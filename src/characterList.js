@@ -21,12 +21,24 @@ export function loadCharacters() {
 }
 
 export function saveCharacters() {
-    localStorage.setItem('sc_characters', JSON.stringify(characters));
+    try {
+        localStorage.setItem('sc_characters', JSON.stringify(characters));
+    } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+            throw new Error("Storage quota exceeded. Please delete some characters or chats.");
+        }
+        throw e;
+    }
 }
 
 export function addCharacter(char) {
     characters.push(char);
-    saveCharacters();
+    try {
+        saveCharacters();
+    } catch (e) {
+        characters.pop();
+        throw e;
+    }
 }
 
 export function getCharacter(index) {
