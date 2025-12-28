@@ -1,8 +1,9 @@
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
 import { openBottomSheet, closeBottomSheet } from './ui.js';
+import { db } from './db.js';
 
-export function initPersonas() {
+export async function initPersonas() {
     const personaCard = document.getElementById('persona-card');
     const sheetOverlay = document.getElementById('personas-sheet-overlay');
     const sheetList = document.getElementById('personas-list');
@@ -44,21 +45,28 @@ export function initPersonas() {
     }
 
     let personas = [];
-    try {
-        const saved = localStorage.getItem('sc_personas');
-        if (saved) personas = JSON.parse(saved);
-    } catch (e) { console.error(e); }
+    // Migration
+    const localSaved = localStorage.getItem('sc_personas');
+    if (localSaved) {
+        try {
+            personas = JSON.parse(localSaved);
+            await db.set('sc_personas', personas);
+            localStorage.removeItem('sc_personas');
+        } catch(e) { console.error(e); }
+    } else {
+        personas = (await db.get('sc_personas')) || [];
+    }
 
     if (personas.length === 0) {
         personas = [{ name: "Traveler", prompt: "A curious adventurer" }];
-        localStorage.setItem('sc_personas', JSON.stringify(personas));
+        await db.set('sc_personas', personas);
     }
 
     let activeIndex = parseInt(localStorage.getItem('sc_active_persona_index') || '0');
     if (activeIndex < 0 || activeIndex >= personas.length) activeIndex = 0;
 
-    function savePersonas() {
-        localStorage.setItem('sc_personas', JSON.stringify(personas));
+    async function savePersonas() {
+        await db.set('sc_personas', personas);
     }
 
     function updateActive() {

@@ -1,5 +1,6 @@
 import { formatText, replaceMacros } from './textFormatter.js';
 import { scrollToBottom } from './ui.js';
+import { db } from './db.js';
 
 export async function sendToLLM(text, activeChatChar, translations, currentLang, appendMessage, onComplete, onError, controller, onUpdate, type = 'normal') {
     let apiKey = localStorage.getItem('api-key');
@@ -26,7 +27,7 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
     const container = document.getElementById('chat-messages');
     
     // --- Prompt Construction based on Preset ---
-    const presets = JSON.parse(localStorage.getItem('sc_prompt_presets')) || [];
+    const presets = (await db.get('sc_prompt_presets')) || [];
     const activePresetId = localStorage.getItem('sc_active_preset_id');
     const activePreset = presets.find(p => p.id === activePresetId) || presets[0]; // Fallback
     

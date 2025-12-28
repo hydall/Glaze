@@ -1,5 +1,7 @@
 import { currentLang } from './APPSettings.js';
 import { translations } from './i18n.js';
+import { App } from '@capacitor/app';
+import { Toast } from '@capacitor/toast';
 
 export function attachLongPress(element, callback) {
     let timer;
@@ -127,14 +129,28 @@ export function initRipple() {
 export function initThemeToggle() {
     const themeToggle = document.getElementById('theme-toggle');
 
+    const updateStatusBar = () => {
+        const isDark = document.body.classList.contains('dark-theme');
+        const color = isDark ? '#121212' : '#ffffff';
+        let meta = document.querySelector('meta[name="theme-color"]');
+        if (!meta) {
+            meta = document.createElement('meta');
+            meta.name = "theme-color";
+            document.head.appendChild(meta);
+        }
+        meta.setAttribute('content', color);
+    };
+
     // Auto-detect system theme
     if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
         document.body.classList.add('dark-theme');
     }
+    updateStatusBar();
 
     if (themeToggle) {
         themeToggle.addEventListener('click', () => {
             document.body.classList.toggle('dark-theme');
+            updateStatusBar();
         });
     }
 }
@@ -240,4 +256,53 @@ export function scrollToBottom(elementId, targetElement) {
         }
         requestAnimationFrame(animate);
     });
+}
+
+export function initBackButton() {
+    let lastBackPress = 0;
+    const handleBackButton = async () => {
+        // 1. Проверяем открытые Bottom Sheets
+        const openSheet = document.querySelector('.modal-overlay.visible');
+        if (openSheet) {
+            closeBottomSheet(openSheet.id);
+            return;
+        }
+
+        // 2. Проверяем полноэкранный редактор
+        const fsEditor = document.getElementById('full-screen-editor');
+        if (fsEditor && fsEditor.style.display !== 'none') {
+            const closeBtn = document.getElementById('fs-editor-close');
+            if (closeBtn) closeBtn.click();
+            return;
+        }
+
+        // 3. Проверяем, находимся ли мы во вложенном экране (Чат, Редактор персонажа и т.д.)
+        const activeView = document.querySelector('.view.active-view');
+        const mainViews = ['view-dialogs', 'view-characters', 'view-generation', 'view-menu'];
+        
+        if (activeView && !mainViews.includes(activeView.id)) {
+            const backBtn = document.getElementById('header-back');
+            if (backBtn && backBtn.offsetParent !== null) {
+                backBtn.click();
+                return;
+            }
+        }
+
+        // 4. Логика выхода из приложения (Главный экран)
+        const now = Date.now();
+        if (now - lastBackPress < 2000) {
+            App.exitApp();
+        } else {
+            lastBackPress = now;
+            await Toast.show({
+                text: (translations[currentLang] && translations[currentLang]['exit_hint']) || 'Нажмите ещё раз для выхода',
+                duration: 'short',
+                position: 'bottom'
+            });
+        }
+    };
+
+    App.addListener('backButton', handleBackButton);
+    // Для тестов через консоль: window.simulateBackButton()
+    window.simulateBackButton = handleBackButton;
 }

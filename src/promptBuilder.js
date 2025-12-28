@@ -1,6 +1,7 @@
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
 import { openBottomSheet, closeBottomSheet, initBottomSheet } from './ui.js';
+import { db } from './db.js';
 
 let internalRender = null;
 
@@ -8,7 +9,7 @@ export function refreshPromptBlocks() {
     if (internalRender) internalRender();
 }
 
-export function initPromptEditor() {
+export async function initPromptEditor() {
     console.log("Debug: Initializing Prompt Editor...");
 
     const list = document.getElementById('prompt-blocks-list');
@@ -47,7 +48,16 @@ export function initPromptEditor() {
     ];
 
     // Load Presets
-    let presets = JSON.parse(localStorage.getItem('sc_prompt_presets')) || [];
+    let presets = [];
+    const localPresets = localStorage.getItem('sc_prompt_presets');
+    if (localPresets) {
+        presets = JSON.parse(localPresets);
+        await db.set('sc_prompt_presets', presets);
+        localStorage.removeItem('sc_prompt_presets');
+    } else {
+        presets = (await db.get('sc_prompt_presets')) || [];
+    }
+
     let activePresetId = localStorage.getItem('sc_active_preset_id');
     
     let presetToDeleteId = null;
@@ -73,8 +83,8 @@ export function initPromptEditor() {
 
     updatePresetUI();
 
-    function savePresets() {
-        localStorage.setItem('sc_prompt_presets', JSON.stringify(presets));
+    async function savePresets() {
+        await db.set('sc_prompt_presets', presets);
         localStorage.setItem('sc_active_preset_id', activePreset.id);
     }
 

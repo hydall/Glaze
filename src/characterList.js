@@ -3,40 +3,53 @@ import { currentLang } from './APPSettings.js';
 import { attachLongPress, openBottomSheet, closeBottomSheet } from './ui.js';
 import { triggerCharacterImport } from './characterImporter.js';
 import { initEditor, openCharacterEditor } from './editor.js';
+import { db } from './db.js';
 
 export let characters = [];
 let onChatOpenCallback = null;
 let activeActionCharIndex = -1;
 
-export function loadCharacters() {
-    const saved = localStorage.getItem('sc_characters');
-    if (saved) {
+export async function loadCharacters() {
+    // 1. Проверяем localStorage (Миграция)
+    const localData = localStorage.getItem('sc_characters');
+    if (localData) {
         try {
-            characters = JSON.parse(saved);
+            characters = JSON.parse(localData);
+            // Сохраняем в новую БД
+            await db.set('sc_characters', characters);
+            // Очищаем старое хранилище
+            localStorage.removeItem('sc_characters');
+            console.log("Characters migrated to IndexedDB");
         } catch (e) {
-            console.error("Ошибка загрузки персонажей:", e);
-            characters = [];
+            console.error("Migration failed:", e);
+        }
+    } else {
+        // 2. Загружаем из IndexedDB
+        try {
+            const saved = await db.get('sc_characters');
+            if (saved) characters = saved;
+        } catch (e) {
+            console.error("Error loading characters from DB:", e);
         }
     }
 }
 
-export function saveCharacters() {
+export async function saveCharacters() {
     try {
-        localStorage.setItem('sc_characters', JSON.stringify(characters));
+        await db.set('sc_characters', characters);
     } catch (e) {
-        if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
-            throw new Error("Storage quota exceeded. Please delete some characters or chats.");
-        }
+        console.error("Failed to save characters:", e);
         throw e;
     }
 }
 
-export function addCharacter(char) {
+export async function addCharacter(char) {
     characters.push(char);
     try {
-        saveCharacters();
+        await saveCharacters();
     } catch (e) {
         characters.pop();
+        alert("Не удалось сохранить персонажа: " + e.message);
         throw e;
     }
 }
@@ -49,27 +62,28 @@ export function getCharacterByName(name) {
     return characters.find(c => c.name === name);
 }
 
-export function deleteCharacter(index) {
+export async function deleteCharacter(index) {
     if (index > -1 && index < characters.length) {
         const char = characters[index];
         characters.splice(index, 1);
-        saveCharacters();
+        await saveCharacters();
 
         // Delete chats
-        const savedChats = localStorage.getItem('sc_chats');
-        if (savedChats) {
-            const chats = JSON.parse(savedChats);
-            if (chats && chats[char.name]) {
+        try {
+            const chats = (await db.get('sc_chats')) || {};
+            if (chats[char.name]) {
                 delete chats[char.name];
-                localStorage.setItem('sc_chats', JSON.stringify(chats));
+                await db.set('sc_chats', chats);
             }
+        } catch (e) {
+            console.warn("Failed to delete associated chats:", e);
         }
 
         // Delete unread status
-        const unread = JSON.parse(localStorage.getItem('sc_unread') || '{}');
+        const unread = (await db.get('sc_unread')) || {};
         if (unread && unread[char.name]) {
             delete unread[char.name];
-            localStorage.setItem('sc_unread', JSON.stringify(unread));
+            await db.set('sc_unread', unread);
         }
 
         // Notify components to update (e.g. dialog list)
@@ -77,10 +91,10 @@ export function deleteCharacter(index) {
     }
 }
 
-export function toggleFavorite(index) {
+export async function toggleFavorite(index) {
     if (characters[index]) {
         characters[index].isFavorite = !characters[index].isFavorite;
-        saveCharacters();
+        await saveCharacters();
     }
 }
 
@@ -139,7 +153,6 @@ export function init(chatCallback) {
 export function renderList(category = 'all') {
     const list = document.getElementById('characters-list');
     const favList = document.getElementById('favorites-list');
-    const fabAdd = document.getElementById('fab-add-character');
     
     if (!list) return;
     list.innerHTML = '';
@@ -167,7 +180,7 @@ export function renderList(category = 'all') {
 
             el.innerHTML = `
                 ${avatarHtml}
-                <div class="favorite-name">${char.name}</div>
+                <div class="favorite-name">${char.name.length > 10 ? char.name.substring(0, 10) + '...' : char.name}</div>
             `;
             el.addEventListener('click', () => { if(onChatOpenCallback) onChatOpenCallback(char); });
             favList.appendChild(el);
@@ -176,34 +189,48 @@ export function renderList(category = 'all') {
     }
 
     // Render Main List
-    // Sort by last message time
-    const savedChats = localStorage.getItem('sc_chats');
-    const chats = savedChats ? JSON.parse(savedChats) : {};
+    // We need chats to sort. Since renderList is sync in UI flow, we might need to fetch chats async.
+    // However, to keep UI responsive, we can fetch chats and then re-render or assume chats are loaded.
+    // For now, let's fetch chats async and then sort.
+    
+    db.get('sc_chats').then(chats => {
+        chats = chats || {};
+        const sortedChars = [...characters].sort((a, b) => {
+            const chatA = chats[a.name];
+            const chatB = chats[b.name];
+            
+            let timeA = 0;
+            let timeB = 0;
 
-    const sortedChars = [...characters].sort((a, b) => {
-        const chatA = chats[a.name];
-        const chatB = chats[b.name];
-        
-        let timeA = 0;
-        let timeB = 0;
-
-        if (chatA && chatA.sessions && chatA.sessions[chatA.currentId]) {
-            const msgs = chatA.sessions[chatA.currentId];
-            if (msgs.length > 0) timeA = msgs[msgs.length - 1].timestamp || 0;
-        }
-        if (chatB && chatB.sessions && chatB.sessions[chatB.currentId]) {
-            const msgs = chatB.sessions[chatB.currentId];
-            if (msgs.length > 0) timeB = msgs[msgs.length - 1].timestamp || 0;
-        }
-        return timeB - timeA;
+            if (chatA && chatA.sessions && chatA.sessions[chatA.currentId]) {
+                const msgs = chatA.sessions[chatA.currentId];
+                if (msgs.length > 0) timeA = msgs[msgs.length - 1].timestamp || 0;
+            }
+            if (chatB && chatB.sessions && chatB.sessions[chatB.currentId]) {
+                const msgs = chatB.sessions[chatB.currentId];
+                if (msgs.length > 0) timeB = msgs[msgs.length - 1].timestamp || 0;
+            }
+            return timeB - timeA;
+        });
+        renderSortedList(sortedChars, list, category);
     });
 
+    // Initial render (unsorted or previously sorted) to avoid blank screen
+    if (list.children.length === 0) {
+        renderSortedList(characters, list, category);
+    }
+}
+
+function renderSortedList(sortedChars, list, category) {
+    const fabAdd = document.getElementById('fab-add-character');
+    list.innerHTML = ''; // Clear current
     sortedChars.forEach((char) => {
         const index = characters.indexOf(char); // Get original index for editing
         if (category !== 'all' && char.category !== category) return;
 
         const el = document.createElement('div');
         el.className = 'list-item';
+        el.dataset.charName = char.name; // For animation finding
         if (char.isFavorite) el.classList.add('favorite');
         
         let avatarHtml;
@@ -218,7 +245,7 @@ export function renderList(category = 'all') {
             ${avatarHtml}
             <div class="item-content">
                 <div class="item-header">
-                    <span class="item-title">${char.name}<sup class="item-version">${char.version}</sup></span>
+                    <span class="item-title">${char.name.length > 20 ? char.name.substring(0, 20) + '...' : char.name}<sup class="item-version">${char.version}</sup></span>
                 </div>
                 <div class="item-subtitle">${char.desc}</div>
             </div>
@@ -258,6 +285,11 @@ function openActions(char, index) {
     const title = document.getElementById('char-actions-title');
     const favBtn = document.getElementById('btn-char-favorite');
     const favLabel = document.getElementById('lbl-char-favorite');
+    const btnNewVer = document.getElementById('btn-char-new-version');
+    const btnDelete = document.getElementById('btn-char-delete');
+
+    // Hide New Version button as requested
+    if (btnNewVer) btnNewVer.style.display = 'none';
     
     if (title) {
         title.textContent = char.name;
@@ -277,25 +309,66 @@ function openActions(char, index) {
         const newFavBtn = favBtn.cloneNode(true);
         favBtn.parentNode.replaceChild(newFavBtn, favBtn);
         
-        newFavBtn.addEventListener('click', () => {
-            toggleFavorite(activeActionCharIndex);
+        newFavBtn.addEventListener('click', async () => {
+            await toggleFavorite(activeActionCharIndex);
             renderList();
             closeBottomSheet('char-actions-sheet-overlay');
         });
+
+        // Setup Delete Button
+        if (btnDelete) {
+            const newBtnDelete = btnDelete.cloneNode(true);
+            btnDelete.parentNode.replaceChild(newBtnDelete, btnDelete);
+            
+            newBtnDelete.addEventListener('click', () => {
+                closeBottomSheet('char-actions-sheet-overlay');
+                
+                const sheetId = 'char-delete-confirm-sheet';
+                const confirmBtn = document.getElementById('btn-confirm-delete-char');
+                const cancelBtn = document.getElementById('btn-cancel-delete-char');
+                
+                const newConfirm = confirmBtn.cloneNode(true);
+                confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+                
+                newConfirm.addEventListener('click', async () => {
+                    // Animation Logic
+                    const list = document.getElementById('characters-list');
+                    const item = list.querySelector(`.list-item[data-char-name="${char.name.replace(/"/g, '\\"')}"]`);
+                    
+                    if (item) {
+                        item.style.transition = 'all 0.3s ease-out';
+                        item.style.opacity = '0';
+                        item.style.maxHeight = '0';
+                        item.style.marginTop = '0';
+                        item.style.marginBottom = '0';
+                        item.style.paddingTop = '0';
+                        item.style.paddingBottom = '0';
+                        item.style.overflow = 'hidden';
+                        // Wait for animation
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                    }
+
+                    await deleteCharacter(activeActionCharIndex);
+                    renderList();
+                    closeBottomSheet(sheetId);
+                });
+                
+                if (cancelBtn) {
+                    const newCancel = cancelBtn.cloneNode(true);
+                    cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+                    newCancel.onclick = () => closeBottomSheet(sheetId);
+                }
+                
+                openBottomSheet(sheetId);
+            });
+        }
 
         openBottomSheet('char-actions-sheet-overlay');
     }
 }
 
 function initActionListeners() {
-    document.getElementById('btn-char-new-version').addEventListener('click', () => {
-        console.log('New Version');
-        closeBottomSheet('char-actions-sheet-overlay');
-    });
-    document.getElementById('btn-char-delete').addEventListener('click', () => {
-        // Logic handled in editor now
-        closeBottomSheet('char-actions-sheet-overlay');
-    });
+    // Listeners are now handled dynamically in openActions to support context
     
     // Create New Character (from Options Sheet)
     document.getElementById('btn-create-char').addEventListener('click', () => {

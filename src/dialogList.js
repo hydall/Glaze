@@ -1,17 +1,17 @@
 import { getCharacterByName } from './characterList.js';
-import { attachLongPress } from './ui.js';
+import { attachLongPress, openBottomSheet, closeBottomSheet } from './ui.js';
 import { formatText } from './textFormatter.js';
-import { isCharacterGenerating } from './chat.js';
+import { isCharacterGenerating, createNewSession, deleteSession } from './chat.js';
+import { db } from './db.js';
 
-let _onChatOpen, _onChatAction, _lastCategory;
+let _onChatOpen, _lastCategory;
 
 window.addEventListener('character-updated', () => {
     renderDialogs();
 });
 
-export function renderDialogs(category = 'all', onChatOpen, onChatAction) {
+export async function renderDialogs(category = 'all', onChatOpen) {
     if (onChatOpen) _onChatOpen = onChatOpen;
-    if (onChatAction) _onChatAction = onChatAction;
     if (category && category !== 'all') _lastCategory = category;
 
     const list = document.getElementById('dialogs-list');
@@ -19,9 +19,8 @@ export function renderDialogs(category = 'all', onChatOpen, onChatAction) {
     
     list.innerHTML = '';
 
-    const savedChats = localStorage.getItem('sc_chats');
-    const chats = savedChats ? JSON.parse(savedChats) : {};
-    const unread = JSON.parse(localStorage.getItem('sc_unread') || '{}');
+    const chats = (await db.get('sc_chats')) || {};
+    const unread = (await db.get('sc_unread')) || {};
 
     const cat = category === 'all' && _lastCategory ? 'all' : (category || _lastCategory || 'all');
 
@@ -80,6 +79,8 @@ export function renderDialogs(category = 'all', onChatOpen, onChatAction) {
 
         const el = document.createElement('div');
         el.className = 'list-item';
+        el.dataset.charName = chat.name;
+        el.dataset.sessionId = chat.sessionId;
         // Mark unread only if it's the current session (where new messages arrive)
         if (unread[chat.name] && chat.isCurrent) {
             el.classList.add('unread');
@@ -114,7 +115,7 @@ export function renderDialogs(category = 'all', onChatOpen, onChatAction) {
             ${avatarHtml}
             <div class="item-content">
                 <div class="item-header">
-                    <span class="item-title">${chat.name}</span>
+                    <span class="item-title">${chat.name.length > 20 ? chat.name.substring(0, 20) + '...' : chat.name}</span>
                     <span class="item-meta">${chat.time}</span>
                 </div>
                 <div class="item-subtitle">
@@ -125,7 +126,7 @@ export function renderDialogs(category = 'all', onChatOpen, onChatAction) {
         `;
         
         const checkLongPress = attachLongPress(el, () => {
-            if (_onChatAction) _onChatAction(chat.charObj);
+            openDialogActions(chat.charObj);
         });
 
         el.addEventListener('click', (e) => {
@@ -135,4 +136,65 @@ export function renderDialogs(category = 'all', onChatOpen, onChatAction) {
 
         list.appendChild(el);
     });
+}
+
+function openDialogActions(char) {
+    const title = document.getElementById('chat-actions-title');
+    if (title) {
+        const previousView = document.querySelector('.view.active-view');
+        const onBack = () => {
+            if (previousView) previousView.classList.add('active-view', 'anim-fade-in');
+            renderDialogs(_lastCategory, _onChatOpen);
+        };
+
+        title.textContent = char.name;
+        openBottomSheet('chat-actions-sheet-overlay');
+
+        const btnNew = document.getElementById('btn-chat-new-session');
+        const btnDel = document.getElementById('btn-chat-delete');
+
+        // Clone to replace listeners with specific chat context
+        const newBtnNew = btnNew.cloneNode(true);
+        btnNew.parentNode.replaceChild(newBtnNew, btnNew);
+
+        const newBtnDel = btnDel.cloneNode(true);
+        btnDel.parentNode.replaceChild(newBtnDel, btnDel);
+
+        newBtnNew.addEventListener('click', async () => {
+            await createNewSession(char, onBack);
+            closeBottomSheet('chat-actions-sheet-overlay');
+        });
+
+        newBtnDel.addEventListener('click', () => {
+            closeBottomSheet('chat-actions-sheet-overlay');
+            const sheetId = 'session-delete-confirm-sheet';
+            const btnYes = document.getElementById('btn-confirm-delete-session');
+            const newYes = btnYes.cloneNode(true);
+            btnYes.parentNode.replaceChild(newYes, btnYes);
+            
+            newYes.onclick = async () => {
+                const list = document.getElementById('dialogs-list');
+                const safeName = char.name.replace(/"/g, '\\"');
+                const item = list.querySelector(`.list-item[data-char-name="${safeName}"][data-session-id="${char.sessionId}"]`);
+
+                if (item) {
+                    item.style.transition = 'all 0.3s ease-out';
+                    item.style.opacity = '0';
+                    item.style.maxHeight = '0';
+                    item.style.marginTop = '0';
+                    item.style.marginBottom = '0';
+                    item.style.paddingTop = '0';
+                    item.style.paddingBottom = '0';
+                    item.style.overflow = 'hidden';
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+
+                await deleteSession(char.sessionId, char);
+                closeBottomSheet(sheetId);
+                await renderDialogs(_lastCategory, _onChatOpen);
+            };
+            
+            openBottomSheet(sheetId);
+        });
+    }
 }

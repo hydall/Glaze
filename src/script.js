@@ -4,7 +4,7 @@ import { currentLang, setLanguage } from './APPSettings.js';
 import * as CharList from './characterList.js';
 import * as Chat from './chat.js';
 import { renderDialogs } from './dialogList.js';
-import { initBottomSheet, openBottomSheet, closeBottomSheet, initRipple, initThemeToggle, initLanguageToggle, initHeaderDropdown } from './ui.js';
+import { initBottomSheet, openBottomSheet, closeBottomSheet, initRipple, initThemeToggle, initLanguageToggle, initHeaderDropdown, initBackButton } from './ui.js';
 import { initPromptEditor } from './promptBuilder.js';
 import { initPersonas } from './personas.js';
 
@@ -13,7 +13,7 @@ let activeCategories = {
     'view-characters': 'all'
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     console.log("Debug: DOMContentLoaded - App initializing...");
     document.body.classList.add('preload');
     
@@ -148,23 +148,26 @@ document.addEventListener('DOMContentLoaded', () => {
     initRipple();
     initThemeToggle();
     
+    initBackButton();
     initLanguageToggle(() => {
         setLanguage(currentLang === 'ru' ? 'en' : 'ru');
         updateLanguage();
     });
 
     initHeaderDropdown(categories, activeCategories, (viewId, itemId) => {
-        if (viewId === 'view-dialogs') renderDialogs(itemId, openChatWrapper, openChatActionWrapper);
+        if (viewId === 'view-dialogs') renderDialogs(itemId, openChatWrapper);
         if (viewId === 'view-characters') CharList.renderList(itemId);
     });
 
 
     // Mock Data Generation
-    CharList.loadCharacters(); // Загрузка из LocalStorage
+    await CharList.loadCharacters(); // Загрузка из IndexedDB
+    await Chat.loadChats(); // Загрузка чатов
     CharList.init(openChatWrapper);
     CharList.renderList(activeCategories['view-characters']);
-    renderDialogs('all', openChatWrapper, openChatActionWrapper);
-    initPersonas(); // Now imported from personas.js
+    await renderDialogs('all', openChatWrapper);
+    await initPersonas(); // Now imported from personas.js
+    await initPromptEditor();
     Chat.initChat();
     
     // Initialize Bottom Sheets (Swipe Logic)
@@ -199,29 +202,11 @@ function openChatWrapper(char) {
     const previousView = document.querySelector('.view.active-view');
     Chat.openChat(char, () => {
         if (previousView) previousView.classList.add('active-view', 'anim-fade-in');
-        renderDialogs(activeCategories['view-dialogs'], openChatWrapper, openChatActionWrapper);
+        renderDialogs(activeCategories['view-dialogs'], openChatWrapper);
     });
 }
 
 // Action Sheets Logic
 function initActionSheets() {
     const chatSheet = document.getElementById('chat-actions-sheet-overlay');
-    
-    // Chat Actions
-    document.getElementById('btn-chat-new-session').addEventListener('click', () => {
-        Chat.createNewSession();
-        closeBottomSheet('chat-actions-sheet-overlay');
-    });
-    document.getElementById('btn-chat-delete').addEventListener('click', () => {
-        Chat.deleteSession();
-        closeBottomSheet('chat-actions-sheet-overlay');
-    });
-}
-
-function openChatActionWrapper(chat) {
-    const title = document.getElementById('chat-actions-title');
-    if (title) {
-        title.textContent = chat.name;
-        openBottomSheet('chat-actions-sheet-overlay');
-    }
 }

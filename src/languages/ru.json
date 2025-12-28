@@ -116,5 +116,6 @@
     "hint_change_avatar": "Нажмите для смены",
     "confirm_delete_session": "Удалить сессию?",
     "label_impersonation_prompt": "Промпт имперсонизации",
-    "impersonating": "Имперсонизация..."
+    "impersonating": "Имперсонизация...",
+    "exit_hint": "Нажмите ещё раз для выхода"
 }

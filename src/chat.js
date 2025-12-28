@@ -5,6 +5,8 @@ import { attachLongPress, openBottomSheet, closeBottomSheet, scrollToBottom } fr
 import { formatText, replaceMacros } from './textFormatter.js';
 import { renderDialogs } from './dialogList.js';
 import { openCharacterEditor } from './editor.js';
+import { db } from './db.js';
+import { characters } from './characterList.js';
 
 let activeChatChar = null;
 let _currentOnBack = null;
@@ -13,6 +15,24 @@ let genIdCounter = 0;
 
 export function isCharacterGenerating(charName) {
     return !!generatingStates[charName];
+}
+
+// Local cache for chats to maintain synchronous-like access for UI
+let allChats = {};
+
+export async function loadChats() {
+    // Migration
+    const localChats = localStorage.getItem('sc_chats');
+    if (localChats) {
+        try {
+            allChats = JSON.parse(localChats);
+            await db.set('sc_chats', allChats);
+            localStorage.removeItem('sc_chats');
+            console.log("Migrated chats to IndexedDB");
+        } catch(e) { console.error(e); }
+    } else {
+        allChats = (await db.get('sc_chats')) || {};
+    }
 }
 
 function getAllGreetings(char) {
@@ -24,8 +44,7 @@ function getAllGreetings(char) {
 }
 
 function getChatData(charName) {
-    const savedChats = localStorage.getItem('sc_chats');
-    let chats = savedChats ? JSON.parse(savedChats) : {};
+    let chats = allChats;
     let data = chats[charName];
 
     if (Array.isArray(data)) {
@@ -46,8 +65,7 @@ function getChatData(charName) {
 }
 
 function saveMessageToSession(charName, msg) {
-    const savedChats = localStorage.getItem('sc_chats');
-    let chats = savedChats ? JSON.parse(savedChats) : {};
+    let chats = allChats;
     let data = chats[charName]; // Assume migration handled or structure valid if we are here
     
     if (Array.isArray(data) || !data) data = getChatData(charName);
@@ -59,18 +77,17 @@ function saveMessageToSession(charName, msg) {
     data.sessions[data.currentId].push(msg);
     
     chats[charName] = data;
-    localStorage.setItem('sc_chats', JSON.stringify(chats));
+    db.set('sc_chats', chats); // Async save
 }
 
 function updateSessionMessage(char, msgIndex, newMsgData) {
-    const savedChats = localStorage.getItem('sc_chats');
-    let chats = savedChats ? JSON.parse(savedChats) : {};
+    let chats = allChats;
     let data = chats[char.name];
     
     if (data && data.sessions[data.currentId]) {
         data.sessions[data.currentId][msgIndex] = newMsgData;
         chats[char.name] = data;
-        localStorage.setItem('sc_chats', JSON.stringify(chats));
+        db.set('sc_chats', chats);
     }
 }
 
@@ -272,9 +289,10 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
     
     let timerInterval = null;
     const startTimer = (el) => {
-        if (timerInterval) return;
         const statEl = el.querySelector('.gen-stat');
         if (statEl) {
+            statEl.style.display = 'flex';
+            if (timerInterval) return;
             timerInterval = setInterval(() => {
                 const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
                 const timeIcon = `<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:4px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>`;
@@ -471,6 +489,7 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
                 if (statEl) {
                      const timeIcon = `<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:4px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>`;
                      statEl.innerHTML = `${timeIcon} ${duration}`;
+                     statEl.style.display = 'flex';
                 }
                 
                 // If this was a new variant generation (reused element), we need to update the specific swipe
@@ -503,9 +522,11 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
         } else {
             saveMessageToSession(char.name, msg);
             // Mark unread
-            const unread = JSON.parse(localStorage.getItem('sc_unread') || '{}');
-            unread[char.name] = true;
-            localStorage.setItem('sc_unread', JSON.stringify(unread));
+            db.get('sc_unread').then(unread => {
+                unread = unread || {};
+                unread[char.name] = true;
+                db.set('sc_unread', unread);
+            });
 
             // If we are in the list view or another chat, update the list
             renderDialogs();
@@ -566,20 +587,17 @@ function startImpersonation() {
     sendToLLM(promptText, activeChatChar, translations, currentLang, () => {}, onComplete, onError, controller, onUpdate, 'impersonation');
 }
 
-export function openChat(char, onBack) {
+export async function openChat(char, onBack) {
     if (onBack) _currentOnBack = onBack;
     // Handle Session Switch if sessionId is provided in char object (from dialog list)
     if (char.sessionId) {
-        const savedChats = localStorage.getItem('sc_chats');
-        if (savedChats) {
-            const chats = JSON.parse(savedChats);
-            const data = chats[char.name];
-            if (data && data.sessions && data.sessions[char.sessionId]) {
-                if (data.currentId !== char.sessionId) {
-                    data.currentId = char.sessionId;
-                    chats[char.name] = data;
-                    localStorage.setItem('sc_chats', JSON.stringify(chats));
-                }
+        const chats = allChats;
+        const data = chats[char.name];
+        if (data && data.sessions && data.sessions[char.sessionId]) {
+            if (data.currentId !== char.sessionId) {
+                data.currentId = char.sessionId;
+                chats[char.name] = data;
+                await db.set('sc_chats', chats);
             }
         }
     }
@@ -621,15 +639,15 @@ export function openChat(char, onBack) {
     updateSendButton(!!generatingStates[char.name]);
 
     // Clear unread
-    const unread = JSON.parse(localStorage.getItem('sc_unread') || '{}');
+    let unread = (await db.get('sc_unread')) || {};
     if (unread[char.name]) {
         delete unread[char.name];
-        localStorage.setItem('sc_unread', JSON.stringify(unread));
+        await db.set('sc_unread', unread);
     }
 
     const chatData = getChatData(char.name);
     const currentSessionId = chatData.currentId;
-    document.getElementById('chat-header-name').textContent = char.name;
+    document.getElementById('chat-header-name').textContent = char.name.length > 20 ? char.name.substring(0, 20) + '...' : char.name;
     const sessionEl = document.getElementById('chat-header-session');
     if (sessionEl) sessionEl.textContent = `Session #${currentSessionId}`;
     
@@ -681,22 +699,17 @@ export function openChat(char, onBack) {
         const now = new Date();
         const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
         
-        const savedPersona = localStorage.getItem('sc_active_persona');
-        const persona = savedPersona ? JSON.parse(savedPersona) : { name: "User", prompt: "" };
-        const processedText = replaceMacros(char.first_mes, char, persona);
-
         const firstMsg = {
             role: 'char',
-            text: processedText,
+            text: char.first_mes,
             time: time,
             genTime: '0s',
             tokens: 0,
             greetingIndex: 0,
-            swipes: [processedText],
+            swipes: [char.first_mes],
             swipeId: 0,
             timestamp: Date.now()
         };
-        msgs.push(firstMsg);
         // Save immediately
         saveMessageToSession(char.name, firstMsg);
     }
@@ -775,11 +788,11 @@ export function openChat(char, onBack) {
     };
 }
 
-export function createNewSession() {
-    if (activeChatChar) {
-        const charName = activeChatChar.name;
-        const savedChats = localStorage.getItem('sc_chats');
-        let chats = savedChats ? JSON.parse(savedChats) : {};
+export async function createNewSession(targetChar, onBack) {
+    const char = targetChar || activeChatChar;
+    if (char) {
+        const charName = char.name;
+        let chats = allChats;
         let data = chats[charName];
         
         if (Array.isArray(data) || !data) data = getChatData(charName);
@@ -792,19 +805,19 @@ export function createNewSession() {
         data.sessions[nextId] = [];
         
         chats[charName] = data;
-        localStorage.setItem('sc_chats', JSON.stringify(chats));
+        await db.set('sc_chats', chats);
         
-        const charObj = { ...activeChatChar };
+        const charObj = { ...char };
         delete charObj.sessionId;
-        openChat(charObj); // Reload chat
+        await openChat(charObj, onBack); // Reload chat
     }
 }
 
-export function deleteSession(sessionIdToDelete) {
-    if (activeChatChar) {
-        const charName = activeChatChar.name;
-        const savedChats = localStorage.getItem('sc_chats');
-        let chats = savedChats ? JSON.parse(savedChats) : {};
+export async function deleteSession(sessionIdToDelete, targetChar) {
+    const char = targetChar || activeChatChar;
+    if (char) {
+        const charName = char.name;
+        let chats = allChats;
         let data = chats[charName];
         
         if (Array.isArray(data) || !data) data = getChatData(charName);
@@ -822,15 +835,16 @@ export function deleteSession(sessionIdToDelete) {
         }
         
         chats[charName] = data;
-        localStorage.setItem('sc_chats', JSON.stringify(chats));
+        await db.set('sc_chats', chats);
         
-        openChat(activeChatChar); // Reload chat
+        if (activeChatChar && activeChatChar.name === charName) {
+            await openChat(activeChatChar); // Reload chat if active
+        }
     }
 }
 
 function switchSession(char, sessionId) {
-    const savedChats = localStorage.getItem('sc_chats');
-    let chats = savedChats ? JSON.parse(savedChats) : {};
+    let chats = allChats;
     let data = chats[char.name];
     
     if (Array.isArray(data) || !data) data = getChatData(char.name);
@@ -838,7 +852,7 @@ function switchSession(char, sessionId) {
     if (data.sessions[sessionId]) {
         data.currentId = sessionId;
         chats[char.name] = data;
-        localStorage.setItem('sc_chats', JSON.stringify(chats));
+        db.set('sc_chats', chats);
         
         const charObj = { ...char };
         delete charObj.sessionId;
@@ -855,7 +869,8 @@ function openChatInfoSheet(char) {
     if (btnCard) {
         btnCard.onclick = () => {
             closeBottomSheet(sheetId);
-            const savedChars = JSON.parse(localStorage.getItem('sc_characters') || '[]');
+            // We can use the exported characters array from characterList since it's kept in sync
+            const savedChars = characters; 
             const idx = savedChars.findIndex(c => c.name === char.name);
             
             if (idx !== -1) {
@@ -871,7 +886,7 @@ function openChatInfoSheet(char) {
                 // Override Back Button to return to Chat
                 const backBtn = document.getElementById('header-back');
                 backBtn.onclick = () => {
-                    const currentChars = JSON.parse(localStorage.getItem('sc_characters') || '[]');
+                    const currentChars = characters;
                     const updatedChar = currentChars[idx];
                     if (updatedChar) openChat(updatedChar);
                     else {
@@ -1064,7 +1079,9 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
     let metaHtml = '';
     if (msg.role === 'char') {
         const timeIcon = `<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:4px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>`;
-        metaHtml = `<div class="gen-stat" style="display:flex;align-items:center;opacity:0.7;">${timeIcon} ${msg.genTime || '0.0s'}</div>`;
+        const showTimer = msg.genTime && msg.genTime !== '0s' && msg.genTime !== '0.0s';
+        const displayStyle = showTimer ? 'display:flex;' : 'display:none;';
+        metaHtml = `<div class="gen-stat" style="${displayStyle}align-items:center;opacity:0.7;">${timeIcon} ${msg.genTime || '0.0s'}</div>`;
     }
 
     const nameHtml = version ? `${displayName} <sup class="item-version">${version}</sup>` : displayName;
@@ -1081,7 +1098,14 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
         avatarHtml = `<div class="msg-avatar" style="background-color: ${color}; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.2em;">${letter}</div>`;
     }
 
-    let contentHtml = formatText(msg.text);
+    let textToDisplay = msg.text;
+    if (msg.role === 'char' && activeChatChar) {
+        const savedPersona = localStorage.getItem('sc_active_persona');
+        const persona = savedPersona ? JSON.parse(savedPersona) : { name: "User", avatar: null };
+        textToDisplay = replaceMacros(msg.text, activeChatChar, persona);
+    }
+
+    let contentHtml = formatText(textToDisplay);
     if (msg.isError) {
         contentHtml = `<span style="color:red">${msg.text}</span>`;
     }
@@ -1276,8 +1300,8 @@ function changeGreeting(element, msg, dir, animate = true) {
     const persona = savedPersona ? JSON.parse(savedPersona) : { name: "User", avatar: null };
     const processedText = replaceMacros(rawGreeting, activeChatChar, persona);
 
-    msg.text = processedText;
-    msg.swipes = [processedText]; // Reset swipes for first message logic if needed, or keep sync
+    msg.text = rawGreeting;
+    msg.swipes = [rawGreeting]; // Reset swipes for first message logic if needed, or keep sync
     msg.greetingIndex = newIndex;
 
     if (animate) {
@@ -1303,20 +1327,29 @@ function changeSwipe(element, msg, dir, animate = true) {
     msg.swipeId = newIndex;
     msg.text = msg.swipes[newIndex];
 
+    let textToDisplay = msg.text;
+    if (activeChatChar) {
+        const savedPersona = localStorage.getItem('sc_active_persona');
+        const persona = savedPersona ? JSON.parse(savedPersona) : { name: "User", avatar: null };
+        textToDisplay = replaceMacros(msg.text, activeChatChar, persona);
+    }
+
     if (msg.swipesMeta && msg.swipesMeta[newIndex]) {
         msg.genTime = msg.swipesMeta[newIndex].genTime;
         const statEl = element.querySelector('.gen-stat');
         if (statEl) {
              const timeIcon = `<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:4px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>`;
              statEl.innerHTML = `${timeIcon} ${msg.genTime}`;
+             const showTimer = msg.genTime && msg.genTime !== '0s' && msg.genTime !== '0.0s';
+             statEl.style.display = showTimer ? 'flex' : 'none';
         }
     }
 
     if (animate) {
-        animateTextChange(element, msg.text);
+        animateTextChange(element, textToDisplay);
     } else {
         const body = element.querySelector('.msg-body');
-        if (body) body.innerHTML = formatText(msg.text);
+        if (body) body.innerHTML = formatText(textToDisplay);
     }
 
     const counter = element.querySelector('.msg-switcher-count');
@@ -1444,13 +1477,12 @@ function editMessage(element) {
         const index = allMsgs.indexOf(element);
         
         if (index !== -1 && activeChatChar) {
-            const savedChats = localStorage.getItem('sc_chats');
-            let chats = savedChats ? JSON.parse(savedChats) : {};
+            let chats = allChats;
             let data = chats[activeChatChar.name];
             if (data && data.sessions[data.currentId]) {
                 data.sessions[data.currentId][index].text = newText;
                 chats[activeChatChar.name] = data;
-                localStorage.setItem('sc_chats', JSON.stringify(chats));
+                db.set('sc_chats', chats);
             }
         }
     }
@@ -1462,8 +1494,7 @@ function branchSession(element) {
     const index = allMsgs.indexOf(element);
     
     if (index !== -1 && activeChatChar) {
-        const savedChats = localStorage.getItem('sc_chats');
-        let chats = savedChats ? JSON.parse(savedChats) : {};
+        let chats = allChats;
         let data = chats[activeChatChar.name];
         
         if (data && data.sessions[data.currentId]) {
@@ -1476,11 +1507,11 @@ function branchSession(element) {
             // createNewSession reloads chat, so we need to overwrite the new empty session
             // But createNewSession is async in terms of UI reload? No, it's sync.
             // We need to get the data again after createNewSession
-            chats = JSON.parse(localStorage.getItem('sc_chats'));
+            chats = allChats;
             data = chats[activeChatChar.name];
             data.sessions[data.currentId] = newHistory;
             chats[activeChatChar.name] = data;
-            localStorage.setItem('sc_chats', JSON.stringify(chats));
+            db.set('sc_chats', chats);
             
             // Reload UI
             const charObj = { ...activeChatChar };
@@ -1503,15 +1534,14 @@ function deleteMessage(element) {
 
     // Update Storage
     if (activeChatChar) {
-        const savedChats = localStorage.getItem('sc_chats');
-        let chats = savedChats ? JSON.parse(savedChats) : {};
+        let chats = allChats;
         let data = chats[activeChatChar.name];
         if (Array.isArray(data)) data = getChatData(activeChatChar.name);
 
         if (data && data.sessions[data.currentId]) {
             data.sessions[data.currentId].splice(index, 1);
             chats[activeChatChar.name] = data;
-            localStorage.setItem('sc_chats', JSON.stringify(chats));
+            db.set('sc_chats', chats);
         }
     }
 }
@@ -1598,27 +1628,25 @@ function regenerateMessage(element, mode = 'normal') {
 
         // Update Storage (Remove this and subsequent)
         if (activeChatChar) {
-            const savedChats = localStorage.getItem('sc_chats');
-            let chats = savedChats ? JSON.parse(savedChats) : {};
+            let chats = allChats;
             let data = chats[activeChatChar.name];
             if (Array.isArray(data)) data = getChatData(activeChatChar.name);
 
             if (data && data.sessions[data.currentId]) {
                 data.sessions[data.currentId].splice(index);
                 chats[activeChatChar.name] = data;
-                localStorage.setItem('sc_chats', JSON.stringify(chats));
+                db.set('sc_chats', chats);
             }
             
             // Define Restore Callback
-            const onAbort = () => {
-                const savedChatsRestored = localStorage.getItem('sc_chats');
-                let chatsRestored = savedChatsRestored ? JSON.parse(savedChatsRestored) : {};
+            const onAbort = async () => {
+                let chatsRestored = allChats;
                 let dataRestored = chatsRestored[activeChatChar.name];
                 
                 if (dataRestored && dataRestored.sessions[dataRestored.currentId]) {
                     dataRestored.sessions[dataRestored.currentId].splice(index, 0, ...deletedData);
                     chatsRestored[activeChatChar.name] = dataRestored;
-                    localStorage.setItem('sc_chats', JSON.stringify(chatsRestored));
+                    await db.set('sc_chats', chatsRestored);
                 }
 
                 deletedData.forEach(msg => {

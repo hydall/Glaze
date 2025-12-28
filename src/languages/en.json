@@ -116,5 +116,6 @@
     "btn_add": "Add",
     "hint_change_avatar": "Tap to change",
     "label_impersonation_prompt": "Impersonation Prompt",
-    "impersonating": "Impersonating..."
+    "impersonating": "Impersonating...",
+    "exit_hint": "Press back again to exit"
 }
