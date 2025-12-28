@@ -1,9 +1,10 @@
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
-import { attachLongPress, openBottomSheet, closeBottomSheet } from './ui.js';
+import { attachLongPress, showBottomSheet, closeBottomSheet } from './ui.js';
 import { triggerCharacterImport } from './characterImporter.js';
 import { initEditor, openCharacterEditor } from './editor.js';
 import { db } from './db.js';
+import { deleteAllChats, createNewSession, deleteSession } from './chat.js';
 
 export let characters = [];
 let onChatOpenCallback = null;
@@ -70,11 +71,7 @@ export async function deleteCharacter(index) {
 
         // Delete chats
         try {
-            const chats = (await db.get('sc_chats')) || {};
-            if (chats[char.name]) {
-                delete chats[char.name];
-                await db.set('sc_chats', chats);
-            }
+            await deleteAllChats(char.name);
         } catch (e) {
             console.warn("Failed to delete associated chats:", e);
         }
@@ -101,45 +98,16 @@ export async function toggleFavorite(index) {
 export function init(chatCallback) {
     onChatOpenCallback = chatCallback;
 
-    // Import Button Logic
-    const btnImport = document.getElementById('btn-import-char');
-    if (btnImport) {
-        btnImport.addEventListener('click', () => {
-            triggerCharacterImport((data) => {
-                const newChar = {
-                    name: data.name || "Unknown",
-                    description: data.description || "",
-                    desc: data.description || data.creator_notes || "",
-                    creator_notes: data.creator_notes || "",
-                    tags: data.tags || [],
-                    personality: data.personality || "",
-                    scenario: data.scenario || "",
-                    first_mes: data.first_mes || "",
-                    alternate_greetings: data.alternate_greetings || [],
-                    mes_example: data.mes_example || "",
-                    color: "#" + Math.floor(Math.random()*16777215).toString(16),
-                    category: "anime",
-                    version: data.character_version || "v1.0",
-                    avatar: data.avatar || null
-                };
-                addCharacter(newChar);
-                renderList();
-                closeBottomSheet('char-options-sheet-overlay');
-            });
-        });
-    }
-
     // FAB Listener
     const fabAdd = document.getElementById('fab-add-character');
     if (fabAdd) {
         fabAdd.addEventListener('click', () => {
-            openBottomSheet('char-options-sheet-overlay');
+            openCharOptionsSheet();
         });
     }
 
     // Init Editor and Actions
     initActionListeners();
-    initSelectionList();
     
     initEditor({
         getCharacter: getCharacter,
@@ -147,6 +115,46 @@ export function init(chatCallback) {
         addCharacter: addCharacter,
         deleteCharacter: deleteCharacter,
         renderList: renderList
+    });
+}
+
+function openCharOptionsSheet() {
+    showBottomSheet({
+        title: translations[currentLang]['sheet_title_char_options'],
+        items: [
+            {
+                label: translations[currentLang]['action_create_new'],
+                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+                onClick: () => { closeBottomSheet(); openCharacterEditor(-1); }
+            },
+            {
+                label: translations[currentLang]['action_import'],
+                icon: '<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
+                onClick: () => { 
+                    closeBottomSheet();
+                    triggerCharacterImport((data) => {
+                        const newChar = {
+                            name: data.name || "Unknown",
+                            description: data.description || "",
+                            desc: data.description || data.creator_notes || "",
+                            creator_notes: data.creator_notes || "",
+                            tags: data.tags || [],
+                            personality: data.personality || "",
+                            scenario: data.scenario || "",
+                            first_mes: data.first_mes || "",
+                            alternate_greetings: data.alternate_greetings || [],
+                            mes_example: data.mes_example || "",
+                            color: "#" + Math.floor(Math.random()*16777215).toString(16),
+                            category: "anime",
+                            version: data.character_version || "v1.0",
+                            avatar: data.avatar || null
+                        };
+                        addCharacter(newChar);
+                        renderList();
+                    });
+                }
+            }
+        ]
     });
 }
 
@@ -182,7 +190,7 @@ export function renderList(category = 'all') {
                 ${avatarHtml}
                 <div class="favorite-name">${char.name.length > 10 ? char.name.substring(0, 10) + '...' : char.name}</div>
             `;
-            el.addEventListener('click', () => { if(onChatOpenCallback) onChatOpenCallback(char); });
+            el.addEventListener('click', () => handleCharacterClick(char));
             favList.appendChild(el);
         });
         }
@@ -262,7 +270,7 @@ function renderSortedList(sortedChars, list, category) {
             if (checkLongPress()) return;
             // Check if click was on edit button
             if (e.target.closest('.item-edit-btn')) return;
-            if(onChatOpenCallback) onChatOpenCallback(char);
+            handleCharacterClick(char);
         });
 
         el.querySelector('.item-edit-btn').addEventListener('click', (e) => {
@@ -282,134 +290,194 @@ function renderSortedList(sortedChars, list, category) {
 
 function openActions(char, index) {
     activeActionCharIndex = index;
-    const title = document.getElementById('char-actions-title');
-    const favBtn = document.getElementById('btn-char-favorite');
-    const favLabel = document.getElementById('lbl-char-favorite');
-    const btnNewVer = document.getElementById('btn-char-new-version');
-    const btnDelete = document.getElementById('btn-char-delete');
-
-    // Hide New Version button as requested
-    if (btnNewVer) btnNewVer.style.display = 'none';
     
-    if (title) {
-        title.textContent = char.name;
-        
-        // Update Favorite Button State
-        const favIconContainer = favBtn.querySelector('.sheet-item-icon');
-        if (char.isFavorite) {
-            favLabel.textContent = translations[currentLang]['action_remove_fav'];
-            favIconContainer.style.fill = '#ff4444';
-            favIconContainer.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/><line x1="4" y1="4" x2="20" y2="20" stroke="#ff4444" stroke-width="2" /></svg>`;
-        } else {
-            favLabel.textContent = translations[currentLang]['action_add_fav'];
-            favIconContainer.style.fill = 'var(--text-gray)';
-            favIconContainer.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`;
-        }
-        
-        const newFavBtn = favBtn.cloneNode(true);
-        favBtn.parentNode.replaceChild(newFavBtn, favBtn);
-        
-        newFavBtn.addEventListener('click', async () => {
-            await toggleFavorite(activeActionCharIndex);
-            renderList();
-            closeBottomSheet('char-actions-sheet-overlay');
-        });
+    const favIcon = char.isFavorite 
+        ? `<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/><line x1="4" y1="4" x2="20" y2="20" stroke="#ff4444" stroke-width="2" /></svg>`
+        : `<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`;
+    
+    const favLabel = char.isFavorite ? translations[currentLang]['action_remove_fav'] : translations[currentLang]['action_add_fav'];
+    const favColor = char.isFavorite ? '#ff4444' : 'var(--text-gray)';
 
-        // Setup Delete Button
-        if (btnDelete) {
-            const newBtnDelete = btnDelete.cloneNode(true);
-            btnDelete.parentNode.replaceChild(newBtnDelete, btnDelete);
-            
-            newBtnDelete.addEventListener('click', () => {
-                closeBottomSheet('char-actions-sheet-overlay');
-                
-                const sheetId = 'char-delete-confirm-sheet';
-                const confirmBtn = document.getElementById('btn-confirm-delete-char');
-                const cancelBtn = document.getElementById('btn-cancel-delete-char');
-                
-                const newConfirm = confirmBtn.cloneNode(true);
-                confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
-                
-                newConfirm.addEventListener('click', async () => {
-                    // Animation Logic
+    showBottomSheet({
+        title: char.name,
+        items: [
+            {
+                label: favLabel,
+                icon: favIcon,
+                iconColor: favColor,
+                onClick: async () => {
+                    await toggleFavorite(activeActionCharIndex);
+                    renderList();
+                    closeBottomSheet();
+                }
+            },
+            {
+                label: translations[currentLang]['action_delete_char'],
+                icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
+                iconColor: '#ff4444',
+                isDestructive: true,
+                onClick: () => {
+                    closeBottomSheet();
+                    openDeleteConfirm(char);
+                }
+            }
+        ]
+    });
+}
+
+function openDeleteConfirm(char) {
+    showBottomSheet({
+        title: translations[currentLang]['confirm_delete_title'],
+        items: [
+            {
+                label: translations[currentLang]['btn_yes'],
+                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                iconColor: '#ff4444',
+                isDestructive: true,
+                onClick: async () => {
                     const list = document.getElementById('characters-list');
                     const item = list.querySelector(`.list-item[data-char-name="${char.name.replace(/"/g, '\\"')}"]`);
-                    
                     if (item) {
                         item.style.transition = 'all 0.3s ease-out';
                         item.style.opacity = '0';
                         item.style.maxHeight = '0';
-                        item.style.marginTop = '0';
-                        item.style.marginBottom = '0';
-                        item.style.paddingTop = '0';
-                        item.style.paddingBottom = '0';
-                        item.style.overflow = 'hidden';
-                        // Wait for animation
                         await new Promise(resolve => setTimeout(resolve, 300));
                     }
-
                     await deleteCharacter(activeActionCharIndex);
                     renderList();
-                    closeBottomSheet(sheetId);
-                });
-                
-                if (cancelBtn) {
-                    const newCancel = cancelBtn.cloneNode(true);
-                    cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
-                    newCancel.onclick = () => closeBottomSheet(sheetId);
+                    closeBottomSheet();
                 }
-                
-                openBottomSheet(sheetId);
-            });
-        }
-
-        openBottomSheet('char-actions-sheet-overlay');
-    }
+            },
+            {
+                label: translations[currentLang]['btn_no'],
+                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+                onClick: () => closeBottomSheet()
+            }
+        ]
+    });
 }
 
 function initActionListeners() {
     // Listeners are now handled dynamically in openActions to support context
     
     // Create New Character (from Options Sheet)
-    document.getElementById('btn-create-char').addEventListener('click', () => {
-        closeBottomSheet('char-options-sheet-overlay');
-        // Open editor for new character (index -1)
-        openCharacterEditor(-1);
-    });
+    // This logic is moved to openCharOptionsSheet
 }
 
-function initSelectionList() {
-    const fabDialog = document.getElementById('fab-add-dialog');
-    if (fabDialog) {
-        fabDialog.addEventListener('click', () => {
-            renderSelectionList();
-            openBottomSheet('char-selection-sheet-overlay');
-        });
+async function handleCharacterClick(char, forceSelector = false) {
+    const allChats = (await db.get('sc_chats')) || {};
+    const charData = allChats[char.name];
+    
+    if (charData && (forceSelector || (charData.sessions && Object.keys(charData.sessions).length > 1))) {
+        openSessionSelector(char, charData);
+    } else {
+        if(onChatOpenCallback) onChatOpenCallback(char);
     }
 }
 
-function renderSelectionList() {
-    const charSelectionList = document.getElementById('char-selection-list');
-    if (!charSelectionList) return;
+function openSessionSelector(char, charData) {
+    const listContainer = document.createElement('div');
+    const sessions = charData.sessions;
     
-    charSelectionList.innerHTML = '';
-    characters.forEach(char => {
-        const item = document.createElement('div');
-        item.className = 'sheet-item';
-        
-        let avatarHtml;
-        if (char.avatar) {
-            avatarHtml = `<div class="avatar" style="width:40px;height:40px;"><img src="${char.avatar}" style="width:100%;height:100%;object-fit:cover;"></div>`;
-        } else {
-            const letter = (char.name && char.name[0]) ? char.name[0].toUpperCase() : "?";
-            avatarHtml = `<div class="avatar" style="width:40px;height:40px;background-color:${char.color||'#ccc'};display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;">${letter}</div>`;
-        }
+    const ids = Object.keys(sessions).map(Number).sort((a,b) => {
+        const lastA = sessions[a][sessions[a].length-1]?.timestamp || 0;
+        const lastB = sessions[b][sessions[b].length-1]?.timestamp || 0;
+        return lastB - lastA;
+    });
 
-        item.innerHTML = `${avatarHtml}<div class="sheet-item-content">${char.name}</div>`;
-        item.addEventListener('click', () => {
-            if(onChatOpenCallback) onChatOpenCallback(char);
-            closeBottomSheet('char-selection-sheet-overlay');
+    ids.forEach(sid => {
+        const msgs = sessions[sid];
+        const lastMsg = msgs[msgs.length - 1];
+        let preview = 'Empty session';
+        let time = '';
+        if (lastMsg) {
+            preview = lastMsg.text.length > 40 ? lastMsg.text.substring(0, 40) + '...' : lastMsg.text;
+            time = lastMsg.time;
+        }
+        
+        const count = msgs.length;
+        const isCurrent = sid === charData.currentId;
+        
+        const el = document.createElement('div');
+        el.className = 'sheet-item';
+        if (isCurrent) el.style.backgroundColor = 'var(--bg-secondary)';
+        
+        el.innerHTML = `
+            <div class="sheet-item-content" style="width: 100%; overflow: hidden;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-weight: bold;">Session #${sid}</span>
+                        <span style="display: flex; align-items: center; font-size: 0.8em; color: var(--text-gray);">
+                            <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;margin-right:2px;"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+                            ${count}
+                        </span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <div style="font-size: 0.8em; color: var(--text-gray); white-space: nowrap;">${time}</div>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 0.8em; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; margin-right: 8px;">${preview}</div>
+                    <div class="session-delete-btn" style="color: #ff4444; padding: 4px; cursor: pointer; display: flex;">
+                        <svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        el.onclick = () => {
+            closeBottomSheet();
+            if (onChatOpenCallback) {
+                const charWithSession = { ...char, sessionId: sid };
+                onChatOpenCallback(charWithSession);
+            }
+        };
+
+        el.querySelector('.session-delete-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeBottomSheet();
+            openDeleteSessionConfirm(char, sid);
         });
-        charSelectionList.appendChild(item);
+        
+        listContainer.appendChild(el);
+    });
+
+    showBottomSheet({
+        title: translations[currentLang]['history_title'] || 'Chat History',
+        content: listContainer,
+        headerAction: {
+            icon: '+',
+            onClick: () => {
+                closeBottomSheet();
+                createNewSession(char);
+            }
+        }
+    });
+}
+
+function openDeleteSessionConfirm(char, sessionId) {
+    showBottomSheet({
+        title: translations[currentLang]['confirm_delete_session'] || 'Delete Session?',
+        items: [
+            {
+                label: translations[currentLang]['btn_yes'],
+                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                iconColor: '#ff4444',
+                isDestructive: true,
+                onClick: async () => {
+                    await deleteSession(sessionId, char);
+                    closeBottomSheet();
+                    handleCharacterClick(char, true);
+                }
+            },
+            {
+                label: translations[currentLang]['btn_no'],
+                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+                onClick: () => {
+                    closeBottomSheet();
+                    handleCharacterClick(char);
+                }
+            }
+        ]
     });
 }

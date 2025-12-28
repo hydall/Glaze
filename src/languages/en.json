@@ -117,5 +117,12 @@
     "hint_change_avatar": "Tap to change",
     "label_impersonation_prompt": "Impersonation Prompt",
     "impersonating": "Impersonating...",
-    "exit_hint": "Press back again to exit"
+    "exit_hint": "Press back again to exit",
+    "status_connected": "Connected",
+    "status_connecting": "Connecting...",
+    "status_failed": "Failed",
+    "action_regenerate": "Regenerate",
+    "sheet_title_msg_actions": "Message Actions",
+    "stat_messages": "Messages",
+    "stat_gen_time": "Generation Time"
 }

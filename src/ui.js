@@ -1,7 +1,10 @@
 import { currentLang } from './APPSettings.js';
 import { translations } from './i18n.js';
+import { formatText } from './textFormatter.js';
 import { App } from '@capacitor/app';
 import { Toast } from '@capacitor/toast';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
 
 export function attachLongPress(element, callback) {
     let timer;
@@ -11,7 +14,12 @@ export function attachLongPress(element, callback) {
         isLongPress = false;
         timer = setTimeout(() => {
             isLongPress = true;
-            if (navigator.vibrate) navigator.vibrate(50);
+            // Use Capacitor Haptics to bypass browser intervention
+            try {
+                Haptics.impact({ style: ImpactStyle.Light });
+            } catch (e) {
+                if (navigator.vibrate) try { navigator.vibrate(50); } catch (err) {}
+            }
             callback();
         }, 500);
     };
@@ -35,27 +43,56 @@ export function attachLongPress(element, callback) {
     return () => isLongPress;
 }
 
-export function initBottomSheet(id) {
-    const overlay = document.getElementById(id);
-    if (!overlay) return;
+let genericSheetOverlay = null;
+let activeSheetConfig = null;
+let closeTimer = null;
+let isKeyboardOpen = false;
+
+export function initGenericBottomSheet() {
+    if (document.getElementById('generic-bottom-sheet')) {
+        genericSheetOverlay = document.getElementById('generic-bottom-sheet');
+        return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'generic-bottom-sheet';
+    overlay.className = 'modal-overlay bottom-sheet-overlay';
+    overlay.style.display = 'none';
+    overlay.innerHTML = `
+        <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
+            <div class="sheet-header" style="display:none;">
+                <span class="sheet-title"></span>
+                <div class="sheet-header-action"></div>
+            </div>
+            <div class="sheet-scroll-container" style="overflow-y: auto; max-height: 70vh;">
+                <div class="sheet-list"></div>
+                <div class="sheet-custom-content"></div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    genericSheetOverlay = overlay;
+
     const content = overlay.querySelector('.bottom-sheet-content');
-    
     let startY = 0;
     let isDragging = false;
 
     overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeBottomSheet(id);
+        if (e.target === overlay) closeBottomSheet();
     });
 
     content.addEventListener('touchstart', (e) => {
-        if (content.scrollTop > 0) return;
+        const scrollContainer = overlay.querySelector('.sheet-scroll-container');
+        if (scrollContainer && scrollContainer.scrollTop > 0) return;
+        
         startY = e.touches[0].clientY;
         isDragging = true;
         content.style.transition = 'none';
     }, { passive: true });
 
     content.addEventListener('touchmove', (e) => {
-        if (!isDragging) return;
+        if (!isDragging) return; 
         const delta = e.touches[0].clientY - startY;
         if (delta > 0) {
             e.preventDefault();
@@ -69,35 +106,120 @@ export function initBottomSheet(id) {
         const delta = e.changedTouches[0].clientY - startY;
         content.style.transition = '';
         if (delta > 100) {
-            closeBottomSheet(id);
+            closeBottomSheet();
         } else {
             content.style.transform = '';
         }
     });
 }
 
-export function openBottomSheet(id) {
-    const overlay = document.getElementById(id);
-    if (!overlay) return;
-    const content = overlay.querySelector('.bottom-sheet-content');
-    overlay.style.display = 'flex';
+export function showBottomSheet({ title, items, content, headerAction, onClose }) {
+    if (!genericSheetOverlay) initGenericBottomSheet();
+    const overlay = genericSheetOverlay;
     
-    // Use requestAnimationFrame to ensure the browser registers the display change before adding the class
+    if (closeTimer) {
+        clearTimeout(closeTimer);
+        closeTimer = null;
+    }
+
+    const titleEl = overlay.querySelector('.sheet-title');
+    const headerEl = overlay.querySelector('.sheet-header');
+    const headerActionEl = overlay.querySelector('.sheet-header-action');
+    const listEl = overlay.querySelector('.sheet-list');
+    const customEl = overlay.querySelector('.sheet-custom-content');
+
+    // Reset
+    listEl.innerHTML = '';
+    customEl.innerHTML = '';
+    headerActionEl.innerHTML = '';
+    listEl.style.display = 'none';
+    customEl.style.display = 'none';
+
+    // Title
+    if (title) {
+        titleEl.textContent = title;
+        headerEl.style.display = 'flex';
+    } else {
+        headerEl.style.display = 'none';
+    }
+
+    // Header Action
+    if (headerAction) {
+        const btn = document.createElement('div');
+        btn.className = 'sheet-action-btn';
+        btn.innerHTML = headerAction.icon || '+';
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            if (headerAction.onClick) headerAction.onClick();
+        };
+        headerActionEl.appendChild(btn);
+    }
+
+    // Items List
+    if (items && items.length > 0) {
+        items.forEach(item => {
+            const el = document.createElement('div');
+            el.className = 'sheet-item';
+            if (item.id) el.id = item.id;
+            
+            const iconHtml = item.icon ? `<div class="sheet-item-icon" style="${item.iconColor ? 'fill:'+item.iconColor : ''}">${item.icon}</div>` : '';
+            const labelStyle = item.isDestructive ? 'color: #ff4444;' : '';
+            
+            el.innerHTML = `
+                ${iconHtml}
+                <div class="sheet-item-content" style="${labelStyle}">${item.label}</div>
+            `;
+            
+            el.onclick = (e) => {
+                if (item.onClick) item.onClick(e);
+            };
+            listEl.appendChild(el);
+        });
+        listEl.style.display = 'block';
+    }
+
+    // Custom Content
+    if (content) {
+        if (typeof content === 'string') {
+            customEl.innerHTML = content;
+        } else if (content instanceof HTMLElement || content instanceof DocumentFragment) {
+            customEl.appendChild(content);
+        }
+        customEl.style.display = 'block';
+    }
+
+    activeSheetConfig = { onClose };
+
+    overlay.style.display = 'flex';
+    const contentEl = overlay.querySelector('.bottom-sheet-content');
+    
+    // Double RAF ensures the browser paints the display:flex frame before adding the class
     requestAnimationFrame(() => {
-        content.style.transform = ''; 
-        overlay.classList.add('visible');
+        requestAnimationFrame(() => {
+            contentEl.style.transform = ''; 
+            overlay.classList.add('visible');
+        });
     });
 }
 
-export function closeBottomSheet(id) {
-    const overlay = document.getElementById(id);
-    if (!overlay) return;
+export function closeBottomSheet() {
+    if (!genericSheetOverlay) return;
+    const overlay = genericSheetOverlay;
     const content = overlay.querySelector('.bottom-sheet-content');
+    
     content.style.transform = '';
     overlay.classList.remove('visible');
-    setTimeout(() => {
+    
+    if (activeSheetConfig && activeSheetConfig.onClose) {
+        activeSheetConfig.onClose();
+    }
+    activeSheetConfig = null;
+
+    if (closeTimer) clearTimeout(closeTimer);
+    closeTimer = setTimeout(() => {
         overlay.style.display = 'none';
         content.style.transform = '';
+        closeTimer = null;
     }, 300);
 }
 
@@ -258,13 +380,56 @@ export function scrollToBottom(elementId, targetElement) {
     });
 }
 
+export function initViewportFix() {
+    // Fix for 100vh on mobile browsers (address bar issue)
+    const setVh = () => {
+        // Не пересчитываем высоту, если открыта клавиатура (избегаем прыжков)
+        if (isKeyboardOpen) return;
+        
+        const vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
+    };
+    window.addEventListener('resize', setVh);
+    setVh();
+}
+
+export function initKeyboardFix() {
+    if (typeof Keyboard === 'undefined') return;
+
+    // Skip on web platform to avoid "not implemented" errors
+    if (!window.Capacitor || window.Capacitor.getPlatform() === 'web') return;
+
+    // Настройка режима ресайза (помогает от двойного тапа и проблем с layout)
+    try {
+        if (window.Capacitor && window.Capacitor.getPlatform() === 'android') {
+            Keyboard.setResizeMode({ mode: KeyboardResize.Native });
+        }
+    } catch (e) { console.warn('Keyboard resize mode error', e); }
+
+    Keyboard.addListener('keyboardWillShow', () => {
+        isKeyboardOpen = true;
+        document.body.classList.add('keyboard-open');
+    });
+
+    Keyboard.addListener('keyboardWillHide', () => {
+        isKeyboardOpen = false;
+        document.body.classList.remove('keyboard-open');
+    });
+}
+
 export function initBackButton() {
     let lastBackPress = 0;
     const handleBackButton = async () => {
+        // 0. Если клавиатура открыта - закрываем её
+        if (isKeyboardOpen) {
+            await Keyboard.hide();
+            return;
+        }
+
         // 1. Проверяем открытые Bottom Sheets
         const openSheet = document.querySelector('.modal-overlay.visible');
         if (openSheet) {
-            closeBottomSheet(openSheet.id);
+            closeBottomSheet();
             return;
         }
 
@@ -305,4 +470,29 @@ export function initBackButton() {
     App.addListener('backButton', handleBackButton);
     // Для тестов через консоль: window.simulateBackButton()
     window.simulateBackButton = handleBackButton;
+}
+
+export function animateTextChange(element, newText, direction, onUpdate) {
+    const body = element.querySelector('.msg-body');
+    
+    body.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
+    body.style.opacity = '0';
+    if (direction) {
+        body.style.transform = `translateX(${direction * -20}px)`;
+    }
+    
+    setTimeout(() => {
+        if (onUpdate) onUpdate();
+        else body.innerHTML = formatText(newText);
+        
+        body.style.transition = 'none';
+        if (direction) {
+            body.style.transform = `translateX(${direction * 20}px)`;
+        }
+        void body.offsetWidth; // Trigger reflow
+
+        body.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
+        body.style.opacity = '1';
+        body.style.transform = 'translateX(0)';
+    }, 200);
 }

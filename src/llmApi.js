@@ -138,7 +138,7 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
             </div>
         `;
         container.appendChild(typingSection);
-        scrollToBottom('view-chat', typingSection);
+        scrollToBottom('chat-messages', typingSection);
 
         removeTypingWithAnimation = () => {
             if (!typingSection || !typingSection.parentNode) return;

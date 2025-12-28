@@ -1,40 +1,13 @@
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
-import { openBottomSheet, closeBottomSheet } from './ui.js';
+import { showBottomSheet, closeBottomSheet } from './ui.js';
 import { db } from './db.js';
 
 export async function initPersonas() {
     const personaCard = document.getElementById('persona-card');
-    const sheetOverlay = document.getElementById('personas-sheet-overlay');
-    const sheetList = document.getElementById('personas-list');
     const avatarEl = personaCard.querySelector('.avatar');
     const titleEl = personaCard.querySelector('.title');
     
-    // Remove old bottom button if exists
-    const btnAddOld = document.getElementById('btn-add-persona');
-    if (btnAddOld) btnAddOld.style.display = 'none';
-
-    // Add Plus Button to Sheet Header
-    const sheetHeader = sheetOverlay.querySelector('.sheet-header');
-    let btnAddHeader = document.getElementById('btn-header-add-persona');
-    if (!btnAddHeader && sheetHeader) {
-        btnAddHeader = document.createElement('div');
-        btnAddHeader.id = 'btn-header-add-persona';
-        btnAddHeader.innerHTML = `<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:var(--vk-blue);"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>`;
-        btnAddHeader.style.cursor = 'pointer';
-        btnAddHeader.style.position = 'absolute';
-        btnAddHeader.style.right = '16px';
-        btnAddHeader.style.top = '50%';
-        btnAddHeader.style.transform = 'translateY(-50%)';
-        sheetHeader.style.position = 'relative'; // Ensure positioning context
-        sheetHeader.appendChild(btnAddHeader);
-
-        btnAddHeader.addEventListener('click', () => {
-            openPersonaEditor(-1); // -1 means new
-            closeBottomSheet('personas-sheet-overlay');
-        });
-    }
-
     // Helper for avatar
     function getAvatarHTML(name, avatar) {
         if (avatar) {
@@ -84,11 +57,10 @@ export async function initPersonas() {
     // Open Bottom Sheet
     personaCard.addEventListener('click', () => {
         renderSheet();
-        openBottomSheet('personas-sheet-overlay');
     });
 
     function renderSheet() {
-        sheetList.innerHTML = '';
+        const listContainer = document.createElement('div');
         personas.forEach((p, i) => {
             const item = document.createElement('div');
             item.className = 'sheet-item';
@@ -108,17 +80,29 @@ export async function initPersonas() {
             item.addEventListener('click', () => {
                 activeIndex = i;
                 updateActive();
-                closeBottomSheet('personas-sheet-overlay');
+                closeBottomSheet();
             });
 
             // Edit Persona
             item.querySelector('.sheet-item-edit').addEventListener('click', (e) => {
                 e.stopPropagation();
                 openPersonaEditor(i);
-                closeBottomSheet('personas-sheet-overlay');
+                closeBottomSheet();
             });
 
-            sheetList.appendChild(item);
+            listContainer.appendChild(item);
+        });
+
+        showBottomSheet({
+            title: translations[currentLang]['sheet_title_personas'],
+            content: listContainer,
+            headerAction: {
+                icon: '<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:var(--vk-blue);"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+                onClick: () => {
+                    openPersonaEditor(-1);
+                    closeBottomSheet();
+                }
+            }
         });
     }
 
@@ -205,31 +189,31 @@ export async function initPersonas() {
             deleteBtn = newBtn;
             
             deleteBtn.addEventListener('click', () => {
-                const sheet = document.getElementById('char-delete-confirm-sheet');
-                if (sheet) {
-                    const confirmBtn = document.getElementById('btn-confirm-delete-char');
-                    const newConfirm = confirmBtn.cloneNode(true);
-                    confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
-                    
-                    newConfirm.addEventListener('click', () => {
-                        personas.splice(editingIndex, 1);
-                        if (personas.length === 0) personas.push({ name: "Traveler", prompt: "A curious adventurer" });
-                        if (activeIndex >= personas.length) activeIndex = 0;
-                        savePersonas();
-                        updateActive();
-                        closeBottomSheet('char-delete-confirm-sheet');
-                        closeEditor();
-                    });
-                    openBottomSheet('char-delete-confirm-sheet');
-
-                    // Fix Cancel Button in Delete Sheet
-                    const cancelBtn = document.getElementById('btn-cancel-delete-char');
-                    if (cancelBtn) {
-                        const newCancel = cancelBtn.cloneNode(true);
-                        cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
-                        newCancel.addEventListener('click', () => closeBottomSheet('char-delete-confirm-sheet'));
-                    }
-                }
+                showBottomSheet({
+                    title: translations[currentLang]['confirm_delete_title'],
+                    items: [
+                        {
+                            label: translations[currentLang]['btn_yes'],
+                            icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                            iconColor: '#ff4444',
+                            isDestructive: true,
+                            onClick: () => {
+                                personas.splice(editingIndex, 1);
+                                if (personas.length === 0) personas.push({ name: "Traveler", prompt: "A curious adventurer" });
+                                if (activeIndex >= personas.length) activeIndex = 0;
+                                savePersonas();
+                                updateActive();
+                                closeBottomSheet();
+                                closeEditor();
+                            }
+                        },
+                        {
+                            label: translations[currentLang]['btn_no'],
+                            icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+                            onClick: () => closeBottomSheet()
+                        }
+                    ]
+                });
             });
         }
 

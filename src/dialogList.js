@@ -1,14 +1,20 @@
-import { getCharacterByName } from './characterList.js';
-import { attachLongPress, openBottomSheet, closeBottomSheet } from './ui.js';
+import { getCharacterByName, characters } from './characterList.js';
+import { attachLongPress, showBottomSheet, closeBottomSheet } from './ui.js';
 import { formatText } from './textFormatter.js';
 import { isCharacterGenerating, createNewSession, deleteSession } from './chat.js';
 import { db } from './db.js';
+import { translations } from './i18n.js';
+import { currentLang } from './APPSettings.js';
 
 let _onChatOpen, _lastCategory;
 
 window.addEventListener('character-updated', () => {
     renderDialogs();
 });
+
+export function refreshDialogs() {
+    return renderDialogs(_lastCategory);
+}
 
 export async function renderDialogs(category = 'all', onChatOpen) {
     if (onChatOpen) _onChatOpen = onChatOpen;
@@ -136,65 +142,89 @@ export async function renderDialogs(category = 'all', onChatOpen) {
 
         list.appendChild(el);
     });
+
+    const fab = document.getElementById('fab-add-dialog');
+    if (fab) {
+        const newFab = fab.cloneNode(true);
+        fab.parentNode.replaceChild(newFab, fab);
+        newFab.addEventListener('click', () => {
+            openNewSessionPicker();
+        });
+    }
 }
 
 function openDialogActions(char) {
-    const title = document.getElementById('chat-actions-title');
-    if (title) {
-        const previousView = document.querySelector('.view.active-view');
-        const onBack = () => {
-            if (previousView) previousView.classList.add('active-view', 'anim-fade-in');
-            renderDialogs(_lastCategory, _onChatOpen);
-        };
+    const previousView = document.querySelector('.view.active-view');
+    const onBack = () => {
+        if (previousView) previousView.classList.add('active-view', 'anim-fade-in');
+        renderDialogs(_lastCategory, _onChatOpen);
+    };
 
-        title.textContent = char.name;
-        openBottomSheet('chat-actions-sheet-overlay');
-
-        const btnNew = document.getElementById('btn-chat-new-session');
-        const btnDel = document.getElementById('btn-chat-delete');
-
-        // Clone to replace listeners with specific chat context
-        const newBtnNew = btnNew.cloneNode(true);
-        btnNew.parentNode.replaceChild(newBtnNew, btnNew);
-
-        const newBtnDel = btnDel.cloneNode(true);
-        btnDel.parentNode.replaceChild(newBtnDel, btnDel);
-
-        newBtnNew.addEventListener('click', async () => {
-            await createNewSession(char, onBack);
-            closeBottomSheet('chat-actions-sheet-overlay');
-        });
-
-        newBtnDel.addEventListener('click', () => {
-            closeBottomSheet('chat-actions-sheet-overlay');
-            const sheetId = 'session-delete-confirm-sheet';
-            const btnYes = document.getElementById('btn-confirm-delete-session');
-            const newYes = btnYes.cloneNode(true);
-            btnYes.parentNode.replaceChild(newYes, btnYes);
-            
-            newYes.onclick = async () => {
-                const list = document.getElementById('dialogs-list');
-                const safeName = char.name.replace(/"/g, '\\"');
-                const item = list.querySelector(`.list-item[data-char-name="${safeName}"][data-session-id="${char.sessionId}"]`);
-
-                if (item) {
-                    item.style.transition = 'all 0.3s ease-out';
-                    item.style.opacity = '0';
-                    item.style.maxHeight = '0';
-                    item.style.marginTop = '0';
-                    item.style.marginBottom = '0';
-                    item.style.paddingTop = '0';
-                    item.style.paddingBottom = '0';
-                    item.style.overflow = 'hidden';
-                    await new Promise(resolve => setTimeout(resolve, 300));
+    showBottomSheet({
+        title: char.name,
+        items: [
+            {
+                label: 'Новая сессия', // TODO: i18n
+                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+                onClick: async () => {
+                    await createNewSession(char, onBack);
+                    closeBottomSheet();
                 }
+            },
+            {
+                label: 'Удалить сессию', // TODO: i18n
+                icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
+                iconColor: '#ff4444',
+                isDestructive: true,
+                onClick: () => {
+                    closeBottomSheet();
+                    openDeleteConfirm(char);
+                }
+            }
+        ]
+    });
+}
 
-                await deleteSession(char.sessionId, char);
-                closeBottomSheet(sheetId);
-                await renderDialogs(_lastCategory, _onChatOpen);
-            };
-            
-            openBottomSheet(sheetId);
-        });
-    }
+function openNewSessionPicker() {
+    const items = characters.map(char => ({
+        label: char.name,
+        icon: char.avatar ? `<img src="${char.avatar}" style="width:24px;height:24px;border-radius:50%;object-fit:cover;">` : 
+              `<div style="width:24px;height:24px;border-radius:50%;background-color:${char.color||'#ccc'};display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:bold;">${(char.name[0]||'?').toUpperCase()}</div>`,
+        onClick: () => {
+            closeBottomSheet();
+            const previousView = document.getElementById('view-dialogs');
+            createNewSession(char, () => {
+                if (previousView) previousView.classList.add('active-view', 'anim-fade-in');
+                renderDialogs(_lastCategory, _onChatOpen);
+            });
+        }
+    }));
+
+    showBottomSheet({
+        title: translations[currentLang]['sheet_title_select_char'] || 'Select Character',
+        items: items
+    });
+}
+
+function openDeleteConfirm(char) {
+    showBottomSheet({
+        title: 'Удалить сессию?', // TODO: i18n
+        items: [
+            {
+                label: 'Да',
+                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                iconColor: '#ff4444',
+                isDestructive: true,
+                onClick: async () => {
+                    await deleteSession(char.sessionId, char);
+                    closeBottomSheet();
+                }
+            },
+            {
+                label: 'Нет',
+                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+                onClick: () => closeBottomSheet()
+            }
+        ]
+    });
 }

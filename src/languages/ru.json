@@ -117,5 +117,12 @@
     "confirm_delete_session": "Удалить сессию?",
     "label_impersonation_prompt": "Промпт имперсонизации",
     "impersonating": "Имперсонизация...",
-    "exit_hint": "Нажмите ещё раз для выхода"
+    "exit_hint": "Нажмите ещё раз для выхода",
+    "status_connected": "Подключено",
+    "status_connecting": "Подключение...",
+    "status_failed": "Ошибка",
+    "action_regenerate": "Регенерация",
+    "sheet_title_msg_actions": "Действия",
+    "stat_messages": "Сообщений",
+    "stat_gen_time": "Время генерации"
 }

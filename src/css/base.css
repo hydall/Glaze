@@ -24,10 +24,19 @@ body {
   background-color: var(--white);
   color: var(--text-black);
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Keyboard Open State Fixes */
+body.keyboard-open {
+    padding-bottom: 0 !important; /* Убираем safe-area отступ */
+}
+body.keyboard-open .tabbar {
+    display: none !important; /* Скрываем навбар */
 }
 
 input, textarea, select, button {
@@ -54,6 +63,7 @@ main {
     top: 0;
     left: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
     background-color: var(--white);
 }
@@ -97,7 +107,7 @@ input[type=range] {
     -webkit-appearance: none;
     width: 100%;
     background: transparent;
-    margin: 10px 0;
+    margin: 12px 0;
     height: 30px;
     display: flex;
     align-items: center;
@@ -109,46 +119,99 @@ input[type=range]:focus {
 
 input[type=range]::-webkit-slider-runnable-track {
     width: 100%;
-    height: 24px;
+    height: 4px;
     cursor: pointer;
-    background: var(--bg-gray);
+    background: #e1e3e6;
     border-radius: 2px;
-    border: 1px solid var(--border-color);
-    box-shadow: inset 0 1px 4px rgba(0,0,0,0.15);
-    transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    border: none;
+    box-shadow: none;
+    transition: background-color 0.3s ease;
 }
 
 input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    height: 24px;
-    width: 36px;
-    border-radius: 1px;
-    background: var(--vk-blue);
+    height: 20px;
+    width: 20px;
+    border-radius: 50%;
+    background: #ffffff;
     cursor: pointer;
-    margin-top: -1px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    margin-top: -8px; /* (4px track - 20px thumb) / 2 */
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05);
     border: 1px solid rgba(0,0,0,0.1);
-    background-image: repeating-linear-gradient(90deg, rgba(255,255,255,0.4) 0, rgba(255,255,255,0.4) 1px, transparent 1px, transparent 4px);
-    background-size: 9px 10px;
-    background-position: center;
-    background-repeat: no-repeat;
-    transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    transition: transform 0.1s ease, box-shadow 0.2s ease;
+}
+
+input[type=range]:active::-webkit-slider-thumb {
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.05);
 }
 
 body.dark-theme input[type=range]::-webkit-slider-runnable-track {
-    box-shadow: inset 0 1px 5px rgba(0,0,0,0.5);
+    background: rgba(255,255,255,0.2);
 }
 
 body.dark-theme input[type=range]::-webkit-slider-thumb {
-    background: var(--vk-blue);
-    border-color: rgba(0,0,0,0.3);
-    background-image: repeating-linear-gradient(90deg, rgba(255,255,255,0.4) 0, rgba(255,255,255,0.4) 1px, transparent 1px, transparent 4px);
-    background-size: 9px 10px;
-    background-position: center;
-    background-repeat: no-repeat;
+    background: #e0e0e0;
+    border-color: transparent;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
 }
 
 /* Prevent transitions on load */
 body.preload * {
     transition: none !important;
+}
+
+body.dark-theme .api-status {
+    background: rgba(255,255,255,0.15) !important; /* Более отчетливый фон */
+    color: #fff;
+}
+
+/* API Status Base Style (moved from inline) */
+.api-status {
+    display: flex; 
+    align-items: center; 
+    font-size: 0.75em; 
+    cursor: pointer; 
+    padding: 4px 8px; 
+    background: rgba(0,0,0,0.05); 
+    border-radius: 12px; 
+    font-weight: normal; 
+    text-transform: none;
+    transition: background-color 0.3s ease;
+}
+
+#api-status-dot {
+    transition: background-color 0.3s ease;
+}
+
+#api-status-text {
+    transition: opacity 0.2s ease, color 0.3s ease;
+}
+
+/* Input with Icon (Model Selector) */
+.input-with-icon {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.input-with-icon input {
+    width: 100%;
+    padding-right: 40px; /* Space for icon */
+}
+
+.input-with-icon .icon-btn {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-gray);
+    background: transparent;
+    border-radius: 0 8px 8px 0;
 }

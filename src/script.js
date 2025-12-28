@@ -1,10 +1,11 @@
+import { initGlobalErrorHandling } from './errorHandler.js';
 import { initSettings } from './APISettings.js';
 import { translations, updateLanguage } from './i18n.js';
 import { currentLang, setLanguage } from './APPSettings.js';
 import * as CharList from './characterList.js';
 import * as Chat from './chat.js';
 import { renderDialogs } from './dialogList.js';
-import { initBottomSheet, openBottomSheet, closeBottomSheet, initRipple, initThemeToggle, initLanguageToggle, initHeaderDropdown, initBackButton } from './ui.js';
+import { initGenericBottomSheet, initRipple, initThemeToggle, initLanguageToggle, initHeaderDropdown, initBackButton, initViewportFix, initKeyboardFix } from './ui.js';
 import { initPromptEditor } from './promptBuilder.js';
 import { initPersonas } from './personas.js';
 
@@ -12,6 +13,9 @@ let activeCategories = {
     'view-dialogs': 'all',
     'view-characters': 'all'
 };
+
+// Initialize error handling as early as possible
+initGlobalErrorHandling();
 
 document.addEventListener('DOMContentLoaded', async () => {
     console.log("Debug: DOMContentLoaded - App initializing...");
@@ -148,6 +152,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     initRipple();
     initThemeToggle();
     
+    initViewportFix();
+    initKeyboardFix();
     initBackButton();
     initLanguageToggle(() => {
         setLanguage(currentLang === 'ru' ? 'en' : 'ru');
@@ -170,26 +176,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     await initPromptEditor();
     Chat.initChat();
     
-    // Initialize Bottom Sheets (Swipe Logic)
-    const sheetIds = [
-        'personas-sheet-overlay',
-        'char-options-sheet-overlay',
-        'char-selection-sheet-overlay',
-        'chat-actions-sheet-overlay',
-        'char-actions-sheet-overlay',
-        'sessions-sheet-overlay',
-        'char-delete-confirm-sheet',
-        'msg-actions-sheet-overlay',
-        'prompt-presets-sheet-overlay',
-        'new-preset-sheet-overlay',
-        'delete-block-sheet-overlay',
-        'delete-preset-sheet-overlay',
-        'session-delete-confirm-sheet',
-        'chat-info-sheet-overlay'
-    ];
-    sheetIds.forEach(id => initBottomSheet(id));
+    // Initialize Generic Bottom Sheet
+    initGenericBottomSheet();
 
-    initActionSheets();
+    // initActionSheets(); // No longer needed as sheets are dynamic
     updateLanguage(); // Initial translation
 
     // Remove preload class to enable transitions
@@ -204,9 +194,4 @@ function openChatWrapper(char) {
         if (previousView) previousView.classList.add('active-view', 'anim-fade-in');
         renderDialogs(activeCategories['view-dialogs'], openChatWrapper);
     });
-}
-
-// Action Sheets Logic
-function initActionSheets() {
-    const chatSheet = document.getElementById('chat-actions-sheet-overlay');
 }

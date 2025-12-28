@@ -1,6 +1,6 @@
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
-import { openBottomSheet, closeBottomSheet, initBottomSheet } from './ui.js';
+import { showBottomSheet, closeBottomSheet } from './ui.js';
 import { db } from './db.js';
 
 let internalRender = null;
@@ -16,25 +16,15 @@ export async function initPromptEditor() {
     const addBtn = document.getElementById('add-block-btn');
     const presetSelector = document.getElementById('btn-preset-selector');
     const currentPresetLabel = document.getElementById('current-preset-name');
-    const presetsList = document.getElementById('prompt-presets-list');
-    const btnAddPreset = document.getElementById('btn-add-preset');
     const btnCreatePreset = document.getElementById('btn-create-preset');
     const newPresetInput = document.getElementById('new-preset-name-input');
     const impInput = document.getElementById('impersonation-prompt-input');
-    
-    // Delete Confirmation Elements
-    const btnConfirmDeleteBlock = document.getElementById('btn-confirm-delete-block');
-    const btnConfirmDeletePreset = document.getElementById('btn-confirm-delete-preset');
-    const btnCancelDeleteBlock = document.getElementById('btn-cancel-delete-block');
-    const btnCancelDeletePreset = document.getElementById('btn-cancel-delete-preset');
     
     // Component Existence Checks
     if (!list) console.error("Debug: Element 'prompt-blocks-list' not found!");
     if (!addBtn) console.error("Debug: Element 'add-block-btn' not found!");
     if (!presetSelector) console.error("Debug: Element 'btn-preset-selector' not found!");
     if (!currentPresetLabel) console.error("Debug: Element 'current-preset-name' not found!");
-    if (!presetsList) console.error("Debug: Element 'prompt-presets-list' not found!");
-    if (!btnAddPreset) console.error("Debug: Element 'btn-add-preset' not found!");
     if (!btnCreatePreset) console.error("Debug: Element 'btn-create-preset' not found!");
     if (!newPresetInput) console.error("Debug: Element 'new-preset-name-input' not found!");
     
@@ -99,16 +89,7 @@ export async function initPromptEditor() {
         presetSelector.addEventListener('click', () => {
             console.log("Debug: Preset selector clicked");
             try {
-                renderPresetsList();
-                const sheetId = 'prompt-presets-sheet-overlay';
-                const sheet = document.getElementById(sheetId);
-                if (sheet) {
-                    sheet.style.display = ''; // Remove inline display: none
-                    openBottomSheet(sheetId);
-                    console.log(`Debug: Opening bottom sheet '${sheetId}'`);
-                } else {
-                    console.error(`Debug: Bottom sheet '${sheetId}' not found in DOM!`);
-                }
+                openPresetsSheet();
             } catch (e) {
                 console.error("Debug: Error in preset selector click handler:", e);
             }
@@ -117,13 +98,8 @@ export async function initPromptEditor() {
         console.error("Debug: Preset selector element NOT found");
     }
 
-    function renderPresetsList() {
-        console.log("Debug: Rendering presets list...");
-        if (!presetsList) {
-            console.error("Debug: Cannot render presets list, container missing.");
-            return;
-        }
-        presetsList.innerHTML = '';
+    function openPresetsSheet() {
+        const listContainer = document.createElement('div');
         presets.forEach(p => {
             const el = document.createElement('div');
             el.className = 'sheet-item';
@@ -141,86 +117,90 @@ export async function initPromptEditor() {
                 activePreset = p;
                 savePresets();
                 updatePresetUI();
-                closeBottomSheet('prompt-presets-sheet-overlay');
+                closeBottomSheet();
             });
 
             if (presets.length > 1) {
                 el.querySelector('.sheet-item-remove').addEventListener('click', (e) => {
                     e.stopPropagation();
                     presetToDeleteId = p.id;
-                    closeBottomSheet('prompt-presets-sheet-overlay');
-                    const sheet = document.getElementById('delete-preset-sheet-overlay');
-                    if (sheet) sheet.style.display = '';
-                    openBottomSheet('delete-preset-sheet-overlay');
+                    closeBottomSheet();
+                    openDeletePresetConfirm();
                 });
             }
 
-            presetsList.appendChild(el);
+            listContainer.appendChild(el);
         });
-    }
 
-    // Confirm Preset Delete
-    if (btnConfirmDeletePreset) {
-        btnConfirmDeletePreset.addEventListener('click', () => {
-            if (presetToDeleteId) {
-                presets = presets.filter(pr => pr.id !== presetToDeleteId);
-                if (activePreset.id === presetToDeleteId) activePreset = presets[0];
-                savePresets();
-                updatePresetUI();
-                renderPresetsList();
-                presetToDeleteId = null;
-                closeBottomSheet('delete-preset-sheet-overlay');
+        showBottomSheet({
+            title: translations[currentLang]['sheet_title_presets'],
+            content: listContainer,
+            headerAction: {
+                icon: '+',
+                onClick: () => {
+                    closeBottomSheet();
+                    openImportCreateSheet();
+                }
             }
         });
     }
 
-    if (btnCancelDeletePreset) {
-        btnCancelDeletePreset.addEventListener('click', () => closeBottomSheet('delete-preset-sheet-overlay'));
+    function openDeletePresetConfirm() {
+        showBottomSheet({
+            title: translations[currentLang]['confirm_delete_preset'],
+            items: [
+                {
+                    label: translations[currentLang]['btn_yes'],
+                    icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                    iconColor: '#ff4444',
+                    isDestructive: true,
+                    onClick: () => {
+                        if (presetToDeleteId) {
+                            presets = presets.filter(pr => pr.id !== presetToDeleteId);
+                            if (activePreset.id === presetToDeleteId) activePreset = presets[0];
+                            savePresets();
+                            updatePresetUI();
+                            presetToDeleteId = null;
+                            closeBottomSheet();
+                            setTimeout(openPresetsSheet, 300);
+                        }
+                    }
+                },
+                {
+                    label: translations[currentLang]['btn_no'],
+                    icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+                    onClick: () => {
+                        closeBottomSheet();
+                        setTimeout(openPresetsSheet, 300);
+                    }
+                }
+            ]
+        });
     }
 
-    // Import/Create Sheet Logic
-    const importSheetId = 'preset-import-option-sheet';
-    if (!document.getElementById(importSheetId)) {
-        const sheet = document.createElement('div');
-        sheet.id = importSheetId;
-        sheet.className = 'modal-overlay';
-        sheet.style.display = 'none';
-        sheet.innerHTML = `
-            <div class="bottom-sheet-content">
-                <div class="sheet-handle-bar"></div>
-                <div class="sheet-header">
-                    <div class="sheet-title">${translations[currentLang]['new_preset']}</div>
-                </div>
-                <div class="sheet-list">
-                    <div class="sheet-item" id="btn-opt-create-new">
-                        <div class="sheet-item-icon">
-                            <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                        </div>
-                        <div class="sheet-item-content">${translations[currentLang]['action_create_new']}</div>
-                    </div>
-                    <div class="sheet-item" id="btn-opt-import-json">
-                        <div class="sheet-item-icon">
-                            <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
-                        </div>
-                        <div class="sheet-item-content">${translations[currentLang]['action_import']}</div>
-                    </div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(sheet);
-
-        initBottomSheet(importSheetId);
-
-        document.getElementById('btn-opt-create-new').addEventListener('click', () => {
-            closeBottomSheet(importSheetId);
-            if (newPresetInput) newPresetInput.value = '';
-            openBottomSheet('new-preset-sheet-overlay');
-        });
-
-        document.getElementById('btn-opt-import-json').addEventListener('click', () => {
-            closeBottomSheet(importSheetId);
-            const fileInput = document.getElementById('preset-file-input');
-            if (fileInput) fileInput.click();
+    function openImportCreateSheet() {
+        showBottomSheet({
+            title: translations[currentLang]['new_preset'],
+            items: [
+                {
+                    label: translations[currentLang]['action_create_new'],
+                    icon: '<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+                    onClick: () => {
+                        closeBottomSheet();
+                        if (newPresetInput) newPresetInput.value = '';
+                        openBottomSheet('new-preset-sheet-overlay'); // Keep this one static for now or refactor to dynamic input
+                    }
+                },
+                {
+                    label: translations[currentLang]['action_import'],
+                    icon: '<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
+                    onClick: () => {
+                        closeBottomSheet();
+                        const fileInput = document.getElementById('preset-file-input');
+                        if (fileInput) fileInput.click();
+                    }
+                }
+            ]
         });
     }
 
@@ -376,17 +356,6 @@ export async function initPromptEditor() {
         activePreset = newPreset;
         savePresets();
         updatePresetUI();
-    }
-
-    // Add New Preset
-    if (btnAddPreset) {
-        const newBtn = btnAddPreset.cloneNode(true);
-        btnAddPreset.parentNode.replaceChild(newBtn, btnAddPreset);
-        
-        newBtn.addEventListener('click', () => {
-            closeBottomSheet('prompt-presets-sheet-overlay');
-            openBottomSheet(importSheetId);
-        });
     }
 
     if (btnCreatePreset) {
@@ -568,10 +537,7 @@ export async function initPromptEditor() {
     const roleInput = document.getElementById('edit-block-role');
     const contentInput = document.getElementById('edit-block-content');
     let currentEditIndex = -1;
-    const btnDeleteBlock = document.getElementById('btn-delete-block');
-    
-    // Header Elements for manipulation
-    const headerTitle = document.getElementById('header-title');
+    const btnDeleteBlock = document.getElementById('btn-delete-block');    const headerTitle = document.getElementById('header-title');
     const headerBack = document.getElementById('header-back');
     const headerLogo = document.getElementById('header-logo');
     const headerArrow = document.getElementById('header-arrow');
@@ -643,27 +609,31 @@ export async function initPromptEditor() {
     if (btnDeleteBlock) {
         btnDeleteBlock.addEventListener('click', () => {
             if (currentEditIndex > -1) {
-                const sheet = document.getElementById('delete-block-sheet-overlay');
-                if (sheet) sheet.style.display = '';
-                openBottomSheet('delete-block-sheet-overlay');
+                showBottomSheet({
+                    title: translations[currentLang]['confirm_delete_block'],
+                    items: [
+                        {
+                            label: translations[currentLang]['btn_yes'],
+                            icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                            iconColor: '#ff4444',
+                            isDestructive: true,
+                            onClick: () => {
+                                activePreset.blocks.splice(currentEditIndex, 1);
+                                savePresets();
+                                renderBlocks();
+                                closeBottomSheet();
+                                closeEditBlockView();
+                            }
+                        },
+                        {
+                            label: translations[currentLang]['btn_no'],
+                            icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+                            onClick: () => closeBottomSheet()
+                        }
+                    ]
+                });
             }
         });
-    }
-
-    if (btnConfirmDeleteBlock) {
-        btnConfirmDeleteBlock.addEventListener('click', () => {
-            if (currentEditIndex > -1) {
-                activePreset.blocks.splice(currentEditIndex, 1);
-                savePresets();
-                renderBlocks();
-                closeBottomSheet('delete-block-sheet-overlay');
-                closeEditBlockView();
-            }
-        });
-    }
-    
-    if (btnCancelDeleteBlock) {
-        btnCancelDeleteBlock.addEventListener('click', () => closeBottomSheet('delete-block-sheet-overlay'));
     }
 
     if (impInput) {

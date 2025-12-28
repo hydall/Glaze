@@ -1,6 +1,6 @@
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
-import { openBottomSheet, closeBottomSheet } from './ui.js';
+import { showBottomSheet, closeBottomSheet } from './ui.js';
 
 let callbacks = {};
 let editingCharIndex = -1;
@@ -81,6 +81,7 @@ export function initEditor(cbs) {
                 tempAvatar = ev.target.result;
                 updateAvatarDisplay(tempAvatar, nameInput.value);
                 autoSave();
+                if (callbacks.renderList) callbacks.renderList();
             };
             reader.readAsDataURL(file);
         }
@@ -179,22 +180,28 @@ export function openCharacterEditor(index) {
         
         newDeleteBtn.style.display = isNew ? 'none' : 'flex';
         newDeleteBtn.onclick = () => {
-            openBottomSheet('char-delete-confirm-sheet');
+            showBottomSheet({
+                title: translations[currentLang]['confirm_delete_title'],
+                items: [
+                    {
+                        label: translations[currentLang]['btn_yes'],
+                        icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                        iconColor: '#ff4444',
+                        isDestructive: true,
+                        onClick: () => {
+                            callbacks.deleteCharacter(editingCharIndex);
+                            closeBottomSheet();
+                            closeEditor(previousView);
+                        }
+                    },
+                    {
+                        label: translations[currentLang]['btn_no'],
+                        icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+                        onClick: () => closeBottomSheet()
+                    }
+                ]
+            });
         };
-
-        // Confirm Delete Sheet Logic
-        const confirmDeleteBtn = document.getElementById('btn-confirm-delete-char');
-        const newConfirmBtn = confirmDeleteBtn.cloneNode(true);
-        confirmDeleteBtn.parentNode.replaceChild(newConfirmBtn, confirmDeleteBtn);
-        
-        newConfirmBtn.addEventListener('click', () => {
-            callbacks.deleteCharacter(editingCharIndex);
-            closeBottomSheet('char-delete-confirm-sheet');
-            closeEditor(previousView);
-        });
-
-        const cancelDeleteBtn = document.getElementById('btn-cancel-delete-char');
-        cancelDeleteBtn.onclick = () => closeBottomSheet('char-delete-confirm-sheet');
     }
 }
 

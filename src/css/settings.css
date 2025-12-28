@@ -193,3 +193,7 @@
     cursor: pointer;
     width: 100%;
 }
+
+body.dark-theme .vk-switch {
+    background-color: #363636;
+}
