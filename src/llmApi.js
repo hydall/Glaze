@@ -1,10 +1,7 @@
 import { formatText, replaceMacros } from './textFormatter.js';
 import { scrollToBottom } from './ui.js';
 import { db } from './db.js';
-import { CapacitorForegroundService } from 'capacitor-foreground-service';
-
-// Robust import: Handle different export formats (Named vs Default) to prevent Vite errors
-const ForegroundService = CapacitorForegroundService;
+import { BackgroundTask } from '@capawesome/capacitor-background-task';
 
 export async function sendToLLM(text, activeChatChar, translations, currentLang, appendMessage, onComplete, onError, controller, onUpdate, type = 'normal') {
     let apiKey = localStorage.getItem('api-key');
@@ -201,18 +198,24 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
     const handleVisibilityChange = () => { if (document.visibilityState === 'visible') requestWakeLock(); };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Start Foreground Service (Notification) to keep app alive in background
+    // Setup Background Task to keep app alive if backgrounded
+    let backgroundTaskId = null;
+    let completeBackgroundTask = null;
+    let isTaskFinished = false;
+
     try {
-        if (ForegroundService && typeof ForegroundService.start === 'function') {
-            await ForegroundService.start({
-                id: 999,
-                title: "SillyCradle",
-                body: translations[currentLang]['notification_generating'] || "Generating response...",
-                smallIcon: "ic_stat_icon_config_sample", // Убедитесь, что иконка существует, или используйте стандартную
+        backgroundTaskId = await BackgroundTask.beforeExit(async () => {
+            if (isTaskFinished) {
+                if (backgroundTaskId) BackgroundTask.finish({ taskId: backgroundTaskId });
+                return;
+            }
+            await new Promise(resolve => {
+                completeBackgroundTask = resolve;
             });
-        }
+            if (backgroundTaskId) BackgroundTask.finish({ taskId: backgroundTaskId });
+        });
     } catch (e) {
-        console.warn("Foreground Service failed to start:", e);
+        console.warn("Background Task setup failed:", e);
     }
 
     try {
@@ -304,13 +307,11 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
         if (wakeLock) {
             try { wakeLock.release(); } catch (e) {}
         }
-        // Stop Foreground Service
-        try {
-            if (ForegroundService && typeof ForegroundService.stop === 'function') {
-                await ForegroundService.stop();
-            }
-        } catch (e) {
-            console.warn("Foreground Service failed to stop:", e);
+        
+        // Signal Background Task to finish
+        isTaskFinished = true;
+        if (completeBackgroundTask) {
+            completeBackgroundTask();
         }
     }
 }
