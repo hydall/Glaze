@@ -86,6 +86,53 @@ export function initEditor(cbs) {
             reader.readAsDataURL(file);
         }
     });
+
+    // Full Screen Editor Logic
+    const fsEditor = document.getElementById('full-screen-editor');
+    const fsTextarea = document.getElementById('fs-editor-textarea');
+    const fsClose = document.getElementById('fs-editor-close');
+    const fsSave = document.getElementById('fs-editor-save');
+    let currentTargetInput = null;
+
+    if (fsEditor && fsTextarea && !fsEditor.dataset.initialized) {
+        fsEditor.dataset.initialized = 'true';
+
+        const closeFullScreen = () => {
+            fsEditor.classList.remove('anim-fade-in');
+            fsEditor.classList.add('anim-fade-out');
+            setTimeout(() => {
+                fsEditor.style.display = 'none';
+                fsEditor.classList.remove('active-view', 'anim-fade-out');
+                currentTargetInput = null;
+            }, 200);
+        };
+
+        if (fsClose) fsClose.onclick = closeFullScreen;
+        
+        if (fsSave) fsSave.onclick = () => {
+            if (currentTargetInput) {
+                currentTargetInput.value = fsTextarea.value;
+                currentTargetInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            closeFullScreen();
+        };
+
+        document.body.addEventListener('click', (e) => {
+            const btn = e.target.closest('.expand-btn');
+            if (btn) {
+                const targetId = btn.getAttribute('data-target');
+                const target = document.getElementById(targetId);
+                if (target) {
+                    currentTargetInput = target;
+                    fsTextarea.value = target.value || '';
+                    fsEditor.style.display = 'flex';
+                    requestAnimationFrame(() => {
+                        fsEditor.classList.add('active-view', 'anim-fade-in');
+                    });
+                }
+            }
+        });
+    }
 }
 
 export function openCharacterEditor(index) {

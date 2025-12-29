@@ -19,6 +19,8 @@ export async function initPromptEditor() {
     const btnCreatePreset = document.getElementById('btn-create-preset');
     const newPresetInput = document.getElementById('new-preset-name-input');
     const impInput = document.getElementById('impersonation-prompt-input');
+    const reasoningStartInput = document.getElementById('preset-reasoning-start');
+    const reasoningEndInput = document.getElementById('preset-reasoning-end');
     
     // Component Existence Checks
     if (!list) console.error("Debug: Element 'prompt-blocks-list' not found!");
@@ -58,6 +60,8 @@ export async function initPromptEditor() {
         const defaultPreset = {
             id: 'default',
             name: 'Default',
+            reasoningStart: "",
+            reasoningEnd: "",
             blocks: [
                 { name: "Main Prompt", content: "You will participate in a roleplay with {{user}}. Take on a role of {{char}}", enabled: true, role: "system" },
                 ...mandatoryBlocks
@@ -82,6 +86,8 @@ export async function initPromptEditor() {
         if (currentPresetLabel) currentPresetLabel.textContent = activePreset.name;
         renderBlocks();
         if (impInput) impInput.value = activePreset.impersonationPrompt || "";
+        if (reasoningStartInput) reasoningStartInput.value = activePreset.reasoningStart || "";
+        if (reasoningEndInput) reasoningEndInput.value = activePreset.reasoningEnd || "";
     }
 
     // Preset Selector Logic
@@ -349,6 +355,8 @@ export async function initPromptEditor() {
             id: Date.now().toString(),
             name: defaultName || "Imported Preset",
             impersonationPrompt: data.impersonation_prompt || "",
+            reasoningStart: data.reasoning_start || "",
+            reasoningEnd: data.reasoning_end || "",
             blocks: orderedBlocks
         };
 
@@ -365,6 +373,8 @@ export async function initPromptEditor() {
                 id: Date.now().toString(),
                 name: name,
                 impersonationPrompt: "",
+                reasoningStart: "",
+                reasoningEnd: "",
                 blocks: [...mandatoryBlocks] // Start with mandatory blocks
             };
             presets.push(newPreset);
@@ -639,6 +649,20 @@ export async function initPromptEditor() {
     if (impInput) {
         impInput.addEventListener('input', () => {
             activePreset.impersonationPrompt = impInput.value;
+            savePresets();
+        });
+    }
+
+    if (reasoningStartInput) {
+        reasoningStartInput.addEventListener('input', () => {
+            activePreset.reasoningStart = reasoningStartInput.value;
+            savePresets();
+        });
+    }
+
+    if (reasoningEndInput) {
+        reasoningEndInput.addEventListener('input', () => {
+            activePreset.reasoningEnd = reasoningEndInput.value;
             savePresets();
         });
     }

@@ -185,6 +185,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Remove preload class to enable transitions
     setTimeout(() => {
         document.body.classList.remove('preload');
+        document.body.classList.add('app-loaded');
     }, 100);
 });
 

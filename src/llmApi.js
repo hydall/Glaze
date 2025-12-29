@@ -1,6 +1,10 @@
 import { formatText, replaceMacros } from './textFormatter.js';
 import { scrollToBottom } from './ui.js';
 import { db } from './db.js';
+import { CapacitorForegroundService } from 'capacitor-foreground-service';
+
+// Robust import: Handle different export formats (Named vs Default) to prevent Vite errors
+const ForegroundService = CapacitorForegroundService;
 
 export async function sendToLLM(text, activeChatChar, translations, currentLang, appendMessage, onComplete, onError, controller, onUpdate, type = 'normal') {
     let apiKey = localStorage.getItem('api-key');
@@ -106,6 +110,28 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
     if (type === 'impersonation' && text) {
         messages.push({ role: "system", content: text });
     }
+
+    // --- Author's Notes Injection ---
+    if (activeChatChar) {
+        const anKey = `sc_an_${activeChatChar.name}`;
+        try {
+            const anData = JSON.parse(localStorage.getItem(anKey));
+            if (anData && anData.enabled && anData.content) {
+                let content = anData.content;
+                content = replaceMacros(content, activeChatChar, personaObj);
+                const noteMsg = { role: anData.role || 'system', content: content };
+                const depth = parseInt(anData.depth) || 0;
+                
+                if (depth === 0) {
+                    messages.push(noteMsg);
+                } else {
+                    let insertIdx = messages.length - depth;
+                    if (insertIdx < 0) insertIdx = 0;
+                    messages.splice(insertIdx, 0, noteMsg);
+                }
+            }
+        } catch(e) { console.warn("Error processing Author's Notes:", e); }
+    }
     // -------------------------------------------
 
     const charName = activeChatChar.name;
@@ -162,6 +188,33 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
 
     console.log("LLM Request:", requestBody);
 
+    // Keep screen on during generation to prevent OS suspension
+    let wakeLock = null;
+    const requestWakeLock = async () => {
+        if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+            try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { console.warn("WakeLock error:", e); }
+        }
+    };
+    await requestWakeLock();
+
+    // Re-acquire lock if app comes back to foreground while generating
+    const handleVisibilityChange = () => { if (document.visibilityState === 'visible') requestWakeLock(); };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Start Foreground Service (Notification) to keep app alive in background
+    try {
+        if (ForegroundService && typeof ForegroundService.start === 'function') {
+            await ForegroundService.start({
+                id: 999,
+                title: "SillyCradle",
+                body: translations[currentLang]['notification_generating'] || "Generating response...",
+                smallIcon: "ic_stat_icon_config_sample", // Убедитесь, что иконка существует, или используйте стандартную
+            });
+        }
+    } catch (e) {
+        console.warn("Foreground Service failed to start:", e);
+    }
+
     try {
         const response = await fetch(`${apiUrl}/chat/completions`, {
             method: 'POST',
@@ -197,9 +250,16 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
                     
                     try {
                         const json = JSON.parse(dataStr);
+
+                        if (json.error) {
+                            throw new Error("API Stream Error: " + (json.error.message || JSON.stringify(json.error)));
+                        }
+
+                        if (!json.choices || !json.choices.length) continue;
+
                         const delta = json.choices[0].delta;
-                        if (delta && delta.content) {
-                            const content = delta.content;
+                        if (delta && (delta.content || delta.reasoning_content)) {
+                            const content = delta.content || "";
                             const reasoning = delta.reasoning_content || null;
                             console.log("Stream chunk:", content, "Reasoning:", reasoning);
                             fullText += content;
@@ -212,6 +272,9 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
                             if (onUpdate) onUpdate(content, reasoning);
                         }
                     } catch (e) {
+                        if (e.message && e.message.startsWith("API Stream Error")) {
+                            throw e;
+                        }
                         console.warn("Error parsing stream chunk", e);
                     }
                 }
@@ -236,5 +299,18 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
         }
         removeTypingWithAnimation();
         if (onError) onError(e);
+    } finally {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        if (wakeLock) {
+            try { wakeLock.release(); } catch (e) {}
+        }
+        // Stop Foreground Service
+        try {
+            if (ForegroundService && typeof ForegroundService.stop === 'function') {
+                await ForegroundService.stop();
+            }
+        } catch (e) {
+            console.warn("Foreground Service failed to stop:", e);
+        }
     }
 }

@@ -104,9 +104,9 @@ export async function renderDialogs(category = 'all', onChatOpen) {
             subtitleHtml = `<div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`;
         } else {
             let rawText = chat.msg || "";
-            // Apply markdown and strip paragraph tags if added by formatter
+            // Apply markdown and strip ALL tags (including img) for preview
             let formatted = formatText(rawText);
-            formatted = formatted.replace(/<\/?p>/g, '');
+            formatted = formatted.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '');
 
             const maxLength = 100;
             if (formatted.length > maxLength) {
@@ -147,6 +147,11 @@ export async function renderDialogs(category = 'all', onChatOpen) {
     if (fab) {
         const newFab = fab.cloneNode(true);
         fab.parentNode.replaceChild(newFab, fab);
+        
+        // Update FAB content to Pill style
+        const label = (translations[currentLang]?.btn_new_chat || "New Chat").replace(/^\+\s*/, '');
+        newFab.innerHTML = `<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg><span>${label}</span>`;
+        
         newFab.addEventListener('click', () => {
             openNewSessionPicker();
         });

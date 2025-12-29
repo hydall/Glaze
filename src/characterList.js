@@ -101,6 +101,10 @@ export function init(chatCallback) {
     // FAB Listener
     const fabAdd = document.getElementById('fab-add-character');
     if (fabAdd) {
+        // Update FAB content to Pill style
+        const label = translations[currentLang]?.action_create_new || "Create New";
+        fabAdd.innerHTML = `<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg><span>${label}</span>`;
+        
         fabAdd.addEventListener('click', () => {
             openCharOptionsSheet();
         });

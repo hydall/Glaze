@@ -209,11 +209,6 @@
                         </div>
                         <input type="checkbox" id="api-reasoning" class="vk-switch">
                     </div>
-                    <div class="settings-item">
-                        <label data-i18n="label_reasoning_tags">Теги ризонинга (Outer CoT)</label>
-                        <input type="text" id="api-reasoning-start" placeholder="<think>" data-i18n-placeholder="placeholder_tag_start" style="margin-bottom: 5px;">
-                        <input type="text" id="api-reasoning-end" placeholder="</think>" data-i18n-placeholder="placeholder_tag_end">
-                    </div>
                 </div>
             </div>
 
@@ -229,10 +224,16 @@
                 <div class="prompt-container" id="prompt-blocks-list">
                     <!-- Blocks will be rendered here -->
                 </div>
-                <div class="section-header" data-i18n="label_impersonation_prompt">Impersonation Prompt</div>
+                <div class="section-header" data-i18n="label_preset_prompts">Function Prompts</div>
                 <div class="menu-group">
                     <div class="settings-item">
+                        <label data-i18n="label_impersonation_prompt">Impersonation Prompt</label>
                         <textarea id="impersonation-prompt-input" rows="3" placeholder="Prompt to trigger impersonation..."></textarea>
+                    </div>
+                    <div class="settings-item">
+                        <label data-i18n="label_reasoning_tags">Теги ризонинга (Outer CoT)</label>
+                        <input type="text" id="api-reasoning-start" placeholder="<think>" data-i18n-placeholder="placeholder_tag_start" style="margin-bottom: 5px;">
+                        <input type="text" id="api-reasoning-end" placeholder="</think>" data-i18n-placeholder="placeholder_tag_end">
                     </div>
                 </div>
             </div>
@@ -242,6 +243,9 @@
         <div id="view-chat" class="view">
             <div class="chat-container" id="chat-messages">
                 <!-- Messages will be injected here -->
+            </div>
+            <div id="scroll-to-bottom" class="scroll-bottom-btn">
+                <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
             </div>
             
             <div class="chat-input-bar">

@@ -5,7 +5,7 @@
     "header_more": "Ещё",
     "header_editor": "Редактор",
     "header_prompt_edit": "Редактирование промпта",
-    "tab_dialogs": "Диалоги",
+    "tab_dialogs": "Чаты",
     "tab_characters": "Персонажи",
     "tab_generation": "Генерация",
     "tab_more": "Ещё",
@@ -32,6 +32,7 @@
     "label_stream": "Стриминг ответа",
     "desc_stream": "Отображать текст ответа постепенно по мере его появления",
     "label_reasoning": "Запрашивать ризонинг",
+    "label_preset_prompts": "Промпты функций",
     "desc_reasoning": "Показывает блок раздумий (если поддерживается)",
     "label_reasoning_tags": "Теги ризонинга (Outer CoT)",
     "placeholder_tag_start": "Начало (напр. <think>)",
@@ -124,5 +125,10 @@
     "action_regenerate": "Регенерация",
     "sheet_title_msg_actions": "Действия",
     "stat_messages": "Сообщений",
-    "stat_gen_time": "Время генерации"
+    "stat_gen_time": "Время генерации",
+    "notification_generating": "Генерация ответа...",
+    "magic_authors_notes": "Заметки автора",
+    "label_depth": "Глубина (Depth)",
+    "placeholder_depth": "0 = в конце контекста",
+    "label_enabled": "Включено"
 }

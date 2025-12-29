@@ -1,6 +1,12 @@
 /* Persona & Block Edit Views */
-#view-persona-edit, #view-block-edit {
+#view-persona-edit, #view-block-edit, #full-screen-editor {
     background-color: var(--bg-gray);
+}
+
+#full-screen-editor {
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
 }
 
 /* Prompt Preset Editor */
@@ -228,14 +234,20 @@
 }
 
 .fs-editor-body {
-    height: calc(100% - 56px);
+    flex: 1;
     padding: 16px;
     background-color: var(--white);
+    display: flex;
+    flex-direction: column;
+}
+
+body.dark-theme .fs-editor-body {
+    background-color: #1e1e1e;
 }
 
 #fs-editor-textarea {
     width: 100%;
-    height: 100%;
+    flex: 1;
     border: none;
     resize: none;
     font-size: 16px;
@@ -243,4 +255,8 @@
     outline: none;
     color: var(--text-black);
     background-color: transparent;
+}
+
+body.dark-theme #fs-editor-textarea {
+    color: #e1e3e6;
 }

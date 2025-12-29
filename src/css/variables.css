@@ -13,6 +13,7 @@
     --separator-color: #f0f0f0;
 }
 
+/* Native Dark Mode Support (Prevents white flash on load) */
 body.dark-theme {
     --vk-header-bg: #19191a;
     --bg-gray: #0a0a0a;

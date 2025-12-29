@@ -253,7 +253,11 @@ export function initThemeToggle() {
 
     const updateStatusBar = () => {
         const isDark = document.body.classList.contains('dark-theme');
-        const color = isDark ? '#121212' : '#ffffff';
+        const color = isDark ? '#252526' : '#ffffff';
+        
+        // Fix: Set body background to match theme (prevents white flash on keyboard open)
+        document.body.style.backgroundColor = color;
+
         let meta = document.querySelector('meta[name="theme-color"]');
         if (!meta) {
             meta = document.createElement('meta');
@@ -262,6 +266,18 @@ export function initThemeToggle() {
         }
         meta.setAttribute('content', color);
     };
+
+    // Fix: Inject global styles for text selection and UI tweaks
+    if (!document.getElementById('ui-fixes-styles')) {
+        const style = document.createElement('style');
+        style.id = 'ui-fixes-styles';
+        style.textContent = `
+            body { -webkit-user-select: none; user-select: none; }
+            .msg-body, .selectable, [contenteditable] { -webkit-user-select: text; user-select: text; }
+            input, textarea { -webkit-user-select: auto; user-select: auto; }
+        `;
+        document.head.appendChild(style);
+    }
 
     // Auto-detect system theme
     if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {

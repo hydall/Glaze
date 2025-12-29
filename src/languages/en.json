@@ -5,7 +5,7 @@
     "header_more": "More",
     "header_editor": "Editor",
     "header_prompt_edit": "Prompt Editing",
-    "tab_dialogs": "Dialogs",
+    "tab_dialogs": "Chats",
     "tab_characters": "Characters",
     "tab_generation": "Generation",
     "tab_more": "More",
@@ -32,6 +32,7 @@
     "label_stream": "Stream Response",
     "desc_stream": "Show response text as it is generated",
     "label_reasoning": "Request Reasoning",
+    "label_preset_prompts": "Function Prompts",
     "desc_reasoning": "Shows thought block (if supported)",
     "label_reasoning_tags": "Reasoning Tags (Outer CoT)",
     "placeholder_tag_start": "Start (e.g. <think>)",
@@ -124,5 +125,10 @@
     "action_regenerate": "Regenerate",
     "sheet_title_msg_actions": "Message Actions",
     "stat_messages": "Messages",
-    "stat_gen_time": "Generation Time"
+    "stat_gen_time": "Generation Time",
+    "notification_generating": "Generating response...",
+    "magic_authors_notes": "Author's Notes",
+    "label_depth": "Depth",
+    "placeholder_depth": "0 = at the end",
+    "label_enabled": "Enabled"
 }

@@ -39,9 +39,7 @@ export function initSettings() {
         { id: 'api-key', key: 'api-key' },
         { id: 'api-model', key: 'api-model' },
         { id: 'api-max-tokens', key: 'api-max-tokens' },
-        { id: 'api-context', key: 'api-context' },
-        { id: 'api-reasoning-start', key: 'sc_api_reasoning_start' },
-        { id: 'api-reasoning-end', key: 'sc_api_reasoning_end' }
+        { id: 'api-context', key: 'api-context' }
     ];
 
     apiInputs.forEach(config => {

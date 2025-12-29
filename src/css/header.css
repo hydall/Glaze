@@ -10,11 +10,7 @@
     width: 100%;
     z-index: 100;
     flex-shrink: 0;
-    transition: background-color 0.3s ease, border-bottom-color 0.3s ease, margin-top 0.3s ease;
-}
-
-.app-header.scroll-hidden {
-    margin-top: -57px;
+    transition: background-color 0.3s ease, margin-top 0.3s ease, transform 0.3s ease-in-out !important;
 }
 
 .app-header.no-border {

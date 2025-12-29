@@ -2,6 +2,7 @@ import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
 import { sendToLLM } from './llmApi.js';
 import { attachLongPress, showBottomSheet, closeBottomSheet, scrollToBottom, animateTextChange } from './ui.js';
+import { openImageViewer } from './imageViewer.js';
 import { formatText, replaceMacros } from './textFormatter.js';
 import { renderDialogs, refreshDialogs } from './dialogList.js';
 import { openCharacterEditor } from './editor.js';
@@ -101,9 +102,13 @@ export async function deleteAllChats(charName) {
 export function initChat() {
     const chatInput = document.getElementById('chat-input');
     if (chatInput) {
+        // Fix for Android Keyboard: ensure text input mode (prevents number row stuck)
+        chatInput.setAttribute('inputmode', 'text');
+
         chatInput.addEventListener('input', function() {
             this.style.height = 'auto';
-            this.style.height = (this.scrollHeight) + 'px';
+            // Fix for Android height glitch: add buffer for borders/sub-pixel rendering
+            this.style.height = (this.scrollHeight + 2) + 'px';
         });
         // Fix for double-tap issue on mobile (prevents parent handlers from stealing focus)
         chatInput.addEventListener('touchstart', (e) => {
@@ -150,6 +155,29 @@ export function initChat() {
             e.stopPropagation();
             document.getElementById('magic-menu').classList.add('hidden');
             startImpersonation();
+        });
+    }
+
+    const scrollBtn = document.getElementById('scroll-to-bottom');
+    if (scrollBtn) {
+        scrollBtn.addEventListener('click', () => {
+            scrollToBottom('chat-messages');
+        });
+    }
+
+    // Inject Author's Notes button into Magic Menu
+    const magicMenu = document.getElementById('magic-menu');
+    if (magicMenu && !document.getElementById('btn-authors-notes')) {
+        const btn = document.createElement('div');
+        btn.id = 'btn-authors-notes';
+        btn.className = 'magic-item'; // Assuming magic-item class exists or inherits styles
+        btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor;margin-right:12px;"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg><span>${translations[currentLang]['magic_authors_notes'] || "Author's Notes"}</span>`;
+        magicMenu.appendChild(btn);
+        
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            magicMenu.classList.add('hidden');
+            openAuthorsNotesEditor();
         });
     }
 }
@@ -317,7 +345,13 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
         updateSendButton(true);
     }
     
-    if (existingElement) startTimer(existingElement);
+    if (existingElement) {
+        existingElement.classList.remove('error');
+        startTimer(existingElement);
+        // Hide actions during generation
+        const actions = existingElement.querySelector('.msg-actions-btn');
+        if (actions) actions.style.display = 'none';
+    }
 
     let streamingMsgElement = existingElement; // Use existing if provided
     
@@ -334,6 +368,9 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
             swipeId: 0
         };
         streamingMsgElement = appendMessage(msg, char.avatar, char.name, char.version, false, true);
+        // Hide actions during generation
+        const actions = streamingMsgElement.querySelector('.msg-actions-btn');
+        if (actions) actions.style.display = 'none';
         
         const body = streamingMsgElement.querySelector('.msg-body');
         if (body) {
@@ -350,6 +387,9 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
     const restoreState = () => {
         if (timerInterval) clearInterval(timerInterval);
         if (existingElement) existingElement.classList.remove('generating-swipe');
+        // Show actions
+        const actions = existingElement ? existingElement.querySelector('.msg-actions-btn') : null;
+        if (actions) actions.style.display = 'flex';
         
         // Restore content if it was a swipe generation
         if (existingElement && existingElement._msgData) {
@@ -390,176 +430,209 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
 
     const onError = (e) => {
         restoreState();
-        handleGenerationError(char.name, e);
+        delete generatingStates[char.name];
+        
+        if (existingElement) {
+            const errorText = `Error: ${e.message}`;
+            const body = existingElement.querySelector('.msg-body');
+            if (body) {
+                body.innerHTML = formatText(errorText);
+            }
+            if (existingElement._msgData) {
+                addSwipe(existingElement, existingElement._msgData, errorText, { genTime: '0.0s', isError: true });
+            }
+            existingElement.classList.add('error');
+            if (activeChatChar && activeChatChar.name === char.name) {
+                updateSendButton(false);
+            }
+        } else {
+            handleGenerationError(char.name, e);
+        }
     };
     
-    let fullText = text || ""; // If text provided (e.g. impersonation), start with it
-    let fullReasoning = "";
-    let displayedText = "";
-    let typewriterRaf = null;
-    const view = document.getElementById('chat-messages');
-
-    const processTypewriter = () => {
-        if (displayedText.length < fullText.length) {
-            const pending = fullText.length - displayedText.length;
-            const step = Math.max(1, Math.ceil(pending / 3));
-            displayedText = fullText.substring(0, displayedText.length + step);
-            
-            const body = streamingMsgElement.querySelector('.msg-body');
-            if (body) body.innerHTML = formatText(displayedText);
-
-            // Smart Auto-scroll: скроллим только если пользователь внизу
-            if (view) {
-                const threshold = 50;
-                const dist = view.scrollHeight - view.scrollTop - view.clientHeight;
-                if (dist < threshold) view.scrollTop = view.scrollHeight;
-            }
-            
-            typewriterRaf = requestAnimationFrame(processTypewriter);
-        } else {
-            typewriterRaf = null;
-        }
-    };
-
-    const onUpdate = (chunk, reasoningChunk) => {
-        // Clear initial typing dots on first chunk
-        if (fullText === "" && chunk) {
-             const body = streamingMsgElement.querySelector('.msg-body');
-             if (body && body.querySelector('.typing-container')) {
-                 body.innerHTML = "";
-             }
-        }
+    // Fetch preset settings asynchronously before starting generation
+    db.get('sc_prompt_presets').then(presets => {
+        presets = presets || [];
+        const activePresetId = localStorage.getItem('sc_active_preset_id');
+        const activePreset = presets.find(p => p.id === activePresetId) || presets[0];
         
-        fullText += chunk || "";
-        if (reasoningChunk) fullReasoning += reasoningChunk;
+        // Use preset tags, fallback to legacy localStorage if needed (or empty)
+        const tagStart = activePreset?.reasoningStart || localStorage.getItem('sc_api_reasoning_start');
+        const tagEnd = activePreset?.reasoningEnd || localStorage.getItem('sc_api_reasoning_end');
 
-        // ... (existing CoT logic) ...
-        const tagStart = localStorage.getItem('sc_api_reasoning_start');
-        const tagEnd = localStorage.getItem('sc_api_reasoning_end');
-        
-        let effectiveReasoning = fullReasoning;
-        let effectiveText = fullText;
+        let rawStreamText = text || ""; // Accumulator for raw stream
+        let fullText = text || ""; // Clean text for typewriter
+        let fullReasoning = "";
+        let displayedText = "";
+        let typewriterRaf = null;
+        const view = document.getElementById('chat-messages');
 
-        if (tagStart && tagEnd && fullText.includes(tagStart)) {
-            const startIndex = fullText.indexOf(tagStart);
-            const endIndex = fullText.indexOf(tagEnd, startIndex);
-            
-            if (endIndex !== -1) {
-                effectiveReasoning = fullText.substring(startIndex + tagStart.length, endIndex);
-                effectiveText = fullText.substring(0, startIndex) + fullText.substring(endIndex + tagEnd.length);
+        const processTypewriter = () => {
+            if (displayedText.length < fullText.length) {
+                const pending = fullText.length - displayedText.length;
+                const step = Math.max(1, Math.ceil(pending / 3));
+                displayedText = fullText.substring(0, displayedText.length + step);
+                
+                const body = streamingMsgElement.querySelector('.msg-body');
+                if (body) body.innerHTML = formatText(displayedText);
+
+                // Smart Auto-scroll: скроллим только если пользователь внизу
+                if (view) {
+                    const threshold = 50;
+                    const dist = view.scrollHeight - view.scrollTop - view.clientHeight;
+                    if (dist < threshold) view.scrollTop = view.scrollHeight;
+                }
+                
+                typewriterRaf = requestAnimationFrame(processTypewriter);
             } else {
-                effectiveReasoning = fullText.substring(startIndex + tagStart.length);
-                effectiveText = fullText.substring(0, startIndex);
+                typewriterRaf = null;
             }
-        }
-
-        updateReasoningBlock(streamingMsgElement, effectiveReasoning);
-        fullText = effectiveText; // Update global text for typewriter
-        if (!typewriterRaf) typewriterRaf = requestAnimationFrame(processTypewriter);
-    };
-
-    const type = (streamingMsgElement || existingElement) ? 'no_typing' : 'normal';
-    sendToLLM(text, char, translations, currentLang, appendMessage, (response, finalReasoning) => {
-        const currentState = generatingStates[char.name];
-        if (timerInterval) clearInterval(timerInterval);
-        if (!currentState || currentState.genId !== genId) return; // Stopped or superseded
-        
-        if (typewriterRaf) cancelAnimationFrame(typewriterRaf);
-        delete generatingStates[char.name];
-
-        if (existingElement) existingElement.classList.remove('generating-swipe');
-
-        const now = new Date();
-        const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
-        const duration = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
-        
-        const msg = {
-            role: 'char',
-            text: response,
-            time: time,
-            genTime: duration,
-            timestamp: Date.now(),
-            tokens: response.length,
-            reasoning: fullReasoning || finalReasoning,
-            swipes: [response],
-            swipeId: 0,
-            swipesMeta: [{ genTime: duration }]
         };
 
-        if (activeChatChar && activeChatChar.name === char.name) {
-            // ... (existing tag check logic) ...
-            const tagStart = localStorage.getItem('sc_api_reasoning_start');
-            const tagEnd = localStorage.getItem('sc_api_reasoning_end');
-            if (tagStart && tagEnd && response.includes(tagStart) && response.includes(tagEnd)) {
-                 const sIdx = response.indexOf(tagStart);
-                 const eIdx = response.indexOf(tagEnd, sIdx);
-                 if (sIdx !== -1 && eIdx !== -1) {
-                     msg.reasoning = response.substring(sIdx + tagStart.length, eIdx);
-                     msg.text = response.substring(0, sIdx) + response.substring(eIdx + tagEnd.length);
-                 }
-            }
-
-            // Remove placeholder if exists
-            const placeholder = document.querySelector('.typing-indicator-placeholder');
-            if (placeholder) placeholder.remove();
-
-            if (streamingMsgElement) {
-                // If we were streaming, just update the existing element one last time and save
+        const onUpdate = (chunk, reasoningChunk) => {
+            // Clear initial typing dots on first chunk
+            if (fullText === "" && chunk) {
                 const body = streamingMsgElement.querySelector('.msg-body');
-                if (body) {
-                    // Ensure we don't have typing indicator
-                    body.innerHTML = formatText(msg.text);
+                if (body && body.querySelector('.typing-container')) {
+                    body.innerHTML = "";
                 }
-                updateReasoningBlock(streamingMsgElement, msg.reasoning);
-                
-                // Final time update
-                const statEl = streamingMsgElement.querySelector('.gen-stat');
-                if (statEl) {
-                     const timeIcon = `<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:4px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>`;
-                     statEl.innerHTML = `${timeIcon} <span class="gen-time">${duration}</span>`;
-                     statEl.style.display = 'flex';
-                }
-                
-                // If this was a new variant generation (reused element), we need to update the specific swipe
-                if (existingElement && streamingMsgElement._msgData) {
-                    const mData = streamingMsgElement._msgData;
-                    addSwipe(streamingMsgElement, mData, msg.text, { genTime: duration });
-                } else {
-                    // New message - update the single swipe (fix for "empty first variant" issue)
-                    if (streamingMsgElement._msgData) {
-                        streamingMsgElement._msgData.text = msg.text;
-                        streamingMsgElement._msgData.swipes = [msg.text];
-                        streamingMsgElement._msgData.swipeId = 0;
-                        streamingMsgElement._msgData.reasoning = msg.reasoning;
-                        streamingMsgElement._msgData.swipesMeta = [{ genTime: duration }];
-                        streamingMsgElement._msgData.genTime = duration;
-                    }
-                    saveMessageToSession(char.name, msg);
-                }
-                
-                // Final scroll check
-                if (view) {
-                    const threshold = 100;
-                    const dist = view.scrollHeight - view.scrollTop - view.clientHeight;
-                    if (dist < threshold) scrollToBottom('chat-messages', streamingMsgElement);
-                }
-            } else {
-                appendMessage(msg, char.avatar, char.name, char.version, true);
             }
-            updateSendButton(false);
-        } else {
-            saveMessageToSession(char.name, msg);
-            // Mark unread
-            db.get('sc_unread').then(unread => {
-                unread = unread || {};
-                unread[char.name] = true;
-                db.set('sc_unread', unread);
-            });
+            
+            rawStreamText += chunk || "";
+            if (reasoningChunk) fullReasoning += reasoningChunk;
 
-            // If we are in the list view or another chat, update the list
-            renderDialogs();
-        }
-    }, onError, controller, onUpdate, type);
+            // ... (existing CoT logic) ...
+            
+            let effectiveReasoning = fullReasoning;
+            let effectiveText = rawStreamText;
+
+            if (tagStart && tagEnd && rawStreamText.includes(tagStart)) {
+                const startIndex = rawStreamText.indexOf(tagStart);
+                const endIndex = rawStreamText.indexOf(tagEnd, startIndex);
+                
+                if (endIndex !== -1) {
+                    effectiveReasoning = rawStreamText.substring(startIndex + tagStart.length, endIndex);
+                    effectiveText = rawStreamText.substring(0, startIndex) + rawStreamText.substring(endIndex + tagEnd.length);
+                } else {
+                    effectiveReasoning = rawStreamText.substring(startIndex + tagStart.length);
+                    effectiveText = rawStreamText.substring(0, startIndex);
+                }
+            }
+
+            updateReasoningBlock(streamingMsgElement, effectiveReasoning);
+            fullText = effectiveText; // Update global text for typewriter
+            if (!typewriterRaf) typewriterRaf = requestAnimationFrame(processTypewriter);
+        };
+
+        const type = (streamingMsgElement || existingElement) ? 'no_typing' : 'normal';
+        sendToLLM(text, char, translations, currentLang, appendMessage, (response, finalReasoning) => {
+            const currentState = generatingStates[char.name];
+            if (timerInterval) clearInterval(timerInterval);
+            if (!currentState || currentState.genId !== genId) return; // Stopped or superseded
+            
+            if (typewriterRaf) cancelAnimationFrame(typewriterRaf);
+            delete generatingStates[char.name];
+
+            if (existingElement) existingElement.classList.remove('generating-swipe');
+
+            const now = new Date();
+            const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
+            const duration = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
+            
+            const msg = {
+                role: 'char',
+                text: response,
+                time: time,
+                genTime: duration,
+                timestamp: Date.now(),
+                tokens: response.length,
+                reasoning: fullReasoning || finalReasoning,
+                swipes: [response],
+                swipeId: 0,
+                swipesMeta: [{ genTime: duration }]
+            };
+
+            if (activeChatChar && activeChatChar.name === char.name) {
+                // ... (existing tag check logic) ...
+                if (tagStart && tagEnd && response.includes(tagStart)) {
+                    const sIdx = response.indexOf(tagStart);
+                    const eIdx = response.indexOf(tagEnd, sIdx);
+                    if (sIdx !== -1) {
+                        if (eIdx !== -1) {
+                        msg.reasoning = response.substring(sIdx + tagStart.length, eIdx);
+                        msg.text = response.substring(0, sIdx) + response.substring(eIdx + tagEnd.length);
+                        } else {
+                            msg.reasoning = response.substring(sIdx + tagStart.length);
+                            msg.text = response.substring(0, sIdx);
+                        }
+                    }
+                }
+
+                // Remove placeholder if exists
+                const placeholder = document.querySelector('.typing-indicator-placeholder');
+                if (placeholder) placeholder.remove();
+                
+                const actions = streamingMsgElement ? streamingMsgElement.querySelector('.msg-actions-btn') : null;
+                if (actions) actions.style.display = 'flex';
+
+                if (streamingMsgElement) {
+                    // If we were streaming, just update the existing element one last time and save
+                    const body = streamingMsgElement.querySelector('.msg-body');
+                    if (body) {
+                        // Ensure we don't have typing indicator
+                        body.innerHTML = formatText(msg.text);
+                    }
+                    updateReasoningBlock(streamingMsgElement, msg.reasoning);
+                    
+                    // Final time update
+                    const statEl = streamingMsgElement.querySelector('.gen-stat');
+                    if (statEl) {
+                        const timeIcon = `<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:4px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>`;
+                        statEl.innerHTML = `${timeIcon} <span class="gen-time">${duration}</span>`;
+                        statEl.style.display = 'flex';
+                    }
+                    
+                    // If this was a new variant generation (reused element), we need to update the specific swipe
+                    if (existingElement && streamingMsgElement._msgData) {
+                        const mData = streamingMsgElement._msgData;
+                        addSwipe(streamingMsgElement, mData, msg.text, { genTime: duration });
+                    } else {
+                        // New message - update the single swipe (fix for "empty first variant" issue)
+                        if (streamingMsgElement._msgData) {
+                            streamingMsgElement._msgData.text = msg.text;
+                            streamingMsgElement._msgData.swipes = [msg.text];
+                            streamingMsgElement._msgData.swipeId = 0;
+                            streamingMsgElement._msgData.reasoning = msg.reasoning;
+                            streamingMsgElement._msgData.swipesMeta = [{ genTime: duration }];
+                            streamingMsgElement._msgData.genTime = duration;
+                        }
+                        saveMessageToSession(char.name, msg);
+                    }
+                    
+                    // Final scroll check
+                    if (view) {
+                        const threshold = 100;
+                        const dist = view.scrollHeight - view.scrollTop - view.clientHeight;
+                        if (dist < threshold) scrollToBottom('chat-messages', streamingMsgElement);
+                    }
+                } else {
+                    appendMessage(msg, char.avatar, char.name, char.version, true);
+                }
+                updateSendButton(false);
+            } else {
+                saveMessageToSession(char.name, msg);
+                // Mark unread
+                db.get('sc_unread').then(unread => {
+                    unread = unread || {};
+                    unread[char.name] = true;
+                    db.set('sc_unread', unread);
+                });
+
+                // If we are in the list view or another chat, update the list
+                renderDialogs();
+            }
+        }, onError, controller, onUpdate, type);
+    });
 }
 
 function startImpersonation() {
@@ -615,6 +688,65 @@ function startImpersonation() {
     sendToLLM(promptText, activeChatChar, translations, currentLang, () => {}, onComplete, onError, controller, onUpdate, 'impersonation');
 }
 
+function openAuthorsNotesEditor() {
+    if (!activeChatChar) return;
+    
+    const key = `sc_an_${activeChatChar.name}`;
+    let data = { enabled: true, role: 'system', depth: 4, content: '' };
+    try {
+        const saved = localStorage.getItem(key);
+        if (saved) data = { ...data, ...JSON.parse(saved) };
+    } catch(e) {}
+
+    const content = document.createElement('div');
+    content.style.padding = '16px';
+    content.innerHTML = `
+        <div style="margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between;">
+            <label style="font-weight: 500;">${translations[currentLang]['label_enabled'] || 'Enabled'}</label>
+            <input type="checkbox" class="vk-switch" id="an-enabled" ${data.enabled ? 'checked' : ''}>
+        </div>
+        
+        <div style="margin-bottom: 16px;">
+            <label style="display:block; margin-bottom: 8px; font-size: 14px; color: var(--text-gray);">${translations[currentLang]['label_role'] || 'Role'}</label>
+            <select id="an-role" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--separator-color); background: var(--bg-gray); color: var(--text-black);">
+                <option value="system" ${data.role === 'system' ? 'selected' : ''}>System</option>
+                <option value="user" ${data.role === 'user' ? 'selected' : ''}>User</option>
+                <option value="assistant" ${data.role === 'assistant' ? 'selected' : ''}>Assistant</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+            <label style="display:block; margin-bottom: 8px; font-size: 14px; color: var(--text-gray);">${translations[currentLang]['label_depth'] || 'Depth'}</label>
+            <input type="number" id="an-depth" value="${data.depth}" placeholder="${translations[currentLang]['placeholder_depth'] || '0 = at the end'}" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--separator-color); background: var(--bg-gray); color: var(--text-black);">
+        </div>
+
+        <div style="margin-bottom: 16px;">
+            <label style="display:block; margin-bottom: 8px; font-size: 14px; color: var(--text-gray);">${translations[currentLang]['label_content'] || 'Content'}</label>
+            <textarea id="an-content" rows="5" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--separator-color); background: var(--bg-gray); color: var(--text-black); resize: vertical;">${data.content}</textarea>
+        </div>
+    `;
+
+    const save = () => {
+        const newData = {
+            enabled: content.querySelector('#an-enabled').checked,
+            role: content.querySelector('#an-role').value,
+            depth: parseInt(content.querySelector('#an-depth').value) || 0,
+            content: content.querySelector('#an-content').value
+        };
+        localStorage.setItem(key, JSON.stringify(newData));
+    };
+
+    content.querySelector('#an-enabled').addEventListener('change', save);
+    content.querySelector('#an-role').addEventListener('change', save);
+    content.querySelector('#an-depth').addEventListener('input', save);
+    content.querySelector('#an-content').addEventListener('input', save);
+
+    showBottomSheet({
+        title: translations[currentLang]['magic_authors_notes'] || "Author's Notes",
+        content: content
+    });
+}
+
 export async function openChat(char, onBack) {
     if (onBack) _currentOnBack = onBack;
     // Handle Session Switch if sessionId is provided in char object (from dialog list)
@@ -640,25 +772,68 @@ export async function openChat(char, onBack) {
     const backBtn = document.getElementById('header-back');
     const headerLogo = document.getElementById('header-logo');
 
+    const appHeader = document.querySelector('.app-header');
+    if (appHeader) appHeader.classList.add('fixed-header');
+
     // Scroll Handler for Header Hiding
-    let lastScrollTop = 0;
+    let lastScrollTop = getChatData(char.name).lastScrollPosition || 0;
+    let ticking = false;
     const messagesContainer = document.getElementById('chat-messages');
-    const onChatScroll = () => {
+    
+    const updateHeader = () => {
         const st = messagesContainer.scrollTop;
         const header = document.querySelector('.app-header');
-        if (!header) return;
+        const scrollBtn = document.getElementById('scroll-to-bottom');
+        
+        if (!header) {
+            ticking = false;
+            return;
+        }
 
         // Ignore rubber-banding/overscroll
-        if (st < 0) return;
-        if (st + messagesContainer.clientHeight > messagesContainer.scrollHeight) return;
+        if (st < 0 || st + messagesContainer.clientHeight > messagesContainer.scrollHeight) {
+            lastScrollTop = st <= 0 ? 0 : st;
+            ticking = false;
+            return;
+        }
 
-        // Добавлен порог (hysteresis) 10px, чтобы избежать дрожания
-        if (st > lastScrollTop + 10 && st > 50) {
-            header.classList.add('scroll-hidden');
-        } else if (st < lastScrollTop - 10) {
-            header.classList.remove('scroll-hidden');
+        // Fix: Don't toggle header during generation to prevent jumping
+        if (activeChatChar && generatingStates[activeChatChar.name]) {
+            lastScrollTop = st <= 0 ? 0 : st;
+            ticking = false;
+            return;
+        }
+
+        // Increased sensitivity: 10px -> 3px
+        if (st > lastScrollTop + 3 && st > 50) {
+            if (!header.classList.contains('scroll-hidden')) {
+                header.classList.add('scroll-hidden');
+            }
+        } else if (st < lastScrollTop - 3) {
+            if (header.classList.contains('scroll-hidden')) {
+                header.classList.remove('scroll-hidden');
+            }
         }
         lastScrollTop = st <= 0 ? 0 : st;
+
+        // Scroll to bottom button visibility
+        if (scrollBtn) {
+            const dist = messagesContainer.scrollHeight - st - messagesContainer.clientHeight;
+            if (dist > 300) {
+                scrollBtn.classList.add('visible');
+            } else {
+                scrollBtn.classList.remove('visible');
+            }
+        }
+
+        ticking = false;
+    };
+
+    const onChatScroll = () => {
+        if (!ticking) {
+            window.requestAnimationFrame(updateHeader);
+            ticking = true;
+        }
     };
     messagesContainer.addEventListener('scroll', onChatScroll, { passive: true });
 
@@ -709,6 +884,10 @@ export async function openChat(char, onBack) {
         headerAvatarImg.style.display = 'block';
         headerAvatarImg.src = char.avatar;
         if (headerPlaceholder) headerPlaceholder.style.display = 'none';
+        headerAvatarImg.onclick = (e) => {
+            e.stopPropagation();
+            openImageViewer(char.avatar);
+        };
     } else {
         headerAvatarImg.style.display = 'none';
         if (!headerPlaceholder) {
@@ -813,15 +992,29 @@ export async function openChat(char, onBack) {
     requestAnimationFrame(() => {
         // If it's a new session (empty or just greeting), scroll to top
         if (msgs.length <= 1) {
-            chatView.scrollTop = 0;
+            messagesContainer.scrollTop = 0;
         } else {
-            chatView.scrollTop = chatView.scrollHeight;
+            if (chatData.lastScrollPosition !== undefined) {
+                messagesContainer.scrollTop = chatData.lastScrollPosition;
+                lastScrollTop = chatData.lastScrollPosition; // Sync to prevent initial hide
+            } else {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                lastScrollTop = messagesContainer.scrollTop; // Sync
+            }
         }
     });
 
     backBtn.onclick = () => {
+        if (activeChatChar) {
+            const data = getChatData(activeChatChar.name);
+            data.lastScrollPosition = messagesContainer.scrollTop;
+            db.set('sc_chats', allChats);
+        }
         messagesContainer.removeEventListener('scroll', onChatScroll);
-        document.querySelector('.app-header').classList.remove('scroll-hidden');
+        const header = document.querySelector('.app-header');
+        if (header) {
+            header.classList.remove('scroll-hidden', 'fixed-header');
+        }
         activeChatChar = null;
         chatView.classList.remove('anim-fade-in');
         chatView.classList.add('anim-fade-out');
@@ -885,12 +1078,11 @@ export async function deleteSession(sessionIdToDelete, targetChar) {
         const remainingIds = Object.keys(data.sessions).map(Number).sort((a,b) => a-b);
         if (remainingIds.length > 0) {
             data.currentId = remainingIds[remainingIds.length - 1];
+            chats[charName] = data;
         } else {
-            data.currentId = 1;
-            data.sessions[1] = [];
+            delete chats[charName];
         }
         
-        chats[charName] = data;
         await db.set('sc_chats', chats);
         
         if (activeChatChar && activeChatChar.name === charName) {
@@ -1164,7 +1356,8 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
         const timeIcon = `<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:4px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>`;
         const showTimer = msg.genTime && msg.genTime !== '0s' && msg.genTime !== '0.0s';
         const displayStyle = showTimer ? 'display:flex;' : 'display:none;';
-        metaHtml = `<div class="gen-stat" style="${displayStyle}">${timeIcon} <span class="gen-time">${msg.genTime || '0.0s'}</span></div>`;
+        const errorStyle = msg.isError ? 'color:white;opacity:0.8;' : '';
+        metaHtml = `<div class="gen-stat" style="${displayStyle}${errorStyle}">${timeIcon} <span class="gen-time">${msg.genTime || '0.0s'}</span></div>`;
     }
 
     const nameHtml = version ? `${displayName} <sup class="item-version">${version}</sup>` : displayName;
@@ -1212,6 +1405,15 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
     
     container.appendChild(section);
     
+    const avatarImg = section.querySelector('.msg-avatar');
+    if (avatarImg && avatarImg.tagName === 'IMG') {
+        avatarImg.style.cursor = 'pointer';
+        avatarImg.onclick = (e) => {
+            e.stopPropagation();
+            openImageViewer(avatarImg.src);
+        };
+    }
+
     if (autoScroll) {
         scrollToBottom('chat-messages', section);
     }
@@ -1288,6 +1490,7 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
         let isScrolling = false;
 
         section.addEventListener('touchstart', e => {
+            if (section.classList.contains('editing')) return;
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
             
@@ -1297,6 +1500,7 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
         }, {passive: true});
         
         section.addEventListener('touchmove', e => {
+            if (section.classList.contains('editing')) return;
             if (isScrolling) return;
 
             const delta = e.touches[0].clientX - startX;
@@ -1313,7 +1517,16 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
             if (body) {
                 // Prevent dragging too far if no more swipes
                 if (delta < 0 && msg.swipeId >= msg.swipes.length - 1 && section.nextElementSibling) return;
-                if (delta > 0 && msg.swipeId <= 0 && !canSwitch) return; // Allow if canSwitch (greetings) or just block
+                
+                if (canSwitch && activeChatChar) {
+                    const greetings = getAllGreetings(activeChatChar);
+                    if (greetings.length <= 1) return;
+                }
+
+                if (delta > 0) {
+                    if (canSwitch && (msg.greetingIndex || 0) <= 0) return;
+                    if (!canSwitch && msg.swipeId <= 0) return;
+                }
                 
                 body.style.transform = `translateX(${delta}px)`;
             }
@@ -1328,8 +1541,19 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
             const delta = e.changedTouches[0].clientX - startX;
             // First message: Switch greetings only
             if (canSwitch) {
+                if (activeChatChar) {
+                    const greetings = getAllGreetings(activeChatChar);
+                    if (greetings.length <= 1) return;
+                }
+
                 if (delta < -100) changeGreeting(section, msg, 1, true);
-                else if (delta > 100) changeGreeting(section, msg, -1, true);
+                else if (delta > 100) {
+                    if ((msg.greetingIndex || 0) > 0) changeGreeting(section, msg, -1, true);
+                    else if (body) {
+                        body.style.transition = 'transform 0.3s ease';
+                        body.style.transform = '';
+                    }
+                }
                 else if (body) {
                     body.style.transition = 'transform 0.3s ease';
                     body.style.transform = '';
@@ -1449,6 +1673,10 @@ function changeSwipe(element, msg, dir, animate = true) {
 
     msg.swipeId = newIndex;
     msg.text = msg.swipes[newIndex];
+
+    const isError = msg.swipesMeta && msg.swipesMeta[newIndex] && msg.swipesMeta[newIndex].isError;
+    if (isError) element.classList.add('error');
+    else element.classList.remove('error');
 
     let textToDisplay = msg.text;
     if (activeChatChar) {
@@ -1609,7 +1837,7 @@ function openMessageActions(element, msgData) {
         });
         items.push({
             label: translations[currentLang]['action_branch'],
-            icon: '<svg viewBox="0 0 24 24"><path d="M6 14l3 3v5h6v-5l3-3V9H6v5zm2-3h8v2.17l-4 4-4-4V11zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>',
+            icon: '<svg viewBox="0 0 24 24"><path d="M17.5 4C15.57 4 14 5.57 14 7.5C14 8.55 14.46 9.49 15.2 10.15L11.2 14.15C10.46 13.46 9.55 13 8.5 13C7.57 13 6.72 13.36 6.08 13.96L6 6.5C6.55 6.23 7 5.69 7 5C7 3.9 6.1 3 5 3C3.9 3 3 3.9 3 5C3 5.69 3.45 6.23 4 6.5L4.08 16.04C3.44 16.64 3 17.43 3 18.5C3 20.43 4.57 22 6.5 22C8.43 22 10 20.43 10 18.5C10 17.55 9.54 16.71 8.8 16.05L12.8 12.05C13.54 12.74 14.45 13.2 15.5 13.2C17.43 13.2 19 11.63 19 9.7C19 7.77 17.43 6.2 15.5 6.2C15.5 6.2 15.5 6.2 15.5 6.2L17.5 4Z"/></svg>',
             onClick: () => {
                 closeBottomSheet();
                 branchSession(element);
@@ -1843,6 +2071,7 @@ function regenerateMessage(element, mode = 'normal') {
     if (index === -1) return;
 
     const isUser = element.classList.contains('user');
+    const isLast = index === allMsgs.length - 1;
     const isMagic = mode === 'magic';
 
     // If Magic Menu and last message is User -> Don't delete, just generate
@@ -1854,6 +2083,11 @@ function regenerateMessage(element, mode = 'normal') {
             startGeneration(activeChatChar, null);
         }
         return;
+    }
+
+    // Prefer New Variant for last message to avoid destroying history/block
+    if (!isUser && isLast && (mode === 'normal' || mode === 'magic')) {
+        mode = 'new_variant';
     }
 
     // New Variant Logic (Swipe at end)
