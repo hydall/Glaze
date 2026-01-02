@@ -130,5 +130,7 @@
     "magic_authors_notes": "Заметки автора",
     "label_depth": "Глубина (Depth)",
     "placeholder_depth": "0 = в конце контекста",
-    "label_enabled": "Включено"
+    "label_enabled": "Включено",
+    "date_yesterday": "Вчера",
+    "date_today": "Сегодня"
 }

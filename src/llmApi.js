@@ -3,6 +3,8 @@ import { scrollToBottom } from './ui.js';
 import { db } from './db.js';
 import { BackgroundTask } from '@capawesome/capacitor-background-task';
 
+let requestCounter = 0;
+
 export async function sendToLLM(text, activeChatChar, translations, currentLang, appendMessage, onComplete, onError, controller, onUpdate, type = 'normal') {
     let apiKey = localStorage.getItem('api-key');
     let apiUrl = localStorage.getItem('sc_api_endpoint_normalized') || localStorage.getItem('api-endpoint') || 'https://api.openai.com/v1';
@@ -236,7 +238,7 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
             const decoder = new TextDecoder("utf-8");
             let fullText = "";
             let isFirst = true;
-
+            
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -287,6 +289,12 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
             if (onComplete) onComplete(fullText, null);
 
         } else {
+            requestCounter++;
+            // TEST: Fail normal generation on even requests
+            if (requestCounter % 2 === 0) {
+                throw new Error("TEST: Normal generation forced fail");
+            }
+
             const data = await response.json();
             console.log("LLM Response:", data);
             const content = data.choices[0].message.content;

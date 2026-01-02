@@ -5,20 +5,22 @@ import { isCharacterGenerating, createNewSession, deleteSession } from './chat.j
 import { db } from './db.js';
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
+import { formatDate } from './dateFormatter.js';
 
-let _onChatOpen, _lastCategory;
+let _onChatOpen, _lastCategory, _lastSearchQuery = '';
 
 window.addEventListener('character-updated', () => {
     renderDialogs();
 });
 
 export function refreshDialogs() {
-    return renderDialogs(_lastCategory);
+    return renderDialogs(_lastCategory, _onChatOpen, _lastSearchQuery);
 }
 
-export async function renderDialogs(category = 'all', onChatOpen) {
+export async function renderDialogs(category = 'all', onChatOpen, searchQuery = '') {
     if (onChatOpen) _onChatOpen = onChatOpen;
     if (category && category !== 'all') _lastCategory = category;
+    _lastSearchQuery = searchQuery;
 
     const list = document.getElementById('dialogs-list');
     if (!list) return;
@@ -41,12 +43,13 @@ export async function renderDialogs(category = 'all', onChatOpen) {
             // Legacy format (single session)
             const msgs = charData;
             const lastMsg = msgs[msgs.length - 1];
+            const timestamp = lastMsg ? (lastMsg.timestamp || 0) : 0;
             chatList.push({
                 name: charName,
                 sessionId: 1,
                 msg: lastMsg ? lastMsg.text : (char.first_mes || ""),
-                time: lastMsg ? lastMsg.time : "",
-                timestamp: lastMsg ? (lastMsg.timestamp || 0) : 0,
+                time: timestamp ? formatDate(timestamp, 'short') : (lastMsg ? lastMsg.time : ""),
+                timestamp: timestamp,
                 avatar: char.avatar,
                 color: char.color,
                 category: char.category,
@@ -59,12 +62,13 @@ export async function renderDialogs(category = 'all', onChatOpen) {
                 const sessionId = parseInt(sid);
                 const msgs = charData.sessions[sid];
                 const lastMsg = msgs[msgs.length - 1];
+                const timestamp = lastMsg ? (lastMsg.timestamp || 0) : 0;
                 chatList.push({
                     name: charName,
                     sessionId: sessionId,
                     msg: lastMsg ? lastMsg.text : (char.first_mes || ""),
-                    time: lastMsg ? lastMsg.time : "",
-                    timestamp: lastMsg ? (lastMsg.timestamp || 0) : 0,
+                    time: timestamp ? formatDate(timestamp, 'short') : (lastMsg ? lastMsg.time : ""),
+                    timestamp: timestamp,
                     avatar: char.avatar,
                     color: char.color,
                     category: char.category,
@@ -82,6 +86,9 @@ export async function renderDialogs(category = 'all', onChatOpen) {
 
     chatList.forEach(chat => {
         if (cat !== 'all' && chat.category !== cat) return;
+        if (searchQuery && !chat.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+            return;
+        }
 
         const el = document.createElement('div');
         el.className = 'list-item';

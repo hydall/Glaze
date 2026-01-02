@@ -162,7 +162,7 @@ function openCharOptionsSheet() {
     });
 }
 
-export function renderList(category = 'all') {
+export function renderList(category = 'all', searchQuery = '') {
     const list = document.getElementById('characters-list');
     const favList = document.getElementById('favorites-list');
     
@@ -224,19 +224,23 @@ export function renderList(category = 'all') {
             }
             return timeB - timeA;
         });
-        renderSortedList(sortedChars, list, category);
+        renderSortedList(sortedChars, list, category, searchQuery);
     });
 
     // Initial render (unsorted or previously sorted) to avoid blank screen
     if (list.children.length === 0) {
-        renderSortedList(characters, list, category);
+        renderSortedList(characters, list, category, searchQuery);
     }
 }
 
-function renderSortedList(sortedChars, list, category) {
+function renderSortedList(sortedChars, list, category, searchQuery) {
     const fabAdd = document.getElementById('fab-add-character');
     list.innerHTML = ''; // Clear current
     sortedChars.forEach((char) => {
+        if (searchQuery && !char.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+            return;
+        }
+
         const index = characters.indexOf(char); // Get original index for editing
         if (category !== 'all' && char.category !== category) return;
 

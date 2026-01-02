@@ -1,4 +1,6 @@
-export function openImageViewer(src) {
+import { setupImageViewerHeader } from './header.js';
+
+export function openImageViewer(src, onCloseCallback) {
     let overlay = document.getElementById('image-viewer-overlay');
     let img;
 
@@ -7,9 +9,6 @@ export function openImageViewer(src) {
         overlay.id = 'image-viewer-overlay';
         overlay.className = 'image-viewer-overlay';
         overlay.innerHTML = `
-            <div class="image-viewer-close">
-                <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-            </div>
             <div class="image-viewer-container" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;">
                 <img class="image-viewer-img" src="" alt="Full view" style="transform-origin: center; transition: transform 0.1s ease-out;">
             </div>
@@ -51,16 +50,17 @@ export function openImageViewer(src) {
             setTimeout(() => { 
                 overlay.style.display = 'none'; 
                 resetZoom();
+                if (onCloseCallback) onCloseCallback();
             }, 300);
         };
         
-        overlay.querySelector('.image-viewer-close').onclick = close;
+        // Setup Header for Viewer
+        setupImageViewerHeader(close);
         
         // Close on background click (if not interacting)
         let isInteracting = false;
         overlay.addEventListener('click', (e) => {
             if (isInteracting) { isInteracting = false; return; }
-            if (e.target.closest('.image-viewer-close')) return;
             if (scale > 1.1) return; // Don't close if zoomed in
             close();
         });

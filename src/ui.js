@@ -5,6 +5,8 @@ import { App } from '@capacitor/app';
 import { Toast } from '@capacitor/toast';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { NavigationBar } from '@hugotomazi/capacitor-navigation-bar';
 
 export function attachLongPress(element, callback) {
     let timer;
@@ -224,9 +226,15 @@ export function closeBottomSheet() {
 }
 
 export function initRipple() {
-    const tabbar = document.querySelector('.tabbar');
-    if (tabbar) {
-        tabbar.addEventListener('click', function(e) {
+    const elements = document.querySelectorAll('.tabbar, .chat-input-bar');
+    elements.forEach(el => {
+        el.addEventListener('pointerdown', function(e) {
+            // Remove existing ripples to prevent buildup
+            const existing = this.getElementsByClassName('ripple');
+            while(existing.length > 0) {
+                existing[0].remove();
+            }
+
             const circle = document.createElement('span');
             const diameter = Math.max(this.clientWidth, this.clientHeight);
             const radius = diameter / 2;
@@ -238,35 +246,76 @@ export function initRipple() {
             circle.style.top = `${e.clientY - rect.top - radius}px`;
             circle.classList.add('ripple');
             
-            const ripple = this.getElementsByClassName('ripple')[0];
-            if (ripple) {
-                ripple.remove();
-            }
+            circle.addEventListener('animationend', () => {
+                circle.remove();
+            });
             
             this.appendChild(circle);
         });
+    });
+}
+
+export function rgbToHex(rgb) {
+    if (!rgb || rgb.startsWith('#')) return rgb || '#ffffff';
+    const start = rgb.indexOf('(') + 1;
+    const end = rgb.indexOf(')');
+    const rgbVals = rgb.substring(start, end).split(',').map(x => x.trim());
+    
+    let r = (+rgbVals[0]).toString(16),
+        g = (+rgbVals[1]).toString(16),
+        b = (+rgbVals[2]).toString(16);
+    if (r.length == 1) r = "0" + r;
+    if (g.length == 1) g = "0" + g;
+    if (b.length == 1) b = "0" + b;
+    return "#" + r + g + b;
+}
+
+export async function updateAppColors(forceMainView = false) {
+    const isDark = document.body.classList.contains('dark-theme');
+    const chatView = document.getElementById('view-chat');
+    const isChatOpen = chatView && chatView.classList.contains('active-view') && !forceMainView;
+    
+    // Hardcoded palette to match CSS variables and avoid transition lag
+    const palette = {
+        light: {
+            statusBar: '#ffffff', // --vk-header-bg
+            navBarMain: '#f9f9f9', // tabbar bg
+            navBarChat: '#ebedf0', // chat input bg
+            body: '#ffffff'
+        },
+        dark: {
+            statusBar: '#19191a', // --vk-header-bg
+            navBarMain: '#19191a', // tabbar bg
+            navBarChat: '#252526', // chat input bg
+            body: '#19191a'
+        }
+    };
+
+    const theme = isDark ? palette.dark : palette.light;
+    
+    const statusBarColor = theme.statusBar;
+    const navBarColor = isChatOpen ? theme.navBarChat : theme.navBarMain;
+
+    // Apply to body to prevent flashes
+    document.body.style.backgroundColor = theme.body;
+
+    let meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta) {
+        meta = document.createElement('meta');
+        meta.name = "theme-color";
+        document.head.appendChild(meta);
     }
+    meta.setAttribute('content', statusBarColor);
+
+    try {
+        await StatusBar.setBackgroundColor({ color: statusBarColor });
+        await StatusBar.setStyle({ style: isDark ? Style.Dark : Style.Light });
+        await NavigationBar.setColor({ color: navBarColor, darkButtons: !isDark });
+    } catch (e) { console.warn('StatusBar/NavBar error', e); }
 }
 
 export function initThemeToggle() {
     const themeToggle = document.getElementById('theme-toggle');
-
-    const updateStatusBar = () => {
-        const isDark = document.body.classList.contains('dark-theme');
-        const color = isDark ? '#252526' : '#ffffff';
-        
-        // Fix: Set body background to match theme (prevents white flash on keyboard open)
-        document.body.style.backgroundColor = color;
-
-        let meta = document.querySelector('meta[name="theme-color"]');
-        if (!meta) {
-            meta = document.createElement('meta');
-            meta.name = "theme-color";
-            document.head.appendChild(meta);
-        }
-        meta.setAttribute('content', color);
-    };
-
     // Fix: Inject global styles for text selection and UI tweaks
     if (!document.getElementById('ui-fixes-styles')) {
         const style = document.createElement('style');
@@ -283,12 +332,12 @@ export function initThemeToggle() {
     if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
         document.body.classList.add('dark-theme');
     }
-    updateStatusBar();
+    updateAppColors();
 
     if (themeToggle) {
         themeToggle.addEventListener('click', () => {
             document.body.classList.toggle('dark-theme');
-            updateStatusBar();
+            updateAppColors();
         });
     }
 }
@@ -446,6 +495,14 @@ export function initBackButton() {
         const openSheet = document.querySelector('.modal-overlay.visible');
         if (openSheet) {
             closeBottomSheet();
+            return;
+        }
+
+        // Check Image Viewer
+        const imageViewer = document.getElementById('image-viewer-overlay');
+        if (imageViewer && imageViewer.classList.contains('visible')) {
+            const closeBtn = document.getElementById('header-btn-close-viewer');
+            if (closeBtn) closeBtn.click();
             return;
         }
 

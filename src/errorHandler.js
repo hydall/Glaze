@@ -45,6 +45,9 @@ export function initGlobalErrorHandling() {
             close: '#5181B8'
         };
 
+        // Ensure body is visible if error occurs during loading
+        document.body.classList.remove('preload');
+
         let overlay = document.getElementById('app-error-overlay');
         if (!overlay) {
             overlay = document.createElement('div');

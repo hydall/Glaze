@@ -14,7 +14,7 @@
             <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
         </div>
         <div id="header-logo" class="header-logo">
-            <svg viewBox="0 0 24 24"><path d="M20 8H4c-1.1 0-2 .9-2 2v8h2v2h2v-2h12v2h2v-2h2v-8c0-1.1-.9-2-2-2zm-2 8h-2v-6h2v6zm-4 0h-2v-6h2v6zm-4 0H8v-6h2v6z"/></svg>
+            <span style="color: var(--vk-blue); font-weight: 800; font-size: 22px;">SC</span>
         </div>
         <div class="header-content" id="header-content-default">
             <span id="header-title" data-i18n="header_dialogs">Сообщения</span>
@@ -45,7 +45,7 @@
         <!-- VIEW 1: DIALOGS -->
         <div id="view-dialogs" class="view active-view">
             <div class="search-bar">
-                <input type="text" placeholder="Поиск" data-i18n-placeholder="search_dialogs">
+                <input type="text" id="search-dialogs" placeholder="Поиск" data-i18n-placeholder="search_dialogs">
             </div>
             <div class="list-container" id="dialogs-list">
                 <!-- JS will populate this -->
@@ -56,7 +56,7 @@
         <!-- VIEW 2: CHARACTERS -->
         <div id="view-characters" class="view">
             <div class="search-bar">
-                <input type="text" placeholder="Поиск персонажей" data-i18n-placeholder="search_characters">
+                <input type="text" id="search-characters" placeholder="Поиск персонажей" data-i18n-placeholder="search_characters">
             </div>
             <div class="favorites-row" id="favorites-list">
                 <!-- JS will populate this -->
@@ -249,7 +249,7 @@
             </div>
             
             <div class="chat-input-bar">
-                <textarea id="chat-input" rows="1" placeholder="Сообщение..." data-i18n-placeholder="chat_placeholder"></textarea>
+                <textarea id="chat-input" rows="1" placeholder="Сообщение..." data-i18n-placeholder="chat_placeholder" type="text"></textarea>
                 <div class="chat-input-buttons">
                     <div class="chat-btn" id="btn-magic">
                         <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>

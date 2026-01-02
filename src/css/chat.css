@@ -48,6 +48,10 @@
     color: white;
 }
 
+.message-section.error .msg-body {
+    color: white;
+}
+
 .message-section.error .msg-content {
     font-family: monospace;
     white-space: pre-wrap;
@@ -57,6 +61,16 @@
 .message-section.error .msg-name,
 .message-section.error .msg-footer {
     color: rgba(255, 255, 255, 0.8);
+}
+
+.message-section.error .msg-time {
+    color: white;
+    opacity: 0.8;
+}
+
+.message-section.error .msg-actions-btn svg {
+    fill: white;
+    opacity: 1;
 }
 
 .msg-header {
@@ -119,6 +133,14 @@
     width: 28px;
     height: 28px;
     margin-right: 4px;
+}
+
+.msg-actions-btn svg {
+    width: 22px;
+    height: 22px;
+    fill: currentColor;
+    opacity: 0.6;
+    transition: fill 0.2s, opacity 0.2s;
 }
 
 .gen-stat {
@@ -742,13 +764,12 @@ body.dark-theme .edit-btn:hover {
 }
 .app-header.fixed-header {
     position: fixed;
-    top: 0;
     left: 0;
     width: 100%;
     z-index: 1000;
 }
 .app-header.scroll-hidden {
-    transform: translateY(-120%) translateZ(0);
+    transform: translateY(-200%) translateZ(0);
     margin-top: 0 !important;
 }
 

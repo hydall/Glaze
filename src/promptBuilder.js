@@ -2,6 +2,7 @@ import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from './ui.js';
 import { db } from './db.js';
+import { setupEditorHeader } from './header.js';
 
 let internalRender = null;
 
@@ -548,9 +549,6 @@ export async function initPromptEditor() {
     const contentInput = document.getElementById('edit-block-content');
     let currentEditIndex = -1;
     const btnDeleteBlock = document.getElementById('btn-delete-block');    const headerTitle = document.getElementById('header-title');
-    const headerBack = document.getElementById('header-back');
-    const headerLogo = document.getElementById('header-logo');
-    const headerArrow = document.getElementById('header-arrow');
 
     function openEditModal(index) {
         currentEditIndex = index;
@@ -569,14 +567,7 @@ export async function initPromptEditor() {
         editBlockView.classList.add('active-view', 'anim-fade-in');
         document.querySelector('.tabbar').style.display = 'none';
         
-        // Update Header
-        if (headerTitle) headerTitle.textContent = translations[currentLang]['header_prompt_edit'];
-        if (headerLogo) headerLogo.style.display = 'none';
-        if (headerArrow) headerArrow.style.display = 'none';
-        if (headerBack) {
-            headerBack.style.display = 'flex';
-            headerBack.onclick = closeEditBlockView;
-        }
+        setupEditorHeader(translations[currentLang]['header_prompt_edit'], closeEditBlockView);
     }
 
     function closeEditBlockView() {
@@ -594,11 +585,9 @@ export async function initPromptEditor() {
 
         document.querySelector('.tabbar').style.display = 'flex';
         
-        // Restore Header
-        if (headerTitle) headerTitle.textContent = translations[currentLang]['header_generation'];
-        if (headerLogo) headerLogo.style.display = 'flex';
-        if (headerBack) headerBack.style.display = 'none';
-        // headerArrow is hidden for generation view by default in script.js logic
+        // Restore Header via active tab
+        const activeTab = document.querySelector('.tab-btn.active');
+        if (activeTab) activeTab.click();
     }
 
     // Auto-save Logic

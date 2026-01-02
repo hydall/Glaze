@@ -1,8 +1,13 @@
+export function cleanText(text) {
+    if (!text) return "";
+    return text.replace(/^[\r\n]+|[\r\n]+$/g, '');
+}
+
 export function formatText(text) {
     if (!text) return "";
     
     // Remove leading/trailing line breaks
-    text = text.replace(/^[\r\n]+|[\r\n]+$/g, '');
+    text = cleanText(text);
 
     // 1. Allow HTML (No escaping)
     let html = text;

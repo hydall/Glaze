@@ -18,7 +18,9 @@
     "@capacitor/core": "^8.0.0",
     "@capacitor/haptics": "^8.0.0",
     "@capacitor/keyboard": "^8.0.0",
+    "@capacitor/status-bar": "^8.0.0",
     "@capacitor/toast": "^8.0.0",
-    "@capawesome/capacitor-background-task": "^8.0.0"
+    "@capawesome/capacitor-background-task": "^8.0.0",
+    "@hugotomazi/capacitor-navigation-bar": "^4.0.1"
   }
 }

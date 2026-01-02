@@ -1,6 +1,7 @@
 /* Header */
 .app-header {
-    height: 56px;
+    min-height: 56px;
+    height: auto;
     background-color: var(--vk-header-bg);
     display: flex;
     align-items: center;
@@ -17,9 +18,25 @@
     border-bottom: none;
 }
 
+.app-header.header-transparent {
+    background-color: transparent;
+    box-shadow: none;
+    border-bottom: none;
+}
+
+.app-header.header-wrap {
+    flex-wrap: wrap;
+    height: auto;
+}
+
+.app-header.header-overlay {
+    z-index: 10002;
+}
+
 .header-btn-left {
     position: absolute;
     left: 10px;
+    top: 13px;
     width: 30px;
     height: 30px;
     display: flex;
@@ -33,6 +50,7 @@
 .header-logo {
     position: absolute;
     left: 12px;
+    top: 12px;
     width: 32px;
     height: 32px;
     display: flex;
@@ -45,6 +63,7 @@
 .header-btn-right {
     position: absolute;
     right: 10px;
+    top: 13px;
     width: 30px;
     height: 30px;
     display: flex;

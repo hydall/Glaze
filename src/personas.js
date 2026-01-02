@@ -2,6 +2,7 @@ import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from './ui.js';
 import { db } from './db.js';
+import { setupEditorHeader } from './header.js';
 
 export async function initPersonas() {
     const personaCard = document.getElementById('persona-card');
@@ -116,13 +117,6 @@ export async function initPersonas() {
     const editAvatar = document.getElementById('edit-persona-avatar');
     const avatarUpload = document.getElementById('persona-avatar-upload');
     
-    // Header Elements
-    const headerTitle = document.getElementById('header-title');
-    const headerBack = document.getElementById('header-back');
-    const headerLogo = document.getElementById('header-logo');
-    const headerArrow = document.getElementById('header-arrow');
-    const headerContent = document.getElementById('header-content-default');
-
     // Create Delete Button if not exists
     let deleteBtn = document.getElementById('header-btn-delete-persona');
     if (!deleteBtn) {
@@ -161,16 +155,6 @@ export async function initPersonas() {
         editView.classList.add('active-view', 'anim-fade-in');
         document.querySelector('.tabbar').style.display = 'none';
 
-        // Header Setup
-        if (headerLogo) headerLogo.style.display = 'none';
-        if (headerArrow) headerArrow.style.display = 'none';
-        headerBack.style.display = 'flex';
-        headerTitle.textContent = translations[currentLang]['sheet_title_personas'];
-        
-        // Fix alignment
-        if (headerContent) headerContent.style.justifyContent = 'center';
-        if (headerContent) headerContent.style.display = 'flex';
-
         // Buttons Logic
         if (isNew) {
             btnSave.style.display = 'flex';
@@ -181,43 +165,41 @@ export async function initPersonas() {
             btnCancel.style.display = 'none';
         }
 
-        // Delete Button Logic
-        if (deleteBtn) {
-            deleteBtn.style.display = isNew ? 'none' : 'flex';
-            const newBtn = deleteBtn.cloneNode(true);
-            deleteBtn.parentNode.replaceChild(newBtn, deleteBtn);
-            deleteBtn = newBtn;
-            
-            deleteBtn.addEventListener('click', () => {
-                showBottomSheet({
-                    title: translations[currentLang]['confirm_delete_title'],
-                    items: [
-                        {
-                            label: translations[currentLang]['btn_yes'],
-                            icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-                            iconColor: '#ff4444',
-                            isDestructive: true,
-                            onClick: () => {
-                                personas.splice(editingIndex, 1);
-                                if (personas.length === 0) personas.push({ name: "Traveler", prompt: "A curious adventurer" });
-                                if (activeIndex >= personas.length) activeIndex = 0;
-                                savePersonas();
-                                updateActive();
-                                closeBottomSheet();
-                                closeEditor();
+        const actions = [];
+        if (!isNew) {
+            actions.push({
+                id: 'header-btn-delete-persona',
+                onClick: () => {
+                    showBottomSheet({
+                        title: translations[currentLang]['confirm_delete_title'],
+                        items: [
+                            {
+                                label: translations[currentLang]['btn_yes'],
+                                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                                iconColor: '#ff4444',
+                                isDestructive: true,
+                                onClick: () => {
+                                    personas.splice(editingIndex, 1);
+                                    if (personas.length === 0) personas.push({ name: "Traveler", prompt: "A curious adventurer" });
+                                    if (activeIndex >= personas.length) activeIndex = 0;
+                                    savePersonas();
+                                    updateActive();
+                                    closeBottomSheet();
+                                    closeEditor();
+                                }
+                            },
+                            {
+                                label: translations[currentLang]['btn_no'],
+                                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+                                onClick: () => closeBottomSheet()
                             }
-                        },
-                        {
-                            label: translations[currentLang]['btn_no'],
-                            icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-                            onClick: () => closeBottomSheet()
-                        }
-                    ]
-                });
+                        ]
+                    });
+                }
             });
         }
 
-        headerBack.onclick = closeEditor;
+        setupEditorHeader(translations[currentLang]['sheet_title_personas'], closeEditor, actions);
     }
 
     function updateEditAvatar(name, avatar) {
@@ -293,16 +275,9 @@ export async function initPersonas() {
 
         document.querySelector('.tabbar').style.display = 'flex';
 
-        // Restore Header
-        if (headerLogo) headerLogo.style.display = 'flex';
-        headerBack.style.display = 'none';
-        if (headerArrow) headerArrow.style.display = 'none';
-        headerTitle.textContent = translations[currentLang]['header_more'];
-        
-        // Restore alignment
-        if (headerContent) headerContent.style.justifyContent = '';
-        
-        if (deleteBtn) deleteBtn.style.display = 'none';
+        // Restore Header by clicking active tab
+        const activeTab = document.querySelector('.tab-btn.active');
+        if (activeTab) activeTab.click();
     }
 
     updateActive();

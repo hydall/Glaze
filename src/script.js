@@ -8,6 +8,7 @@ import { renderDialogs } from './dialogList.js';
 import { initGenericBottomSheet, initRipple, initThemeToggle, initLanguageToggle, initHeaderDropdown, initBackButton, initViewportFix, initKeyboardFix } from './ui.js';
 import { initPromptEditor } from './promptBuilder.js';
 import { initPersonas } from './personas.js';
+import { setupDefaultHeader, setupGenerationHeader, setupMoreHeader } from './header.js';
 
 let activeCategories = {
     'view-dialogs': 'all',
@@ -32,13 +33,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Navigation Logic
     const tabs = document.querySelectorAll('.tab-btn');
     const views = document.querySelectorAll('.view');
-    const headerTitle = document.getElementById('header-title');
-    const backBtn = document.getElementById('header-back');
-    const headerDefault = document.getElementById('header-content-default');
-    const headerChatInfo = document.getElementById('header-chat-info');
-    const headerActions = document.getElementById('header-actions');
-    
-    // Переменная для хранения текущей анимации, чтобы можно было отменить очистку при быстром клике
     let pendingAnimation = null;
 
     // Dropdown Categories Configuration
@@ -54,6 +48,38 @@ document.addEventListener('DOMContentLoaded', async () => {
             { id: 'games', i18n: 'cat_games' }
         ]
     };
+
+    function updateHeaderForView(targetId) {
+        const activeTab = document.querySelector(`.tab-btn[data-target="${targetId}"]`);
+        const titleKey = activeTab ? activeTab.getAttribute('data-i18n-title') : '';
+        const title = titleKey ? translations[currentLang][titleKey] : '';
+
+        if (targetId === 'view-generation') {
+            const subTabsContainer = document.querySelector('.sub-tab-bar'); // Assuming this class exists or we find parent
+            const subTabsBtn = document.querySelector('.sub-tab-btn');
+            setupGenerationHeader(title, subTabsBtn ? subTabsBtn.parentNode : null);
+        } else if (targetId === 'view-menu') {
+            const personaCard = document.getElementById('persona-card');
+            setupMoreHeader(title, personaCard);
+        } else if (targetId === 'view-dialogs' || targetId === 'view-characters') {
+            setupDefaultHeader(title, !!categories[targetId]);
+            const appHeader = document.querySelector('.app-header');
+            if (appHeader) appHeader.classList.add('no-border');
+        } else {
+            setupDefaultHeader(title, !!categories[targetId]);
+        }
+    }
+
+    function openChatWrapper(char) {
+        const previousView = document.querySelector('.view.active-view');
+        Chat.openChat(char, () => {
+            if (previousView) {
+                previousView.classList.add('active-view', 'anim-fade-in');
+                updateHeaderForView(previousView.id); // Restore header state (title, border, etc.)
+            }
+            renderDialogs(activeCategories['view-dialogs'], openChatWrapper);
+        });
+    }
 
     tabs.forEach((tab) => {
         tab.addEventListener('click', () => {
@@ -82,29 +108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             tabs.forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             
-            // Update Header Title with translation
-            const titleKey = tab.getAttribute('data-i18n-title');
-            headerTitle.classList.add('fade-out');
-            setTimeout(() => {
-                headerTitle.textContent = translations[currentLang][titleKey];
-                headerTitle.classList.remove('fade-out');
-            }, 150);
-
-            // Toggle Header Border for Generation View
-            const appHeader = document.querySelector('.app-header');
-            if (targetId === 'view-generation' || targetId === 'view-menu') {
-                appHeader.classList.add('no-border');
-            } else {
-                appHeader.classList.remove('no-border');
-            }
-
-            // Update Arrow Visibility
-            const arrow = document.getElementById('header-arrow');
-            if (categories[targetId]) {
-                arrow.style.display = 'block';
-            } else {
-                arrow.style.display = 'none';
-            }
+            updateHeaderForView(targetId);
 
             // Запуск новой анимации
             newView.classList.add('active-view');
@@ -182,17 +186,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     // initActionSheets(); // No longer needed as sheets are dynamic
     updateLanguage(); // Initial translation
 
+    updateHeaderForView('view-dialogs');
+
+    // Search Listeners
+    const searchDialogs = document.getElementById('search-dialogs');
+    if (searchDialogs) {
+        searchDialogs.addEventListener('input', (e) => {
+            renderDialogs(activeCategories['view-dialogs'], openChatWrapper, e.target.value);
+        });
+    }
+
+    const searchChars = document.getElementById('search-characters');
+    if (searchChars) {
+        searchChars.addEventListener('input', (e) => {
+            CharList.renderList(activeCategories['view-characters'], e.target.value);
+        });
+    }
+
     // Remove preload class to enable transitions
     setTimeout(() => {
         document.body.classList.remove('preload');
         document.body.classList.add('app-loaded');
     }, 100);
 });
-
-function openChatWrapper(char) {
-    const previousView = document.querySelector('.view.active-view');
-    Chat.openChat(char, () => {
-        if (previousView) previousView.classList.add('active-view', 'anim-fade-in');
-        renderDialogs(activeCategories['view-dialogs'], openChatWrapper);
-    });
-}

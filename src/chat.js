@@ -1,13 +1,17 @@
-import { translations } from './i18n.js';
+import { formatText, replaceMacros, cleanText } from './textFormatter.js';
+import { formatDate } from './dateFormatter.js';
 import { currentLang } from './APPSettings.js';
+import { translations } from './i18n.js';
 import { sendToLLM } from './llmApi.js';
-import { attachLongPress, showBottomSheet, closeBottomSheet, scrollToBottom, animateTextChange } from './ui.js';
+import { attachLongPress, showBottomSheet, closeBottomSheet, scrollToBottom, animateTextChange, updateAppColors, rgbToHex } from './ui.js';
 import { openImageViewer } from './imageViewer.js';
-import { formatText, replaceMacros } from './textFormatter.js';
 import { renderDialogs, refreshDialogs } from './dialogList.js';
 import { openCharacterEditor } from './editor.js';
 import { db } from './db.js';
 import { characters } from './characterList.js';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { NavigationBar } from '@hugotomazi/capacitor-navigation-bar';
+import { setupChatHeader, updateHeaderAvatar, resetHeader, initHeaderScroll, setupImageViewerHeader } from './header.js';
 
 let activeChatChar = null;
 let _currentOnBack = null;
@@ -103,7 +107,7 @@ export function initChat() {
     const chatInput = document.getElementById('chat-input');
     if (chatInput) {
         // Fix for Android Keyboard: ensure text input mode (prevents number row stuck)
-        chatInput.setAttribute('inputmode', 'text');
+        // chatInput.setAttribute('inputmode', 'text');
 
         chatInput.addEventListener('input', function() {
             this.style.height = 'auto';
@@ -133,9 +137,9 @@ export function initChat() {
     if (btnMagicRegen) btnMagicRegen.addEventListener('click', (e) => {
         e.stopPropagation();
         
-        // Cancel any active editing
+        // Prevent regeneration if editing
         const editingEl = document.querySelector('.message-section.editing');
-        if (editingEl) cancelEdit(editingEl);
+        if (editingEl) return;
 
         if (activeChatChar && generatingStates[activeChatChar.name]) return;
 
@@ -249,24 +253,7 @@ window.addEventListener('character-updated', (e) => {
     // Check if it's the same character object reference
     if (activeChatChar === updatedChar) {
         // Update Header Avatar
-        const headerAvatarImg = document.getElementById('chat-header-avatar');
-        const headerPlaceholder = document.getElementById('chat-header-avatar-placeholder');
-        
-        if (activeChatChar.avatar) {
-            if (headerAvatarImg) {
-                headerAvatarImg.src = activeChatChar.avatar;
-                headerAvatarImg.style.display = 'block';
-            }
-            if (headerPlaceholder) headerPlaceholder.style.display = 'none';
-        } else {
-            if (headerAvatarImg) headerAvatarImg.style.display = 'none';
-            if (headerPlaceholder) {
-                headerPlaceholder.style.display = 'flex';
-                headerPlaceholder.style.backgroundColor = activeChatChar.color || '#ccc';
-                headerPlaceholder.textContent = (activeChatChar.name[0] || "?").toUpperCase();
-            }
-        }
-        
+        updateHeaderAvatar(activeChatChar);
         // Update Message Avatars in the current chat view
         const charMsgs = document.querySelectorAll('.message-section.char .msg-header');
         charMsgs.forEach(header => {
@@ -310,7 +297,7 @@ function handleGenerationError(charName, error) {
                 role: 'char',
                 text: `Error: ${error.message}`,
                 time: time, 
-                style: 'color: white;',
+                timestamp: Date.now(),
                 isError: true
             };
             appendMessage(msg, activeChatChar.avatar, activeChatChar.name, null, false);
@@ -324,6 +311,7 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
     const genId = ++genIdCounter;
     const controller = new AbortController();
     const startTime = Date.now();
+    let rawStreamText = text || "";
     
     let timerInterval = null;
     const startTimer = (el) => {
@@ -384,7 +372,7 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
         startTimer(streamingMsgElement);
     }
 
-    const restoreState = () => {
+    const restoreState = (isError = false) => {
         if (timerInterval) clearInterval(timerInterval);
         if (existingElement) existingElement.classList.remove('generating-swipe');
         // Show actions
@@ -423,25 +411,50 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
             }
         }
 
-        if (onAbort) onAbort();
+        if (onAbort) onAbort(isError);
     };
 
     generatingStates[char.name] = { genId, controller, restoreState };
 
     const onError = (e) => {
-        restoreState();
+        restoreState(true);
         delete generatingStates[char.name];
         
         if (existingElement) {
             const errorText = `Error: ${e.message}`;
             const body = existingElement.querySelector('.msg-body');
-            if (body) {
-                body.innerHTML = formatText(errorText);
-            }
-            if (existingElement._msgData) {
-                addSwipe(existingElement, existingElement._msgData, errorText, { genTime: '0.0s', isError: true });
+            
+            if (rawStreamText && rawStreamText.length > 0) {
+                const typing = body ? body.querySelector('.typing-container') : null;
+                if (typing) typing.remove();
+
+                const errorHtml = `<div class="msg-error-footer" style="border-top: 1px solid var(--separator-color); margin-top: 8px; padding-top: 8px; color: #ff6b6b;">${errorText}</div>`;
+                const fullText = rawStreamText + errorHtml;
+                
+                if (body) body.innerHTML = formatText(fullText);
+                
+                if (existingElement._msgData) {
+                    existingElement._msgData.text = fullText;
+                    if (existingElement._msgData.swipes) {
+                        existingElement._msgData.swipes[existingElement._msgData.swipeId] = fullText;
+                    }
+                    existingElement._msgData.isError = true;
+                    
+                    const container = document.getElementById('chat-messages');
+                    const allMsgs = Array.from(container.querySelectorAll('.message-section'));
+                    const index = allMsgs.indexOf(existingElement);
+                    if (index !== -1) {
+                        updateSessionMessage(char, index, existingElement._msgData);
+                    }
+                }
+            } else {
+                if (body) body.innerHTML = formatText(errorText);
+                if (existingElement._msgData) {
+                    addSwipe(existingElement, existingElement._msgData, errorText, { genTime: '0.0s', isError: true });
+                }
             }
             existingElement.classList.add('error');
+            
             if (activeChatChar && activeChatChar.name === char.name) {
                 updateSendButton(false);
             }
@@ -460,7 +473,6 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
         const tagStart = activePreset?.reasoningStart || localStorage.getItem('sc_api_reasoning_start');
         const tagEnd = activePreset?.reasoningEnd || localStorage.getItem('sc_api_reasoning_end');
 
-        let rawStreamText = text || ""; // Accumulator for raw stream
         let fullText = text || ""; // Clean text for typewriter
         let fullReasoning = "";
         let displayedText = "";
@@ -536,6 +548,9 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
             if (existingElement) existingElement.classList.remove('generating-swipe');
 
             const now = new Date();
+            
+            response = cleanText(response);
+            
             const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
             const duration = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
             
@@ -596,6 +611,12 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
                     if (existingElement && streamingMsgElement._msgData) {
                         const mData = streamingMsgElement._msgData;
                         addSwipe(streamingMsgElement, mData, msg.text, { genTime: duration });
+                        
+                        // Clear error state if we recovered
+                        if (mData.isError) {
+                            mData.isError = false;
+                            streamingMsgElement.classList.remove('error');
+                        }
                     } else {
                         // New message - update the single swipe (fix for "empty first variant" issue)
                         if (streamingMsgElement._msgData) {
@@ -605,6 +626,12 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
                             streamingMsgElement._msgData.reasoning = msg.reasoning;
                             streamingMsgElement._msgData.swipesMeta = [{ genTime: duration }];
                             streamingMsgElement._msgData.genTime = duration;
+                            
+                            // Clear error state
+                            if (streamingMsgElement._msgData.isError) {
+                                streamingMsgElement._msgData.isError = false;
+                                streamingMsgElement.classList.remove('error');
+                            }
                         }
                         saveMessageToSession(char.name, msg);
                     }
@@ -635,11 +662,11 @@ function startGeneration(char, text, existingElement = null, onAbort = null) {
     });
 }
 
-function startImpersonation() {
+async function startImpersonation() {
     if (!activeChatChar) return;
     
     const activePresetId = localStorage.getItem('sc_active_preset_id');
-    const presets = JSON.parse(localStorage.getItem('sc_prompt_presets') || '[]');
+    const presets = (await db.get('sc_prompt_presets')) || [];
     const preset = presets.find(p => p.id === activePresetId) || presets[0];
     const promptText = preset ? (preset.impersonationPrompt || "") : "";
 
@@ -666,6 +693,7 @@ function startImpersonation() {
     };
 
     const onComplete = (response) => {
+        response = cleanText(response);
         delete generatingStates[activeChatChar.name];
         updateSendButton(false);
         if (statusEl) statusEl.style.display = 'none';
@@ -682,6 +710,7 @@ function startImpersonation() {
         updateSendButton(false);
         if (statusEl) statusEl.style.display = 'none';
         console.error("Impersonation error:", err);
+        alert("Impersonation failed: " + err.message);
     };
 
     // We pass the prompt as 'text' to sendToLLM.
@@ -765,81 +794,10 @@ export async function openChat(char, onBack) {
     activeChatChar = char;
     const chatView = document.getElementById('view-chat');
     const currentView = document.querySelector('.view.active-view');
-    const tabbar = document.querySelector('.tabbar');
-    const headerDefault = document.getElementById('header-content-default');
-    const headerChatInfo = document.getElementById('header-chat-info');
-    const headerActions = document.getElementById('header-actions');
-    const backBtn = document.getElementById('header-back');
-    const headerLogo = document.getElementById('header-logo');
-
-    const appHeader = document.querySelector('.app-header');
-    if (appHeader) appHeader.classList.add('fixed-header');
-
-    // Scroll Handler for Header Hiding
-    let lastScrollTop = getChatData(char.name).lastScrollPosition || 0;
-    let ticking = false;
     const messagesContainer = document.getElementById('chat-messages');
     
-    const updateHeader = () => {
-        const st = messagesContainer.scrollTop;
-        const header = document.querySelector('.app-header');
-        const scrollBtn = document.getElementById('scroll-to-bottom');
-        
-        if (!header) {
-            ticking = false;
-            return;
-        }
-
-        // Ignore rubber-banding/overscroll
-        if (st < 0 || st + messagesContainer.clientHeight > messagesContainer.scrollHeight) {
-            lastScrollTop = st <= 0 ? 0 : st;
-            ticking = false;
-            return;
-        }
-
-        // Fix: Don't toggle header during generation to prevent jumping
-        if (activeChatChar && generatingStates[activeChatChar.name]) {
-            lastScrollTop = st <= 0 ? 0 : st;
-            ticking = false;
-            return;
-        }
-
-        // Increased sensitivity: 10px -> 3px
-        if (st > lastScrollTop + 3 && st > 50) {
-            if (!header.classList.contains('scroll-hidden')) {
-                header.classList.add('scroll-hidden');
-            }
-        } else if (st < lastScrollTop - 3) {
-            if (header.classList.contains('scroll-hidden')) {
-                header.classList.remove('scroll-hidden');
-            }
-        }
-        lastScrollTop = st <= 0 ? 0 : st;
-
-        // Scroll to bottom button visibility
-        if (scrollBtn) {
-            const dist = messagesContainer.scrollHeight - st - messagesContainer.clientHeight;
-            if (dist > 300) {
-                scrollBtn.classList.add('visible');
-            } else {
-                scrollBtn.classList.remove('visible');
-            }
-        }
-
-        ticking = false;
-    };
-
-    const onChatScroll = () => {
-        if (!ticking) {
-            window.requestAnimationFrame(updateHeader);
-            ticking = true;
-        }
-    };
-    messagesContainer.addEventListener('scroll', onChatScroll, { passive: true });
-
-    // Ensure Editor artifacts are cleaned up
-    const btnDeleteChar = document.getElementById('header-btn-delete-char');
-    if (btnDeleteChar) btnDeleteChar.style.display = 'none';
+    // Scroll Handler
+    let cleanupScroll = null;
 
     // Restore header title based on active tab (in case we came from Editor)
     const activeTab = document.querySelector('.tab-btn.active');
@@ -854,13 +812,6 @@ export async function openChat(char, onBack) {
 
     chatView.classList.remove('anim-fade-out', 'anim-fade-in');
 
-    headerDefault.style.display = 'none';
-    headerChatInfo.style.display = 'flex';
-    headerActions.style.display = 'flex';
-    backBtn.style.display = 'flex';
-    tabbar.style.display = 'none';
-    if(headerLogo) headerLogo.style.display = 'none';
-
     updateSendButton(!!generatingStates[char.name]);
 
     // Clear unread
@@ -872,46 +823,37 @@ export async function openChat(char, onBack) {
 
     const chatData = getChatData(char.name);
     const currentSessionId = chatData.currentId;
-    document.getElementById('chat-header-name').textContent = char.name.length > 20 ? char.name.substring(0, 20) + '...' : char.name;
-    const sessionEl = document.getElementById('chat-header-session');
-    if (sessionEl) sessionEl.textContent = `Session #${currentSessionId}`;
-    
-    const headerAvatarImg = document.getElementById('chat-header-avatar');
-    const headerAvatarParent = headerAvatarImg.parentElement;
-    let headerPlaceholder = document.getElementById('chat-header-avatar-placeholder');
 
-    if (char.avatar) {
-        headerAvatarImg.style.display = 'block';
-        headerAvatarImg.src = char.avatar;
-        if (headerPlaceholder) headerPlaceholder.style.display = 'none';
-        headerAvatarImg.onclick = (e) => {
-            e.stopPropagation();
-            openImageViewer(char.avatar);
-        };
-    } else {
-        headerAvatarImg.style.display = 'none';
-        if (!headerPlaceholder) {
-            headerPlaceholder = document.createElement('div');
-            headerPlaceholder.id = 'chat-header-avatar-placeholder';
-            headerPlaceholder.className = 'header-avatar';
-            // Copy basic styles from img or set defaults
-            headerPlaceholder.style.cssText = "border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.2em;";
-            headerAvatarParent.insertBefore(headerPlaceholder, headerAvatarImg);
+    const onBackClick = () => {
+        // Revert System Colors
+        updateAppColors(true);
+
+        if (activeChatChar) {
+            const data = getChatData(activeChatChar.name);
+            data.lastScrollPosition = messagesContainer.scrollTop;
+            db.set('sc_chats', allChats);
         }
-        headerPlaceholder.style.display = 'flex';
-        headerPlaceholder.style.backgroundColor = char.color || '#ccc';
-        headerPlaceholder.textContent = (char.name[0] || "?").toUpperCase();
-    }
+        
+        if (cleanupScroll) cleanupScroll();
+        resetHeader();
+        
+        activeChatChar = null;
+        chatView.classList.remove('anim-fade-in');
+        chatView.classList.add('anim-fade-out');
+        
+        if (_currentOnBack) _currentOnBack();
 
-    headerChatInfo.onclick = (e) => {
-        e.stopPropagation();
-        openChatInfoSheet(char);
+        const onAnimationEnd = () => {
+            chatView.classList.remove('active-view', 'anim-fade-out');
+        };
+        chatView.addEventListener('animationend', onAnimationEnd, { once: true });
     };
 
-    headerActions.onclick = (e) => {
-        e.stopPropagation();
-        openSessionsSheet(char);
-    };
+    setupChatHeader(char, currentSessionId, {
+        onInfoClick: openChatInfoSheet,
+        onActionsClick: openSessionsSheet,
+        onBackClick: onBackClick
+    });
 
     messagesContainer.innerHTML = '';
 
@@ -990,51 +932,20 @@ export async function openChat(char, onBack) {
     if (currentView) currentView.classList.remove('active-view');
     chatView.classList.add('active-view', 'anim-fade-in');
     requestAnimationFrame(() => {
+        // Update System Colors for Chat
+        updateAppColors();
+
         // If it's a new session (empty or just greeting), scroll to top
         if (msgs.length <= 1) {
             messagesContainer.scrollTop = 0;
         } else {
-            if (chatData.lastScrollPosition !== undefined) {
-                messagesContainer.scrollTop = chatData.lastScrollPosition;
-                lastScrollTop = chatData.lastScrollPosition; // Sync to prevent initial hide
-            } else {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                lastScrollTop = messagesContainer.scrollTop; // Sync
-            }
+            const savedScroll = chatData.lastScrollPosition !== undefined ? chatData.lastScrollPosition : messagesContainer.scrollHeight;
+            messagesContainer.scrollTop = savedScroll;
         }
     });
 
-    backBtn.onclick = () => {
-        if (activeChatChar) {
-            const data = getChatData(activeChatChar.name);
-            data.lastScrollPosition = messagesContainer.scrollTop;
-            db.set('sc_chats', allChats);
-        }
-        messagesContainer.removeEventListener('scroll', onChatScroll);
-        const header = document.querySelector('.app-header');
-        if (header) {
-            header.classList.remove('scroll-hidden', 'fixed-header');
-        }
-        activeChatChar = null;
-        chatView.classList.remove('anim-fade-in');
-        chatView.classList.add('anim-fade-out');
-        
-        if (_currentOnBack) _currentOnBack();
-
-        headerChatInfo.onclick = null;
-        headerActions.onclick = null;
-        const onAnimationEnd = () => {
-            chatView.classList.remove('active-view', 'anim-fade-out');
-        };
-        chatView.addEventListener('animationend', onAnimationEnd, { once: true });
-
-        headerDefault.style.display = 'flex';
-        headerChatInfo.style.display = 'none';
-        headerActions.style.display = 'none';
-        backBtn.style.display = 'none';
-        tabbar.style.display = 'flex';
-        if(headerLogo) headerLogo.style.display = 'flex';
-    };
+    const initialScroll = getChatData(char.name).lastScrollPosition || 0;
+    cleanupScroll = initHeaderScroll(messagesContainer, initialScroll, () => activeChatChar && generatingStates[activeChatChar.name]);
 }
 
 export async function createNewSession(targetChar, onBack) {
@@ -1121,13 +1032,10 @@ function openChatInfoSheet(char) {
                     const savedChars = characters; 
                     const idx = savedChars.findIndex(c => c.name === char.name);
                     if (idx !== -1) {
-                        document.getElementById('header-chat-info').style.display = 'none';
-                        document.getElementById('header-actions').style.display = 'none';
-                        document.getElementById('header-content-default').style.display = 'flex';
-                        const headerLogo = document.getElementById('header-logo');
-                        if (headerLogo) headerLogo.style.display = 'flex';
-                        openCharacterEditor(idx);
+                        resetHeader();
                         const backBtn = document.getElementById('header-back');
+                        if (backBtn) backBtn.style.display = 'flex'; // Ensure visible for editor return
+                        openCharacterEditor(idx);
                         backBtn.onclick = () => {
                             const currentChars = characters;
                             const updatedChar = currentChars[idx];
@@ -1298,19 +1206,26 @@ function updateReasoningBlock(element, reasoningText) {
     if (!reasoningText) return;
     let reasoningEl = element.querySelector('.msg-reasoning');
     if (!reasoningEl) {
-        // Insert inside body (at the top)
+        // Insert before body (to avoid typewriter overwrite)
         const body = element.querySelector('.msg-body');
         reasoningEl = document.createElement('div');
         reasoningEl.className = 'msg-reasoning collapsed'; // Default collapsed
         reasoningEl.innerHTML = `<div class="msg-reasoning-header"><span>Reasoning</span><svg class="reasoning-arrow" viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor"><path d="M7 10l5 5 5-5z"/></svg></div><div class="msg-reasoning-content"><div class="msg-reasoning-inner"></div></div>`;
         reasoningEl.querySelector('.msg-reasoning-header').onclick = () => reasoningEl.classList.toggle('collapsed');
-        if (body) body.insertBefore(reasoningEl, body.firstChild);
+        if (body) {
+            element.insertBefore(reasoningEl, body);
+        } else {
+            element.appendChild(reasoningEl);
+        }
     }
     reasoningEl.querySelector('.msg-reasoning-inner').textContent = reasoningText;
 }
 
 function removeWithAnimation(element) {
     if (!element) return;
+    // Remove error class to prevent red blinking during deletion
+    element.classList.remove('error');
+
     // Set explicit height to allow transition from it
     element.style.maxHeight = element.scrollHeight + 'px';
     element.classList.add('deleting');
@@ -1361,7 +1276,8 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
     }
 
     const nameHtml = version ? `${displayName} <sup class="item-version">${version}</sup>` : displayName;
-    const timeHtml = `<span class="msg-time"${msg.isError ? ' style="color:white;opacity:0.8;"' : ''}>${msg.time}</span>`;
+    const displayTime = msg.timestamp ? formatDate(msg.timestamp, 'long') : msg.time;
+    const timeHtml = `<span class="msg-time">${displayTime}</span>`;
 
     // Avatar HTML generation
     let avatarHtml = '';
@@ -1382,9 +1298,6 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
     }
 
     let contentHtml = formatText(textToDisplay);
-    if (msg.isError) {
-        contentHtml = `<span style="color:white">${msg.text}</span>`;
-    }
 
     let reasoningHtml = '';
     // Reasoning block is added dynamically if present
@@ -1410,7 +1323,75 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
         avatarImg.style.cursor = 'pointer';
         avatarImg.onclick = (e) => {
             e.stopPropagation();
-            openImageViewer(avatarImg.src);
+            openImageViewer(avatarImg.src, () => {
+                // Restore chat header when viewer closes
+                if (activeChatChar) setupChatHeader(activeChatChar, activeChatChar.sessionId || 1, {
+                    onInfoClick: openChatInfoSheet,
+                    onActionsClick: openSessionsSheet,
+                    onBackClick: () => document.getElementById('header-back').click() // Simulate back to exit chat if needed, or just restore
+                });
+                // Actually we just need to restore the header state.
+                // Since openChat sets up the header, we can just re-run setupChatHeader.
+                // But we need the callbacks.
+                // Let's simplify: if we are in chat, we just want to restore the chat header.
+                // The easiest way is to re-call openChat logic or just the header setup.
+                // But we don't have easy access to the exact callbacks here without reconstructing them.
+                // However, the image viewer is just an overlay.
+                // If we use setupImageViewerHeader, it replaces the header.
+                // So we MUST restore it.
+                // Let's use a helper or just re-open chat (which is cheap if already open).
+                // Or better:
+                const chatView = document.getElementById('view-chat');
+                if (chatView.classList.contains('active-view')) {
+                     // We are in chat
+                     const data = getChatData(activeChatChar.name);
+                     setupChatHeader(activeChatChar, data.currentId, {
+                        onInfoClick: openChatInfoSheet,
+                        onActionsClick: openSessionsSheet,
+                        onBackClick: () => {
+                            // This is the original onBackClick logic from openChat
+                            // We can't easily access it.
+                            // Maybe we should just trigger the back button of the viewer to close it?
+                            // Wait, the viewer close callback is called when viewer closes.
+                            // So we just need to restore the header.
+                            // We can grab the back button click handler from DOM before opening viewer? No.
+                            
+                            // Let's just re-call openChat(activeChatChar) which is idempotent-ish?
+                            // It might reset scroll.
+                            
+                            // Alternative: Don't change header for image viewer if inside chat?
+                            // But user asked for it.
+                            
+                            // Let's try to reconstruct the callbacks.
+                            // They are standard.
+                            const onBack = _currentOnBack; // We have this global
+                            
+                            // Re-setup header
+                            setupChatHeader(activeChatChar, data.currentId, {
+                                onInfoClick: openChatInfoSheet,
+                                onActionsClick: openSessionsSheet,
+                                onBackClick: () => {
+                                    updateAppColors(true);
+                                    if (activeChatChar) {
+                                        const d = getChatData(activeChatChar.name);
+                                        const c = document.getElementById('chat-messages');
+                                        d.lastScrollPosition = c.scrollTop;
+                                        db.set('sc_chats', allChats);
+                                    }
+                                    resetHeader();
+                                    activeChatChar = null;
+                                    document.getElementById('view-chat').classList.remove('active-view', 'anim-fade-in');
+                                    document.getElementById('view-chat').classList.add('anim-fade-out');
+                                    if (onBack) onBack();
+                                    document.getElementById('view-chat').addEventListener('animationend', () => {
+                                        document.getElementById('view-chat').classList.remove('active-view', 'anim-fade-out');
+                                    }, { once: true });
+                                }
+                            });
+                        }
+                     });
+                }
+            });
         };
     }
 
@@ -1474,8 +1455,7 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
 
     const actionsBtn = document.createElement('div');
     actionsBtn.className = 'msg-actions-btn';
-    const iconStyle = msg.isError ? 'fill:white;opacity:1;' : 'fill:currentColor;opacity:0.6;';
-    actionsBtn.innerHTML = `<svg viewBox="0 0 24 24" style="width:22px;height:22px;${iconStyle}"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>`;
+    actionsBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>`;
     actionsBtn.onclick = (e) => {
         e.stopPropagation();
         activeMessageElement = section;
@@ -1533,6 +1513,7 @@ function appendMessage(msg, forceAvatarUrl, defaultName, version, save = true, a
         }, {passive: false});
         
         section.addEventListener('touchend', e => {
+            if (section.classList.contains('editing')) return;
             const body = section.querySelector('.msg-body');
             if (isScrolling) {
                 if (body) body.style.transform = '';
@@ -1675,8 +1656,12 @@ function changeSwipe(element, msg, dir, animate = true) {
     msg.text = msg.swipes[newIndex];
 
     const isError = msg.swipesMeta && msg.swipesMeta[newIndex] && msg.swipesMeta[newIndex].isError;
-    if (isError) element.classList.add('error');
-    else element.classList.remove('error');
+    
+    if (isError) {
+        element.classList.add('error');
+    } else {
+        element.classList.remove('error');
+    }
 
     let textToDisplay = msg.text;
     if (activeChatChar) {
@@ -1960,6 +1945,7 @@ function cancelEdit(element) {
 function saveEdit(element, newText) {
     if (!element.classList.contains('editing')) return;
     
+    newText = cleanText(newText);
     const textarea = element.querySelector('.edit-textarea');
     const editButtons = element.querySelector('.edit-buttons');
 
@@ -2086,7 +2072,7 @@ function regenerateMessage(element, mode = 'normal') {
     }
 
     // Prefer New Variant for last message to avoid destroying history/block
-    if (!isUser && isLast && (mode === 'normal' || mode === 'magic')) {
+    if (!isUser && isLast && (mode === 'normal')) {
         mode = 'new_variant';
     }
 
@@ -2162,7 +2148,1054 @@ function regenerateMessage(element, mode = 'normal') {
             }
             
             // Define Restore Callback
-            const onAbort = async () => {
+            const onAbort = async (isError) => {
+                // If Magic Menu regeneration AND Error -> Do not restore (let error replace it)
+                if (isMagic && isError) return;
+
+                let chatsRestored = allChats;
+                let dataRestored = chatsRestored[activeChatChar.name];
+                
+                if (dataRestored && dataRestored.sessions[dataRestored.currentId]) {
+                    dataRestored.sessions[dataRestored.currentId].splice(index, 0, ...deletedData);
+                    chatsRestored[activeChatChar.name] = dataRestored;
+                    await db.set('sc_chats', chatsRestored);
+                }
+
+                deletedData.forEach(msg => {
+                    appendMessage(msg, activeChatChar.avatar, activeChatChar.name, activeChatChar.version, false, true);
+                });
+            };
+
+            // Trigger Generation
+            startGeneration(activeChatChar, null, null, onAbort);
+        }
+    }
+}   if (index === -1) return;
+
+    const isUser = element.classList.contains('user');
+    const isLast = index === allMsgs.length - 1;
+    const isMagic = mode === 'magic';
+
+    // If Magic Menu and last message is User -> Don't delete, just generate
+    if (isMagic && isUser) {
+        if (activeChatChar) {
+            // We pass null text to imply "continue/regenerate" based on history, 
+            // or we could pass the user text if the API requires it. 
+            // Assuming sendToLLM(null...) handles context building from history.
+            startGeneration(activeChatChar, null);
+        }
+        return;
+    }
+
+    // Prefer New Variant for last message to avoid destroying history/block
+    if (!isUser && isLast && (mode === 'normal')) {
+        mode = 'new_variant';
+    }
+
+    // New Variant Logic (Swipe at end)
+    if (mode === 'new_variant' && !isUser) {
+        // Prepare UI for generation inside existing element
+        const body = element.querySelector('.msg-body');
+        body.style.opacity = '0';
+        
+        setTimeout(() => {
+            body.innerHTML = `
+                <div class="typing-container">
+                    <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <span class="typing-text">${translations[currentLang]['model_typing'] || 'Generating...'}</span>
+                </div>
+            `;
+            body.style.opacity = '1';
+            
+            // Mark for API to ignore this message's content in history
+            element.classList.add('generating-swipe');
+            
+            const switcher = element.querySelector('.msg-switcher');
+            if (switcher) switcher.remove();
+            
+            startGeneration(activeChatChar, null, element);
+        }, 200);
+        return;
+    }
+
+    // If Magic Menu and last message is Char -> Swipe animation then delete & regen
+    if (isMagic && !isUser) {
+        element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+        element.style.transform = 'translateX(-100%)';
+        element.style.opacity = '0';
+        
+        setTimeout(() => {
+            performDeleteAndRegen();
+        }, 300);
+        return;
+    }
+
+    // Default behavior (context menu) or after animation
+    performDeleteAndRegen(); // This is the "Delete and Regenerate" action
+
+    function performDeleteAndRegen() {
+        // Capture data for restoration
+        const deletedData = [];
+        for (let i = index; i < allMsgs.length; i++) {
+             if (allMsgs[i]._msgData) {
+                 deletedData.push(allMsgs[i]._msgData);
+             }
+        }
+
+        // Remove this message and all subsequent messages from DOM
+        for (let i = allMsgs.length - 1; i >= index; i--) {
+            if (allMsgs[i] === element && (isMagic || element.style.transform.includes('translateX(-100%)'))) {
+                allMsgs[i].remove();
+            } else {
+                removeWithAnimation(allMsgs[i]);
+            }
+        }
+
+        // Update Storage (Remove this and subsequent)
+        if (activeChatChar) {
+            let chats = allChats;
+            let data = chats[activeChatChar.name];
+            if (Array.isArray(data)) data = getChatData(activeChatChar.name);
+
+            if (data && data.sessions[data.currentId]) {
+                data.sessions[data.currentId].splice(index);
+                chats[activeChatChar.name] = data;
+                db.set('sc_chats', chats);
+            }
+            
+            // Define Restore Callback
+            const onAbort = async (isError) => {
+                // If Magic Menu regeneration AND Error -> Do not restore (let error replace it)
+                if (isMagic && isError) return;
+
+                let chatsRestored = allChats;
+                let dataRestored = chatsRestored[activeChatChar.name];
+                
+                if (dataRestored && dataRestored.sessions[dataRestored.currentId]) {
+                    dataRestored.sessions[dataRestored.currentId].splice(index, 0, ...deletedData);
+                    chatsRestored[activeChatChar.name] = dataRestored;
+                    await db.set('sc_chats', chatsRestored);
+                }
+
+                deletedData.forEach(msg => {
+                    appendMessage(msg, activeChatChar.avatar, activeChatChar.name, activeChatChar.version, false, true);
+                });
+            };
+
+            // Trigger Generation
+            startGeneration(activeChatChar, null, null, onAbort);
+        }
+    }
+}   if (index === -1) return;
+
+    const isUser = element.classList.contains('user');
+    const isLast = index === allMsgs.length - 1;
+    const isMagic = mode === 'magic';
+
+    // If Magic Menu and last message is User -> Don't delete, just generate
+    if (isMagic && isUser) {
+        if (activeChatChar) {
+            // We pass null text to imply "continue/regenerate" based on history, 
+            // or we could pass the user text if the API requires it. 
+            // Assuming sendToLLM(null...) handles context building from history.
+            startGeneration(activeChatChar, null);
+        }
+        return;
+    }
+
+    // Prefer New Variant for last message to avoid destroying history/block
+    if (!isUser && isLast && (mode === 'normal')) {
+        mode = 'new_variant';
+    }
+
+    // New Variant Logic (Swipe at end)
+    if (mode === 'new_variant' && !isUser) {
+        // Prepare UI for generation inside existing element
+        const body = element.querySelector('.msg-body');
+        body.style.opacity = '0';
+        
+        setTimeout(() => {
+            body.innerHTML = `
+                <div class="typing-container">
+                    <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <span class="typing-text">${translations[currentLang]['model_typing'] || 'Generating...'}</span>
+                </div>
+            `;
+            body.style.opacity = '1';
+            
+            // Mark for API to ignore this message's content in history
+            element.classList.add('generating-swipe');
+            
+            const switcher = element.querySelector('.msg-switcher');
+            if (switcher) switcher.remove();
+            
+            startGeneration(activeChatChar, null, element);
+        }, 200);
+        return;
+    }
+
+    // If Magic Menu and last message is Char -> Swipe animation then delete & regen
+    if (isMagic && !isUser) {
+        element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+        element.style.transform = 'translateX(-100%)';
+        element.style.opacity = '0';
+        
+        setTimeout(() => {
+            performDeleteAndRegen();
+        }, 300);
+        return;
+    }
+
+    // Default behavior (context menu) or after animation
+    performDeleteAndRegen(); // This is the "Delete and Regenerate" action
+
+    function performDeleteAndRegen() {
+        // Capture data for restoration
+        const deletedData = [];
+        for (let i = index; i < allMsgs.length; i++) {
+             if (allMsgs[i]._msgData) {
+                 deletedData.push(allMsgs[i]._msgData);
+             }
+        }
+
+        // Remove this message and all subsequent messages from DOM
+        for (let i = allMsgs.length - 1; i >= index; i--) {
+            if (allMsgs[i] === element && (isMagic || element.style.transform.includes('translateX(-100%)'))) {
+                allMsgs[i].remove();
+            } else {
+                removeWithAnimation(allMsgs[i]);
+            }
+        }
+
+        // Update Storage (Remove this and subsequent)
+        if (activeChatChar) {
+            let chats = allChats;
+            let data = chats[activeChatChar.name];
+            if (Array.isArray(data)) data = getChatData(activeChatChar.name);
+
+            if (data && data.sessions[data.currentId]) {
+                data.sessions[data.currentId].splice(index);
+                chats[activeChatChar.name] = data;
+                db.set('sc_chats', chats);
+            }
+            
+            // Define Restore Callback
+            const onAbort = async (isError) => {
+                // If Magic Menu regeneration AND Error -> Do not restore (let error replace it)
+                if (isMagic && isError) return;
+
+                let chatsRestored = allChats;
+                let dataRestored = chatsRestored[activeChatChar.name];
+                
+                if (dataRestored && dataRestored.sessions[dataRestored.currentId]) {
+                    dataRestored.sessions[dataRestored.currentId].splice(index, 0, ...deletedData);
+                    chatsRestored[activeChatChar.name] = dataRestored;
+                    await db.set('sc_chats', chatsRestored);
+                }
+
+                deletedData.forEach(msg => {
+                    appendMessage(msg, activeChatChar.avatar, activeChatChar.name, activeChatChar.version, false, true);
+                });
+            };
+
+            // Trigger Generation
+            startGeneration(activeChatChar, null, null, onAbort);
+        }
+    }
+}   if (index === -1) return;
+
+    const isUser = element.classList.contains('user');
+    const isLast = index === allMsgs.length - 1;
+    const isMagic = mode === 'magic';
+
+    // If Magic Menu and last message is User -> Don't delete, just generate
+    if (isMagic && isUser) {
+        if (activeChatChar) {
+            // We pass null text to imply "continue/regenerate" based on history, 
+            // or we could pass the user text if the API requires it. 
+            // Assuming sendToLLM(null...) handles context building from history.
+            startGeneration(activeChatChar, null);
+        }
+        return;
+    }
+
+    // Prefer New Variant for last message to avoid destroying history/block
+    if (!isUser && isLast && (mode === 'normal')) {
+        mode = 'new_variant';
+    }
+
+    // New Variant Logic (Swipe at end)
+    if (mode === 'new_variant' && !isUser) {
+        // Prepare UI for generation inside existing element
+        const body = element.querySelector('.msg-body');
+        body.style.opacity = '0';
+        
+        setTimeout(() => {
+            body.innerHTML = `
+                <div class="typing-container">
+                    <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <span class="typing-text">${translations[currentLang]['model_typing'] || 'Generating...'}</span>
+                </div>
+            `;
+            body.style.opacity = '1';
+            
+            // Mark for API to ignore this message's content in history
+            element.classList.add('generating-swipe');
+            
+            const switcher = element.querySelector('.msg-switcher');
+            if (switcher) switcher.remove();
+            
+            startGeneration(activeChatChar, null, element);
+        }, 200);
+        return;
+    }
+
+    // If Magic Menu and last message is Char -> Swipe animation then delete & regen
+    if (isMagic && !isUser) {
+        element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+        element.style.transform = 'translateX(-100%)';
+        element.style.opacity = '0';
+        
+        setTimeout(() => {
+            performDeleteAndRegen();
+        }, 300);
+        return;
+    }
+
+    // Default behavior (context menu) or after animation
+    performDeleteAndRegen(); // This is the "Delete and Regenerate" action
+
+    function performDeleteAndRegen() {
+        // Capture data for restoration
+        const deletedData = [];
+        for (let i = index; i < allMsgs.length; i++) {
+             if (allMsgs[i]._msgData) {
+                 deletedData.push(allMsgs[i]._msgData);
+             }
+        }
+
+        // Remove this message and all subsequent messages from DOM
+        for (let i = allMsgs.length - 1; i >= index; i--) {
+            if (allMsgs[i] === element && (isMagic || element.style.transform.includes('translateX(-100%)'))) {
+                allMsgs[i].remove();
+            } else {
+                removeWithAnimation(allMsgs[i]);
+            }
+        }
+
+        // Update Storage (Remove this and subsequent)
+        if (activeChatChar) {
+            let chats = allChats;
+            let data = chats[activeChatChar.name];
+            if (Array.isArray(data)) data = getChatData(activeChatChar.name);
+
+            if (data && data.sessions[data.currentId]) {
+                data.sessions[data.currentId].splice(index);
+                chats[activeChatChar.name] = data;
+                db.set('sc_chats', chats);
+            }
+            
+            // Define Restore Callback
+            const onAbort = async (isError) => {
+                // If Magic Menu regeneration AND Error -> Do not restore (let error replace it)
+                if (isMagic && isError) return;
+
+                let chatsRestored = allChats;
+                let dataRestored = chatsRestored[activeChatChar.name];
+                
+                if (dataRestored && dataRestored.sessions[dataRestored.currentId]) {
+                    dataRestored.sessions[dataRestored.currentId].splice(index, 0, ...deletedData);
+                    chatsRestored[activeChatChar.name] = dataRestored;
+                    await db.set('sc_chats', chatsRestored);
+                }
+
+                deletedData.forEach(msg => {
+                    appendMessage(msg, activeChatChar.avatar, activeChatChar.name, activeChatChar.version, false, true);
+                });
+            };
+
+            // Trigger Generation
+            startGeneration(activeChatChar, null, null, onAbort);
+        }
+    }
+}   if (index === -1) return;
+
+    const isUser = element.classList.contains('user');
+    const isLast = index === allMsgs.length - 1;
+    const isMagic = mode === 'magic';
+
+    // If Magic Menu and last message is User -> Don't delete, just generate
+    if (isMagic && isUser) {
+        if (activeChatChar) {
+            // We pass null text to imply "continue/regenerate" based on history, 
+            // or we could pass the user text if the API requires it. 
+            // Assuming sendToLLM(null...) handles context building from history.
+            startGeneration(activeChatChar, null);
+        }
+        return;
+    }
+
+    // Prefer New Variant for last message to avoid destroying history/block
+    if (!isUser && isLast && (mode === 'normal')) {
+        mode = 'new_variant';
+    }
+
+    // New Variant Logic (Swipe at end)
+    if (mode === 'new_variant' && !isUser) {
+        // Prepare UI for generation inside existing element
+        const body = element.querySelector('.msg-body');
+        body.style.opacity = '0';
+        
+        setTimeout(() => {
+            body.innerHTML = `
+                <div class="typing-container">
+                    <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <span class="typing-text">${translations[currentLang]['model_typing'] || 'Generating...'}</span>
+                </div>
+            `;
+            body.style.opacity = '1';
+            
+            // Mark for API to ignore this message's content in history
+            element.classList.add('generating-swipe');
+            
+            const switcher = element.querySelector('.msg-switcher');
+            if (switcher) switcher.remove();
+            
+            startGeneration(activeChatChar, null, element);
+        }, 200);
+        return;
+    }
+
+    // If Magic Menu and last message is Char -> Swipe animation then delete & regen
+    if (isMagic && !isUser) {
+        element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+        element.style.transform = 'translateX(-100%)';
+        element.style.opacity = '0';
+        
+        setTimeout(() => {
+            performDeleteAndRegen();
+        }, 300);
+        return;
+    }
+
+    // Default behavior (context menu) or after animation
+    performDeleteAndRegen(); // This is the "Delete and Regenerate" action
+
+    function performDeleteAndRegen() {
+        // Capture data for restoration
+        const deletedData = [];
+        for (let i = index; i < allMsgs.length; i++) {
+             if (allMsgs[i]._msgData) {
+                 deletedData.push(allMsgs[i]._msgData);
+             }
+        }
+
+        // Remove this message and all subsequent messages from DOM
+        for (let i = allMsgs.length - 1; i >= index; i--) {
+            if (allMsgs[i] === element && (isMagic || element.style.transform.includes('translateX(-100%)'))) {
+                allMsgs[i].remove();
+            } else {
+                removeWithAnimation(allMsgs[i]);
+            }
+        }
+
+        // Update Storage (Remove this and subsequent)
+        if (activeChatChar) {
+            let chats = allChats;
+            let data = chats[activeChatChar.name];
+            if (Array.isArray(data)) data = getChatData(activeChatChar.name);
+
+            if (data && data.sessions[data.currentId]) {
+                data.sessions[data.currentId].splice(index);
+                chats[activeChatChar.name] = data;
+                db.set('sc_chats', chats);
+            }
+            
+            // Define Restore Callback
+            const onAbort = async (isError) => {
+                // If Magic Menu regeneration AND Error -> Do not restore (let error replace it)
+                if (isMagic && isError) return;
+
+                let chatsRestored = allChats;
+                let dataRestored = chatsRestored[activeChatChar.name];
+                
+                if (dataRestored && dataRestored.sessions[dataRestored.currentId]) {
+                    dataRestored.sessions[dataRestored.currentId].splice(index, 0, ...deletedData);
+                    chatsRestored[activeChatChar.name] = dataRestored;
+                    await db.set('sc_chats', chatsRestored);
+                }
+
+                deletedData.forEach(msg => {
+                    appendMessage(msg, activeChatChar.avatar, activeChatChar.name, activeChatChar.version, false, true);
+                });
+            };
+
+            // Trigger Generation
+            startGeneration(activeChatChar, null, null, onAbort);
+        }
+    }
+}   if (index === -1) return;
+
+    const isUser = element.classList.contains('user');
+    const isLast = index === allMsgs.length - 1;
+    const isMagic = mode === 'magic';
+
+    // If Magic Menu and last message is User -> Don't delete, just generate
+    if (isMagic && isUser) {
+        if (activeChatChar) {
+            // We pass null text to imply "continue/regenerate" based on history, 
+            // or we could pass the user text if the API requires it. 
+            // Assuming sendToLLM(null...) handles context building from history.
+            startGeneration(activeChatChar, null);
+        }
+        return;
+    }
+
+    // Prefer New Variant for last message to avoid destroying history/block
+    if (!isUser && isLast && (mode === 'normal')) {
+        mode = 'new_variant';
+    }
+
+    // New Variant Logic (Swipe at end)
+    if (mode === 'new_variant' && !isUser) {
+        // Prepare UI for generation inside existing element
+        const body = element.querySelector('.msg-body');
+        body.style.opacity = '0';
+        
+        setTimeout(() => {
+            body.innerHTML = `
+                <div class="typing-container">
+                    <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <span class="typing-text">${translations[currentLang]['model_typing'] || 'Generating...'}</span>
+                </div>
+            `;
+            body.style.opacity = '1';
+            
+            // Mark for API to ignore this message's content in history
+            element.classList.add('generating-swipe');
+            
+            const switcher = element.querySelector('.msg-switcher');
+            if (switcher) switcher.remove();
+            
+            startGeneration(activeChatChar, null, element);
+        }, 200);
+        return;
+    }
+
+    // If Magic Menu and last message is Char -> Swipe animation then delete & regen
+    if (isMagic && !isUser) {
+        element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+        element.style.transform = 'translateX(-100%)';
+        element.style.opacity = '0';
+        
+        setTimeout(() => {
+            performDeleteAndRegen();
+        }, 300);
+        return;
+    }
+
+    // Default behavior (context menu) or after animation
+    performDeleteAndRegen(); // This is the "Delete and Regenerate" action
+
+    function performDeleteAndRegen() {
+        // Capture data for restoration
+        const deletedData = [];
+        for (let i = index; i < allMsgs.length; i++) {
+             if (allMsgs[i]._msgData) {
+                 deletedData.push(allMsgs[i]._msgData);
+             }
+        }
+
+        // Remove this message and all subsequent messages from DOM
+        for (let i = allMsgs.length - 1; i >= index; i--) {
+            if (allMsgs[i] === element && (isMagic || element.style.transform.includes('translateX(-100%)'))) {
+                allMsgs[i].remove();
+            } else {
+                removeWithAnimation(allMsgs[i]);
+            }
+        }
+
+        // Update Storage (Remove this and subsequent)
+        if (activeChatChar) {
+            let chats = allChats;
+            let data = chats[activeChatChar.name];
+            if (Array.isArray(data)) data = getChatData(activeChatChar.name);
+
+            if (data && data.sessions[data.currentId]) {
+                data.sessions[data.currentId].splice(index);
+                chats[activeChatChar.name] = data;
+                db.set('sc_chats', chats);
+            }
+            
+            // Define Restore Callback
+            const onAbort = async (isError) => {
+                // If Magic Menu regeneration AND Error -> Do not restore (let error replace it)
+                if (isMagic && isError) return;
+
+                let chatsRestored = allChats;
+                let dataRestored = chatsRestored[activeChatChar.name];
+                
+                if (dataRestored && dataRestored.sessions[dataRestored.currentId]) {
+                    dataRestored.sessions[dataRestored.currentId].splice(index, 0, ...deletedData);
+                    chatsRestored[activeChatChar.name] = dataRestored;
+                    await db.set('sc_chats', chatsRestored);
+                }
+
+                deletedData.forEach(msg => {
+                    appendMessage(msg, activeChatChar.avatar, activeChatChar.name, activeChatChar.version, false, true);
+                });
+            };
+
+            // Trigger Generation
+            startGeneration(activeChatChar, null, null, onAbort);
+        }
+    }
+}   if (index === -1) return;
+
+    const isUser = element.classList.contains('user');
+    const isLast = index === allMsgs.length - 1;
+    const isMagic = mode === 'magic';
+
+    // If Magic Menu and last message is User -> Don't delete, just generate
+    if (isMagic && isUser) {
+        if (activeChatChar) {
+            // We pass null text to imply "continue/regenerate" based on history, 
+            // or we could pass the user text if the API requires it. 
+            // Assuming sendToLLM(null...) handles context building from history.
+            startGeneration(activeChatChar, null);
+        }
+        return;
+    }
+
+    // Prefer New Variant for last message to avoid destroying history/block
+    if (!isUser && isLast && (mode === 'normal')) {
+        mode = 'new_variant';
+    }
+
+    // New Variant Logic (Swipe at end)
+    if (mode === 'new_variant' && !isUser) {
+        // Prepare UI for generation inside existing element
+        const body = element.querySelector('.msg-body');
+        body.style.opacity = '0';
+        
+        setTimeout(() => {
+            body.innerHTML = `
+                <div class="typing-container">
+                    <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <span class="typing-text">${translations[currentLang]['model_typing'] || 'Generating...'}</span>
+                </div>
+            `;
+            body.style.opacity = '1';
+            
+            // Mark for API to ignore this message's content in history
+            element.classList.add('generating-swipe');
+            
+            const switcher = element.querySelector('.msg-switcher');
+            if (switcher) switcher.remove();
+            
+            startGeneration(activeChatChar, null, element);
+        }, 200);
+        return;
+    }
+
+    // If Magic Menu and last message is Char -> Swipe animation then delete & regen
+    if (isMagic && !isUser) {
+        element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+        element.style.transform = 'translateX(-100%)';
+        element.style.opacity = '0';
+        
+        setTimeout(() => {
+            performDeleteAndRegen();
+        }, 300);
+        return;
+    }
+
+    // Default behavior (context menu) or after animation
+    performDeleteAndRegen(); // This is the "Delete and Regenerate" action
+
+    function performDeleteAndRegen() {
+        // Capture data for restoration
+        const deletedData = [];
+        for (let i = index; i < allMsgs.length; i++) {
+             if (allMsgs[i]._msgData) {
+                 deletedData.push(allMsgs[i]._msgData);
+             }
+        }
+
+        // Remove this message and all subsequent messages from DOM
+        for (let i = allMsgs.length - 1; i >= index; i--) {
+            if (allMsgs[i] === element && (isMagic || element.style.transform.includes('translateX(-100%)'))) {
+                allMsgs[i].remove();
+            } else {
+                removeWithAnimation(allMsgs[i]);
+            }
+        }
+
+        // Update Storage (Remove this and subsequent)
+        if (activeChatChar) {
+            let chats = allChats;
+            let data = chats[activeChatChar.name];
+            if (Array.isArray(data)) data = getChatData(activeChatChar.name);
+
+            if (data && data.sessions[data.currentId]) {
+                data.sessions[data.currentId].splice(index);
+                chats[activeChatChar.name] = data;
+                db.set('sc_chats', chats);
+            }
+            
+            // Define Restore Callback
+            const onAbort = async (isError) => {
+                // If Magic Menu regeneration AND Error -> Do not restore (let error replace it)
+                if (isMagic && isError) return;
+
+                let chatsRestored = allChats;
+                let dataRestored = chatsRestored[activeChatChar.name];
+                
+                if (dataRestored && dataRestored.sessions[dataRestored.currentId]) {
+                    dataRestored.sessions[dataRestored.currentId].splice(index, 0, ...deletedData);
+                    chatsRestored[activeChatChar.name] = dataRestored;
+                    await db.set('sc_chats', chatsRestored);
+                }
+
+                deletedData.forEach(msg => {
+                    appendMessage(msg, activeChatChar.avatar, activeChatChar.name, activeChatChar.version, false, true);
+                });
+            };
+
+            // Trigger Generation
+            startGeneration(activeChatChar, null, null, onAbort);
+        }
+    }
+}   if (index === -1) return;
+
+    const isUser = element.classList.contains('user');
+    const isLast = index === allMsgs.length - 1;
+    const isMagic = mode === 'magic';
+
+    // If Magic Menu and last message is User -> Don't delete, just generate
+    if (isMagic && isUser) {
+        if (activeChatChar) {
+            // We pass null text to imply "continue/regenerate" based on history, 
+            // or we could pass the user text if the API requires it. 
+            // Assuming sendToLLM(null...) handles context building from history.
+            startGeneration(activeChatChar, null);
+        }
+        return;
+    }
+
+    // Prefer New Variant for last message to avoid destroying history/block
+    if (!isUser && isLast && (mode === 'normal')) {
+        mode = 'new_variant';
+    }
+
+    // New Variant Logic (Swipe at end)
+    if (mode === 'new_variant' && !isUser) {
+        // Prepare UI for generation inside existing element
+        const body = element.querySelector('.msg-body');
+        body.style.opacity = '0';
+        
+        setTimeout(() => {
+            body.innerHTML = `
+                <div class="typing-container">
+                    <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <span class="typing-text">${translations[currentLang]['model_typing'] || 'Generating...'}</span>
+                </div>
+            `;
+            body.style.opacity = '1';
+            
+            // Mark for API to ignore this message's content in history
+            element.classList.add('generating-swipe');
+            
+            const switcher = element.querySelector('.msg-switcher');
+            if (switcher) switcher.remove();
+            
+            startGeneration(activeChatChar, null, element);
+        }, 200);
+        return;
+    }
+
+    // If Magic Menu and last message is Char -> Swipe animation then delete & regen
+    if (isMagic && !isUser) {
+        element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+        element.style.transform = 'translateX(-100%)';
+        element.style.opacity = '0';
+        
+        setTimeout(() => {
+            performDeleteAndRegen();
+        }, 300);
+        return;
+    }
+
+    // Default behavior (context menu) or after animation
+    performDeleteAndRegen(); // This is the "Delete and Regenerate" action
+
+    function performDeleteAndRegen() {
+        // Capture data for restoration
+        const deletedData = [];
+        for (let i = index; i < allMsgs.length; i++) {
+             if (allMsgs[i]._msgData) {
+                 deletedData.push(allMsgs[i]._msgData);
+             }
+        }
+
+        // Remove this message and all subsequent messages from DOM
+        for (let i = allMsgs.length - 1; i >= index; i--) {
+            if (allMsgs[i] === element && (isMagic || element.style.transform.includes('translateX(-100%)'))) {
+                allMsgs[i].remove();
+            } else {
+                removeWithAnimation(allMsgs[i]);
+            }
+        }
+
+        // Update Storage (Remove this and subsequent)
+        if (activeChatChar) {
+            let chats = allChats;
+            let data = chats[activeChatChar.name];
+            if (Array.isArray(data)) data = getChatData(activeChatChar.name);
+
+            if (data && data.sessions[data.currentId]) {
+                data.sessions[data.currentId].splice(index);
+                chats[activeChatChar.name] = data;
+                db.set('sc_chats', chats);
+            }
+            
+            // Define Restore Callback
+            const onAbort = async (isError) => {
+                // If Magic Menu regeneration AND Error -> Do not restore (let error replace it)
+                if (isMagic && isError) return;
+
+                let chatsRestored = allChats;
+                let dataRestored = chatsRestored[activeChatChar.name];
+                
+                if (dataRestored && dataRestored.sessions[dataRestored.currentId]) {
+                    dataRestored.sessions[dataRestored.currentId].splice(index, 0, ...deletedData);
+                    chatsRestored[activeChatChar.name] = dataRestored;
+                    await db.set('sc_chats', chatsRestored);
+                }
+
+                deletedData.forEach(msg => {
+                    appendMessage(msg, activeChatChar.avatar, activeChatChar.name, activeChatChar.version, false, true);
+                });
+            };
+
+            // Trigger Generation
+            startGeneration(activeChatChar, null, null, onAbort);
+        }
+    }
+}   if (index === -1) return;
+
+    const isUser = element.classList.contains('user');
+    const isLast = index === allMsgs.length - 1;
+    const isMagic = mode === 'magic';
+
+    // If Magic Menu and last message is User -> Don't delete, just generate
+    if (isMagic && isUser) {
+        if (activeChatChar) {
+            // We pass null text to imply "continue/regenerate" based on history, 
+            // or we could pass the user text if the API requires it. 
+            // Assuming sendToLLM(null...) handles context building from history.
+            startGeneration(activeChatChar, null);
+        }
+        return;
+    }
+
+    // Prefer New Variant for last message to avoid destroying history/block
+    if (!isUser && isLast && (mode === 'normal')) {
+        mode = 'new_variant';
+    }
+
+    // New Variant Logic (Swipe at end)
+    if (mode === 'new_variant' && !isUser) {
+        // Prepare UI for generation inside existing element
+        const body = element.querySelector('.msg-body');
+        body.style.opacity = '0';
+        
+        setTimeout(() => {
+            body.innerHTML = `
+                <div class="typing-container">
+                    <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <span class="typing-text">${translations[currentLang]['model_typing'] || 'Generating...'}</span>
+                </div>
+            `;
+            body.style.opacity = '1';
+            
+            // Mark for API to ignore this message's content in history
+            element.classList.add('generating-swipe');
+            
+            const switcher = element.querySelector('.msg-switcher');
+            if (switcher) switcher.remove();
+            
+            startGeneration(activeChatChar, null, element);
+        }, 200);
+        return;
+    }
+
+    // If Magic Menu and last message is Char -> Swipe animation then delete & regen
+    if (isMagic && !isUser) {
+        element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+        element.style.transform = 'translateX(-100%)';
+        element.style.opacity = '0';
+        
+        setTimeout(() => {
+            performDeleteAndRegen();
+        }, 300);
+        return;
+    }
+
+    // Default behavior (context menu) or after animation
+    performDeleteAndRegen(); // This is the "Delete and Regenerate" action
+
+    function performDeleteAndRegen() {
+        // Capture data for restoration
+        const deletedData = [];
+        for (let i = index; i < allMsgs.length; i++) {
+             if (allMsgs[i]._msgData) {
+                 deletedData.push(allMsgs[i]._msgData);
+             }
+        }
+
+        // Remove this message and all subsequent messages from DOM
+        for (let i = allMsgs.length - 1; i >= index; i--) {
+            if (allMsgs[i] === element && (isMagic || element.style.transform.includes('translateX(-100%)'))) {
+                allMsgs[i].remove();
+            } else {
+                removeWithAnimation(allMsgs[i]);
+            }
+        }
+
+        // Update Storage (Remove this and subsequent)
+        if (activeChatChar) {
+            let chats = allChats;
+            let data = chats[activeChatChar.name];
+            if (Array.isArray(data)) data = getChatData(activeChatChar.name);
+
+            if (data && data.sessions[data.currentId]) {
+                data.sessions[data.currentId].splice(index);
+                chats[activeChatChar.name] = data;
+                db.set('sc_chats', chats);
+            }
+            
+            // Define Restore Callback
+            const onAbort = async (isError) => {
+                // If Magic Menu regeneration AND Error -> Do not restore (let error replace it)
+                if (isMagic && isError) return;
+
+                let chatsRestored = allChats;
+                let dataRestored = chatsRestored[activeChatChar.name];
+                
+                if (dataRestored && dataRestored.sessions[dataRestored.currentId]) {
+                    dataRestored.sessions[dataRestored.currentId].splice(index, 0, ...deletedData);
+                    chatsRestored[activeChatChar.name] = dataRestored;
+                    await db.set('sc_chats', chatsRestored);
+                }
+
+                deletedData.forEach(msg => {
+                    appendMessage(msg, activeChatChar.avatar, activeChatChar.name, activeChatChar.version, false, true);
+                });
+            };
+
+            // Trigger Generation
+            startGeneration(activeChatChar, null, null, onAbort);
+        }
+    }
+}   if (index === -1) return;
+
+    const isUser = element.classList.contains('user');
+    const isLast = index === allMsgs.length - 1;
+    const isMagic = mode === 'magic';
+
+    // If Magic Menu and last message is User -> Don't delete, just generate
+    if (isMagic && isUser) {
+        if (activeChatChar) {
+            // We pass null text to imply "continue/regenerate" based on history, 
+            // or we could pass the user text if the API requires it. 
+            // Assuming sendToLLM(null...) handles context building from history.
+            startGeneration(activeChatChar, null);
+        }
+        return;
+    }
+
+    // Prefer New Variant for last message to avoid destroying history/block
+    if (!isUser && isLast && (mode === 'normal')) {
+        mode = 'new_variant';
+    }
+
+    // New Variant Logic (Swipe at end)
+    if (mode === 'new_variant' && !isUser) {
+        // Prepare UI for generation inside existing element
+        const body = element.querySelector('.msg-body');
+        body.style.opacity = '0';
+        
+        setTimeout(() => {
+            body.innerHTML = `
+                <div class="typing-container">
+                    <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <span class="typing-text">${translations[currentLang]['model_typing'] || 'Generating...'}</span>
+                </div>
+            `;
+            body.style.opacity = '1';
+            
+            // Mark for API to ignore this message's content in history
+            element.classList.add('generating-swipe');
+            
+            const switcher = element.querySelector('.msg-switcher');
+            if (switcher) switcher.remove();
+            
+            startGeneration(activeChatChar, null, element);
+        }, 200);
+        return;
+    }
+
+    // If Magic Menu and last message is Char -> Swipe animation then delete & regen
+    if (isMagic && !isUser) {
+        element.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+        element.style.transform = 'translateX(-100%)';
+        element.style.opacity = '0';
+        
+        setTimeout(() => {
+            performDeleteAndRegen();
+        }, 300);
+        return;
+    }
+
+    // Default behavior (context menu) or after animation
+    performDeleteAndRegen(); // This is the "Delete and Regenerate" action
+
+    function performDeleteAndRegen() {
+        // Capture data for restoration
+        const deletedData = [];
+        for (let i = index; i < allMsgs.length; i++) {
+             if (allMsgs[i]._msgData) {
+                 deletedData.push(allMsgs[i]._msgData);
+             }
+        }
+
+        // Remove this message and all subsequent messages from DOM
+        for (let i = allMsgs.length - 1; i >= index; i--) {
+            if (allMsgs[i] === element && (isMagic || element.style.transform.includes('translateX(-100%)'))) {
+                allMsgs[i].remove();
+            } else {
+                removeWithAnimation(allMsgs[i]);
+            }
+        }
+
+        // Update Storage (Remove this and subsequent)
+        if (activeChatChar) {
+            let chats = allChats;
+            let data = chats[activeChatChar.name];
+            if (Array.isArray(data)) data = getChatData(activeChatChar.name);
+
+            if (data && data.sessions[data.currentId]) {
+                data.sessions[data.currentId].splice(index);
+                chats[activeChatChar.name] = data;
+                db.set('sc_chats', chats);
+            }
+            
+            // Define Restore Callback
+            const onAbort = async (isError) => {
+                // If Magic Menu regeneration AND Error -> Do not restore (let error replace it)
+                if (isMagic && isError) return;
+
                 let chatsRestored = allChats;
                 let dataRestored = chatsRestored[activeChatChar.name];
                 

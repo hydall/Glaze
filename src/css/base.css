@@ -16,7 +16,7 @@
 body {
   /* Применяем отступы */
   padding-top: var(--sat);
-  padding-bottom: var(--sab);
+  padding-bottom: 0;
   
   margin: 0;
   box-sizing: border-box;
@@ -38,6 +38,9 @@ body.keyboard-open {
 }
 body.keyboard-open .tabbar {
     display: none !important; /* Скрываем навбар */
+}
+body.keyboard-open .chat-input-bar {
+    padding-bottom: 0 !important;
 }
 
 input, textarea, select, button {
@@ -232,4 +235,11 @@ body.dark-theme .api-status {
 body.app-loaded {
     opacity: 1;
     animation: app-entry 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.tabbar, .chat-input-bar {
+    padding-bottom: var(--sab) !important;
+    transition: padding-bottom 0.3s ease, background-color 0.3s ease;
+    position: relative;
+    overflow: hidden;
 }

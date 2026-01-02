@@ -1,6 +1,7 @@
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from './ui.js';
+import { setupEditorHeader } from './header.js';
 
 let callbacks = {};
 let editingCharIndex = -1;
@@ -170,86 +171,59 @@ export function openCharacterEditor(index) {
     editView.classList.add('active-view', 'anim-fade-in');
     document.querySelector('.tabbar').style.display = 'none';
 
-    // Header Setup
-    const headerTitle = document.getElementById('header-title');
-    const headerArrow = document.getElementById('header-arrow');
-    const backBtn = document.getElementById('header-back');
-    const headerLogo = document.getElementById('header-logo');
-    const deleteBtn = document.getElementById('header-btn-delete-char');
-
-    if(headerLogo) headerLogo.style.display = 'none';
-    backBtn.style.display = 'flex';
-    headerArrow.style.display = 'none';
-    headerTitle.textContent = isNew ? translations[currentLang]['action_create_new'] : translations[currentLang]['header_editor'];
-    if(deleteBtn) deleteBtn.style.display = isNew ? 'none' : 'flex';
-
-    // Create Button (for new char)
-    let createBtn = document.getElementById('header-btn-create-char');
-    if (!createBtn) {
-        createBtn = document.createElement('div');
-        createBtn.id = 'header-btn-create-char';
-        createBtn.className = 'header-btn';
-        createBtn.style.alignItems = 'center';
-        createBtn.style.justifyContent = 'center';
-        createBtn.style.padding = '0 10px';
-        createBtn.style.cursor = 'pointer';
-        createBtn.style.position = 'absolute';
-        createBtn.style.right = '10px';
-        createBtn.innerHTML = `<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
-        if (deleteBtn && deleteBtn.parentNode) deleteBtn.parentNode.insertBefore(createBtn, deleteBtn);
-        else backBtn.parentNode.appendChild(createBtn);
-        
-        createBtn.addEventListener('click', () => {
-            if (tempNewChar) {
-                if (!tempNewChar.name || !tempNewChar.name.trim()) {
-                    alert(translations[currentLang]['placeholder_enter_name'] || "Name is required");
-                    return;
+    const actions = [];
+    if (isNew) {
+        actions.push({
+            id: 'header-btn-create-char',
+            onClick: () => {
+                if (tempNewChar) {
+                    if (!tempNewChar.name || !tempNewChar.name.trim()) {
+                        alert(translations[currentLang]['placeholder_enter_name'] || "Name is required");
+                        return;
+                    }
+                    tempNewChar.color = "#" + Math.floor(Math.random()*16777215).toString(16);
+                    tempNewChar.category = "anime";
+                    tempNewChar.version = "v1.0";
+                    callbacks.addCharacter(tempNewChar);
+                    callbacks.renderList();
+                    closeEditor(previousView);
                 }
-                tempNewChar.color = "#" + Math.floor(Math.random()*16777215).toString(16);
-                tempNewChar.category = "anime";
-                tempNewChar.version = "v1.0";
-                callbacks.addCharacter(tempNewChar);
-                callbacks.renderList();
-                closeEditor(previousView);
+            }
+        });
+    } else {
+        actions.push({
+            id: 'header-btn-delete-char',
+            onClick: () => {
+                showBottomSheet({
+                    title: translations[currentLang]['confirm_delete_title'],
+                    items: [
+                        {
+                            label: translations[currentLang]['btn_yes'],
+                            icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                            iconColor: '#ff4444',
+                            isDestructive: true,
+                            onClick: () => {
+                                callbacks.deleteCharacter(editingCharIndex);
+                                closeBottomSheet();
+                                closeEditor(previousView);
+                            }
+                        },
+                        {
+                            label: translations[currentLang]['btn_no'],
+                            icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+                            onClick: () => closeBottomSheet()
+                        }
+                    ]
+                });
             }
         });
     }
-    createBtn.style.display = isNew ? 'flex' : 'none';
 
-    // Back Button
-    backBtn.onclick = () => closeEditor(previousView);
-
-    // Delete Button
-    if (deleteBtn) {
-        // Clone to remove old listeners
-        const newDeleteBtn = deleteBtn.cloneNode(true);
-        deleteBtn.parentNode.replaceChild(newDeleteBtn, deleteBtn);
-        
-        newDeleteBtn.style.display = isNew ? 'none' : 'flex';
-        newDeleteBtn.onclick = () => {
-            showBottomSheet({
-                title: translations[currentLang]['confirm_delete_title'],
-                items: [
-                    {
-                        label: translations[currentLang]['btn_yes'],
-                        icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-                        iconColor: '#ff4444',
-                        isDestructive: true,
-                        onClick: () => {
-                            callbacks.deleteCharacter(editingCharIndex);
-                            closeBottomSheet();
-                            closeEditor(previousView);
-                        }
-                    },
-                    {
-                        label: translations[currentLang]['btn_no'],
-                        icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-                        onClick: () => closeBottomSheet()
-                    }
-                ]
-            });
-        };
-    }
+    setupEditorHeader(
+        isNew ? translations[currentLang]['action_create_new'] : translations[currentLang]['header_editor'],
+        () => closeEditor(previousView),
+        actions
+    );
 }
 
 function closeEditor(previousView) {
@@ -265,27 +239,15 @@ function closeEditor(previousView) {
     };
     editView.addEventListener('animationend', onAnimationEnd, { once: true });
 
-    // Restore Header
-    const headerLogo = document.getElementById('header-logo');
-    const backBtn = document.getElementById('header-back');
-    const deleteBtn = document.getElementById('header-btn-delete-char');
-    const createBtn = document.getElementById('header-btn-create-char');
-    const headerTitle = document.getElementById('header-title');
-    const headerArrow = document.getElementById('header-arrow');
-
-    if(headerLogo) headerLogo.style.display = 'flex';
-    backBtn.style.display = 'none';
-    if(deleteBtn) deleteBtn.style.display = 'none';
-    if(createBtn) createBtn.style.display = 'none';
+    // Restore Header via setupDefaultHeader (or similar logic)
+    // Since we don't have direct access to setupDefaultHeader here easily without importing, 
+    // we rely on the fact that we are returning to a view.
+    // Ideally, we should trigger the view's header setup.
     
     if (previousView) {
+        // Trigger click on active tab to restore header state
         const prevTab = document.querySelector(`.tab-btn[data-target="${previousView.id}"]`);
-        if (prevTab) {
-            const titleKey = prevTab.getAttribute('data-i18n-title');
-            headerTitle.textContent = translations[currentLang][titleKey];
-        }
-        const hasDropdown = (previousView.id === 'view-dialogs' || previousView.id === 'view-characters');
-        headerArrow.style.display = hasDropdown ? 'block' : 'none';
+        if (prevTab) prevTab.click();
     }
 
     document.querySelector('.tabbar').style.display = 'flex';
