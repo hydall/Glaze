@@ -1,30 +1,35 @@
 import { formatText, replaceMacros } from './textFormatter.js';
 import { scrollToBottom } from './ui.js';
+import { showBottomSheet, closeBottomSheet, showBigInfoSheet } from './bottomsheet.js';
 import { db } from './db.js';
 import { BackgroundTask } from '@capawesome/capacitor-background-task';
-
-let requestCounter = 0;
+import { Capacitor } from '@capacitor/core';
+import { ForegroundService } from '@capawesome-team/capacitor-android-foreground-service';
 
 export async function sendToLLM(text, activeChatChar, translations, currentLang, appendMessage, onComplete, onError, controller, onUpdate, type = 'normal') {
     let apiKey = localStorage.getItem('api-key');
-    let apiUrl = localStorage.getItem('sc_api_endpoint_normalized') || localStorage.getItem('api-endpoint') || 'https://api.openai.com/v1';
-    let model = localStorage.getItem('api-model') || 'gpt-3.5-turbo';
+    let apiUrl = localStorage.getItem('sc_api_endpoint_normalized') || localStorage.getItem('api-endpoint');
+    let model = localStorage.getItem('api-model');
     let stream = localStorage.getItem('sc_api_stream') === 'true';
     let requestReasoning = localStorage.getItem('sc_api_request_reasoning') === 'true';
     let temp = parseFloat(localStorage.getItem('sc_api_temp')) || 0.7;
     let topP = parseFloat(localStorage.getItem('sc_api_topp')) || 0.9;
     let maxTokens = parseInt(localStorage.getItem('api-max-tokens')) || 300;
 
-    if (!apiKey) {
-        apiKey = prompt("Please enter your OpenAI API Key (stored locally):");
-        if (apiKey) {
-            localStorage.setItem('api-key', apiKey.trim());
-            const keyInput = document.getElementById('api-key');
-            if (keyInput) keyInput.value = apiKey.trim();
-        } else {
-            appendMessage({ role: 'char', text: "API Key is required. Please try again.", time: "System" }, null, "System", null);
+    if (!apiUrl || !model) {
+        showBigInfoSheet({
+            title: translations[currentLang]['section_connection'] || "Connection",
+            icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
+            description: translations[currentLang]['api_not_configured'] || "API Not Configured",
+            buttonText: translations[currentLang]['btn_configure'] || "Configure",
+            onButtonClick: () => {
+                closeBottomSheet();
+                const tab = document.querySelector('.tab-btn[data-target="view-generation"]');
+                if (tab) tab.click();
+            }
+        });
+        if (onError) onError(new Error("API Not Configured"));
             return;
-        }
     }
 
     const container = document.getElementById('chat-messages');
@@ -204,29 +209,60 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
     let backgroundTaskId = null;
     let completeBackgroundTask = null;
     let isTaskFinished = false;
+    const isAndroid = Capacitor.getPlatform() === 'android';
 
-    try {
-        backgroundTaskId = await BackgroundTask.beforeExit(async () => {
-            if (isTaskFinished) {
-                if (backgroundTaskId) BackgroundTask.finish({ taskId: backgroundTaskId });
-                return;
-            }
-            await new Promise(resolve => {
-                completeBackgroundTask = resolve;
+    if (isAndroid) {
+        try {
+            // 1. Создаем канал уведомлений (если еще нет)
+            await ForegroundService.createNotificationChannel({
+                id: 'sc_generation_channel',
+                name: 'Generation Status',
+                description: 'Shows when the app is generating text',
+                importance: 1, // Importance.Min (Скрывает иконку из статус-бара)
+                visibility: 1
             });
-            if (backgroundTaskId) BackgroundTask.finish({ taskId: backgroundTaskId });
-        });
-    } catch (e) {
-        console.warn("Background Task setup failed:", e);
+
+            // 2. Запускаем сервис с уведомлением
+            await ForegroundService.startForegroundService({
+                id: 1001, // Уникальный ID уведомления
+                title: 'SillyCradle',
+                body: translations[currentLang]['model_typing'] || 'Generating...',
+                smallIcon: 'ic_stat_icon_config_sample', // Используем стандартную иконку приложения
+                silent: true, // Без звука
+                notificationChannelId: 'sc_generation_channel'
+            });
+        } catch (e) {
+            console.warn("Android Foreground Service failed:", e);
+        }
+    } else {
+        // Fallback для iOS и других платформ
+        try {
+            backgroundTaskId = await BackgroundTask.beforeExit(async () => {
+                if (isTaskFinished) {
+                    if (backgroundTaskId) BackgroundTask.finish({ taskId: backgroundTaskId });
+                    return;
+                }
+                await new Promise(resolve => {
+                    completeBackgroundTask = resolve;
+                });
+                if (backgroundTaskId) BackgroundTask.finish({ taskId: backgroundTaskId });
+            });
+        } catch (e) {
+            console.warn("Background Task setup failed:", e);
+        }
     }
+
+    let fullText = "";
+
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
     try {
         const response = await fetch(`${apiUrl}/chat/completions`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
+            headers: headers,
             body: JSON.stringify(requestBody),
             signal: controller ? controller.signal : undefined
         });
@@ -236,7 +272,6 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
         if (stream) {
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
-            let fullText = "";
             let isFirst = true;
             
             while (true) {
@@ -266,7 +301,6 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
                         if (delta && (delta.content || delta.reasoning_content)) {
                             const content = delta.content || "";
                             const reasoning = delta.reasoning_content || null;
-                            console.log("Stream chunk:", content, "Reasoning:", reasoning);
                             fullText += content;
                             
                             if (isFirst) {
@@ -289,12 +323,6 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
             if (onComplete) onComplete(fullText, null);
 
         } else {
-            requestCounter++;
-            // TEST: Fail normal generation on even requests
-            if (requestCounter % 2 === 0) {
-                throw new Error("TEST: Normal generation forced fail");
-            }
-
             const data = await response.json();
             console.log("LLM Response:", data);
             const content = data.choices[0].message.content;
@@ -308,6 +336,15 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
             removeTypingWithAnimation();
             return;
         }
+
+        // Если сеть отвалилась (в фоне), но текст есть — сохраняем его как успех
+        if (fullText.length > 0) {
+            console.warn("Network error during stream, saving partial response:", e);
+            if (onComplete) onComplete(fullText, null);
+            removeTypingWithAnimation();
+            return;
+        }
+
         removeTypingWithAnimation();
         if (onError) onError(e);
     } finally {
@@ -316,10 +353,16 @@ export async function sendToLLM(text, activeChatChar, translations, currentLang,
             try { wakeLock.release(); } catch (e) {}
         }
         
-        // Signal Background Task to finish
-        isTaskFinished = true;
-        if (completeBackgroundTask) {
-            completeBackgroundTask();
+        if (isAndroid) {
+            try {
+                await ForegroundService.stopForegroundService();
+            } catch (e) { console.warn("Failed to stop foreground service:", e); }
+        } else {
+            // Signal Background Task to finish (iOS/Web)
+            isTaskFinished = true;
+            if (completeBackgroundTask) {
+                completeBackgroundTask();
+            }
         }
     }
 }

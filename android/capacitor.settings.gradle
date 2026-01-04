@@ -2,6 +2,9 @@
 include ':capacitor-android'
 project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/android/capacitor')
 
+include ':anuradev-capacitor-background-mode'
+project(':anuradev-capacitor-background-mode').projectDir = new File('../node_modules/@anuradev/capacitor-background-mode/android')
+
 include ':capacitor-app'
 project(':capacitor-app').projectDir = new File('../node_modules/@capacitor/app/android')
 
@@ -16,6 +19,9 @@ project(':capacitor-status-bar').projectDir = new File('../node_modules/@capacit
 
 include ':capacitor-toast'
 project(':capacitor-toast').projectDir = new File('../node_modules/@capacitor/toast/android')
+
+include ':capawesome-team-capacitor-android-foreground-service'
+project(':capawesome-team-capacitor-android-foreground-service').projectDir = new File('../node_modules/@capawesome-team/capacitor-android-foreground-service/android')
 
 include ':capawesome-capacitor-background-task'
 project(':capawesome-capacitor-background-task').projectDir = new File('../node_modules/@capawesome/capacitor-background-task/android')

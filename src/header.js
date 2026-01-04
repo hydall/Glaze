@@ -214,37 +214,6 @@ export function setupMoreHeader(title, customElement) {
     }
 }
 
-export function setupImageViewerHeader(onBack) {
-    clearHeader();
-    const appHeader = document.querySelector('.app-header');
-
-    if (appHeader) {
-        appHeader.classList.add('fixed-header', 'header-transparent', 'header-overlay');
-    }
-
-    let closeBtn = document.getElementById('header-btn-close-viewer');
-    if (!closeBtn) {
-        closeBtn = document.createElement('div');
-        closeBtn.id = 'header-btn-close-viewer';
-        closeBtn.className = 'header-btn';
-        closeBtn.style.position = 'absolute';
-        closeBtn.style.right = '10px';
-        closeBtn.style.top = '50%';
-        closeBtn.style.transform = 'translateY(-50%)';
-        closeBtn.style.cursor = 'pointer';
-        closeBtn.innerHTML = `<svg viewBox="0 0 24 24" style="width:28px;height:28px;fill:white;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`;
-        if (appHeader) appHeader.appendChild(closeBtn);
-    }
-    closeBtn.style.display = 'flex';
-    
-    const newBtn = closeBtn.cloneNode(true);
-    closeBtn.parentNode.replaceChild(newBtn, closeBtn);
-    newBtn.onclick = (e) => {
-        e.stopPropagation();
-        if (onBack) onBack();
-    };
-}
-
 export function updateHeaderAvatar(char) {
     const headerAvatarImg = document.getElementById('chat-header-avatar');
     if (!headerAvatarImg) return;

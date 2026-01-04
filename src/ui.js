@@ -1,4 +1,4 @@
-import { currentLang } from './APPSettings.js';
+import { currentLang, themeMode, setThemeMode, getThemeMode, imageViewerMode, setImageViewerMode } from './APPSettings.js';
 import { translations } from './i18n.js';
 import { formatText } from './textFormatter.js';
 import { App } from '@capacitor/app';
@@ -7,6 +7,7 @@ import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { NavigationBar } from '@hugotomazi/capacitor-navigation-bar';
+import { showBottomSheet, closeBottomSheet } from './bottomsheet.js';
 
 export function attachLongPress(element, callback) {
     let timer;
@@ -45,185 +46,7 @@ export function attachLongPress(element, callback) {
     return () => isLongPress;
 }
 
-let genericSheetOverlay = null;
-let activeSheetConfig = null;
-let closeTimer = null;
 let isKeyboardOpen = false;
-
-export function initGenericBottomSheet() {
-    if (document.getElementById('generic-bottom-sheet')) {
-        genericSheetOverlay = document.getElementById('generic-bottom-sheet');
-        return;
-    }
-
-    const overlay = document.createElement('div');
-    overlay.id = 'generic-bottom-sheet';
-    overlay.className = 'modal-overlay bottom-sheet-overlay';
-    overlay.style.display = 'none';
-    overlay.innerHTML = `
-        <div class="bottom-sheet-content">
-            <div class="sheet-handle-bar"></div>
-            <div class="sheet-header" style="display:none;">
-                <span class="sheet-title"></span>
-                <div class="sheet-header-action"></div>
-            </div>
-            <div class="sheet-scroll-container" style="overflow-y: auto; max-height: 70vh;">
-                <div class="sheet-list"></div>
-                <div class="sheet-custom-content"></div>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-    genericSheetOverlay = overlay;
-
-    const content = overlay.querySelector('.bottom-sheet-content');
-    let startY = 0;
-    let isDragging = false;
-
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeBottomSheet();
-    });
-
-    content.addEventListener('touchstart', (e) => {
-        const scrollContainer = overlay.querySelector('.sheet-scroll-container');
-        if (scrollContainer && scrollContainer.scrollTop > 0) return;
-        
-        startY = e.touches[0].clientY;
-        isDragging = true;
-        content.style.transition = 'none';
-    }, { passive: true });
-
-    content.addEventListener('touchmove', (e) => {
-        if (!isDragging) return; 
-        const delta = e.touches[0].clientY - startY;
-        if (delta > 0) {
-            e.preventDefault();
-            content.style.transform = `translateY(${delta}px)`;
-        }
-    }, { passive: false });
-
-    content.addEventListener('touchend', (e) => {
-        if (!isDragging) return;
-        isDragging = false;
-        const delta = e.changedTouches[0].clientY - startY;
-        content.style.transition = '';
-        if (delta > 100) {
-            closeBottomSheet();
-        } else {
-            content.style.transform = '';
-        }
-    });
-}
-
-export function showBottomSheet({ title, items, content, headerAction, onClose }) {
-    if (!genericSheetOverlay) initGenericBottomSheet();
-    const overlay = genericSheetOverlay;
-    
-    if (closeTimer) {
-        clearTimeout(closeTimer);
-        closeTimer = null;
-    }
-
-    const titleEl = overlay.querySelector('.sheet-title');
-    const headerEl = overlay.querySelector('.sheet-header');
-    const headerActionEl = overlay.querySelector('.sheet-header-action');
-    const listEl = overlay.querySelector('.sheet-list');
-    const customEl = overlay.querySelector('.sheet-custom-content');
-
-    // Reset
-    listEl.innerHTML = '';
-    customEl.innerHTML = '';
-    headerActionEl.innerHTML = '';
-    listEl.style.display = 'none';
-    customEl.style.display = 'none';
-
-    // Title
-    if (title) {
-        titleEl.textContent = title;
-        headerEl.style.display = 'flex';
-    } else {
-        headerEl.style.display = 'none';
-    }
-
-    // Header Action
-    if (headerAction) {
-        const btn = document.createElement('div');
-        btn.className = 'sheet-action-btn';
-        btn.innerHTML = headerAction.icon || '+';
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            if (headerAction.onClick) headerAction.onClick();
-        };
-        headerActionEl.appendChild(btn);
-    }
-
-    // Items List
-    if (items && items.length > 0) {
-        items.forEach(item => {
-            const el = document.createElement('div');
-            el.className = 'sheet-item';
-            if (item.id) el.id = item.id;
-            
-            const iconHtml = item.icon ? `<div class="sheet-item-icon" style="${item.iconColor ? 'fill:'+item.iconColor : ''}">${item.icon}</div>` : '';
-            const labelStyle = item.isDestructive ? 'color: #ff4444;' : '';
-            
-            el.innerHTML = `
-                ${iconHtml}
-                <div class="sheet-item-content" style="${labelStyle}">${item.label}</div>
-            `;
-            
-            el.onclick = (e) => {
-                if (item.onClick) item.onClick(e);
-            };
-            listEl.appendChild(el);
-        });
-        listEl.style.display = 'block';
-    }
-
-    // Custom Content
-    if (content) {
-        if (typeof content === 'string') {
-            customEl.innerHTML = content;
-        } else if (content instanceof HTMLElement || content instanceof DocumentFragment) {
-            customEl.appendChild(content);
-        }
-        customEl.style.display = 'block';
-    }
-
-    activeSheetConfig = { onClose };
-
-    overlay.style.display = 'flex';
-    const contentEl = overlay.querySelector('.bottom-sheet-content');
-    
-    // Double RAF ensures the browser paints the display:flex frame before adding the class
-    requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            contentEl.style.transform = ''; 
-            overlay.classList.add('visible');
-        });
-    });
-}
-
-export function closeBottomSheet() {
-    if (!genericSheetOverlay) return;
-    const overlay = genericSheetOverlay;
-    const content = overlay.querySelector('.bottom-sheet-content');
-    
-    content.style.transform = '';
-    overlay.classList.remove('visible');
-    
-    if (activeSheetConfig && activeSheetConfig.onClose) {
-        activeSheetConfig.onClose();
-    }
-    activeSheetConfig = null;
-
-    if (closeTimer) clearTimeout(closeTimer);
-    closeTimer = setTimeout(() => {
-        overlay.style.display = 'none';
-        content.style.transform = '';
-        closeTimer = null;
-    }, 300);
-}
 
 export function initRipple() {
     const elements = document.querySelectorAll('.tabbar, .chat-input-bar');
@@ -271,7 +94,6 @@ export function rgbToHex(rgb) {
 }
 
 export async function updateAppColors(forceMainView = false) {
-    const isDark = document.body.classList.contains('dark-theme');
     const chatView = document.getElementById('view-chat');
     const isChatOpen = chatView && chatView.classList.contains('active-view') && !forceMainView;
     
@@ -291,6 +113,14 @@ export async function updateAppColors(forceMainView = false) {
         }
     };
 
+    let isDark = false;
+    const currentMode = getThemeMode();
+    if (currentMode === 'system') {
+        isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } else {
+        isDark = currentMode === 'dark';
+    }
+
     const theme = isDark ? palette.dark : palette.light;
     
     const statusBarColor = theme.statusBar;
@@ -298,6 +128,8 @@ export async function updateAppColors(forceMainView = false) {
 
     // Apply to body to prevent flashes
     document.body.style.backgroundColor = theme.body;
+    if (isDark) document.body.classList.add('dark-theme');
+    else document.body.classList.remove('dark-theme');
 
     let meta = document.querySelector('meta[name="theme-color"]');
     if (!meta) {
@@ -315,7 +147,6 @@ export async function updateAppColors(forceMainView = false) {
 }
 
 export function initThemeToggle() {
-    const themeToggle = document.getElementById('theme-toggle');
     // Fix: Inject global styles for text selection and UI tweaks
     if (!document.getElementById('ui-fixes-styles')) {
         const style = document.createElement('style');
@@ -329,15 +160,65 @@ export function initThemeToggle() {
     }
 
     // Auto-detect system theme
-    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        document.body.classList.add('dark-theme');
-    }
     updateAppColors();
 
-    if (themeToggle) {
-        themeToggle.addEventListener('click', () => {
-            document.body.classList.toggle('dark-theme');
-            updateAppColors();
+    // System theme change listener
+    if (window.matchMedia) {
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        const handleChange = () => {
+            if (getThemeMode() === 'system') {
+                updateAppColors();
+            }
+        };
+        if (mediaQuery.addEventListener) mediaQuery.addEventListener('change', handleChange);
+        else mediaQuery.addListener(handleChange);
+    }
+
+    // Theme Selector
+    const themeSelector = document.getElementById('theme-selector');
+    const themeValue = document.getElementById('theme-value-text');
+    
+    const updateThemeText = () => {
+        if (!themeValue) return;
+        const map = { 'system': 'Системная', 'dark': 'Тёмная', 'light': 'Светлая' };
+        themeValue.textContent = map[getThemeMode()] || 'Системная';
+    };
+    updateThemeText();
+
+    if (themeSelector) {
+        themeSelector.addEventListener('click', () => {
+            const getIcon = (mode) => getThemeMode() === mode ? '<svg viewBox="0 0 24 24" style="fill: var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : '';
+            showBottomSheet({
+                title: 'Тема',
+                items: [
+                    { label: 'Системная', icon: getIcon('system'), onClick: () => { setThemeMode('system'); updateAppColors(); updateThemeText(); closeBottomSheet(); } },
+                    { label: 'Тёмная', icon: getIcon('dark'), onClick: () => { setThemeMode('dark'); updateAppColors(); updateThemeText(); closeBottomSheet(); } },
+                    { label: 'Светлая', icon: getIcon('light'), onClick: () => { setThemeMode('light'); updateAppColors(); updateThemeText(); closeBottomSheet(); } }
+                ]
+            });
+        });
+    }
+
+    // Holo Cards Selector
+    const holoSelector = document.getElementById('holocards-selector');
+    const holoValue = document.getElementById('holocards-value-text');
+
+    const updateHoloText = () => {
+        if (!holoValue) return;
+        holoValue.textContent = imageViewerMode === 'holo' ? 'Holo Card' : 'Стандарт';
+    };
+    updateHoloText();
+
+    if (holoSelector) {
+        holoSelector.addEventListener('click', () => {
+            const getIcon = (mode) => imageViewerMode === mode ? '<svg viewBox="0 0 24 24" style="fill: var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : '';
+            showBottomSheet({
+                title: 'Просмотр изображений',
+                items: [
+                    { label: 'Стандартный просмотрщик изображений', description: 'Стандартный просмотрщик изображений', icon: getIcon('default'), onClick: () => { setImageViewerMode('default'); updateHoloText(); closeBottomSheet(); } },
+                    { label: 'Голографическая карточка', description: 'Она блестит!', icon: getIcon('holo'), onClick: () => { setImageViewerMode('holo'); updateHoloText(); closeBottomSheet(); } }
+                ]
+            });
         });
     }
 }
@@ -501,7 +382,7 @@ export function initBackButton() {
         // Check Image Viewer
         const imageViewer = document.getElementById('image-viewer-overlay');
         if (imageViewer && imageViewer.classList.contains('visible')) {
-            const closeBtn = document.getElementById('header-btn-close-viewer');
+            const closeBtn = document.getElementById('image-viewer-close-btn');
             if (closeBtn) closeBtn.click();
             return;
         }
@@ -548,24 +429,30 @@ export function initBackButton() {
 export function animateTextChange(element, newText, direction, onUpdate) {
     const body = element.querySelector('.msg-body');
     
-    body.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
-    body.style.opacity = '0';
-    if (direction) {
-        body.style.transform = `translateX(${direction * -20}px)`;
-    }
-    
-    setTimeout(() => {
+    // Reset inline styles that might interfere (from swipe gestures)
+    body.style.transform = '';
+    body.style.transition = '';
+
+    // Clean up previous animations if any
+    body.classList.remove('slide-out-left', 'slide-out-right', 'slide-in-left', 'slide-in-right');
+    void body.offsetWidth; // Trigger reflow
+
+    const exitClass = direction > 0 ? 'slide-out-left' : 'slide-out-right';
+    body.classList.add(exitClass);
+
+    body.addEventListener('animationend', () => {
+        // Prevent flickering: keep hidden until new animation starts
+        body.style.opacity = '0';
+        body.classList.remove(exitClass);
+        
         if (onUpdate) onUpdate();
         else body.innerHTML = formatText(newText);
         
-        body.style.transition = 'none';
-        if (direction) {
-            body.style.transform = `translateX(${direction * 20}px)`;
-        }
         void body.offsetWidth; // Trigger reflow
 
-        body.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
-        body.style.opacity = '1';
-        body.style.transform = 'translateX(0)';
-    }, 200);
+        const enterClass = direction > 0 ? 'slide-in-right' : 'slide-in-left';
+        body.classList.add(enterClass);
+        body.style.opacity = ''; // Release opacity override
+        body.addEventListener('animationend', () => body.classList.remove(enterClass), { once: true });
+    }, { once: true });
 }

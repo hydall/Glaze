@@ -1,5 +1,6 @@
 import { getCharacterByName, characters } from './characterList.js';
-import { attachLongPress, showBottomSheet, closeBottomSheet } from './ui.js';
+import { attachLongPress } from './ui.js';
+import { showBottomSheet, closeBottomSheet } from './bottomsheet.js';
 import { formatText } from './textFormatter.js';
 import { isCharacterGenerating, createNewSession, deleteSession } from './chat.js';
 import { db } from './db.js';

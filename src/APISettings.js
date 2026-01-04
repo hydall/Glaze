@@ -1,8 +1,9 @@
-import { showBottomSheet, closeBottomSheet } from './ui.js';
+import { showBottomSheet, closeBottomSheet } from './bottomsheet.js';
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
+import { db } from './db.js';
 
-export function initSettings() {
+export async function initSettings() {
     // API Settings Logic (Sliders)
     const rangeConfigs = [
         { slider: 'api-temp', input: 'val-temp-input', key: 'sc_api_temp', def: 0.7 },
@@ -244,4 +245,153 @@ export function initSettings() {
             });
         });
     }
+
+    // --- API Presets Logic ---
+    const presetSelector = document.getElementById('btn-api-preset-selector');
+    const presetNameLabel = document.getElementById('current-api-preset-name');
+    
+    let apiPresets = [];
+    let activeApiPreset = null;
+
+    async function loadApiPresets() {
+        const saved = await db.get('sc_api_connection_presets');
+        if (saved && Array.isArray(saved) && saved.length > 0) {
+            apiPresets = saved;
+        } else {
+            // Create default from current
+            apiPresets = [{
+                id: 'default',
+                name: 'Default',
+                endpoint: localStorage.getItem('api-endpoint') || '',
+                key: localStorage.getItem('api-key') || '',
+                model: localStorage.getItem('api-model') || '',
+                max_tokens: localStorage.getItem('api-max-tokens') || '8000',
+                context: localStorage.getItem('api-context') || '32000',
+                temp: localStorage.getItem('sc_api_temp') || '0.7',
+                topp: localStorage.getItem('sc_api_topp') || '0.9',
+                stream: localStorage.getItem('sc_api_stream') === 'true',
+                reasoning: localStorage.getItem('sc_api_request_reasoning') === 'true'
+            }];
+            await db.set('sc_api_connection_presets', apiPresets);
+        }
+
+        const activeId = localStorage.getItem('sc_active_api_preset_id');
+        activeApiPreset = apiPresets.find(p => p.id === activeId) || apiPresets[0];
+        updatePresetUI();
+    }
+
+    function updatePresetUI() {
+        if (presetNameLabel) presetNameLabel.textContent = activeApiPreset.name;
+        
+        const setVal = (key, val, elId) => {
+            localStorage.setItem(key, val);
+            const el = document.getElementById(elId);
+            if (el) {
+                if (el.type === 'checkbox') el.checked = (val === true || val === 'true');
+                else el.value = val;
+                // Trigger change event for existing listeners (like normalization)
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        };
+
+        setVal('api-endpoint', activeApiPreset.endpoint, 'api-endpoint');
+        setVal('api-key', activeApiPreset.key, 'api-key');
+        setVal('api-model', activeApiPreset.model, 'api-model');
+        setVal('api-max-tokens', activeApiPreset.max_tokens, 'api-max-tokens');
+        setVal('api-context', activeApiPreset.context, 'api-context');
+        setVal('sc_api_temp', activeApiPreset.temp, 'api-temp');
+        setVal('sc_api_topp', activeApiPreset.topp, 'api-topp');
+        
+        const tempInput = document.getElementById('val-temp-input');
+        if (tempInput) tempInput.value = activeApiPreset.temp;
+        const toppInput = document.getElementById('val-topp-input');
+        if (toppInput) toppInput.value = activeApiPreset.topp;
+
+        setVal('sc_api_stream', activeApiPreset.stream, 'api-stream');
+        setVal('sc_api_request_reasoning', activeApiPreset.reasoning, 'api-reasoning');
+
+        if (activeApiPreset.endpoint) {
+             if (debounceTimer) clearTimeout(debounceTimer);
+             debounceTimer = setTimeout(fetchModels, 500);
+        }
+    }
+
+    async function saveApiPresets() {
+        await db.set('sc_api_connection_presets', apiPresets);
+        localStorage.setItem('sc_active_api_preset_id', activeApiPreset.id);
+    }
+
+    const hookInput = (id, field) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', () => {
+                activeApiPreset[field] = el.type === 'checkbox' ? el.checked : el.value;
+                saveApiPresets();
+            });
+            if (el.type === 'checkbox') {
+                el.addEventListener('change', () => {
+                    activeApiPreset[field] = el.checked;
+                    saveApiPresets();
+                });
+            }
+        }
+    };
+
+    hookInput('api-endpoint', 'endpoint');
+    hookInput('api-key', 'key');
+    hookInput('api-model', 'model');
+    hookInput('api-max-tokens', 'max_tokens');
+    hookInput('api-context', 'context');
+    hookInput('api-temp', 'temp');
+    hookInput('api-topp', 'topp');
+    hookInput('api-stream', 'stream');
+    hookInput('api-reasoning', 'reasoning');
+
+    if (presetSelector) {
+        presetSelector.addEventListener('click', () => {
+            const listContainer = document.createElement('div');
+            apiPresets.forEach(p => {
+                const el = document.createElement('div');
+                el.className = 'sheet-item';
+                if (p.id === activeApiPreset.id) el.style.backgroundColor = 'var(--bg-gray)';
+                el.innerHTML = `<div class="sheet-item-content">${p.name}</div>` + 
+                    (apiPresets.length > 1 ? `<div class="sheet-item-remove"><svg viewBox="0 0 24 24" style="fill:#ff4444;width:24px;height:24px;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></div>` : '');
+                
+                el.addEventListener('click', () => {
+                    activeApiPreset = p;
+                    saveApiPresets();
+                    updatePresetUI();
+                    closeBottomSheet();
+                });
+
+                if (apiPresets.length > 1) {
+                    el.querySelector('.sheet-item-remove').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        apiPresets = apiPresets.filter(pr => pr.id !== p.id);
+                        if (activeApiPreset.id === p.id) activeApiPreset = apiPresets[0];
+                        saveApiPresets();
+                        updatePresetUI();
+                        closeBottomSheet();
+                    });
+                }
+                listContainer.appendChild(el);
+            });
+
+            // Add "Create New" button to the list
+            const addEl = document.createElement('div');
+            addEl.className = 'sheet-item';
+            addEl.innerHTML = `<div class="sheet-item-icon"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></div><div class="sheet-item-content">${translations[currentLang]['create_new']}</div>`;
+            addEl.addEventListener('click', () => {
+                closeBottomSheet();
+                setTimeout(() => {
+                    showBottomSheet({ title: translations[currentLang]['new_preset'], content: `<div class="menu-group" style="margin-bottom: 20px;"><div class="settings-item"><input type="text" id="new-api-preset-name" placeholder="Preset Name" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-gray);color:var(--text-black);"></div></div><div class="btn-save" id="btn-create-api-preset">${translations[currentLang]['btn_create']}</div>` });
+                    setTimeout(() => { const btn = document.getElementById('btn-create-api-preset'); const input = document.getElementById('new-api-preset-name'); if (btn && input) { input.focus(); btn.onclick = () => { const name = input.value.trim() || "New Preset"; const newPreset = { ...activeApiPreset, id: Date.now().toString(), name: name }; apiPresets.push(newPreset); activeApiPreset = newPreset; saveApiPresets(); updatePresetUI(); closeBottomSheet(); }; } }, 100);
+                }, 300);
+            });
+            listContainer.appendChild(addEl);
+
+            showBottomSheet({ title: "API Presets", content: listContainer });
+        });
+    }
+    await loadApiPresets();
 }

@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>SillyCradle</title>
+  <script type="module" crossorigin src="./assets/index-BDNQUO4z.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-C27w-iL_.css">
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="app-header">
+        <div id="header-back" class="header-btn-left" style="display: none;">
+            <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </div>
+        <div id="header-logo" class="header-logo">
+            <span style="color: var(--vk-blue); font-weight: 800; font-size: 22px;">SC</span>
+        </div>
+        <div class="header-content" id="header-content-default">
+            <span id="header-title" data-i18n="header_dialogs">Сообщения</span>
+            <svg id="header-arrow" class="header-arrow" viewBox="0 0 24 24" style="display: none;"><path d="M7 10l5 5 5-5z"/></svg>
+        </div>
+        <div class="header-chat-info" id="header-chat-info" style="display: none;">
+            <div class="header-avatar"><img id="chat-header-avatar" src="" alt=""></div>
+            <div style="display: flex; flex-direction: column; justify-content: center; margin-left: 10px;">
+                <div class="header-name" id="chat-header-name" style="line-height: 1.2;">Персонаж</div>
+                <div id="chat-header-session" style="color: var(--text-gray); font-size: 0.8em; line-height: 1.2;"></div>
+            </div>
+        </div>
+        <div id="header-actions" class="header-btn-right" style="display: none;">
+            <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+        </div>
+        <div id="header-btn-delete-char" class="header-btn-right" style="display: none;">
+            <svg viewBox="0 0 24 24" style="fill: #ff4444;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        </div>
+        
+        <!-- Custom Dropdown -->
+        <!-- <div id="header-dropdown" class="header-dropdown" style="display: none;">
+        </div> -->
+    </header>
+
+    <!-- Main Content Area -->
+    <main id="main-container">
+        
+        <!-- VIEW 1: DIALOGS -->
+        <div id="view-dialogs" class="view active-view">
+            <div class="search-bar">
+                <input type="text" id="search-dialogs" placeholder="Поиск" data-i18n-placeholder="search_dialogs">
+            </div>
+            <div class="list-container" id="dialogs-list">
+                <!-- JS will populate this -->
+            </div>
+            <div class="fab-add" id="fab-add-dialog">+</div>
+        </div>
+
+        <!-- VIEW 2: CHARACTERS -->
+        <div id="view-characters" class="view">
+            <div class="search-bar">
+                <input type="text" id="search-characters" placeholder="Поиск персонажей" data-i18n-placeholder="search_characters">
+            </div>
+            <div class="favorites-row" id="favorites-list">
+                <!-- JS will populate this -->
+            </div>
+            <div class="list-container" id="characters-list">
+                <!-- JS will populate this -->
+            </div>
+            <div class="fab-add" id="fab-add-character">+</div>
+        </div>
+
+        <!-- VIEW 3: MENU (SETTINGS & EXTRAS) -->
+        <div id="view-menu" class="view">
+            
+            <!-- Persona Header -->
+            <div class="menu-section user-profile" id="persona-card">
+                <div class="avatar big-avatar" style="background-color: #e88;">U</div>
+                <div class="content">
+                    <div class="title">User Persona</div>
+                    <div class="item-subtitle" data-i18n="persona_hint">Нажмите, чтобы сменить</div>
+                </div>
+            </div>
+
+            <div class="section-header" data-i18n="section_appearance">Внешний вид</div>
+            <div class="menu-group">
+                <div class="menu-item" id="theme-selector">
+                    <svg class="menu-icon" viewBox="0 0 24 24">
+                        <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/>
+                    </svg>
+                    <div class="menu-text" data-i18n="menu_theme">Тема</div>
+                    <div class="menu-value" id="theme-value-text">Системная</div>
+                </div>
+                <div class="menu-item" id="holocards-selector">
+                    <svg class="menu-icon" viewBox="0 0 24 24"><path d="M21 3H3C2 3 1 4 1 5v14c0 1.1.9 2 2 2h18c1 0 2-1 2-2V5c0-1-1-2-2-2zm0 15.92c-.02.03-.06.06-.08.08H3V5.08L3.08 5h17.83c.03.02.06.06.08.08v13.84zm-10-3.41L8.5 12.5 5 17h14l-4.5-6-3.5 4.51z"/></svg>
+                    <div class="menu-text" data-i18n="label_holocards">Holo Cards</div>
+                    <div class="menu-value" id="holocards-value-text">Default</div>
+                </div>
+            </div>
+
+            <div class="section-header" data-i18n="section_settings">Настройки</div>
+            <div class="menu-group">
+                <div class="menu-item" id="lang-toggle">
+                    <svg class="menu-icon" viewBox="0 0 24 24">
+                        <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.91-4.33-3.56zm2.95-8H5.08c.96-1.65 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/>
+                    </svg>
+                    <div class="menu-text" data-i18n="menu_language">Язык: Русский</div>
+                </div>
+                <!--  <div class="menu-item">
+                    <svg class="menu-icon" viewBox="0 0 24 24">
+                        <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                    </svg>
+                    <div class="menu-text" data-i18n="menu_app_settings">Настройки приложения</div>  -->
+                </div>
+            </div>
+
+            <!--
+            <div class="section-header" data-i18n="section_content">Контент</div>
+            <div class="menu-group">
+                <div class="menu-item">
+                    <svg class="menu-icon" viewBox="0 0 24 24">
+                        <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/>
+                    </svg>
+                    <div class="menu-text" data-i18n="menu_glossary">Глоссарий</div>
+                </div>
+                <div class="menu-item">
+                    <svg class="menu-icon" viewBox="0 0 24 24">
+                        <path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/>
+                    </svg>
+                    <div class="menu-text" data-i18n="menu_lorebooks">Лорбуки (World Info)</div>
+                </div>
+            </div>
+            -->
+
+            <!--
+            <div class="section-header" data-i18n="section_info">Инфо</div>
+            <div class="menu-group">
+                <div class="menu-item">
+                    <svg class="menu-icon" viewBox="0 0 24 24">
+                        <path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+                    </svg>
+                    <div class="menu-text" data-i18n="menu_about">О SillyCradle</div>
+                </div>
+            </div>
+        </div>
+         -->
+        <!-- VIEW 4: GENERATION (API & PROMPT) -->
+        <div id="view-generation" class="view">
+            <!-- Sub-tabs Header -->
+            <div class="sub-tab-header">
+                <div class="segmented-control">
+                    <div class="sub-tab-btn active" data-subtarget="subview-api" data-i18n="subtab_api">API</div>
+                    <div class="sub-tab-btn" data-subtarget="subview-preset" data-i18n="subtab_preset">Пресет</div>
+                </div>
+            </div>
+
+            <!-- Sub-view: API -->
+            <div id="subview-api" class="sub-view active-sub-view">
+                <div class="section-header section-header-flex">
+                    <div class="preset-selector" id="btn-api-preset-selector">
+                        <span id="current-api-preset-name">Default</span>
+                        <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
+                    <div id="api-status-indicator" class="api-status">
+                        <div id="api-status-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: orange; margin-right: 6px;"></div>
+                        <span id="api-status-text">...</span>
+                    </div>
+                </div>
+                <div class="section-header" data-i18n="section_connection">Подключение</div>
+                <div class="menu-group">
+                    <div class="settings-item">
+                        <label>API Endpoint</label>
+                        <input type="text" id="api-endpoint" placeholder="http://127.0.0.1:5000/v1">
+                    </div>
+                    <div class="settings-item">
+                        <label>Model Name</label>
+                        <div style="position: relative;">
+                            <input type="text" id="api-model" placeholder="gemini-3-pro-preview" style="width: 100%; padding-right: 44px;">
+                            <div id="btn-model-list" style="position: absolute; right: 0; top: 0; bottom: 0; width: 44px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                                <svg viewBox="0 0 24 24" style="width: 24px; height: 24px; fill: var(--text-gray);"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-item">
+                        <label>API Key</label>
+                        <input type="password" id="api-key" placeholder="sk-...">
+                    </div>
+                </div>
+
+                <div class="section-header" data-i18n="section_gen_params">Параметры генерации</div>
+                <div class="menu-group">
+                    <div class="settings-item-range">
+                        <div class="range-row">
+                            <label data-i18n="label_temperature">Temperature</label>
+                            <input type="number" id="val-temp-input" class="range-input-val" step="0.01" value="0.7">
+                        </div>
+                        <input type="range" id="api-temp" min="0" max="2" step="0.01" value="0.7">
+                    </div>
+                    <div class="settings-item-range">
+                        <div class="range-row">
+                            <label data-i18n="label_top_p">Top P</label>
+                            <input type="number" id="val-topp-input" class="range-input-val" step="0.01" value="0.9">
+                        </div>
+                        <input type="range" id="api-topp" min="0" max="1" step="0.01" value="0.9">
+                    </div>
+                    <div class="settings-item">
+                        <label data-i18n="label_max_tokens">Max Output Tokens</label>
+                        <input type="number" id="api-max-tokens" value="8000">
+                    </div>
+                    <div class="settings-item">
+                        <label data-i18n="label_context_size">Context Size</label>
+                        <input type="number" id="api-context" value="32000">
+                    </div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label data-i18n="label_stream">Стриминг ответа</label>
+                            <div class="settings-desc" data-i18n="desc_stream">Показывать текст по мере генерации</div>
+                        </div>
+                        <input type="checkbox" id="api-stream" class="vk-switch">
+                    </div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label data-i18n="label_reasoning">Запрашивать ризонинг</label>
+                            <div class="settings-desc" data-i18n="desc_reasoning">Показывает блок раздумий</div>
+                        </div>
+                        <input type="checkbox" id="api-reasoning" class="vk-switch">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-view: PRESET -->
+            <div id="subview-preset" class="sub-view">
+                <div class="section-header section-header-flex">
+                    <div class="preset-selector" id="btn-preset-selector">
+                        <span id="current-preset-name">Default</span>
+                        <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
+                </div>
+                <div class="prompt-container" id="prompt-blocks-list">
+                    <!-- Blocks will be rendered here -->
+                </div>
+                <div class="section-header" data-i18n="label_preset_prompts">Function Prompts</div>
+                <div class="menu-group">
+                    <div class="settings-item">
+                        <label data-i18n="label_impersonation_prompt">Impersonation Prompt</label>
+                        <textarea id="impersonation-prompt-input" rows="3" placeholder="Prompt to trigger impersonation..."></textarea>
+                    </div>
+                    <div class="settings-item">
+                        <label data-i18n="label_reasoning_tags">Теги ризонинга (Outer CoT)</label>
+                        <input type="text" id="api-reasoning-start" placeholder="<think>" data-i18n-placeholder="placeholder_tag_start" style="margin-bottom: 5px;">
+                        <input type="text" id="api-reasoning-end" placeholder="</think>" data-i18n-placeholder="placeholder_tag_end">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- VIEW 5: CHAT -->
+        <div id="view-chat" class="view">
+            <div class="chat-container" id="chat-messages">
+                <!-- Messages will be injected here -->
+            </div>
+            <div id="scroll-to-bottom" class="scroll-bottom-btn">
+                <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </div>
+            
+            <div class="chat-input-bar">
+                <div class="input-wrapper">
+                    <div id="chat-input-highlight" aria-hidden="true"></div>
+                    <textarea id="chat-input" rows="1" placeholder="Сообщение..." data-i18n-placeholder="chat_placeholder" type="text"></textarea>
+                </div>
+                <div class="chat-input-buttons">
+                    <div class="chat-btn" id="btn-magic">
+                        <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
+                    </div>
+                    <div id="impersonate-status" class="impersonate-status" style="display: none;">
+                        <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                        <span data-i18n="impersonating" style="font-size: 14px; color: var(--text-gray); margin-left: 4px;">Имперсонизация...</span>
+                    </div>
+                    <div class="chat-btn" id="btn-send">
+                        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                    </div>
+                </div>
+            </div>
+
+            <div id="magic-menu" class="magic-menu hidden">
+                <div class="magic-item" id="btn-regenerate">
+                    <svg class="magic-icon" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                    <span data-i18n="magic_regenerate">Регенерация</span>
+                </div>
+                <div class="magic-item" id="btn-impersonate">
+                    <svg class="magic-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+                    <span data-i18n="magic_impersonate">Имперсонизация</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- VIEW 6: PERSONA EDIT -->
+        <div id="view-persona-edit" class="view">
+            <div class="persona-edit-header">
+                <div class="avatar big-avatar" id="edit-persona-avatar"></div>
+                <div class="edit-avatar-hint" data-i18n="hint_change_avatar" style="font-size: 0.8em; opacity: 0.7; margin-top: 5px;">Нажмите для смены</div>
+                <input type="file" id="persona-avatar-upload" accept="image/*" style="display: none;">
+            </div>
+            
+            <div class="section-header" data-i18n="section_basic_info">Основная информация</div>
+            <div class="menu-group">
+                <div class="settings-item">
+                    <label data-i18n="label_name">Имя</label>
+                    <input type="text" id="persona-name-input" placeholder="Введите имя" data-i18n-placeholder="placeholder_enter_name">
+                </div>
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_char_prompt">Промпт персонажа</label>
+                        <div class="expand-btn" data-target="persona-prompt-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="persona-prompt-input" rows="3" placeholder="Описание персонажа..." data-i18n-placeholder="placeholder_char_desc"></textarea>
+                </div>
+            </div>
+            
+            <div class="settings-padding">
+                <div class="btn-save" id="btn-save-persona" data-i18n="btn_save">Сохранить</div>
+                <div class="btn-cancel-full" id="btn-cancel-persona" data-i18n="btn_cancel">Отмена</div>
+            </div>
+        </div>
+
+        <!-- VIEW 8: CHARACTER EDIT -->
+        <div id="view-character-edit" class="view">
+            <div class="persona-edit-header">
+                <div class="avatar big-avatar" id="edit-char-avatar"></div>
+                <div class="edit-avatar-hint" data-i18n="hint_change_avatar" style="font-size: 0.8em; opacity: 0.7; margin-top: 5px;">Нажмите для смены</div>
+                <input type="file" id="char-avatar-upload" accept="image/*" style="display: none;">
+            </div>
+            
+            <div class="section-header" data-i18n="section_basic_info">Основная информация</div>
+            <div class="menu-group">
+                <div class="settings-item">
+                    <label data-i18n="label_name">Имя</label>
+                    <input type="text" id="char-name-input">
+                </div>
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_description">Описание</label>
+                        <div class="expand-btn" data-target="char-description-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="char-description-input" rows="3"></textarea>
+                </div>
+                <div class="settings-item">
+                    <label data-i18n="label_creator_notes">Заметки автора</label>
+                    <textarea id="char-creator-notes-input" rows="2"></textarea>
+                </div>
+                <div class="settings-item">
+                    <label data-i18n="label_tags">Теги (через запятую)</label>
+                    <input type="text" id="char-tags-input">
+                </div>
+            </div>
+
+            <div class="section-header" data-i18n="section_personality">Личность и Сценарий</div>
+            <div class="menu-group">
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_personality">Личность</label>
+                        <div class="expand-btn" data-target="char-personality-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="char-personality-input" rows="4"></textarea>
+                </div>
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_scenario">Сценарий</label>
+                        <div class="expand-btn" data-target="char-scenario-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="char-scenario-input" rows="3"></textarea>
+                </div>
+            </div>
+
+            <div class="section-header" data-i18n="section_dialogue">Диалог</div>
+            <div class="menu-group">
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_first_mes">Первое сообщение</label>
+                        <div class="field-controls" style="display: flex; align-items: center; gap: 5px; margin-left: 10px;">
+                            <div class="arrow-btn" id="btn-prev-first-mes" style="cursor: pointer; opacity: 0.6;">&lt;</div>
+                            <span id="first-mes-counter" style="font-size: 0.8em; color: var(--text-gray);">1/1</span>
+                            <div class="arrow-btn" id="btn-next-first-mes" style="cursor: pointer; opacity: 0.6;">&gt;</div>
+                        </div>
+                        <div class="expand-btn" data-target="char-first-mes-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="char-first-mes-input" rows="4"></textarea>
+                </div>
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_mes_example">Примеры диалогов</label>
+                        <div class="field-controls" style="display: flex; align-items: center; gap: 5px; margin-left: 10px;">
+                            <div class="arrow-btn" id="btn-prev-first-mes" style="cursor: pointer; opacity: 0.6;">&lt;</div>
+                            <span id="first-mes-counter" style="font-size: 0.8em; color: var(--text-gray);">1/1</span>
+                            <div class="arrow-btn" id="btn-next-first-mes" style="cursor: pointer; opacity: 0.6;">&gt;</div>
+                        </div>
+                        <div class="expand-btn" data-target="char-mes-example-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="char-mes-example-input" rows="6"></textarea>
+                </div>
+            </div>
+
+            <div class="settings-padding">
+            </div>
+        </div>
+
+        <!-- VIEW 7: BLOCK EDIT -->
+        <div id="view-block-edit" class="view">
+            <div class="menu-group">
+                <div class="settings-item">
+                    <label data-i18n="label_role">Роль</label>
+                    <select id="edit-block-role" class="settings-select">
+                        <option value="system" data-i18n="role_system">Система</option>
+                        <option value="user" data-i18n="role_user">Пользователь</option>
+                        <option value="assistant" data-i18n="role_assistant">Ассистент</option>
+                    </select>
+                </div>
+                <div class="settings-item">
+                    <label data-i18n="label_block_name">Название</label>
+                    <input type="text" id="edit-block-name" placeholder="Название блока" data-i18n-placeholder="placeholder_block_name">
+                </div>
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_content">Содержимое</label>
+                        <div class="expand-btn" data-target="edit-block-content"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="edit-block-content" rows="10" placeholder="Текст промпта..." data-i18n-placeholder="placeholder_prompt_text"></textarea>
+                </div>
+            </div>
+            
+            <div class="settings-padding">
+                <div class="btn-delete-full" id="btn-delete-block" data-i18n="btn_delete">Удалить</div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Bottom Navigation Bar -->
+    <nav class="tabbar">
+        <div class="tab-btn active" data-target="view-dialogs" data-title="Сообщения" data-i18n-title="header_dialogs">
+            <svg class="tab-icon" viewBox="0 0 24 24">
+                <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+            </svg>
+            <span class="tab-label" data-i18n="tab_dialogs">Диалоги</span>
+        </div>
+        
+        <div class="tab-btn" data-target="view-characters" data-title="Персонажи" data-i18n-title="header_characters">
+            <svg class="tab-icon" viewBox="0 0 24 24">
+                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+            </svg>
+            <span class="tab-label" data-i18n="tab_characters">Персонажи</span>
+        </div>
+
+        <div class="tab-btn" data-target="view-generation" data-title="Генерация" data-i18n-title="header_generation">
+            <svg class="tab-icon" viewBox="0 0 24 24">
+                <path d="M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1.5-4c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+            </svg>
+            <span class="tab-label" data-i18n="tab_generation">Генерация</span>
+        </div>
+
+        <div class="tab-btn" data-target="view-menu" data-title="Ещё" data-i18n-title="header_more">
+            <svg class="tab-icon" viewBox="0 0 24 24">
+                <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+            </svg>
+            <span class="tab-label" data-i18n="tab_more">Ещё</span>
+        </div>
+    </nav>
+
+    <!-- Full Screen Editor -->
+    <div id="full-screen-editor" class="view" style="z-index: 2000; display: none;">
+        <header class="app-header">
+            <div id="fs-editor-close" class="header-btn-left">
+                <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            </div>
+            <div class="header-content" data-i18n="header_editor">Редактор</div>
+            <div id="fs-editor-save" class="header-btn-right">
+                <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+            </div>
+        </header>
+        <div class="fs-editor-body">
+            <textarea id="fs-editor-textarea"></textarea>
+        </div>
+    </div>
+
+    <!-- Bottom Sheet for New Preset Name -->
+    <div id="new-preset-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
+        <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
+            <div class="sheet-header">
+                <span class="sheet-title" data-i18n="new_preset">Новый пресет</span>
+            </div>
+            <div class="menu-group" style="margin-bottom: 20px;">
+                <div class="settings-item">
+                    <input type="text" id="new-preset-name-input" placeholder="Name" data-i18n-placeholder="placeholder_preset_name">
+                </div>
+            </div>
+            <div class="btn-save" id="btn-create-preset" data-i18n="btn_create">Создать</div>
+        </div>
+    </div>
+
+    <!-- Bottom Sheet for Preset Delete Confirmation -->
+    <div id="delete-preset-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
+        <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
+            <div class="sheet-header">
+                <span class="sheet-title" data-i18n="confirm_delete_preset">Удалить пресет?</span>
+            </div>
+            <div class="sheet-list">
+                <div class="sheet-item" id="btn-confirm-delete-preset">
+                    <div class="sheet-item-icon" style="fill: #ff4444;"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></div>
+                    <div class="sheet-item-content" style="color: #ff4444;" data-i18n="btn_yes">Да</div>
+                </div>
+                <div class="sheet-item" id="btn-cancel-delete-preset">
+                    <div class="sheet-item-icon"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
+                    <div class="sheet-item-content" data-i18n="btn_no">Нет</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Templates -->
+    <template id="tpl-typing-indicator">
+        <div class="typing-container">
+            <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            <span class="typing-text"></span>
+        </div>
+    </template>
+
+    <template id="tpl-msg-switcher">
+        <div class="msg-switcher">
+            <div class="msg-switcher-btn prev"><svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></div>
+            <div class="msg-switcher-count"></div>
+            <div class="msg-switcher-btn next"><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+        </div>
+    </template>
+
+    <template id="tpl-reasoning-block">
+        <div class="msg-reasoning collapsed entering">
+            <div class="msg-reasoning-header">
+                <span>Reasoning</span>
+                <svg class="reasoning-arrow" viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+            </div>
+            <div class="msg-reasoning-content">
+                <div class="msg-reasoning-inner"></div>
+            </div>
+        </div>
+    </template>
+
+    <template id="tpl-msg-actions-btn">
+        <div class="msg-actions-btn">
+            <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+        </div>
+    </template>
+
+    <template id="tpl-msg-edit-buttons">
+        <div class="edit-buttons">
+            <div class="edit-btn cancel" title="Cancel"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
+            <div class="edit-btn save" title="Save"><svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>
+        </div>
+    </template>
+
+</body>
+</html>

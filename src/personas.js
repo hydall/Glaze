@@ -1,6 +1,6 @@
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
-import { showBottomSheet, closeBottomSheet } from './ui.js';
+import { showBottomSheet, closeBottomSheet } from './bottomsheet.js';
 import { db } from './db.js';
 import { setupEditorHeader } from './header.js';
 

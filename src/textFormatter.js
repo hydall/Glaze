@@ -54,6 +54,9 @@ export function formatText(text) {
     // Horizontal Rule on its own line
     html = html.replace(/^(_{3,}|-{3,}|\*{3,})$/gm, '<hr>');
 
+    // Strikethrough
+    html = html.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>');
+
     // Bold and Italic
     html = html.replace(/\*\*\*([\s\S]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
     
@@ -113,4 +116,34 @@ export function replaceMacros(text, char, persona) {
                .replace(/{{personality}}/gi, charPersonality)
                .replace(/{{user}}/gi, userName)
                .replace(/{{persona}}/gi, userPersona);
+}
+
+export function formatInputPreview(text) {
+    if (!text) return "";
+    
+    // Escape HTML
+    let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    // Strikethrough ~~text~~
+    html = html.replace(/~~([\s\S]+?)~~/g, '<span class="md-strike">~~$1~~</span>');
+
+    // Use entity to prevent re-matching of asterisks by subsequent regexes
+    const AST = '&#42;';
+
+    // Bold+Italic ***text***
+    html = html.replace(/\*\*\*([\s\S]+?)\*\*\*/g, `<span class="md-bold-italic">${AST}${AST}${AST}$1${AST}${AST}${AST}</span>`);
+    
+    // Bold **text**
+    html = html.replace(/\*\*([\s\S]+?)\*\*/g, `<span class="md-bold">${AST}${AST}$1${AST}${AST}</span>`);
+    
+    // Italic *text*
+    html = html.replace(/\*([\s\S]+?)\*/g, `<span class="md-italic">${AST}$1${AST}</span>`);
+
+    // Newlines
+    html = html.replace(/\n/g, '<br>');
+    
+    // Trailing newline fix
+    if (text.endsWith('\n')) html += '<br>';
+
+    return html;
 }

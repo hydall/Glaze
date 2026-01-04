@@ -100,7 +100,7 @@
     "cat_anime": "Аниме",
     "cat_games": "Игры",
     "new_persona": "Новая персона",
-    "create_new": "+ Создать новую",
+    "create_new": "Создать новую",
     "new_block": "Новый блок",
     "dialog_started": "Диалог начат сегодня",
     "model_typing": "Генерация...",
@@ -132,5 +132,8 @@
     "placeholder_depth": "0 = в конце контекста",
     "label_enabled": "Включено",
     "date_yesterday": "Вчера",
-    "date_today": "Сегодня"
+    "date_today": "Сегодня",
+    "label_holocards": "Holo Cards (3D)",
+    "api_not_configured": "API не настроен. Пожалуйста, выберите модель и эндпоинт.",
+    "btn_configure": "Настроить"
 }

@@ -12,6 +12,7 @@
     "vite": "^7.2.4"
   },
   "dependencies": {
+    "@anuradev/capacitor-background-mode": "^7.2.1",
     "@capacitor/android": "^8.0.0",
     "@capacitor/app": "^8.0.0",
     "@capacitor/cli": "^8.0.0",
@@ -20,6 +21,7 @@
     "@capacitor/keyboard": "^8.0.0",
     "@capacitor/status-bar": "^8.0.0",
     "@capacitor/toast": "^8.0.0",
+    "@capawesome-team/capacitor-android-foreground-service": "^8.0.0",
     "@capawesome/capacitor-background-task": "^8.0.0",
     "@hugotomazi/capacitor-navigation-bar": "^4.0.1"
   }

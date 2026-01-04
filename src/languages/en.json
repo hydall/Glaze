@@ -101,7 +101,7 @@
     "cat_anime": "Anime",
     "cat_games": "Games",
     "new_persona": "New Persona",
-    "create_new": "+ Create New",
+    "create_new": "Create New",
     "new_block": "New Block",
     "dialog_started": "Dialog started today",
     "model_typing": "Generating...",
@@ -130,5 +130,7 @@
     "magic_authors_notes": "Author's Notes",
     "label_depth": "Depth",
     "placeholder_depth": "0 = at the end",
-    "label_enabled": "Enabled"
+    "label_enabled": "Enabled",
+    "api_not_configured": "API Not Configured. Please set API Endpoint and Model.",
+    "btn_configure": "Configure"
 }

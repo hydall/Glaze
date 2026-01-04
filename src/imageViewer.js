@@ -1,6 +1,21 @@
-import { setupImageViewerHeader } from './header.js';
+import { imageViewerMode } from './APPSettings.js';
+import { openHolocardsViewer } from './holocardsViewer.js';
 
-export function openImageViewer(src, onCloseCallback) {
+export function openImageViewer(src, nameOrCallback, description = "", onCloseCallback) {
+    let name = "Character";
+    let cb = null;
+
+    if (typeof nameOrCallback === 'function') {
+        cb = nameOrCallback;
+    } else if (typeof nameOrCallback === 'string') {
+        name = nameOrCallback;
+        cb = onCloseCallback;
+    }
+
+    if (imageViewerMode === 'holo' || imageViewerMode === 'holocards') {
+        return openHolocardsViewer(src, name, description, cb);
+    }
+
     let overlay = document.getElementById('image-viewer-overlay');
     let img;
 
@@ -8,15 +23,20 @@ export function openImageViewer(src, onCloseCallback) {
         overlay = document.createElement('div');
         overlay.id = 'image-viewer-overlay';
         overlay.className = 'image-viewer-overlay';
+        overlay.style.zIndex = '20000'; // Ensure it's on top of everything
         overlay.innerHTML = `
             <div class="image-viewer-container" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;">
                 <img class="image-viewer-img" src="" alt="Full view" style="transform-origin: center; transition: transform 0.1s ease-out;">
+            </div>
+            <div id="image-viewer-close-btn" style="position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 10px; z-index: 20020; padding: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                <svg viewBox="0 0 24 24" style="width:32px;height:32px;fill:white;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.5));"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
             </div>
         `;
         document.body.appendChild(overlay);
         
         img = overlay.querySelector('.image-viewer-img');
         const container = overlay.querySelector('.image-viewer-container');
+        const closeBtn = overlay.querySelector('#image-viewer-close-btn');
 
         // Zoom State
         let scale = 1;
@@ -45,24 +65,26 @@ export function openImageViewer(src, onCloseCallback) {
             setTimeout(() => { img.style.transition = 'transform 0.1s ease-out'; }, 300);
         };
 
-        const close = () => {
+        overlay.closeViewer = () => {
             overlay.classList.remove('visible');
             setTimeout(() => { 
                 overlay.style.display = 'none'; 
                 resetZoom();
-                if (onCloseCallback) onCloseCallback();
+                if (overlay._onCloseCallback) overlay._onCloseCallback();
             }, 300);
         };
         
-        // Setup Header for Viewer
-        setupImageViewerHeader(close);
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            overlay.closeViewer();
+        });
         
         // Close on background click (if not interacting)
         let isInteracting = false;
         overlay.addEventListener('click', (e) => {
             if (isInteracting) { isInteracting = false; return; }
             if (scale > 1.1) return; // Don't close if zoomed in
-            close();
+            overlay.closeViewer();
         });
 
         // Touch Logic
@@ -165,6 +187,8 @@ export function openImageViewer(src, onCloseCallback) {
     } else {
         img = overlay.querySelector('.image-viewer-img');
     }
+    
+    overlay._onCloseCallback = cb;
     
     img.src = src;
     overlay.style.display = 'flex';

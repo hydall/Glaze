@@ -1,6 +1,7 @@
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
-import { attachLongPress, showBottomSheet, closeBottomSheet } from './ui.js';
+import { attachLongPress } from './ui.js';
+import { showBottomSheet, closeBottomSheet } from './bottomsheet.js';
 import { triggerCharacterImport } from './characterImporter.js';
 import { initEditor, openCharacterEditor } from './editor.js';
 import { db } from './db.js';

@@ -1,6 +1,6 @@
 import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
-import { showBottomSheet, closeBottomSheet } from './ui.js';
+import { showBottomSheet, closeBottomSheet } from './bottomsheet.js';
 import { db } from './db.js';
 import { setupEditorHeader } from './header.js';
 
@@ -14,18 +14,16 @@ export async function initPromptEditor() {
     console.log("Debug: Initializing Prompt Editor...");
 
     const list = document.getElementById('prompt-blocks-list');
-    const addBtn = document.getElementById('add-block-btn');
     const presetSelector = document.getElementById('btn-preset-selector');
     const currentPresetLabel = document.getElementById('current-preset-name');
     const btnCreatePreset = document.getElementById('btn-create-preset');
     const newPresetInput = document.getElementById('new-preset-name-input');
     const impInput = document.getElementById('impersonation-prompt-input');
-    const reasoningStartInput = document.getElementById('preset-reasoning-start');
-    const reasoningEndInput = document.getElementById('preset-reasoning-end');
+    const reasoningStartInput = document.getElementById('api-reasoning-start');
+    const reasoningEndInput = document.getElementById('api-reasoning-end');
     
     // Component Existence Checks
     if (!list) console.error("Debug: Element 'prompt-blocks-list' not found!");
-    if (!addBtn) console.error("Debug: Element 'add-block-btn' not found!");
     if (!presetSelector) console.error("Debug: Element 'btn-preset-selector' not found!");
     if (!currentPresetLabel) console.error("Debug: Element 'current-preset-name' not found!");
     if (!btnCreatePreset) console.error("Debug: Element 'btn-create-preset' not found!");
@@ -139,16 +137,30 @@ export async function initPromptEditor() {
             listContainer.appendChild(el);
         });
 
+        // Add "Create New" item
+        const createEl = document.createElement('div');
+        createEl.className = 'sheet-item';
+        createEl.innerHTML = `<div class="sheet-item-icon"><svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></div><div class="sheet-item-content">${translations[currentLang]['action_create_new']}</div>`;
+        createEl.addEventListener('click', () => {
+            closeBottomSheet();
+            openDynamicCreatePresetSheet();
+        });
+        listContainer.appendChild(createEl);
+
+        // Add "Import" item
+        const importEl = document.createElement('div');
+        importEl.className = 'sheet-item';
+        importEl.innerHTML = `<div class="sheet-item-icon"><svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg></div><div class="sheet-item-content">${translations[currentLang]['action_import']}</div>`;
+        importEl.addEventListener('click', () => {
+            closeBottomSheet();
+            const fileInput = document.getElementById('preset-file-input');
+            if (fileInput) fileInput.click();
+        });
+        listContainer.appendChild(importEl);
+
         showBottomSheet({
             title: translations[currentLang]['sheet_title_presets'],
-            content: listContainer,
-            headerAction: {
-                icon: '+',
-                onClick: () => {
-                    closeBottomSheet();
-                    openImportCreateSheet();
-                }
-            }
+            content: listContainer
         });
     }
 
@@ -185,30 +197,34 @@ export async function initPromptEditor() {
         });
     }
 
-    function openImportCreateSheet() {
+    function openDynamicCreatePresetSheet() {
+        const content = document.createElement('div');
+        content.innerHTML = `
+            <div class="menu-group" style="margin-bottom: 20px;">
+                <div class="settings-item">
+                    <input type="text" id="dyn-new-preset-name" placeholder="${translations[currentLang]['placeholder_preset_name'] || 'Preset Name'}" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-gray);color:var(--text-black);">
+                </div>
+            </div>
+            <div class="btn-save" id="dyn-btn-create-preset">${translations[currentLang]['btn_create']}</div>
+        `;
+
         showBottomSheet({
             title: translations[currentLang]['new_preset'],
-            items: [
-                {
-                    label: translations[currentLang]['action_create_new'],
-                    icon: '<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-                    onClick: () => {
-                        closeBottomSheet();
-                        if (newPresetInput) newPresetInput.value = '';
-                        openBottomSheet('new-preset-sheet-overlay'); // Keep this one static for now or refactor to dynamic input
-                    }
-                },
-                {
-                    label: translations[currentLang]['action_import'],
-                    icon: '<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
-                    onClick: () => {
-                        closeBottomSheet();
-                        const fileInput = document.getElementById('preset-file-input');
-                        if (fileInput) fileInput.click();
-                    }
-                }
-            ]
+            content: content
         });
+
+        setTimeout(() => {
+            const btn = document.getElementById('dyn-btn-create-preset');
+            const input = document.getElementById('dyn-new-preset-name');
+            if (btn && input) {
+                input.focus();
+                btn.onclick = () => {
+                    const name = input.value.trim() || "New Preset";
+                    createPreset(name);
+                    closeBottomSheet();
+                };
+            }
+        }, 100);
     }
 
     // Hidden File Input
@@ -367,22 +383,27 @@ export async function initPromptEditor() {
         updatePresetUI();
     }
 
+    function createPreset(name) {
+        const newPreset = {
+            id: Date.now().toString(),
+            name: name,
+            impersonationPrompt: "",
+            reasoningStart: "",
+            reasoningEnd: "",
+            blocks: [...mandatoryBlocks] // Start with mandatory blocks
+        };
+        presets.push(newPreset);
+        activePreset = newPreset;
+        savePresets();
+        updatePresetUI();
+    }
+
     if (btnCreatePreset) {
         btnCreatePreset.addEventListener('click', () => {
             const name = newPresetInput.value.trim() || "New Preset";
-            const newPreset = {
-                id: Date.now().toString(),
-                name: name,
-                impersonationPrompt: "",
-                reasoningStart: "",
-                reasoningEnd: "",
-                blocks: [...mandatoryBlocks] // Start with mandatory blocks
-            };
-            presets.push(newPreset);
-            activePreset = newPreset;
-            savePresets();
-            updatePresetUI();
-            closeBottomSheet('new-preset-sheet-overlay');
+            createPreset(name);
+            // closeBottomSheet('new-preset-sheet-overlay'); // Legacy static sheet close
+            closeBottomSheet();
         });
     }
 
@@ -455,15 +476,24 @@ export async function initPromptEditor() {
             list.appendChild(el);
         });
 
-        internalRender = renderBlocks;
-    }
-
-    if (addBtn) {
-        addBtn.addEventListener('click', () => {
+        // Add "Add Block" item at the end
+        const addEl = document.createElement('div');
+        addEl.className = 'menu-item';
+        addEl.style.cssText = "justify-content: center; color: var(--vk-blue); font-weight: 500; cursor: pointer; border-bottom: none; margin-top: 10px; border-radius: 8px; background-color: var(--white); padding: 10px;";
+        addEl.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                <span>${translations[currentLang]['btn_add'] || "Add"}</span>
+            </div>
+        `;
+        addEl.addEventListener('click', () => {
             activePreset.blocks.push({ name: translations[currentLang]['new_block'], content: "", enabled: true, role: "system" });
             savePresets();
             renderBlocks();
         });
+        list.appendChild(addEl);
+
+        internalRender = renderBlocks;
     }
 
     // Drag & Drop Handlers

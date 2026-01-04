@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SillyCradle</title>
     <link rel="stylesheet" href="./src/styles.css">
+    <link rel="stylesheet" href="./src/css/holocards.css">
 </head>
 <body>
 
@@ -79,15 +80,24 @@
                 </div>
             </div>
 
-
-            <div class="section-header" data-i18n="section_settings">Настройки</div>
+            <div class="section-header" data-i18n="section_appearance">Внешний вид</div>
             <div class="menu-group">
-                <div class="menu-item" id="theme-toggle">
+                <div class="menu-item" id="theme-selector">
                     <svg class="menu-icon" viewBox="0 0 24 24">
                         <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/>
                     </svg>
-                    <div class="menu-text" data-i18n="menu_theme">Тёмная тема</div>
+                    <div class="menu-text" data-i18n="menu_theme">Тема</div>
+                    <div class="menu-value" id="theme-value-text">Системная</div>
                 </div>
+                <div class="menu-item" id="holocards-selector">
+                    <svg class="menu-icon" viewBox="0 0 24 24"><path d="M21 3H3C2 3 1 4 1 5v14c0 1.1.9 2 2 2h18c1 0 2-1 2-2V5c0-1-1-2-2-2zm0 15.92c-.02.03-.06.06-.08.08H3V5.08L3.08 5h17.83c.03.02.06.06.08.08v13.84zm-10-3.41L8.5 12.5 5 17h14l-4.5-6-3.5 4.51z"/></svg>
+                    <div class="menu-text" data-i18n="label_holocards">Holo Cards</div>
+                    <div class="menu-value" id="holocards-value-text">Default</div>
+                </div>
+            </div>
+
+            <div class="section-header" data-i18n="section_settings">Настройки</div>
+            <div class="menu-group">
                 <div class="menu-item" id="lang-toggle">
                     <svg class="menu-icon" viewBox="0 0 24 24">
                         <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.91-4.33-3.56zm2.95-8H5.08c.96-1.65 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/>
@@ -144,13 +154,17 @@
 
             <!-- Sub-view: API -->
             <div id="subview-api" class="sub-view active-sub-view">
-                <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
-                    <span data-i18n="section_connection">Подключение</span>
+                <div class="section-header section-header-flex">
+                    <div class="preset-selector" id="btn-api-preset-selector">
+                        <span id="current-api-preset-name">Default</span>
+                        <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
                     <div id="api-status-indicator" class="api-status">
                         <div id="api-status-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: orange; margin-right: 6px;"></div>
                         <span id="api-status-text">...</span>
                     </div>
                 </div>
+                <div class="section-header" data-i18n="section_connection">Подключение</div>
                 <div class="menu-group">
                     <div class="settings-item">
                         <label>API Endpoint</label>
@@ -159,7 +173,7 @@
                     <div class="settings-item">
                         <label>Model Name</label>
                         <div style="position: relative;">
-                            <input type="text" id="api-model" placeholder="gpt-3.5-turbo" style="width: 100%; padding-right: 44px;">
+                            <input type="text" id="api-model" placeholder="gemini-3-pro-preview" style="width: 100%; padding-right: 44px;">
                             <div id="btn-model-list" style="position: absolute; right: 0; top: 0; bottom: 0; width: 44px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
                                 <svg viewBox="0 0 24 24" style="width: 24px; height: 24px; fill: var(--text-gray);"><path d="M7 10l5 5 5-5z"/></svg>
                             </div>
@@ -189,7 +203,7 @@
                     </div>
                     <div class="settings-item">
                         <label data-i18n="label_max_tokens">Max Output Tokens</label>
-                        <input type="number" id="api-max-tokens" value="1000">
+                        <input type="number" id="api-max-tokens" value="8000">
                     </div>
                     <div class="settings-item">
                         <label data-i18n="label_context_size">Context Size</label>
@@ -219,7 +233,6 @@
                         <span id="current-preset-name">Default</span>
                         <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                     </div>
-                    <div id="add-block-btn" class="header-action-btn">+</div>
                 </div>
                 <div class="prompt-container" id="prompt-blocks-list">
                     <!-- Blocks will be rendered here -->
@@ -249,7 +262,10 @@
             </div>
             
             <div class="chat-input-bar">
-                <textarea id="chat-input" rows="1" placeholder="Сообщение..." data-i18n-placeholder="chat_placeholder" type="text"></textarea>
+                <div class="input-wrapper">
+                    <div id="chat-input-highlight" aria-hidden="true"></div>
+                    <textarea id="chat-input" rows="1" placeholder="Сообщение..." data-i18n-placeholder="chat_placeholder" type="text"></textarea>
+                </div>
                 <div class="chat-input-buttons">
                     <div class="chat-btn" id="btn-magic">
                         <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
@@ -499,6 +515,47 @@
             </div>
         </div>
     </div>
+
+    <!-- Templates -->
+    <template id="tpl-typing-indicator">
+        <div class="typing-container">
+            <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            <span class="typing-text"></span>
+        </div>
+    </template>
+
+    <template id="tpl-msg-switcher">
+        <div class="msg-switcher">
+            <div class="msg-switcher-btn prev"><svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></div>
+            <div class="msg-switcher-count"></div>
+            <div class="msg-switcher-btn next"><svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+        </div>
+    </template>
+
+    <template id="tpl-reasoning-block">
+        <div class="msg-reasoning collapsed entering">
+            <div class="msg-reasoning-header">
+                <span>Reasoning</span>
+                <svg class="reasoning-arrow" viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+            </div>
+            <div class="msg-reasoning-content">
+                <div class="msg-reasoning-inner"></div>
+            </div>
+        </div>
+    </template>
+
+    <template id="tpl-msg-actions-btn">
+        <div class="msg-actions-btn">
+            <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+        </div>
+    </template>
+
+    <template id="tpl-msg-edit-buttons">
+        <div class="edit-buttons">
+            <div class="edit-btn cancel" title="Cancel"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
+            <div class="edit-btn save" title="Save"><svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>
+        </div>
+    </template>
 
     <script type="module">
         import { initGlobalErrorHandling } from './src/errorHandler.js';

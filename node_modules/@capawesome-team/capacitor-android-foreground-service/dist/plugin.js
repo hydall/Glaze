@@ -1,0 +1,62 @@
+var capacitorForegroundService = (function (exports, core) {
+    'use strict';
+
+    /**
+     * The importance level.
+     *
+     * For more details, see the [Android Developer Docs](https://developer.android.com/reference/android/app/NotificationManager#IMPORTANCE_DEFAULT)
+     *
+     * @since 6.1.0
+     */
+    exports.Importance = void 0;
+    (function (Importance) {
+        /**
+         * @since 6.1.0
+         */
+        Importance[Importance["Min"] = 1] = "Min";
+        /**
+         * @since 6.1.0
+         */
+        Importance[Importance["Low"] = 2] = "Low";
+        /**
+         * @since 6.1.0
+         */
+        Importance[Importance["Default"] = 3] = "Default";
+        /**
+         * @since 6.1.0
+         */
+        Importance[Importance["High"] = 4] = "High";
+        /**
+         * @since 6.1.0
+         */
+        Importance[Importance["Max"] = 5] = "Max";
+    })(exports.Importance || (exports.Importance = {}));
+    /**
+     * @since 6.2.0
+     */
+    exports.ServiceType = void 0;
+    (function (ServiceType) {
+        /**
+         * Long-running use cases that require location access, such as navigation and location sharing.
+         *
+         * @since 6.2.0
+         * @see https://developer.android.com/develop/background-work/services/fgs/service-types#location
+         */
+        ServiceType[ServiceType["Location"] = 8] = "Location";
+        /**
+         * Continue microphone capture from the background, such as voice recorders or communication apps.
+         *
+         * @since 6.2.0
+         * @see https://developer.android.com/develop/background-work/services/fgs/service-types#microphone
+         */
+        ServiceType[ServiceType["Microphone"] = 128] = "Microphone";
+    })(exports.ServiceType || (exports.ServiceType = {}));
+
+    const ForegroundService = core.registerPlugin('ForegroundService');
+
+    exports.ForegroundService = ForegroundService;
+
+    return exports;
+
+})({}, capacitorExports);
+//# sourceMappingURL=plugin.js.map

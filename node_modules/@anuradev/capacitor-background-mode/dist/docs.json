@@ -1,0 +1,496 @@
+{
+  "api": {
+    "name": "BackgroundModePlugin",
+    "slug": "backgroundmodeplugin",
+    "docs": "",
+    "tags": [],
+    "methods": [
+      {
+        "name": "enable",
+        "signature": "(settings: Partial<ISettings>) => Promise<void>",
+        "parameters": [
+          {
+            "name": "settings",
+            "docs": "",
+            "type": "Partial<ISettings>"
+          }
+        ],
+        "returns": "Promise<void>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [
+          "Partial",
+          "ISettings"
+        ],
+        "slug": "enable"
+      },
+      {
+        "name": "disable",
+        "signature": "() => Promise<void>",
+        "parameters": [],
+        "returns": "Promise<void>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "disable"
+      },
+      {
+        "name": "updateNotification",
+        "signature": "(settings: Partial<ISettings>) => Promise<void>",
+        "parameters": [
+          {
+            "name": "settings",
+            "docs": "",
+            "type": "Partial<ISettings>"
+          }
+        ],
+        "returns": "Promise<void>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [
+          "Partial",
+          "ISettings"
+        ],
+        "slug": "updatenotification"
+      },
+      {
+        "name": "checkNotificationsPermission",
+        "signature": "() => Promise<NotificationPermissionStatus>",
+        "parameters": [],
+        "returns": "Promise<NotificationPermissionStatus>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [
+          "NotificationPermissionStatus"
+        ],
+        "slug": "checknotificationspermission"
+      },
+      {
+        "name": "requestNotificationsPermission",
+        "signature": "() => Promise<NotificationPermissionStatus>",
+        "parameters": [],
+        "returns": "Promise<NotificationPermissionStatus>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [
+          "NotificationPermissionStatus"
+        ],
+        "slug": "requestnotificationspermission"
+      },
+      {
+        "name": "checkMicrophonePermission",
+        "signature": "() => Promise<MicrophonePermissionStatus>",
+        "parameters": [],
+        "returns": "Promise<MicrophonePermissionStatus>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [
+          "MicrophonePermissionStatus"
+        ],
+        "slug": "checkmicrophonepermission"
+      },
+      {
+        "name": "requestMicrophonePermission",
+        "signature": "() => Promise<MicrophonePermissionStatus>",
+        "parameters": [],
+        "returns": "Promise<MicrophonePermissionStatus>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [
+          "MicrophonePermissionStatus"
+        ],
+        "slug": "requestmicrophonepermission"
+      },
+      {
+        "name": "checkBatteryOptimizations",
+        "signature": "() => Promise<{ enabled: boolean; }>",
+        "parameters": [],
+        "returns": "Promise<{ enabled: boolean; }>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "checkbatteryoptimizations"
+      },
+      {
+        "name": "requestDisableBatteryOptimizations",
+        "signature": "() => Promise<{ enabled: boolean; }>",
+        "parameters": [],
+        "returns": "Promise<{ enabled: boolean; }>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "requestdisablebatteryoptimizations"
+      },
+      {
+        "name": "enableWebViewOptimizations",
+        "signature": "() => Promise<void>",
+        "parameters": [],
+        "returns": "Promise<void>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "enablewebviewoptimizations"
+      },
+      {
+        "name": "disableWebViewOptimizations",
+        "signature": "() => Promise<void>",
+        "parameters": [],
+        "returns": "Promise<void>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "disablewebviewoptimizations"
+      },
+      {
+        "name": "moveToBackground",
+        "signature": "() => Promise<void>",
+        "parameters": [],
+        "returns": "Promise<void>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "movetobackground"
+      },
+      {
+        "name": "moveToForeground",
+        "signature": "() => Promise<void>",
+        "parameters": [],
+        "returns": "Promise<void>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "movetoforeground"
+      },
+      {
+        "name": "isScreenOff",
+        "signature": "() => Promise<{ isScreenOff: boolean; }>",
+        "parameters": [],
+        "returns": "Promise<{ isScreenOff: boolean; }>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "isscreenoff"
+      },
+      {
+        "name": "isEnabled",
+        "signature": "() => Promise<{ enabled: boolean; }>",
+        "parameters": [],
+        "returns": "Promise<{ enabled: boolean; }>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "isenabled"
+      },
+      {
+        "name": "isActive",
+        "signature": "() => Promise<{ activated: boolean; }>",
+        "parameters": [],
+        "returns": "Promise<{ activated: boolean; }>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "isactive"
+      },
+      {
+        "name": "wakeUp",
+        "signature": "() => Promise<void>",
+        "parameters": [],
+        "returns": "Promise<void>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "wakeup"
+      },
+      {
+        "name": "unlock",
+        "signature": "() => Promise<void>",
+        "parameters": [],
+        "returns": "Promise<void>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "unlock"
+      },
+      {
+        "name": "addListener",
+        "signature": "(eventName: 'appInBackground', listenerFunc: () => void) => Promise<PluginListenerHandle>",
+        "parameters": [
+          {
+            "name": "eventName",
+            "docs": "",
+            "type": "'appInBackground'"
+          },
+          {
+            "name": "listenerFunc",
+            "docs": "",
+            "type": "() => void"
+          }
+        ],
+        "returns": "Promise<PluginListenerHandle>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [
+          "PluginListenerHandle"
+        ],
+        "slug": "addlistenerappinbackground-"
+      },
+      {
+        "name": "addListener",
+        "signature": "(eventName: 'appInForeground', listenerFunc: () => void) => Promise<PluginListenerHandle>",
+        "parameters": [
+          {
+            "name": "eventName",
+            "docs": "",
+            "type": "'appInForeground'"
+          },
+          {
+            "name": "listenerFunc",
+            "docs": "",
+            "type": "() => void"
+          }
+        ],
+        "returns": "Promise<PluginListenerHandle>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [
+          "PluginListenerHandle"
+        ],
+        "slug": "addlistenerappinforeground-"
+      },
+      {
+        "name": "removeAllListeners",
+        "signature": "() => Promise<void>",
+        "parameters": [],
+        "returns": "Promise<void>",
+        "tags": [],
+        "docs": "",
+        "complexTypes": [],
+        "slug": "removealllisteners"
+      }
+    ],
+    "properties": []
+  },
+  "interfaces": [
+    {
+      "name": "ISettings",
+      "slug": "isettings",
+      "docs": "",
+      "tags": [],
+      "methods": [],
+      "properties": [
+        {
+          "name": "title",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "string"
+        },
+        {
+          "name": "text",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "string"
+        },
+        {
+          "name": "subText",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "string"
+        },
+        {
+          "name": "bigText",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "boolean"
+        },
+        {
+          "name": "resume",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "boolean"
+        },
+        {
+          "name": "silent",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "boolean"
+        },
+        {
+          "name": "hidden",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "boolean"
+        },
+        {
+          "name": "color",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "string"
+        },
+        {
+          "name": "icon",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "string"
+        },
+        {
+          "name": "channelName",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "string"
+        },
+        {
+          "name": "channelDescription",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "string"
+        },
+        {
+          "name": "allowClose",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "boolean"
+        },
+        {
+          "name": "closeIcon",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "string"
+        },
+        {
+          "name": "closeTitle",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "string"
+        },
+        {
+          "name": "showWhen",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "boolean"
+        },
+        {
+          "name": "disableWebViewOptimization",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "boolean"
+        },
+        {
+          "name": "visibility",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "'public' | 'private' | 'secret'"
+        }
+      ]
+    },
+    {
+      "name": "NotificationPermissionStatus",
+      "slug": "notificationpermissionstatus",
+      "docs": "",
+      "tags": [],
+      "methods": [],
+      "properties": [
+        {
+          "name": "notifications",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [
+            "PermissionState"
+          ],
+          "type": "PermissionState"
+        }
+      ]
+    },
+    {
+      "name": "MicrophonePermissionStatus",
+      "slug": "microphonepermissionstatus",
+      "docs": "",
+      "tags": [],
+      "methods": [],
+      "properties": [
+        {
+          "name": "microphone",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [
+            "PermissionState"
+          ],
+          "type": "PermissionState"
+        }
+      ]
+    },
+    {
+      "name": "PluginListenerHandle",
+      "slug": "pluginlistenerhandle",
+      "docs": "",
+      "tags": [],
+      "methods": [],
+      "properties": [
+        {
+          "name": "remove",
+          "tags": [],
+          "docs": "",
+          "complexTypes": [],
+          "type": "() => Promise<void>"
+        }
+      ]
+    }
+  ],
+  "enums": [],
+  "typeAliases": [
+    {
+      "name": "Partial",
+      "slug": "partial",
+      "docs": "Make all properties in T optional",
+      "types": [
+        {
+          "text": "{\r\n    [P in keyof T]?: T[P];\r\n}",
+          "complexTypes": [
+            "T",
+            "P"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "PermissionState",
+      "slug": "permissionstate",
+      "docs": "",
+      "types": [
+        {
+          "text": "'prompt'",
+          "complexTypes": []
+        },
+        {
+          "text": "'prompt-with-rationale'",
+          "complexTypes": []
+        },
+        {
+          "text": "'granted'",
+          "complexTypes": []
+        },
+        {
+          "text": "'denied'",
+          "complexTypes": []
+        }
+      ]
+    }
+  ],
+  "pluginConfigs": []
+}

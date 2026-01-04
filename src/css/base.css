@@ -238,7 +238,7 @@ body.app-loaded {
 }
 
 .tabbar, .chat-input-bar {
-    padding-bottom: var(--sab) !important;
+    padding-bottom: var(--safe-area-inset-bottom) !important;
     transition: padding-bottom 0.3s ease, background-color 0.3s ease;
     position: relative;
     overflow: hidden;
