@@ -10,8 +10,8 @@ const CharacterList = defineAsyncComponent(() => import('@/views/CharacterList.v
 const MenuView = defineAsyncComponent(() => import('@/views/Menu/MenuView.vue'));
 const PresetView = defineAsyncComponent(() => import('@/views/PresetView.vue'));
 const ChatView = defineAsyncComponent(() => import('@/views/ChatView.vue'));
-const ThemeSettingsView = defineAsyncComponent(() => import('@/views/Menu/settings/ThemeSettingsView.vue'));
-const SettingsView = defineAsyncComponent(() => import('@/views/Menu/settings/SettingsView.vue'));
+const ThemeSettingsView = defineAsyncComponent(() => import('@/views/Menu/Settings/ThemeSettingsView.vue'));
+const SettingsView = defineAsyncComponent(() => import('@/views/Menu/Settings/SettingsView.vue'));
 const OnboardingView = defineAsyncComponent(() => import('@/views/OnboardingView.vue'));
 
 const Editor = defineAsyncComponent(() => import('@/components/editors/GenericEditor.vue'));

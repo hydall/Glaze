@@ -20,9 +20,9 @@ Glaze — это локальный, удобный для новичков ИИ
 
 | | | |
 |:---:|:---:|:---:|
-| <img src="assets/screenshots/screenshot_01.png" width="200"> | <img src="assets/screenshots/screenshot_02.png" width="200"> | <img src="assets/screenshots/screenshot_03.png" width="200"> |
-| <img src="assets/screenshots/screenshot_04.png" width="200"> | <img src="assets/screenshots/screenshot_05.png" width="200"> | <img src="assets/screenshots/screenshot_06.png" width="200"> |
-| <img src="assets/screenshots/screenshot_07.png" width="200"> | <img src="assets/screenshots/screenshot_08.png" width="200"> | <img src="assets/screenshots/screenshot_09.png" width="200"> |
+| <img src="assets/screenshots/screenshot_02.png" width="200"> | <img src="assets/screenshots/screenshot_03.png" width="200"> | <img src="assets/screenshots/screenshot_04.png" width="200"> |
+| <img src="assets/screenshots/screenshot_05.png" width="200"> | <img src="assets/screenshots/screenshot_06.png" width="200"> | <img src="assets/screenshots/screenshot_07.png" width="200"> |
+| <img src="assets/screenshots/screenshot_08.png" width="200"> | <img src="assets/screenshots/screenshot_01.png" width="200"> | |
 
 ## ✨ Основные Особенности
 

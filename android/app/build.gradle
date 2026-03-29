@@ -8,7 +8,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 5
-        versionName "alpha 0.4.0 preview"
+        versionName "0.4.0-alpha"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,19 +16,19 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    def keystorePath     = System.getenv("ANDROID_KEYSTORE_PATH")
-    def keystorePassword = System.getenv("ANDROID_STORE_PASSWORD")
-    def keyAlias         = System.getenv("ANDROID_KEY_ALIAS")
-    def keyPassword      = System.getenv("ANDROID_KEY_PASSWORD")
-    def signingAvailable = keystorePath && keystorePassword && keyAlias && keyPassword
+    def ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+    def ksPass = System.getenv("ANDROID_STORE_PASSWORD")
+    def kAlias = System.getenv("ANDROID_KEY_ALIAS")
+    def kPass  = System.getenv("ANDROID_KEY_PASSWORD")
+    def signingAvailable = ksPath && ksPass && kAlias && kPass
 
     if (signingAvailable) {
         signingConfigs {
             release {
-                storeFile     file(keystorePath)
-                storePassword keystorePassword
-                keyAlias      keyAlias
-                keyPassword   keyPassword
+                storeFile     file(ksPath)
+                storePassword ksPass
+                keyAlias      kAlias
+                keyPassword   kPass
             }
         }
     }

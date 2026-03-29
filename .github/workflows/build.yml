@@ -1,9 +1,6 @@
 name: Build Release Artifacts
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -89,7 +86,9 @@ jobs:
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: cd android && ./gradlew assembleRelease --no-daemon
+        run: |
+          chmod +x android/gradlew
+          cd android && ./gradlew assembleRelease --no-daemon
 
       - name: Upload Signed APK
         uses: actions/upload-artifact@v4
@@ -123,7 +122,7 @@ jobs:
 
       - name: Get version from package.json
         id: ver
-        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+        run: echo "version=$(node -p "require('./package.json').version.replace(/\s+/g, '-')")" >> $GITHUB_OUTPUT
 
       - name: Rename artifacts
         run: |
@@ -133,6 +132,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: "v${{ steps.ver.outputs.version }}"
           name: "Glaze ${{ steps.ver.outputs.version }}"
           files: |
             release-files/Glaze-${{ steps.ver.outputs.version }}.apk
