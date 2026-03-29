@@ -1,11 +1,6 @@
 name: Build Release Artifacts
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -91,7 +86,9 @@ jobs:
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: cd android && ./gradlew assembleRelease --no-daemon
+        run: |
+          chmod +x android/gradlew
+          cd android && ./gradlew assembleRelease --no-daemon
 
       - name: Upload Signed APK
         uses: actions/upload-artifact@v4
@@ -105,7 +102,6 @@ jobs:
 
   release:
     needs: [build-ios, build-android]
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -136,6 +132,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: "v${{ steps.ver.outputs.version }}"
           name: "Glaze ${{ steps.ver.outputs.version }}"
           files: |
             release-files/Glaze-${{ steps.ver.outputs.version }}.apk
