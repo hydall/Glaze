@@ -34,7 +34,7 @@ If you encounter a bug while using Glaze, open an issue and describe it. Include
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/your-username/glaze.git
+   git clone https://github.com/hydall/glaze.git
    cd glaze
    ```
 3. Install dependencies:
