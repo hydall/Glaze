@@ -35,25 +35,7 @@
 
 <body class="preload">
     <div id="app"></div>
-    <script type="module">
-        import { initGlobalErrorHandling } from './src/utils/errors.js';
-        initGlobalErrorHandling();
-    </script>
-    <script type="module">
-        import { createApp } from 'vue';
-        import App from './src/App.vue';
-        import './src/assets/styles.css';
-
-        const app = createApp(App);
-
-        // Vue-specific error handling
-        app.config.errorHandler = (err, vm, info) => {
-            console.error('[Vue Error]', err, info);
-            window.dispatchEvent(new CustomEvent('vue-error', { detail: { err, info } }));
-        };
-
-        app.mount('#app');
-    </script>
+    <script type="module" src="./src/main.js"></script>
 </body>
 
 </html>
