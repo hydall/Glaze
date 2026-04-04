@@ -1,9 +1,8 @@
 <!-- src/components/ui/SheetView.vue -->
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
-import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
-import { isKeyboardOpen as globalKeyboardOpen } from '@/core/services/ui.js';
+import { isKeyboardOpen as globalKeyboardOpen, hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 
 const props = defineProps({
     fitContent: { type: Boolean, default: false },
@@ -89,7 +88,7 @@ function close() {
             active.blur();
         }
         if (Capacitor.isNativePlatform()) {
-            Keyboard.hide().catch(() => {});
+            hideKeyboard();
         }
     }
     isVisible.value = false;
@@ -171,16 +170,11 @@ function checkFocus() {
             isLocalKeyboardOpen.value = true;
             
             // Ensure overlap is set so the sheet can actually rise
-            const cs = getComputedStyle(document.documentElement);
-            const overlap = cs.getPropertyValue('--keyboard-overlap').trim();
-            if (overlap === '0px' || !overlap) {
-                const kbH = cs.getPropertyValue('--keyboard-height').trim() || '300px';
-                document.documentElement.style.setProperty('--keyboard-overlap', kbH);
-            }
+            applyKeyboardOverlap();
 
             // Force keyboard on Android if needed
             if (Capacitor.isNativePlatform()) {
-                Keyboard.show().catch(() => {});
+                showKeyboard();
             }
         } else {
             isLocalKeyboardOpen.value = false;
@@ -205,15 +199,14 @@ onMounted(async () => {
     document.addEventListener('focusout', () => { setTimeout(checkFocus, 50); });
 
     if (Capacitor.isNativePlatform()) {
-        kbListeners.push(await Keyboard.addListener('keyboardWillShow', (info) => { 
+        kbListeners.push(await onKeyboardShow((info) => { 
             checkFocus();
             window.scrollTo(0, 0);
             if (info && info.keyboardHeight) {
-                document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
-                document.documentElement.style.setProperty('--keyboard-overlap', `${info.keyboardHeight}px`);
+                applyKeyboardOverlap(info.keyboardHeight);
             }
         }));
-        kbListeners.push(await Keyboard.addListener('keyboardWillHide', () => { 
+        kbListeners.push(await onKeyboardHide(() => { 
             isLocalKeyboardOpen.value = false; 
         }));
     }
@@ -333,7 +326,7 @@ onBeforeUnmount(() => {
 }
 
 .sheet-view-content.keyboard-open {
-    padding-bottom: calc(var(--keyboard-overlap, var(--keyboard-height, 300px)) + 10px + var(--sab, 0px) + var(--sheet-translate, 0px)) !important;
+    padding-bottom: calc(var(--keyboard-overlap, 0px) + 10px + var(--sab, 0px) + var(--sheet-translate, 0px)) !important;
 }
 
 .sheet-view-content.expanded {

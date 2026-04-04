@@ -5,7 +5,7 @@ import RequestPreviewSheet from '@/components/sheets/RequestPreviewSheet.vue';
 import MagicDrawer from '@/components/chat/MagicDrawer.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { Keyboard } from '@capacitor/keyboard';
+import { hideKeyboard, onKeyboardShow, onKeyboardHide, isNativeKeyboard } from '@/core/services/keyboardHandler.js';
 import { Capacitor } from '@capacitor/core';
 import { attachRipple } from '@/core/services/ui.js';
 
@@ -297,7 +297,7 @@ const toggleMagicMenu = async () => {
     } else {
         if (isKeyboardOpen.value || document.body.classList.contains('keyboard-open')) {
             isSwitchingToDrawer.value = true;
-            await Keyboard.hide().catch(() => {});
+            await hideKeyboard();
         } else {
             isMagicMenuVisible.value = true;
         }
@@ -332,7 +332,7 @@ const closeMagicMenu = (e) => {
 
 const openFullScreenEditor = async () => {
     if (isKeyboardOpen.value || document.body.classList.contains('keyboard-open')) {
-        await Keyboard.hide().catch(() => {});
+        await hideKeyboard();
     }
     window.dispatchEvent(new CustomEvent('open-fs-request', {
         detail: {
@@ -358,12 +358,12 @@ onMounted(async () => {
 
     // Register keyboard listeners with proper lifecycle management
     if (Capacitor.isNativePlatform()) {
-        kbListeners.push(await Keyboard.addListener('keyboardWillShow', () => {
+        kbListeners.push(await onKeyboardShow(() => {
             isKeyboardOpen.value = true;
             isMagicMenuVisible.value = false;
             isSwitchingToDrawer.value = false;
         }));
-        kbListeners.push(await Keyboard.addListener('keyboardWillHide', () => { 
+        kbListeners.push(await onKeyboardHide(() => { 
             isKeyboardOpen.value = false;
             if (isSwitchingToDrawer.value) {
                 isMagicMenuVisible.value = true;
@@ -391,7 +391,7 @@ defineExpose({
 </script>
 
 <template>
-    <div class="chat-input-container" :class="{ 'drawer-open': isMagicMenuVisible || (isKeyboardOpen && Capacitor.getPlatform() !== 'android') }">
+    <div class="chat-input-container" :class="{ 'drawer-open': isMagicMenuVisible || isSwitchingToDrawer, 'keyboard-open': isKeyboardOpen }">
         <div class="chat-status-gradient-bottom"></div>
         <div v-if="!isSearchMode" id="scroll-to-bottom" class="scroll-bottom-btn" :class="{ visible: showScrollButton }" @click="emit('scroll-to-bottom')">
             <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M12 16.17L5.59 9.76L7 8.35L12 13.35L17 8.35L18.41 9.76L12 16.17Z"/></svg>
@@ -601,6 +601,10 @@ defineExpose({
     padding-bottom: var(--keyboard-height, 300px);
 }
 
+.chat-input-container.keyboard-open .chat-input-content {
+    padding-bottom: var(--keyboard-overlap, 0px);
+}
+
 .chat-input-container.drawer-open .chat-input-bar {
     margin-bottom: 10px;
 }
@@ -618,6 +622,10 @@ defineExpose({
     justify-content: flex-start;
     -webkit-user-select: text;
     user-select: text;
+}
+
+.chat-input-container.keyboard-open .chat-input-bar {
+    margin-bottom: 10px;
 }
 
 .chat-input-buttons-row {

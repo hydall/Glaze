@@ -22,12 +22,8 @@ const ImageViewer = defineAsyncComponent(() => import('@/components/media/ImageV
 
 const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/ConnectionsSheet.vue'));
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
-import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
-
-
-
-// Imports from script.js
+import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { initSettings } from '@/core/config/APISettings.js';
 import { initTheme, themeState } from '@/core/states/themeState.js';
 import { updateLanguage } from '@/utils/i18n.js';
@@ -90,7 +86,6 @@ const shouldOpenPersonasOnReturn = ref(false);
 
 const isDeleting = ref(false); // Guard flag to prevent auto-save during deletion
 const isOnboarding = ref(false);
-const isKeyboardOpen = ref(document.body.classList.contains('keyboard-open'));
 let kbListeners = [];
 
 // --- Categories ---
@@ -614,8 +609,8 @@ onMounted(async () => {
     setTimeout(checkAndRequestNotifications, 1000);
 
     if (Capacitor.isNativePlatform()) {
-        kbListeners.push(await Keyboard.addListener('keyboardWillShow', () => { isKeyboardOpen.value = true; }));
-        kbListeners.push(await Keyboard.addListener('keyboardWillHide', () => { isKeyboardOpen.value = false; }));
+        kbListeners.push(await onKeyboardShow(() => { isKeyboardOpen.value = true; }));
+        kbListeners.push(await onKeyboardHide(() => { isKeyboardOpen.value = false; }));
     }
 });
 
@@ -810,7 +805,7 @@ watch(currentView, () => {
 }
 
 #main-container.keyboard-open {
-    padding-bottom: var(--keyboard-height, 300px) !important;
+    padding-bottom: var(--keyboard-overlap, 300px) !important;
 }
 
 .active-view::-webkit-scrollbar-track {

@@ -4,7 +4,7 @@
   "webDir": "dist",
   "plugins": {
     "SystemBars": {
-      "insetsHandling": "true"
+      "insetsHandling": "disable"
     },
     "Keyboard": {
       "resizeOnFullScreen": false

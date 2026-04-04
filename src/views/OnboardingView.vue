@@ -9,7 +9,7 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { convertSTPreset } from '@/core/services/presetImportService.js';
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { presetState, initPresetState, savePresets, setPresetConnection } from '@/core/states/presetState.js';
-import { isKeyboardOpen as globalKeyboardOpen } from '@/core/services/ui.js';
+import { isKeyboardOpen as globalKeyboardOpen } from '@/core/services/keyboardHandler.js';
 
 const t = (key) => translations[currentLang]?.[key] || key;
 
@@ -572,7 +572,7 @@ async function finish() {
 }
 
 .onboarding-card.keyboard-open {
-    padding-bottom: calc(var(--keyboard-overlap, var(--keyboard-height, 300px)) + 10px) !important;
+    padding-bottom: calc(var(--keyboard-overlap, 0px) + 10px) !important;
 }
 
 .slides-container {

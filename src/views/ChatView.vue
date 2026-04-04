@@ -2290,6 +2290,7 @@ function setScrollLock(enabled) {
 // during rapid keyboard show/hide cycles (which can crash WKWebView).
 let _vpRafId = null;
 function handleVisualViewport() {
+    if (Capacitor.getPlatform() !== 'ios') return;
     if (_vpRafId) return;
     _vpRafId = requestAnimationFrame(() => {
         _vpRafId = null;

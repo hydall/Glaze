@@ -1,6 +1,6 @@
 import { ref } from 'vue';
-import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
+import { hideKeyboard } from '@/core/services/keyboardHandler.js';
 
 export const bottomSheetState = ref({
     visible: false,
@@ -41,7 +41,7 @@ export function closeBottomSheet() {
     if (active && active.closest('.bottom-sheet-content')) {
         active.blur();
         if (Capacitor.isNativePlatform()) {
-            Keyboard.hide().catch(() => { });
+            hideKeyboard();
         }
     }
     bottomSheetState.value.visible = false;

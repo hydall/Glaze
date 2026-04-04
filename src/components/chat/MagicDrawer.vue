@@ -517,7 +517,7 @@ defineExpose({
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
-    padding: 4px 10px 30px 10px;
+    padding: 4px 10px calc(30px + var(--sab)) 10px;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px 6px;

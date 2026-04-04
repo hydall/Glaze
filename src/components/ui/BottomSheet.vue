@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
-import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
+import { hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { translations, t } from '@/utils/i18n.js';
 const props = defineProps({
     visible: Boolean,
@@ -26,7 +26,7 @@ function close() {
             active.blur();
         }
         if (Capacitor.isNativePlatform()) {
-            Keyboard.hide().catch(() => {});
+            hideKeyboard();
         }
     }
     emit('close');
@@ -49,18 +49,13 @@ watch(() => props.input, (newVal) => {
         isLocalKeyboardOpen.value = true;
         
         // Pre-emptively set overlap if it's 0 to avoid delay in sheet raising
-        const cs = getComputedStyle(document.documentElement);
-        const overlap = cs.getPropertyValue('--keyboard-overlap').trim();
-        if (overlap === '0px' || !overlap) {
-            const kbH = cs.getPropertyValue('--keyboard-height').trim() || '300px';
-            document.documentElement.style.setProperty('--keyboard-overlap', kbH);
-        }
+        applyKeyboardOverlap();
 
         nextTick(() => {
             if (inputRef.value) {
                 inputRef.value.focus();
                 if (Capacitor.isNativePlatform()) {
-                    Keyboard.show().catch(() => {});
+                    showKeyboard();
                 }
             }
         });
@@ -135,16 +130,11 @@ function checkFocus() {
             isLocalKeyboardOpen.value = true;
             
             // Ensure overlap is set so the sheet can actually rise
-            const cs = getComputedStyle(document.documentElement);
-            const overlap = cs.getPropertyValue('--keyboard-overlap').trim();
-            if (overlap === '0px' || !overlap) {
-                const kbH = cs.getPropertyValue('--keyboard-height').trim() || '300px';
-                document.documentElement.style.setProperty('--keyboard-overlap', kbH);
-            }
+            applyKeyboardOverlap();
 
             // Force keyboard on Android if needed
             if (Capacitor.isNativePlatform()) {
-                Keyboard.show().catch(() => {});
+                showKeyboard();
             }
         } else {
             isLocalKeyboardOpen.value = false;
@@ -170,15 +160,14 @@ onMounted(async () => {
     document.addEventListener('focusout', () => { setTimeout(checkFocus, 50); });
 
     if (Capacitor.isNativePlatform()) {
-        kbListeners.push(await Keyboard.addListener('keyboardWillShow', (info) => {
+        kbListeners.push(await onKeyboardShow((info) => {
             checkFocus();
             // Height might not be set yet if it's the first time
             if (info && info.keyboardHeight) {
-                document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
-                document.documentElement.style.setProperty('--keyboard-overlap', `${info.keyboardHeight}px`);
+                applyKeyboardOverlap(info.keyboardHeight);
             }
         }));
-        kbListeners.push(await Keyboard.addListener('keyboardWillHide', () => { 
+        kbListeners.push(await onKeyboardHide(() => { 
             isLocalKeyboardOpen.value = false; 
         }));
     }

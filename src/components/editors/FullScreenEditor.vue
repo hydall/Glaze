@@ -1,6 +1,7 @@
 <script setup>
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
+import { isKeyboardOpen } from '@/core/services/keyboardHandler.js';
 
 defineProps({
     modelValue: {
@@ -22,7 +23,7 @@ const onInput = (e) => {
 </script>
 
 <template>
-  <div id="full-screen-editor" v-show="visible" :class="{ 'anim-fade-in': visible }">
+  <div id="full-screen-editor" v-show="visible" :class="{ 'anim-fade-in': visible, 'keyboard-open': isKeyboardOpen }">
       <div class="fs-editor-body">
           <textarea id="fs-editor-textarea" :value="modelValue" @input="onInput"></textarea>
       </div>
@@ -56,6 +57,10 @@ body.dark-theme #full-screen-editor {
     display: flex;
     flex-direction: column;
     padding-top: calc(var(--header-height, 80px) + 10px);
+    padding-bottom: calc(20px + var(--sab));
+}
+
+#full-screen-editor.keyboard-open .fs-editor-body {
     padding-bottom: calc(20px + var(--sab) + var(--keyboard-overlap, 0px));
 }
 

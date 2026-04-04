@@ -1,16 +1,16 @@
 import { currentLang, themeMode, setThemeMode, getThemeMode, imageViewerMode, setImageViewerMode } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { formatText } from '@/utils/textFormatter.js';
-import { SystemBars, Capacitor } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { Toast } from '@capacitor/toast';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
 import { SafeArea } from '@capacitor-community/safe-area';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { themeState, getPresets, applyPreset } from '@/core/states/themeState.js';
 import { ref } from 'vue';
 import { logger } from '../../utils/logger.js';
+import { isKeyboardOpen, initKeyboard, hideKeyboard } from './keyboardHandler.js';
 
 // --- Long-press background guard ---
 const _activeLongPressTimers = new Set();
@@ -102,8 +102,6 @@ export function attachLongPress(element, callback) {
 
     return () => isLongPress;
 }
-
-export const isKeyboardOpen = ref(false);
 
 export function attachRipple(el) {
     if (el.dataset.rippleInit) return;
@@ -223,8 +221,8 @@ export async function updateAppColors(forceMainView = false) {
 
     try {
         // DARK = light icons on dark background, LIGHT = dark icons on light background
-        await SystemBars.setStyle({ style: isDark ? 'DARK' : 'LIGHT' });
-    } catch (e) { console.warn('SystemBars error', e); }
+        await SafeArea.setSystemBarsStyle({ style: isDark ? 'DARK' : 'LIGHT' });
+    } catch (e) { console.warn('SafeArea SystemBars error', e); }
 }
 
 export function initThemeToggle() {
@@ -455,141 +453,15 @@ export function initViewportFix() {
 
     // Fix for 100vh on mobile browsers (address bar issue)
     const setVh = () => {
-        // iOS WKWebView: skip during keyboard animation to prevent layout jumps.
-        // Android (incl. old WebViews that ignore interactive-widget=overlays-content):
-        // allow update so --vh tracks the actual shrunken viewport height.
         if (isKeyboardOpen.value && isIos) return;
-
         const vh = window.innerHeight * 0.01;
         document.documentElement.style.setProperty('--vh', `${vh}px`);
-    };
-
-    const updateSafeAreas = async () => {
-        try {
-            const result = await SafeArea.getSafeAreaInsets();
-            const insets = result.insets;
-            const shorthands = { top: 'sat', bottom: 'sab', left: 'sal', right: 'sar' };
-            for (const [key, value] of Object.entries(insets)) {
-                let finalValue = value;
-                document.documentElement.style.setProperty(`--safe-area-inset-${key}`, `${finalValue}px`);
-                if (shorthands[key]) {
-                    document.documentElement.style.setProperty(`--${shorthands[key]}`, `${finalValue}px`);
-                }
-            }
-            logger.debug('[UI] Safe area insets updated:', insets);
-        } catch (e) {
-            console.warn('[UI] Failed to get safe area insets', e);
-        }
     };
 
     window.addEventListener('resize', setVh);
     setVh();
 
-    // Initial safe area update
-    updateSafeAreas();
-
-    // Listen for safe area changes (especially important for rotation/split view)
-    SafeArea.addListener('safeAreaChanged', (data) => {
-        const insets = data.insets;
-        const shorthands = { top: 'sat', bottom: 'sab', left: 'sal', right: 'sar' };
-        for (const [key, value] of Object.entries(insets)) {
-            let finalValue = value;
-            document.documentElement.style.setProperty(`--safe-area-inset-${key}`, `${finalValue}px`);
-            if (shorthands[key]) {
-                document.documentElement.style.setProperty(`--${shorthands[key]}`, `${finalValue}px`);
-            }
-        }
-        logger.debug('[UI] Safe area changed:', insets);
-    });
-
-    // Set default keyboard height for drawer
-    const savedKbHeight = localStorage.getItem('gz_keyboard_height');
-    document.documentElement.style.setProperty('--keyboard-height', savedKbHeight ? `${savedKbHeight}px` : '300px');
-
-    if (Capacitor.isNativePlatform()) {
-        Keyboard.setResizeMode({ mode: KeyboardResize.None }).catch(() => { });
-
-        Keyboard.setScroll({ isDisabled: true }).catch(e => console.warn('Keyboard setScroll error', e));
-
-        // Android WebView forcefully scrolls the body when an input is focused,
-        // even with position:fixed and overflow:hidden. This shifts all fixed overlays.
-        // We fight this by constantly resetting the body scroll.
-        let _scrollResetRaf = null;
-        let preKeyboardHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-
-        function resetBodyScroll() {
-            if (document.body.scrollTop !== 0) {
-                document.body.scrollTop = 0;
-            }
-            window.scrollTo(0, 0);
-        }
-
-        function startScrollResetLoop() {
-            if (_scrollResetRaf) return;
-            function tick() {
-                resetBodyScroll();
-                if (isKeyboardOpen.value) {
-                    // Dynamically adjust overlap to prevent double padding if OS natively shrinks viewport
-                    const currentHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-                    const viewportShrunk = Math.max(0, preKeyboardHeight - currentHeight);
-                    const currentKbHeight = parseInt(document.documentElement.style.getPropertyValue('--keyboard-height')) || 0;
-                    if (currentKbHeight > 0) {
-                        const effectiveOverlap = Math.max(0, currentKbHeight - viewportShrunk);
-                        document.documentElement.style.setProperty('--keyboard-overlap', `${effectiveOverlap}px`);
-                    }
-
-                    _scrollResetRaf = requestAnimationFrame(tick);
-                } else {
-                    _scrollResetRaf = null;
-                }
-            }
-            _scrollResetRaf = requestAnimationFrame(tick);
-        }
-
-        function stopScrollResetLoop() {
-            if (_scrollResetRaf) {
-                cancelAnimationFrame(_scrollResetRaf);
-                _scrollResetRaf = null;
-            }
-            // Final reset after keyboard closes
-            resetBodyScroll();
-            setTimeout(resetBodyScroll, 100);
-        }
-
-        Keyboard.addListener('keyboardWillShow', (info) => {
-            if (!isKeyboardOpen.value) {
-                preKeyboardHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-            }
-            isKeyboardOpen.value = true;
-            document.body.classList.add('keyboard-open');
-            resetBodyScroll();
-
-            if (info && info.keyboardHeight) {
-                document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
-                localStorage.setItem('gz_keyboard_height', info.keyboardHeight);
-
-                const currentHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-                const viewportShrunk = Math.max(0, preKeyboardHeight - currentHeight);
-                const effectiveOverlap = Math.max(0, info.keyboardHeight - viewportShrunk);
-                document.documentElement.style.setProperty('--keyboard-overlap', `${effectiveOverlap}px`);
-            }
-            startScrollResetLoop();
-        });
-
-        Keyboard.addListener('keyboardDidShow', (info) => {
-            if (info && info.keyboardHeight) {
-                document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
-                localStorage.setItem('gz_keyboard_height', info.keyboardHeight);
-            }
-            resetBodyScroll();
-        });
-        Keyboard.addListener('keyboardWillHide', () => {
-            isKeyboardOpen.value = false;
-            document.body.classList.remove('keyboard-open');
-            document.documentElement.style.setProperty('--keyboard-overlap', '0px');
-            stopScrollResetLoop();
-        });
-    }
+    initKeyboard();
 }
 
 export function initBackButton() {
@@ -597,7 +469,7 @@ export function initBackButton() {
     const handleBackButton = async () => {
         // 0. If keyboard is open — dismiss it
         if (isKeyboardOpen.value) {
-            await Keyboard.hide().catch(() => { });
+            await hideKeyboard();
             return;
         }
 
