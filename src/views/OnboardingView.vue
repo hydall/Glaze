@@ -11,7 +11,7 @@ import { requestNotificationPermission } from '@/core/services/notificationServi
 import { presetState, initPresetState, savePresets, setPresetConnection } from '@/core/states/presetState.js';
 import { isKeyboardOpen as globalKeyboardOpen } from '@/core/services/keyboardHandler.js';
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const emit = defineEmits(['finish']);
 

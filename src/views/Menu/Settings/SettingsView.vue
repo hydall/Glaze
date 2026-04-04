@@ -6,10 +6,10 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { themeState, setChatLayout } from '@/core/states/themeState.js';
 
-const localLang = ref(currentLang);
+const localLang = ref(currentLang.value);
 const t = (key) => translations[localLang.value]?.[key] || key;
 const activeImageViewerMode = ref(localStorage.getItem('gz_image_viewer') || 'default');
-const disableSwipeRegen = ref(disableSwipeRegeneration);
+const disableSwipeRegen = ref(disableSwipeRegeneration.value);
 
 const currentScreen = ref('main');
 
@@ -25,9 +25,9 @@ watch(currentScreen, (newVal) => {
         window.dispatchEvent(new CustomEvent('header-force-update'));
     }
 });
-const hideMsgId = ref(hideMessageId);
-const hideGenTime = ref(hideGenerationTime);
-const hideTokenCnt = ref(hideTokenCount);
+const hideMsgId = ref(hideMessageId.value);
+const hideGenTime = ref(hideGenerationTime.value);
+const hideTokenCnt = ref(hideTokenCount.value);
 
 const toggleDisableSwipeRegen = () => {
     const newValue = !disableSwipeRegen.value;
@@ -128,7 +128,7 @@ const onRequestNotifications = async () => {
 };
 
 const onLangChange = () => {
-    localLang.value = currentLang;
+    localLang.value = currentLang.value;
 };
 
 onMounted(() => {

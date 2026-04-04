@@ -25,7 +25,7 @@ onMounted(() => {
     updateLanguage();
 });
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const openBackupOptions = () => {
     showBottomSheet({

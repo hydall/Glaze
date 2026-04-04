@@ -63,7 +63,7 @@ const getAvatarUrl = (avatar) => {
     return `/characters/${avatar}`;
 };
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 async function loadPickerData() {
     try {

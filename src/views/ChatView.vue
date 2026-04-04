@@ -205,7 +205,7 @@ const onScroll = (e) => {
 window.forceScrollToBottom = () => { vsScrollToBottom('auto') };
 
 // Helper to access translations
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 // --- Search Logic ---
 watch(searchQuery, (newVal) => {

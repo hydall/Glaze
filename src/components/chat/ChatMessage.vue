@@ -32,7 +32,7 @@ const emit = defineEmits([
 ]);
 
 const triggeredItemsSheet = ref(null);
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const isGuidedSwipeOpen = ref(false);
 const guidedSwipeText = ref('');
@@ -288,7 +288,7 @@ function handleTouchEnd(e) {
     if (deltaX < -100) {
         if ((props.message.swipeId || 0) < (props.message.swipes?.length || 1) - 1) {
             animateChange(() => emit('swipe', 1));
-        } else if (props.isLast && !disableSwipeRegeneration) {
+        } else if (props.isLast && !disableSwipeRegeneration.value) {
             body.style.transition = 'transform 0.1s';
             body.style.transform = `translateX(-20px)`;
             setTimeout(() => { 
@@ -399,14 +399,14 @@ const tokenCount = computed(() => {
     return props.message.tokens || 0;
 });
 
-const uiHideMsgId = ref(hideMessageId);
-const uiHideGenTime = ref(hideGenerationTime);
-const uiHideTokenCnt = ref(hideTokenCount);
+const uiHideMsgId = ref(hideMessageId.value);
+const uiHideGenTime = ref(hideGenerationTime.value);
+const uiHideTokenCnt = ref(hideTokenCount.value);
 
 const onSettingsChanged = () => {
-    uiHideMsgId.value = hideMessageId;
-    uiHideGenTime.value = hideGenerationTime;
-    uiHideTokenCnt.value = hideTokenCount;
+    uiHideMsgId.value = hideMessageId.value;
+    uiHideGenTime.value = hideGenerationTime.value;
+    uiHideTokenCnt.value = hideTokenCount.value;
 };
 
 onMounted(() => {

@@ -5,7 +5,7 @@ import { getLastPrompt } from '@/core/services/generationService.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const sheet = ref(null);
 const previewData = ref(null);

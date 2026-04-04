@@ -21,7 +21,7 @@ export function formatDate(timestamp, format = 'short') {
     const m = String(date.getMonth() + 1).padStart(2, '0');
     const dateStr = `${d}.${m}`;
 
-    const t = translations[currentLang] || {};
+    const t = translations[currentLang.value] || {};
     const yesterdayText = t['date_yesterday'] || 'Yesterday';
 
     if (diff === 0) { // Today
@@ -57,13 +57,13 @@ export function formatDateSeparator(timestamp) {
     const diff = startOfToday.getTime() - startOfMsgDay.getTime();
     const oneDay = 24 * 60 * 60 * 1000;
     
-    const t = translations[currentLang] || {};
-    
+    const t = translations[currentLang.value] || {};
+
     if (diff === 0) return t['date_today'] || 'Today';
     if (diff === oneDay) return t['date_yesterday'] || 'Yesterday';
-    
+
     try {
-        return new Intl.DateTimeFormat(currentLang, { 
+        return new Intl.DateTimeFormat(currentLang.value, {
             day: 'numeric', month: 'long', year: 'numeric' 
         }).format(date);
     } catch (e) {

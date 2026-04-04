@@ -7,7 +7,7 @@ import SheetView from '@/components/ui/SheetView.vue';
 
 const sheet = ref(null);
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const openEditor = (index) => {
     window.dispatchEvent(new CustomEvent('open-persona-editor', {

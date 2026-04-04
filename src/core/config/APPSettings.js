@@ -1,52 +1,54 @@
+import { ref } from 'vue';
 import { logger } from '../../utils/logger.js';
+
 const savedLang = localStorage.getItem('gz_lang');
 const systemLang = (navigator.language || 'en').toLowerCase().startsWith('ru') ? 'ru' : 'en';
-export let currentLang = savedLang || systemLang;
+export const currentLang = ref(savedLang || systemLang);
 
 export function setLanguage(lang) {
-    currentLang = lang;
+    currentLang.value = lang;
     localStorage.setItem('gz_lang', lang);
 }
 
-export let themeMode = localStorage.getItem('gz_theme') || 'system';
+export const themeMode = ref(localStorage.getItem('gz_theme') || 'system');
 export function setThemeMode(mode) {
-    themeMode = mode;
+    themeMode.value = mode;
     localStorage.setItem('gz_theme', mode);
 }
 export function getThemeMode() {
-    return themeMode;
+    return themeMode.value;
 }
 
-export let imageViewerMode = localStorage.getItem('gz_image_viewer') || 'default';
-logger.debug('[APPSettings] Initial imageViewerMode:', imageViewerMode);
+export const imageViewerMode = ref(localStorage.getItem('gz_image_viewer') || 'default');
+logger.debug('[APPSettings] Initial imageViewerMode:', imageViewerMode.value);
 
 export function setImageViewerMode(mode) {
     logger.debug('[APPSettings] setImageViewerMode:', mode);
-    imageViewerMode = mode;
+    imageViewerMode.value = mode;
     localStorage.setItem('gz_image_viewer', mode);
 }
 
-export let disableSwipeRegeneration = localStorage.getItem('gz_disable_swipe_regeneration') === 'true';
+export const disableSwipeRegeneration = ref(localStorage.getItem('gz_disable_swipe_regeneration') === 'true');
 
 export function setDisableSwipeRegeneration(value) {
-    disableSwipeRegeneration = value;
+    disableSwipeRegeneration.value = value;
     localStorage.setItem('gz_disable_swipe_regeneration', value);
 }
 
-export let hideMessageId = localStorage.getItem('gz_hide_msg_id') === 'true';
+export const hideMessageId = ref(localStorage.getItem('gz_hide_msg_id') === 'true');
 export function setHideMessageId(value) {
-    hideMessageId = value;
+    hideMessageId.value = value;
     localStorage.setItem('gz_hide_msg_id', value);
 }
 
-export let hideGenerationTime = localStorage.getItem('gz_hide_gen_time') === 'true';
+export const hideGenerationTime = ref(localStorage.getItem('gz_hide_gen_time') === 'true');
 export function setHideGenerationTime(value) {
-    hideGenerationTime = value;
+    hideGenerationTime.value = value;
     localStorage.setItem('gz_hide_gen_time', value);
 }
 
-export let hideTokenCount = localStorage.getItem('gz_hide_token_count') === 'true';
+export const hideTokenCount = ref(localStorage.getItem('gz_hide_token_count') === 'true');
 export function setHideTokenCount(value) {
-    hideTokenCount = value;
+    hideTokenCount.value = value;
     localStorage.setItem('gz_hide_token_count', value);
 }

@@ -16,7 +16,7 @@ const emit = defineEmits(['update:modelValue', 'save', 'open-fs']);
 
 const item = ref({});
 const avatarInput = ref(null);
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 // Specific state for greetings cycling
 const currentGreetingIndex = ref(0);

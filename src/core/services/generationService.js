@@ -105,7 +105,7 @@ export async function generateChatResponse({
     let apiConfig = getEffectiveApiConfig();
     let { apiKey, apiUrl, model, stream, requestReasoning, temp, topP, maxTokens, contextSize } = apiConfig;
 
-    const t = (key) => translations[currentLang]?.[key] || key;
+    const t = (key) => translations[currentLang.value]?.[key] || key;
 
     if (!apiUrl || !model) {
         showBottomSheet({

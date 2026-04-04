@@ -269,7 +269,7 @@ export function initThemeToggle() {
 
     const updateThemeText = () => {
         if (!themeValue) return;
-        const t = translations[currentLang] || {};
+        const t = translations[currentLang.value] || {};
         const map = {
             'system': t.theme_system || 'System',
             'dark': t.theme_dark || 'Dark',
@@ -281,7 +281,7 @@ export function initThemeToggle() {
 
     if (themeSelector) {
         themeSelector.addEventListener('click', () => {
-            const t = translations[currentLang] || {};
+            const t = translations[currentLang.value] || {};
             const getIcon = (mode) => getThemeMode() === mode ? '<svg viewBox="0 0 24 24" style="fill: var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : '';
             showBottomSheet({
                 title: t.theme_title || 'Theme',
@@ -300,13 +300,13 @@ export function initThemeToggle() {
 
     const updateHoloText = () => {
         if (!holoValue) return;
-        holoValue.textContent = imageViewerMode === 'holo' ? 'Holo Card' : 'Standard';
+        holoValue.textContent = imageViewerMode.value === 'holo' ? 'Holo Card' : 'Standard';
     };
     updateHoloText();
 
     if (holoSelector) {
         holoSelector.addEventListener('click', () => {
-            const getIcon = (mode) => imageViewerMode === mode ? '<svg viewBox="0 0 24 24" style="fill: var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : '';
+            const getIcon = (mode) => imageViewerMode.value === mode ? '<svg viewBox="0 0 24 24" style="fill: var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : '';
             showBottomSheet({
                 title: 'Image viewer',
                 items: [
@@ -353,7 +353,7 @@ export function initHeaderDropdown(categories, activeCategories, onCategoryChang
             const el = document.createElement('div');
             el.className = 'dropdown-item' + (item.id === currentVal ? ' selected' : '');
             el.innerHTML = `
-                <span>${translations[currentLang][item.i18n]}</span>
+                <span>${translations[currentLang.value][item.i18n]}</span>
                 <svg class="dropdown-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
             `;
             el.addEventListener('click', () => {
@@ -549,7 +549,7 @@ export function initBackButton() {
         } else {
             lastBackPress = now;
             await Toast.show({
-                text: (translations[currentLang] && translations[currentLang]['exit_hint']) || 'Press again to exit',
+                text: (translations[currentLang.value] && translations[currentLang.value]['exit_hint']) || 'Press again to exit',
                 duration: 'short',
                 position: 'bottom'
             });

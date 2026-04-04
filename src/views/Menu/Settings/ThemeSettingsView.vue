@@ -46,7 +46,7 @@ const activeThemeMode = ref(getThemeMode());
 const activeTab = ref('general');
 const activeChatSubTab = ref('font');
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const loadPresetsList = async () => {
     presets.value = await getPresets();

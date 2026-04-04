@@ -169,8 +169,8 @@ function setupGenerationHeader(title, activeTab, onTabChange) {
     state.showLogo = true;
     state.generationTab = activeTab || 'subview-api';
     state.onGenerationTabChange = onTabChange;
-    state.tabApiLabel = translations[currentLang]?.subtab_api || 'API';
-    state.tabPresetLabel = translations[currentLang]?.subtab_preset || 'Preset';
+    state.tabApiLabel = translations[currentLang.value]?.subtab_api || 'API';
+    state.tabPresetLabel = translations[currentLang.value]?.subtab_preset || 'Preset';
     toggleTabbar(true);
 }
 
@@ -213,7 +213,7 @@ function updateHeader() {
     };
     
     const key = titleKeys[viewId];
-    const title = key ? translations[currentLang][key] : '';
+    const title = key ? translations[currentLang.value][key] : '';
 
     if (viewId === 'view-generation') {
         setupGenerationHeader(title, state.generationTab, state.onGenerationTabChange);
@@ -225,7 +225,7 @@ function updateHeader() {
         setupSettingsHeader(title);
     } else if (viewId === 'view-character-edit') {
         const isNew = props.editingIndex === -1;
-        const tr = translations[currentLang] || {};
+        const tr = translations[currentLang.value] || {};
         const editTitle = isNew 
             ? (tr.action_create_new || 'Create New') 
             : (tr.header_editor || 'Editor');
@@ -247,7 +247,7 @@ function updateHeader() {
     } else if (viewId === 'view-persona-edit') {
         logger.debug('[AppHeader] Setting up Persona Editor Header');
         const isNew = props.editingIndex === -1;
-        const tr = translations[currentLang] || {};
+        const tr = translations[currentLang.value] || {};
         const editTitle = isNew 
             ? (tr.new_persona || 'New Persona') 
             : (tr.header_editor || 'Editor');
@@ -275,7 +275,7 @@ function updateHeader() {
     // Setup Search for specific views
     if (needsSearch) {
         state.showSearch = true;
-        state.searchPlaceholder = viewId === 'view-dialogs' ? (translations[currentLang]?.search_dialogs || 'Search') : (translations[currentLang]?.search_characters || 'Search characters');
+        state.searchPlaceholder = viewId === 'view-dialogs' ? (translations[currentLang.value]?.search_dialogs || 'Search') : (translations[currentLang.value]?.search_characters || 'Search characters');
     }
 
     nextTick(() => {
@@ -284,7 +284,7 @@ function updateHeader() {
 }
 
 // --- Persona Logic (Moved from MenuView) ---
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 // Event Handlers
 const handleBack = () => {

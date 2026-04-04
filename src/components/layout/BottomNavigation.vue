@@ -12,7 +12,7 @@ defineEmits(['update:currentView']);
 const tabbarRef = ref(null);
 let resizeObserver = null;
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const updateTabBarHeight = () => {
   if (tabbarRef.value) {

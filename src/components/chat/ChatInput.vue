@@ -29,7 +29,7 @@ const emit = defineEmits([
     'search-next', 'search-prev', 'delete-selected', 'hide-selected', 'cancel-selection'
 ]);
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const chatInput = ref(null);
 const isComposing = ref(false);

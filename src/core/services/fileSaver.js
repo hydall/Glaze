@@ -86,7 +86,7 @@ export async function saveFile(filename, content, mimeType = 'application/json',
                 });
             }
 
-            const t = translations[currentLang];
+            const t = translations[currentLang.value];
 
             showBottomSheet({
                 title: t?.export_success || "Export Complete",
@@ -150,7 +150,7 @@ export async function saveFile(filename, content, mimeType = 'application/json',
                     });
                 }
 
-                const t = translations[currentLang];
+                const t = translations[currentLang.value];
                 showBottomSheet({
                     title: t?.export_success || "Export Complete",
                     bigInfo: {
@@ -161,7 +161,7 @@ export async function saveFile(filename, content, mimeType = 'application/json',
                     }
                 });
             } catch (e2) {
-                const t = translations[currentLang];
+                const t = translations[currentLang.value];
                 showBottomSheet({
                     title: t?.title_error || "Error",
                     bigInfo: {

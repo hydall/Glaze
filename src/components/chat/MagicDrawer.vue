@@ -37,7 +37,7 @@ const emit = defineEmits([
     'add-block'
 ]);
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const isEditing = ref(false);
 const dragSrcIndex = ref(-1);

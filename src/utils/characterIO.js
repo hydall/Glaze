@@ -175,7 +175,7 @@ export function triggerCharacterImport(onImport) {
             }
         } catch (error) {
             console.error("Import failed:", error);
-            const t = translations[currentLang];
+            const t = translations[currentLang.value];
             showBottomSheet({
                 title: t?.title_error || "Error",
                 bigInfo: {

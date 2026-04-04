@@ -8,7 +8,7 @@ import { lorebookState, initLorebookState, createLorebook, deleteLorebook, impor
 import { saveFile } from '@/core/services/fileSaver.js';
 
 const sheet = ref(null);
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const currentView = ref('list'); // list, entries, edit_entry
 const activeLorebook = ref(null);

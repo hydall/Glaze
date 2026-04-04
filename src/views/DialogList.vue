@@ -135,7 +135,7 @@ const openActions = (chat) => {
         title: chat.name,
         items: [
             {
-                label: translations[currentLang]?.action_new_session || 'New Session',
+                label: translations[currentLang.value]?.action_new_session || 'New Session',
                 icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
                 onClick: async () => {
                     await createNewSession(chat.id);
@@ -144,7 +144,7 @@ const openActions = (chat) => {
                 }
             },
             {
-                label: translations[currentLang]?.action_export_chat || 'Export Chat (JSONL)',
+                label: translations[currentLang.value]?.action_export_chat || 'Export Chat (JSONL)',
                 icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
                 onClick: () => {
                     exportSillyTavernChat(chat);
@@ -152,17 +152,17 @@ const openActions = (chat) => {
                 }
             },
             {
-                label: translations[currentLang]?.action_delete_session || 'Delete Session',
+                label: translations[currentLang.value]?.action_delete_session || 'Delete Session',
                 icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
                 iconColor: '#ff4444',
                 isDestructive: true,
                 onClick: () => {
                     closeBottomSheet();
                     showBottomSheet({
-                        title: translations[currentLang]?.confirm_delete_session || 'Delete session?',
+                        title: translations[currentLang.value]?.confirm_delete_session || 'Delete session?',
                         items: [
                             {
-                                label: translations[currentLang]?.btn_yes || 'Yes',
+                                label: translations[currentLang.value]?.btn_yes || 'Yes',
                                 icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
                                 iconColor: '#ff4444',
                                 isDestructive: true,
@@ -198,7 +198,7 @@ const openActions = (chat) => {
                                 }
                             },
                             {
-                                label: translations[currentLang]?.btn_no || 'No',
+                                label: translations[currentLang.value]?.btn_no || 'No',
                                 icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
                                 onClick: () => closeBottomSheet()
                             }
@@ -232,7 +232,7 @@ const startChatImport = async () => {
         }));
 
         showBottomSheet({
-            title: translations[currentLang]?.select_persona_import || 'Select User Persona',
+            title: translations[currentLang.value]?.select_persona_import || 'Select User Persona',
             items: items
         });
     };
@@ -250,7 +250,7 @@ const startChatImport = async () => {
         }));
 
         showBottomSheet({
-            title: translations[currentLang]?.select_char_import || 'Select Character',
+            title: translations[currentLang.value]?.select_char_import || 'Select Character',
             items: items
         });
     };
@@ -262,11 +262,11 @@ const startChatImport = async () => {
             loadData();
             
             showBottomSheet({
-                title: translations[currentLang]?.import_success || 'Import Successful',
+                title: translations[currentLang.value]?.import_success || 'Import Successful',
                 bigInfo: {
                     icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
                     description: `Imported ${result.messageCount} messages.`,
-                    buttonText: translations[currentLang]?.btn_close || 'Close',
+                    buttonText: translations[currentLang.value]?.btn_close || 'Close',
                     onButtonClick: () => {
                         closeBottomSheet();
                     }
@@ -303,7 +303,7 @@ const openNewChatPicker = () => {
     });
 
     showBottomSheet({
-        title: translations[currentLang]?.sheet_title_select_char || 'Select Character',
+        title: translations[currentLang.value]?.sheet_title_select_char || 'Select Character',
         items: items
     });
 };
@@ -356,7 +356,7 @@ onUnmounted(() => {
                     <div class="msg-preview" v-if="!generating[`${chat.id}_${chat.sessionId}`]">{{ formatPreview(chat.msg) }}</div>
                     <div class="msg-preview generating" v-else>
                         <svg class="typing-icon-mini" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
-                        <span>{{ translations[currentLang]?.model_typing || 'Generating...' }}</span>
+                        <span>{{ translations[currentLang.value]?.model_typing || 'Generating...' }}</span>
                     </div>
                 </div>
             </div>
@@ -364,7 +364,7 @@ onUnmounted(() => {
           </div>
           <div v-if="filteredChats.length === 0" class="empty-state">
               <svg class="empty-state-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
-              <div class="empty-state-text">{{ translations[currentLang]?.no_dialogs || 'No dialogs' }}</div>
+              <div class="empty-state-text">{{ translations[currentLang.value]?.no_dialogs || 'No dialogs' }}</div>
           </div>
       </div>
   </div>

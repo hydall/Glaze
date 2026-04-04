@@ -7,7 +7,7 @@ import { getGlobalStats, getCharStats, getChatStats, migrateStatsIfNeeded } from
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const sheet = ref(null);
 const currentTab = ref('chat');

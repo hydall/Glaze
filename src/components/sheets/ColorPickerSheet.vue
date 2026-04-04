@@ -23,7 +23,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['update:visible', 'update:modelValue', 'select']);
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const localValue = ref(props.modelValue);
 

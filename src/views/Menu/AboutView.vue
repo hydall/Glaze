@@ -41,7 +41,7 @@ watch(visible, (val) => {
     }
 });
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 defineExpose({ open });
 </script>

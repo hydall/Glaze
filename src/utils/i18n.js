@@ -13,15 +13,15 @@ export const i18nTrigger = ref(0);
 export function t(key) {
     // Read the trigger so Vue tracks this call
     const _track = i18nTrigger.value;
-    return translations[currentLang] ? (translations[currentLang][key] || key) : key;
+    return translations[currentLang.value] ? (translations[currentLang.value][key] || key) : key;
 }
 
 export function pluralize(count, key) {
-    const wordInfo = translations[currentLang]?.[key];
+    const wordInfo = translations[currentLang.value]?.[key];
     if (!wordInfo) return key;
 
     if (Array.isArray(wordInfo)) {
-        if (currentLang === 'ru') {
+        if (currentLang.value === 'ru') {
             const cases = [2, 0, 1, 1, 1, 2];
             return wordInfo[(count % 100 > 4 && count % 100 < 20) ? 2 : cases[(count % 10 < 5) ? Math.floor(count % 10) : 5]];
         } else {
@@ -51,16 +51,16 @@ export function updateLanguage() {
         // Update elements with data-i18n
         i18nElements.forEach(el => {
             const key = el.getAttribute('data-i18n');
-            if (translations[currentLang][key]) {
-                el.textContent = translations[currentLang][key];
+            if (translations[currentLang.value][key]) {
+                el.textContent = translations[currentLang.value][key];
             }
         });
 
         // Update placeholders
         placeholderElements.forEach(el => {
             const key = el.getAttribute('data-i18n-placeholder');
-            if (translations[currentLang][key]) {
-                el.placeholder = translations[currentLang][key];
+            if (translations[currentLang.value][key]) {
+                el.placeholder = translations[currentLang.value][key];
             }
         });
 
@@ -68,8 +68,8 @@ export function updateLanguage() {
         const activeTab = document.querySelector('.tab-btn.active');
         if (activeTab && headerTitle) {
             const titleKey = activeTab.getAttribute('data-i18n-title');
-            if (titleKey && translations[currentLang][titleKey]) {
-                headerTitle.textContent = translations[currentLang][titleKey];
+            if (titleKey && translations[currentLang.value][titleKey]) {
+                headerTitle.textContent = translations[currentLang.value][titleKey];
             }
         }
 

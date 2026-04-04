@@ -14,7 +14,7 @@ const props = defineProps({
 });
 
 const sheet = ref(null);
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const currentView = ref('list'); // list, edit
 const activeScript = ref(null);

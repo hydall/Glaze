@@ -40,7 +40,7 @@ import { initLorebookState } from '@/core/states/lorebookState.js';
 import { initPresetState } from '@/core/states/presetState.js';
 import { startTracking } from '@/core/services/timeTracker.js';
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 // Initialize error handling
 
 // --- Navigation state ---
@@ -363,7 +363,7 @@ watch(fsEditorVisible, (val) => {
     if (val) {
         window.dispatchEvent(new CustomEvent('header-setup-editor', {
             detail: {
-                title: translations[currentLang]?.header_editor || 'Editor',
+                title: translations[currentLang.value]?.header_editor || 'Editor',
                 onBack: () => { fsEditorVisible.value = false; },
                 actions: [{
                     icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
@@ -418,12 +418,12 @@ const personaEditorConfig = [
 const fabConfig = computed(() => {
     if (currentView.value === 'view-dialogs') {
         return {
-            text: translations[currentLang]?.btn_new_chat || 'New Chat',
+            text: translations[currentLang.value]?.btn_new_chat || 'New Chat',
             action: () => dialogListRef.value?.openNewChatPicker()
         };
     } else if (currentView.value === 'view-characters') {
         return {
-            text: translations[currentLang]?.btn_add || 'Add',
+            text: translations[currentLang.value]?.btn_add || 'Add',
             action: () => characterListRef.value?.onAddCharacter()
         };
     }
@@ -470,8 +470,8 @@ const onOpenOnboarding = () => { isOnboarding.value = true; };
 
 const onTriggerOpenImage = (e) => {
     const { src, name, description, onCloseCallback } = e.detail;
-    logger.debug('[App] trigger-open-image. Current Mode:', imageViewerMode);
-    if (imageViewerMode === 'holo' || imageViewerMode === 'holocards') {
+    logger.debug('[App] trigger-open-image. Current Mode:', imageViewerMode.value);
+    if (imageViewerMode.value === 'holo' || imageViewerMode.value === 'holocards') {
         window.dispatchEvent(new CustomEvent('open-holocards', {
             detail: { src, name, description, onCloseCallback }
         }));

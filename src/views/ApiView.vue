@@ -367,7 +367,7 @@ function openApiPresetSelector() {
 
 // --- Helpers ---
 const t = (key) => {
-    return translations[currentLang] ? translations[currentLang][key] : key;
+    return translations[currentLang.value] ? translations[currentLang.value][key] : key;
 };
 
 // --- Lifecycle ---

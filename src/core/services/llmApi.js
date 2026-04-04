@@ -18,7 +18,7 @@ export async function executeRequest({
     callbacks
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
-    const t = (key) => translations[currentLang]?.[key] || key;
+    const t = (key) => translations[currentLang.value]?.[key] || key;
     const headerModel = `<span style="color: var(--vk-blue); font-weight: 700; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">${t('reasoning_model')}</span>`;
     const headerInline = `<span style="color: var(--vk-blue); font-weight: 700; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">${t('reasoning_inline')}</span>`;
 
@@ -51,7 +51,7 @@ export async function executeRequest({
     const isAndroid = Capacitor.getPlatform() === 'android';
 
     if (isAndroid) {
-        await startGenerationNotification('Glaze', translations[currentLang]['model_typing'] || 'Generating...');
+        await startGenerationNotification('Glaze', translations[currentLang.value]['model_typing'] || 'Generating...');
     } else {
         // Fallback for iOS and other platforms
         try {

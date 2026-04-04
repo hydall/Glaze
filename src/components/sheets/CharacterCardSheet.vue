@@ -9,7 +9,7 @@ import { db } from '@/utils/db.js';
 
 const sheet = ref(null);
 const character = ref({});
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const config = computed(() => [
     {
