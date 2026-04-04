@@ -13,6 +13,7 @@ function genMsgId() {
 <script setup>
 import { ref, nextTick, onMounted, onUnmounted, watch, computed, onBeforeUnmount } from 'vue';
 import { Capacitor } from '@capacitor/core';
+import { keyboardOverlap } from '@/core/services/keyboardHandler.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { formatText, cleanText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
@@ -44,6 +45,8 @@ import LorebookSheet from '@/components/sheets/LorebookSheet.vue';
 import RegexSheet from '@/components/sheets/RegexSheet.vue';
 import StatsSheet from '@/components/sheets/StatsSheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
+
+const isAndroid = Capacitor.getPlatform() === 'android';
 
 // --- Component State ---
 const chatViewRoot = ref(null);
@@ -2271,10 +2274,19 @@ const onVisibilityChange = () => {
     }
 };
 
+let _paddingRafContext = null;
 const updateContentPadding = () => {
-    if (messagesContainer.value && chatInputContainer.value) {
+    if (_paddingRafContext) cancelAnimationFrame(_paddingRafContext);
+    _paddingRafContext = requestAnimationFrame(() => {
+        _paddingRafContext = null;
+        if (messagesContainer.value && chatInputContainer.value) {
         const el = messagesContainer.value;
         const currentFullHeight = chatInputContainer.value.getBoundingClientRect().height;
+        const currentContainerHeight = el.getBoundingClientRect().height;
+        
+        const prevContainerHeight = el._lastContainerHeight !== undefined ? el._lastContainerHeight : currentContainerHeight;
+        el._lastContainerHeight = currentContainerHeight;
+        const containerHeightDiff = currentContainerHeight - prevContainerHeight;
         
         const prevFullHeight = el._lastFullHeight !== undefined ? el._lastFullHeight : currentFullHeight;
         el._lastFullHeight = currentFullHeight;
@@ -2285,7 +2297,7 @@ const updateContentPadding = () => {
         const currentPadding = parseFloat(el.style.paddingBottom) || 0;
         const paddingDiff = targetPadding - currentPadding;
 
-        if (Math.abs(diffScroll) < 0.1 && Math.abs(paddingDiff) < 0.1) return;
+        if (Math.abs(diffScroll) < 0.1 && Math.abs(paddingDiff) < 0.1 && Math.abs(containerHeightDiff) < 0.1) return;
 
         const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 5;
 
@@ -2298,14 +2310,17 @@ const updateContentPadding = () => {
         el._scrollUnlockTimer = setTimeout(() => {
             isProgrammaticScrolling.value = false;
         }, 100);
+        
+        const totalScrollAdjustment = diffScroll - containerHeightDiff;
 
         if (isAtBottom) {
             // If already at the bottom, stay at the bottom
             el.scrollTop = el.scrollHeight - el.clientHeight;
-        } else if (!ignoreScrollAdjustment && Math.abs(diffScroll) > 0.1) {
-            el.scrollTop += diffScroll;
+        } else if (!ignoreScrollAdjustment && Math.abs(totalScrollAdjustment) > 0.1) {
+            el.scrollTop += totalScrollAdjustment;
         }
-    }
+        }
+    });
 };
 
 function setScrollLock(enabled) {
@@ -2352,6 +2367,7 @@ onMounted(() => {
     if (chatInputContainer.value) {
         inputResizeObserver = new ResizeObserver(updateContentPadding);
         inputResizeObserver.observe(chatInputContainer.value);
+        if (messagesContainer.value) inputResizeObserver.observe(messagesContainer.value);
         updateContentPadding();
     }
     updateContextCutoff();
@@ -2474,12 +2490,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div id="view-chat" ref="chatViewRoot">
+    <div id="view-chat" ref="chatViewRoot" :class="{ 'android-resize-fix': isAndroid }">
         <div v-if="isLoading" class="chat-loading-overlay">
             <div class="app-loader-spinner"></div>
         </div>
 
-        <div class="chat-container" id="chat-messages" ref="messagesContainer" :class="{ 'is-scrolling': isScrolling, 'visually-hidden': isLoading }">
+        <div class="chat-container" id="chat-messages" ref="messagesContainer" :class="{ 'is-scrolling': isScrolling, 'visually-hidden': isLoading }" :style="isAndroid ? { marginBottom: keyboardOverlap + 'px' } : {}">
             <!-- paddingTop - spacer for virtual list scroll offset -->
             <div :style="{ height: paddingTop + 'px' }"></div>
             
@@ -2522,7 +2538,7 @@ onUnmounted(() => {
         <div class="chat-status-gradient"></div>
 
 
-        <div class="chat-input-wrapper" ref="chatInputContainer">
+        <div class="chat-input-wrapper" ref="chatInputContainer" :style="isAndroid ? { bottom: keyboardOverlap + 'px' } : {}">
             <ChatInput 
                 ref="chatInputRef"
                 v-model="inputValue"
@@ -3118,6 +3134,17 @@ body.dark-theme .message-section {
 .clock-flip-leave-to {
     transform: translateY(15px);
     opacity: 0;
+}
+
+/* Android text selection fix */
+#view-chat.android-resize-fix .chat-container {
+    transition: margin-bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#view-chat.android-resize-fix .chat-input-wrapper {
+    transition: bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#view-chat.android-resize-fix .chat-input-container.keyboard-open .chat-input-content {
+    padding-bottom: 0 !important;
 }
 </style>
 

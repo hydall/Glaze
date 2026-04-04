@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 
 export const isKeyboardOpen = ref(false);
 export const isNativeKeyboard = ref(false);
+export const keyboardOverlap = ref(0);
 
 let _scrollResetRaf = null;
 
@@ -29,6 +30,7 @@ export function initKeyboard() {
             if (info && info.keyboardHeight) {
                 document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
                 document.documentElement.style.setProperty('--keyboard-overlap', `${info.keyboardHeight}px`);
+                keyboardOverlap.value = info.keyboardHeight;
                 localStorage.setItem('gz_keyboard_height', info.keyboardHeight);
             }
         });
@@ -37,6 +39,7 @@ export function initKeyboard() {
             if (info && info.keyboardHeight) {
                 document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
                 document.documentElement.style.setProperty('--keyboard-overlap', `${info.keyboardHeight}px`);
+                keyboardOverlap.value = info.keyboardHeight;
                 localStorage.setItem('gz_keyboard_height', info.keyboardHeight);
             }
         });
@@ -45,6 +48,7 @@ export function initKeyboard() {
             isKeyboardOpen.value = false;
             document.body.classList.remove('keyboard-open');
             document.documentElement.style.setProperty('--keyboard-overlap', '0px');
+            keyboardOverlap.value = 0;
         });
     } else if (Capacitor.getPlatform() === 'ios') {
         let preKeyboardHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
@@ -68,6 +72,7 @@ export function initKeyboard() {
                     if (currentKbHeight > 0) {
                         const effectiveOverlap = Math.max(0, currentKbHeight - viewportShrunk);
                         document.documentElement.style.setProperty('--keyboard-overlap', `${effectiveOverlap}px`);
+                        keyboardOverlap.value = effectiveOverlap;
                     }
 
                     _scrollResetRaf = requestAnimationFrame(tick);
@@ -104,6 +109,7 @@ export function initKeyboard() {
                 const viewportShrunk = Math.max(0, preKeyboardHeight - currentHeight);
                 const effectiveOverlap = Math.max(0, info.keyboardHeight - viewportShrunk);
                 document.documentElement.style.setProperty('--keyboard-overlap', `${effectiveOverlap}px`);
+                keyboardOverlap.value = effectiveOverlap;
             }
             startScrollResetLoop();
         });
@@ -120,6 +126,7 @@ export function initKeyboard() {
             isKeyboardOpen.value = false;
             document.body.classList.remove('keyboard-open');
             document.documentElement.style.setProperty('--keyboard-overlap', '0px');
+            keyboardOverlap.value = 0;
             stopScrollResetLoop();
         });
     }
