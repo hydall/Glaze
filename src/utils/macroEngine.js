@@ -1,4 +1,4 @@
-export function replaceMacros(text, char, persona) {
+export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyObj = null) {
     if (!text) return "";
 
     // --- Comments ---
@@ -16,15 +16,13 @@ export function replaceMacros(text, char, persona) {
     const userName = persona ? persona.name : "User";
     const userPersona = persona ? (persona.prompt || "") : "";
 
-    result = result.replace(/\{{1,2}char\}{1,2}/gi, charName)
+    result = result.replace(/{{char}}/gi, charName)
         .replace(/{{description}}/gi, charDesc)
         .replace(/{{scenario}}/gi, charScenario)
         .replace(/{{personality}}/gi, charPersonality)
         .replace(/{{mesExamples}}/gi, charMesExample)
-        .replace(/\{{1,2}user\}{1,2}/gi, userName)
+        .replace(/{{user}}/gi, userName)
         .replace(/{{persona}}/gi, userPersona);
-
-    // --- Advanced Macros ---
 
     // {{trim}}
     if (result.includes("{{trim}}")) {
@@ -34,18 +32,21 @@ export function replaceMacros(text, char, persona) {
     const charId = char?.id || "default";
     const sessionId = char?.sessionId || "current";
 
+    // If sessionVars not provided (main thread), load from localStorage
+    const ownVars = sessionVarsIn === null;
+    const sessionVars = ownVars ? _getSessionVars(charId, sessionId) : sessionVarsIn;
+    let varsChanged = false;
+
     // {{setvar::name::value}}
     result = result.replace(/{{setvar::([\s\S]*?)::([\s\S]*?)}}/gi, (match, name, value) => {
-        const vars = getSessionVars(charId, sessionId);
-        vars[name] = value;
-        saveSessionVars(charId, sessionId, vars);
+        sessionVars[name] = value;
+        varsChanged = true;
         return "";
     });
 
     // {{getvar::name}}
     result = result.replace(/{{getvar::([\s\S]*?)}}/gi, (match, name) => {
-        const vars = getSessionVars(charId, sessionId);
-        return vars[name] !== undefined ? vars[name] : "";
+        return sessionVars[name] !== undefined ? sessionVars[name] : "";
     });
 
     // {{random::a::b::c}}
@@ -58,25 +59,29 @@ export function replaceMacros(text, char, persona) {
     let pickCount = 0;
     result = result.replace(/{{pick::(.*?)}}/gi, (match, optionsStr) => {
         const options = optionsStr.split("::");
-        const vars = getSessionVars(charId, sessionId);
-        const version = vars.__pick_version || 0;
+        const version = sessionVars.__pick_version || 0;
         const seed = `${charId}_${sessionId}_pick_${pickCount++}_v${version}`;
-        const hash = simpleHash(seed);
+        const hash = _simpleHash(seed);
         return options[hash % options.length];
     });
 
     // {{roll::1d20}}
     result = result.replace(/{{roll::(.*?)}}/gi, (match, dice) => {
-        return rollDice(dice);
+        return _rollDice(dice);
     });
 
     // --- Escaping: \{\{ → {{ and \}\} → }} ---
     result = result.replace(/\\\{/g, '{').replace(/\\\}/g, '}');
 
+    if (varsChanged) {
+        if (notifyObj) notifyObj.varsChanged = true;
+        if (ownVars) _saveSessionVars(charId, sessionId, sessionVars);
+    }
+
     return result;
 }
 
-function getSessionVars(charId, sessionId) {
+function _getSessionVars(charId, sessionId) {
     const key = `gz_vars_${charId}_${sessionId}`;
     try {
         return JSON.parse(localStorage.getItem(key)) || {};
@@ -85,12 +90,12 @@ function getSessionVars(charId, sessionId) {
     }
 }
 
-function saveSessionVars(charId, sessionId, vars) {
+function _saveSessionVars(charId, sessionId, vars) {
     const key = `gz_vars_${charId}_${sessionId}`;
     localStorage.setItem(key, JSON.stringify(vars));
 }
 
-function simpleHash(str) {
+function _simpleHash(str) {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
         const char = str.charCodeAt(i);
@@ -100,7 +105,7 @@ function simpleHash(str) {
     return Math.abs(hash);
 }
 
-function rollDice(dice) {
+function _rollDice(dice) {
     const match = dice.match(/(\d+)d(\d+)/i);
     if (!match) return dice;
     const count = parseInt(match[1]);
