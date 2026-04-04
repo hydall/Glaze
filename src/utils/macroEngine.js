@@ -16,12 +16,12 @@ export function replaceMacros(text, char, persona) {
     const userName = persona ? persona.name : "User";
     const userPersona = persona ? (persona.prompt || "") : "";
 
-    result = result.replace(/{{char}}/gi, charName)
+    result = result.replace(/\{{1,2}char\}{1,2}/gi, charName)
         .replace(/{{description}}/gi, charDesc)
         .replace(/{{scenario}}/gi, charScenario)
         .replace(/{{personality}}/gi, charPersonality)
         .replace(/{{mesExamples}}/gi, charMesExample)
-        .replace(/{{user}}/gi, userName)
+        .replace(/\{{1,2}user\}{1,2}/gi, userName)
         .replace(/{{persona}}/gi, userPersona);
 
     // --- Advanced Macros ---
