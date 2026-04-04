@@ -8,6 +8,14 @@ function toPlain(data) {
     return JSON.parse(JSON.stringify(data));
 }
 
+// Global write queue — serializes all IndexedDB writes to prevent race conditions
+let _dbWriteQueue = Promise.resolve();
+
+export function queueDbWrite(fn) {
+    _dbWriteQueue = _dbWriteQueue.then(fn).catch(err => console.error('[DB] Write queue error:', err));
+    return _dbWriteQueue;
+}
+
 export const db = {
     open: () => {
         return new Promise((resolve, reject) => {
@@ -127,6 +135,8 @@ export const db = {
             };
         });
     },
+    // Queued version of set — safe for high-frequency writes (e.g. auto-save on typing)
+    queuedSet: (key, value) => queueDbWrite(() => db.set(key, value)),
     delete: async (storeName, key) => {
         const database = await db.open();
         return new Promise((resolve, reject) => {

@@ -117,6 +117,15 @@ watch(() => presetState, () => {
     }
 }, { deep: true });
 
+// Call when closing the preset editor to flush any pending debounced save
+export function flushPresetSave() {
+    if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+    }
+    savePresets();
+}
+
 export function setPresetConnection(type, targetId, presetId) {
     if (type === 'global') {
         const newId = presetId || 'default';

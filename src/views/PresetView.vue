@@ -9,7 +9,7 @@ import { replaceMacros } from '@/utils/macroEngine.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { convertSTPreset, exportSTPreset, mandatoryBlocks } from '@/core/services/presetImportService.js';
 import { generateSummary } from '@/core/services/generationService.js';
-import { presetState, initPresetState, setPresetConnection, getEffectivePresetId, DEFAULT_PRESETS } from '@/core/states/presetState.js';
+import { presetState, initPresetState, setPresetConnection, getEffectivePresetId, DEFAULT_PRESETS, flushPresetSave } from '@/core/states/presetState.js';
 import { Browser } from '@capacitor/browser';
 import { saveFile } from '@/core/services/fileSaver.js';
 import SheetView from '@/components/ui/SheetView.vue';
@@ -1767,7 +1767,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack" :actions="headerState.actions" @back="goBackFromEditor">
+    <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack" :actions="headerState.actions" @back="goBackFromEditor" @close="flushPresetSave">
         <div class="gen-sheet-body" ref="genSheetBodyRef">
         <!-- ═══ SELECTOR LIST VIEW ═══ -->
         <div class="preset-selector-list" v-if="!isEditingBlock && !editingPresetId">

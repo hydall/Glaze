@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import { db } from '@/utils/db.js';
+import { db, queueDbWrite } from '@/utils/db.js';
 import { setThemeMode } from '@/core/config/APPSettings.js';
 
 export const themeState = reactive({
@@ -103,7 +103,7 @@ function scheduleSave() {
     if (isApplyingPreset) return;
     if (saveTimeout) clearTimeout(saveTimeout);
     saveTimeout = setTimeout(() => {
-        saveStateToActivePreset();
+        queueDbWrite(() => saveStateToActivePreset());
     }, 500);
 }
 

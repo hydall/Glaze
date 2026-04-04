@@ -4,7 +4,7 @@ import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { lorebookState, initLorebookState, createLorebook, deleteLorebook, importSTLorebook, exportSTLorebook, setLorebookActivation } from '@/core/states/lorebookState.js';
+import { lorebookState, initLorebookState, createLorebook, deleteLorebook, importSTLorebook, exportSTLorebook, setLorebookActivation, flushLorebookSave } from '@/core/states/lorebookState.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 
 const sheet = ref(null);
@@ -347,7 +347,7 @@ defineExpose({ open, openEntry, close, openLorebook });
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="sheetTitle" :show-back="showBackBtn" :actions="sheetActions" @back="goBack">
+    <SheetView ref="sheet" :title="sheetTitle" :show-back="showBackBtn" :actions="sheetActions" @back="goBack" @close="flushLorebookSave">
         <template #header-right>
             <div v-if="currentView === 'edit_entry'" class="header-toggle" style="align-items: center;">
                  <input type="checkbox" v-model="activeEntry.enabled" class="vk-switch">

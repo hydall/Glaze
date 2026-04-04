@@ -67,18 +67,31 @@ export async function initLorebookState() {
 }
 
 export async function saveLorebooks() {
-    // Deep copy to avoid proxy issues with IndexedDB
-    await db.set('gz_lorebooks', {
+    await db.queuedSet('gz_lorebooks', {
         lorebooks: JSON.parse(JSON.stringify(lorebookState.lorebooks)),
         settings: JSON.parse(JSON.stringify(lorebookState.globalSettings)),
         activations: JSON.parse(JSON.stringify(lorebookState.activations))
     });
 }
 
-// Auto-save on changes
+// Auto-save on changes with debounce to prevent rapid IndexedDB writes on keystroke
+let _lorebookSaveTimer = null;
 watch(() => lorebookState, () => {
-    saveLorebooks();
+    if (_lorebookSaveTimer) clearTimeout(_lorebookSaveTimer);
+    _lorebookSaveTimer = setTimeout(() => {
+        saveLorebooks();
+        _lorebookSaveTimer = null;
+    }, 500);
 }, { deep: true });
+
+// Call when closing the lorebook editor to flush any pending debounced save
+export function flushLorebookSave() {
+    if (_lorebookSaveTimer) {
+        clearTimeout(_lorebookSaveTimer);
+        _lorebookSaveTimer = null;
+    }
+    return saveLorebooks();
+}
 
 export function createLorebook(name = 'New World Info') {
     const newLb = {

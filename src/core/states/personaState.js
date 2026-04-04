@@ -1,9 +1,8 @@
 import { ref, computed, reactive } from 'vue';
-import { db } from '@/utils/db.js';
+import { db, queueDbWrite } from '@/utils/db.js';
 
 const personas = ref([]);
 const activeIndex = ref(0);
-let dbQueue = Promise.resolve();
 
 export const personaConnections = reactive({
     character: {},
@@ -12,11 +11,6 @@ export const personaConnections = reactive({
 
 function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-}
-
-function queueDbOp(op) {
-    dbQueue = dbQueue.then(op).catch(err => console.error("DB Op failed", err));
-    return dbQueue;
 }
 
 export const activePersona = computed({
@@ -103,7 +97,7 @@ export function addPersona(persona) {
     personas.value.push(newPersona);
     activeIndex.value = personas.value.length - 1;
     updateActiveStorage();
-    queueDbOp(async () => {
+    queueDbWrite(async () => {
         await db.put('personas', newPersona);
     });
     return newPersona;
@@ -128,7 +122,7 @@ export function updatePersona(index, persona) {
 
         if (activeIndex.value === index) updateActiveStorage();
 
-        return queueDbOp(async () => {
+        return queueDbWrite(async () => {
             await db.put('personas', newPersona);
         });
     }
@@ -184,7 +178,7 @@ export function deletePersona(index) {
         }
         updateActiveStorage();
 
-        return queueDbOp(async () => {
+        return queueDbWrite(async () => {
             try {
                 await db.delete('personas', p.id);
                 if (defaultPersona) {
