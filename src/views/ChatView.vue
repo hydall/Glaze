@@ -440,6 +440,36 @@ const onFsEditorClosed = async () => {
 };
 
 async function openChat(char, onBack) {
+    // Prevent reloading if the requested chat is already open and active
+    if (activeChatChar && activeChatChar.id === char.id && !isOpeningChat) {
+        if (char.msgId) {
+            const msgIdx = currentMessages.value.findIndex(m => m.id === char.msgId);
+            if (msgIdx !== -1) {
+                const displayIndex = displayMessages.value.findIndex(
+                    m => m.type === 'message' && m.originalIndex === msgIdx
+                );
+                if (displayIndex !== -1) {
+                    scrollToAnchor({ index: displayIndex, offset: 0 });
+                    nextTick(() => {
+                        const el = document.getElementById(`msg-${msgIdx}`);
+                        if (el) {
+                            el.classList.add('search-highlight');
+                            setTimeout(() => el.classList.remove('search-highlight'), 2000);
+                        }
+                    });
+                }
+            }
+            delete char.msgId;
+        }
+        
+        if (onBack && currentOnBack !== onBack) {
+            currentOnBack = onBack;
+        }
+
+        clearMessageNotifications(char.id);
+        return;
+    }
+
     isOpeningChat = true;
     isLoading.value = true;
     

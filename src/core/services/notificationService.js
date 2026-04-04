@@ -1,7 +1,9 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { logger } from '../../utils/logger.js';
 import { ForegroundService } from '@capawesome-team/capacitor-android-foreground-service';
 import { LocalNotifications } from '@capacitor/local-notifications';
+
+const MessagingStyleNotification = registerPlugin('MessagingStyleNotification');
 
 let pendingNotificationData = null;
 
@@ -23,6 +25,15 @@ if (Capacitor.getPlatform() === 'android') {
         if (data && data.charId) {
             pendingNotificationData = data;
             logger.debug("[NotificationService] Dispatching open-chat for:", data);
+            window.dispatchEvent(new CustomEvent('open-chat', { detail: data }));
+        }
+    });
+
+    MessagingStyleNotification.addListener('notificationActionPerformed', (data) => {
+        logger.debug("[MessagingStyleNotificationPlugin] Action Performed:", JSON.stringify(data));
+        if (data && data.charId) {
+            pendingNotificationData = data;
+            logger.debug("[MessagingStyleNotificationPlugin] Dispatching open-chat for:", data);
             window.dispatchEvent(new CustomEvent('open-chat', { detail: data }));
         }
     });
@@ -113,6 +124,8 @@ export async function clearMessageNotifications(charId) {
     if (Capacitor.getPlatform() !== 'android') return;
 
     try {
+        await MessagingStyleNotification.clearNotifications({ charId: String(charId) });
+
         const delivered = await LocalNotifications.getDeliveredNotifications();
         const toRemove = delivered.notifications
             .filter(n => {
@@ -138,7 +151,7 @@ export function consumePendingNotificationData() {
     return data;
 }
 
-export function sendMessageNotification(title, body, icon, charId, sessionId, msgId) {
+export async function sendMessageNotification(title, body, icon, charId, sessionId, msgId) {
     // Don't notify if app is open and visible
     if (document.visibilityState === 'visible') return;
 
@@ -150,30 +163,33 @@ export function sendMessageNotification(title, body, icon, charId, sessionId, ms
 
     try {
         if (Capacitor.getPlatform() === 'android') {
-            // Use LocalNotifications on Android with grouping per chat
-            LocalNotifications.schedule({
-                notifications: [{
-                    title: title,
-                    body: body,
-                    id: Math.floor(Date.now() % 2147483647),
-                    channelId: 'sc_message_channel',
-                    smallIcon: 'new_message',
-                    group: String(charId),
-                    extra: { charId, sessionId, msgId }
-                }]
-            });
-            // Summary notification for grouping
-            LocalNotifications.schedule({
-                notifications: [{
-                    title: title,
-                    body: body,
-                    id: stableIdFromString(charId),
-                    channelId: 'sc_message_channel',
-                    smallIcon: 'new_message',
-                    group: String(charId),
-                    groupSummary: true,
-                    extra: { charId, sessionId, msgId }
-                }]
+            let avatarBase64 = null;
+            if (icon) {
+                let url = icon;
+                if (!url.startsWith('http') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+                    url = `/characters/${url}`;
+                }
+                try {
+                    const res = await fetch(url);
+                    const blob = await res.blob();
+                    await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            avatarBase64 = reader.result;
+                            resolve();
+                        };
+                        reader.readAsDataURL(blob);
+                    });
+                } catch (e) { console.warn("Failed to convert avatar to base64", e); }
+            }
+
+            await MessagingStyleNotification.showMessagingNotification({
+                title,
+                body,
+                avatarBase64,
+                charId: String(charId || ''),
+                sessionId: String(sessionId || ''),
+                msgId: String(msgId || '')
             });
         } else if (window.Notification && Notification.permission === 'granted') {
             let iconPath = icon;

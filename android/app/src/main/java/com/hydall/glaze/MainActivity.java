@@ -7,6 +7,7 @@ import androidx.activity.EdgeToEdge;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(MessagingStyleNotificationPlugin.class);
         super.onCreate(savedInstanceState);
         // Enable edge-to-edge mode for modern Android versions
         EdgeToEdge.enable(this);
