@@ -327,7 +327,7 @@ function openApiPresetSelector() {
         const item = {
             label: p.name,
             sublabel: isActive ? (t('preset_active') || 'Active') : '',
-            icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;"><circle cx="12" cy="12" r="10" fill="' + (isActive ? 'var(--vk-blue)' : 'var(--text-gray)') + '"/></svg>',
+            icon: getPresetIcon(p.endpoint, isActive),
             onClick: () => {
                 applyApiPreset(p);
                 closeBottomSheet();
@@ -363,6 +363,26 @@ function openApiPresetSelector() {
         title: t('api_presets') || 'API Presets',
         cardItems
     });
+}
+
+// --- Favicon helper ---
+function getPresetIcon(endpoint, isActive) {
+    const dotColor = isActive ? 'var(--vk-blue)' : 'var(--text-gray)';
+    const dotSvg = `<svg viewBox="0 0 24 24" style="fill:currentColor;"><circle cx="12" cy="12" r="10" fill="${dotColor}"/></svg>`;
+
+    if (!endpoint) return dotSvg;
+
+    let origin;
+    try {
+        const href = /^https?:\/\//i.test(endpoint) ? endpoint : 'http://' + endpoint;
+        origin = new URL(href).origin;
+    } catch {
+        return dotSvg;
+    }
+
+    const faviconUrl = origin + '/favicon.ico';
+    const escapedDot = dotSvg.replace(/'/g, '&#39;');
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;"><img src="${faviconUrl}" style="width:100%;height:100%;border-radius:6px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><svg style="display:none;fill:currentColor;width:100%;height:100%;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="${dotColor}"/></svg></span>`;
 }
 
 // --- Helpers ---

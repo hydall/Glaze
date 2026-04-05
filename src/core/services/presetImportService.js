@@ -4,7 +4,8 @@ export const mandatoryBlocks = [
     { id: "char_personality", i18n: "block_char_personality", name: "Character Personality", role: "system", content: "", isStatic: true, enabled: true },
     { id: "scenario", i18n: "block_scenario", name: "Scenario", role: "system", content: "", isStatic: true, enabled: true },
     { id: "example_dialogue", i18n: "block_example_dialogue", name: "Dialogue Examples", role: "system", content: "", isStatic: true, enabled: true },
-    { id: "chat_history", i18n: "block_chat_history", name: "Chat History", role: "system", content: "", isStatic: true, enabled: true }
+    { id: "chat_history", i18n: "block_chat_history", name: "Chat History", role: "system", content: "", isStatic: true, enabled: true },
+    { id: "guided_generation", i18n: "block_guided_generation", name: "Guided Generation", role: "system", content: "[System Note: {{guidance}}]", isStatic: true, enabled: true }
 ];
 
 export function convertSTPreset(data, fileName) {

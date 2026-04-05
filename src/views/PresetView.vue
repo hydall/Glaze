@@ -11,6 +11,7 @@ import { convertSTPreset, exportSTPreset, mandatoryBlocks } from '@/core/service
 import { generateSummary } from '@/core/services/generationService.js';
 import { presetState, initPresetState, setPresetConnection, getEffectivePresetId, DEFAULT_PRESETS, flushPresetSave } from '@/core/states/presetState.js';
 import { Browser } from '@capacitor/browser';
+import { Toast } from '@capacitor/toast';
 import { saveFile } from '@/core/services/fileSaver.js';
 import SheetView from '@/components/ui/SheetView.vue';
 import { logger } from '../utils/logger.js';
@@ -89,6 +90,22 @@ function openMergeRoleSelector() {
     }));
     showBottomSheet({
         title: t('label_role') || 'Role',
+        items: items
+    });
+}
+
+function openSquashRoleSelector() {
+    const options = ['user', 'system', 'assistant'];
+    const items = options.map(r => ({
+        label: r.charAt(0).toUpperCase() + r.slice(1),
+        icon: currentPreset.value.squashRole === r ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            currentPreset.value.squashRole = r;
+            closeBottomSheet();
+        }
+    }));
+    showBottomSheet({
+        title: t('label_squash_role') || 'Squash Role',
         items: items
     });
 }
@@ -315,6 +332,7 @@ const resolveBlockContent = (block) => {
         return props.chatHistory.map(m => `${m.role === 'user' ? (m.persona?.name || 'User') : (props.activeChatChar?.name || 'Char')}: ${m.text}`).join('\n');
     }
     
+    if (block.id === 'guided_generation') return block.content || '[System Note: {{guidance}}]';
     if (block.id === 'authors_note') return props.activeChatChar?.authors_note || '';
     if (block.id === 'summary') return props.activeChatChar?.summary || '';
     
@@ -348,10 +366,6 @@ const extendedReplaceMacros = (text) => {
 const getPresetTokens = (preset) => {
     if (!preset) return 0;
     let content = "";
-    // Include Impersonation Prompt
-    if (preset.impersonationPrompt) {
-        content += preset.impersonationPrompt + "\n";
-    }
     // Include Enabled Blocks
     if (preset.blocks) {
         preset.blocks.forEach(b => {
@@ -488,11 +502,18 @@ async function loadPresets() {
         if (preset.parseInlineReasoning === undefined) preset.parseInlineReasoning = false;
         if (preset.mergePrompts === undefined) preset.mergePrompts = false;
         if (preset.mergeRole === undefined) preset.mergeRole = 'system';
+        if (preset.noAssistant === undefined) preset.noAssistant = false;
+        if (preset.stopString === undefined) preset.stopString = '';
+        if (preset.userPrefix === undefined) preset.userPrefix = '';
+        if (preset.charPrefix === undefined) preset.charPrefix = '';
+        if (preset.squashRole === undefined || preset.squashRole === '') preset.squashRole = 'assistant';
         if (preset.author === undefined) preset.author = '';
         if (preset.image === undefined) preset.image = '';
         if (preset.summaryPrompt === undefined) {
             preset.summaryPrompt = 'Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}\n\nSummary:';
         }
+        if (preset.guidedGenerationPrompt === undefined) preset.guidedGenerationPrompt = '[Generate your next reply according to these instructions: {{guidance}}]';
+        if (preset.guidedImpersonationPrompt === undefined) preset.guidedImpersonationPrompt = '[Instead of replying for {{char}}, impersonate {{user}} according to these instructions: {{guidance}}]';
 
         const blocks = preset.blocks;
         if (!blocks) continue;
@@ -521,8 +542,14 @@ async function loadPresets() {
         }
         if (!blocks.find(b => b.id === 'authors_note')) {
             const historyIdx = blocks.findIndex(b => b.id === 'chat_history');
-            const insertIdx = historyIdx !== -1 ? historyIdx : blocks.length;
-            blocks.splice(insertIdx, 0, { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', depth: 4, insertion_mode: 'relative' });
+            const insertIdx = historyIdx !== -1 ? historyIdx + 1 : blocks.length;
+            blocks.splice(insertIdx, 0, { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', insertion_mode: 'relative' });
+        }
+        if (!blocks.find(b => b.id === 'guided_generation')) {
+            const authorsIdx = blocks.findIndex(b => b.id === 'authors_note');
+            const historyIdx = blocks.findIndex(b => b.id === 'chat_history');
+            const insertIdx = authorsIdx !== -1 ? authorsIdx + 1 : (historyIdx !== -1 ? historyIdx + 1 : blocks.length);
+            blocks.splice(insertIdx, 0, { id: 'guided_generation', name: 'Guided Generation', role: 'system', content: '[System Note: {{guidance}}]', enabled: true, isStatic: true, i18n: 'block_guided_generation', insertion_mode: 'relative' });
         }
     }
 }
@@ -533,6 +560,12 @@ function savePresets() {
 
 // Watch for changes to save automatically
 watch(() => presetState, () => {}, { deep: true });
+
+watch(() => currentPreset.value?.noAssistant, (val) => {
+    if (val && currentPreset.value) {
+        currentPreset.value.mergePrompts = true;
+    }
+});
 
 watch(() => currentPreset.value?.reasoningEnabled, (val) => {
     localStorage.setItem('gz_api_request_reasoning', val);
@@ -560,15 +593,23 @@ function createNewPreset() {
                     reasoningEnd: '</think>',
                     mergePrompts: false,
                     mergeRole: 'system',
-                    summaryPrompt: 'Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}\n\nSummary:'
+                    noAssistant: false,
+                    stopString: '',
+                    userPrefix: '',
+                    charPrefix: '',
+                    squashRole: 'assistant',
+                    summaryPrompt: 'Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}\n\nSummary:',
+                    guidedGenerationPrompt: '[Generate your next reply according to these instructions: {{guidance}}]',
+                    guidedImpersonationPrompt: '[Instead of replying for {{char}}, impersonate {{user}} according to these instructions: {{guidance}}]'
                 };
                 // Ensure mandatory blocks are present
                 presetState.presets[id].blocks = [
                     { id: 'sys1', name: 'Main System', role: 'system', content: 'You are a helpful AI assistant.', enabled: true },
-                    ...mandatoryBlocks.filter(b => b.id !== 'chat_history').map(b => ({...b})),
+                    ...mandatoryBlocks.filter(b => b.id !== 'chat_history' && b.id !== 'guided_generation').map(b => ({...b})),
                     { id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_summary', depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' },
-                    { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', depth: 4, insertion_mode: 'relative' },
-                    { ...mandatoryBlocks.find(b => b.id === 'chat_history') }
+                    { ...mandatoryBlocks.find(b => b.id === 'chat_history') },
+                    { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', insertion_mode: 'relative' },
+                    { ...mandatoryBlocks.find(b => b.id === 'guided_generation') },
                 ];
                 setPresetConnection('global', null, id);
                 editingPresetId.value = id;
@@ -1311,15 +1352,22 @@ function processImportedPreset(data, defaultName) {
     // Ensure static blocks
     if (!preset.blocks.find(b => b.id === 'summary')) {
          const historyIdx = preset.blocks.findIndex(b => b.id === 'chat_history');
-         const insertIdx = historyIdx !== -1 ? historyIdx + 1 : preset.blocks.length;
+         const insertIdx = historyIdx !== -1 ? historyIdx : preset.blocks.length;
          preset.blocks.splice(insertIdx, 0, { id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_summary', depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' });
     }
     if (!preset.blocks.find(b => b.id === 'authors_note')) {
-         const summaryIdx = preset.blocks.findIndex(b => b.id === 'summary');
          const historyIdx = preset.blocks.findIndex(b => b.id === 'chat_history');
-         const insertIdx = summaryIdx !== -1 ? summaryIdx + 1 : (historyIdx !== -1 ? historyIdx + 1 : preset.blocks.length);
-         preset.blocks.splice(insertIdx, 0, { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', depth: 4, insertion_mode: 'depth' });
+         const insertIdx = historyIdx !== -1 ? historyIdx + 1 : preset.blocks.length;
+         preset.blocks.splice(insertIdx, 0, { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', insertion_mode: 'relative' });
     }
+    if (!preset.blocks.find(b => b.id === 'guided_generation')) {
+         const authorsIdx = preset.blocks.findIndex(b => b.id === 'authors_note');
+         const historyIdx = preset.blocks.findIndex(b => b.id === 'chat_history');
+         const insertIdx = authorsIdx !== -1 ? authorsIdx + 1 : (historyIdx !== -1 ? historyIdx + 1 : preset.blocks.length);
+         preset.blocks.splice(insertIdx, 0, { id: 'guided_generation', name: 'Guided Generation', role: 'system', content: '[System Note: {{guidance}}]', enabled: true, isStatic: true, i18n: 'block_guided_generation', insertion_mode: 'relative' });
+    }
+    if (!preset.guidedGenerationPrompt) preset.guidedGenerationPrompt = '[Generate your next reply according to these instructions: {{guidance}}]';
+    if (!preset.guidedImpersonationPrompt) preset.guidedImpersonationPrompt = '[Instead of replying for {{char}}, impersonate {{user}} according to these instructions: {{guidance}}]';
     if (!preset.summaryPrompt) {
         preset.summaryPrompt = 'Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}\n\nSummary:';
     }
@@ -1337,7 +1385,7 @@ function getMagicBlockFields(blockId) {
     if (!block) return [];
 
     const fields = [];
-    const mode = block.insertion_mode || (blockId === 'authors_note' ? 'depth' : 'relative');
+    const mode = block.insertion_mode || 'relative';
 
     fields.push({ 
         key: 'role', label: 'label_role', type: 'select', 
@@ -1388,6 +1436,26 @@ const editorConfig = computed(() => {
             title: t('magic_summary') || "Summary",
             fields: fields
         }];
+    }
+    if (activeEditBlock.value?.id === 'guided_generation') {
+        const block = activeEditBlock.value;
+        const mode = block.insertion_mode || 'relative';
+        const fields = [
+            { key: 'role', label: 'label_role', type: 'select', options: [
+                { value: 'system', label: 'role_system' },
+                { value: 'user', label: 'role_user' },
+                { value: 'assistant', label: 'role_assistant' }
+            ]},
+            { key: 'insertion_mode', label: 'label_injection_point', type: 'select', options: [
+                { value: 'relative', label: 'injection_relative' },
+                { value: 'depth', label: 'injection_depth' }
+            ]},
+            ...(mode === 'depth' ? [{ key: 'depth', label: t('label_depth') || 'Depth', type: 'number', placeholder: '0' }] : []),
+            { key: 'info', label: '', type: 'info', text: t('guided_generation_block_hint') || 'This prompt is sent only when Guided Generation is active.\n{{guidance}} — user instruction.' },
+            { key: 'guidedGenerationPrompt', label: t('label_guided_generation_prompt') || 'Generation Prompt', type: 'textarea', rows: 2, expandable: true },
+            { key: 'guidedImpersonationPrompt', label: t('label_guided_impersonation_prompt') || 'Impersonation Prompt', type: 'textarea', rows: 2, expandable: true }
+        ];
+        return [{ title: t('block_guided_generation') || 'Guided Generation', fields }];
     }
 
     if (activeEditBlock.value?.isStatic) {
@@ -1467,20 +1535,29 @@ const editorProxy = computed({
         if (!activeEditBlock.value) return null;
         
         if (activeEditBlock.value.id === 'authors_note') {
-            return { 
-                content: props.activeChatChar?.authors_note || '', 
-                depth: activeEditBlock.value.depth !== undefined ? activeEditBlock.value.depth : 4, 
+            return {
+                content: props.activeChatChar?.authors_note || '',
+                depth: activeEditBlock.value.depth !== undefined ? activeEditBlock.value.depth : 0,
                 role: activeEditBlock.value.role || 'system',
-                insertion_mode: activeEditBlock.value.insertion_mode || 'depth'
+                insertion_mode: activeEditBlock.value.insertion_mode || 'relative'
             };
         }
         if (activeEditBlock.value.id === 'summary') {
-            return { 
+            return {
                 content: props.activeChatChar?.summary || '',
                 depth: activeEditBlock.value.depth !== undefined ? activeEditBlock.value.depth : 4,
                 role: activeEditBlock.value.role || 'system',
                 insertion_mode: activeEditBlock.value.insertion_mode || 'relative',
                 prefix: activeEditBlock.value.prefix || 'Summary: '
+            };
+        }
+        if (activeEditBlock.value.id === 'guided_generation') {
+            return {
+                role: activeEditBlock.value.role || 'system',
+                insertion_mode: activeEditBlock.value.insertion_mode || 'relative',
+                depth: activeEditBlock.value.depth !== undefined ? activeEditBlock.value.depth : 0,
+                guidedGenerationPrompt: currentPreset.value.guidedGenerationPrompt || '',
+                guidedImpersonationPrompt: currentPreset.value.guidedImpersonationPrompt || ''
             };
         }
 
@@ -1500,6 +1577,12 @@ const editorProxy = computed({
             activeEditBlock.value.role = newVal.role;
             activeEditBlock.value.insertion_mode = newVal.insertion_mode;
             activeEditBlock.value.prefix = newVal.prefix;
+        } else if (activeEditBlock.value.id === 'guided_generation') {
+            activeEditBlock.value.role = newVal.role;
+            activeEditBlock.value.insertion_mode = newVal.insertion_mode;
+            activeEditBlock.value.depth = newVal.depth;
+            currentPreset.value.guidedGenerationPrompt = newVal.guidedGenerationPrompt;
+            currentPreset.value.guidedImpersonationPrompt = newVal.guidedImpersonationPrompt;
         } else {
             // Standard block - manual copy to maintain reference or replace properties
             Object.assign(activeEditBlock.value, newVal);
@@ -1551,8 +1634,8 @@ function openAuthorsNoteSheet() {
     const data = {
         enabled: block.enabled !== undefined ? block.enabled : true,
         role: block.role || 'system',
-        insertion_mode: block.insertion_mode || 'depth',
-        depth: block.depth !== undefined ? block.depth : 4,
+        insertion_mode: block.insertion_mode || 'relative',
+        depth: block.depth !== undefined ? block.depth : 0,
         content: char.authors_note || ''
     };
 
@@ -1905,7 +1988,10 @@ onBeforeUnmount(() => {
                                 <div class="block-edit" @click.stop="openBlockEditor(block.id)">
                                     <svg viewBox="0 0 24 24"><path d="M3 17.46v3.04h3.04l11.12-11.12-3.04-3.04L3 17.46zm16.48-9.71c.39-.39.39-1.02 0-1.41l-1.63-1.63c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.04 3.04 1.83-1.83z"/></svg>
                                 </div>
-                                <input type="checkbox" class="vk-switch block-toggle small-switch" v-model="block.enabled">
+                                <div v-if="block.id === 'guided_generation'" class="block-lock-wrap">
+                                    <svg viewBox="0 0 24 24" class="block-lock-icon"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+                                </div>
+                                <input v-else type="checkbox" class="vk-switch block-toggle small-switch" v-model="block.enabled">
                             </div>
                         </div>
                     </TransitionGroup>
@@ -1929,18 +2015,46 @@ onBeforeUnmount(() => {
                 <Transition name="expand">
                     <div v-if="showAdvancedSettings" class="advanced-settings-panel">
                         <div class="menu-group">
-                            <div class="section-header">{{ t('section_merge_settings') || 'Merge Settings' }}</div>
-                            <div class="settings-item-checkbox">
+                            <div class="section-header">{{ t('section_postprocessing') || 'Prompt Postprocessing' }}</div>
+                            <div class="settings-item-checkbox" @click.capture="currentPreset.noAssistant ? Toast.show({ text: t('hint_merge_locked') || 'Required by NoAssistant mode — single block', duration: 'short', position: 'bottom' }) : null">
                                 <div class="settings-text-col">
                                     <label>{{ t('label_merge_prompts') || 'Merge Prompts' }}</label>
                                     <div class="settings-desc">{{ t('desc_merge_prompts') || 'Combine adjacent blocks into one message' }}</div>
                                 </div>
-                                <input type="checkbox" v-model="currentPreset.mergePrompts" class="vk-switch">
+                                <input type="checkbox" v-model="currentPreset.mergePrompts" class="vk-switch" :disabled="currentPreset.noAssistant">
                             </div>
                             <div class="settings-item" v-if="currentPreset.mergePrompts" @click="openMergeRoleSelector">
                                 <label>{{ t('label_merge_role') || 'Merge Role' }}</label>
                                 <div class="settings-desc">{{ currentPreset.mergeRole }}</div>
                             </div>
+                            <div class="settings-item-checkbox">
+                                <div class="settings-text-col">
+                                    <label>{{ t('label_no_assistant') || 'NoAssistant' }}</label>
+                                    <div class="settings-desc">{{ t('desc_no_assistant') || 'Send all chat history in a single block with role prefixes' }}</div>
+                                </div>
+                                <input type="checkbox" v-model="currentPreset.noAssistant" class="vk-switch">
+                            </div>
+                            <template v-if="currentPreset.noAssistant">
+                                <div class="settings-item">
+                                    <label>{{ t('label_stop_string') || 'Stop String' }}</label>
+                                    <div class="settings-desc">{{ t('desc_stop_string') || 'Sent as stop parameter to the model. Leave empty to omit.' }}</div>
+                                    <input type="text" v-model="currentPreset.stopString" placeholder="e.g. User:">
+                                </div>
+                                <div class="settings-item">
+                                    <label>{{ t('label_user_prefix') || 'User Prefix' }}</label>
+                                    <div class="settings-desc">{{ t('desc_user_prefix') || 'Prefix prepended to user messages in history block' }}</div>
+                                    <input type="text" v-model="currentPreset.userPrefix" placeholder="e.g. User: ">
+                                </div>
+                                <div class="settings-item">
+                                    <label>{{ t('label_char_prefix') || 'Char Prefix' }}</label>
+                                    <div class="settings-desc">{{ t('desc_char_prefix') || 'Prefix prepended to character messages in history block' }}</div>
+                                    <input type="text" v-model="currentPreset.charPrefix" placeholder="e.g. Assistant: ">
+                                </div>
+                                <div class="settings-item" @click="openSquashRoleSelector">
+                                    <label>{{ t('label_squash_role') || 'Squash Role' }}</label>
+                                    <div class="settings-desc">{{ t('desc_squash_role') || 'Consecutive messages from this role will be merged' }}: {{ currentPreset.squashRole }}</div>
+                                </div>
+                            </template>
                         </div>
 
                         <div class="menu-group">
@@ -1971,19 +2085,13 @@ onBeforeUnmount(() => {
                             <div class="section-header">{{ t('label_preset_prompts') || 'Function Prompts' }}</div>
                             <div class="settings-item">
                                 <div class="label-row">
-                                    <label>{{ t('label_impersonation_prompt') || 'Impersonation Prompt' }}</label>
-                                    <div class="expand-btn" @click="handleOpenFs('impersonationPrompt')"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
-                                </div>
-                                <textarea v-model="currentPreset.impersonationPrompt" rows="3" :placeholder="t('placeholder_impersonation_prompt') || 'Prompt to trigger impersonation...'"></textarea>
-                            </div>
-                            <div class="settings-item">
-                                <div class="label-row">
                                     <label>{{ t('label_summary_prompt') || 'Summary Prompt' }}</label>
                                     <div class="expand-btn" @click="handleOpenFs('summaryPrompt')"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
                                 </div>
                                 <textarea v-model="currentPreset.summaryPrompt" rows="3" placeholder="Summarize the following roleplay conversation... (use {{history}})"></textarea>
                             </div>
                         </div>
+
                     </div>
                 </Transition>
             </div>
@@ -2242,6 +2350,21 @@ onBeforeUnmount(() => {
 .small-switch {
     transform: scale(0.8);
     transform-origin: right center;
+}
+
+.block-lock-wrap {
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.block-lock-icon {
+    width: 18px;
+    height: 18px;
+    fill: var(--text-gray, rgba(127,127,127,0.5));
 }
 
 .preset-connection-btn {

@@ -135,6 +135,13 @@ export async function generateChatResponse({
     const mergePrompts = activePreset?.mergePrompts || false;
     const mergeRole = activePreset?.mergeRole || 'system';
 
+    // NoAssistant Settings from Preset
+    const noAssistant = activePreset?.noAssistant || false;
+    const stopString = activePreset?.stopString || '';
+    const userPrefix = activePreset?.userPrefix || '';
+    const charPrefix = activePreset?.charPrefix || '';
+    const squashRole = activePreset?.squashRole || 'assistant';
+
     if (activePreset && typeof activePreset.reasoningEnabled === 'boolean') {
         requestReasoning = activePreset.reasoningEnabled;
     }
@@ -170,9 +177,14 @@ export async function generateChatResponse({
             activePreset,
             mergePrompts,
             mergeRole,
+            noAssistant,
+            userPrefix,
+            charPrefix,
+            squashRole,
             personaObj,
             authorsNote: (authorsNote && authorsNote.enabled) ? authorsNote : null,
             guidanceText,
+            guidanceType: type,
             lorebooks: lorebookState.lorebooks,
             globalSettings: lorebookState.globalSettings,
             activations: lorebookState.activations,
@@ -230,6 +242,10 @@ export async function generateChatResponse({
 
     if (maxTokens > 0) {
         requestBody.max_tokens = maxTokens;
+    }
+
+    if (stopString) {
+        requestBody.stop = [stopString];
     }
 
     // Google Gemini specific reasoning config
@@ -302,6 +318,10 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
 
     const mergePrompts = activePreset?.mergePrompts || false;
     const mergeRole = activePreset?.mergeRole || 'system';
+    const noAssistant = activePreset?.noAssistant || false;
+    const userPrefix = activePreset?.userPrefix || '';
+    const charPrefix = activePreset?.charPrefix || '';
+    const squashRole = activePreset?.squashRole || 'assistant';
     const personaObj = getEffectivePersona(char?.id, char?.sessionId) || { name: "User", prompt: "" };
 
     const anData = authorsNote;
@@ -333,6 +353,10 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             activePreset,
             mergePrompts,
             mergeRole,
+            noAssistant,
+            userPrefix,
+            charPrefix,
+            squashRole,
             personaObj,
             authorsNote: (anData && anData.enabled) ? anData : null,
             lorebooks: lorebookState.lorebooks,

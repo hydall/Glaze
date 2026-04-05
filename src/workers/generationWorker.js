@@ -265,8 +265,32 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
     return allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
 }
 
+function squashHistory(historyMsgs, squashRole) {
+    if (!squashRole) return historyMsgs;
+    const result = [];
+    for (const msg of historyMsgs) {
+        const last = result[result.length - 1];
+        if (last && last.role === squashRole && msg.role === squashRole) {
+            last.content += '\n' + msg.content;
+        } else {
+            result.push({ ...msg });
+        }
+    }
+    return result;
+}
+
+function buildNoAssistantHistory(historyMsgs, userPrefix, charPrefix, squashRole) {
+    const squashed = squashHistory(historyMsgs, squashRole);
+    const lines = squashed.map(m => {
+        const prefix = m.role === 'user' ? (userPrefix || '') : (charPrefix || '');
+        return prefix + m.content;
+    });
+    return lines.join('\n');
+}
+
 function buildPromptMessagesWorker(args) {
-    const { char, history, summary, activePreset, mergePrompts, mergeRole, personaObj, authorsNote, guidanceText, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
+    let { char, history, summary, activePreset, mergePrompts, mergeRole, noAssistant, userPrefix, charPrefix, squashRole, personaObj, authorsNote, guidanceText, guidanceType, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
+    if (noAssistant) mergePrompts = true;
 
     const messages = [];
     let mergeBuffer = [];
@@ -345,7 +369,15 @@ function buildPromptMessagesWorker(args) {
             let content = "";
             let role = block.role || "system";
 
-            if (block.id === 'user_persona') content = `User Name: ${personaObj.name}\nUser Description: ${personaObj.prompt || ""}`;
+            if (block.id === 'guided_generation') {
+                const isImpersonation = guidanceType === 'impersonation';
+                if (!guidanceText && !isImpersonation) return null;
+                const template = isImpersonation
+                    ? (activePreset?.guidedImpersonationPrompt || '[Instead of replying for {{char}}, impersonate {{user}} according to these instructions: {{guidance}}]')
+                    : (activePreset?.guidedGenerationPrompt || '[Generate your next reply according to these instructions: {{guidance}}]');
+                content = template.replace(/\{\{guidance\}\}/gi, guidanceText || '');
+            }
+            else if (block.id === 'user_persona') content = `User Name: ${personaObj.name}\nUser Description: ${personaObj.prompt || ""}`;
             else if (block.id === 'char_card') content = `Character Name: ${char.name}\nDescription: ${char.description || char.desc}`;
             else if (block.id === 'char_personality') content = `Personality: ${char.personality}`;
             else if (block.id === 'scenario') content = `Scenario: ${char.scenario}`;
@@ -417,6 +449,14 @@ function buildPromptMessagesWorker(args) {
                     });
                 }
 
+                if (noAssistant) {
+                    const combinedContent = buildNoAssistantHistory(historyMsgs, userPrefix, charPrefix, squashRole);
+                    if (combinedContent) {
+                        messages.push({ role: 'assistant', content: combinedContent, blockName: 'chat_history', isHistory: true });
+                    }
+                    return;
+                }
+
                 const finalHistoryWithDepth = [];
                 const deepBlocks = resolvedDepthBlocks.filter(b => b.depth > historyMsgs.length);
                 for (const b of deepBlocks) finalHistoryWithDepth.push(b);
@@ -481,14 +521,6 @@ function buildPromptMessagesWorker(args) {
         if (m.isHistory) return true;
         return m.content && m.content.trim().length > 0;
     });
-
-    if (guidanceText) {
-        filteredMessages.push({
-            role: 'system',
-            content: `[System Note: ${guidanceText}]`,
-            blockName: 'Guided Generation'
-        });
-    }
 
     return { messages: filteredMessages, loreEntries: allLoreEntries, notifyObj };
 }
