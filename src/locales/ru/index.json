@@ -646,5 +646,9 @@
     "imggen_send_user_avatar": "Аватар персоны",
     "imggen_send_user_avatar_desc": "Использовать аватар активной персоны как визуальный референс",
     "imggen_additional_refs": "Дополнительные референсы",
-    "imggen_add_ref": "Добавить референс"
+    "imggen_add_ref": "Добавить референс",
+    "imggen_image_context": "Контекст изображений",
+    "imggen_image_context_enabled": "Отправлять предыдущие изображения как контекст",
+    "imggen_image_context_desc": "Использовать последние сгенерированные изображения как визуальный референс для новых генераций",
+    "imggen_image_context_count": "Количество изображений в контексте"
 }
