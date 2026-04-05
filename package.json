@@ -51,6 +51,7 @@
   "build": {
     "appId": "com.hydall.glaze",
     "productName": "Glaze",
+    "icon": "assets/logo.png",
     "directories": {
       "output": "dist_electron"
     },
@@ -62,6 +63,15 @@
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/logo.png",
+      "uninstallerIcon": "assets/logo.png",
+      "installerSidebar": "assets/installerSidebar.bmp",
+      "uninstallerSidebar": "assets/installerSidebar.bmp",
+      "installerHeader": "assets/installerHeader.bmp"
     },
     "linux": {
       "target": [
