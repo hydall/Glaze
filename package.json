@@ -65,11 +65,7 @@
       ]
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerSidebar": "assets/installerSidebar.bmp",
-      "uninstallerSidebar": "assets/installerSidebar.bmp",
-      "installerHeader": "assets/installerHeader.bmp"
+      "oneClick": true
     },
     "linux": {
       "target": [
