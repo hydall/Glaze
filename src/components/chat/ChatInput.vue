@@ -25,7 +25,7 @@ const props = defineProps({
 
 const emit = defineEmits([
     'update:modelValue', 'send', 'scroll-to-bottom', 
-    'magic-regenerate', 'magic-impersonate', 'magic-notes', 'magic-stats', 'magic-sessions', 'magic-summary', 'magic-api', 'magic-presets', 'magic-char-card', 'magic-lorebooks', 'magic-regex',
+    'magic-regenerate', 'magic-impersonate', 'magic-notes', 'magic-stats', 'magic-sessions', 'magic-summary', 'magic-api', 'magic-presets', 'magic-char-card', 'magic-lorebooks', 'magic-regex', 'magic-image-gen',
     'search-next', 'search-prev', 'delete-selected', 'hide-selected', 'cancel-selection'
 ]);
 
@@ -528,6 +528,7 @@ defineExpose({
                 @magic-presets="emit('magic-presets')"
                 @magic-lorebooks="emit('magic-lorebooks')"
                 @magic-regex="emit('magic-regex')"
+                @magic-image-gen="emit('magic-image-gen')"
                 @request-preview="openRequestPreview"
                 @add-block="() => {}"
             />

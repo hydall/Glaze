@@ -115,6 +115,35 @@ const getStyles = () => `
   img {
     -webkit-touch-callout: default;
   }
+  .imggen-loading {
+    display: inline-block;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 3px solid rgba(128, 128, 128, 0.2);
+    border-top-color: #007AFF;
+    animation: imggen-spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin: 8px 0;
+  }
+  @keyframes imggen-spin { to { transform: rotate(360deg); } }
+  .imggen-error {
+    display: inline-block;
+    padding: 6px 10px;
+    background: rgba(255, 59, 48, 0.12);
+    border-radius: 8px;
+    color: #FF3B30;
+    font-size: 12px;
+    margin: 4px 0;
+    max-width: 100%;
+    word-break: break-word;
+  }
+  .imggen-result {
+    max-width: 100%;
+    border-radius: 10px;
+    margin: 6px 0;
+    display: block;
+  }
   .chat-quote {
     color: var(--current-quote-color, var(--char-quote-color, var(--vk-blue))) !important;
   }

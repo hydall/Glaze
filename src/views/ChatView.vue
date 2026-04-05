@@ -44,7 +44,9 @@ import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
 import LorebookSheet from '@/components/sheets/LorebookSheet.vue';
 import RegexSheet from '@/components/sheets/RegexSheet.vue';
 import StatsSheet from '@/components/sheets/StatsSheet.vue';
+import ImageGenSheet from '@/components/sheets/ImageGenSheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
+import { processMessageImages } from '@/core/services/imageGenService.js';
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 
@@ -64,6 +66,8 @@ let inputResizeObserver = null;
 const cutoffIndex = ref(-1);
 const apiView = ref(null);
 const statsSheet = ref(null);
+const imageGenSheet = ref(null);
+const openImageGenSheet = () => imageGenSheet.value?.open();
 const presetView = ref(null);
 const charCardSheet = ref(null);
 const lorebookSheet = ref(null);
@@ -1399,7 +1403,18 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             }
             
             updateSessionMessage(char, foundIndex, msg);
-            
+
+            // Process image generation tags async (non-blocking)
+            processMessageImages(msg.text, (updatedText) => {
+                msg.text = updatedText;
+                updateSessionMessage(char, foundIndex, msg);
+            }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null }).then(finalText => {
+                if (finalText !== msg.text) {
+                    msg.text = finalText;
+                    updateSessionMessage(char, foundIndex, msg);
+                }
+            }).catch(e => console.error('[ImageGen] processMessageImages failed:', e));
+
             if (wasVisible) {
                 scrollToIndex(displayIndex, 'smooth', 'top');
             } else {
@@ -2565,6 +2580,7 @@ onUnmounted(() => {
                 @magic-presets="openPresetView"
                 @magic-lorebooks="openLorebookSheet"
                 @magic-regex="openRegexSheet"
+                @magic-image-gen="openImageGenSheet"
                 @delete-selected="deleteSelectedMessages"
                 @hide-selected="toggleHideSelectedMessages"
                 @cancel-selection="clearSelection"
@@ -2579,6 +2595,7 @@ onUnmounted(() => {
         <LorebookSheet ref="lorebookSheet" />
         <RegexSheet ref="regexSheet" :active-chat-char="activeChar" />
         <StatsSheet ref="statsSheet" />
+        <ImageGenSheet ref="imageGenSheet" />
     </div>
 </template>
 
