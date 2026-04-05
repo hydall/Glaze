@@ -568,8 +568,8 @@ defineExpose({ open, openEntry, close, openLorebook });
                             <label>{{ t('label_injection_position') }}</label>
                             <select v-model="activeEntry.position">
                                 <option :value="4">{{ t('pos_top') }}</option>
-                                <option :value="0">{{ t('pos_before_char') }}</option>
-                                <option :value="1">{{ t('pos_after_char') }}</option>
+                                <option value="worldInfoBefore">@worldInfoBefore ({{ t('pos_before_char') }})</option>
+                                <option value="worldInfoAfter">@worldInfoAfter ({{ t('pos_after_char') }})</option>
                                 <option :value="2">{{ t('pos_before_examples') }}</option>
                                 <option :value="3">{{ t('pos_after_examples') }}</option>
                             </select>

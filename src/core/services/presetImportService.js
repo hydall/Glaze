@@ -1,9 +1,11 @@
 export const mandatoryBlocks = [
+    { id: "worldInfoBefore", i18n: "block_wi_before", name: "World Info Before", role: "system", content: "", isStatic: true, enabled: true },
     { id: "user_persona", i18n: "block_user_persona", name: "User Persona", role: "system", content: "", isStatic: true, enabled: true },
     { id: "char_card", i18n: "block_char_card", name: "Character Card", role: "system", content: "", isStatic: true, enabled: true },
     { id: "char_personality", i18n: "block_char_personality", name: "Character Personality", role: "system", content: "", isStatic: true, enabled: true },
     { id: "scenario", i18n: "block_scenario", name: "Scenario", role: "system", content: "", isStatic: true, enabled: true },
     { id: "example_dialogue", i18n: "block_example_dialogue", name: "Dialogue Examples", role: "system", content: "", isStatic: true, enabled: true },
+    { id: "worldInfoAfter", i18n: "block_wi_after", name: "World Info After", role: "system", content: "", isStatic: true, enabled: true },
     { id: "chat_history", i18n: "block_chat_history", name: "Chat History", role: "system", content: "", isStatic: true, enabled: true },
     { id: "guided_generation", i18n: "block_guided_generation", name: "Guided Generation", role: "system", content: "[System Note: {{guidance}}]", isStatic: true, enabled: true }
 ];
@@ -31,13 +33,15 @@ export function convertSTPreset(data, fileName) {
         if (identifier === 'scenario') return 'scenario';
         if (identifier === 'chatHistory') return 'chat_history';
         if (identifier === 'dialogueExamples') return 'example_dialogue';
+        if (identifier === 'worldInfoBefore') return 'worldInfoBefore';
+        if (identifier === 'worldInfoAfter') return 'worldInfoAfter';
         return null;
     };
 
     const processBlock = (item, isStashed = false) => {
         const p = data.prompts.find(p => p.identifier === item.identifier);
         if (!p) return;
-        if (['enhanceDefinitions', 'worldInfoBefore', 'worldInfoAfter'].includes(item.identifier)) return;
+        if (['enhanceDefinitions'].includes(item.identifier) && !p.content) return;
 
         usedIdentifiers.add(item.identifier);
 

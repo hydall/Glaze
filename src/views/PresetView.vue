@@ -523,12 +523,18 @@ async function loadPresets() {
                 if (mb.id === 'chat_history') {
                      blocks.push({ ...mb });
                 } else {
-                     let insertIndex = 0;
+                     let insertIndex = blocks.length;
                      const myIndex = mandatoryBlocks.findIndex(m => m.id === mb.id);
                      if (myIndex > 0) {
                          const prevId = mandatoryBlocks[myIndex-1].id;
                          const prevIdxInPreset = blocks.findIndex(b => b.id === prevId);
                          if (prevIdxInPreset !== -1) insertIndex = prevIdxInPreset + 1;
+                     } else {
+                         // First mandatory block — find next existing mandatory and insert before it
+                         for (let i = myIndex + 1; i < mandatoryBlocks.length; i++) {
+                             const nextIdx = blocks.findIndex(b => b.id === mandatoryBlocks[i].id);
+                             if (nextIdx !== -1) { insertIndex = nextIdx; break; }
+                         }
                      }
                      blocks.splice(insertIndex, 0, { ...mb });
                 }
@@ -607,8 +613,8 @@ function createNewPreset() {
                     { id: 'sys1', name: 'Main System', role: 'system', content: 'You are a helpful AI assistant.', enabled: true },
                     ...mandatoryBlocks.filter(b => b.id !== 'chat_history' && b.id !== 'guided_generation').map(b => ({...b})),
                     { id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_summary', depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' },
-                    { ...mandatoryBlocks.find(b => b.id === 'chat_history') },
                     { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', insertion_mode: 'relative' },
+                    { ...mandatoryBlocks.find(b => b.id === 'chat_history') },
                     { ...mandatoryBlocks.find(b => b.id === 'guided_generation') },
                 ];
                 setPresetConnection('global', null, id);

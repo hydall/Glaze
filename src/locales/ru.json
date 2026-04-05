@@ -207,6 +207,8 @@
     "block_scenario": "Сценарий",
     "block_example_dialogue": "Примеры диалогов",
     "block_chat_history": "История чата",
+    "block_wi_before": "Лорбук (До)",
+    "block_wi_after": "Лорбук (После)",
     "block_guided_generation": "Направленная генерация",
     "guided_generation_block_hint": "Этот промпт отправляется только при использовании Направленной Генерации.\n{{guidance}} — инструкция пользователя.",
     "label_guided_generation_prompt": "Промпт генерации",

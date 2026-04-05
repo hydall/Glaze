@@ -57,6 +57,8 @@ export async function initLorebookState() {
                     if (!entry.id) {
                         entry.id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
                     }
+                    if (entry.position === 0) entry.position = 'worldInfoBefore';
+                    if (entry.position === 1) entry.position = 'worldInfoAfter';
                 });
             });
         }
@@ -366,7 +368,7 @@ export async function importSTLorebook(json, fileName = 'Imported') {
                 caseSensitive: entry.caseSensitive ?? null,
                 useGroupScoring: entry.useGroupScoring ?? null,
                 scanDepth: entry.scanDepth,
-                position: entry.position ?? 0,
+                position: (entry.position === 0) ? 'worldInfoBefore' : (entry.position === 1) ? 'worldInfoAfter' : (entry.position ?? 'worldInfoBefore'),
                 characterFilter: entry.characterFilter,
                 preventRecursion: entry.preventRecursion || false,
                 delayUntilRecursion: entry.delayUntilRecursion || false,
@@ -399,7 +401,7 @@ export function exportSTLorebook(lorebook) {
             constant: entry.constant || false,
             selective: (entry.secondary_keys && entry.secondary_keys.length > 0),
             order: entry.order ?? 100,
-            position: entry.position ?? 0,
+            position: (entry.position === 'worldInfoBefore') ? 0 : (entry.position === 'worldInfoAfter') ? 1 : (entry.position ?? 0),
             disable: entry.enabled === false,
             displayIndex: index,
             addMemo: true,
