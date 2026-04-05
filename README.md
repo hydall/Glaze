@@ -60,8 +60,8 @@ Built with Vue 3 and Capacitor, Glaze supports easy cross-platform development. 
 ### 🏗️ Setup
 
 ```bash
-git clone https://github.com/user/glaze.git
-cd glaze
+git clone https://github.com/hydall/Glaze.git
+cd Glaze
 npm install
 ```
 
