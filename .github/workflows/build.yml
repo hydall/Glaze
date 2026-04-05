@@ -94,7 +94,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SillyCradle-Signed-APK
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: android/app/build/outputs/apk/release/*.apk
 
       - name: Clean Up Keystore
         if: always()
@@ -196,8 +196,8 @@ jobs:
 
       - name: Rename artifacts
         run: |
-          mv release-files/app-release.apk "release-files/Glaze-${{ steps.ver.outputs.version }}.apk"
-          mv release-files/App.ipa         "release-files/Glaze-${{ steps.ver.outputs.version }}.ipa"
+          for f in release-files/*.apk; do mv "$f" "release-files/Glaze-${{ steps.ver.outputs.version }}.apk"; done
+          mv release-files/App.ipa "release-files/Glaze-${{ steps.ver.outputs.version }}.ipa"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
