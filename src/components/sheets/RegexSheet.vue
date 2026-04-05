@@ -7,6 +7,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { getEffectivePreset, savePresets } from '@/core/states/presetState.js';
 import { exportSTRegex } from '@/core/services/regexService.js';
 import { saveFile } from '@/core/services/fileSaver.js';
+import HelpTip from '@/components/ui/HelpTip.vue';
 
 
 const props = defineProps({
@@ -361,7 +362,7 @@ defineExpose({ open, close });
                         <textarea v-model="activeScript.replacement" rows="3" :placeholder="t('regex_replacement_placeholder') || 'Replacement string...'"></textarea>
                     </div>
                     <div class="settings-item">
-                        <label>{{ t('regex_trim_out') || 'Trim Out' }}</label>
+                        <label>{{ t('regex_trim_out') || 'Trim Out' }} <HelpTip term="regex-trimout"/></label>
                         <textarea v-model="activeScript.trimOut" rows="2" :placeholder="t('regex_trim_out_placeholder') || 'Globally trims any unwanted parts from a regex match before replacement. Separate each element by an enter.'"></textarea>
                     </div>
                 </div>
@@ -369,7 +370,7 @@ defineExpose({ open, close });
                 <div class="options-grid">
                     <div class="options-col">
                         <div class="menu-group compact">
-                            <div class="section-header">{{ t('regex_affects') || 'Affects' }}</div>
+                            <div class="section-header">{{ t('regex_affects') || 'Affects' }} <HelpTip term="regex-placement"/></div>
                             <label class="settings-item-checkbox compact" v-for="opt in placementOptions" :key="opt.value">
                                 <div class="checkbox-container">
                                     <input type="checkbox" :value="opt.value" v-model="activeScript.placement" class="native-checkbox">
@@ -402,7 +403,7 @@ defineExpose({ open, close });
                         </div>
 
                         <div class="menu-group compact">
-                            <div class="section-header">{{ t('regex_macros_find') || 'Macros in Find Regex' }}</div>
+                            <div class="section-header">{{ t('regex_macros_find') || 'Macros in Find Regex' }} <HelpTip term="regex-macros"/></div>
                             <div class="settings-item select-item">
                                 <select v-model="activeScript.macroRules" class="vk-select">
                                     <option v-for="opt in macroOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
@@ -411,7 +412,7 @@ defineExpose({ open, close });
                         </div>
 
                         <div class="menu-group compact">
-                            <div class="section-header">{{ t('regex_ephemerality') || 'Ephemerality' }}</div>
+                            <div class="section-header">{{ t('regex_ephemerality') || 'Ephemerality' }} <HelpTip term="regex-ephemerality"/></div>
                             <label class="settings-item-checkbox compact" v-for="opt in ephemeralityOptions" :key="opt.value">
                                 <div class="checkbox-container">
                                     <input type="checkbox" :value="opt.value" v-model="activeScript.ephemerality" class="native-checkbox">

@@ -1,0 +1,205 @@
+{
+    "categories": [
+        {
+            "id": "basics",
+            "label": "Basics",
+            "terms": [
+                {
+                    "id": "llm",
+                    "name": "LLM",
+                    "alt": "Large Language Model",
+                    "desc": "Large Language Model — a neural network trained on massive text corpora to generate human-like text. The model predicts the most probable next token given the current context window. Examples: GPT-4, Claude, Llama."
+                },
+                {
+                    "id": "token",
+                    "name": "Token",
+                    "desc": "The smallest unit of text a model processes — roughly ¾ of a word. Both your prompt and the model's response consume tokens from the context window. The more tokens used, the higher the cost and the slower the generation."
+                },
+                {
+                    "id": "api",
+                    "name": "API",
+                    "alt": "Endpoint",
+                    "desc": "Application Programming Interface — the network address Glaze sends requests to. Must be an OpenAI-compatible /chat/completions endpoint. Works with OpenAI, OpenRouter, Ollama, LM Studio, or any compatible server."
+                },
+                {
+                    "id": "apikey",
+                    "name": "API Key",
+                    "desc": "A secret token that authenticates your requests with the API provider. Never share it — anyone who has it can make requests on your behalf. Leave empty for local servers like Ollama."
+                },
+                {
+                    "id": "chatcompletion",
+                    "name": "Chat Completion",
+                    "desc": "The standard API format: a JSON array of messages, each with a role (system / user / assistant) and content. Glaze assembles this array from your preset blocks and sends it to the model endpoint."
+                },
+                {
+                    "id": "streaming",
+                    "name": "Streaming",
+                    "alt": "SSE",
+                    "desc": "When enabled, the model streams tokens in real time via SSE (Server-Sent Events) so text appears as it is generated. When disabled, Glaze waits for the full response before showing it. Streaming is recommended for better UX."
+                }
+            ]
+        },
+        {
+            "id": "presets",
+            "label": "Presets",
+            "terms": [
+                {
+                    "id": "preset",
+                    "name": "Preset",
+                    "desc": "A prompt template made of ordered, togglable blocks: System, Persona, Character, Scenario, Examples, Summary, Author's Note, Chat History. You control the order and content. Presets can be assigned globally, per character, or per chat session."
+                },
+                {
+                    "id": "preset-role",
+                    "name": "Message Role",
+                    "desc": "Each message sent to the model has a role: system (instructions for the model), user (your messages), or assistant (model replies). The role affects how the model interprets the message."
+                },
+                {
+                    "id": "preset-injection",
+                    "name": "Injection Point",
+                    "alt": "Depth",
+                    "desc": "Controls where a block is placed in the final prompt. \"Relative\" places it in the natural position in the message list. \"Depth\" places it at a specific message index from the end of chat history — e.g. depth 4 = 4 messages from the bottom."
+                },
+                {
+                    "id": "preset-merge",
+                    "name": "Merge Prompts",
+                    "desc": "Combines adjacent blocks with the same role into one message. Reduces the total message count sent to the API. Some models perform better with fewer, larger messages. Required for NoAssistant mode."
+                },
+                {
+                    "id": "preset-noassistant",
+                    "name": "NoAssistant",
+                    "alt": "NoAss",
+                    "desc": "Packs the entire chat history into a single block with role prefixes instead of separate messages. Useful for models that handle roleplay better when the conversation is one big text rather than alternating API messages."
+                },
+                {
+                    "id": "preset-stopstring",
+                    "name": "Stop String",
+                    "desc": "A string sent as the \"stop\" parameter to the model. Generation halts when the model produces this string. Used in NoAssistant mode to prevent the model from generating your character's lines (e.g., \"User:\")."
+                },
+                {
+                    "id": "preset-reasoning",
+                    "name": "Reasoning",
+                    "alt": "Chain of Thought",
+                    "desc": "Some models (like o1, DeepSeek-R1) produce an internal reasoning trace before their final answer. \"Request Native Reasoning\" asks the model for this. \"Parse Inline Reasoning\" extracts it from tags like <think>...</think> in the message body."
+                },
+                {
+                    "id": "authornote",
+                    "name": "Author's Note",
+                    "desc": "A special block injected close to the end of chat history (usually depth 2). Its content is unique per chat session. Use it for per-chat instructions, current scenario notes, or style directions that should have strong influence on the model."
+                },
+                {
+                    "id": "guided",
+                    "name": "Guided Generation",
+                    "desc": "Sends a special instruction block to guide the model's next response — for example, directing the narrative or providing impersonation instructions. Also refers to sampling parameters: Temperature, Top-P, Top-K, Min-P, Repetition Penalty."
+                },
+                {
+                    "id": "temperature",
+                    "name": "Temperature",
+                    "desc": "Controls randomness. Low (0.1–0.5) → predictable, focused output. High (1.0–2.0) → creative, varied, but may become incoherent. Most roleplay works well between 0.7–1.2."
+                },
+                {
+                    "id": "top-p",
+                    "name": "Top-P",
+                    "alt": "Nucleus Sampling",
+                    "desc": "Only tokens whose cumulative probability mass reaches P% are considered at each step. For example, Top-P = 0.9 means only the top 90% of the probability distribution is sampled from. Lower values = more focused."
+                }
+            ]
+        },
+        {
+            "id": "lorebooks",
+            "label": "Lorebooks",
+            "terms": [
+                {
+                    "id": "lorebook",
+                    "name": "Lorebook",
+                    "alt": "World Info",
+                    "desc": "A knowledge base of entries injected into the context automatically. Each entry has trigger keywords — when matching words appear in the chat history, the entry's text is inserted into the prompt. Great for world details, character sheets, lore."
+                },
+                {
+                    "id": "lorebook-keys",
+                    "name": "Primary / Secondary Keys",
+                    "alt": "Keywords",
+                    "desc": "Primary keys trigger the entry when found in chat history. Secondary keys add an extra filter: the entry only activates if secondary keys are also present. Use Logic Mode to control how multiple keys combine (AND, OR, NOT)."
+                },
+                {
+                    "id": "lorebook-logic",
+                    "name": "Logic Mode",
+                    "desc": "Controls how primary and secondary keys combine. \"Primary Only\" ignores secondary keys. \"AND Any/All\" requires secondary keys to also match. \"NOT Any/All\" activates only when secondary keys are absent."
+                },
+                {
+                    "id": "lorebook-budget",
+                    "name": "Context Percent / Budget Cap",
+                    "desc": "Context Percent limits how much of the total context window lorebook entries can occupy (as a %). Budget Cap sets an absolute token limit. Entries are sorted by priority and inserted until the budget is exhausted."
+                },
+                {
+                    "id": "lorebook-probability",
+                    "name": "Probability",
+                    "desc": "Even when an entry's keywords match, it only activates with this probability (0–100%). Use it to add randomness — for example, a 50% chance that an NPC is mentioned inserts their backstory only half the time."
+                },
+                {
+                    "id": "lorebook-temporal",
+                    "name": "Sticky / Cooldown / Delay",
+                    "desc": "Sticky: entry stays active for N turns after its keywords stop matching. Cooldown: after triggering, entry cannot activate again for N turns. Delay: entry does not activate until N turns have passed in the chat."
+                },
+                {
+                    "id": "lorebook-group",
+                    "name": "Group Scoring",
+                    "desc": "Entries in the same named group compete: only the entry with the highest weight (Group Weight) activates, not all of them. Useful for mutually exclusive facts — e.g., different weather conditions for the same location."
+                },
+                {
+                    "id": "lorebook-recursion",
+                    "name": "Recursive Scan",
+                    "desc": "After inserting lorebook entries into the prompt, scans the newly inserted text for additional keyword matches. Allows chained entries where one piece of lore triggers another. Use with caution — can cause loops."
+                }
+            ]
+        },
+        {
+            "id": "regex",
+            "label": "Regex Scripts",
+            "terms": [
+                {
+                    "id": "regex",
+                    "name": "Regex Scripts",
+                    "desc": "Text transformation rules using regular expressions. Each script has a find pattern, a replacement, and filters. Scripts can transform user input, model output, or reasoning before display or before sending to the model."
+                },
+                {
+                    "id": "regex-placement",
+                    "name": "Placement",
+                    "alt": "Affects",
+                    "desc": "Controls which text the script transforms: User Input (before sending), AI Output (model responses), World Info (lorebook content), Reasoning (model thinking). A script can affect multiple placements at once."
+                },
+                {
+                    "id": "regex-ephemerality",
+                    "name": "Ephemerality",
+                    "desc": "\"Alter Chat Display\" — transformation is visual only, stored text is unchanged. \"Alter Outgoing Prompt\" — transformation affects what the model actually receives. Both can be enabled simultaneously."
+                },
+                {
+                    "id": "regex-trimout",
+                    "name": "Trim Out",
+                    "desc": "A list of strings (one per line) to globally strip from regex matches before applying the replacement. Useful for cleaning up unwanted characters or substrings that should always be removed."
+                },
+                {
+                    "id": "regex-macros",
+                    "name": "Macros in Find Regex",
+                    "desc": "Whether macros like {{char}}, {{user}} are expanded in the Find Regex pattern before matching. \"Don't substitute\" — use literal text. \"Substitute raw\" — expand macros as-is. \"Substitute escaped\" — expand and escape for regex safety."
+                }
+            ]
+        },
+        {
+            "id": "profile",
+            "label": "Profile & Connections",
+            "terms": [
+                {
+                    "id": "persona",
+                    "name": "Persona",
+                    "desc": "Your in-app profile: a name, avatar, and prompt that describes \"you\" in the roleplay. The Persona prompt is injected into the context. You can have multiple personas and assign them per character or per chat."
+                },
+                {
+                    "id": "connections",
+                    "name": "Connections",
+                    "alt": "Bindings",
+                    "desc": "Assigns lorebooks, presets, or personas to specific scopes: globally (all chats), per character, or per chat session. Priority: chat > character > global. Lets different characters or conversations use different configurations automatically."
+                }
+            ]
+        }
+    ]
+}

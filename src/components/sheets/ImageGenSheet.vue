@@ -155,6 +155,17 @@ const openRefMatchModeSelector = (i) => {
     });
 };
 
+const openContextCountSelector = () => {
+    showBottomSheet({
+        title: t('imggen_image_context_count') || 'Context image count',
+        items: [1, 2, 3].map(v => ({
+            label: String(v),
+            sublabel: (settings.value.imageContextCount || 1) === v ? (t('preset_active') || 'Active') : '',
+            onClick: () => { settings.value.imageContextCount = v; closeBottomSheet(); }
+        }))
+    });
+};
+
 // Additional references helpers
 const addRef = () => {
     if (settings.value.additionalReferences.length >= 8) return;
@@ -406,6 +417,27 @@ defineExpose({ open });
                         >
                     </div>
                 </template>
+
+                <!-- Image Context -->
+                <div class="menu-group">
+                    <div class="section-header">{{ t('imggen_image_context') || 'Image Context' }}</div>
+
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('imggen_image_context_enabled') || 'Send previous images as context' }}</label>
+                            <div class="settings-desc">{{ t('imggen_image_context_desc') || 'Include recently generated images as visual reference for new generations' }}</div>
+                        </div>
+                        <input type="checkbox" v-model="settings.imageContextEnabled" class="vk-switch">
+                    </div>
+
+                    <div v-if="settings.imageContextEnabled" class="settings-item selector-row" @click="openContextCountSelector">
+                        <label>{{ t('imggen_image_context_count') || 'Context image count' }}</label>
+                        <div class="selector-value">
+                            <span>{{ settings.imageContextCount || 1 }}</span>
+                            <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Tag format hint -->
                 <div class="hint-block">

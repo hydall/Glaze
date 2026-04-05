@@ -6,6 +6,7 @@ import { initRipple } from '@/core/services/ui.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import SheetView from '@/components/ui/SheetView.vue';
+import HelpTip from '@/components/ui/HelpTip.vue';
 
 const sheet = ref(null);
 
@@ -461,7 +462,7 @@ onBeforeUnmount(() => {
                     </div>
                 </Transition>
                 <div class="menu-group">
-                    <div class="section-header" data-i18n="section_connection">Connection</div>
+                    <div class="section-header">{{ t('section_connection') || 'Connection' }} <HelpTip term="api"/></div>
                     <div class="settings-item">
                         <label>API Endpoint</label>
                         <input type="text" v-model="apiSettings.endpoint" @input="onApiInput('api-endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
@@ -476,7 +477,7 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
                     <div class="settings-item">
-                        <label>API Key</label>
+                        <label>API Key <HelpTip term="apikey"/></label>
                         <div style="position: relative;">
                             <input :type="showApiKey ? 'text' : 'password'" v-model="apiSettings.key" @input="onApiInput('api-key', $event.target.value)" placeholder="sk-..." style="width: 100%; padding-right: 44px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                             <div @click="showApiKey = !showApiKey" style="position: absolute; right: 0; top: 0; bottom: 0; width: 44px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
@@ -487,15 +488,15 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
-                            <label data-i18n="label_stream">Streaming response</label>
-                            <div class="settings-desc" data-i18n="desc_stream">Show text as it is being generated</div>
+                            <label>{{ t('label_stream') || 'Streaming response' }} <HelpTip term="streaming"/></label>
+                            <div class="settings-desc">{{ t('desc_stream') || 'Show text as it is being generated' }}</div>
                         </div>
                         <input type="checkbox" v-model="apiSettings.stream" @change="onApiInput('gz_api_stream', $event.target.checked)" class="vk-switch">
                     </div>
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header" data-i18n="section_gen_params">Generation Parameters</div>
+                    <div class="section-header">{{ t('section_gen_params') || 'Generation Parameters' }} <HelpTip term="guided"/></div>
                     <div class="settings-item-range">
                         <div class="range-row">
                             <label data-i18n="label_temperature">Temperature</label>

@@ -23,6 +23,7 @@ const ImageViewer = defineAsyncComponent(() => import('@/components/media/ImageV
 const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/ConnectionsSheet.vue'));
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
 const BackupSheet = defineAsyncComponent(() => import('@/components/sheets/BackupSheet.vue'));
+const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/GlossarySheet.vue'));
 import { Capacitor } from '@capacitor/core';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { initSettings } from '@/core/config/APISettings.js';
@@ -699,9 +700,16 @@ watch(currentView, () => {
           </div>
 
           <!-- VIEW 3: MENU -->
-          <MenuView 
+          <MenuView
               class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-menu'" 
+              v-else-if="currentView === 'view-menu'"
+          />
+
+          <!-- VIEW: GLOSSARY -->
+          <GlossaryView
+              class="view active-view view-gray-bg"
+              v-else-if="currentView === 'view-glossary'"
+              :view-mode="true"
           />
 
           <!-- VIEW: THEME SETTINGS -->
@@ -752,6 +760,7 @@ watch(currentView, () => {
     <BottomSheet 
         :visible="bottomSheetState.visible"
         :title="bottomSheetState.title"
+        :help-tip="bottomSheetState.helpTip"
         :content="bottomSheetState.content"
         :items="bottomSheetState.items"
         :header-action="bottomSheetState.headerAction"

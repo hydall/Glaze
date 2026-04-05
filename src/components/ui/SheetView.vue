@@ -6,12 +6,13 @@ import { isKeyboardOpen as globalKeyboardOpen, hideKeyboard, showKeyboard, apply
 
 const props = defineProps({
     fitContent: { type: Boolean, default: false },
-    zIndex: { type: [Number, String], default: 990 },
+    zIndex: { type: [Number, String], default: 11000 },
     title: { type: String, default: '' },
     showBack: { type: Boolean, default: false },
     actions: { type: Array, default: () => [] },
     tabs: { type: Array, default: () => [] },
-    activeTab: { type: String, default: '' }
+    activeTab: { type: String, default: '' },
+    viewMode: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['close', 'back', 'update:expanded', 'update:activeTab', 'tab-click']);
@@ -75,6 +76,7 @@ const sheetStyle = computed(() => {
 });
 
 function open() {
+    if (props.viewMode) return;
     isVisible.value = true;
     isExpanded.value = false;
 }
@@ -219,7 +221,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <Teleport to="body">
+    <!-- ── View mode: inline content, no overlay/drag ── -->
+    <div v-if="viewMode" class="sheet-view-inline">
+        <slot></slot>
+    </div>
+
+    <Teleport v-else to="body">
         <div class="sheet-view-overlay" :class="{ visible: isVisible }" :style="{ zIndex: zIndex }" @click.self="close">
             <div ref="sheetViewContentRef"
                  class="sheet-view-content" 
@@ -281,6 +288,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.sheet-view-inline {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding-bottom: 16px;
+}
+
 .sheet-view-overlay {
     position: fixed;
     top: 0;
@@ -288,7 +303,7 @@ onBeforeUnmount(() => {
     width: 100%;
     height: 100%;
     background-color: rgba(0,0,0,0.5);
-    z-index: 990;
+    z-index: 11000;
     display: flex;
     justify-content: center;
     align-items: flex-end;

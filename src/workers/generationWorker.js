@@ -12,17 +12,33 @@ if (!isIOS) {
     });
 }
 
+/**
+ * Strips embedded base64 media from text so it doesn't inflate token counts.
+ * LLM responses may contain HTML blocks with massive data:image/... URIs
+ * (hundreds of KB of base64) that are rendered visually but should not count
+ * toward the context window.
+ */
+function stripEmbeddedMedia(text) {
+    if (!text || text.length < 256) return text;
+    // Remove <img> tags whose src is a data URI
+    let cleaned = text.replace(/<img\s[^>]*src\s*=\s*["']data:image\/[^"']{256,}["'][^>]*\/?>/gi, '');
+    // Remove bare data:image/...base64,... URIs (>256 chars to avoid false positives)
+    cleaned = cleaned.replace(/data:image\/[a-z+]+;base64,[A-Za-z0-9+/=\n\r]{256,}/gi, '');
+    return cleaned;
+}
+
 function estimateTokens(text) {
     if (!text) return 0;
+    const cleaned = stripEmbeddedMedia(text);
     if (GPTTokenizer && typeof GPTTokenizer.countTokens === 'function') {
         try {
-            return GPTTokenizer.countTokens(text);
+            return GPTTokenizer.countTokens(cleaned);
         } catch (e) {
             // Fallback for any errors during full tokenization
         }
     }
     // Lightweight heuristic fallback
-    return Math.ceil(text.length / 3.35);
+    return Math.ceil(cleaned.length / 3.35);
 }
 
 function escapeRegex(string) {

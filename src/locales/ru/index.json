@@ -74,6 +74,8 @@
     "regex_imported_script": "Импортированный скрипт",
     "section_content": "Контент",
     "menu_glossary": "Глоссарий",
+    "hint_glossary_drawer": "Глоссарий также доступен в",
+    "hint_glossary_drawer_suffix": "быстром доступе в чате.",
     "menu_lorebooks": "Лорбуки (World Info)",
     "section_info": "Инфо",
     "menu_about": "О Glaze",

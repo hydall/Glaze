@@ -14,6 +14,7 @@ import { Browser } from '@capacitor/browser';
 import { Toast } from '@capacitor/toast';
 import { saveFile } from '@/core/services/fileSaver.js';
 import SheetView from '@/components/ui/SheetView.vue';
+import HelpTip from '@/components/ui/HelpTip.vue';
 import { logger } from '../utils/logger.js';
 
 const emit = defineEmits(['open-fs']);
@@ -1649,10 +1650,16 @@ function openAuthorsNoteSheet() {
         return `<input type="checkbox" class="vk-switch" ${enabled ? 'checked' : ''} style="pointer-events: none;">`;
     };
 
+    const helpTipHtml = (term) => `
+        <button class="help-tip" data-term="${term}" type="button" tabindex="-1" style="width:20px;height:20px;padding:0;border:none;background:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;opacity:0.4;color:var(--text-gray);vertical-align:middle;margin-left:4px;">
+            <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>
+        </button>
+    `;
+
     const content = document.createElement('div');
     content.innerHTML = `
         <div class="settings-item">
-            <label>${t('label_role')}</label>
+            <label>${t('label_role')}${helpTipHtml('preset-role')}</label>
             <select id="an-role" class="settings-select">
                 <option value="system" ${data.role === 'system' ? 'selected' : ''}>${t('role_system')}</option>
                 <option value="user" ${data.role === 'user' ? 'selected' : ''}>${t('role_user')}</option>
@@ -1660,7 +1667,7 @@ function openAuthorsNoteSheet() {
             </select>
         </div>
         <div class="settings-item">
-            <label>${t('label_injection_point')}</label>
+            <label>${t('label_injection_point')}${helpTipHtml('preset-injection')}</label>
             <select id="an-mode" class="settings-select">
                 <option value="relative" ${data.insertion_mode === 'relative' ? 'selected' : ''}>${t('injection_relative')}</option>
                 <option value="depth" ${data.insertion_mode === 'depth' ? 'selected' : ''}>${t('injection_depth')}</option>
@@ -1678,6 +1685,13 @@ function openAuthorsNoteSheet() {
             <textarea id="an-content" rows="5">${data.content}</textarea>
         </div>
     `;
+
+    content.querySelectorAll('.help-tip').forEach(btn => {
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('open-glossary', { detail: { term: btn.dataset.term } }));
+        };
+    });
 
     let debounceTimer = null;
     const save = () => {
@@ -1714,6 +1728,7 @@ function openAuthorsNoteSheet() {
 
     showBottomSheet({
         title: t('magic_authors_notes'),
+        helpTip: 'authornote',
         content: content,
         headerAction: { icon: getToggleIcon(data.enabled), onClick: toggleAction },
         onClose: () => {
@@ -1736,16 +1751,29 @@ function openSummarySheet() {
         content: char.summary || '',
         prefix: block.prefix || 'Summary: '
     };
+    
+    const helpTipHtml = (term) => `
+        <button class="help-tip" data-term="${term}" type="button" tabindex="-1" style="width:20px;height:20px;padding:0;border:none;background:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;opacity:0.4;color:var(--text-gray);vertical-align:middle;margin-left:4px;">
+            <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>
+        </button>
+    `;
 
     const content = document.createElement('div');
     content.innerHTML = `
-        <div class="settings-item"><label>${t('label_role')}</label><select id="summary-role" class="settings-select"><option value="system" ${data.role === 'system' ? 'selected' : ''}>System</option><option value="user" ${data.role === 'user' ? 'selected' : ''}>User</option><option value="assistant" ${data.role === 'assistant' ? 'selected' : ''}>Assistant</option></select></div>
-        <div class="settings-item"><label>${t('label_injection_point')}</label><select id="summary-mode" class="settings-select"><option value="relative" ${data.insertion_mode === 'relative' ? 'selected' : ''}>${t('injection_relative')}</option><option value="depth" ${data.insertion_mode === 'depth' ? 'selected' : ''}>${t('injection_depth')}</option></select></div>
+        <div class="settings-item"><label>${t('label_role')}${helpTipHtml('preset-role')}</label><select id="summary-role" class="settings-select"><option value="system" ${data.role === 'system' ? 'selected' : ''}>${t('role_system') || 'System'}</option><option value="user" ${data.role === 'user' ? 'selected' : ''}>${t('role_user') || 'User'}</option><option value="assistant" ${data.role === 'assistant' ? 'selected' : ''}>${t('role_assistant') || 'Assistant'}</option></select></div>
+        <div class="settings-item"><label>${t('label_injection_point')}${helpTipHtml('preset-injection')}</label><select id="summary-mode" class="settings-select"><option value="relative" ${data.insertion_mode === 'relative' ? 'selected' : ''}>${t('injection_relative')}</option><option value="depth" ${data.insertion_mode === 'depth' ? 'selected' : ''}>${t('injection_depth')}</option></select></div>
         <div class="settings-item" id="summary-depth-container" style="${data.insertion_mode === 'depth' ? '' : 'display:none'}"><label>${t('label_depth')}</label><input type="number" id="summary-depth" value="${data.depth}" placeholder="${t('placeholder_depth')}"></div>
         <div class="settings-item"><label>${t('label_prefix') || 'Prefix'}</label><input type="text" id="summary-prefix" value="${data.prefix}" placeholder="Summary: "></div>
         <div class="settings-item"><label>${t('label_content')}</label><textarea id="summary-content" rows="8" placeholder="${t('summary_placeholder')}">${data.content}</textarea></div>
         <div class="settings-item"><button id="btn-auto-summary" class="btn-save" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;"><svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L10 12.17l7.59-7.59L19 6l-9 11z"/></svg>${t('btn_auto_summary')}</button></div>
     `;
+
+    content.querySelectorAll('.help-tip').forEach(btn => {
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('open-glossary', { detail: { term: btn.dataset.term } }));
+        };
+    });
 
     let debounceTimer = null;
     const save = () => {
@@ -1792,6 +1820,7 @@ function openSummarySheet() {
 
     showBottomSheet({ 
         title: t('magic_summary'), 
+        helpTip: 'summary',
         content: content,
         onClose: () => {
             if (debounceTimer) clearTimeout(debounceTimer);
@@ -2021,7 +2050,7 @@ onBeforeUnmount(() => {
                 <Transition name="expand">
                     <div v-if="showAdvancedSettings" class="advanced-settings-panel">
                         <div class="menu-group">
-                            <div class="section-header">{{ t('section_postprocessing') || 'Prompt Postprocessing' }}</div>
+                            <div class="section-header">{{ t('section_postprocessing') || 'Prompt Postprocessing' }} <HelpTip term="preset-merge"/></div>
                             <div class="settings-item-checkbox" @click.capture="currentPreset.noAssistant ? Toast.show({ text: t('hint_merge_locked') || 'Required by NoAssistant mode — single block', duration: 'short', position: 'bottom' }) : null">
                                 <div class="settings-text-col">
                                     <label>{{ t('label_merge_prompts') || 'Merge Prompts' }}</label>
@@ -2035,7 +2064,7 @@ onBeforeUnmount(() => {
                             </div>
                             <div class="settings-item-checkbox">
                                 <div class="settings-text-col">
-                                    <label>{{ t('label_no_assistant') || 'NoAssistant' }}</label>
+                                    <label>{{ t('label_no_assistant') || 'NoAssistant' }} <HelpTip term="preset-noassistant"/></label>
                                     <div class="settings-desc">{{ t('desc_no_assistant') || 'Send all chat history in a single block with role prefixes' }}</div>
                                 </div>
                                 <input type="checkbox" v-model="currentPreset.noAssistant" class="vk-switch">
@@ -2064,7 +2093,7 @@ onBeforeUnmount(() => {
                         </div>
 
                         <div class="menu-group">
-                            <div class="section-header">{{ t('label_reasoning_settings') || 'Reasoning' }}</div>
+                            <div class="section-header">{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/></div>
                             <div class="settings-item-checkbox">
                                 <div class="settings-text-col">
                                 <label>{{ t('label_reasoning') || 'Request Native Reasoning' }}</label>
@@ -3314,6 +3343,7 @@ body.dark-theme .stashed-item {
     color: var(--text-light-gray);
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }

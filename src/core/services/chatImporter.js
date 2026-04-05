@@ -229,6 +229,7 @@ export async function exportSillyTavernChat(chat) {
         if (msg.swipesMeta && Array.isArray(msg.swipesMeta)) {
             stMsg.swipe_info = msg.swipesMeta.map(meta => {
                 const info = { extra: {} };
+                if (!meta) return info;
                 if (meta.reasoning) info.extra.reasoning = meta.reasoning;
                 // Gen time reconstruction (approximate)
                 if (meta.genTime) {

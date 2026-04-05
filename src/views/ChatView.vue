@@ -45,6 +45,7 @@ import LorebookSheet from '@/components/sheets/LorebookSheet.vue';
 import RegexSheet from '@/components/sheets/RegexSheet.vue';
 import StatsSheet from '@/components/sheets/StatsSheet.vue';
 import ImageGenSheet from '@/components/sheets/ImageGenSheet.vue';
+import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
 import { processMessageImages } from '@/core/services/imageGenService.js';
 
@@ -68,6 +69,8 @@ const apiView = ref(null);
 const statsSheet = ref(null);
 const imageGenSheet = ref(null);
 const openImageGenSheet = () => imageGenSheet.value?.open();
+const glossarySheet = ref(null);
+const openGlossarySheet = () => glossarySheet.value?.open();
 const presetView = ref(null);
 const charCardSheet = ref(null);
 const lorebookSheet = ref(null);
@@ -446,9 +449,9 @@ const onFsEditorClosed = async () => {
     }
 };
 
-async function openChat(char, onBack) {
+async function openChat(char, onBack, force = false) {
     // Prevent reloading if the requested chat is already open and active
-    if (activeChatChar && activeChatChar.id === char.id && !isOpeningChat) {
+    if (!force && activeChatChar && activeChatChar.id === char.id && (char.sessionId === undefined || activeChatChar.sessionId === char.sessionId) && !isOpeningChat) {
         if (char.msgId) {
             const msgIdx = currentMessages.value.findIndex(m => m.id === char.msgId);
             if (msgIdx !== -1) {
@@ -1408,7 +1411,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             processMessageImages(msg.text, (updatedText) => {
                 msg.text = updatedText;
                 updateSessionMessage(char, foundIndex, msg);
-            }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null }).then(finalText => {
+            }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: currentMessages.value, currentMsgIndex: foundIndex }).then(finalText => {
                 if (finalText !== msg.text) {
                     msg.text = finalText;
                     updateSessionMessage(char, foundIndex, msg);
@@ -1582,7 +1585,7 @@ async function branchSession(msgIndex) {
     // Reload UI
     const charObj = { ...activeChatChar };
     delete charObj.sessionId;
-    await openChat(charObj);
+    await openChat(charObj, null, true);
 }
 
 // --- Message Actions ---
@@ -2076,7 +2079,7 @@ async function deleteSession(sessionId, targetChar) {
                 // Reload chat
                 const charObj = { ...activeChatChar };
                 delete charObj.sessionId; // Ensure we load the new currentId
-                openChat(charObj);
+                openChat(charObj, null, true);
             }
         }
         
@@ -2117,9 +2120,7 @@ async function openSessionsSheet(char) {
                     await dbSwitchSession(char.id, sid);
                     await loadChats();
                     // Pass char without sessionId so openChat uses the currentId from DB
-                    const charObj = { ...char };
-                    delete charObj.sessionId;
-                    openChat(charObj);
+                    openChat({ ...char, sessionId: sid }, null, true);
                 }
                 closeBottomSheet();
             },
@@ -2136,7 +2137,8 @@ async function openSessionsSheet(char) {
     });
 
     showBottomSheet({
-        title: t('history_title'),
+        title: t('history_title') + ' ',
+        helpTip: 'sessions',
         cardItems: cardItems,
         headerAction: {
             icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
@@ -2144,7 +2146,8 @@ async function openSessionsSheet(char) {
                 closeBottomSheet();
                 setTimeout(() => {
                     showBottomSheet({
-                        title: t('history_title') || 'Sessions',
+                        title: t('history_title') + ' ',
+                        helpTip: 'sessions',
                         items: [
                             {
                                 label: t('action_create_new') || 'Create New',
@@ -2163,7 +2166,7 @@ async function openSessionsSheet(char) {
                                         await loadChats();
                                         const charObj = { ...char };
                                         delete charObj.sessionId;
-                                        openChat(charObj);
+                                        openChat(charObj, null, true);
                                     });
                                 }
                             }
@@ -2210,7 +2213,7 @@ async function createNewSession(char) {
     // Open chat with the new currentId (by removing sessionId from char object)
     const charObj = { ...char };
     delete charObj.sessionId;
-    openChat(charObj);
+    openChat(charObj, null, true);
 }
 
 async function openCharCard() {
@@ -2581,6 +2584,7 @@ onUnmounted(() => {
                 @magic-lorebooks="openLorebookSheet"
                 @magic-regex="openRegexSheet"
                 @magic-image-gen="openImageGenSheet"
+                @magic-glossary="openGlossarySheet"
                 @delete-selected="deleteSelectedMessages"
                 @hide-selected="toggleHideSelectedMessages"
                 @cancel-selection="clearSelection"
@@ -2596,6 +2600,7 @@ onUnmounted(() => {
         <RegexSheet ref="regexSheet" :active-chat-char="activeChar" />
         <StatsSheet ref="statsSheet" />
         <ImageGenSheet ref="imageGenSheet" />
+        <GlossarySheet ref="glossarySheet" />
     </div>
 </template>
 

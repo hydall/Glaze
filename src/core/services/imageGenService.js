@@ -23,6 +23,9 @@ const SETTINGS_KEY = {
     naisteraAspectRatio: 'gz_imggen_naistera_aspect_ratio',
     naisteraSendCharAvatar: 'gz_imggen_naistera_send_char_avatar',
     naisteraSendUserAvatar: 'gz_imggen_naistera_send_user_avatar',
+    // Image context
+    imageContextEnabled: 'gz_imggen_image_context_enabled',
+    imageContextCount: 'gz_imggen_image_context_count',
 };
 
 const ADDITIONAL_REFS_KEY = 'gz_imggen_additional_refs';
@@ -44,6 +47,9 @@ export function getImageGenSettings() {
         naisteraSendCharAvatar: localStorage.getItem(SETTINGS_KEY.naisteraSendCharAvatar) === 'true',
         naisteraSendUserAvatar: localStorage.getItem(SETTINGS_KEY.naisteraSendUserAvatar) === 'true',
         additionalReferences: getAdditionalReferences(),
+        // Image context
+        imageContextEnabled: localStorage.getItem(SETTINGS_KEY.imageContextEnabled) === 'true',
+        imageContextCount: Math.min(3, Math.max(1, parseInt(localStorage.getItem(SETTINGS_KEY.imageContextCount), 10) || 1)),
     };
 }
 
@@ -76,6 +82,35 @@ export function saveAdditionalReferences(refs) {
         matchMode: r?.matchMode === 'always' ? 'always' : 'match',
     }));
     localStorage.setItem(ADDITIONAL_REFS_KEY, JSON.stringify(clean));
+}
+
+// ---- Image Context Extraction ----
+
+const IMGGEN_RESULT_REGEX = /<img[^>]+class="imggen-result"[^>]+src="([^"]+)"/g;
+
+/**
+ * Extract previously generated image data URLs from chat messages.
+ * Scans backwards from currentIndex looking for imggen-result images.
+ * Returns array of data URL strings (up to `count`).
+ */
+export function extractPreviousGeneratedImages(messages, currentIndex, count = 1) {
+    const urls = [];
+    if (!Array.isArray(messages) || currentIndex <= 0) return urls;
+
+    for (let i = currentIndex - 1; i >= 0 && urls.length < count; i--) {
+        const msg = messages[i];
+        if (!msg || msg.role === 'user') continue;
+        const text = msg.text || '';
+        let m;
+        IMGGEN_RESULT_REGEX.lastIndex = 0;
+        while ((m = IMGGEN_RESULT_REGEX.exec(text)) !== null && urls.length < count) {
+            const src = m[1];
+            if (src && src.startsWith('data:image/')) {
+                urls.push(src);
+            }
+        }
+    }
+    return urls;
 }
 
 // ---- Tag Parsing ----
@@ -173,6 +208,11 @@ async function generateImageOpenAI(prompt, options, settings) {
         response_format: 'b64_json',
     };
 
+    // OpenAI supports a single reference image
+    if (options.previousImages?.length) {
+        body.image = options.previousImages[0];
+    }
+
     const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -212,8 +252,22 @@ async function generateImageGemini(prompt, options, settings) {
 
     const fullPrompt = options.style ? `[Style: ${options.style}] ${prompt}` : prompt;
 
+    // Build parts: reference images first, then prompt text
+    const parts = [];
+    if (options.previousImages?.length) {
+        for (const dataUrl of options.previousImages) {
+            const commaIdx = dataUrl.indexOf(',');
+            if (commaIdx === -1) continue;
+            const meta = dataUrl.slice(5, commaIdx);
+            const mimeType = meta.split(';')[0] || 'image/png';
+            const base64Data = dataUrl.slice(commaIdx + 1);
+            parts.push({ inlineData: { mimeType, data: base64Data } });
+        }
+    }
+    parts.push({ text: fullPrompt });
+
     const body = {
-        contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+        contents: [{ role: 'user', parts }],
         generationConfig: {
             responseModalities: ['TEXT', 'IMAGE'],
             imageConfig: { aspectRatio, imageSize },
@@ -238,8 +292,8 @@ async function generateImageGemini(prompt, options, settings) {
     const candidates = result.candidates || [];
     if (!candidates.length) throw new Error('No candidates in response');
 
-    const parts = candidates[0].content?.parts || [];
-    for (const part of parts) {
+    const responseParts = candidates[0].content?.parts || [];
+    for (const part of responseParts) {
         if (part.inlineData) return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
         if (part.inline_data) return `data:${part.inline_data.mime_type};base64,${part.inline_data.data}`;
     }
@@ -257,6 +311,7 @@ async function generateImageNaistera(prompt, options, settings) {
     if (options.charAvatar) referenceImages.push(options.charAvatar);
     if (options.userAvatar) referenceImages.push(options.userAvatar);
     if (options.additionalRefs?.length) referenceImages.push(...options.additionalRefs);
+    if (options.previousImages?.length) referenceImages.push(...options.previousImages);
 
     let fullPrompt = options.style ? `[Style: ${options.style}] ${prompt}` : prompt;
     if (referenceImages.length > 0) {
@@ -315,6 +370,7 @@ export async function generateImage(instruction, context = {}) {
         charAvatar: null,
         userAvatar: null,
         additionalRefs: [],
+        previousImages: context.previousImages || [],
     };
 
     if (settings.apiType === 'naistera') {
@@ -372,6 +428,18 @@ export async function processMessageImages(text, onUpdate, context = {}) {
 
     const tags = parseImageGenTags(text);
     if (!tags.length) return text;
+
+    // Collect previous generated images as context if the setting is enabled
+    if (settings.imageContextEnabled && context.messages && context.currentMsgIndex != null) {
+        const prevImages = extractPreviousGeneratedImages(
+            context.messages,
+            context.currentMsgIndex,
+            settings.imageContextCount,
+        );
+        if (prevImages.length) {
+            context.previousImages = prevImages;
+        }
+    }
 
     // Replace all pending tags with loading placeholders
     let current = text;

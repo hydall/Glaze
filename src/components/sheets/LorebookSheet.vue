@@ -6,6 +6,7 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { lorebookState, initLorebookState, createLorebook, deleteLorebook, importSTLorebook, exportSTLorebook, setLorebookActivation, flushLorebookSave } from '@/core/states/lorebookState.js';
 import { saveFile } from '@/core/services/fileSaver.js';
+import HelpTip from '@/components/ui/HelpTip.vue';
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -491,7 +492,7 @@ defineExpose({ open, openEntry, close, openLorebook });
             <div v-else-if="currentView === 'edit_entry'" class="lb-editor">
                 <div class="editor-scroll">
                     <div class="menu-group first-group">
-                        <div class="section-header">{{ t('section_activation_logic') }}</div>
+                        <div class="section-header">{{ t('section_activation_logic') }} <HelpTip term="lorebook-keys"/></div>
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('label_constant') }} <span class="hint">{{ t('hint_always_active') }}</span></label>
@@ -563,7 +564,7 @@ defineExpose({ open, openEntry, close, openLorebook });
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_injection_rules') }}</div>
+                    <div class="section-header">{{ t('section_injection_rules') }} <HelpTip term="lorebook-budget"/></div>
                          <div class="settings-item">
                             <label>{{ t('label_injection_position') }}</label>
                             <select v-model="activeEntry.position">
@@ -581,7 +582,7 @@ defineExpose({ open, openEntry, close, openLorebook });
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_scan_recursion') }}</div>
+                    <div class="section-header">{{ t('section_scan_recursion') }} <HelpTip term="lorebook-recursion"/></div>
                         <div class="settings-item">
                             <label>{{ t('label_scan_depth_lore') }} <span class="hint">{{ t('hint_messages_back') }}</span></label>
                             <input type="number" v-model="activeEntry.scanDepth" placeholder="1">
@@ -599,13 +600,13 @@ defineExpose({ open, openEntry, close, openLorebook });
                             <input type="checkbox" v-model="activeEntry.delayUntilRecursion" class="vk-switch">
                         </div>
                         <div class="settings-item">
-                            <label>{{ t('label_probability') }}</label>
+                            <label>{{ t('label_probability') }} <HelpTip term="lorebook-probability"/></label>
                             <input type="number" v-model="activeEntry.probability" placeholder="100" min="0" max="100">
                         </div>
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_temporal_logic') }}</div>
+                    <div class="section-header">{{ t('section_temporal_logic') }} <HelpTip term="lorebook-temporal"/></div>
                         <div class="settings-item">
                             <label>{{ t('label_sticky') }} <span class="hint">{{ t('hint_sticky_turns') }}</span></label>
                             <input type="number" v-model="activeEntry.sticky" placeholder="0">
@@ -621,7 +622,7 @@ defineExpose({ open, openEntry, close, openLorebook });
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_grouping_filter') }}</div>
+                    <div class="section-header">{{ t('section_grouping_filter') }} <HelpTip term="lorebook-group"/></div>
                         <div class="settings-item">
                             <label>{{ t('label_group_name') }}</label>
                             <input type="text" v-model="activeEntry.group" :placeholder="t('placeholder_faction')">

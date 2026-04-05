@@ -1,11 +1,13 @@
 import { ref } from 'vue';
-import ru from '@/locales/ru.json';
-import en from '@/locales/en.json';
+import ru from '@/locales/ru/index.json';
+import en from '@/locales/en/index.json';
+import ruGlossary from '@/locales/ru/glossary.json';
+import enGlossary from '@/locales/en/glossary.json';
 import { currentLang } from '@/core/config/APPSettings.js';
 
 export const translations = {
-    ru,
-    en
+    ru: { ...ru, glossary: ruGlossary },
+    en: { ...en, glossary: enGlossary }
 };
 
 export const i18nTrigger = ref(0);

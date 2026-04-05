@@ -75,6 +75,8 @@
     "regex_imported_script": "Imported Script",
     "section_content": "Content",
     "menu_glossary": "Glossary",
+    "hint_glossary_drawer": "You can also open the Glossary from the",
+    "hint_glossary_drawer_suffix": "Quick Access in chat.",
     "menu_lorebooks": "Lorebooks (World Info)",
     "section_info": "Info",
     "menu_about": "About Glaze",

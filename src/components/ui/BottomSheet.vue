@@ -3,9 +3,11 @@ import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { Capacitor } from '@capacitor/core';
 import { hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { translations, t } from '@/utils/i18n.js';
+import HelpTip from '@/components/ui/HelpTip.vue';
 const props = defineProps({
     visible: Boolean,
     title: String,
+    helpTip: String,
     content: [String, Object], // HTML string or DOM node
     items: Array, // [{ label, icon, iconColor, onClick, isDestructive, actions: [{icon, color, onClick}] }]
     headerAction: Object, // { icon, onClick }
@@ -191,7 +193,10 @@ onBeforeUnmount(() => {
                  @touchend="onHandleTouchEnd"
             ></div>
             <div class="sheet-header" v-if="title || headerAction">
-                <div class="sheet-title">{{ title }}</div>
+                <div class="sheet-title">
+                    {{ title }}
+                    <HelpTip v-if="helpTip" :term="helpTip" />
+                </div>
                 <div class="sheet-action-btn" v-if="headerAction" @click="headerAction.onClick" v-html="headerAction.icon"></div>
             </div>
             
@@ -393,6 +398,9 @@ onBeforeUnmount(() => {
 .sheet-title {
     font-size: 18px;
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .sheet-action-btn {
@@ -586,7 +594,7 @@ onBeforeUnmount(() => {
     opacity: 1 !important;
     visibility: hidden;
     transition: visibility 0s linear 0.3s !important;
-    z-index: 10000 !important;
+    z-index: 12000 !important;
 }
 
 .modal-overlay.visible {
@@ -798,6 +806,7 @@ body.dark-theme .triggered-item-card.is-active {
     color: var(--text-light-gray);
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }

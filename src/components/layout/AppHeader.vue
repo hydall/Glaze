@@ -189,6 +189,14 @@ function setupThemeSettingsHeader(title) {
     toggleTabbar(false); // Hide tabbar for full screen feel
 }
 
+function setupGlossaryHeader() {
+    clearHeader('default');
+    state.title = translations[currentLang.value]?.menu_glossary || 'Glossary';
+    state.showBack = true;
+    state.onBack = () => window.dispatchEvent(new CustomEvent('gl-back'));
+    toggleTabbar(true);
+}
+
 function setupSettingsHeader(title) {
     clearHeader('default');
     state.title = title;
@@ -215,7 +223,10 @@ function updateHeader() {
     const key = titleKeys[viewId];
     const title = key ? translations[currentLang.value][key] : '';
 
-    if (viewId === 'view-generation') {
+    if (viewId === 'view-glossary') {
+        setupGlossaryHeader();
+        return;
+    } else if (viewId === 'view-generation') {
         setupGenerationHeader(title, state.generationTab, state.onGenerationTabChange);
     } else if (viewId === 'view-menu') {
         setupMoreHeader(title);
@@ -435,6 +446,7 @@ onMounted(() => {
     window.addEventListener('header-show-lb-banner', onShowLbBanner);
     window.addEventListener('header-setup-submenu', onSetupSubmenu);
     window.addEventListener('header-force-update', onForceUpdate);
+    window.addEventListener('gl-header-update', onGlossaryHeaderUpdate);
 });
 
 onBeforeUnmount(() => {
@@ -449,7 +461,14 @@ onBeforeUnmount(() => {
     window.removeEventListener('header-show-lb-banner', onShowLbBanner);
     window.removeEventListener('header-setup-submenu', onSetupSubmenu);
     window.removeEventListener('header-force-update', onForceUpdate);
+    window.removeEventListener('gl-header-update', onGlossaryHeaderUpdate);
 });
+
+function onGlossaryHeaderUpdate(e) {
+    if (props.currentView !== 'view-glossary') return;
+    if (e.detail.title !== undefined) state.title = e.detail.title;
+    // showBack stays true — back always navigates to view-menu
+}
 
 watch(() => state.searchQuery, (val) => {
     if (state.mode === 'chat' && state.isChatSearchMode) {
