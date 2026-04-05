@@ -67,8 +67,6 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon": "assets/logo.png",
-      "uninstallerIcon": "assets/logo.png",
       "installerSidebar": "assets/installerSidebar.bmp",
       "uninstallerSidebar": "assets/installerSidebar.bmp",
       "installerHeader": "assets/installerHeader.bmp"
