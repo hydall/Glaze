@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.4.1-alpha",
   "license": "AGPL-3.0-only",
-  "author": "Glaze Team <team@hydall.com>",
+  "author": "hydall",
   "type": "module",
   "main": "electron-main.cjs",
   "scripts": {
