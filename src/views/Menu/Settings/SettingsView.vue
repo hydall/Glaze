@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { updateLanguage, translations } from '@/utils/i18n.js';
-import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount } from '@/core/config/APPSettings.js';
+import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { themeState, setChatLayout } from '@/core/states/themeState.js';
@@ -14,10 +14,10 @@ const disableSwipeRegen = ref(disableSwipeRegeneration.value);
 const currentScreen = ref('main');
 
 watch(currentScreen, (newVal) => {
-    if (newVal === 'messages') {
+    if (newVal === 'interface') {
         window.dispatchEvent(new CustomEvent('header-setup-submenu', {
             detail: {
-                title: t('menu_message_settings') || 'Message Settings',
+                title: t('menu_interface_settings') || 'Interface Settings',
                 onBack: () => { currentScreen.value = 'main'; }
             }
         }));
@@ -28,6 +28,7 @@ watch(currentScreen, (newVal) => {
 const hideMsgId = ref(hideMessageId.value);
 const hideGenTime = ref(hideGenerationTime.value);
 const hideTokenCnt = ref(hideTokenCount.value);
+const hideHTips = ref(hideHelpTips.value);
 
 const toggleDisableSwipeRegen = () => {
     const newValue = !disableSwipeRegen.value;
@@ -51,6 +52,12 @@ const toggleHideGenTime = () => {
 const toggleHideTokenCnt = () => {
     hideTokenCnt.value = !hideTokenCnt.value;
     setHideTokenCount(hideTokenCnt.value);
+    window.dispatchEvent(new CustomEvent('settings-changed'));
+};
+
+const toggleHideHTips = () => {
+    hideHTips.value = !hideHTips.value;
+    setHideHelpTips(hideHTips.value);
     window.dispatchEvent(new CustomEvent('settings-changed'));
 };
 
@@ -163,10 +170,10 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
                     <div class="menu-text">{{ t('menu_notifications') }}</div>
                 </div>
 
-                <!-- Message Settings Submenu -->
-                <div class="menu-item" @click="currentScreen = 'messages'">
+                <!-- Interface Settings Submenu -->
+                <div class="menu-item" @click="currentScreen = 'interface'">
                     <svg class="menu-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
-                    <div class="menu-text">{{ t('menu_message_settings') || 'Message Settings' }}</div>
+                    <div class="menu-text">{{ t('menu_interface_settings') || 'Interface Settings' }}</div>
                     <div class="menu-value">
                         <svg viewBox="0 0 24 24" style="width: 16px; height: 16px; fill: var(--text-light-gray);"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
                     </div>
@@ -174,64 +181,74 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
             </div>
         </div>
 
-        <div v-else-if="currentScreen === 'messages'" key="messages">
+        <div v-else-if="currentScreen === 'interface'" key="interface">
             <div class="menu-group">
-                <!-- Disable Swipe Regeneration -->
-                <div class="settings-item-checkbox" @click="toggleDisableSwipeRegen" style="cursor: pointer; padding: 12px 16px;">
+                <div class="section-header">{{ t('menu_interface_settings') || 'Interface Settings' }}</div>
+                <!-- Hide Help Tips -->
+                <div class="settings-item-checkbox" @click="toggleHideHTips">
                     <div class="settings-text-col">
-                        <label style="cursor: pointer; margin-bottom: 2px;">{{ t('menu_disable_swipe_regeneration') || 'Disable Swipe Regeneration' }}</label>
-                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_disable_swipe_regeneration') || 'Disables regenerating messages by swiping left' }}</div>
+                        <label>{{ t('menu_hide_help_tips') || 'Hide Tooltips' }}</label>
+                        <div class="settings-desc">{{ t('desc_hide_help_tips') || 'Hides contextual help buttons (?) across the app' }}</div>
+                    </div>
+                    <input type="checkbox" class="vk-switch" :checked="hideHTips" style="pointer-events: none;">
+                </div>
+            </div>
+
+            <div class="menu-group">
+                <div class="section-header">{{ t('menu_message_settings') || 'Message Settings' }}</div>
+                <!-- Disable Swipe Regeneration -->
+                <div class="settings-item-checkbox" @click="toggleDisableSwipeRegen">
+                    <div class="settings-text-col">
+                        <label>{{ t('menu_disable_swipe_regeneration') || 'Disable Swipe Regeneration' }}</label>
+                        <div class="settings-desc">{{ t('desc_disable_swipe_regeneration') || 'Disables regenerating messages by swiping left' }}</div>
                     </div>
                     <input type="checkbox" class="vk-switch" :checked="disableSwipeRegen" style="pointer-events: none;">
                 </div>
 
                 <!-- Image Viewer (Holo Cards) -->
-                <div class="settings-item-checkbox" @click="openImageViewerSelector" style="cursor: pointer; padding: 12px 16px;">
+                <div class="settings-item-checkbox" @click="openImageViewerSelector">
                     <div class="settings-text-col">
-                        <label style="cursor: pointer; margin-bottom: 2px;">{{ t('menu_image_viewer') || 'Image Viewer' }}</label>
-                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_image_viewer') || 'Change how attached images are displayed' }}</div>
+                        <label>{{ t('menu_image_viewer') || 'Image Viewer' }}</label>
+                        <div class="settings-desc">{{ t('desc_image_viewer') || 'Change how attached images are displayed' }}</div>
                     </div>
                     <div class="menu-value" style="font-size: 14px; color: var(--text-gray);">{{ imageViewerLabel }}</div>
                 </div>
 
                 <!-- Chat Layout -->
-                <div class="settings-item-checkbox" @click="openChatLayoutSelector" style="cursor: pointer; padding: 12px 16px;">
+                <div class="settings-item-checkbox" @click="openChatLayoutSelector">
                     <div class="settings-text-col">
-                        <label style="cursor: pointer; margin-bottom: 2px;">{{ t('menu_chat_layout') || 'Chat Layout' }}</label>
-                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_chat_layout') || 'Switch between bubbles or classic message layout' }}</div>
+                        <label>{{ t('menu_chat_layout') || 'Chat Layout' }}</label>
+                        <div class="settings-desc">{{ t('desc_chat_layout') || 'Switch between bubbles or classic message layout' }}</div>
                     </div>
                     <div class="menu-value" style="font-size: 14px; color: var(--text-gray);">{{ chatLayoutLabel }}</div>
                 </div>
 
-                <div style="height: 12px;"></div>
-
                 <!-- Hide Message ID -->
-                <div class="settings-item-checkbox" @click="toggleHideMsgId" style="cursor: pointer; padding: 12px 16px;">
+                <div class="settings-item-checkbox" @click="toggleHideMsgId">
                     <div class="settings-text-col">
-                        <label style="cursor: pointer; margin-bottom: 2px;">{{ t('menu_hide_msg_id') || 'Hide Message ID' }}</label>
-                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_hide_msg_id') || 'Hides the unique message identifier in the chat interface' }}</div>
+                        <label>{{ t('menu_hide_msg_id') || 'Hide Message ID' }}</label>
+                        <div class="settings-desc">{{ t('desc_hide_msg_id') || 'Hides the unique message identifier in the chat interface' }}</div>
                     </div>
                     <input type="checkbox" class="vk-switch" :checked="hideMsgId" style="pointer-events: none;">
                 </div>
 
                 <!-- Hide Generation Time -->
-                <div class="settings-item-checkbox" @click="toggleHideGenTime" style="cursor: pointer; padding: 12px 16px;">
+                <div class="settings-item-checkbox" @click="toggleHideGenTime">
                     <div class="settings-text-col">
-                        <label style="cursor: pointer; margin-bottom: 2px;">{{ t('menu_hide_gen_time') || 'Hide Gen Time' }}</label>
-                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_hide_gen_time') || 'Hides the generation time statistics for AI messages' }}</div>
+                        <label>{{ t('menu_hide_gen_time') || 'Hide Gen Time' }}</label>
+                        <div class="settings-desc">{{ t('desc_hide_gen_time') || 'Hides the generation time statistics for AI messages' }}</div>
                     </div>
                     <input type="checkbox" class="vk-switch" :checked="hideGenTime" style="pointer-events: none;">
                 </div>
 
                 <!-- Hide Token Count -->
-                <div class="settings-item-checkbox" @click="toggleHideTokenCnt" style="cursor: pointer; padding: 12px 16px; border-bottom: none;">
+                <div class="settings-item-checkbox" @click="toggleHideTokenCnt">
                     <div class="settings-text-col">
-                        <label style="cursor: pointer; margin-bottom: 2px;">{{ t('menu_hide_token_count') || 'Hide Token Count' }}</label>
-                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_hide_token_count') || 'Hides token usage statistics attached to messages' }}</div>
+                        <label>{{ t('menu_hide_token_count') || 'Hide Token Count' }}</label>
+                        <div class="settings-desc">{{ t('desc_hide_token_count') || 'Hides token usage statistics attached to messages' }}</div>
                     </div>
                     <input type="checkbox" class="vk-switch" :checked="hideTokenCnt" style="pointer-events: none;">
                 </div>
-
             </div>
         </div>
         </Transition>
