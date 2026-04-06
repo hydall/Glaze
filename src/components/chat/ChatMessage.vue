@@ -1191,7 +1191,7 @@ onUnmounted(() => {
     display: flex; 
     justify-self: end; 
     gap: 8px; 
-    grid-column: 2 / 4; 
+    grid-column: 3; 
 }
 .edit-btn { 
     width: 28px; 
