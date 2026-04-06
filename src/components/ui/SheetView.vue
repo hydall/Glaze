@@ -143,6 +143,13 @@ function onHandleTouchEnd() {
     currentDragY.value = 0;
 }
 
+function onHwBack(e) {
+    if (props.showBack) {
+        emit('back');
+        e.preventDefault();
+    }
+}
+
 defineExpose({ open, close, isVisible, isExpanded });
 
 const sheetViewContentRef = ref(null);
@@ -227,7 +234,7 @@ onBeforeUnmount(() => {
     </div>
 
     <Teleport v-else to="body">
-        <div class="sheet-view-overlay" :class="{ visible: isVisible }" :style="{ zIndex: zIndex }" @click.self="close">
+        <div class="sheet-view-overlay" :class="{ visible: isVisible }" :style="{ zIndex: zIndex }" @click.self="close" @hw-back="onHwBack">
             <div ref="sheetViewContentRef"
                  class="sheet-view-content" 
                  :class="{ 'expanded': isExpanded, 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen || globalKeyboardOpen, 'fit-content': fitContent }"

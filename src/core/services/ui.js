@@ -483,7 +483,11 @@ export function initBackButton() {
         // 1.1 Check SheetView
         const openSheetView = document.querySelector('.sheet-view-overlay.visible');
         if (openSheetView) {
-            openSheetView.click();
+            const backEvent = new CustomEvent('hw-back', { cancelable: true });
+            openSheetView.dispatchEvent(backEvent);
+            if (!backEvent.defaultPrevented) {
+                openSheetView.click();
+            }
             return;
         }
 
