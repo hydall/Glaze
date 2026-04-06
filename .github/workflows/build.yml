@@ -94,14 +94,72 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SillyCradle-Signed-APK
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: android/app/build/outputs/apk/release/*.apk
 
       - name: Clean Up Keystore
         if: always()
         run: rm -f "${{ github.workspace }}/glaze-release.jks"
 
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Web Project
+        run: npx vite build
+
+      - name: Build Electron App
+        run: npx electron-builder --win --publish never
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-Windows-Setup
+          path: dist_electron/*.exe
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot dpkg rpm libarchive-tools
+          npm ci
+
+      - name: Build Web Project
+        run: npx vite build
+
+      - name: Build Electron App
+        run: npx electron-builder --linux deb pacman AppImage --publish never
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-Linux-Packages
+          path: |
+            dist_electron/*.deb
+            dist_electron/*.pacman
+            dist_electron/*.AppImage
+
   release:
-    needs: [build-ios, build-android]
+    needs: [build-ios, build-android, build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -120,21 +178,31 @@ jobs:
           name: SillyCradle-Unsigned-IPA
           path: ./release-files
 
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Glaze-Windows-Setup
+          path: ./release-files
+
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Glaze-Linux-Packages
+          path: ./release-files
+
       - name: Get version from package.json
         id: ver
         run: echo "version=$(node -p "require('./package.json').version.replace(/\s+/g, '-')")" >> $GITHUB_OUTPUT
 
       - name: Rename artifacts
         run: |
-          mv release-files/app-release.apk "release-files/Glaze-${{ steps.ver.outputs.version }}.apk"
-          mv release-files/App.ipa         "release-files/Glaze-${{ steps.ver.outputs.version }}.ipa"
+          for f in release-files/*.apk; do mv "$f" "release-files/Glaze-${{ steps.ver.outputs.version }}.apk"; done
+          mv release-files/App.ipa "release-files/Glaze-${{ steps.ver.outputs.version }}.ipa"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ steps.ver.outputs.version }}"
           name: "Glaze ${{ steps.ver.outputs.version }}"
-          files: |
-            release-files/Glaze-${{ steps.ver.outputs.version }}.apk
-            release-files/Glaze-${{ steps.ver.outputs.version }}.ipa
+          files: release-files/*
           generate_release_notes: true

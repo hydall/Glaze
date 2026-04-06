@@ -3,7 +3,9 @@
   "private": true,
   "version": "0.4.1-alpha",
   "license": "AGPL-3.0-only",
+  "author": "hydall",
   "type": "module",
+  "main": "electron-main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -17,6 +19,8 @@
     "@vitejs/plugin-legacy": "^7.2.1",
     "@vitejs/plugin-vue": "^6.0.4",
     "@vitest/ui": "^4.0.18",
+    "electron": "^41.1.1",
+    "electron-builder": "^26.8.1",
     "happy-dom": "^20.6.1",
     "sharp": "^0.34.5",
     "terser": "^5.44.1",
@@ -43,5 +47,33 @@
     "jszip": "^3.10.1",
     "vue": "^3.5.26",
     "vue-i18n": "^11.2.8"
+  },
+  "build": {
+    "appId": "com.hydall.glaze",
+    "productName": "Glaze",
+    "icon": "assets/logo.png",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron-main.cjs"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": true
+    },
+    "linux": {
+      "target": [
+        "deb",
+        "pacman",
+        "AppImage"
+      ],
+      "category": "Utility"
+    }
   }
 }
