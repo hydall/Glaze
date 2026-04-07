@@ -4,7 +4,7 @@ import { formatInputPreview } from '@/utils/textFormatter.js';
 import RequestPreviewSheet from '@/components/sheets/RequestPreviewSheet.vue';
 import MagicDrawer from '@/components/chat/MagicDrawer.vue';
 import { translations } from '@/utils/i18n.js';
-import { currentLang } from '@/core/config/APPSettings.js';
+import { currentLang, enterToSubmit } from '@/core/config/APPSettings.js';
 import { hideKeyboard, onKeyboardShow, onKeyboardHide, isNativeKeyboard } from '@/core/services/keyboardHandler.js';
 import { Capacitor } from '@capacitor/core';
 import { attachRipple } from '@/core/services/ui.js';
@@ -48,6 +48,10 @@ const guidanceText = ref('');
 const guidanceInput = ref(null);
 
 const closeGuidance = () => {
+    if (guidanceText.value.trim() !== '') {
+        const confirmMsg = t('confirm_discard_changes') || 'Discard changes?';
+        if (!confirm(confirmMsg)) return;
+    }
     isGuidanceMode.value = false;
     guidanceText.value = '';
 };
@@ -246,16 +250,28 @@ function onPaste(e) {
 }
 
 function onKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey && !props.isImpersonating) {
-        e.preventDefault();
-        const el = chatInput.value;
-        if (!el) return;
-        const caret = getCaretIndex(el);
-        const text = props.modelValue || '';
-        const before = text.slice(0, caret);
-        const after = text.slice(caret);
-        emit('update:modelValue', before + '\n' + after);
-        nextTick(() => updateInputPreview(caret + 1));
+    if (e.key === 'Enter') {
+        const shouldSend = enterToSubmit.value ? !e.shiftKey && !e.ctrlKey : (e.shiftKey || e.ctrlKey);
+        
+        if (shouldSend) {
+            e.preventDefault();
+            handleSend();
+        } else {
+            if (e.target.tagName && e.target.tagName.toLowerCase() === 'textarea') {
+                return;
+            }
+            if (!props.isImpersonating) {
+                e.preventDefault();
+                const el = chatInput.value;
+                if (!el) return;
+                const caret = getCaretIndex(el);
+                const text = props.modelValue || '';
+                const before = text.slice(0, caret);
+                const after = text.slice(caret);
+                emit('update:modelValue', before + '\n' + after);
+                nextTick(() => updateInputPreview(caret + 1));
+            }
+        }
     }
 }
 

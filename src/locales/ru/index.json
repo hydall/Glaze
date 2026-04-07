@@ -595,6 +595,8 @@
     "backup_export_complete": "Экспорт завершен",
     "backup_file_downloaded": "Файл сохранен.",
     "menu_message_settings": "Настройки сообщений",
+    "menu_enter_to_send": "Enter для отправки",
+    "desc_enter_to_send": "Нажмите Enter, чтобы отправить сообщение. Если отключено, Enter добавляет новую строку, а Shift+Enter отправляет.",
     "menu_hide_msg_id": "Скрыть ID сообщения",
     "menu_hide_gen_time": "Скрыть время генерации",
     "menu_hide_token_count": "Скрыть кол-во токенов",
@@ -643,5 +645,6 @@
     "imggen_send_user_avatar": "Аватар персоны",
     "imggen_send_user_avatar_desc": "Использовать аватар активной персоны как визуальный референс",
     "imggen_additional_refs": "Дополнительные референсы",
-    "imggen_add_ref": "Добавить референс"
+    "imggen_add_ref": "Добавить референс",
+    "confirm_discard_changes": "Отменить изменения?"
 }

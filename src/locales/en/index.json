@@ -589,6 +589,8 @@
     "backup_export_complete": "Export Complete",
     "backup_file_downloaded": "File downloaded.",
     "menu_message_settings": "Message Settings",
+    "menu_enter_to_send": "Enter to Send",
+    "desc_enter_to_send": "Press Enter to send message. If disabled, Enter adds a new line and Shift+Enter sends.",
     "menu_hide_msg_id": "Hide Message ID",
     "menu_hide_gen_time": "Hide Gen Time",
     "menu_hide_token_count": "Hide Token Count",
@@ -637,5 +639,6 @@
     "imggen_send_user_avatar": "Send persona avatar",
     "imggen_send_user_avatar_desc": "Use active persona's avatar as visual reference",
     "imggen_additional_refs": "Additional references",
-    "imggen_add_ref": "Add reference"
+    "imggen_add_ref": "Add reference",
+    "confirm_discard_changes": "Discard changes?"
 }

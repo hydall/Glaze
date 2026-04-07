@@ -559,6 +559,13 @@ export function initBackButton() {
     App.addListener('backButton', handleBackButton);
     // For console testing: window.simulateBackButton()
     window.simulateBackButton = handleBackButton;
+
+    // Handle Escape key as back button
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            handleBackButton();
+        }
+    });
 }
 
 export function animateTextChange(element, newText, direction, onUpdate) {

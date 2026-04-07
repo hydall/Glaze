@@ -52,3 +52,9 @@ export function setHideTokenCount(value) {
     hideTokenCount.value = value;
     localStorage.setItem('gz_hide_token_count', value);
 }
+
+export const enterToSubmit = ref(localStorage.getItem('gz_enter_to_submit') !== 'false');
+export function setEnterToSubmit(value) {
+    enterToSubmit.value = value;
+    localStorage.setItem('gz_enter_to_submit', value);
+}

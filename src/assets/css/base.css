@@ -456,3 +456,18 @@ body.dark-theme .app-header,
 body.dark-theme .bottom-sheet-content {
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
 }
+
+/* Markdown preview styles for ChatInput */
+.md-bold {
+    font-weight: 700;
+}
+.md-italic {
+    font-style: italic;
+}
+.md-bold-italic {
+    font-weight: 700;
+    font-style: italic;
+}
+.md-strike {
+    text-decoration: line-through;
+}
