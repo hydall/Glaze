@@ -2016,8 +2016,10 @@ async function startImpersonation(guidanceText = null) {
     // Prepare history
     const history = currentMessages.value
         .map((m, i) => ({ ...m, originalIndex: i }))
-        .filter(m => !m.isTyping)
+        .filter(m => !m.isTyping && !m.isHidden)
         .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex }));
+
+    window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId, sessionId: activeChatChar.sessionId } }));
 
     generateChatResponse({
         text: promptText,
@@ -2134,7 +2136,8 @@ async function deleteSession(sessionId, targetChar) {
         await loadChats(); // Reload local state
         
         if (activeChatChar && activeChatChar.id === char.id) {
-            const currentData = await getChatData(char.id);
+            // Fetch raw DB state to bypass getChat's auto-creation
+            const currentData = await db.get(`gz_chat_${char.id}`);
             // Check if there are any sessions left
             if (!currentData || !currentData.sessions || Object.keys(currentData.sessions).length === 0) {
                 // No sessions left, close chat manually to avoid creating a new empty one
@@ -2263,10 +2266,15 @@ function openDeleteSessionConfirm(char, sessionId, returnToSessions = false) {
                 icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
                 iconColor: '#ff4444',
                 isDestructive: true,
-                onClick: () => {
-                    deleteSession(sessionId, char);
+                onClick: async () => {
+                    await deleteSession(sessionId, char);
                     closeBottomSheet();
-                    if (returnToSessions) setTimeout(() => openSessionsSheet(char), 300);
+                    if (returnToSessions) {
+                        const currentData = await db.get(`gz_chat_${char.id}`);
+                        if (currentData && currentData.sessions && Object.keys(currentData.sessions).length > 0) {
+                            setTimeout(() => openSessionsSheet(char), 300);
+                        }
+                    }
                 }
             },
             {

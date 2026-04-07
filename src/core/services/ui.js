@@ -136,6 +136,8 @@ export function attachRipple(el) {
     });
 }
 
+let _rippleDelegationAdded = false;
+
 export function initRipple() {
     // Inject styles for the new ripple if not present
     if (!document.getElementById('ripple-effect-styles')) {
@@ -160,6 +162,36 @@ export function initRipple() {
 
     const elements = document.querySelectorAll('.tabbar, .app-header, .menu-group, .preset-selector, .api-status, .glass-panel, .segmented-control, .bottom-sheet-content');
     elements.forEach(attachRipple);
+
+    if (!_rippleDelegationAdded) {
+        _rippleDelegationAdded = true;
+        document.addEventListener('pointerdown', function (e) {
+            const trigger = e.target.closest('.list-item, .triggered-item-card, .list-container');
+            if (!trigger || trigger.dataset.rippleInit) return;
+
+            const bgContainer = trigger.closest('.view-content-wrapper') || document.body;
+
+            const circle = document.createElement('span');
+            const diameter = Math.max(window.innerWidth, window.innerHeight) * 2;
+            const radius = diameter / 2;
+
+            circle.style.width = circle.style.height = `${diameter}px`;
+            circle.style.left = `${e.clientX - radius}px`;
+            circle.style.top = `${e.clientY - radius}px`;
+            circle.style.position = 'fixed';
+            circle.style.zIndex = '0';
+            circle.style.pointerEvents = 'none';
+            circle.classList.add('ripple');
+
+            circle.style.background = `radial-gradient(circle, rgba(var(--vk-blue-rgb), 0.1) 0%, transparent 70%)`;
+
+            circle.addEventListener('animationend', () => {
+                circle.remove();
+            });
+
+            bgContainer.appendChild(circle);
+        });
+    }
 }
 
 export function rgbToHex(rgb) {

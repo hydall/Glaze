@@ -58,3 +58,9 @@ export function setHideHelpTips(value) {
     hideHelpTips.value = value;
     localStorage.setItem('gz_hide_help_tips', value);
 }
+
+export const dialogGrouping = ref(localStorage.getItem('gz_dialog_grouping') === 'true');
+export function setDialogGrouping(value) {
+    dialogGrouping.value = value;
+    localStorage.setItem('gz_dialog_grouping', value);
+}

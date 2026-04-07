@@ -330,8 +330,7 @@ export const db = {
             if (ids.length > 0) {
                 data.currentId = Math.max(...ids);
             } else {
-                data.currentId = 1;
-                data.sessions[1] = [];
+                data.currentId = null;
             }
         }
 

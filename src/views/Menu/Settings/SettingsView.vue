@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { updateLanguage, translations } from '@/utils/i18n.js';
-import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips } from '@/core/config/APPSettings.js';
+import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips, dialogGrouping, setDialogGrouping } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { themeState, setChatLayout } from '@/core/states/themeState.js';
@@ -29,6 +29,7 @@ const hideMsgId = ref(hideMessageId.value);
 const hideGenTime = ref(hideGenerationTime.value);
 const hideTokenCnt = ref(hideTokenCount.value);
 const hideHTips = ref(hideHelpTips.value);
+const dialogGrouped = ref(dialogGrouping.value);
 
 const toggleDisableSwipeRegen = () => {
     const newValue = !disableSwipeRegen.value;
@@ -58,6 +59,12 @@ const toggleHideTokenCnt = () => {
 const toggleHideHTips = () => {
     hideHTips.value = !hideHTips.value;
     setHideHelpTips(hideHTips.value);
+    window.dispatchEvent(new CustomEvent('settings-changed'));
+};
+
+const toggleDialogGrouped = () => {
+    dialogGrouped.value = !dialogGrouped.value;
+    setDialogGrouping(dialogGrouped.value);
     window.dispatchEvent(new CustomEvent('settings-changed'));
 };
 
@@ -184,6 +191,14 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
         <div v-else-if="currentScreen === 'interface'" key="interface">
             <div class="menu-group">
                 <div class="section-header">{{ t('menu_interface_settings') || 'Interface Settings' }}</div>
+                <!-- Dialog Grouping -->
+                <div class="settings-item-checkbox" @click="toggleDialogGrouped">
+                    <div class="settings-text-col">
+                        <label>{{ t('menu_dialog_grouping') || 'Group Dialogs' }}</label>
+                        <div class="settings-desc">{{ t('desc_dialog_grouping') || 'Groups all sessions by character, sorted by latest message' }}</div>
+                    </div>
+                    <input type="checkbox" class="vk-switch" :checked="dialogGrouped" style="pointer-events: none;">
+                </div>
                 <!-- Hide Help Tips -->
                 <div class="settings-item-checkbox" @click="toggleHideHTips">
                     <div class="settings-text-col">

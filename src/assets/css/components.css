@@ -1,6 +1,7 @@
 /* List Container & Items */
 .list-container {
-    padding-bottom: 0; /* Flex layout handles space now */
+    padding-bottom: 0;
+    /* Flex layout handles space now */
 }
 
 .list-item {
@@ -11,15 +12,14 @@
     position: relative;
 }
 
-.list-item:active {
-    background-color: var(--bg-gray);
-}
+
 
 .list-item::after {
     content: '';
     position: absolute;
     bottom: 0;
-    left: 76px; /* 16px padding + 48px avatar + 12px margin */
+    left: 76px;
+    /* 16px padding + 48px avatar + 12px margin */
     right: 0;
     height: 1px;
     background-color: var(--separator-color);
@@ -83,7 +83,8 @@
     justify-content: center;
 }
 
-.title, .item-title {
+.title,
+.item-title {
     font-weight: 500;
     font-size: 16px;
     color: var(--text-dark-gray);
@@ -189,7 +190,7 @@
     color: white;
     font-size: 16px;
     font-weight: 500;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
     cursor: pointer;
     z-index: 90;
     transition: transform 0.1s;
@@ -261,7 +262,10 @@
 /* Image Viewer */
 .image-viewer-overlay {
     position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background-color: rgba(0, 0, 0, 0.95);
     z-index: 99999;
     display: flex;
@@ -270,24 +274,39 @@
 }
 
 .image-viewer-container {
-    width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-    overflow: hidden; touch-action: none;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    touch-action: none;
 }
 
 .image-viewer-img {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
-    transform-origin: center; transition: transform 0.1s ease-out; will-change: transform;
+    transform-origin: center;
+    transition: transform 0.1s ease-out;
+    will-change: transform;
 }
 
 #image-viewer-close-btn {
-    position: absolute; top: calc(10px + var(--safe-area-inset-top)); right: 10px;
-    z-index: 20020; padding: 10px; cursor: pointer; display: flex;
+    position: absolute;
+    top: calc(10px + var(--safe-area-inset-top));
+    right: 10px;
+    z-index: 20020;
+    padding: 10px;
+    cursor: pointer;
+    display: flex;
 }
 
 #image-viewer-close-btn svg {
-    width: 32px; height: 32px; fill: white; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
+    width: 32px;
+    height: 32px;
+    fill: white;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
 }
 
 /* Empty State */
@@ -320,7 +339,7 @@
 /* Segmented Control (Tabs) */
 .segmented-control {
     display: flex;
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(0, 0, 0, 0.05);
     border-radius: 10px;
     padding: 4px;
     position: relative;
@@ -356,8 +375,14 @@
     border-radius: 8px;
     z-index: 1;
     transition: transform 0.25s cubic-bezier(0.2, 0, 0.2, 1);
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
-body.dark-theme .segmented-control { background-color: rgba(255,255,255,0.1); }
-body.dark-theme .sub-tab-btn.active { background-color: transparent; color: #fff; }
+body.dark-theme .segmented-control {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+body.dark-theme .sub-tab-btn.active {
+    background-color: transparent;
+    color: #fff;
+}

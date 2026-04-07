@@ -22,6 +22,7 @@ const isExpanded = ref(false);
 const isDragging = ref(false);
 const startY = ref(0);
 const currentDragY = ref(0);
+const wasExpandedBeforeKeyboard = ref(false);
 
 const sheetStyle = computed(() => {
     if (!isVisible.value) {
@@ -154,15 +155,18 @@ defineExpose({ open, close, isVisible, isExpanded });
 
 const sheetViewContentRef = ref(null);
 const isLocalKeyboardOpen = ref(false);
+const isTextFieldFocusedInSheet = ref(false);
 
-function checkFocus() {
+function updateFocusState() {
     const active = document.activeElement;
-    if (!active) return;
+    if (!active) {
+        isTextFieldFocusedInSheet.value = false;
+        return;
+    }
     
     const isInside = sheetViewContentRef.value?.contains(active) || active?.closest('.sheet-view-content');
 
     if (isInside) {
-        // Only trigger if it's a text-entry field that actually opens a virtual keyboard
         const tagName = active.tagName;
         let isTextEntry = false;
         
@@ -175,48 +179,69 @@ function checkFocus() {
             isTextEntry = true;
         }
 
-        if (isTextEntry) {
-            isLocalKeyboardOpen.value = true;
-            
-            // Ensure overlap is set so the sheet can actually rise
-            applyKeyboardOverlap();
+        isTextFieldFocusedInSheet.value = isTextEntry;
 
-            // Force keyboard on Android if needed
-            if (Capacitor.isNativePlatform()) {
-                showKeyboard();
-            }
-        } else {
-            isLocalKeyboardOpen.value = false;
+        // Force keyboard on Android if needed
+        if (isTextEntry && Capacitor.isNativePlatform()) {
+            showKeyboard();
         }
     } else {
-        isLocalKeyboardOpen.value = false;
+        isTextFieldFocusedInSheet.value = false;
+    }
+
+    // On non-native (web), drive keyboard state from focus since there are no native keyboard events
+    if (!Capacitor.isNativePlatform()) {
+        isLocalKeyboardOpen.value = isTextFieldFocusedInSheet.value;
     }
 }
 
 let kbListeners = [];
 
 function onSheetFocusIn() {
-    checkFocus();
-    // Reset viewport pan to prevent double offset (CSS padding + browser pan)
+    updateFocusState();
     if (isLocalKeyboardOpen.value) {
         window.scrollTo(0, 0);
     }
 }
 
+function expandForKeyboard() {
+    if (!isExpanded.value && !props.fitContent) {
+        wasExpandedBeforeKeyboard.value = false;
+        isExpanded.value = true;
+        emit('update:expanded', true);
+    } else {
+        wasExpandedBeforeKeyboard.value = true;
+    }
+}
+
+function restoreAfterKeyboard() {
+    if (!wasExpandedBeforeKeyboard.value && !props.fitContent) {
+        isExpanded.value = false;
+        emit('update:expanded', false);
+    }
+}
+
 onMounted(async () => {
     document.addEventListener('focusin', onSheetFocusIn);
-    document.addEventListener('focusout', () => { setTimeout(checkFocus, 50); });
+    document.addEventListener('focusout', () => { setTimeout(updateFocusState, 50); });
 
     if (Capacitor.isNativePlatform()) {
         kbListeners.push(await onKeyboardShow((info) => { 
-            checkFocus();
-            window.scrollTo(0, 0);
-            if (info && info.keyboardHeight) {
-                applyKeyboardOverlap(info.keyboardHeight);
+            updateFocusState();
+            // Only react if a text field inside THIS sheet is focused
+            if (isTextFieldFocusedInSheet.value && isVisible.value) {
+                window.scrollTo(0, 0);
+                if (info && info.keyboardHeight) {
+                    applyKeyboardOverlap(info.keyboardHeight);
+                }
+                isLocalKeyboardOpen.value = true;
+                expandForKeyboard();
             }
         }));
         kbListeners.push(await onKeyboardHide(() => { 
-            isLocalKeyboardOpen.value = false; 
+            isLocalKeyboardOpen.value = false;
+            isTextFieldFocusedInSheet.value = false;
+            restoreAfterKeyboard();
         }));
     }
 });
@@ -348,7 +373,7 @@ onBeforeUnmount(() => {
 }
 
 .sheet-view-content.keyboard-open {
-    padding-bottom: calc(var(--keyboard-overlap, 0px) + 10px + var(--sab, 0px) + var(--sheet-translate, 0px)) !important;
+    padding-bottom: calc(var(--keyboard-overlap, 0px) + 10px) !important;
 }
 
 .sheet-view-content.expanded {

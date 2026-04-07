@@ -302,16 +302,61 @@ const vLongPress = {
 };
 
 const openSessionsSheet = async (char) => {
-    let chatData = await db.getChat(char.id);
+    // Use raw db.get to bypass getChat's auto-session-creation
+    let rawData = await db.get(`gz_chat_${char.id}`);
     
-    // If no data, the char has never been chatted with. We can just open the chat with no sessionId
-    if (!chatData || !chatData.sessions || Object.keys(chatData.sessions).length === 0) {
-        emit('open-chat', char);
+    // If no data or no sessions, show the "no sessions" empty state
+    if (!rawData || !rawData.sessions || Object.keys(rawData.sessions).length === 0) {
+        showBottomSheet({
+            title: translations[currentLang.value]?.history_title || 'Sessions',
+            bigInfo: {
+                icon: '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>',
+                description: translations[currentLang.value]?.no_sessions || 'No sessions',
+                buttonText: translations[currentLang.value]?.action_create_new || 'Create New',
+                onButtonClick: async () => {
+                    closeBottomSheet();
+                    await dbCreateSession(char.id);
+                    emit('open-chat', char);
+                }
+            },
+            headerAction: {
+                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+                onClick: () => {
+                    closeBottomSheet();
+                    setTimeout(() => {
+                        showBottomSheet({
+                            title: translations[currentLang.value]?.history_title || 'Sessions',
+                            items: [
+                                {
+                                    label: translations[currentLang.value]?.action_create_new || 'Create New',
+                                    icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+                                    onClick: async () => {
+                                        closeBottomSheet();
+                                        await dbCreateSession(char.id);
+                                        emit('open-chat', char);
+                                    }
+                                },
+                                {
+                                    label: translations[currentLang.value]?.action_import || 'Import from file',
+                                    icon: '<svg viewBox="0 0 24 24"><path d="M4 15h2v3h12v-3h2v3c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-3zm4.41-6.59L11 5.83V17h2V5.83l2.59 2.58L17 7l-5-5-5 5 1.41 1.41z"/></svg>',
+                                    onClick: () => {
+                                        closeBottomSheet();
+                                        triggerChatImport(char.id, null, () => {
+                                            emit('open-chat', char);
+                                        });
+                                    }
+                                }
+                            ]
+                        });
+                    }, 300);
+                }
+            }
+        });
         return;
     }
     
-    const sessions = chatData.sessions;
-    const currentSessionId = chatData.currentId;
+    const sessions = rawData.sessions;
+    const currentSessionId = rawData.currentId;
     
     const ids = Object.keys(sessions).map(Number).sort((a,b) => {
         const lastA = sessions[a][sessions[a].length-1]?.timestamp || 0;
