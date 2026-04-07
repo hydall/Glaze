@@ -201,7 +201,7 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
                 <div class="settings-item-checkbox" @click="toggleEnterToSubmit" style="cursor: pointer; padding: 12px 16px;">
                     <div class="settings-text-col">
                         <label style="cursor: pointer; margin-bottom: 2px;">{{ t('menu_enter_to_send') || 'Enter to Send' }}</label>
-                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_enter_to_send') || 'Press Enter to send message. If disabled, Enter adds a new line and Shift+Enter sends.' }}</div>
+                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_enter_to_send') || 'Press Enter to send message. If disabled, Enter adds a new line. Applies only to physical keyboards.' }}</div>
                     </div>
                     <input type="checkbox" class="vk-switch" :checked="enterSubmitMode" style="pointer-events: none;">
                 </div>

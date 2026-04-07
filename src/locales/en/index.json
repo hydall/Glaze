@@ -595,7 +595,7 @@
     "backup_file_downloaded": "File downloaded.",
     "menu_message_settings": "Message Settings",
     "menu_enter_to_send": "Enter to Send",
-    "desc_enter_to_send": "Press Enter to send message. If disabled, Enter adds a new line and Shift+Enter sends.",
+    "desc_enter_to_send": "Press Enter to send message. If disabled, Enter adds a new line. Applies only to physical keyboards.",
     "menu_hide_msg_id": "Hide Message ID",
     "menu_hide_gen_time": "Hide Gen Time",
     "menu_hide_token_count": "Hide Token Count",
