@@ -201,7 +201,7 @@ defineExpose({ open, close });
                     <div class="bs-hint">{{ t('backup_hint_export') || 'Create a full backup of your current application state.' }}</div>
                 </div>
                 
-                <input type="file" ref="fileInput" style="display: none" accept=".glz,.zip,.tbk" @change="handleRestoreFile">
+                <input type="file" ref="fileInput" style="display: none" accept="*/*" @change="handleRestoreFile">
             </div>
 
             <!-- Importing View -->
