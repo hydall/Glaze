@@ -1,6 +1,16 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { db } from '@/utils/db.js';
 
+export const PROVIDER_BLACKLIST = [
+    { name: 'EllyAI', match: 'ellyai' }
+];
+
+export function getBlacklistedProvider(url) {
+    if (!url) return null;
+    const lower = url.toLowerCase();
+    return PROVIDER_BLACKLIST.find(entry => lower.includes(entry.match)) || null;
+}
+
 export async function initSettings() {
     // Ensure defaults exist
     if (localStorage.getItem('gz_api_temp') === null) localStorage.setItem('gz_api_temp', '0.7');

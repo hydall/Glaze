@@ -1,10 +1,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue';
-import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig } from '@/core/config/APISettings.js';
+import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getBlacklistedProvider } from '@/core/config/APISettings.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
 import { initRipple } from '@/core/services/ui.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
+import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/states/bottomSheetState.js';
 import SheetView from '@/components/ui/SheetView.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
 
@@ -45,6 +45,37 @@ const activeApiPresetId = ref('default');
 const activeApiPreset = computed(() => {
     return apiPresets.value.find(p => p.id === activeApiPresetId.value) || apiPresets.value[0];
 });
+
+// --- Blacklist Warning ---
+let blacklistCountdownTimer = null;
+
+function showBlacklistWarning(providerName) {
+    if (blacklistCountdownTimer) clearInterval(blacklistCountdownTimer);
+    let countdown = 10;
+    showBottomSheet({
+        title: providerName,
+        locked: true,
+        bigInfo: {
+            icon: '<svg viewBox="0 0 24 24" style="fill:#ff9800"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
+            description: `${providerName} является низкокачественным провайдером. Поддержка по ошибкам подключения и генерации оказываться не будет. Пожалуйста, смените провайдера.`,
+            buttonText: `OK (${countdown})`,
+            buttonDisabled: true,
+            onButtonClick: closeBottomSheet
+        }
+    });
+    blacklistCountdownTimer = setInterval(() => {
+        countdown--;
+        if (bottomSheetState.value.bigInfo) {
+            bottomSheetState.value.bigInfo.buttonText = countdown > 0 ? `OK (${countdown})` : 'OK';
+            bottomSheetState.value.bigInfo.buttonDisabled = countdown > 0;
+        }
+        if (countdown <= 0) {
+            bottomSheetState.value.locked = false;
+            clearInterval(blacklistCountdownTimer);
+            blacklistCountdownTimer = null;
+        }
+    }, 1000);
+}
 
 function loadApiSettings() {
     apiSettings.endpoint = localStorage.getItem('api-endpoint') || '';
@@ -93,7 +124,14 @@ function onApiInput(key, value) {
     saveApiSetting(key, value);
     if (key === 'api-endpoint' || key === 'api-key') {
         if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(checkConnection, 1000);
+        debounceTimer = setTimeout(() => {
+            if (key === 'api-endpoint') {
+                const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || value;
+                const blacklisted = getBlacklistedProvider(endpoint);
+                if (blacklisted) showBlacklistWarning(blacklisted.name);
+            }
+            checkConnection();
+        }, 1000);
     }
 }
 
@@ -107,6 +145,7 @@ function flushApiDebounce() {
 
 async function checkConnection() {
     const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || apiSettings.endpoint;
+
     if (!endpoint) {
         apiStatus.value = 'failed';
         return;
@@ -430,6 +469,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
     flushApiDebounce();
+    if (blacklistCountdownTimer) clearInterval(blacklistCountdownTimer);
 });
 </script>
 
@@ -550,6 +590,7 @@ onBeforeUnmount(() => {
                 </div>
         </div>
     </SheetView>
+
 </template>
 
 <style scoped>

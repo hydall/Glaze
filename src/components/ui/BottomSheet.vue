@@ -6,12 +6,13 @@ import { translations, t } from '@/utils/i18n.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 const props = defineProps({
     visible: Boolean,
+    locked: { type: Boolean, default: false }, // when true, prevents backdrop/drag dismiss
     title: String,
     helpTip: String,
     content: [String, Object], // HTML string or DOM node
     items: Array, // [{ label, icon, iconColor, onClick, isDestructive, actions: [{icon, color, onClick}] }]
     headerAction: Object, // { icon, onClick }
-    bigInfo: Object, // { icon, description, buttonText, onButtonClick }
+    bigInfo: Object, // { icon, description, buttonText, buttonDisabled, onButtonClick }
     sessionItems: Array, // [{ title, count, time, preview, isActive, onClick, onDelete }]
     cardItems: Array, // [{ label, sublabel, icon, onClick }]
     input: Object // { placeholder, value, confirmLabel, onConfirm }
@@ -100,7 +101,7 @@ function onHandleTouchMove(e) {
 
 function onHandleTouchEnd() {
     isDragging.value = false;
-    if (currentDragY.value > 80) {
+    if (!props.locked && currentDragY.value > 80) {
         close();
     }
     currentDragY.value = 0;
@@ -183,7 +184,7 @@ onBeforeUnmount(() => {
 
 <template>
     <div class="modal-overlay" :class="{ visible: visible }">
-        <div class="modal-backdrop" @click="close"></div>
+        <div class="modal-backdrop" @click="locked ? undefined : close()"></div>
         <div class="bottom-sheet-content" @click.stop 
              :style="{ transform: isDragging ? `translateY(${currentDragY}px)` : '' }"
              :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen }">
@@ -212,7 +213,7 @@ onBeforeUnmount(() => {
                 <div v-if="bigInfo" class="sheet-big-info">
                     <div class="big-info-icon" v-html="bigInfo.icon"></div>
                     <div class="big-info-desc">{{ bigInfo.description }}</div>
-                    <div class="sheet-big-info-btn" @click="bigInfo.onButtonClick">{{ bigInfo.buttonText }}</div>
+                    <div class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">{{ bigInfo.buttonText }}</div>
                 </div>
 
                 <!-- List Items -->
@@ -313,6 +314,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.sheet-big-info-btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 .sheet-item.centered {
     justify-content: center;
 }

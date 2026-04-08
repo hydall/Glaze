@@ -12,6 +12,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
 import RollingNumber from '@/components/ui/RollingNumber.vue';
 import SheetView from '@/components/ui/SheetView.vue';
+import { getBlacklistedProvider } from '@/core/config/APISettings.js';
 
 const props = defineProps({
     message: { type: Object, required: true },
@@ -484,6 +485,13 @@ const showFooter = computed(() => {
     return true; // Always show in other layouts for meta/actions
 });
 
+const blacklistedErrorProvider = computed(() => {
+    if (!props.message.isError) return null;
+    const endpoint = localStorage.getItem('gz_api_endpoint_normalized')
+        || localStorage.getItem('api-endpoint') || '';
+    return getBlacklistedProvider(endpoint);
+});
+
 const tokenCount = computed(() => {
     return props.message.tokens || 0;
 });
@@ -612,6 +620,7 @@ onUnmounted(() => {
                     <div v-if="message.isError" class="error-window">
                         <div class="error-header">
                             <span>ERROR</span>
+                            <span v-if="blacklistedErrorProvider" class="error-provider-chip">{{ blacklistedErrorProvider.name }} API</span>
                             <div class="error-copy-btn" @click.stop="copyErrorText(message.text)">
                                 <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
                             </div>
@@ -1462,6 +1471,30 @@ body.dark-theme .error-header {
 
 body.dark-theme .error-content {
     color: #ffb3b3;
+}
+
+.error-provider-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-left: auto;
+    margin-right: 8px;
+    background-color: rgba(255, 59, 48, 0.12);
+    color: #ff3b30;
+    border: 1px solid rgba(255, 59, 48, 0.25);
+}
+
+body.dark-theme .error-provider-chip {
+    background-color: rgba(255, 59, 48, 0.2);
+    color: #ff453a;
+    border-color: rgba(255, 59, 48, 0.35);
 }
 
 :global(body.dark-theme) .message-section.error .msg-name {

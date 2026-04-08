@@ -759,8 +759,9 @@ watch(currentView, () => {
     </div>
 
     <!-- Global Bottom Sheet -->
-    <BottomSheet 
+    <BottomSheet
         :visible="bottomSheetState.visible"
+        :locked="bottomSheetState.locked"
         :title="bottomSheetState.title"
         :help-tip="bottomSheetState.helpTip"
         :content="bottomSheetState.content"
