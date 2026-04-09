@@ -7,41 +7,40 @@
                 {
                     "id": "llm",
                     "name": "LLM",
-                    "alt": "Large Language Model",
-                    "desc": "An AI that reads and writes text. It works by looking at your entire conversation and predicting what word comes next, one piece at a time. Examples: GPT-4, Claude, Llama."
+                    "alt": "AI, Neural Network",
+                    "desc": "An AI that reads and writes text. It works by looking at your entire conversation and predicting what word comes next, one piece at a time. Examples: Gemini 3.1 Pro, Claude Sonnet 4.6, Deepseek V3.2."
                 },
                 {
                     "id": "token",
                     "name": "Token",
-                    "desc": "The smallest piece of text the AI reads and writes — roughly ¾ of a word. Every message you type and every reply you get is counted in tokens. There's also a limit: once the conversation is too long, the oldest messages get cut off. More tokens = higher cost and slower replies."
+                    "desc": "The smallest piece of text the AI reads and writes — roughly 3/4 of a word. Every message you type and every reply you get is counted in tokens. There's also a limit: once the conversation is too long, the oldest messages get cut off. More tokens = higher cost and slower replies."
                 },
                 {
                     "id": "api",
                     "name": "API",
-                    "alt": "Endpoint",
-                    "desc": "The server address Glaze connects to in order to send your messages to the AI and receive replies. Must support the OpenAI-compatible format — works with any hosted or local provider that speaks it."
+                    "alt": "Proxy, Provider, Server",
+                    "desc": "Typically a service that provides a special link — an endpoint — and a key to access it. Glaze connects to this endpoint to send your messages to the AI and receive replies. Must support the OpenAI-compatible format. Recommended providers: [OpenRouter](https://openrouter.ai) and [LinkAPI](https://linkapi.ai)."
                 },
                 {
                     "id": "apikey",
                     "name": "API Key",
-                    "desc": "A secret code that proves you have permission to use an AI service. Never share it — anyone who has it can use the service as if they were you. For local AI servers that don't require authentication, leave this empty."
+                    "desc": "A secret code that proves you have permission to use an AI service. Never share it — anyone who has it can use the service as if they were you."
+                },
+                {
+                    "id": "streaming",
+                    "name": "Streaming",
+                    "desc": "When turned on, the AI sends its reply word by word as it writes — like watching someone type in real time. When turned off, you wait for the full reply before seeing anything. May provoke stronger censorship from the model. Recommended to disable."
                 },
                 {
                     "id": "chatcompletion",
                     "name": "Chat Completion",
                     "desc": "The message format Glaze uses to talk to the AI: a list of messages, each labeled as 'system' (hidden instructions), 'user' (your messages), or 'assistant' (AI replies). Glaze assembles this list automatically from your [[preset]] blocks."
-                },
-                {
-                    "id": "streaming",
-                    "name": "Streaming",
-                    "alt": "SSE",
-                    "desc": "When turned on, the AI sends its reply word by word as it writes — like watching someone type in real time. When turned off, you wait for the full reply before seeing anything. Streaming is recommended for a better experience."
                 }
             ]
         },
         {
-            "id": "chat",
-            "label": "Chat & Messages",
+            "id": "characters",
+            "label": "Characters & Identity",
             "terms": [
                 {
                     "id": "character",
@@ -50,11 +49,28 @@
                     "desc": "An AI character card — a description of who the AI is playing. Includes the character's name, personality, backstory, scenario, example dialogues, and avatar. A character can have multiple independent [[chat-session]]s, its own [[lorebook]] entries, and custom settings via [[connections]]."
                 },
                 {
+                    "id": "persona",
+                    "name": "Persona",
+                    "desc": "Your in-app identity for the roleplay. A persona has a name, an avatar, and a prompt that describes who 'you' are in the story. The prompt is included in the AI's context. You can have multiple personas and assign different ones to different characters or chats."
+                },
+                {
                     "id": "chat-session",
                     "name": "Chat Session",
                     "alt": "Session",
                     "desc": "A separate conversation branch with a character. Each session has its own full message history, [[authornote]], and [[summary]]. You can create as many sessions as you like with the same character — for example, to explore different story paths without overwriting your existing chat."
                 },
+                {
+                    "id": "connections",
+                    "name": "Connections",
+                    "alt": "Bindings",
+                    "desc": "Links a [[lorebook]], [[preset]], or [[persona]] to a specific scope. Scopes: globally (all chats), per character, or per individual chat session. Priority: chat > character > global. Lets different characters or conversations automatically use different settings without manual switching."
+                }
+            ]
+        },
+        {
+            "id": "chat",
+            "label": "Chat",
+            "terms": [
                 {
                     "id": "swipes",
                     "name": "Swipes",
@@ -62,18 +78,13 @@
                 },
                 {
                     "id": "guided-swipe",
-                    "name": "Guided Swipe",
-                    "desc": "A [[swipes]] variant where you add a one-time instruction before regenerating. For example: 'make the scene more tense' or 'have the character mention the forest'. The instruction steers just this one generation and is not saved anywhere."
+                    "name": "Guided Generation",
+                    "desc": "A [[swipes]] variant where you add a one-time instruction before regenerating. For example: 'make the scene more tense' or 'have the character mention the forest'. The instruction steers just this one generation. It is saved in the chat history for convenience, but is not sent to the AI in subsequent requests."
                 },
                 {
                     "id": "impersonation",
                     "name": "Impersonation",
                     "desc": "Generate a reply as if you were your own character — useful for writing your side of the dialogue when you're not sure what to say. Uses a [[guided]] instruction block to tell the AI to write from your perspective instead of the character's."
-                },
-                {
-                    "id": "message-editing",
-                    "name": "Message Editing",
-                    "desc": "Tap and hold any message to edit its text directly. After saving a user message edit, you'll be offered to regenerate the AI's reply based on the new version."
                 },
                 {
                     "id": "selection-mode",
@@ -83,19 +94,30 @@
                 {
                     "id": "hidden-message",
                     "name": "Hidden Message",
-                    "desc": "A message that is excluded from what gets sent to the AI but still visible in your chat. Useful for pruning old or unwanted messages to save space without permanently deleting them. Hidden messages appear faded with a small indicator."
+                    "desc": "A message that is excluded from what gets sent to the AI but still visible in your chat. Useful for pruning old or unwanted messages to save space without permanently deleting them. Hidden messages appear faded with a small indicator. To hide a message, select it using [[selection-mode]]."
                 },
                 {
-                    "id": "macro",
-                    "name": "Macro",
-                    "alt": "Variable",
-                    "desc": "A placeholder in {{curly braces}} that gets automatically replaced with real content when Glaze builds the [[preset]] prompt. Common examples: {{char}} (character name), {{user}} (your name), {{description}}, {{scenario}}, {{random::a::b}} (random choice), {{roll::1d20}} (dice roll). Also works in [[regex]] replacement strings."
+                    "id": "chat-session",
+                    "name": "Chat Session",
+                    "alt": "Session",
+                    "desc": "A separate conversation branch with a character. Each session has its own full message history, [[authornote]], and [[summary]]. You can create as many sessions as you like with the same character — for example, to explore different story paths without overwriting your existing chat."
+                },
+                {
+                    "id": "connections",
+                    "name": "Connections",
+                    "alt": "Bindings",
+                    "desc": "Links a [[lorebook]], [[preset]], or [[persona]] to a specific scope. Scopes: globally (all chats), per character, or per individual chat session. Priority: chat > character > global. Lets different characters or conversations automatically use different settings without manual switching."
+                },
+                {
+                    "id": "magic-drawer",
+                    "name": "Quick Access",
+                    "desc": "A side panel that slides in during a chat. All necessary chat settings are located here: [[character]] info, active [[lorebook]] entries, Author's Note, summary, sessions, preset, and persona settings. Open it with the wand button in the chat input area."
                 }
             ]
         },
         {
             "id": "presets",
-            "label": "Presets",
+            "label": "Presets & Prompts",
             "terms": [
                 {
                     "id": "preset",
@@ -103,9 +125,41 @@
                     "desc": "A customizable set of instructions Glaze sends to the AI before every reply. Made up of blocks you can turn on/off and reorder: System (global rules), Persona (who you are), [[character]] card, Scenario, Example dialogues, [[summary]], [[authornote]], and Chat History. Assignable globally, per character, or per [[chat-session]] via [[connections]]."
                 },
                 {
+                    "id": "macro",
+                    "name": "Macro",
+                    "alt": "Variable",
+                    "desc": "A placeholder in {{curly braces}} that gets automatically replaced with real content when Glaze builds the [[preset]] prompt. Common examples: {{char}} (character name), {{user}} (your name), {{description}}, {{scenario}}, {{random::a::b}} (random choice), {{roll::1d20}} (dice roll). Also works in [[regex]] replacement strings."
+                },
+                {
+                    "id": "authornote",
+                    "name": "Author's Note",
+                    "desc": "A short note you can write separately for each [[chat-session]]. It's placed near the very end of the conversation in the AI's view, giving it strong influence over the next reply. Great for current plot reminders, style directions, or anything the AI should keep in mind right now."
+                },
+                {
+                    "id": "summary",
+                    "name": "Summary",
+                    "desc": "A block for a brief recap of the earlier parts of the chat. As conversations grow long, the oldest messages fall out of the AI's memory — a summary helps it stay aware of what happened earlier. You can write it yourself or generate it automatically with a button."
+                },
+                {
+                    "id": "guided",
+                    "name": "Guided Generation",
+                    "desc": "Sends a one-time instruction alongside the next message to steer the AI's reply — for example, directing the plot, tone, or writing style. Also refers to the sampling settings that shape how the AI picks words: [[temperature]], [[top-p]], and similar parameters."
+                },
+                {
+                    "id": "temperature",
+                    "name": "Temperature",
+                    "desc": "Controls how creative or predictable the AI's replies are. Low (0.1-0.5) = safe and focused, but can become repetitive. High (1.0-2.0) = varied and creative, but may turn incoherent. For roleplay, 0.7-1.2 is a good starting range."
+                },
+                {
+                    "id": "top-p",
+                    "name": "Top-P",
+                    "alt": "Nucleus Sampling",
+                    "desc": "Limits the pool of words the AI can pick from at each step. At 1.0, everything is fair game. At 0.9, it only considers the most likely 90% of words, cutting out rare and unusual choices. Lower values = more focused and predictable replies."
+                },
+                {
                     "id": "preset-role",
                     "name": "Message Role",
-                    "desc": "Each message in the conversation has a label: 'system' (instructions the AI follows but that stay hidden from the roleplay), 'user' (your messages), or 'assistant' (AI replies). The label affects how the AI treats the message — 'system' carries the most authority."
+                    "desc": "Each message in the conversation has a label that affects how the AI perceives it. 'system' — an instruction from the system, the AI treats it almost as a given. 'user' — triggers the model's user-interaction behavior patterns. 'assistant' — the model thinks it wrote this itself (prefill), and tends to repeat the style."
                 },
                 {
                     "id": "preset-injection",
@@ -122,7 +176,7 @@
                     "id": "preset-noassistant",
                     "name": "NoAssistant",
                     "alt": "NoAss",
-                    "desc": "A special mode that puts the entire conversation into one big block of text with 'User:' and 'Character:' labels, instead of sending separate messages. Some AI models handle roleplay better this way — it feels more like a continuous story than a chat app."
+                    "desc": "A special mode that puts the entire conversation into one big block of text with 'User:' and 'Character:' labels, instead of sending separate messages. Helps reduce the model's predisposition toward the user. Requires a character card in a special format and third-person messages — the user must be hidden from the model."
                 },
                 {
                     "id": "preset-stopstring",
@@ -133,33 +187,7 @@
                     "id": "preset-reasoning",
                     "name": "Reasoning",
                     "alt": "Chain of Thought",
-                    "desc": "Some AI models 'think out loud' before giving their final answer, working through their reasoning step by step. 'Request Native Reasoning' asks the model to include this thinking. 'Parse Inline Reasoning' extracts it from tags like <think>...</think> and displays it separately. Supported by models like o1 and DeepSeek-R1."
-                },
-                {
-                    "id": "authornote",
-                    "name": "Author's Note",
-                    "desc": "A short note you can write separately for each [[chat-session]]. It's placed near the very end of the conversation in the AI's view (usually depth 2), giving it strong influence over the next reply. Great for current plot reminders, style directions, or anything the AI should keep in mind right now."
-                },
-                {
-                    "id": "summary",
-                    "name": "Summary",
-                    "desc": "A block for a brief recap of the earlier parts of the chat. As conversations grow long, the oldest messages fall out of the AI's memory — a summary helps it stay aware of what happened earlier. You can write it yourself or generate it automatically with a button."
-                },
-                {
-                    "id": "guided",
-                    "name": "Guided Generation",
-                    "desc": "Sends a one-time instruction alongside the next message to steer the AI's reply — for example, directing the plot, tone, or writing style. Also refers to the sampling settings that shape how the AI picks words: [[temperature]], [[top-p]], and similar parameters."
-                },
-                {
-                    "id": "temperature",
-                    "name": "Temperature",
-                    "desc": "Controls how creative or predictable the AI's replies are. Low (0.1–0.5) → safe and focused, but can become repetitive. High (1.0–2.0) → varied and creative, but may turn incoherent. For roleplay, 0.7–1.2 is a good starting range."
-                },
-                {
-                    "id": "top-p",
-                    "name": "Top-P",
-                    "alt": "Nucleus Sampling",
-                    "desc": "Limits the pool of words the AI can pick from at each step. At 1.0, everything is fair game. At 0.9, it only considers the most likely 90% of words, cutting out rare and unusual choices. Lower values = more focused and predictable replies."
+                    "desc": "Some AI models 'think out loud' before giving their final answer, working through their reasoning step by step. 'Request Model Reasoning' only affects visibility and does not disable the model's thinking process. 'Parse Inline Reasoning' is made for cases when the model sends its thinking inside the response text rather than in a separate block — it extracts it from tags like <think>...</think> and displays it separately."
                 }
             ]
         },
@@ -187,12 +215,12 @@
                 {
                     "id": "lorebook-budget",
                     "name": "Context Percent / Budget Cap",
-                    "desc": "Limits how much of the AI's memory lorebook entries can occupy. The AI can only hold so much text at once — this setting controls what fraction lorebooks are allowed to use. Context Percent sets a relative cap (e.g. 20%). Budget Cap sets a hard token limit. Entries are sorted by priority and added until the budget runs out."
+                    "desc": "Limits how much of the AI's memory lorebook entries can occupy. The AI can only hold so much text at once — this controls what share lorebooks are allowed to use. Context Percent sets a relative cap (e.g. 20%). Budget Cap sets a hard token limit. Entries are sorted by priority and added until the budget runs out."
                 },
                 {
                     "id": "lorebook-probability",
                     "name": "Probability",
-                    "desc": "Even when an entry's keywords match, it only activates with this probability (0–100%). Use it to add randomness — for example, a 50% chance means a character's backstory is only included half the time their name appears."
+                    "desc": "Even when an entry's keywords match, it only activates with this probability (0-100%). Use it to add randomness — for example, a 50% chance means a character's backstory is only included half the time their name appears."
                 },
                 {
                     "id": "lorebook-temporal",
@@ -218,7 +246,7 @@
                 {
                     "id": "regex",
                     "name": "Regex Scripts",
-                    "desc": "Rules that automatically find and replace text patterns in your chat. Each script has a search pattern, a replacement, and filters for when to apply it. The search uses 'regular expressions' — a powerful text-matching syntax. Control what kind of text it affects via [[regex-placement]]."
+                    "desc": "Special scripts that find text matching a specified pattern and replace it with a specified template. Control what kind of text it affects via [[regex-placement]]."
                 },
                 {
                     "id": "regex-placement",
@@ -239,24 +267,7 @@
                 {
                     "id": "regex-macros",
                     "name": "Macros in Find Regex",
-                    "desc": "Whether [[macro]] placeholders like {{char}} and {{user}} are expanded in the search pattern before matching. 'Don't substitute' — match the literal text {{char}}. 'Substitute raw' — replace with the actual character name first. 'Substitute escaped' — replace and also escape special regex characters so they match literally."
-                }
-            ]
-        },
-        {
-            "id": "profile",
-            "label": "Personas & Connections",
-            "terms": [
-                {
-                    "id": "persona",
-                    "name": "Persona",
-                    "desc": "Your in-app identity for the roleplay. A persona has a name, an avatar, and a prompt that describes who 'you' are in the story. The prompt is included in the AI's context. You can have multiple personas and assign different ones to different characters or chats."
-                },
-                {
-                    "id": "connections",
-                    "name": "Connections",
-                    "alt": "Bindings",
-                    "desc": "Links a [[lorebook]], [[preset]], or [[persona]] to a specific scope. Scopes: globally (all chats), per character, or per individual chat session. Priority: chat > character > global. Lets different characters or conversations automatically use different settings without manual switching."
+                    "desc": "Whether [[macro]] placeholders like {{char}} and {{user}} are expanded in the search pattern before matching. 'Don't substitute' — match the literal text {{char}}. 'Substitute raw' — replace with the actual character name first. 'Substitute escaped' — replace and escape special regex characters so they match literally."
                 }
             ]
         },
@@ -269,11 +280,32 @@
                     "name": "Themes",
                     "alt": "Appearance",
                     "desc": "Customize how the app looks. Switch between light and dark mode, change the accent color, set custom colors for message bubbles, pick fonts for the UI and chat, and control the transparency and blur of background elements. Theme settings apply globally across all chats."
+                }
+            ]
+        },
+        {
+            "id": "faq",
+            "label": "FAQ",
+            "terms": [
+                {
+                    "id": "faq-where-cards",
+                    "name": "Where to get character cards?",
+                    "desc": "[[character]] cards in SillyTavern format are available on several community websites. [Chub.ai](https://chub.ai) (Character Hub) is the largest repository — search, preview, and download cards directly as .json files ready to import into Glaze. For characters from Janitor AI, use [datacat.run](https://datacat.run) to export any character as a card file — including private ones and those with proxy disabled. [Backyard.ai](https://backyard.ai) also has a library of cards you can download."
                 },
                 {
-                    "id": "magic-drawer",
-                    "name": "Magic Drawer",
-                    "desc": "A side panel that slides in during a chat. Shows the [[character]]'s info, active [[lorebook]] entries, and shortcuts to Author's Note, summary, sessions, preset, and persona settings. Open it with the wand button in the chat input area."
+                    "id": "faq-thinking-in-message",
+                    "name": "Why is the model thinking inside the message?",
+                    "desc": "The model is sending its reasoning (chain of thought) inside the response text rather than in a separate block. See [[preset-reasoning|Reasoning]] — enable 'Parse Inline Reasoning' to automatically extract thinking from tags like <think>...</think> and display it in a separate reasoning block."
+                },
+                {
+                    "id": "faq-where-llm",
+                    "name": "Where to find an LLM?",
+                    "desc": "You need an [[api|API provider]] — a service that gives you access to AI models. After signing up, you'll get an API endpoint and key to enter in Glaze's API settings."
+                },
+                {
+                    "id": "faq-censorship",
+                    "name": "The model is censoring my messages",
+                    "desc": "Try a good preset — for example, fawnie from the built-in presets. Make sure to use at least inline CoT (the additional thinking feature in the preset). Note that censorship can also depend on the provider, even if the model is the same. It's not just the chat that matters — all data in the preset affects this, including your [[persona]] and [[character]] card. The model can be triggered by sexual descriptions in them."
                 }
             ]
         }

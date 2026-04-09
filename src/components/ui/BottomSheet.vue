@@ -12,13 +12,20 @@ const props = defineProps({
     content: [String, Object], // HTML string or DOM node
     items: Array, // [{ label, icon, iconColor, onClick, isDestructive, actions: [{icon, color, onClick}] }]
     headerAction: Object, // { icon, onClick }
-    bigInfo: Object, // { icon, description, buttonText, buttonDisabled, onButtonClick }
+    bigInfo: Object, // { icon, description, buttonText, buttonDisabled, onButtonClick, glossaryChip: { term, label } }
     sessionItems: Array, // [{ title, count, time, preview, isActive, onClick, onDelete }]
     cardItems: Array, // [{ label, sublabel, icon, onClick }]
     input: Object // { placeholder, value, confirmLabel, onConfirm }
 });
 
 const emit = defineEmits(['close']);
+
+function openGlossaryChip(term) {
+    emit('close');
+    nextTick(() => {
+        window.dispatchEvent(new CustomEvent('open-glossary', { detail: { term } }));
+    });
+}
 
 function close() {
     // Hide keyboard and blur active element before closing
@@ -213,6 +220,7 @@ onBeforeUnmount(() => {
                 <div v-if="bigInfo" class="sheet-big-info">
                     <div class="big-info-icon" v-html="bigInfo.icon"></div>
                     <div class="big-info-desc">{{ bigInfo.description }}</div>
+                    <div v-if="bigInfo.glossaryChip" class="big-info-chip-line">{{ bigInfo.glossaryChip.hint }} <button class="big-info-chip" @click.stop="openGlossaryChip(bigInfo.glossaryChip.term)">{{ bigInfo.glossaryChip.label }}</button></div>
                     <div class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">{{ bigInfo.buttonText }}</div>
                 </div>
 
@@ -542,6 +550,34 @@ onBeforeUnmount(() => {
     line-height: 1.5;
     word-break: break-word;
     white-space: pre-wrap;
+}
+
+.big-info-chip-line {
+    font-size: 14px;
+    color: var(--text-gray);
+    margin-bottom: 18px;
+    line-height: 1.5;
+}
+
+.big-info-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 6px;
+    background: rgba(var(--vk-blue-rgb), 0.12);
+    color: var(--vk-blue);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    border: 1px solid rgba(var(--vk-blue-rgb), 0.2);
+    cursor: pointer;
+    vertical-align: baseline;
+    transition: background 0.15s, opacity 0.15s;
+    -webkit-tap-highlight-color: transparent;
+}
+.big-info-chip:active {
+    background: rgba(var(--vk-blue-rgb), 0.22);
+    opacity: 0.8;
 }
 
 .sheet-big-info-btn {

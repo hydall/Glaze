@@ -737,7 +737,7 @@ body.dark-theme .app-header {
 .header-btn-right {
     position: absolute;
     right: 10px;
-    top: 8px;
+    top: 9px;
     display: flex;
     align-items: center;
     gap: 2px;

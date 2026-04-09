@@ -58,9 +58,7 @@ const replayOnboarding = () => {
                 <div class="menu-text">{{ t('onboarding_replay') }}</div>
             </div>
             
-            <div class="menu-hint">
-                <span data-i18n="hint_generation_settings">Looking for generation settings? You can find them in chat by tapping the icon</span>&nbsp;<svg viewBox="0 0 24 24" class="hint-icon"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
-            </div>
+
             <div class="menu-item" @click="openBackupSheet">
                 <svg class="menu-icon" viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95A5.469 5.469 0 0 1 12 6c2.62 0 4.88 1.86 5.39 4.43l.3 1.5 1.53.11A2.98 2.98 0 0 1 22 15c0 1.65-1.35 3-3 3zM8 13h2.55v3h2.9v-3H16l-4-4z"/></svg>
                 <div class="menu-text" data-i18n="menu_backups">Backups</div>
@@ -84,20 +82,5 @@ const replayOnboarding = () => {
 </template>
 
 <style scoped>
-.menu-hint {
-    padding: 0px 20px 12px 20px;
-    font-size: 13px;
-    color: var(--text-gray, #8E8E93);
-    line-height: 1.4;
-    opacity: 0.9;
-}
 
-.hint-icon {
-    width: 14px;
-    height: 14px;
-    fill: currentColor;
-    display: inline-block;
-    vertical-align: middle;
-    margin-bottom: 2px;
-}
 </style>

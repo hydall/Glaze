@@ -2082,7 +2082,7 @@ function openAvatar(msg) {
     const src = getAvatar(msg);
     if (src) {
         const name = getDisplayName(msg);
-        const description = (msg.role === 'char' && activeChatChar) ? (activeChatChar.description || "") : "";
+        const description = "";
         window.dispatchEvent(new CustomEvent('trigger-open-image', { 
             detail: { src, name, description, onCloseCallback: null } 
         }));

@@ -192,6 +192,10 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
                         <svg viewBox="0 0 24 24" style="width: 16px; height: 16px; fill: var(--text-light-gray);"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
                     </div>
                 </div>
+
+                <div class="menu-hint">
+                    <span>{{ t('hint_generation_settings') }}</span>&nbsp;<svg viewBox="0 0 24 24" class="hint-icon"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
+                </div>
             </div>
         </div>
 
@@ -298,5 +302,22 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
 .slide-fade-leave-to {
   transform: translateX(-10%);
   opacity: 0;
+}
+
+.menu-hint {
+    padding: 4px 16px 16px 16px;
+    font-size: 13px;
+    color: var(--text-gray, #8E8E93);
+    line-height: 1.4;
+    opacity: 0.9;
+}
+
+.hint-icon {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+    display: inline-block;
+    vertical-align: middle;
+    margin-bottom: 2px;
 }
 </style>

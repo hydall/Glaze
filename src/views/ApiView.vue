@@ -57,7 +57,8 @@ function showBlacklistWarning(providerName) {
         locked: true,
         bigInfo: {
             icon: '<svg viewBox="0 0 24 24" style="fill:#ff9800"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
-            description: `${providerName} является низкокачественным провайдером. Поддержка по ошибкам подключения и генерации оказываться не будет. Пожалуйста, смените провайдера.`,
+            description: t('blacklist_warning_desc').replace('{providerName}', providerName),
+            glossaryChip: { term: 'api', hint: t('blacklist_glossary_hint') || 'Recommended providers are here:', label: t('blacklist_glossary_chip') || 'Providers' },
             buttonText: `OK (${countdown})`,
             buttonDisabled: true,
             onButtonClick: closeBottomSheet

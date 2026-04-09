@@ -321,11 +321,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .sheet-view-inline {
-    flex: 1;
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
-    padding-bottom: 16px;
 }
 
 .sheet-view-overlay {
