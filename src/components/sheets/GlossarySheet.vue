@@ -591,7 +591,8 @@ body.dark-theme .gl-article-divider {
 
 /* ── View transition wrapper ─────────────────────────── */
 .gl-view-wrapper {
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     flex: 1;
     display: flex;
     flex-direction: column;
