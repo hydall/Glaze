@@ -84,3 +84,10 @@ captures/
 /*.vue
 /*.png
 /*.jpg
+*.md
+!README.md
+!CLAUDE.md
+!CONTRIBUTING.md
+/.claude
+docs/index.html
+/tavo-backup
