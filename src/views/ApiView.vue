@@ -12,9 +12,10 @@ function handleBack() {
         sheet.value?.close();
     }
 }
-import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getBlacklistedProvider } from '@/core/config/APISettings.js';
+import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getBlacklistedProvider, ANTHROPIC_MODELS } from '@/core/config/APISettings.js';
 import { getEmbeddingConfig, saveEmbeddingSetting, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { testEmbeddingConnection } from '@/core/services/embeddingService.js';
+import { startOAuthFlow } from '@/core/services/oauthService.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
 import { initRipple } from '@/core/services/ui.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -49,6 +50,8 @@ const apiSettings = reactive({
 });
 
 const showApiKey = ref(false);
+const oauthStatus = ref('idle');
+const oauthError = ref('');
 
 const embeddingSettings = reactive({
     useSame: true,
@@ -117,6 +120,15 @@ const activeApiPresetId = ref('default');
 
 const activeApiPreset = computed(() => {
     return apiPresets.value.find(p => p.id === activeApiPresetId.value) || apiPresets.value[0];
+});
+
+const isAnthropic = computed(() => apiSettings.apiType === 'anthropic');
+const isOAuth = computed(() => isAnthropic.value && apiSettings.authType === 'oauth');
+const hasOAuthTokens = computed(() => !!activeApiPreset.value?.oauth?.access_token);
+const oauthExpiresAt = computed(() => {
+    const exp = activeApiPreset.value?.oauth?.expires_at;
+    if (!exp) return null;
+    return new Date(exp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 });
 
 // --- Blacklist Warning ---
@@ -229,14 +241,84 @@ function flushApiDebounce() {
     }
 }
 
-async function checkConnection() {
-    const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || apiSettings.endpoint;
+function onApiTypeChange(value) {
+    apiSettings.apiType = value;
+    saveApiSetting('gz_api_type', value);
+    if (activeApiPreset.value) {
+        activeApiPreset.value.apiType = value;
+        saveApiPresets(apiPresets.value);
+    }
+    if (value === 'anthropic' && !apiSettings.model.startsWith('claude-')) {
+        apiSettings.model = ANTHROPIC_MODELS[0];
+        saveApiSetting('api-model', ANTHROPIC_MODELS[0]);
+    }
+    checkConnection();
+}
 
+function onAuthTypeChange(value) {
+    apiSettings.authType = value;
+    saveApiSetting('gz_api_auth_type', value);
+    if (activeApiPreset.value) {
+        activeApiPreset.value.authType = value;
+        saveApiPresets(apiPresets.value);
+    }
+}
+
+async function startAuthorize() {
+    oauthStatus.value = 'authorizing';
+    oauthError.value = '';
+    try {
+        const tokens = await startOAuthFlow();
+        if (activeApiPreset.value) {
+            activeApiPreset.value.oauth = tokens;
+            saveApiPresets(apiPresets.value);
+        }
+        oauthStatus.value = 'authorized';
+        checkConnection();
+    } catch (e) {
+        oauthStatus.value = 'error';
+        oauthError.value = e.message || 'Authorization failed';
+    }
+}
+
+function oauthLogout() {
+    if (activeApiPreset.value) {
+        activeApiPreset.value.oauth = null;
+        saveApiPresets(apiPresets.value);
+    }
+    oauthStatus.value = 'idle';
+}
+
+async function checkConnection() {
+    if (isAnthropic.value) {
+        const preset = activeApiPreset.value;
+        if (apiSettings.authType === 'key' && !apiSettings.key) {
+            apiStatus.value = 'failed';
+            return;
+        }
+        if (apiSettings.authType === 'oauth' && !preset?.oauth?.access_token) {
+            apiStatus.value = 'failed';
+            return;
+        }
+
+        apiStatus.value = 'connecting';
+        try {
+            const models = await fetchRemoteModels(null, apiSettings.key, 'anthropic', apiSettings.authType, preset?.oauth);
+            availableModels.value = models;
+            apiStatus.value = 'connected';
+        } catch (e) {
+            console.warn(e);
+            availableModels.value = [...ANTHROPIC_MODELS];
+            apiStatus.value = 'connected';
+        }
+        return;
+    }
+
+    const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || apiSettings.endpoint;
     if (!endpoint) {
         apiStatus.value = 'failed';
         return;
     }
-    
     apiStatus.value = 'connecting';
     try {
         const models = await fetchRemoteModels(endpoint, apiSettings.key);
@@ -332,6 +414,12 @@ function applyApiPreset(p) {
     apiSettings.authType = p.authType || 'key';
     saveApiSetting('gz_api_type', apiSettings.apiType);
     saveApiSetting('gz_api_auth_type', apiSettings.authType);
+
+    if (p.oauth?.access_token) {
+        oauthStatus.value = 'authorized';
+    } else {
+        oauthStatus.value = 'idle';
+    }
 
     apiSettings.endpoint = p.endpoint;
     apiSettings.key = p.key;
@@ -559,20 +647,74 @@ onBeforeUnmount(() => {
 
                 <div class="menu-group">
                     <div class="section-header">{{ t('section_connection') || 'Connection' }} <HelpTip term="api"/></div>
+
                     <div class="settings-item">
+                        <label>{{ t('label_api_type') || 'API Type' }}</label>
+                        <select :value="apiSettings.apiType" @change="onApiTypeChange($event.target.value)" class="vk-select">
+                            <option value="openai">OpenAI-compatible</option>
+                            <option value="anthropic">Anthropic</option>
+                        </select>
+                    </div>
+
+                    <template v-if="isAnthropic">
+                        <div class="settings-item">
+                            <label>{{ t('label_auth_type') || 'Authentication' }}</label>
+                            <select :value="apiSettings.authType" @change="onAuthTypeChange($event.target.value)" class="vk-select">
+                                <option value="key">API Key</option>
+                                <option value="oauth">OAuth (Claude.ai)</option>
+                            </select>
+                        </div>
+                    </template>
+
+                    <template v-if="isOAuth">
+                        <div class="settings-item">
+                            <label>{{ t('label_oauth_status') || 'Authorization' }}</label>
+                            <div class="oauth-status-row">
+                                <template v-if="hasOAuthTokens">
+                                    <div class="oauth-status connected">
+                                        <div class="status-dot connected"></div>
+                                        <span>{{ t('oauth_authorized') || 'Authorized' }}</span>
+                                        <span v-if="oauthExpiresAt" class="oauth-expires">({{ oauthExpiresAt }})</span>
+                                    </div>
+                                    <button class="vk-btn vk-btn-text" @click="oauthLogout">
+                                        {{ t('btn_logout') || 'Logout' }}
+                                    </button>
+                                </template>
+                                <template v-else>
+                                    <div class="oauth-status">
+                                        <div class="status-dot failed"></div>
+                                        <span>{{ t('oauth_not_authorized') || 'Not authorized' }}</span>
+                                    </div>
+                                    <button class="vk-btn vk-btn-primary" @click="startAuthorize" :disabled="oauthStatus === 'authorizing'">
+                                        {{ oauthStatus === 'authorizing' ? (t('oauth_authorizing') || 'Authorizing...') : (t('btn_authorize') || 'Authorize') }}
+                                    </button>
+                                </template>
+                            </div>
+                            <div v-if="oauthError" class="oauth-error">{{ oauthError }}</div>
+                        </div>
+                    </template>
+
+                    <div v-if="!isAnthropic" class="settings-item">
                         <label>API Endpoint</label>
                         <input type="text" v-model="apiSettings.endpoint" @input="onApiInput('api-endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                     </div>
                     <div class="settings-item">
                         <label>Model Name</label>
                         <div style="position: relative;">
-                            <input type="text" v-model="apiSettings.model" @input="onApiInput('api-model', $event.target.value)" placeholder="gemini-3-pro-preview" style="width: 100%; padding-right: 44px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                            <div @click="openModelSelector" style="position: absolute; right: 0; top: 0; bottom: 0; width: 44px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
-                                <svg viewBox="0 0 24 24" style="width: 24px; height: 24px; fill: var(--text-gray);"><path d="M7 10l5 5 5-5z"/></svg>
-                            </div>
+                            <template v-if="isAnthropic">
+                                <select v-model="apiSettings.model" @change="onApiInput('api-model', $event.target.value)" class="vk-select" style="width: 100%;">
+                                    <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+                                </select>
+                            </template>
+                            <template v-else>
+                                <input type="text" v-model="apiSettings.model" @input="onApiInput('api-model', $event.target.value)" placeholder="gemini-3-pro-preview" style="width: 100%; padding-right: 44px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                                <div @click="openModelSelector" style="position: absolute; right: 0; top: 0; bottom: 0; width: 44px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                                    <svg viewBox="0 0 24 24" style="width: 24px; height: 24px; fill: var(--text-gray);"><path d="M7 10l5 5 5-5z"/></svg>
+                                </div>
+                            </template>
                         </div>
                     </div>
-                    <div class="settings-item">
+                    <div v-if="!isOAuth" class="settings-item">
                         <label>API Key <HelpTip term="apikey"/></label>
                         <div style="position: relative;">
                             <input :type="showApiKey ? 'text' : 'password'" v-model="apiSettings.key" @input="onApiInput('api-key', $event.target.value)" placeholder="sk-..." style="width: 100%; padding-right: 44px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
@@ -746,8 +888,8 @@ onBeforeUnmount(() => {
     font-size: 17px;
 }
 
-.gen-sheet-body { 
-    position: relative; 
+.gen-sheet-body {
+    position: relative;
     padding-bottom: calc(var(--footer-height, 0px) + var(--keyboard-overlap, 0px) + 20px);
 }
 
@@ -774,5 +916,71 @@ onBeforeUnmount(() => {
     height: 24px;
     fill: var(--text-gray);
     opacity: 0.5;
+}
+
+.oauth-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 4px;
+}
+
+.oauth-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+}
+
+.oauth-expires {
+    color: var(--text-gray);
+    font-size: 12px;
+}
+
+.oauth-error {
+    color: #ff3b30;
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+.vk-select {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--white);
+    color: var(--text);
+    font-size: 14px;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z' fill='%23999'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+}
+
+.vk-btn {
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.vk-btn-primary {
+    background: var(--vk-blue);
+    color: white;
+}
+
+.vk-btn-primary:disabled {
+    opacity: 0.5;
+}
+
+.vk-btn-text {
+    background: transparent;
+    color: #ff3b30;
 }
 </style>

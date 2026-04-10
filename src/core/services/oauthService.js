@@ -1,3 +1,5 @@
+import { InAppBrowser } from '@capgo/inappbrowser';
+
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const AUTHORIZE_URL = 'https://claude.ai/oauth/authorize';
 const TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
@@ -126,6 +128,73 @@ export async function getValidAccessToken(oauth, presetId, onTokenRefresh) {
 
     refreshPromises.set(presetId, refreshPromise);
     return refreshPromise;
+}
+
+export async function startOAuthFlow() {
+    const pkce = await generatePKCE();
+    const authUrl = buildAuthorizationURL(pkce);
+
+    return new Promise((resolve, reject) => {
+        let settled = false;
+
+        const cleanup = () => {
+            InAppBrowser.removeAllListeners();
+        };
+
+        InAppBrowser.addListener('urlChangeEvent', async ({ url }) => {
+            if (settled) return;
+            if (!url.includes('console.anthropic.com/oauth/code/callback')) return;
+
+            settled = true;
+            cleanup();
+
+            try {
+                await InAppBrowser.close();
+            } catch (e) {
+                console.warn('Failed to close InAppBrowser:', e);
+            }
+
+            try {
+                const params = new URL(url).searchParams;
+                const code = params.get('code');
+                const state = params.get('state');
+
+                if (!code) {
+                    reject(new Error('No authorization code in callback URL'));
+                    return;
+                }
+
+                if (state !== pkce.state) {
+                    reject(new Error('OAuth state mismatch'));
+                    return;
+                }
+
+                const tokens = await exchangeCodeForTokens(code, pkce.code_verifier, state);
+                resolve(tokens);
+            } catch (e) {
+                reject(e);
+            }
+        });
+
+        InAppBrowser.addListener('browserFinished', () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error('Authorization cancelled by user'));
+        });
+
+        InAppBrowser.openWebView({
+            url: authUrl,
+            title: 'Authorize with Claude',
+            isPresentAfterPageLoad: true
+        }).catch(e => {
+            if (!settled) {
+                settled = true;
+                cleanup();
+                reject(e);
+            }
+        });
+    });
 }
 
 export function _resetRefreshPromises() {
