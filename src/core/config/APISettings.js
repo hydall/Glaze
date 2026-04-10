@@ -77,7 +77,7 @@ export async function fetchRemoteModels(endpoint, key, apiType, authType, oauth)
     if (apiType === 'anthropic') {
         const headers = { 'anthropic-version': '2023-06-01' };
         if (authType === 'oauth' && oauth) {
-            headers['Authorization'] = `Bearer ${oauth}`;
+            headers['Authorization'] = `Bearer ${oauth.access_token}`;
             headers['anthropic-beta'] = 'oauth-2025-04-20';
         } else if (key) {
             headers['x-api-key'] = key;

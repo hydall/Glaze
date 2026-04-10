@@ -125,7 +125,7 @@ export async function generateChatResponse({
 
     const t = (key) => translations[currentLang.value]?.[key] || key;
 
-    if (!apiUrl || !model) {
+    if ((apiConfig.apiType !== 'anthropic' && !apiUrl) || !model) {
         showBottomSheet({
             title: t('section_connection') || "Connection",
             bigInfo: {
@@ -625,7 +625,7 @@ export async function generateSummary({ history, prompt, controller, apiConfigOv
     };
     const { apiKey, apiUrl, model, temp } = apiConfig;
 
-    if (!apiUrl || !model) {
+    if ((apiConfig.apiType !== 'anthropic' && !apiUrl) || !model) {
         throw new Error("API Not Configured");
     }
 
@@ -658,7 +658,8 @@ export async function generateSummary({ history, prompt, controller, apiConfigOv
         requestBody: {
             model,
             messages: [{ role: 'user', content: finalPrompt }],
-            temperature: temp
+            temperature: temp,
+            max_tokens: apiConfig.maxTokens
         },
         controller,
         callbacks: {
