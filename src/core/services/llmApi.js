@@ -6,7 +6,7 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { logger } from '../../utils/logger.js';
 import { convertToAnthropicBody, buildAnthropicHeaders, parseAnthropicSSE, parseAnthropicResponse } from './anthropicFormat.js';
-// Uncomment in Task 6: import { getValidAccessToken } from './oauthService.js';
+import { getValidAccessToken } from './oauthService.js';
 
 export async function executeRequest({
     apiUrl,
@@ -75,7 +75,7 @@ export async function executeRequest({
     if (apiType === 'anthropic') {
         let accessToken = null;
         if (authType === 'oauth') {
-            accessToken = oauth?.access_token;
+            accessToken = await getValidAccessToken(oauth, oauth?._presetId || 'default', onTokenRefresh);
         }
 
         headers = buildAnthropicHeaders({
@@ -178,22 +178,18 @@ export async function executeRequest({
         if (!response.ok) {
             if (response.status === 401 && apiType === 'anthropic' && authType === 'oauth' && !_retried) {
                 try {
-                    // Force token refresh by setting expires_at to 0
-                    // TODO: uncomment when oauthService exists
-                    // const newToken = await getValidAccessToken(
-                    //     { ...oauth, expires_at: 0 },
-                    //     oauth?._presetId || 'default',
-                    //     onTokenRefresh
-                    // );
-                    // return executeRequest({
-                    //     apiUrl, apiKey, apiType, authType,
-                    //     oauth: { ...oauth, access_token: newToken, expires_at: Date.now() + 3600000 },
-                    //     requestBody, stream, controller, requestReasoning,
-                    //     tagStart, tagEnd, onTokenRefresh, callbacks,
-                    //     _retried: true
-                    // });
-
-                    throw new Error('Session expired, please re-authorize');
+                    const newToken = await getValidAccessToken(
+                        { ...oauth, expires_at: 0 },
+                        oauth?._presetId || 'default',
+                        onTokenRefresh
+                    );
+                    return executeRequest({
+                        apiUrl, apiKey, apiType, authType,
+                        oauth: { ...oauth, access_token: newToken, expires_at: Date.now() + 3600000 },
+                        requestBody, stream, controller, requestReasoning,
+                        tagStart, tagEnd, onTokenRefresh, callbacks,
+                        _retried: true
+                    });
                 } catch (refreshErr) {
                     throw new Error('Session expired, please re-authorize');
                 }
