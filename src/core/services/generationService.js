@@ -1,4 +1,4 @@
-import { getApiConfig } from '@/core/config/APISettings.js';
+import { getApiConfig, getApiPresets, saveApiPresets } from '@/core/config/APISettings.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { translations } from '@/utils/i18n.js';
@@ -118,6 +118,10 @@ export async function generateChatResponse({
     const { onUpdate, onComplete, onError } = callbacks;
     let apiConfig = getEffectiveApiConfig();
     let { apiKey, apiUrl, model, stream, requestReasoning, reasoningEffort, temp, topP, maxTokens, contextSize } = apiConfig;
+
+    const apiPresets = await getApiPresets();
+    const activeApiPresetId = localStorage.getItem('gz_active_api_preset_id') || 'default';
+    const activeApiPreset = apiPresets.find(p => p.id === activeApiPresetId) || apiPresets[0];
 
     const t = (key) => translations[currentLang.value]?.[key] || key;
 
@@ -408,6 +412,22 @@ export async function generateChatResponse({
         requestBody.stop = [stopString];
     }
 
+    // Provider-specific reasoning config (skip for Anthropic — handled natively in llmApi)
+    if (apiConfig.apiType !== 'anthropic') {
+        if (apiUrl.includes('generativelanguage.googleapis.com')) {
+            if (requestReasoning) {
+                requestBody.extra_body = {
+                    google: {
+                        thinking_config: {
+                            include_thoughts: true
+                        }
+                    }
+                };
+            }
+        } else {
+            requestBody.include_reasoning = requestReasoning; // OpenRouter/DeepSeek specific
+        }
+    }
 
     // Save for preview
     lastPrompt = JSON.parse(JSON.stringify(requestBody));
@@ -442,6 +462,15 @@ export async function generateChatResponse({
         await executeRequest({
             apiUrl,
             apiKey,
+            apiType: apiConfig.apiType,
+            authType: apiConfig.authType,
+            oauth: activeApiPreset?.oauth || null,
+            onTokenRefresh: (newOAuth) => {
+                if (activeApiPreset) {
+                    activeApiPreset.oauth = newOAuth;
+                    saveApiPresets(apiPresets);
+                }
+            },
             requestBody,
             stream,
             controller,
@@ -590,15 +619,19 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
 }
 
 export async function generateSummary({ history, prompt, controller, apiConfigOverride = null }) {
-    const effectiveConfig = {
+    const apiConfig = {
         ...getEffectiveApiConfig(),
         ...(apiConfigOverride || {})
     };
-    const { apiKey, apiUrl, model, temp } = effectiveConfig;
+    const { apiKey, apiUrl, model, temp } = apiConfig;
 
     if (!apiUrl || !model) {
         throw new Error("API Not Configured");
     }
+
+    const apiPresets = await getApiPresets();
+    const activeApiPresetId = localStorage.getItem('gz_active_api_preset_id') || 'default';
+    const activeApiPreset = apiPresets.find(p => p.id === activeApiPresetId) || apiPresets[0];
 
     const defaultPrompt = "Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}";
     const template = prompt || defaultPrompt;
@@ -613,6 +646,15 @@ export async function generateSummary({ history, prompt, controller, apiConfigOv
     await executeRequest({
         apiUrl,
         apiKey,
+        apiType: apiConfig.apiType || 'openai',
+        authType: apiConfig.authType || 'key',
+        oauth: activeApiPreset?.oauth || null,
+        onTokenRefresh: (newOAuth) => {
+            if (activeApiPreset) {
+                activeApiPreset.oauth = newOAuth;
+                saveApiPresets(apiPresets);
+            }
+        },
         requestBody: {
             model,
             messages: [{ role: 'user', content: finalPrompt }],
