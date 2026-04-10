@@ -85,6 +85,7 @@ captures/
 /*.png
 /*.jpg
 *.md
+!docs/**/*.md
 !README.md
 !CLAUDE.md
 !CONTRIBUTING.md
