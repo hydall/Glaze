@@ -43,7 +43,9 @@ const apiSettings = reactive({
     autoHideImages: false,
     autoHideImagesN: 1,
     reasoningEnabled: false,
-    reasoningEffort: 'medium'
+    reasoningEffort: 'medium',
+    apiType: 'openai',
+    authType: 'key',
 });
 
 const showApiKey = ref(false);
@@ -163,6 +165,8 @@ function loadApiSettings() {
     apiSettings.autoHideImagesN = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
     apiSettings.reasoningEnabled = localStorage.getItem('gz_api_request_reasoning') === 'true';
     apiSettings.reasoningEffort = localStorage.getItem('gz_api_reasoning_effort') || 'medium';
+    apiSettings.apiType = localStorage.getItem('gz_api_type') || 'openai';
+    apiSettings.authType = localStorage.getItem('gz_api_auth_type') || 'key';
     loadEmbeddingSettings();
 }
 
@@ -190,7 +194,9 @@ function saveApiSetting(key, value) {
             'gz_api_auto_hide_images': 'auto_hide_images',
             'gz_api_auto_hide_images_n': 'auto_hide_images_n',
             'gz_api_request_reasoning': 'reasoning_enabled',
-            'gz_api_reasoning_effort': 'reasoning_effort'
+            'gz_api_reasoning_effort': 'reasoning_effort',
+            'gz_api_type': 'apiType',
+            'gz_api_auth_type': 'authType',
         };
         if (map[key]) {
             activeApiPreset.value[map[key]] = value;
@@ -291,6 +297,9 @@ function createNewApiPreset() {
                 const newPreset = {
                     id: Date.now().toString(36),
                     name: name,
+                    apiType: apiSettings.apiType,
+                    authType: apiSettings.authType,
+                    oauth: null,
                     endpoint: apiSettings.endpoint,
                     key: apiSettings.key,
                     model: apiSettings.model,
@@ -318,7 +327,12 @@ function createNewApiPreset() {
 function applyApiPreset(p) {
     activeApiPresetId.value = p.id;
     localStorage.setItem('gz_active_api_preset_id', p.id);
-    
+
+    apiSettings.apiType = p.apiType || 'openai';
+    apiSettings.authType = p.authType || 'key';
+    saveApiSetting('gz_api_type', apiSettings.apiType);
+    saveApiSetting('gz_api_auth_type', apiSettings.authType);
+
     apiSettings.endpoint = p.endpoint;
     apiSettings.key = p.key;
     apiSettings.model = p.model;

@@ -6,6 +6,15 @@ export const PROVIDER_BLACKLIST = [
     { name: 'MegaLLM', match: 'megallm' }
 ];
 
+export const ANTHROPIC_MODELS = [
+    'claude-opus-4-5',
+    'claude-sonnet-4-5',
+    'claude-haiku-4-5',
+];
+
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1';
+export { ANTHROPIC_API_URL };
+
 export function getBlacklistedProvider(url) {
     if (!url) return null;
     const lower = url.toLowerCase();
@@ -56,11 +65,47 @@ export function getApiConfig() {
         contextSize: isNaN(ctx) ? 32000 : ctx,
         autoHideImages: localStorage.getItem('gz_api_auto_hide_images') === 'true',
         autoHideImagesN: parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10),
-        reasoningEffort: localStorage.getItem('gz_api_reasoning_effort') || 'medium'
+        reasoningEffort: localStorage.getItem('gz_api_reasoning_effort') || 'medium',
+        apiType: localStorage.getItem('gz_api_type') || 'openai',
+        authType: localStorage.getItem('gz_api_auth_type') || 'key',
     };
 }
 
-export async function fetchRemoteModels(endpoint, key) {
+export async function fetchRemoteModels(endpoint, key, apiType, authType, oauth) {
+    if (!endpoint && apiType !== 'anthropic') throw new Error("No endpoint");
+
+    if (apiType === 'anthropic') {
+        const headers = { 'anthropic-version': '2023-06-01' };
+        if (authType === 'oauth' && oauth) {
+            headers['Authorization'] = `Bearer ${oauth}`;
+            headers['anthropic-beta'] = 'oauth-2025-04-20';
+        } else if (key) {
+            headers['x-api-key'] = key;
+        } else {
+            return [...ANTHROPIC_MODELS];
+        }
+
+        try {
+            let data;
+            const url = `${ANTHROPIC_API_URL}/models`;
+            if (Capacitor.isNativePlatform()) {
+                const response = await CapacitorHttp.get({ url, headers });
+                if (response.status >= 400) throw new Error(`HTTP ${response.status}`);
+                data = response.data;
+            } else {
+                const res = await fetch(url, { headers });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                data = await res.json();
+            }
+            if (data.data && Array.isArray(data.data)) {
+                return data.data.map(m => m.id).sort();
+            }
+            return [...ANTHROPIC_MODELS];
+        } catch {
+            return [...ANTHROPIC_MODELS];
+        }
+    }
+
     if (!endpoint) throw new Error("No endpoint");
 
     let url = endpoint;
@@ -103,6 +148,9 @@ export async function getApiPresets() {
     return [{
         id: 'default',
         name: 'Default',
+        apiType: 'openai',
+        authType: 'key',
+        oauth: null,
         endpoint: localStorage.getItem('api-endpoint') || '',
         key: localStorage.getItem('api-key') || '',
         model: localStorage.getItem('api-model') || '',
