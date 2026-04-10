@@ -5,17 +5,24 @@ import { cleanText } from '@/utils/textFormatter.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { logger } from '../../utils/logger.js';
+import { convertToAnthropicBody, buildAnthropicHeaders, parseAnthropicSSE, parseAnthropicResponse } from './anthropicFormat.js';
+// Uncomment in Task 6: import { getValidAccessToken } from './oauthService.js';
 
 export async function executeRequest({
     apiUrl,
     apiKey,
+    apiType,
+    authType,
+    oauth,
     requestBody,
     stream,
     controller,
     requestReasoning,
     tagStart,
     tagEnd,
-    callbacks
+    onTokenRefresh,
+    callbacks,
+    _retried = false
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
     const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -62,22 +69,45 @@ export async function executeRequest({
     let rawAccumulated = "";
     let accumulatedReasoning = "";
 
-    const headers = {
-        'Content-Type': 'application/json'
-    };
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    let headers;
+    let requestUrl;
+
+    if (apiType === 'anthropic') {
+        let accessToken = null;
+        if (authType === 'oauth') {
+            accessToken = oauth?.access_token;
+        }
+
+        headers = buildAnthropicHeaders({
+            authType,
+            apiKey,
+            accessToken
+        });
+        requestUrl = 'https://api.anthropic.com/v1/messages';
+    } else {
+        headers = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+        requestUrl = `${apiUrl}/chat/completions`;
+    }
+
+    let finalRequestBody;
+    if (apiType === 'anthropic') {
+        finalRequestBody = convertToAnthropicBody(requestBody, { requestReasoning });
+    } else {
+        finalRequestBody = requestBody;
+    }
 
     try {
-        logger.debug("LLM Request Body:", JSON.stringify(requestBody, null, 2));
+        logger.debug("LLM Request Body:", JSON.stringify(finalRequestBody, null, 2));
 
         // Bypass Mixed Content/Cleartext restrictions on Native for local HTTP
         // Use CapacitorHttp only for non-streaming requests.
         // For streaming, we fall through to standard fetch (requires android:usesCleartextTraffic="true")
         if (Capacitor.isNativePlatform() && apiUrl.startsWith('http:') && !apiUrl.includes('https:') && !stream) {
             const response = await CapacitorHttp.post({
-                url: `${apiUrl}/chat/completions`,
+                url: requestUrl,
                 headers: headers,
-                data: requestBody,
+                data: finalRequestBody,
                 responseType: 'json',
                 connectTimeout: CONNECT_TIMEOUT,
                 readTimeout: STREAM_TIMEOUT
@@ -90,25 +120,33 @@ export async function executeRequest({
 
             const data = response.data;
             logger.debug("LLM Response (Native):", data);
-            
-            // Defensive check: ensure API returned valid structure
-            if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
+
+            // Defensive check: ensure API returned valid structure (non-anthropic)
+            if (apiType !== 'anthropic' && (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message)) {
                 throw new Error("Invalid API response structure (Native): " + JSON.stringify(data));
             }
-            
-            const content = data.choices[0].message.content;
-            const rawReasoning = data.choices[0].message.reasoning_content;
 
-            let finalText = content || "";
-            let finalReasoning = requestReasoning ? (rawReasoning || "") : "";
+            let finalText = "";
+            let finalReasoning = "";
             let inlineReasoning = "";
 
-            if (hasInlineTags && content && content.includes(tagStart)) {
-                const startIndex = content.indexOf(tagStart);
-                const endIndex = content.indexOf(tagEnd, startIndex);
-                if (endIndex !== -1) {
-                    inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
-                    finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
+            if (apiType === 'anthropic') {
+                const parsed = parseAnthropicResponse(data);
+                finalText = parsed.text || "";
+                finalReasoning = requestReasoning ? (parsed.reasoning || "") : "";
+            } else {
+                const content = data.choices[0].message.content;
+                const rawReasoning = data.choices[0].message.reasoning_content;
+                finalText = content || "";
+                finalReasoning = requestReasoning ? (rawReasoning || "") : "";
+
+                if (hasInlineTags && content && content.includes(tagStart)) {
+                    const startIndex = content.indexOf(tagStart);
+                    const endIndex = content.indexOf(tagEnd, startIndex);
+                    if (endIndex !== -1) {
+                        inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
+                        finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
+                    }
                 }
             }
 
@@ -127,10 +165,10 @@ export async function executeRequest({
         // Connection timeout — abort if server doesn't respond
         connectTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, CONNECT_TIMEOUT);
 
-        const response = await fetch(`${apiUrl}/chat/completions`, {
+        const response = await fetch(requestUrl, {
             method: 'POST',
             headers: headers,
-            body: JSON.stringify(requestBody),
+            body: JSON.stringify(finalRequestBody),
             signal: controller ? controller.signal : undefined
         });
 
@@ -138,6 +176,29 @@ export async function executeRequest({
         connectTimer = null;
 
         if (!response.ok) {
+            if (response.status === 401 && apiType === 'anthropic' && authType === 'oauth' && !_retried) {
+                try {
+                    // Force token refresh by setting expires_at to 0
+                    // TODO: uncomment when oauthService exists
+                    // const newToken = await getValidAccessToken(
+                    //     { ...oauth, expires_at: 0 },
+                    //     oauth?._presetId || 'default',
+                    //     onTokenRefresh
+                    // );
+                    // return executeRequest({
+                    //     apiUrl, apiKey, apiType, authType,
+                    //     oauth: { ...oauth, access_token: newToken, expires_at: Date.now() + 3600000 },
+                    //     requestBody, stream, controller, requestReasoning,
+                    //     tagStart, tagEnd, onTokenRefresh, callbacks,
+                    //     _retried: true
+                    // });
+
+                    throw new Error('Session expired, please re-authorize');
+                } catch (refreshErr) {
+                    throw new Error('Session expired, please re-authorize');
+                }
+            }
+
             let errText = "";
             try { errText = await response.text(); } catch (e) { }
             throw new Error(`API Error: ${response.status} ${errText}`);
@@ -191,6 +252,7 @@ export async function executeRequest({
             };
             resetStreamTimer();
 
+            let streamDone = false;
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -199,73 +261,43 @@ export async function executeRequest({
                 const chunk = decoder.decode(value, { stream: true });
                 const lines = chunk.split('\n');
 
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (!trimmed || !trimmed.startsWith('data: ')) continue;
+                if (apiType === 'anthropic') {
+                    for (const line of lines) {
+                        const parsed = parseAnthropicSSE(line);
+                        if (!parsed) continue;
 
-                    const dataStr = trimmed.substring(6);
-                    if (dataStr === '[DONE]') continue;
-
-                    try {
-                        const json = JSON.parse(dataStr);
-
-                        if (json.error) {
-                            throw new Error("API Stream Error: " + (json.error.message || JSON.stringify(json.error)));
+                        if (parsed.error) {
+                            throw new Error("API Stream Error: " + parsed.error);
                         }
 
-                        if (!json.choices || !json.choices.length) continue;
+                        if (parsed.done) {
+                            streamDone = true;
+                            break;
+                        }
 
-                        const delta = json.choices[0].delta;
-                        if (delta && (delta.content || delta.reasoning_content)) {
-                            const content = delta.content || "";
-                            const reasoning = (requestReasoning && delta.reasoning_content) || null;
+                        if (parsed.text) {
+                            logger.debug(parsed.text);
+                            fullText += parsed.text;
+                            rawAccumulated += parsed.text;
+                        }
+                        if (parsed.reasoning) {
+                            accumulatedReasoning += parsed.reasoning;
+                        }
 
-                            if (content) logger.debug(content);
-
-                            fullText += content;
-                            rawAccumulated += content;
-                            if (reasoning) accumulatedReasoning += reasoning;
-
-                            // Process Outer CoT (Reasoning Tags)
-                            let effectiveText = rawAccumulated;
-                            let effectiveReasoning = "";
-
-                            if (requestReasoning) {
-                                effectiveReasoning = accumulatedReasoning || "";
-                            }
-
-                            let inlineReasoning = "";
-                            if (hasInlineTags && rawAccumulated.includes(tagStart)) {
-                                const startIndex = rawAccumulated.indexOf(tagStart);
-                                const endIndex = rawAccumulated.indexOf(tagEnd, startIndex);
-                                if (endIndex !== -1) {
-                                    inlineReasoning = rawAccumulated.substring(startIndex + tagStart.length, endIndex);
-                                    effectiveText = rawAccumulated.substring(0, startIndex) + rawAccumulated.substring(endIndex + tagEnd.length);
-                                } else {
-                                    inlineReasoning = rawAccumulated.substring(startIndex + tagStart.length);
-                                    effectiveText = rawAccumulated.substring(0, startIndex);
-                                }
-                            }
-
-                            if (effectiveReasoning && inlineReasoning) {
-                                effectiveReasoning = `${headerModel}\n${effectiveReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-                            } else if (inlineReasoning) {
-                                effectiveReasoning = inlineReasoning;
-                            }
-
-                            // Strip leading whitespace and decode HTML entities
-                            effectiveText = effectiveText.replace(/^\s+/, '')
+                        if (parsed.text || parsed.reasoning) {
+                            let effectiveText = rawAccumulated.replace(/^\s+/, '')
                                 .replace(/&amp;/g, '&')
                                 .replace(/&gt;/g, '>')
                                 .replace(/&lt;/g, '<')
                                 .replace(/&quot;/g, '"')
                                 .replace(/&apos;/g, "'");
 
-                            // Buffer text ending in an incomplete HTML entity, flush it in the next delta
                             const incompleteEntity = effectiveText.match(/&[a-zA-Z0-9#]*$/);
                             if (incompleteEntity) {
                                 effectiveText = effectiveText.substring(0, incompleteEntity.index);
                             }
+
+                            let effectiveReasoning = requestReasoning ? (accumulatedReasoning || "") : "";
 
                             let textDelta = null;
                             if (effectiveText.startsWith(previousEffectiveText)) {
@@ -273,13 +305,93 @@ export async function executeRequest({
                             }
                             previousEffectiveText = effectiveText;
 
-                            if (onUpdate) onUpdate(content, reasoning, effectiveText, effectiveReasoning, textDelta);
+                            if (onUpdate) onUpdate(parsed.text || "", parsed.reasoning || null, effectiveText, effectiveReasoning, textDelta);
                         }
-                    } catch (e) {
-                        if (e.message && e.message.startsWith("API Stream Error")) {
-                            throw e;
+                    }
+                    if (streamDone) break;
+                } else {
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+
+                        const dataStr = trimmed.substring(6);
+                        if (dataStr === '[DONE]') continue;
+
+                        try {
+                            const json = JSON.parse(dataStr);
+
+                            if (json.error) {
+                                throw new Error("API Stream Error: " + (json.error.message || JSON.stringify(json.error)));
+                            }
+
+                            if (!json.choices || !json.choices.length) continue;
+
+                            const delta = json.choices[0].delta;
+                            if (delta && (delta.content || delta.reasoning_content)) {
+                                const content = delta.content || "";
+                                const reasoning = delta.reasoning_content || null;
+
+                                if (content) logger.debug(content);
+
+                                fullText += content;
+                                rawAccumulated += content;
+                                if (reasoning) accumulatedReasoning += reasoning;
+
+                                // Process Outer CoT (Reasoning Tags)
+                                let effectiveText = rawAccumulated;
+                                let effectiveReasoning = "";
+
+                                if (requestReasoning) {
+                                    effectiveReasoning = accumulatedReasoning || "";
+                                }
+
+                                let inlineReasoning = "";
+                                if (hasInlineTags && rawAccumulated.includes(tagStart)) {
+                                    const startIndex = rawAccumulated.indexOf(tagStart);
+                                    const endIndex = rawAccumulated.indexOf(tagEnd, startIndex);
+                                    if (endIndex !== -1) {
+                                        inlineReasoning = rawAccumulated.substring(startIndex + tagStart.length, endIndex);
+                                        effectiveText = rawAccumulated.substring(0, startIndex) + rawAccumulated.substring(endIndex + tagEnd.length);
+                                    } else {
+                                        inlineReasoning = rawAccumulated.substring(startIndex + tagStart.length);
+                                        effectiveText = rawAccumulated.substring(0, startIndex);
+                                    }
+                                }
+
+                                if (effectiveReasoning && inlineReasoning) {
+                                    effectiveReasoning = `${headerModel}\n${effectiveReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
+                                } else if (inlineReasoning) {
+                                    effectiveReasoning = inlineReasoning;
+                                }
+
+                                // Strip leading whitespace and decode HTML entities
+                                effectiveText = effectiveText.replace(/^\s+/, '')
+                                    .replace(/&amp;/g, '&')
+                                    .replace(/&gt;/g, '>')
+                                    .replace(/&lt;/g, '<')
+                                    .replace(/&quot;/g, '"')
+                                    .replace(/&apos;/g, "'");
+
+                                // Buffer text ending in an incomplete HTML entity, flush it in the next delta
+                                const incompleteEntity = effectiveText.match(/&[a-zA-Z0-9#]*$/);
+                                if (incompleteEntity) {
+                                    effectiveText = effectiveText.substring(0, incompleteEntity.index);
+                                }
+
+                                let textDelta = null;
+                                if (effectiveText.startsWith(previousEffectiveText)) {
+                                    textDelta = effectiveText.substring(previousEffectiveText.length);
+                                }
+                                previousEffectiveText = effectiveText;
+
+                                if (onUpdate) onUpdate(content, reasoning, effectiveText, effectiveReasoning, textDelta);
+                            }
+                        } catch (e) {
+                            if (e.message && e.message.startsWith("API Stream Error")) {
+                                throw e;
+                            }
+                            console.warn("Error parsing stream chunk", e);
                         }
-                        console.warn("Error parsing stream chunk", e);
                     }
                 }
             }
@@ -287,61 +399,74 @@ export async function executeRequest({
             if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
 
             // Final processing for onComplete
-            let finalReasoning = requestReasoning ? accumulatedReasoning : "";
-            let finalText = fullText;
-            let inlineReasoning = "";
+            if (apiType === 'anthropic') {
+                let finalReasoning = requestReasoning ? accumulatedReasoning : "";
+                logger.debug("Stream finished:", fullText);
+                if (onComplete) onComplete(cleanText(fullText), finalReasoning || null);
+            } else {
+                let finalReasoning = requestReasoning ? accumulatedReasoning : "";
+                let finalText = fullText;
+                let inlineReasoning = "";
 
-            if (hasInlineTags && fullText.includes(tagStart)) {
-                const startIndex = fullText.indexOf(tagStart);
-                const endIndex = fullText.indexOf(tagEnd, startIndex);
-                if (endIndex !== -1) {
-                    inlineReasoning = fullText.substring(startIndex + tagStart.length, endIndex);
-                    finalText = fullText.substring(0, startIndex) + fullText.substring(endIndex + tagEnd.length);
+                if (hasInlineTags && fullText.includes(tagStart)) {
+                    const startIndex = fullText.indexOf(tagStart);
+                    const endIndex = fullText.indexOf(tagEnd, startIndex);
+                    if (endIndex !== -1) {
+                        inlineReasoning = fullText.substring(startIndex + tagStart.length, endIndex);
+                        finalText = fullText.substring(0, startIndex) + fullText.substring(endIndex + tagEnd.length);
+                    }
                 }
+
+                if (finalReasoning && inlineReasoning) {
+                    finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
+                } else if (inlineReasoning) {
+                    finalReasoning = inlineReasoning;
+                }
+
+                logger.debug("Stream finished:", finalText);
+
+                if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
             }
-
-            if (finalReasoning && inlineReasoning) {
-                finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-            } else if (inlineReasoning) {
-                finalReasoning = inlineReasoning;
-            }
-
-            logger.debug("Stream finished:", finalText);
-
-            if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
 
         } else {
             const data = await response.json();
             logger.debug("LLM Response:", data);
-            
-            // Defensive check: ensure API returned valid structure
-            if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
+
+            // Defensive check: ensure API returned valid structure (non-anthropic)
+            if (apiType !== 'anthropic' && (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message)) {
                 throw new Error("Invalid API response structure: " + JSON.stringify(data));
             }
-            
-            const content = data.choices[0].message.content;
-            const rawReasoning = data.choices[0].message.reasoning_content;
 
-            let finalText = content || "";
-            let finalReasoning = requestReasoning ? (rawReasoning || "") : "";
-            let inlineReasoning = "";
+            if (apiType === 'anthropic') {
+                const parsed = parseAnthropicResponse(data);
+                const finalText = parsed.text || "";
+                const finalReasoning = requestReasoning ? (parsed.reasoning || "") : "";
+                if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
+            } else {
+                const content = data.choices[0].message.content;
+                const rawReasoning = data.choices[0].message.reasoning_content;
 
-            if (hasInlineTags && content && content.includes(tagStart)) {
-                const startIndex = content.indexOf(tagStart);
-                const endIndex = content.indexOf(tagEnd, startIndex);
-                if (endIndex !== -1) {
-                    inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
-                    finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
+                let finalText = content || "";
+                let finalReasoning = requestReasoning ? (rawReasoning || "") : "";
+                let inlineReasoning = "";
+
+                if (hasInlineTags && content && content.includes(tagStart)) {
+                    const startIndex = content.indexOf(tagStart);
+                    const endIndex = content.indexOf(tagEnd, startIndex);
+                    if (endIndex !== -1) {
+                        inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
+                        finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
+                    }
                 }
-            }
 
-            if (finalReasoning && inlineReasoning) {
-                finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-            } else if (inlineReasoning) {
-                finalReasoning = inlineReasoning;
-            }
+                if (finalReasoning && inlineReasoning) {
+                    finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
+                } else if (inlineReasoning) {
+                    finalReasoning = inlineReasoning;
+                }
 
-            if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
+                if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
+            }
         }
     } catch (e) {
         if (e.name === 'AbortError') {
