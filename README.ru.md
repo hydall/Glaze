@@ -61,7 +61,7 @@ Glaze создан на базе Vue 3 и Capacitor и предлагает пр
 ### 🏗️ Настройка
 
 ```bash
-git clone https://github.com/user/glaze.git
+git clone https://github.com/hydall/glaze.git
 cd glaze
 npm install
 ```
