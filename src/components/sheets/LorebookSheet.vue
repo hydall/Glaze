@@ -211,9 +211,20 @@ function isCharActive(lbId, charId) {
     return !!lorebookState.activations?.character?.[charId]?.includes(lbId);
 }
 
-function isChatActive(lbId, chatId) {
-    if (!chatId) return false;
-    return !!lorebookState.activations?.chat?.[chatId]?.includes(lbId);
+function selectChat(chatId) {
+    currentContext.value.chatId = chatId;
+}
+
+function openOptionSelector({ title, options, currentValue, onSelect }) {
+    const items = options.map(opt => ({
+        label: opt.label,
+        icon: currentValue === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            onSelect(opt.value);
+            closeBottomSheet();
+        }
+    }));
+    showBottomSheet({ title, items });
 }
 
 // activation now managed via LorebookConnectionsSheet
@@ -451,10 +462,18 @@ defineExpose({ open, openEntry, close, openLorebook });
 
                          <div class="settings-item">
                             <label>{{ t('label_insertion_strategy') }}</label>
-                            <select v-model="lorebookState.globalSettings.insertionStrategy" class="vk-select">
-                                <option value="character_first">{{ t('strategy_char_first') }}</option>
-                                <option value="global_first">{{ t('strategy_global_first') }}</option>
-                            </select>
+                            <div class="clickable-selector" @click="openOptionSelector({
+                                title: t('label_insertion_strategy'),
+                                options: [
+                                    { value: 'character_first', label: t('strategy_char_first') },
+                                    { value: 'global_first', label: t('strategy_global_first') }
+                                ],
+                                currentValue: lorebookState.globalSettings.insertionStrategy,
+                                onSelect: (v) => lorebookState.globalSettings.insertionStrategy = v
+                            })">
+                                <span>{{ lorebookState.globalSettings.insertionStrategy === 'character_first' ? t('strategy_char_first') : t('strategy_global_first') }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
                         </div>
 
                         <div class="settings-item-checkbox small-checkbox">
@@ -561,41 +580,70 @@ defineExpose({ open, openEntry, close, openLorebook });
                             </div>
                             <div class="settings-item">
                                 <label>{{ t('label_logic_mode') }}</label>
-                                <select v-model="activeEntry.selectiveLogic" class="vk-select">
-                                    <option :value="4">{{ t('logic_primary_only') }}</option>
-                                    <option :value="0">{{ t('logic_and_any') }}</option>
-                                    <option :value="1">{{ t('logic_and_all') }}</option>
-                                    <option :value="2">{{ t('logic_not_any') }}</option>
-                                    <option :value="3">{{ t('logic_not_all') }}</option>
-                                </select>
+                                <div class="clickable-selector" @click="openOptionSelector({
+                                    title: t('label_logic_mode'),
+                                    options: [
+                                        { value: 4, label: t('logic_primary_only') },
+                                        { value: 0, label: t('logic_and_any') },
+                                        { value: 1, label: t('logic_and_all') },
+                                        { value: 2, label: t('logic_not_any') },
+                                        { value: 3, label: t('logic_not_all') }
+                                    ],
+                                    currentValue: activeEntry.selectiveLogic,
+                                    onSelect: (v) => activeEntry.selectiveLogic = v
+                                })">
+                                    <span>{{ [t('logic_and_any'), t('logic_and_all'), t('logic_not_any'), t('logic_not_all'), t('logic_primary_only')][activeEntry.selectiveLogic] }}</span>
+                                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                                </div>
                             </div>
                             
                         <div class="settings-item">
                             <label>{{ t('label_case_sensitive') }}</label>
-                            <select :value="typeof activeEntry.caseSensitive !== 'boolean' ? 'null' : activeEntry.caseSensitive.toString()" 
-                                    @change="activeEntry.caseSensitive = $event.target.value === 'null' ? null : ($event.target.value === 'true')" class="vk-select">
-                                <option value="null">{{ t('match_global') }}</option>
-                                <option value="true">{{ t('on') }}</option>
-                                <option value="false">{{ t('off') }}</option>
-                            </select>
+                            <div class="clickable-selector" @click="openOptionSelector({
+                                title: t('label_case_sensitive'),
+                                options: [
+                                    { value: 'null', label: t('match_global') },
+                                    { value: 'true', label: t('on') },
+                                    { value: 'false', label: t('off') }
+                                ],
+                                currentValue: typeof activeEntry.caseSensitive !== 'boolean' ? 'null' : activeEntry.caseSensitive.toString(),
+                                onSelect: (v) => activeEntry.caseSensitive = v === 'null' ? null : (v === 'true')
+                            })">
+                                <span>{{ typeof activeEntry.caseSensitive !== 'boolean' ? t('match_global') : (activeEntry.caseSensitive ? t('on') : t('off')) }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
                         </div>
                         <div class="settings-item">
                             <label>{{ t('label_match_whole_words') }}</label>
-                            <select :value="typeof activeEntry.matchWholeWords !== 'boolean' ? 'null' : activeEntry.matchWholeWords.toString()" 
-                                    @change="activeEntry.matchWholeWords = $event.target.value === 'null' ? null : ($event.target.value === 'true')" class="vk-select">
-                                <option value="null">{{ t('match_global') }}</option>
-                                <option value="true">{{ t('on') }}</option>
-                                <option value="false">{{ t('off') }}</option>
-                            </select>
+                            <div class="clickable-selector" @click="openOptionSelector({
+                                title: t('label_match_whole_words'),
+                                options: [
+                                    { value: 'null', label: t('match_global') },
+                                    { value: 'true', label: t('on') },
+                                    { value: 'false', label: t('off') }
+                                ],
+                                currentValue: typeof activeEntry.matchWholeWords !== 'boolean' ? 'null' : activeEntry.matchWholeWords.toString(),
+                                onSelect: (v) => activeEntry.matchWholeWords = v === 'null' ? null : (v === 'true')
+                            })">
+                                <span>{{ typeof activeEntry.matchWholeWords !== 'boolean' ? t('match_global') : (activeEntry.matchWholeWords ? t('on') : t('off')) }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
                         </div>
                         <div class="settings-item">
                             <label>{{ t('label_group_scoring') }}</label>
-                            <select :value="typeof activeEntry.useGroupScoring !== 'boolean' ? 'null' : activeEntry.useGroupScoring.toString()" 
-                                    @change="activeEntry.useGroupScoring = $event.target.value === 'null' ? null : ($event.target.value === 'true')" class="vk-select">
-                                <option value="null">{{ t('match_global') }}</option>
-                                <option value="true">{{ t('on') }}</option>
-                                <option value="false">{{ t('off') }}</option>
-                            </select>
+                            <div class="clickable-selector" @click="openOptionSelector({
+                                title: t('label_group_scoring'),
+                                options: [
+                                    { value: 'null', label: t('match_global') },
+                                    { value: 'true', label: t('on') },
+                                    { value: 'false', label: t('off') }
+                                ],
+                                currentValue: typeof activeEntry.useGroupScoring !== 'boolean' ? 'null' : activeEntry.useGroupScoring.toString(),
+                                onSelect: (v) => activeEntry.useGroupScoring = v === 'null' ? null : (v === 'true')
+                            })">
+                                <span>{{ typeof activeEntry.useGroupScoring !== 'boolean' ? t('match_global') : (activeEntry.useGroupScoring ? t('on') : t('off')) }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
                         </div>
 
                         <div class="settings-item" v-if="activeEntry.selectiveLogic !== 4">
@@ -621,13 +669,21 @@ defineExpose({ open, openEntry, close, openLorebook });
                     <div class="section-header">{{ t('section_injection_rules') }} <HelpTip term="lorebook-budget"/></div>
                          <div class="settings-item">
                             <label>{{ t('label_injection_position') }}</label>
-                            <select v-model="activeEntry.position">
-                                <option :value="4">{{ t('pos_top') }}</option>
-                                <option value="worldInfoBefore">@worldInfoBefore ({{ t('pos_before_char') }})</option>
-                                <option value="worldInfoAfter">@worldInfoAfter ({{ t('pos_after_char') }})</option>
-                                <option :value="2">{{ t('pos_before_examples') }}</option>
-                                <option :value="3">{{ t('pos_after_examples') }}</option>
-                            </select>
+                            <div class="clickable-selector" @click="openOptionSelector({
+                                title: t('label_injection_position'),
+                                options: [
+                                    { value: 4, label: t('pos_top') },
+                                    { value: 'worldInfoBefore', label: '@worldInfoBefore (' + t('pos_before_char') + ')' },
+                                    { value: 'worldInfoAfter', label: '@worldInfoAfter (' + t('pos_after_char') + ')' },
+                                    { value: 2, label: t('pos_before_examples') },
+                                    { value: 3, label: t('pos_after_examples') }
+                                ],
+                                currentValue: activeEntry.position,
+                                onSelect: (v) => activeEntry.position = v
+                            })">
+                                <span>{{ activeEntry.position === 4 ? t('pos_top') : activeEntry.position === 'worldInfoBefore' ? '@worldInfoBefore' : activeEntry.position === 'worldInfoAfter' ? '@worldInfoAfter' : activeEntry.position === 2 ? t('pos_before_examples') : t('pos_after_examples') }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
                         </div>
                         <div class="settings-item">
                             <label>{{ t('label_order_priority') }} <span class="hint">{{ t('hint_lower_first') }}</span></label>
@@ -794,10 +850,32 @@ defineExpose({ open, openEntry, close, openLorebook });
     padding: 8px 16px;
     border-radius: 8px;
     font-size: 14px;
-    font-weight: 600;
-    border: none;
-    background: var(--vk-blue);
-    color: white;
+}
+
+.clickable-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-item);
+    border: 1px solid var(--border-color);
+    padding: 0 16px;
+    height: 44px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+    margin-top: 4px;
+}
+
+.clickable-selector:active {
+    background: var(--bg-item-active);
+}
+
+.clickable-selector svg {
+    width: 20px;
+    height: 20px;
+    fill: var(--text-gray);
+    opacity: 0.5;
 }
 .vk-btn-action.secondary {
     background: rgba(0,0,0,0.05);

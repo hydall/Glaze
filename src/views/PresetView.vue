@@ -111,6 +111,28 @@ function openSquashRoleSelector() {
     });
 }
 
+function openReasoningEffortSelector() {
+    const options = [
+        { value: 'low', label: t('reasoning_effort_low') || 'Low' },
+        { value: 'medium', label: t('reasoning_effort_medium') || 'Medium' },
+        { value: 'high', label: t('reasoning_effort_high') || 'High' }
+    ];
+
+    const items = options.map(opt => ({
+        label: opt.label,
+        icon: currentPreset.value.reasoningEffort === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            currentPreset.value.reasoningEffort = opt.value;
+            closeBottomSheet();
+        }
+    }));
+
+    showBottomSheet({
+        title: t('label_reasoning_effort') || 'Reasoning Effort',
+        items
+    });
+}
+
 // --- Editor State ---
 const isEditingBlock = ref(false);
 const editingBlockId = ref(null);
@@ -2102,13 +2124,12 @@ onBeforeUnmount(() => {
                                 </div>
                                 <input type="checkbox" v-model="currentPreset.reasoningEnabled" class="vk-switch">
                             </div>
-                            <div class="settings-item" v-if="currentPreset.reasoningEnabled">
+                            <div class="settings-item" v-if="currentPreset.reasoningEnabled" @click="openReasoningEffortSelector">
                                 <label>{{ t('label_reasoning_effort') || 'Reasoning Effort' }}</label>
-                                <select v-model="currentPreset.reasoningEffort" class="settings-select">
-                                    <option value="low">{{ t('reasoning_effort_low') || 'Low' }}</option>
-                                    <option value="medium">{{ t('reasoning_effort_medium') || 'Medium' }}</option>
-                                    <option value="high">{{ t('reasoning_effort_high') || 'High' }}</option>
-                                </select>
+                                <div class="clickable-selector">
+                                    <span>{{ t('reasoning_effort_' + currentPreset.reasoningEffort) || currentPreset.reasoningEffort }}</span>
+                                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                                </div>
                             </div>
                             <div class="settings-item-checkbox">
                                 <div class="settings-text-col">
@@ -2521,6 +2542,32 @@ onBeforeUnmount(() => {
 
 .gen-sheet-tabs { padding: 10px 16px; flex-shrink: 0; }
 .gen-sheet-body { flex: 1; overflow-y: auto; position: relative;}
+
+.clickable-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-item);
+    border: 1px solid var(--border-color);
+    padding: 0 16px;
+    height: 44px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+    margin-top: 4px;
+}
+
+.clickable-selector:active {
+    background: var(--bg-item-active);
+}
+
+.clickable-selector svg {
+    width: 20px;
+    height: 20px;
+    fill: var(--text-gray);
+    opacity: 0.5;
+}
 
 .preset-overview-block {
     margin: 8px 16px 0;

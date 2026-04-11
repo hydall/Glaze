@@ -216,6 +216,29 @@ function openFsEditor(field, index = -1) {
     // Dispatch global event for App.vue to catch
     window.dispatchEvent(new CustomEvent('open-fs-request', { detail: payload }));
 }
+
+function openSelectSelector(field) {
+    const items = field.options.map(opt => ({
+        label: t(opt.label) || opt.label,
+        icon: item.value[field.key] === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            item.value[field.key] = opt.value;
+            autoSave();
+            closeBottomSheet();
+        }
+    }));
+    showBottomSheet({
+        title: t(field.label) || field.label,
+        items: items
+    });
+}
+
+function getSelectedLabel(field) {
+    const val = item.value[field.key];
+    const opt = field.options.find(o => o.value === val);
+    if (!opt) return val;
+    return t(opt.label) || opt.label;
+}
 </script>
 
 <template>
@@ -281,9 +304,10 @@ function openFsEditor(field, index = -1) {
                         </div>
                     </div>
 
-                    <select v-else-if="field.type === 'select'" v-model="item[field.key]" class="vk-select" @change="autoSave" style="width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-gray); color: var(--text-black);">
-                        <option v-for="opt in field.options" :key="opt.value" :value="opt.value">{{ t(opt.label) || opt.label }}</option>
-                    </select>
+                    <div v-else-if="field.type === 'select'" class="clickable-selector" @click="openSelectSelector(field)">
+                        <span>{{ getSelectedLabel(field) }}</span>
+                        <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
                     
                     <div v-else-if="field.type === 'info'" class="info-field">
                         {{ field.text || item[field.key] }}
@@ -559,5 +583,30 @@ select:focus {
     width: 20px;
     height: 20px;
     fill: currentColor;
+}
+
+.clickable-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-item);
+    border: 1px solid var(--border-color);
+    padding: 0 16px;
+    height: 48px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 15px;
+    transition: background 0.2s;
+}
+
+.clickable-selector:active {
+    background: var(--bg-item-active);
+}
+
+.clickable-selector svg {
+    width: 24px;
+    height: 24px;
+    fill: var(--text-gray);
+    opacity: 0.5;
 }
 </style>

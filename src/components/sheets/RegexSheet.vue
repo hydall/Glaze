@@ -290,6 +290,22 @@ function handleScriptMenu(script, index, isPreset = false) {
     });
 }
 
+function openMacroSelector() {
+    const items = macroOptions.value.map(opt => ({
+        label: opt.label,
+        icon: activeScript.value.macroRules === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            activeScript.value.macroRules = opt.value;
+            closeBottomSheet();
+        }
+    }));
+    showBottomSheet({
+        title: t('regex_macros_find') || 'Macros',
+        items: items
+    });
+}
+
+
 defineExpose({ open, close });
 </script>
 
@@ -404,10 +420,11 @@ defineExpose({ open, close });
 
                         <div class="menu-group compact">
                             <div class="section-header">{{ t('regex_macros_find') || 'Macros in Find Regex' }} <HelpTip term="regex-macros"/></div>
-                            <div class="settings-item select-item">
-                                <select v-model="activeScript.macroRules" class="vk-select">
-                                    <option v-for="opt in macroOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                                </select>
+                            <div class="settings-item select-item" @click="openMacroSelector">
+                                <div class="clickable-selector">
+                                    <span>{{ macroOptions.find(o => o.value === activeScript.macroRules)?.label || activeScript.macroRules }}</span>
+                                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                                </div>
                             </div>
                         </div>
 
@@ -486,6 +503,32 @@ defineExpose({ open, close });
 .small-switch { width: 36px; height: 20px; }
 .small-switch::after { width: 16px; height: 16px; }
 .small-switch:checked::after { transform: translateX(16px); }
+
+.clickable-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-item);
+    border: 1px solid var(--border-color);
+    padding: 0 16px;
+    height: 44px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.clickable-selector:active {
+    background: var(--bg-item-active);
+}
+
+.clickable-selector svg {
+    width: 20px;
+    height: 20px;
+    fill: var(--text-gray);
+    opacity: 0.5;
+}
+
 
 
 </style>

@@ -176,6 +176,29 @@ function openModelSelector() {
     showBottomSheet({ title: "Select Model", items });
 }
 
+function openReasoningEffortSelector() {
+    const options = [
+        { value: 'low', label: t('reasoning_effort_low') || 'Low' },
+        { value: 'medium', label: t('reasoning_effort_medium') || 'Medium' },
+        { value: 'high', label: t('reasoning_effort_high') || 'High' }
+    ];
+
+    const items = options.map(opt => ({
+        label: opt.label,
+        icon: apiSettings.reasoningEffort === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            apiSettings.reasoningEffort = opt.value;
+            saveApiSetting('gz_api_reasoning_effort', opt.value);
+            closeBottomSheet();
+        }
+    }));
+
+    showBottomSheet({
+        title: t('label_reasoning_effort') || 'Reasoning Effort',
+        items
+    });
+}
+
 function createNewApiPreset() {
     showBottomSheet({
         title: t('new_preset') || 'New Preset',
@@ -506,11 +529,10 @@ onBeforeUnmount(() => {
                     </Transition>
                     <div class="settings-item">
                         <label>{{ t('label_reasoning_effort') || 'Reasoning Effort' }}</label>
-                        <select v-model="apiSettings.reasoningEffort" @change="onApiInput('gz_api_reasoning_effort', $event.target.value)" class="settings-select">
-                            <option value="low">{{ t('reasoning_effort_low') || 'Low' }}</option>
-                            <option value="medium">{{ t('reasoning_effort_medium') || 'Medium' }}</option>
-                            <option value="high">{{ t('reasoning_effort_high') || 'High' }}</option>
-                        </select>
+                        <div class="clickable-selector" @click="openReasoningEffortSelector">
+                            <span>{{ t('reasoning_effort_' + apiSettings.reasoningEffort) || apiSettings.reasoningEffort }}</span>
+                            <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                        </div>
                     </div>
                 </div>
         </div>
@@ -565,4 +587,29 @@ onBeforeUnmount(() => {
 }
 
 .gen-sheet-body { flex: 1; overflow-y: auto; position: relative;}
+
+.clickable-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-item);
+    border: 1px solid var(--border-color);
+    padding: 0 16px;
+    height: 48px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 15px;
+    transition: background 0.2s;
+}
+
+.clickable-selector:active {
+    background: var(--bg-item-active);
+}
+
+.clickable-selector svg {
+    width: 24px;
+    height: 24px;
+    fill: var(--text-gray);
+    opacity: 0.5;
+}
 </style>
