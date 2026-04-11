@@ -64,6 +64,12 @@ export function formatText(text, isUser = false, options = {}) {
     // Fix escaped newlines from model (in remaining text)
     html = html.replace(/&lt;br\s*\/?(?:&gt;|>)/gi, '<br>');
 
+    // Janitor image: ![alt](url) -> wrapped img with options button
+    const JANITOR_OPTIONS_SVG = `<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>`;
+    html = html.replace(/!\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g, (match, alt, src) => {
+        return `<span class="janitor-img-wrapper"><img class="janitor-img" src="${src}"${alt ? ` alt="${alt}"` : ''}><button class="janitor-options-btn" type="button" title="Options">${JANITOR_OPTIONS_SVG}</button></span>`;
+    });
+
     // 4. Protect HTML Tags (to prevent <br> injection inside them AND corruption by Quote formatter)
     const tagBlocks = [];
     const blockTagsRegex = /^\s*<\/?(div|p|style|pre|table|ul|ol|li|h[1-6]|blockquote|section|article|header|footer|hr|details|summary|figure|figcaption|svg|path|math|canvas|video|audio|form|fieldset|nav|aside|main)(?:\s+[^>]*?)?>/i;

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
 import { formatText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import ShadowContent from '@/components/ui/ShadowContent.vue';
@@ -13,6 +13,7 @@ import { hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config
 import RollingNumber from '@/components/ui/RollingNumber.vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { getBlacklistedProvider } from '@/core/config/APISettings.js';
+import { saveFile } from '@/core/services/fileSaver.js';
 
 const props = defineProps({
     message: { type: Object, required: true },
@@ -428,6 +429,42 @@ const handleContentClick = (e) => {
         return;
     }
 
+    // Options button on janitor image → bottom sheet with 2 actions
+    const janitorOptionsBtn = path.find(el => el?.classList?.contains('janitor-options-btn'));
+    if (janitorOptionsBtn) {
+        e.stopPropagation();
+        const wrapper = path.find(el => el?.classList?.contains('janitor-img-wrapper'));
+        const img = wrapper?.querySelector?.('img.janitor-img');
+        if (!img) return;
+        const src = img.src;
+        showBottomSheet({
+            items: [
+                {
+                    label: t('imggen_expand_image') || 'Expand image',
+                    hint: t('expand_image_hint') || 'Открыть картинку в полноэкранном режиме',
+                    icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
+                    onClick: () => { closeBottomSheet(); openImage(src); }
+                },
+                {
+                    label: t('action_save_image') || 'Save image',
+                    hint: t('imggen_save_hint') || 'Сохранить картинку на устройство',
+                    icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
+                    onClick: async () => {
+                        closeBottomSheet();
+                        try {
+                            const response = await fetch(src);
+                            const blob = await response.blob();
+                            await saveFile(`Image_${Date.now()}.png`, blob, 'image/png');
+                        } catch (err) {
+                            console.error('Failed to save image:', err);
+                        }
+                    }
+                },
+            ]
+        });
+        return;
+    }
+
     // Options button on generated image → bottom sheet with 3 actions
     const optionsBtn = path.find(el => el?.classList?.contains('imggen-options-btn'));
     if (optionsBtn) {
@@ -445,6 +482,21 @@ const handleContentClick = (e) => {
                     hint: t('imggen_expand_image_hint') || 'Открыть картинку в полноэкранном режиме и посмотреть промпт',
                     icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
                     onClick: () => { closeBottomSheet(); openImage(src, instr); }
+                },
+                {
+                    label: t('action_save_image') || 'Save image',
+                    hint: t('imggen_save_hint') || 'Сохранить картинку на устройство',
+                    icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
+                    onClick: async () => {
+                        closeBottomSheet();
+                        try {
+                            const response = await fetch(src);
+                            const blob = await response.blob();
+                            await saveFile(`Image_${Date.now()}.png`, blob, 'image/png');
+                        } catch (err) {
+                            console.error('Failed to save image:', err);
+                        }
+                    }
                 },
                 {
                     label: t('action_regenerate') || 'Regenerate',
@@ -466,6 +518,25 @@ const handleContentClick = (e) => {
             const instr = parseIIGInstruction(errorBlock);
             const id = errorBlock.dataset?.iigId;
             if (instr && id) emit('regenerate-image', { instruction: instr, id });
+        }
+        return;
+    }
+
+    // Enable and generate button
+    const enableBtn = path.find(el => el?.classList?.contains('imggen-enable-retry'));
+    if (enableBtn) {
+        e.stopPropagation();
+        const disabledBlock = path.find(el => el?.classList?.contains('imggen-disabled'));
+        if (disabledBlock) {
+            import('@/core/services/imageGenService.js').then(module => {
+                const settings = module.getImageGenSettings();
+                settings.enabled = true;
+                module.saveImageGenSettings(settings);
+                
+                const instr = parseIIGInstruction(disabledBlock);
+                const id = disabledBlock.dataset?.iigId;
+                if (instr && id) emit('regenerate-image', { instruction: instr, id });
+            });
         }
         return;
     }
@@ -1000,7 +1071,7 @@ onUnmounted(() => {
 .triggered-group-title {
     font-size: 12px;
     font-weight: 600;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     padding-left: 4px;
@@ -1058,7 +1129,7 @@ onUnmounted(() => {
 
 .item-sublabel {
     font-size: 12px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1067,10 +1138,11 @@ onUnmounted(() => {
 .msg-time {
     margin-left: auto;
     font-size: 12px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
 }
 
 .msg-body {
+    position: relative;
     font-size: var(--chat-font-size, 15px);
     letter-spacing: var(--chat-letter-spacing, 0px);
     line-height: 1.5;
@@ -1096,7 +1168,7 @@ onUnmounted(() => {
 
 .msg-index, .gen-stat {
     font-size: 11px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     display: flex;
     align-items: center;
 }
@@ -1350,24 +1422,24 @@ onUnmounted(() => {
     justify-content: center;
     border-radius: 50%;
     cursor: pointer;
-    background-color: rgba(0, 0, 0, 0.03);
+    background-color: rgba(255, 255, 255, 0.03);
     transition: all 0.2s ease;
 }
-.guided-btn:active { transform: scale(0.9); background-color: rgba(0, 0, 0, 0.1); }
+.guided-btn:active { transform: scale(0.9); background-color: rgba(255, 255, 255, 0.1); }
 .guided-btn.confirm { color: #4CAF50; }
 .guided-btn.cancel { color: #ff4444; }
 .guided-btn svg { width: 16px; height: 16px; fill: currentColor; }
-:global(body.dark-theme) .guided-swipe-textarea { color: #fff; }
+.guided-swipe-textarea { color: var(--text-black); }
 
-/* Dark Theme */
-:global(body.dark-theme) .msg-body { color: var(--current-text-color, #e1e3e6); }
+/* Message Styles */
+.msg-body { color: var(--current-text-color, #e1e3e6); }
 .message-section.selected .msg-body { user-select: text; -webkit-user-select: text; }
-:global(body.dark-theme) .msg-switcher { border-color: rgba(255, 255, 255, 0.1); }
-:global(body.dark-theme) .msg-regenerate { border-color: rgba(255, 255, 255, 0.1); color: #aaa; }
-:global(body.dark-theme) .edit-textarea { background: rgba(255, 255, 255, 0.05); color: #fff; }
-:global(body.dark-theme) .msg-actions-btn { border-color: rgba(255, 255, 255, 0.1); }
-:global(body.dark-theme) .msg-reasoning { border-color: rgba(255, 255, 255, 0.1); }
-:global(body.dark-theme) .msg-reasoning-header { border-bottom-color: rgba(255, 255, 255, 0.1); }
+.msg-switcher { border-color: rgba(255, 255, 255, 0.1); }
+.msg-regenerate { border-color: rgba(255, 255, 255, 0.1); color: var(--text-gray); }
+.edit-textarea { background: rgba(255, 255, 255, 0.05); color: var(--text-black); }
+.msg-actions-btn { border-color: rgba(255, 255, 255, 0.1); }
+.msg-reasoning { border-color: rgba(255, 255, 255, 0.1); }
+.msg-reasoning-header { border-bottom-color: rgba(255, 255, 255, 0.1); }
 
 /* Swipe Animations */
 .slide-next-enter-active, .slide-next-leave-active,
@@ -1393,12 +1465,12 @@ onUnmounted(() => {
 .error-window {
     display: block;
     margin-top: 6px;
-    background-color: rgba(255, 242, 242, 0.9);
+    background-color: rgba(43, 14, 14, 0.85);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid #ff3b30;
     border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(255, 59, 48, 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     overflow: hidden;
 }
 
@@ -1406,9 +1478,9 @@ onUnmounted(() => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: rgba(255, 59, 48, 0.1);
+    background-color: rgba(255, 59, 48, 0.2);
     padding: 6px 12px;
-    border-bottom: 1px solid rgba(255, 59, 48, 0.2);
+    border-bottom: 1px solid rgba(255, 59, 48, 0.3);
 }
 
 .error-header span {
@@ -1446,7 +1518,7 @@ onUnmounted(() => {
     padding: 10px 12px;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 12px;
-    color: #c42b2b;
+    color: #ffb3b3;
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -1455,23 +1527,12 @@ onUnmounted(() => {
     color: #ff3b30;
 }
 
-:global(body.dark-theme) .message-section.error {
+.message-section.error {
     background-color: transparent;
+    border-left: none;
 }
 
-body.dark-theme .error-window {
-    background-color: rgba(43, 14, 14, 0.85);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
 
-body.dark-theme .error-header {
-    background-color: rgba(255, 59, 48, 0.2);
-    border-bottom: 1px solid rgba(255, 59, 48, 0.3);
-}
-
-body.dark-theme .error-content {
-    color: #ffb3b3;
-}
 
 .error-provider-chip {
     display: inline-flex;
@@ -1486,18 +1547,14 @@ body.dark-theme .error-content {
     flex-shrink: 0;
     margin-left: auto;
     margin-right: 8px;
-    background-color: rgba(255, 59, 48, 0.12);
-    color: #ff3b30;
-    border: 1px solid rgba(255, 59, 48, 0.25);
-}
-
-body.dark-theme .error-provider-chip {
     background-color: rgba(255, 59, 48, 0.2);
     color: #ff453a;
-    border-color: rgba(255, 59, 48, 0.35);
+    border: 1px solid rgba(255, 59, 48, 0.35);
 }
 
-:global(body.dark-theme) .message-section.error .msg-name {
+
+
+.message-section.error .msg-name {
     color: #ff453a;
 }
 
@@ -1525,26 +1582,19 @@ body.dark-theme .error-provider-chip {
 }
 
 :deep(.search-highlight-text) {
-    background-color: #ff9800; /* Vibrant Orange */
-    color: #fff;
+    background-color: rgba(255, 215, 0, 0.4);
     border-radius: 4px;
     padding: 0 2px;
 }
 
 :deep(.search-highlight-text.active-search-match) {
-    background-color: #f44336; /* Distinct Red/Orange */
+    background-color: rgba(244, 67, 54, 0.8);
+    color: #fff;
     border-radius: 4px;
     padding: 0 2px;
 }
 
-:global(body.dark-theme) :deep(.search-highlight-text) {
-    background-color: rgba(255, 215, 0, 0.4);
-}
 
-:global(body.dark-theme) :deep(.search-highlight-text.active-search-match) {
-    background-color: rgba(244, 67, 54, 0.8);
-    color: #fff;
-}
 
 :global(.search-highlight) {
     background-color: rgba(var(--vk-blue-rgb), 0.1) !important;
@@ -1591,7 +1641,7 @@ body.dark-theme .error-provider-chip {
     background-color: rgba(var(--char-bubble-color-rgb, var(--vk-blue-rgb)), var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 12px));
     -webkit-backdrop-filter: blur(var(--element-blur, 12px));
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 18px;
     border-top-left-radius: 4px;
     padding: 10px 14px 6px 14px;
@@ -1607,19 +1657,11 @@ body.dark-theme .error-provider-chip {
     background-color: rgba(var(--user-bubble-color-rgb, var(--ui-bg-rgb)), var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 12px));
     -webkit-backdrop-filter: blur(var(--element-blur, 12px));
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 18px;
     border-top-right-radius: 4px;
     margin-left: auto;
     margin-right: 0;
-}
-:global(body.dark-theme) .message-section.layout-bubble .msg-body {
-    background-color: rgba(var(--char-bubble-color-rgb, var(--vk-blue-rgb)), var(--element-opacity, 0.8));
-    border-color: rgba(255, 255, 255, 0.1);
-}
-:global(body.dark-theme) .message-section.layout-bubble.user .msg-body {
-    background-color: rgba(var(--user-bubble-color-rgb, var(--ui-bg-rgb)), var(--element-opacity, 0.8));
-    border-color: rgba(255, 255, 255, 0.1);
 }
 .message-section.layout-bubble .bubble-meta {
     display: flex;
@@ -1628,7 +1670,7 @@ body.dark-theme .error-provider-chip {
     gap: 8px;
     margin-top: 4px;
     font-size: 11px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     opacity: 0.8;
 }
 .message-section.layout-bubble .bubble-time {
@@ -1669,7 +1711,7 @@ body.dark-theme .error-provider-chip {
     margin-bottom: 8px;
     padding: 6px 10px;
     border-left: 2px solid var(--vk-blue);
-    background: rgba(var(--vk-blue-rgb), 0.05);
+    background: rgba(var(--vk-blue-rgb), 0.1);
     border-radius: 4px;
     font-size: 13px;
     width: fit-content;
@@ -1684,15 +1726,23 @@ body.dark-theme .error-provider-chip {
     text-transform: uppercase;
 }
 .guidance-content {
-    color: var(--text-dark-gray);
+    color: #ccc;
     line-height: 1.4;
     font-size: 12px;
     font-style: italic;
 }
-:global(body.dark-theme) .msg-guidance-block {
-    background: rgba(var(--vk-blue-rgb), 0.1);
-}
-:global(body.dark-theme) .guidance-content {
-    color: #ccc;
+
+.imggen-rolling-overlay {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 11px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    color: rgba(128,128,128,0.8);
+    background: rgba(0,0,0,0.45);
+    border-radius: 8px;
+    padding: 2px 6px;
+    z-index: 2;
+    pointer-events: none;
 }
 </style>

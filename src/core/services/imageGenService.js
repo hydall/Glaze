@@ -1,4 +1,5 @@
 import { t } from '@/utils/i18n.js';
+import { startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
 
 /**
  * Image Generation Service for Glaze
@@ -446,8 +447,7 @@ function getPlaceholderAspectRatio() {
 export function makeLoadingHtml(instruction, id) {
     const enc = encodeIIGInstruction(instruction);
     const prompt = (instruction.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const ar = getPlaceholderAspectRatio();
-    return `<span class="imggen-loading" style="aspect-ratio:${ar}" data-iig-instruction='${enc}' data-iig-id="${id}"><span class="imggen-loading-prompt">${prompt}</span></span>`;
+    return `<span class="imggen-loading" data-iig-instruction='${enc}' data-iig-id="${id}"><span class="imggen-loading-hint">Generating Image...</span><span class="imggen-loading-timer" data-start="${Date.now()}">0.0s</span><span class="imggen-loading-prompt">${prompt}</span></span>`;
 }
 
 function extractErrorMessage(errorMessage) {
@@ -473,6 +473,13 @@ export function makeErrorHtml(instruction, id, errorMessage) {
     return `<span class="imggen-error" data-iig-instruction='${enc}' data-iig-id="${id}"><span class="imggen-error-icon">⚠</span><span class="imggen-error-msg">${msg}</span><button class="imggen-error-retry" type="button">${RETRY_SVG}${label}</button></span>`;
 }
 
+export function makeDisabledHtml(instruction, id) {
+    const enc = encodeIIGInstruction(instruction);
+    const msg = t('imggen_disabled') || 'Image generation disabled';
+    const label = t('imggen_enable_btn') || 'Enable and generate';
+    return `<span class="imggen-error imggen-disabled" data-iig-instruction='${enc}' data-iig-id="${id}"><span class="imggen-error-icon">🖼️</span><span class="imggen-error-msg">${msg}</span><button class="imggen-enable-retry" type="button" style="display: flex;align-items: center;gap: 4px;border-radius: 12px;padding: 2px 8px;height: 22px;font-size: 11px;color: rgba(255,59,48,0.9);background: rgba(255,59,48,0.1);border: 1px solid rgba(255,59,48,0.3);cursor: pointer;transition: background 0.15s;">${label}</button></span>`;
+}
+
 const RETRY_SVG = `<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>`;
 const OPTIONS_SVG = `<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>`;
 
@@ -490,10 +497,19 @@ export function makeResultHtml(instruction, id, dataUrl) {
  */
 export async function processMessageImages(text, onUpdate, context = {}) {
     const settings = getImageGenSettings();
-    if (!settings.enabled) return text;
 
     const tags = parseImageGenTags(text);
     if (!tags.length) return text;
+
+    if (!settings.enabled) {
+        let current = text;
+        for (const tag of tags) {
+            const id = makeIIGId();
+            const placeholder = makeDisabledHtml(tag.instruction, id);
+            current = current.replace(tag.fullMatch, placeholder);
+        }
+        return current;
+    }
 
     // Collect previous generated images as context if the setting is enabled
     if (settings.imageContextEnabled && context.messages && context.currentMsgIndex != null) {
@@ -518,16 +534,26 @@ export async function processMessageImages(text, onUpdate, context = {}) {
     }
     onUpdate(current);
 
-    // Generate images one by one
-    for (const { placeholder, id, instruction } of placeholders) {
-        try {
-            const dataUrl = await generateImage(instruction, context);
-            current = current.replace(placeholder, makeResultHtml(instruction, id, dataUrl));
-        } catch (err) {
-            console.error('[ImageGen]', err);
-            current = current.replace(placeholder, makeErrorHtml(instruction, id, err.message));
+    if (placeholders.length > 0) {
+        startGenerationNotification(t('imggen_notification_title') || 'Glaze', t('imggen_notification_body') || 'Generating image...');
+    }
+
+    try {
+        // Generate images one by one
+        for (const { placeholder, id, instruction } of placeholders) {
+            try {
+                const dataUrl = await generateImage(instruction, context);
+                current = current.replace(placeholder, makeResultHtml(instruction, id, dataUrl));
+            } catch (err) {
+                console.error('[ImageGen]', err);
+                current = current.replace(placeholder, makeErrorHtml(instruction, id, err.message));
+            }
+            onUpdate(current);
         }
-        onUpdate(current);
+    } finally {
+        if (placeholders.length > 0) {
+            stopGenerationNotification();
+        }
     }
 
     return current;

@@ -1,5 +1,6 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import RollingNumber from '@/components/ui/RollingNumber.vue';
 
 const props = defineProps({
   html: { type: String, required: true },
@@ -9,6 +10,24 @@ const props = defineProps({
 const container = ref(null);
 let shadow = null;
 let contentDiv = null;
+let timerRafId = null;
+
+const activeTimers = ref([]);
+
+const updateTimers = () => {
+  if (activeTimers.value.length > 0) {
+    const now = Date.now();
+    activeTimers.value.forEach(t => {
+      if (t.start) {
+        const newVal = ((now - t.start) / 1000).toFixed(1) + 's';
+        if (t.value !== newVal) {
+          t.value = newVal;
+        }
+      }
+    });
+  }
+  timerRafId = requestAnimationFrame(updateTimers);
+};
 
 const getStyles = () => `
   :host {
@@ -39,8 +58,8 @@ const getStyles = () => `
     font-weight: bold;
   }
   pre.code-block {
-    background: rgba(var(--ui-bg-rgb, 0,0,0), 0.05);
-    border: 1px solid rgba(var(--ui-bg-rgb, 0,0,0), 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     padding: 10px;
     border-radius: 8px;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
@@ -49,18 +68,6 @@ const getStyles = () => `
     margin: 10px 0;
     white-space: pre-wrap;
     color: inherit;
-  }
-  .unclosed-tag {
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    background: rgba(var(--ui-bg-rgb, 0,0,0), 0.05);
-    border: 1px solid rgba(var(--ui-bg-rgb, 0,0,0), 0.1);
-    padding: 2px 4px;
-    border-radius: 4px;
-    color: #888;
-    font-size: 0.9em;
-  }
-  :global(body.dark-theme) pre.code-block {
-    background: rgba(255, 255, 255, 0.05);
   }
   hr {
     border: none;
@@ -95,45 +102,67 @@ const getStyles = () => `
     color: #007AFF !important; /* Fallback if var not reachable, but vars are reachable */
   }
   .search-highlight-text {
-    background-color: #ff9800;
+    background-color: rgba(255, 215, 0, 0.4);
     color: #fff;
     border-radius: 4px;
     padding: 0 2px;
   }
   .search-highlight-text.active-search-match {
-    background-color: #f44336;
-    border-radius: 4px;
-    padding: 0 2px;
-  }
-  :global(body.dark-theme) .search-highlight-text {
-    background-color: rgba(255, 215, 0, 0.4);
-  }
-  :global(body.dark-theme) .search-highlight-text.active-search-match {
     background-color: rgba(244, 67, 54, 0.8);
     color: #fff;
+    border-radius: 4px;
+    padding: 0 2px;
   }
   img {
     -webkit-touch-callout: default;
   }
+  .janitor-img-wrapper {
+    display: block;
+    position: relative;
+    margin-top: 8px;
+  }
+  .janitor-img {
+    width: 100%;
+    border-radius: 12px;
+    display: block;
+  }
+  .janitor-options-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.50);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.15s;
+  }
+  .janitor-img-wrapper:hover .janitor-options-btn { opacity: 1; }
+  @media (hover: none) { .janitor-options-btn { opacity: 0.7; } }
+  .janitor-options-btn:active { background: rgba(0,0,0,0.75); }
+  .janitor-options-btn svg { width: 16px; height: 16px; fill: #fff; pointer-events: none; }
   .imggen-loading {
     display: block;
     width: 240px;
     max-width: 100%;
+    min-height: 80px;
     border-radius: 12px;
     margin: 8px 0;
     background: linear-gradient(90deg,
-      rgba(128,128,128,0.07) 25%,
-      rgba(128,128,128,0.16) 50%,
-      rgba(128,128,128,0.07) 75%);
+      rgba(255,255,255,0.04) 25%,
+      rgba(255,255,255,0.10) 50%,
+      rgba(255,255,255,0.04) 75%);
     background-size: 200% 100%;
     animation: imggen-shimmer 1.4s infinite linear;
     position: relative;
     overflow: hidden;
     border: none;
-  }
-  @keyframes imggen-shimmer {
-    from { background-position: 200% 0; }
-    to   { background-position: -200% 0; }
   }
   .imggen-loading-prompt {
     position: absolute;
@@ -149,8 +178,8 @@ const getStyles = () => `
     user-select: none;
   }
   .imggen-loading.expanded .imggen-loading-prompt {
-    top: 10px;
-    max-height: calc(100% - 20px);
+    top: 28px;
+    max-height: calc(100% - 38px);
     overflow-y: auto;
   }
   .imggen-error {
@@ -165,8 +194,8 @@ const getStyles = () => `
     margin: 8px 0;
     padding: 14px 12px;
     box-sizing: border-box;
-    background: rgba(255,59,48,0.08);
-    border: 1px solid rgba(255,59,48,0.22);
+    background: rgba(255,59,48,0.13);
+    border: 1px solid rgba(255,59,48,0.32);
   }
   .imggen-error-icon { font-size: 20px; line-height: 1; flex-shrink: 0; }
   .imggen-error-msg {
@@ -224,18 +253,7 @@ const getStyles = () => `
   @media (hover: none) { .imggen-options-btn { opacity: 0.7; } }
   .imggen-options-btn:active { background: rgba(0,0,0,0.75); }
   .imggen-options-btn svg { width: 16px; height: 16px; fill: #fff; pointer-events: none; }
-  :global(body.dark-theme) .imggen-loading {
-    background: linear-gradient(90deg,
-      rgba(255,255,255,0.04) 25%,
-      rgba(255,255,255,0.10) 50%,
-      rgba(255,255,255,0.04) 75%);
-    background-size: 200% 100%;
-    animation: imggen-shimmer 1.4s infinite linear;
-  }
-  :global(body.dark-theme) .imggen-error {
-    background: rgba(255,59,48,0.13);
-    border-color: rgba(255,59,48,0.32);
-  }
+
   .chat-quote {
     color: var(--current-quote-color, var(--char-quote-color, var(--vk-blue))) !important;
   }
@@ -246,6 +264,23 @@ const getStyles = () => `
     color: var(--current-italic-color, var(--char-italic-color, #888));
     font-style: italic;
   }
+
+  /* RollingNumber styles */
+  .rolling-number { display: inline-flex; align-items: center; vertical-align: middle; height: 1.2em; font-variant-numeric: tabular-nums; }
+  .rolling-number-inner { display: inline-flex; align-items: center; }
+  .rolling-column { position: relative; display: inline-flex; justify-content: center; }
+  .column-enter-active, .column-leave-active { transition: all 0.2s ease; }
+  .column-enter-from, .column-leave-to { opacity: 0; width: 0 !important; transform: scaleX(0); }
+  .digit-container { display: inline-block; position: relative; height: 1.2em; overflow: hidden; vertical-align: top; }
+  .digit-measure { visibility: hidden; display: inline-block; line-height: 1.2em; }
+  .digit { position: absolute; top: 0; left: 0; right: 0; text-align: center; line-height: 1.2em; }
+  .symbol { line-height: 1.2em; }
+  .is-symbol { width: auto; }
+  .slide-digit-enter-active, .slide-digit-leave-active { transition: transform 0.2s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s cubic-bezier(0.4, 0.0, 0.2, 1); }
+  .slide-digit-fast-enter-active, .slide-digit-fast-leave-active { transition: transform 0.05s linear, opacity 0.05s linear; }
+  .slide-digit-enter-from, .slide-digit-fast-enter-from { transform: translateY(100%); opacity: 0; }
+  .slide-digit-leave-to, .slide-digit-fast-leave-to { transform: translateY(-100%); opacity: 0; }
+  .slide-digit-enter-to, .slide-digit-leave-from, .slide-digit-fast-enter-to, .slide-digit-fast-leave-from { transform: translateY(0); opacity: 1; }
 `;
 
 onMounted(() => {
@@ -305,15 +340,34 @@ onMounted(() => {
     });
   };
 
-  watch(() => props.html, (newHtml) => {
+  watch(() => props.html, async (newHtml) => {
     if (contentDiv) {
+      activeTimers.value = [];
+      await nextTick();
+      
       contentDiv.innerHTML = newHtml;
+      
+      const timers = Array.from(contentDiv.querySelectorAll('.imggen-loading-timer'));
+      if (timers.length > 0) {
+        activeTimers.value = timers.map(el => {
+          el.textContent = '';
+          return {
+            el,
+            start: parseInt(el.dataset.start, 10),
+            value: '0.0s'
+          };
+        });
+      }
+      
       setTimeout(() => executeScripts(contentDiv), 0);
     }
   }, { immediate: true });
 
+  timerRafId = requestAnimationFrame(updateTimers);
+
   // Clean up
   onUnmounted(() => {
+    if (timerRafId) cancelAnimationFrame(timerRafId);
     window.removeEventListener('click', handleInteraction, true);
     window.removeEventListener('change', handleInteraction, true);
     window.removeEventListener('input', handleInteraction, true);
@@ -323,6 +377,9 @@ onMounted(() => {
 
 <template>
   <div ref="container" class="shadow-content-wrapper" :style="{ '--user-select': isSelected ? 'text' : 'none' }"></div>
+  <Teleport v-for="(timer, i) in activeTimers" :key="i" :to="timer.el">
+    <RollingNumber :value="timer.value" />
+  </Teleport>
 </template>
 
 <style scoped>

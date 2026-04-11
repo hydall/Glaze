@@ -31,7 +31,7 @@ import { createNewSession as dbCreateSession, deleteSession as dbDeleteSession, 
 import { lorebookState, getActiveLorebooksForContext } from '@/core/states/lorebookState.js';
 import { presetState, getEffectivePreset, getEffectivePresetId } from '@/core/states/presetState.js';
 import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
-import { sendMessageNotification, clearMessageNotifications } from '@/core/services/notificationService.js';
+import { sendMessageNotification, clearMessageNotifications, startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
 import { formatError } from '@/utils/errors.js';
 import { themeState } from '@/core/states/themeState.js';
 import { triggerChatImport } from '@/core/services/chatImporter.js';
@@ -1320,7 +1320,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     const m = currentMessages.value[targetIndex];
                     m.triggeredLorebooks = loreEntries.map(e => ({
                         id: e.id,
-                        name: e.keys?.[0] || e.name || 'Entry',
+                        // Lorebook entry display name: ST-compatible field is `comment`
+                        name: e.comment || e.name || e.keys?.[0] || 'Entry',
                         content: e.content,
                         lorebookName: e.lorebookName,
                         lorebookId: e.lorebookId
@@ -1508,14 +1509,14 @@ async function handleImageRegenerate(msgIndex, { instruction, id }) {
     const idEsc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const loadingHtml = makeLoadingHtml(instruction, id);
     const toLoading = (text) => text
-        .replace(new RegExp(`<span[^>]+class="imggen-error"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/button><\\/span>`, 'g'), loadingHtml)
-        .replace(new RegExp(`<span[^>]+class="imggen-result-wrapper"[^>]*>[\\s\\S]*?data-iig-id="${idEsc}"[\\s\\S]*?<\\/span>`, 'g'), loadingHtml);
+        .replace(new RegExp(`<span[^>]+class="[^"]*imggen-error[^"]*"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/button><\\/span>`, 'g'), loadingHtml)
+        .replace(new RegExp(`<span[^>]+class="[^"]*imggen-result-wrapper[^"]*"[^>]*>[\\s\\S]*?data-iig-id="${idEsc}"[\\s\\S]*?<\\/span>`, 'g'), loadingHtml);
 
     msg.text = toLoading(msg.text);
     msg.swipes[msg.swipeId || 0] = msg.text;
     updateSessionMessage(char, msgIndex, msg);
 
-    const loadingRe = new RegExp(`<span[^>]+class="imggen-loading"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/span>`, 'g');
+    const loadingRe = new RegExp(`<span[^>]+class="[^"]*imggen-loading[^"]*"[^>]+data-iig-id="${idEsc}"[^>]*>(?:<span[^>]*>[\\s\\S]*?<\\/span>)*<\\/span>`, 'g');
     const context = { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null };
 
     try {
@@ -1809,9 +1810,7 @@ function openMessageActions(msg, index) {
             icon: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
             onClick: () => {
                 closeBottomSheet();
-                let textToEdit = msg.text;
-                msg.editText = textToEdit;
-                msg.isEditing = true;
+                enterEditMode(msg);
             }
         });
     }
@@ -1910,10 +1909,98 @@ function openMessageActions(msg, index) {
     showBottomSheet({ title: t('sheet_title_msg_actions'), items });
 }
 
+function enterEditMode(msg) {
+    const { text, map } = prepareEditText(msg?.text || '');
+    msg.editText = text;
+    msg._base64Map = map;
+    msg.isEditing = true;
+}
+
+function normalizeImgGenHtmlForEditing(text) {
+    if (!text) return text;
+
+    const makeTag = (instruction) => `<img data-iig-instruction='${instruction}' src="[IMG:GEN]">`;
+
+    const extractInstruction = (chunk) => {
+        if (!chunk) return null;
+        const m1 = chunk.match(/\bdata-iig-instruction='([^']*)'/i);
+        if (m1?.[1] != null) return m1[1];
+        const m2 = chunk.match(/\bdata-iig-instruction="([^"]*)"/i);
+        if (m2?.[1] != null) return m2[1];
+        return null;
+    };
+
+    // Result wrapper (contains base64 src + options button) → canonical [IMG:GEN] tag.
+    text = text.replace(
+        /<span\b[^>]*\bclass="[^"]*\bimggen-result-wrapper\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
+        (wrapperHtml) => {
+            const instruction = extractInstruction(wrapperHtml);
+            if (!instruction) return wrapperHtml;
+            return makeTag(instruction);
+        }
+    );
+
+    // Standalone imggen-result <img> (in case wrapper was stripped elsewhere) → canonical [IMG:GEN] tag.
+    text = text.replace(
+        /<img\b[^>]*\bclass="[^"]*\bimggen-result\b[^"]*"[^>]*>/gi,
+        (imgHtml) => {
+            const instruction = extractInstruction(imgHtml);
+            if (!instruction) return imgHtml;
+            return makeTag(instruction);
+        }
+    );
+
+    // Loading / Error / Disabled blocks → canonical [IMG:GEN] tag.
+    text = text.replace(
+        /<span\b[^>]*\bclass="[^"]*\bimggen-loading\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
+        (spanHtml) => {
+            const instruction = extractInstruction(spanHtml);
+            if (!instruction) return spanHtml;
+            return makeTag(instruction);
+        }
+    );
+    text = text.replace(
+        /<span\b[^>]*\bclass="[^"]*\bimggen-error\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
+        (spanHtml) => {
+            const instruction = extractInstruction(spanHtml);
+            if (!instruction) return spanHtml;
+            return makeTag(instruction);
+        }
+    );
+
+    return text;
+}
+
+function prepareEditText(text) {
+    text = normalizeImgGenHtmlForEditing(text);
+
+    const map = {};
+    let idx = 0;
+    const cleaned = text.replace(
+        /(<img\b[^>]*\bsrc=")([^"]{256,})("[^>]*>)/gi,
+        (match, before, src, after) => {
+            const key = `[IMG:SRC:${idx}]`;
+            map[key] = src;
+            idx++;
+            return before + key + after;
+        }
+    );
+    return { text: cleaned, map };
+}
+
+function restoreEditText(text, map) {
+    if (!map) return text;
+    for (const [key, src] of Object.entries(map)) {
+        text = text.replace(key, src);
+    }
+    return text;
+}
+
 function saveEdit(msg, index) {
-    let newText = msg.editText || "";
+    let newText = restoreEditText(msg.editText || "", msg._base64Map);
+    delete msg._base64Map;
     let newReasoning = msg.reasoning;
-    
+
     const { start: tagStart, end: tagEnd } = getReasoningTags();
 
     if (tagStart && tagEnd) {
@@ -1944,6 +2031,7 @@ function saveEdit(msg, index) {
 function cancelEdit(msg) {
     msg.isEditing = false;
     delete msg.editText;
+    delete msg._base64Map;
 }
 
 function saveGuidance(msg, index, newGuidance) {
@@ -2658,7 +2746,7 @@ onUnmounted(() => {
                     @swipe="(dir) => changeSwipe(vItem.item.originalIndex, dir, true)"
                     @change-greeting="(dir) => changeGreeting(vItem.item.originalIndex, dir, true)"
                     @regenerate="(mode, guidanceText) => regenerateMessage(vItem.item.originalIndex, mode, guidanceText)"
-                    @edit="() => { vItem.item.data.editText = vItem.item.data.text; vItem.item.data.isEditing = true; }"
+                    @edit="() => enterEditMode(vItem.item.data)"
                     @save-edit="saveEdit(vItem.item.data, vItem.item.originalIndex)"
                     @cancel-edit="cancelEdit(vItem.item.data)"
                     @save-guidance="(text) => saveGuidance(vItem.item.data, vItem.item.originalIndex, text)"
@@ -2797,7 +2885,7 @@ onUnmounted(() => {
 .msg-time {
     margin-left: auto;
     font-size: 12px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
 }
 
 /* Typing Indicator (VK Style Pencil) */
@@ -2856,7 +2944,7 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     padding: 16px 0;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     font-size: 11px;
     font-weight: 500;
     text-transform: uppercase;
@@ -2878,7 +2966,7 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     padding: 16px 0;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     font-size: 11px;
     font-weight: 500;
     text-transform: uppercase;
@@ -2984,14 +3072,14 @@ onUnmounted(() => {
 }
 
 
-body.dark-theme .msg-switcher {
+.msg-switcher {
     background-color: rgba(30, 30, 30, var(--element-opacity, 0.6));
-    color: #aaa;
+    color: var(--text-gray);
 }
 
 /* Code Blocks */
 .code-block {
-    background-color: rgba(0, 0, 0, 0.05);
+    background-color: rgba(255, 255, 255, 0.1);
     border-radius: 6px;
     padding: 10px;
     margin: 8px 0;
@@ -3000,11 +3088,6 @@ body.dark-theme .msg-switcher {
     font-size: 13px;
     white-space: pre;
     color: var(--text-black);
-}
-
-body.dark-theme .code-block {
-    background-color: rgba(255, 255, 255, 0.1);
-    color: #e1e3e6;
 }
 
 .edit-btn.save svg {
@@ -3016,9 +3099,6 @@ body.dark-theme .code-block {
 }
 
 .edit-btn:hover {
-    background-color: rgba(0,0,0,0.05);
-}
-body.dark-theme .edit-btn:hover {
     background-color: rgba(255,255,255,0.1);
 }
 
@@ -3188,8 +3268,8 @@ body.dark-theme .edit-btn:hover {
     transform: translateY(-250%);
 }
 
-body.dark-theme .message-section {
-    border-bottom-color: rgba(255, 255, 255, 0.05);
+.message-section {
+    border-bottom: 0.5px solid rgba(255, 255, 255, 0.05);
 }
 
 /* Text Change Animations */

@@ -338,7 +338,7 @@ function buildPromptMessagesWorker(args) {
             const msg = {
                 role: 'system',
                 content: replaceMacros(entry.content || "", char, personaObj, sessionVars, notifyObj),
-                blockName: `Lorebook: ${entry.keys?.[0] || 'Entry'}`,
+                blockName: `Lorebook: ${entry.comment || entry.keys?.[0] || 'Entry'}`,
                 isLorebook: true
             };
             if (loreByPosition[pos]) loreByPosition[pos].push(msg);
