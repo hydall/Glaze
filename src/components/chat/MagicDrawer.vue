@@ -504,11 +504,31 @@ defineExpose({
 }
 
 .drawer-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 20px;
+    padding: 14px 20px 60px 20px;
     flex-shrink: 0;
+    z-index: 10;
+    background: linear-gradient(to bottom, 
+        rgba(20, 20, 22, 0.98) 0%, 
+        rgba(20, 20, 22, 0.95) 20%,
+        rgba(20, 20, 22, 0.7) 50%,
+        rgba(20, 20, 22, 0) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    mask-image: linear-gradient(to bottom, black 0%, black 25%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, black 25%, transparent 100%);
+    pointer-events: none;
+}
+
+.drawer-header > * {
+    pointer-events: auto;
 }
 
 .drawer-title {
@@ -523,7 +543,7 @@ defineExpose({
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
-    padding: 4px 10px calc(30px + var(--sab)) 10px;
+    padding: 80px 10px calc(30px + var(--sab)) 10px;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px 6px;
@@ -557,7 +577,6 @@ defineExpose({
     transition: transform 0.2s cubic-bezier(0.2, 0, 0.2, 1), background-color 0.2s ease, border-color 0.2s ease;
     display: flex;
     align-items: center;
-    overflow: hidden;
 }
 
 .magic-item:active {
