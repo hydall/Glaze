@@ -15,6 +15,7 @@ const selectedTerm = ref(null);
 const searchQuery = ref('');
 const navDirection = ref('forward'); // 'forward' | 'back'
 const navStack = ref([]); // [{ view, selectedCategory, selectedTerm }]
+const openedViaHelptip = ref(false);
 
 const CATEGORY_ICONS = {
     basics:     'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
@@ -29,18 +30,18 @@ const CATEGORY_ICONS = {
 };
 
 const CATEGORY_COLORS = {
-    basics:     { light: 'rgba(100,149,237,0.12)', dark: 'rgba(100,149,237,0.18)', icon: 'var(--vk-blue)' },
-    characters: { light: 'rgba(237,137,54,0.12)',  dark: 'rgba(237,137,54,0.18)',  icon: '#ed8936' },
-    chat:       { light: 'rgba(236,201,75,0.12)',  dark: 'rgba(236,201,75,0.18)',  icon: '#ecc94b' },
-    presets:    { light: 'rgba(159,122,234,0.12)', dark: 'rgba(159,122,234,0.18)', icon: '#9f7aea' },
-    lorebooks:  { light: 'rgba(237,100,100,0.12)', dark: 'rgba(237,100,100,0.18)', icon: '#ed6464' },
-    regex:      { light: 'rgba(56,189,178,0.12)',  dark: 'rgba(56,189,178,0.18)',  icon: '#38bdb2' },
-    interface:  { light: 'rgba(237,100,166,0.12)', dark: 'rgba(237,100,166,0.18)', icon: '#ed64a6' },
-    faq:        { light: 'rgba(72,187,120,0.12)',  dark: 'rgba(72,187,120,0.18)',  icon: '#48bb78' },
-    advanced:   { light: 'rgba(160,174,192,0.12)', dark: 'rgba(160,174,192,0.18)', icon: '#a0aec0' },
+    basics:     { bg: 'rgba(100,149,237,0.18)', icon: 'var(--vk-blue)' },
+    characters: { bg: 'rgba(237,137,54,0.18)',  icon: '#ed8936' },
+    chat:       { bg: 'rgba(236,201,75,0.18)',  icon: '#ecc94b' },
+    presets:    { bg: 'rgba(159,122,234,0.18)', icon: '#9f7aea' },
+    lorebooks:  { bg: 'rgba(237,100,100,0.18)', icon: '#ed6464' },
+    regex:      { bg: 'rgba(56,189,178,0.18)',  icon: '#38bdb2' },
+    interface:  { bg: 'rgba(237,100,166,0.18)', icon: '#ed64a6' },
+    faq:        { bg: 'rgba(72,187,120,0.18)',  icon: '#48bb78' },
+    advanced:   { bg: 'rgba(160,174,192,0.18)', icon: '#a0aec0' },
 };
 
-const DEFAULT_COLOR = { light: 'rgba(100,149,237,0.12)', dark: 'rgba(100,149,237,0.18)', icon: 'var(--vk-blue)' };
+const DEFAULT_COLOR = { bg: 'rgba(100,149,237,0.18)', icon: 'var(--vk-blue)' };
 
 const categories = computed(() => translations[currentLang.value]?.glossary?.categories || []);
 
@@ -111,6 +112,11 @@ function goBack() {
         selectedTerm.value = prev.selectedTerm;
         return;
     }
+    // Opened via helptip — close the sheet entirely instead of navigating back
+    if (openedViaHelptip.value) {
+        if (!props.viewMode) sheet.value?.close();
+        return;
+    }
     if (view.value === 'article') {
         selectedTerm.value = null;
         view.value = 'terms';
@@ -122,6 +128,7 @@ function goBack() {
 
 async function open(termId) {
     navStack.value = [];
+    openedViaHelptip.value = !!termId;
     if (!props.viewMode) {
         sheet.value?.open();
     }
@@ -148,7 +155,7 @@ function handleGlossaryEvent(e) {
 
 function handleGlBack() {
     if (!props.viewMode) return;
-    if (view.value === 'categories') {
+    if (view.value === 'categories' || (openedViaHelptip.value && navStack.value.length === 0)) {
         window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-menu' }));
     } else {
         goBack();
@@ -175,17 +182,26 @@ onBeforeUnmount(() => {
     window.removeEventListener('gl-back', handleGlBack);
 });
 
+const INLINE_ICONS = {
+    'triggered-items': 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z',
+};
+function getInlineIconPath(id) { return INLINE_ICONS[id] || ''; }
+
 const parsedDesc = computed(() => {
     if (!selectedTerm.value?.desc) return [];
     const parts = [];
     // [[termId]] or [[termId|display text]] — chip links
     // [display text](url) — external URL links
-    const regex = /\[\[([^\]|]+)(?:\|([^\]]*))?\]\]|\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+    // [icon:id] — inline icon
+    const regex = /\[\[([^\]|]+)(?:\|([^\]]*))?\]\]|\[([^\]]+)\]\((https?:\/\/[^)]+)\)|\[icon:([^\]]+)\]/g;
     const text = selectedTerm.value.desc;
     let lastIndex = 0, match;
     while ((match = regex.exec(text)) !== null) {
         if (match.index > lastIndex) parts.push({ type: 'text', value: text.slice(lastIndex, match.index) });
-        if (match[4]) {
+        if (match[5]) {
+            // Inline icon: [icon:id]
+            parts.push({ type: 'icon', id: match[5] });
+        } else if (match[4]) {
             // External URL link: [label](url)
             parts.push({ type: 'link', label: match[3], url: match[4] });
         } else {
@@ -243,7 +259,7 @@ defineExpose({ open });
                         </div>
                         <div v-else key="cats" class="gl-list">
                             <div v-for="cat in categories" :key="cat.id" class="gl-cat-card"
-                                :style="{ '--gl-cat-bg-light': getCategoryColor(cat.id).light, '--gl-cat-bg-dark': getCategoryColor(cat.id).dark, '--gl-cat-icon': getCategoryColor(cat.id).icon }"
+                                :style="{ '--gl-cat-bg': getCategoryColor(cat.id).bg, '--gl-cat-icon': getCategoryColor(cat.id).icon }"
                                 @click="selectCategory(cat)">
                                 <div class="gl-cat-icon-wrap"><svg viewBox="0 0 24 24"><path :d="getCategoryIcon(cat.id)"/></svg></div>
                                 <div class="gl-cat-info">
@@ -277,6 +293,7 @@ defineExpose({ open });
                             <span v-if="part.type === 'text'">{{ part.value }}</span>
                             <button v-else-if="part.type === 'chip'" class="gl-chip" @click="navigateToChipTerm(part.termId)">{{ part.label }}</button>
                             <button v-else-if="part.type === 'link'" class="gl-ext-link" @click="openLink(part.url)">{{ part.label }}</button>
+                            <span v-else-if="part.type === 'icon'" class="gl-inline-icon"><svg viewBox="0 0 24 24"><path :d="getInlineIconPath(part.id)"/></svg></span>
                         </template>
                     </p>
                 </div>
@@ -324,16 +341,11 @@ defineExpose({ open });
     display: flex;
     align-items: center;
     gap: 8px;
-    background: rgba(255, 255, 255, var(--element-opacity, 0.7));
-    border: 1px solid var(--border-color, rgba(0,0,0,0.08));
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.09);
     border-radius: 14px;
     padding: 0 12px;
     height: 44px;
-}
-
-body.dark-theme .gl-search-bar {
-    background: rgba(255,255,255,0.06);
-    border-color: rgba(255,255,255,0.09);
 }
 
 .gl-search-icon {
@@ -372,7 +384,7 @@ body.dark-theme .gl-search-bar {
     width: 22px;
     height: 22px;
     border: none;
-    background: rgba(0,0,0,0.08);
+    background: rgba(255,255,255,0.1);
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -380,10 +392,6 @@ body.dark-theme .gl-search-bar {
     cursor: pointer;
     flex-shrink: 0;
     padding: 0;
-}
-
-body.dark-theme .gl-search-clear {
-    background: rgba(255,255,255,0.1);
 }
 
 .gl-search-clear svg {
@@ -448,33 +456,23 @@ body.dark-theme .gl-search-clear {
     gap: 14px;
     padding: 14px;
     border-radius: 16px;
-    background: rgba(255, 255, 255, var(--element-opacity, 0.7));
-    border: 1px solid var(--border-color, rgba(0,0,0,0.08));
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.09);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
     transition: opacity 0.15s;
-}
-.gl-cat-card:active { opacity: 0.65; }
-
-body.dark-theme .gl-cat-card {
-    background: rgba(255,255,255,0.05);
-    border-color: rgba(255,255,255,0.09);
 }
 
 .gl-cat-icon-wrap {
     width: 42px;
     height: 42px;
     border-radius: 12px;
-    background: var(--gl-cat-bg-light);
+    background: var(--gl-cat-bg);
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-}
-
-body.dark-theme .gl-cat-icon-wrap {
-    background: var(--gl-cat-bg-dark);
 }
 
 .gl-cat-icon-wrap svg {
@@ -513,19 +511,13 @@ body.dark-theme .gl-cat-icon-wrap {
     align-items: center;
     padding: 12px 14px;
     border-radius: 14px;
-    background: rgba(255,255,255, var(--element-opacity, 0.7));
-    border: 1px solid var(--border-color, rgba(0,0,0,0.08));
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.09);
     cursor: pointer;
     gap: 10px;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
     transition: opacity 0.15s;
-}
-.gl-term-item:active { opacity: 0.65; }
-
-body.dark-theme .gl-term-item {
-    background: rgba(255,255,255,0.05);
-    border-color: rgba(255,255,255,0.09);
 }
 
 .gl-term-body {
@@ -582,13 +574,9 @@ body.dark-theme .gl-term-item {
 
 .gl-article-divider {
     height: 1px;
-    background: var(--border-color, rgba(0,0,0,0.08));
+    background: rgba(255,255,255,0.08);
     margin-bottom: 18px;
     border-radius: 1px;
-}
-
-body.dark-theme .gl-article-divider {
-    background: rgba(255,255,255,0.08);
 }
 
 .gl-article-desc {
@@ -654,25 +642,31 @@ body.dark-theme .gl-article-divider {
     padding: 2px 8px;
     margin: 0 2px;
     border-radius: 6px;
-    background: rgba(var(--vk-blue-rgb), 0.12);
+    background: rgba(var(--vk-blue-rgb), 0.18);
     color: var(--vk-blue);
     font-size: 13px;
     font-weight: 600;
     font-family: inherit;
-    border: 1px solid rgba(var(--vk-blue-rgb), 0.2);
+    border: 1px solid rgba(var(--vk-blue-rgb), 0.28);
     cursor: pointer;
     vertical-align: baseline;
     line-height: 1.5;
     transition: background 0.15s, opacity 0.15s;
     -webkit-tap-highlight-color: transparent;
 }
-.gl-chip:active {
-    background: rgba(var(--vk-blue-rgb), 0.22);
-    opacity: 0.8;
+
+/* ── Inline icons inside article descriptions ────────── */
+.gl-inline-icon {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+    margin: 0 2px;
+    margin-bottom: 2px;
 }
-body.dark-theme .gl-chip {
-    background: rgba(var(--vk-blue-rgb), 0.18);
-    border-color: rgba(var(--vk-blue-rgb), 0.28);
+.gl-inline-icon svg {
+    width: 15px;
+    height: 15px;
+    fill: var(--text-gray);
 }
 
 /* ── External URL links inside article descriptions ──── */
@@ -682,25 +676,16 @@ body.dark-theme .gl-chip {
     padding: 2px 8px;
     margin: 0 2px;
     border-radius: 6px;
-    background: rgba(72,187,120,0.12);
-    color: #38a169;
+    background: rgba(72,187,120,0.18);
+    color: #68d391;
     font-size: 13px;
     font-weight: 600;
     font-family: inherit;
-    border: 1px solid rgba(72,187,120,0.22);
+    border: 1px solid rgba(72,187,120,0.3);
     cursor: pointer;
     vertical-align: baseline;
     line-height: 1.5;
     transition: background 0.15s, opacity 0.15s;
     -webkit-tap-highlight-color: transparent;
-}
-.gl-ext-link:active {
-    background: rgba(72,187,120,0.22);
-    opacity: 0.8;
-}
-body.dark-theme .gl-ext-link {
-    background: rgba(72,187,120,0.18);
-    color: #68d391;
-    border-color: rgba(72,187,120,0.3);
 }
 </style>
