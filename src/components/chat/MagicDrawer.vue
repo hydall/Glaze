@@ -511,24 +511,45 @@ defineExpose({
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 20px 60px 20px;
+    padding: 14px 20px 48px 20px;
     flex-shrink: 0;
     z-index: 10;
+    pointer-events: none;
+}
+
+.drawer-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background: linear-gradient(to bottom, 
-        rgba(20, 20, 22, 0.98) 0%, 
-        rgba(20, 20, 22, 0.95) 20%,
-        rgba(20, 20, 22, 0.7) 50%,
+        rgba(20, 20, 22, 0.7) 0%, 
         rgba(20, 20, 22, 0) 100%
     );
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    mask-image: linear-gradient(to bottom, black 0%, black 25%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, black 0%, black 25%, transparent 100%);
-    pointer-events: none;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 15%, 
+        rgba(0, 0, 0, 0.8) 35%,
+        rgba(0, 0, 0, 0.4) 60%,
+        transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 15%, 
+        rgba(0, 0, 0, 0.8) 35%,
+        rgba(0, 0, 0, 0.4) 60%,
+        transparent 100%
+    );
+    z-index: -1;
 }
 
 .drawer-header > * {
     pointer-events: auto;
+    opacity: 1 !important;
 }
 
 .drawer-title {
@@ -543,11 +564,16 @@ defineExpose({
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
-    padding: 80px 10px calc(30px + var(--sab)) 10px;
+    scroll-padding-top: 60px;
+    padding: 60px 10px calc(20px + var(--sab)) 10px;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px 6px;
     align-content: start;
+}
+
+.drawer-content::-webkit-scrollbar-track {
+    margin-top: 60px;
 }
 
 .drawer-enter-active,
