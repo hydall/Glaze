@@ -3299,10 +3299,6 @@ onUnmounted(() => {
     transform: translateY(-250%);
 }
 
-.message-section {
-    border-bottom: 0.5px solid rgba(255, 255, 255, 0.05);
-}
-
 /* Text Change Animations */
 @keyframes slideOutLeft {
     to { opacity: 0; transform: translateX(-20px); }

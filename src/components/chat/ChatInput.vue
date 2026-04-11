@@ -1068,8 +1068,6 @@ defineExpose({
 }
 
 
-
-.chat-input-bar { background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)); }
 .chat-input-editable { color: var(--text-black); }
 
 .chat-status-gradient-bottom {

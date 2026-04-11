@@ -801,7 +801,7 @@ const chatPreviewStyle = computed(() => ({
 
 .tab.active {
     background: rgba(255,255,255,0.1);
-    color: white;
+    color: var(--text-black);
 }
 
 /* Sub-tabs */

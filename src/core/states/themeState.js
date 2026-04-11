@@ -1,3 +1,4 @@
+import { reactive } from 'vue';
 import { db, queueDbWrite } from '@/utils/db.js';
 
 export const themeState = reactive({
@@ -841,7 +842,7 @@ function updateThemeStyles() {
     noiseStyle.textContent = `
         .menu-group,
         .preset-selector,
-        .api-status {
+        .conn-badge  {
             background-image: ${noiseSvg} !important;
         }
 

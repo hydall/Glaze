@@ -477,7 +477,7 @@ defineExpose({ open, close });
 .depth-item { flex: 1; background: rgba(30, 30, 32, var(--element-opacity, 0.7)); backdrop-filter: blur(10px); border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); }
 
 .select-item { padding: 8px 20px; border: none; }
-.vk-select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: white; font-family: inherit; font-size: 14px; outline: none; }
+.vk-select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: var(--text-black); font-family: inherit; font-size: 14px; outline: none; }
 
 .vk-switch { appearance: none; width: 44px; height: 24px; background: #e9e9ea; border-radius: 12px; position: relative; transition: 0.3s; cursor: pointer; }
 .vk-switch:checked { background: var(--vk-blue); }

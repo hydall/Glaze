@@ -348,6 +348,6 @@
 
 .sub-tab-btn.active {
     background-color: transparent;
-    color: #fff;
+    color: var(--text-black);
     box-shadow: none;
 }
