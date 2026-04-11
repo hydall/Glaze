@@ -2,7 +2,8 @@ import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { db } from '@/utils/db.js';
 
 export const PROVIDER_BLACKLIST = [
-    { name: 'EllyAI', match: 'ellyai' }
+    { name: 'EllyAI', match: 'ellyai' },
+    { name: 'MegaLLM', match: 'megallm' }
 ];
 
 export function getBlacklistedProvider(url) {
