@@ -1,4 +1,4 @@
-import { currentLang, themeMode, setThemeMode, getThemeMode, imageViewerMode, setImageViewerMode } from '@/core/config/APPSettings.js';
+import { currentLang, imageViewerMode, setImageViewerMode } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { formatText } from '@/utils/textFormatter.js';
 import { Capacitor } from '@capacitor/core';
@@ -160,7 +160,7 @@ export function initRipple() {
         document.head.appendChild(style);
     }
 
-    const elements = document.querySelectorAll('.tabbar, .app-header, .menu-group, .preset-selector, .api-status, .glass-panel, .segmented-control, .bottom-sheet-content');
+    const elements = document.querySelectorAll('.tabbar, .app-header, .menu-group, .preset-selector, .conn-badge, .glass-panel, .segmented-control, .bottom-sheet-content');
     elements.forEach(attachRipple);
 
     if (!_rippleDelegationAdded) {
@@ -224,7 +224,7 @@ export async function updateAppColors(forceMainView = false) {
     document.documentElement.style.setProperty('--element-opacity', elemOp !== null ? elemOp : '0.8');
     document.documentElement.style.setProperty('--element-blur', (elemBl !== null ? elemBl : '12') + 'px');
 
-    meta.setAttribute('content', '#19191a');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#19191a');
 
     try {
         await SafeArea.setSystemBarsStyle({ style: 'DARK' });
@@ -246,33 +246,6 @@ export function initThemeToggle() {
 
     // Auto-detect system theme
     updateAppColors();
-
-    // Theme Selector
-    const themeSelector = document.getElementById('theme-selector');
-    const themeValue = document.getElementById('theme-value-text');
-
-    const updateThemeText = () => {
-        if (!themeValue) return;
-        const t = translations[currentLang.value] || {};
-        const map = {
-            'dark': t.theme_dark || 'Dark'
-        };
-        themeValue.textContent = map[getThemeMode()] || (t.theme_dark || 'Dark');
-    };
-    updateThemeText();
-
-    if (themeSelector) {
-        themeSelector.addEventListener('click', () => {
-            const t = translations[currentLang.value] || {};
-            const getIcon = (mode) => getThemeMode() === mode ? '<svg viewBox="0 0 24 24" style="fill: var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : '';
-            showBottomSheet({
-                title: t.theme_title || 'Theme',
-                items: [
-                    { label: t.theme_dark || 'Dark', icon: getIcon('dark'), onClick: () => { setThemeMode('dark'); updateAppColors(); updateThemeText(); closeBottomSheet(); } }
-                ]
-            });
-        });
-    }
 
     // Holo Cards Selector
     const holoSelector = document.getElementById('holocards-selector');
