@@ -11,6 +11,7 @@ import { convertSTPreset } from '@/core/services/presetImportService.js';
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { presetState, initPresetState, savePresets, setPresetConnection } from '@/core/states/presetState.js';
 import { isKeyboardOpen as globalKeyboardOpen } from '@/core/services/keyboardHandler.js';
+import { userDefaultPresets } from '@/core/states/defaultPresets.js';
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
@@ -347,23 +348,26 @@ async function finish() {
 
 <template>
     <div class="onboarding-overlay">
-        <!-- Stories Progress Bar -->
-        <div class="stories-nav">
-            <div 
-                v-for="(_, index) in slides" 
-                :key="index" 
-                class="story-bar"
-                :class="{ active: index === currentSlide, passed: index < currentSlide }"
-            >
-                <div class="story-fill"></div>
-            </div>
-        </div>
-
-        <button v-if="currentSlide > 0" class="nav-back-btn" @click="prev">
-            <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-        </button>
-
         <div class="onboarding-card" :class="{ 'keyboard-open': globalKeyboardOpen }">
+            <!-- Header with skip/progress -->
+            <div class="onboarding-header">
+                <div class="onboarding-header-gradient"></div>
+                <!-- Stories Progress Bar -->
+                <div class="stories-nav">
+                    <div 
+                        v-for="(_, index) in slides" 
+                        :key="index" 
+                        class="story-bar"
+                        :class="{ active: index === currentSlide, passed: index < currentSlide }"
+                    >
+                        <div class="story-fill"></div>
+                    </div>
+                </div>
+
+                <button v-if="currentSlide > 0" class="nav-back-btn" @click="prev">
+                    <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                </button>
+            </div>
             <div class="slides-container">
                 <Transition name="slide-fade" mode="out-in">
                     <div :key="currentSlide" class="slide" :class="{ 'welcome-align': ['welcome', 'features'].includes(slides[currentSlide].type) }">
@@ -444,15 +448,44 @@ async function finish() {
                             </div>
                         </div>
 
-                        <!-- Preset Import Slide -->
-                        <div v-if="slides[currentSlide].type === 'preset_import'" class="intro-blocks-container" style="margin-top: 24px;">
-                            <div class="intro-block clickable" @click="triggerPresetImport">
-                                <div class="intro-icon">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        <div v-if="slides[currentSlide].type === 'preset_import'" style="width: 100%;" class="preset-selector-list">
+                            <!-- Defaults List (PresetView style) -->
+                            <div class="ps-list">
+                                <div v-for="preset in userDefaultPresets" :key="preset.id"
+                                     class="ps-card"
+                                     :class="{ 'ps-has-bg': !!preset.image }"
+                                     :style="preset.image ? { backgroundImage: 'url(' + preset.image + ')' } : {}">
+                                    
+                                    <!-- Overlay for image cards -->
+                                    <div class="ps-card-overlay" v-if="preset.image"></div>
+                                    
+                                    <!-- Icon only for non-image cards -->
+                                    <div class="ps-card-icon" v-if="!preset.image">
+                                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                                    </div>
+
+                                    <!-- Info -->
+                                    <div class="ps-card-info">
+                                        <div class="ps-card-name" :class="{ 'ps-with-bg': !!preset.image }">{{ preset.name || 'Default' }}</div>
+                                        <div class="ps-card-meta" :class="{ 'ps-with-bg': !!preset.image }">
+                                            <div v-if="preset.author" class="ps-author-line">by {{ preset.author }}</div>
+                                            <div v-if="preset.descriptionKey" class="ps-desc-line">{{ t(preset.descriptionKey) }}</div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="intro-text">
-                                    <h3>{{ t('onboarding_btn_import_preset') }}</h3>
-                                    <p>JSON</p>
+
+                                <p class="description" style="margin-top: 16px; margin-bottom: 8px; font-size: 14px; opacity: 0.8; width: 100%; text-align: center;">
+                                    {{ t('onboarding_preset_import_st_hint') }}
+                                </p>
+
+                                <div class="intro-block clickable" @click="triggerPresetImport">
+                                    <div class="intro-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    </div>
+                                    <div class="intro-text">
+                                        <h3>{{ t('onboarding_btn_import_preset') }}</h3>
+                                        <p>JSON</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -474,18 +507,21 @@ async function finish() {
                 </Transition>
             </div>
 
-            <div class="controls">
-                <button class="btn-primary full-width" @click="next">
-                    {{ mainButtonLabel }}
-                </button>
-                <button 
-                    v-if="slides[currentSlide].type === 'notifications'" 
-                    class="btn-secondary full-width" 
-                    style="margin-top: 12px; width: 100%;" 
-                    @click="skipNotifications"
-                >
-                    {{ t('btn_later') || "Later" }}
-                </button>
+            <div class="onboarding-footer">
+                <div class="onboarding-footer-gradient"></div>
+                <div class="controls">
+                    <button class="btn-primary full-width" @click="next">
+                        {{ mainButtonLabel }}
+                    </button>
+                    <button 
+                        v-if="slides[currentSlide].type === 'notifications'" 
+                        class="btn-secondary full-width" 
+                        style="margin-top: 12px; width: 100%;" 
+                        @click="skipNotifications"
+                    >
+                        {{ t('btn_later') || "Later" }}
+                    </button>
+                </div>
             </div>
         </div>
         <BackupSheet ref="backupSheet" :z-index="10000" />
@@ -499,7 +535,7 @@ async function finish() {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: #000;
+    background-color: rgb(var(--ui-bg-rgb));
     z-index: 9999;
     display: flex;
     flex-direction: column;
@@ -509,9 +545,57 @@ async function finish() {
     font-family: -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
 }
 
-/* Stories Navigation */
-.stories-nav {
+/* Header & Footer Layout */
+.onboarding-header {
     position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.onboarding-header > * {
+    pointer-events: auto;
+}
+
+.onboarding-header-gradient {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: calc(84px + var(--sat));
+    background: linear-gradient(to bottom, rgba(0,0,0,0.4), transparent);
+    z-index: -1;
+    pointer-events: none;
+}
+
+.onboarding-footer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.onboarding-footer > * {
+    pointer-events: auto;
+}
+
+.onboarding-footer-gradient {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: calc(120px + var(--sab));
+    background: linear-gradient(to top, rgba(0,0,0,0.5), transparent);
+    z-index: -1;
+    pointer-events: none;
+}
+
+.stories-nav {
+    position: relative;
     top: 0;
     left: 0;
     width: 100%;
@@ -520,6 +604,16 @@ async function finish() {
     display: flex;
     gap: 6px;
     z-index: 10;
+    box-sizing: border-box;
+}
+
+.controls {
+    width: 100%;
+    max-width: 500px;
+    margin: 0 auto;
+    padding: 24px;
+    padding-bottom: calc(24px + var(--sab));
+    flex-shrink: 0;
     box-sizing: border-box;
 }
 
@@ -550,9 +644,7 @@ async function finish() {
     background: rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(50px);
     -webkit-backdrop-filter: blur(50px);
-    padding: 24px;
-    padding-top: calc(44px + var(--sat));
-    padding-bottom: calc(24px + var(--sab));
+    padding: 0;
     display: flex;
     flex-direction: column;
     z-index: 2;
@@ -565,14 +657,19 @@ async function finish() {
 
 .slides-container {
     flex: 1;
-    display: grid;
-    place-items: start;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     width: 100%;
     max-width: 500px;
     margin: 0 auto;
     overflow-y: auto;
     overflow-x: hidden;
     min-height: 0;
+    padding: 24px;
+    padding-top: calc(84px + var(--sat));
+    padding-bottom: calc(100px + var(--sab));
+    box-sizing: border-box;
 }
 
 .slide, .standard-slide {
@@ -581,8 +678,13 @@ async function finish() {
     display: flex;
     flex-direction: column;
     align-items: center;
-    margin: auto 0;
 }
+
+.slide {
+    margin: auto 0;
+    flex-shrink: 0;
+}
+
 .slide.welcome-align {
     margin: 0;
 }
@@ -713,8 +815,10 @@ async function finish() {
     line-height: 1.5;
     color: var(--text-gray);
     white-space: pre-line;
-    max-width: 320px;
+    max-width: 100%;
+    padding: 0 20px;
     margin: 0 auto;
+    box-sizing: border-box;
 }
 
 /* Forms */
@@ -765,18 +869,34 @@ async function finish() {
 
 .nav-back-btn {
     position: absolute;
-    top: calc(40px + var(--sat));
-    left: 16px;
+    top: calc(36px + var(--sat));
+    left: 12px;
     z-index: 20;
-    background: none;
-    border: none;
-    color: #fff;
-    padding: 8px;
-    cursor: pointer;
-    border-radius: 50%;
+    width: 40px;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
+    cursor: pointer;
+    color: var(--accent-color, var(--vk-blue));
+    border-radius: 50%;
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+}
+
+.nav-back-btn :deep(svg) {
+    width: 20px !important;
+    height: 20px !important;
+    fill: currentColor !important;
+}
+
+.nav-back-btn:active {
+    transform: scale(0.9);
+    opacity: 0.8;
 }
 
 /* Avatar Card (matches GenericEditor style) */
@@ -845,5 +965,158 @@ async function finish() {
     background: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent);
     text-shadow: 0 2px 4px rgba(0,0,0,0.5);
     pointer-events: none;
+}
+
+/* Transitions */
+.slide-fade-enter-active,
+.slide-fade-leave-active {
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.slide-fade-enter-from {
+    transform: translateX(40px);
+    opacity: 0;
+}
+
+.slide-fade-leave-to {
+    transform: translateX(-40px);
+    opacity: 0;
+}
+
+.status-fade-enter-active,
+.status-fade-leave-active {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.status-fade-enter-from,
+.status-fade-leave-to {
+    opacity: 0;
+    transform: translateY(4px);
+}
+
+/* Preset Selector Styles (from PresetView) */
+.preset-selector-list {
+    width: 100%;
+    margin-top: 16px;
+    padding: 0 10px;
+    box-sizing: border-box;
+}
+
+.ps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.ps-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 2px solid #2c2d2e;
+    border-radius: 16px;
+    position: relative;
+    overflow: hidden;
+    background-size: cover;
+    background-position: center top;
+    text-align: left;
+}
+
+.ps-card.ps-has-bg {
+    min-height: 120px;
+    align-items: flex-end;
+    padding: 10px 14px;
+}
+
+.ps-card-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.2) 100%);
+    z-index: 1;
+}
+
+.ps-card > *:not(.ps-card-overlay) {
+    position: relative;
+    z-index: 2;
+}
+
+.ps-card-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    background: rgba(var(--vk-blue-rgb), 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--vk-blue);
+}
+
+.ps-card-icon svg {
+    width: 24px;
+    height: 24px;
+    fill: currentColor;
+}
+
+.ps-card-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.ps-card-name {
+    font-size: 17px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 2px;
+}
+
+.ps-card-name.ps-with-bg {
+    text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+}
+
+.ps-card-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ps-author-line {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.ps-desc-line {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.3;
+}
+
+.ps-card-meta.ps-with-bg .ps-author-line,
+.ps-card-meta.ps-with-bg .ps-desc-line {
+    text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+}
+
+/* Onboarding adjustments for Preset Selector List */
+.preset-selector-list .intro-block {
+    padding: 12px;
+    border-radius: 16px;
+}
+
+.preset-selector-list .intro-icon {
+    width: 32px;
+    height: 32px;
+}
+
+.preset-selector-list .intro-text h3 {
+    font-size: 16px;
+}
+
+.preset-selector-list .intro-text p {
+    font-size: 13px;
 }
 </style>
