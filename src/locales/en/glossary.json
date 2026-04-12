@@ -148,6 +148,17 @@
                     "id": "triggered-items",
                     "name": "Triggered Items",
                     "desc": "An icon [icon:triggered-items] that appears on a message when at least one [[lorebook]] entry or [[regex]] script was activated during its generation. Tap it to see exactly which lorebook entries were injected and which regex scripts were applied to that message."
+                },
+                {
+                    "id": "request-preview",
+                    "name": "Request Preview",
+                    "desc": "A very handy tool to debug your prompt. It shows the exact [[chatcompletion|JSON Chat Completion]] payload Glaze is sending to the [[api|API provider]]. It's useful for debugging prompt issues, seeing how [[macro]]s are expanded, and checking which [[lorebook]] entries and [[regex]] scripts are being injected. You can view the request both in a formatted view and as raw JSON."
+                },
+                {
+                    "id": "image-gen",
+                    "name": "Image Generation",
+                    "alt": "AI Images",
+                    "desc": "A background service that monitors messages for image generation tags (like `[IMG:GEN]`). When a tag is detected, it handles the API request to OpenAI, Google, or Naistera to generate an inline image directly in the chat. It can also send visual references — such as character avatars or your own custom images — to help the AI maintain consistency in the generated art."
                 }
             ]
         },
@@ -224,6 +235,11 @@
                     "name": "Reasoning",
                     "alt": "Chain of Thought",
                     "desc": "Some AI models 'think out loud' before giving their final answer, working through their reasoning step by step. 'Request Model Reasoning' only affects visibility and does not disable the model's thinking process. 'Parse Inline Reasoning' is made for cases when the model sends its thinking inside the response text rather than in a separate block — it extracts it from tags like <think>...</think> and displays it separately."
+                },
+                {
+                    "id": "preset-reasoning-inline",
+                    "name": "Parse Inline Reasoning",
+                    "desc": "Automatically extracts thinking/reasoning from the model's main message body and moves it to a separate UI block. This is especially useful for models like DeepSeek V3 that use tags like `<think>...</think>` instead of a dedicated reasoning field, and for presets designed to bypass native reasoning features by forcing the model to 'think out loud' directly in its response text."
                 }
             ]
         },
