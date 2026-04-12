@@ -720,10 +720,12 @@ onUnmounted(() => {
                                     <RollingNumber class="gen-time" :value="message.genTime" />
                                 </div>
                             </template>
-                            <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
-                                <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                                <span>{{ tokenCount }}t</span>
-                            </div>
+                            <Transition name="fade">
+                                <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !isGenerating" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
+                                    <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                                    <span>{{ tokenCount }}t</span>
+                                </div>
+                            </Transition>
                         </div>
 
                         <span class="bubble-time" :style="!(((!uiHideGenTime && message.genTime && message.genTime !== '0s') || (!uiHideTokenCnt && tokenCount > 0))) ? 'margin-left: auto;' : ''">
@@ -750,10 +752,12 @@ onUnmounted(() => {
                                     <RollingNumber class="gen-time" :value="message.genTime" />
                                 </div>
                             </template>
-                            <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
-                                <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                                <span>{{ tokenCount }}t</span>
-                            </div>
+                            <Transition name="fade">
+                                <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !isGenerating" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
+                                    <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                                    <span>{{ tokenCount }}t</span>
+                                </div>
+                            </Transition>
                         </div>
 
                         <span class="bubble-time" :style="!((!uiHideGenTime && message.genTime && message.genTime !== '0s') || (!uiHideTokenCnt && tokenCount > 0)) ? 'margin-left: auto;' : ''">
@@ -773,10 +777,12 @@ onUnmounted(() => {
                             <RollingNumber class="gen-time" :value="message.genTime" />
                         </div>
                     </template>
-                    <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
-                        <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                        <span>{{ tokenCount }}t</span>
-                    </div>
+                    <Transition name="fade">
+                        <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !isGenerating" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
+                            <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                            <span>{{ tokenCount }}t</span>
+                        </div>
+                    </Transition>
                 </div>
             </div>
 
@@ -1450,6 +1456,13 @@ onUnmounted(() => {
 .slide-next-leave-to { transform: translateX(-10px); opacity: 0; }
 .slide-prev-enter-from { transform: translateX(-10px); opacity: 0; }
 .slide-prev-leave-to { transform: translateX(10px); opacity: 0; }
+
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+}
 
 /* Error State (Glassmorphism) */
 .message-section.error {
