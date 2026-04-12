@@ -53,10 +53,10 @@ const allAvailableItems = [
     { id: 'stats', i18n: 'action_chat_stats', icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z', event: 'magic-stats' },
     { id: 'char-card', i18n: 'block_char_card', icon: 'M3 5v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H5c-1.11 0-2 .9-2 2zm12 4c0 1.66-1.34 3-3 3s-3-1.34-3-3 1.34-3 3-3 3 1.34 3 3zm-9 8c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1H6v-1z', event: 'magic-char-card' },
     { id: 'lorebooks', i18n: 'menu_lorebooks', fallback: 'World Info', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z', event: 'magic-lorebooks' },
-    { id: 'regex', i18n: 'menu_regex', fallback: 'Regex Scripts', icon: 'M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H9v-2h6v2zm0-5H9v-2h6v2zm0-5H9V6h6v2z', event: 'magic-regex' },
-    { id: 'api', i18n: 'tab_api', fallback: 'API', icon: 'M7.77 6.76L6.23 5.48.82 12l5.41 6.52 1.54-1.28L3.42 12l4.35-5.24zM7 13h2v-2H7v2zm10-2h-2v2h2v-2zm-6 2h2v-2h-2v2zm6.77-7.52l-1.54 1.28L20.58 12l-4.35 5.24 1.54 1.28L23.18 12l-5.41-6.52z', event: 'magic-api' },
+    { id: 'regex', i18n: 'menu_regex', fallback: 'Regex Scripts', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z', event: 'magic-regex' },
+    { id: 'api', i18n: 'tab_api', fallback: 'API', icon: 'M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z', event: 'magic-api' },
     { id: 'presets', i18n: 'subtab_preset', fallback: 'Presets', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z', event: 'magic-presets' },
-    { id: 'preview', i18n: 'magic_request_preview', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z', event: 'request-preview' },
+    { id: 'preview', i18n: 'magic_request_preview', icon: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z', event: 'request-preview' },
     { id: 'personas', i18n: 'tab_personas', fallback: 'Personas', icon: 'M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1z', event: 'magic-personas' },
     { id: 'image-gen', i18n: 'imggen_title', fallback: 'Image Gen', icon: 'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z', event: 'magic-image-gen' },
     { id: 'glossary', i18n: 'menu_glossary', fallback: 'Glossary', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z', event: 'magic-glossary' }
@@ -103,7 +103,10 @@ const loadItems = () => {
 const items = ref(loadItems());
 
 const displayItems = computed(() => {
-    const list = items.value.map((item, index) => ({ ...item, originalIndex: index }));
+    const list = items.value.map((item, index) => {
+        const canonical = allAvailableItems.find(a => a.id === item.id);
+        return { ...item, ...(canonical || {}), originalIndex: index };
+    });
     if (isEditing.value && canAdd.value) {
         list.push({ isAddBtn: true, id: 'add-btn' });
     }
