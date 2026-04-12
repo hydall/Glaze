@@ -149,9 +149,8 @@ const getStyles = () => `
   .janitor-options-btn svg { width: 16px; height: 16px; fill: #fff; pointer-events: none; }
   .imggen-loading {
     display: block;
-    width: 240px;
     max-width: 100%;
-    min-height: 80px;
+    min-height: 120px;
     border-radius: 12px;
     margin: 8px 0;
     background: linear-gradient(90deg,
@@ -159,10 +158,26 @@ const getStyles = () => `
       rgba(255,255,255,0.10) 50%,
       rgba(255,255,255,0.04) 75%);
     background-size: 200% 100%;
-    animation: imggen-shimmer 1.4s infinite linear;
+    animation: imggen-shimmer 1.5s infinite linear;
     position: relative;
     overflow: hidden;
     border: none;
+  }
+  .imggen-loading-hint {
+    display: inline-block;
+    padding: 12px 0 0 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+    user-select: none;
+  }
+  .imggen-loading-timer {
+    display: inline-block;
+    padding: 12px 12px 0 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.7);
+    user-select: none;
   }
   .imggen-loading-prompt {
     position: absolute;
@@ -177,9 +192,13 @@ const getStyles = () => `
     transition: max-height 0.25s ease;
     user-select: none;
   }
+  @keyframes imggen-shimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
   .imggen-loading.expanded .imggen-loading-prompt {
-    top: 28px;
-    max-height: calc(100% - 38px);
+    top: 44px;
+    max-height: calc(100% - 54px);
     overflow-y: auto;
   }
   .imggen-error {
@@ -376,10 +395,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <div ref="container" class="shadow-content-wrapper" :style="{ '--user-select': isSelected ? 'text' : 'none' }"></div>
-  <Teleport v-for="(timer, i) in activeTimers" :key="i" :to="timer.el">
-    <RollingNumber :value="timer.value" />
-  </Teleport>
+  <div class="shadow-content-wrapper">
+    <div ref="container" class="shadow-content-root" :style="{ '--user-select': isSelected ? 'text' : 'none' }"></div>
+    <Teleport v-for="(timer, i) in activeTimers" :key="i" :to="timer.el">
+      <RollingNumber :value="timer.value" />
+    </Teleport>
+  </div>
 </template>
 
 <style scoped>
