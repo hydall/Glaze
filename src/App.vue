@@ -17,7 +17,7 @@ const OnboardingView = defineAsyncComponent(() => import('@/views/OnboardingView
 const Editor = defineAsyncComponent(() => import('@/components/editors/GenericEditor.vue'));
 const FullScreenEditor = defineAsyncComponent(() => import('@/components/editors/FullScreenEditor.vue'));
 
-const HoloCardViewer = defineAsyncComponent(() => import('@/components/media/HoloCardViewer.vue'));
+// const HoloCardViewer = defineAsyncComponent(() => import('@/components/media/HoloCardViewer.vue'));
 const ImageViewer = defineAsyncComponent(() => import('@/components/media/ImageViewer.vue'));
 import AppToast from '@/components/ui/AppToast.vue';
 
@@ -477,16 +477,10 @@ const onOpenOnboarding = () => { isOnboarding.value = true; };
 const onTriggerOpenImage = (e) => {
     const { src, name, description, onCloseCallback } = e.detail;
     logger.debug('[App] trigger-open-image. Current Mode:', imageViewerMode.value);
-    if (imageViewerMode.value === 'holo' || imageViewerMode.value === 'holocards') {
-        window.dispatchEvent(new CustomEvent('open-holocards', {
-            detail: { src, name, description, onCloseCallback }
-        }));
-    } else {
-        logger.debug('[App] Dispatching open-image-viewer');
-        window.dispatchEvent(new CustomEvent('open-image-viewer', {
-            detail: { src, description, onCloseCallback }
-        }));
-    }
+    logger.debug('[App] trigger-open-image. Always using default viewer.');
+    window.dispatchEvent(new CustomEvent('open-image-viewer', {
+        detail: { src, description, onCloseCallback }
+    }));
 };
 
 const onOpenFsRequest = (e) => { openFsEditor(e.detail); };
@@ -789,7 +783,7 @@ watch(currentView, () => {
     />
 
     <!-- Holo Cards Viewer -->
-    <HoloCardViewer />
+    <!-- <HoloCardViewer /> -->
 
     <!-- Standard Image Viewer -->
     <ImageViewer />

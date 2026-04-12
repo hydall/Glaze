@@ -75,10 +75,13 @@ const toggleDialogGrouped = () => {
     window.dispatchEvent(new CustomEvent('settings-changed'));
 };
 
+/*
 const imageViewerLabel = computed(() => {
     return (activeImageViewerMode.value === 'holo' || activeImageViewerMode.value === 'holocards') ? (t('viewer_holo') || 'Holo Cards (3D)') : (t('viewer_default') || 'Default (2D)');
 });
+*/
 
+/*
 const openImageViewerSelector = () => {
     showBottomSheet({
         title: t('menu_image_viewer') || 'Image Viewer',
@@ -88,6 +91,7 @@ const openImageViewerSelector = () => {
         ]
     });
 };
+*/
 
 const setViewer = (mode) => {
     setImageViewerMode(mode);
@@ -241,13 +245,13 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
                 </div>
 
                 <!-- Image Viewer (Holo Cards) -->
-                <div class="settings-item-checkbox" @click="openImageViewerSelector">
+                <!-- <div class="settings-item-checkbox" @click="openImageViewerSelector">
                     <div class="settings-text-col">
                         <label>{{ t('menu_image_viewer') || 'Image Viewer' }}</label>
                         <div class="settings-desc">{{ t('desc_image_viewer') || 'Change how attached images are displayed' }}</div>
                     </div>
                     <div class="menu-value" style="font-size: 14px; color: var(--text-gray);">{{ imageViewerLabel }}</div>
-                </div>
+                </div> -->
 
                 <!-- Chat Layout -->
                 <div class="settings-item-checkbox" @click="openChatLayoutSelector">
