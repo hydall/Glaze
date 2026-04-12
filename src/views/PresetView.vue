@@ -1808,6 +1808,7 @@ function openAuthorsNoteSheet() {
         title: t('magic_authors_notes'),
         helpTip: 'authornote',
         content: content,
+        isSolid: true,
         headerAction: { icon: getToggleIcon(data.enabled), onClick: toggleAction },
         onClose: () => {
             if (debounceTimer) clearTimeout(debounceTimer);
@@ -1900,6 +1901,7 @@ function openSummarySheet() {
         title: t('magic_summary'), 
         helpTip: 'summary',
         content: content,
+        isSolid: true,
         onClose: () => {
             if (debounceTimer) clearTimeout(debounceTimer);
             save();

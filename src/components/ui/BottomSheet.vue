@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { translations, t } from '@/utils/i18n.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import { bottomSheetState } from '@/core/states/bottomSheetState.js';
 const props = defineProps({
     visible: Boolean,
     locked: { type: Boolean, default: false }, // when true, prevents backdrop/drag dismiss
@@ -15,7 +16,8 @@ const props = defineProps({
     bigInfo: Object, // { icon, description, buttonText, buttonDisabled, onButtonClick, glossaryChip: { term, label } }
     sessionItems: Array, // [{ title, count, time, preview, isActive, onClick, onDelete }]
     cardItems: Array, // [{ label, sublabel, icon, onClick }]
-    input: Object // { placeholder, value, confirmLabel, onConfirm }
+    input: Object, // { placeholder, value, confirmLabel, onConfirm }
+    isSolid: Boolean
 });
 
 const emit = defineEmits(['close']);
@@ -194,7 +196,7 @@ onBeforeUnmount(() => {
         <div class="modal-backdrop" @click="locked ? undefined : close()"></div>
         <div class="bottom-sheet-content" @click.stop 
              :style="{ transform: isDragging ? `translateY(${currentDragY}px)` : '' }"
-             :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen }">
+             :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid }">
             <div class="sheet-handle-bar"
                  @touchstart="onHandleTouchStart"
                  @touchmove.prevent="onHandleTouchMove"
@@ -684,6 +686,12 @@ onBeforeUnmount(() => {
     transition: background-color 0.3s ease, transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
     border-top-left-radius: 20px;
     border-top-right-radius: 20px;
+}
+.bottom-sheet-content.is-solid {
+    background-color: var(--app-bg) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background-image: none !important;
 }
 
 .bottom-sheet-content.keyboard-open {
