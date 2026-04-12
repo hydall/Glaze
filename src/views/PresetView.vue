@@ -15,6 +15,7 @@ import { Toast } from '@capacitor/toast';
 import { saveFile } from '@/core/services/fileSaver.js';
 import SheetView from '@/components/ui/SheetView.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import RegexSheet from '@/components/sheets/RegexSheet.vue';
 import { logger } from '../utils/logger.js';
 
 const emit = defineEmits(['open-fs']);
@@ -67,10 +68,18 @@ function close() {
     sheet.value?.close();
 }
 
-async function openPreset(id) {
+function onSheetClose() {
+    openedFromRegex.value = false;
+    flushPresetSave();
+}
+
+const openedFromRegex = ref(false);
+
+async function openPreset(id, fromRegex = false) {
     await initPresetState();
     await loadPresets();
     editingPresetId.value = id;
+    openedFromRegex.value = fromRegex;
     sheet.value?.open();
     updateHeaderState();
 }
@@ -134,23 +143,20 @@ function openReasoningEffortSelector() {
 }
 
 // --- Editor State ---
+const editingPresetId = ref(null);
+const optimisticGlobalPresetId = ref(null);
 const isEditingBlock = ref(false);
 const editingBlockId = ref(null);
 const showStash = ref(false);
+const navDirection = ref('forward');
 
-const activeBlocks = computed(() => {
-    if (!currentPreset.value || !currentPreset.value.blocks) return [];
-    return currentPreset.value.blocks.filter(b => !b.isStashed);
+watch([editingPresetId, isEditingBlock], ([newE, newB], [oldE, oldB]) => {
+    const getLevel = (e, b) => b ? 2 : (e ? 1 : 0);
+    const newL = getLevel(newE, newB);
+    const oldL = getLevel(oldE, oldB);
+    if (newL > oldL) navDirection.value = 'forward';
+    else if (newL < oldL) navDirection.value = 'back';
 });
-
-const stashedBlocks = computed(() => {
-    if (!currentPreset.value || !currentPreset.value.blocks) return [];
-    return currentPreset.value.blocks.filter(b => b.isStashed);
-});
-
-// --- Computed ---
-const editingPresetId = ref(null);
-const optimisticGlobalPresetId = ref(null);
 
 const effectivePresetId = computed(() => {
     const charId = props.activeChatChar?.id;
@@ -166,8 +172,30 @@ const currentPresetId = computed(() => {
 
 const currentPreset = computed(() => {
     const id = currentPresetId.value;
-    return presetState.presets[id] || presetState.presets['default'] || Object.values(presetState.presets)[0];
+    return presetState.presets[id] || presetState.presets['default_shino'] || Object.values(presetState.presets)[0];
 });
+
+const activeBlocks = computed(() => {
+    if (!currentPreset.value || !currentPreset.value.blocks) return [];
+    return currentPreset.value.blocks.filter(b => !b.isStashed);
+});
+
+const stashedBlocks = computed(() => {
+    if (!currentPreset.value || !currentPreset.value.blocks) return [];
+    return currentPreset.value.blocks.filter(b => b.isStashed);
+});
+
+const regexSheetRef = ref(null);
+const presetRegexCount = computed(() => currentPreset.value?.regexes?.length || 0);
+function openRegexSheetFromPreset() {
+    if (openedFromRegex.value) {
+        close();
+    } else {
+        regexSheetRef.value?.open();
+    }
+}
+
+// --- Other Computed ---
 
 const activePresetName = computed(() => {
     const id = effectivePresetId.value;
@@ -379,6 +407,10 @@ const extendedReplaceMacros = (text) => {
 const getPresetTokens = (preset) => {
     if (!preset) return 0;
     let content = "";
+    // Include Impersonation Prompt
+    if (preset.impersonationPrompt) {
+        content += preset.impersonationPrompt + "\n";
+    }
     // Include Enabled Blocks
     if (preset.blocks) {
         preset.blocks.forEach(b => {
@@ -398,12 +430,12 @@ const displayedEditingTokens = ref(0);
 
 const activePresetTokens = computed(() => {
     const id = effectivePresetId.value;
-    const preset = presetState.presets[id] || presetState.presets['default'];
+    const preset = presetState.presets[id] || presetState.presets['default_shino'];
     return getPresetTokens(preset);
 });
 const displayedActiveTokens = ref(0);
 
-const globalTokens = computed(() => getPresetTokens(presetState.presets[presetState.globalPresetId] || presetState.presets['default']));
+const globalTokens = computed(() => getPresetTokens(presetState.presets[presetState.globalPresetId] || presetState.presets['default_shino']));
 const charTokens = computed(() => {
     const charId = props.activeChatChar?.id;
     const id = charId ? presetState.connections.character[charId] : null;
@@ -457,7 +489,7 @@ const getBlockTokens = (blockOrContent) => {
 
 const getPresetWeight = (id, preset) => {
     if (preset.isFeatured) return -3;
-    if (id === 'default') return -2;
+    if (id === 'default_shino') return -2;
     if (DEFAULT_PRESETS[id]) return -1;
     return 0;
 };
@@ -1107,19 +1139,13 @@ function openCopyBlockPicker(presetId, preset) {
 }
 
 function updateHeaderState() {
-    if (isEditingBlock.value) {
-        headerState.title = t('header_prompt_edit') || 'Edit Prompt';
+    headerState.title = t('sheet_title_presets') || 'Presets';
+    if (isEditingBlock.value || editingPresetId.value) {
         headerState.showBack = true;
-        headerState.actions = [];
-    } else if (editingPresetId.value) {
-        headerState.title = currentPreset.value?.name || t('subtab_preset') || 'Preset';
-        headerState.showBack = true;
-        headerState.actions = [];
     } else {
-        headerState.title = t('sheet_title_presets') || 'Presets';
         headerState.showBack = false;
-        headerState.actions = [];
     }
+    headerState.actions = [];
 }
 
 function goBackFromEditor() {
@@ -1190,8 +1216,9 @@ function openBlockEditor(blockId) {
     logger.debug('[GenerationView] openBlockEditor', blockId);
     
     // Save scroll pos before opening
-    if (genSheetBodyRef.value) {
-        savedScrollPos = genSheetBodyRef.value.scrollTop;
+    const scroller = genSheetBodyRef.value?.closest('.sheet-view-body');
+    if (scroller) {
+        savedScrollPos = scroller.scrollTop;
     }
 
     editingBlockId.value = blockId;
@@ -1215,8 +1242,9 @@ function closeBlockEditor() {
     // Restore Generation Header
     nextTick(() => {
         updateHeaderState();
-        if (genSheetBodyRef.value) {
-            genSheetBodyRef.value.scrollTop = savedScrollPos;
+        const scroller = genSheetBodyRef.value?.closest('.sheet-view-body');
+        if (scroller) {
+            scroller.scrollTop = savedScrollPos;
         }
     });
 }
@@ -1474,12 +1502,12 @@ const editorConfig = computed(() => {
         const block = activeEditBlock.value;
         const mode = block.insertion_mode || 'relative';
         const fields = [
-            { key: 'role', label: 'label_role', type: 'select', options: [
+            { key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role', options: [
                 { value: 'system', label: 'role_system' },
                 { value: 'user', label: 'role_user' },
                 { value: 'assistant', label: 'role_assistant' }
             ]},
-            { key: 'insertion_mode', label: 'label_injection_point', type: 'select', options: [
+            { key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection', options: [
                 { value: 'relative', label: 'injection_relative' },
                 { value: 'depth', label: 'injection_depth' }
             ]},
@@ -1497,7 +1525,7 @@ const editorConfig = computed(() => {
         
         if (activeEditBlock.value.id !== 'chat_history') {
             fields.push({ 
-                key: 'role', label: 'label_role', type: 'select', 
+                key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role',
                 options: [
                     { value: 'system', label: 'role_system' },
                     { value: 'user', label: 'role_user' },
@@ -1507,7 +1535,7 @@ const editorConfig = computed(() => {
         }
 
         fields.push({
-            key: 'insertion_mode', label: 'label_injection_point', type: 'select',
+            key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection',
             options: [
                 { value: 'relative', label: 'injection_relative' },
                 { value: 'depth', label: 'injection_depth' }
@@ -1533,7 +1561,7 @@ const editorConfig = computed(() => {
     const genericFields = [
         { key: 'name', label: 'label_block_name', type: 'text' },
         { 
-            key: 'role', label: 'label_role', type: 'select', 
+            key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role',
             options: [
                 { value: 'system', label: 'role_system' },
                 { value: 'user', label: 'role_user' },
@@ -1541,7 +1569,7 @@ const editorConfig = computed(() => {
             ]
         },
         {
-            key: 'insertion_mode', label: 'label_injection_point', type: 'select',
+            key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection',
             options: [
                 { value: 'relative', label: 'injection_relative' },
                 { value: 'depth', label: 'injection_depth' }
@@ -1911,49 +1939,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack" :actions="headerState.actions" @back="goBackFromEditor" @close="flushPresetSave">
-        <template #header-bottom v-if="editingPresetId && !isEditingBlock">
-            <div class="preset-dashboard" :class="{ 'has-background': !!currentPreset.image }" :style="currentPreset.image ? { 'background-image': 'url(' + currentPreset.image + ')' } : {}">
-                <div class="dashboard-edit-header">
-                    <div class="active-row-content">
-                        <div class="active-name-group">
-                            <div class="active-preset-name-wrapper">
-                                <div class="active-preset-name">{{ currentPreset.name || 'Default' }}</div>
-                            </div>
-                            <div v-if="currentPreset.author" class="active-preset-author">by {{ currentPreset.author }}</div>
-                        </div>
-                        
-                        <!-- Consolidate Actions Top Right -->
-                        <div class="action-icons-corner">
-                            <div class="header-dots-btn" @click.stop="openPresetOptionsMenu">
-                                <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="dashboard-utils-row">
-                    <div class="utils-left">
-                        <div v-if="stashedBlocks.length > 0" 
-                             class="header-stash-btn" 
-                             @click.stop="openStashSheet"
-                             :title="t('stash') || 'Stash'">
-                            <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6 10H6v-2h8v2zm4-4H6v-2h12v2z"/></svg>
-                            <span class="stash-count-dot">{{ stashedBlocks.length }}</span>
-                        </div>
-                    </div>
-                    <div class="utils-right">
-                        <div class="active-tokens">
-                            <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                            <span>{{ displayedEditingTokens }}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </template>
+    <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack" :actions="headerState.actions" :z-index="11500" @back="goBackFromEditor" @close="onSheetClose">
         <div class="gen-sheet-body" ref="genSheetBodyRef">
+            <Transition :name="navDirection === 'forward' ? 'ps-fwd' : 'ps-back'" mode="out-in">
         <!-- ═══ SELECTOR LIST VIEW ═══ -->
-        <div class="preset-selector-list" v-if="!isEditingBlock && !editingPresetId">
+        <div class="preset-selector-list" v-if="!isEditingBlock && !editingPresetId" key="list">
             <div class="ps-list">
                 <div v-for="[id, preset] in sortedPresetEntries" :key="id"
                      class="ps-card"
@@ -2010,11 +2000,55 @@ onBeforeUnmount(() => {
             </div>
         </div>
 
-        <!-- ═══ EDITOR VIEW (existing dashboard) ═══ -->
-        <div class="prompt-builder-wrapper" v-if="!isEditingBlock && editingPresetId">
+        <!-- ═══ EDITOR VIEW ═══ -->
+        <div class="prompt-builder-wrapper" v-else-if="!isEditingBlock && editingPresetId" key="editor">
 
-                <!-- Consolidated Blocks Container -->
-                <div class="prompt-blocks-area">
+                <!-- Consolidated Dashboard and Blocks Container -->
+                <div class="preset-dashboard" :class="{ 'has-background': !!currentPreset.image }" :style="currentPreset.image ? { 'background-image': 'url(' + currentPreset.image + ')' } : {}">
+                    <div class="dashboard-edit-header">
+                        <div class="active-row-content">
+                            <div class="active-name-group">
+                                <div class="active-preset-name-wrapper">
+                                    <div class="active-preset-name">{{ currentPreset.name || 'Default' }}</div>
+                                </div>
+                                <div v-if="currentPreset.author" class="active-preset-author">by {{ currentPreset.author }}</div>
+                            </div>
+                            
+                            <!-- Consolidate Actions Top Right -->
+                            <div class="action-icons-corner">
+                                <div class="header-dots-btn" @click.stop="openPresetOptionsMenu">
+                                    <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-utils-row">
+                        <div class="utils-left">
+                            <div v-if="stashedBlocks.length > 0"
+                                 class="header-stash-btn"
+                                 @click.stop="openStashSheet"
+                                 :title="t('stash') || 'Stash'">
+                                <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6 10H6v-2h8v2zm4-4H6v-2h12v2z"/></svg>
+                                <span class="stash-count-dot">{{ stashedBlocks.length }}</span>
+                            </div>
+                            <div class="header-stash-btn"
+                                 @click.stop="openRegexSheetFromPreset"
+                                 :title="t('menu_regex') || 'Regex'">
+                                <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+                                <span v-if="presetRegexCount > 0" class="stash-count-dot">{{ presetRegexCount }}</span>
+                            </div>
+                        </div>
+                        <div class="utils-right">
+                            <div class="active-tokens">
+                                <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                                <span>{{ displayedEditingTokens }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Integrated Block List directly below hierarchy -->
+                    <div class="prompt-blocks-area">
                     <TransitionGroup name="block-list" tag="div">
                         <div v-for="block in activeBlocks" :key="block.id" 
                              class="prompt-block"
@@ -2063,6 +2097,7 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
                     </div> <!-- End prompt-blocks-area -->
+                </div> <!-- End preset-dashboard -->
 
                 <!-- Advanced Settings Section -->
                 <div class="advanced-settings-toggle" @click="showAdvancedSettings = !showAdvancedSettings">
@@ -2073,10 +2108,10 @@ onBeforeUnmount(() => {
                 <Transition name="expand">
                     <div v-if="showAdvancedSettings" class="advanced-settings-panel">
                         <div class="menu-group">
-                            <div class="section-header">{{ t('section_postprocessing') || 'Prompt Postprocessing' }} <HelpTip term="preset-merge"/></div>
+                            <div class="section-header">{{ t('section_postprocessing') || 'Prompt Postprocessing' }}</div>
                             <div class="settings-item-checkbox" @click.capture="currentPreset.noAssistant ? Toast.show({ text: t('hint_merge_locked') || 'Required by NoAssistant mode — single block', duration: 'short', position: 'bottom' }) : null">
                                 <div class="settings-text-col">
-                                    <label>{{ t('label_merge_prompts') || 'Merge Prompts' }}</label>
+                                    <label>{{ t('label_merge_prompts') || 'Merge Prompts' }} <HelpTip term="preset-merge"/></label>
                                     <div class="settings-desc">{{ t('desc_merge_prompts') || 'Combine adjacent blocks into one message' }}</div>
                                 </div>
                                 <input type="checkbox" v-model="currentPreset.mergePrompts" class="vk-switch" :disabled="currentPreset.noAssistant">
@@ -2119,7 +2154,7 @@ onBeforeUnmount(() => {
                             <div class="section-header">{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/></div>
                             <div class="settings-item-checkbox">
                                 <div class="settings-text-col">
-                                <label>{{ t('label_parse_inline_reasoning') || 'Parse Inline Reasoning' }}</label>
+                                <label>{{ t('label_parse_inline_reasoning') || 'Parse Inline Reasoning' }} <HelpTip term="preset-reasoning-inline"/></label>
                                 <div class="settings-desc">{{ t('desc_parse_inline_reasoning') || 'Extracts reasoning from the message body and inserts it into the reasoning block' }}</div>
                                 </div>
                                 <input type="checkbox" v-model="currentPreset.parseInlineReasoning" class="vk-switch">
@@ -2136,6 +2171,13 @@ onBeforeUnmount(() => {
                             <div class="section-header">{{ t('label_preset_prompts') || 'Function Prompts' }}</div>
                             <div class="settings-item">
                                 <div class="label-row">
+                                    <label>{{ t('label_impersonation_prompt') || 'Impersonation Prompt' }}</label>
+                                    <div class="expand-btn" @click="handleOpenFs('impersonationPrompt')"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                                </div>
+                                <textarea v-model="currentPreset.impersonationPrompt" rows="3" :placeholder="t('placeholder_impersonation_prompt') || 'Prompt to trigger impersonation...'"></textarea>
+                            </div>
+                            <div class="settings-item">
+                                <div class="label-row">
                                     <label>{{ t('label_summary_prompt') || 'Summary Prompt' }}</label>
                                     <div class="expand-btn" @click="handleOpenFs('summaryPrompt')"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
                                 </div>
@@ -2148,7 +2190,7 @@ onBeforeUnmount(() => {
             </div>
 
         <!-- Block Editor View -->
-        <div v-if="isEditingBlock" class="block-editor-view editor-fixed-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; background: var(--app-bg);">
+        <div v-else-if="isEditingBlock" class="block-editor-view" key="block-editor" style="background: var(--app-bg); min-height: 100%;">
             <div class="block-editor-scroll">
                 <Editor v-model="editorProxy" :config="editorConfig" @open-fs="(data) => emit('open-fs', data)">
                     <template #footer>
@@ -2166,12 +2208,15 @@ onBeforeUnmount(() => {
                 </Editor>
             </div>
         </div>
-            </div>
+            </Transition>
+        </div>
     </SheetView>
 
-    <input 
-        type="file" 
-        id="preset-file-input" 
+    <RegexSheet ref="regexSheetRef" :active-chat-char="activeChatChar" :inside-preset="true" :z-index="11800" />
+
+    <input
+        type="file"
+        id="preset-file-input"
         style="display: none" 
         accept=".json" 
         @change="onFileSelected"
@@ -2316,7 +2361,7 @@ onBeforeUnmount(() => {
 
 .block-content {
     flex: 1;
-    padding: 10px 5px;
+    padding: 10px 0;
     display: flex;
     align-items: center;
     overflow: hidden;
@@ -2527,7 +2572,12 @@ onBeforeUnmount(() => {
 .header-btn svg { width: 24px; height: 24px; fill: currentColor; }
 
 .gen-sheet-tabs { padding: 10px 16px; flex-shrink: 0; }
-.gen-sheet-body { position: relative; }
+.gen-sheet-body { 
+    position: relative; 
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
 
 .clickable-selector {
     display: flex;
@@ -2556,7 +2606,7 @@ onBeforeUnmount(() => {
 }
 
 .preset-overview-block {
-    margin: 8px 16px 0;
+    margin: 0 16px 16px;
     padding: 12px;
     background: rgba(var(--vk-blue-rgb), 0.05);
     border: 1px solid var(--border-color);
@@ -2568,8 +2618,8 @@ onBeforeUnmount(() => {
 
 .preset-dashboard {
     /* Base styling for when no image is present */
-    margin: 8px 16px;
-    padding: 12px 12px 0;
+    margin: 0 16px 16px;
+    padding: 12px 0 0;
     background: rgba(var(--vk-blue-rgb), 0.05);
     border: 1px solid var(--border-color);
     border-radius: 16px;
@@ -2587,7 +2637,6 @@ onBeforeUnmount(() => {
     background-position: top center;
     background-repeat: no-repeat;
     background-color: transparent;
-    padding: 12px 12px 0;
     min-height: auto;
     justify-content: flex-start;
 }
@@ -2656,13 +2705,14 @@ onBeforeUnmount(() => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 4px;
+    padding: 0 16px;
     margin-top: 24px;
 }
 
 .utils-left, .utils-right {
     display: flex;
     align-items: center;
+    gap: 8px;
 }
 
 .header-dots-btn {
@@ -2698,8 +2748,6 @@ onBeforeUnmount(() => {
     z-index: 1;
     display: flex;
     flex-direction: column;
-    margin-left: -12px;
-    margin-right: -12px;
 }
 
 /* Removed active scaling for the whole dashboard since it contains interactive elements now */
@@ -2720,7 +2768,7 @@ onBeforeUnmount(() => {
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;
-    padding: 0 8px;
+    padding: 0 20px;
 }
 
 .active-row-content {
@@ -2748,6 +2796,8 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 4px;
     min-width: 0;
+    position: relative;
+    z-index: 10;
 }
 
 .active-preset-name {
@@ -3150,8 +3200,12 @@ onBeforeUnmount(() => {
 }
 
 .block-editor-scroll {
-    flex: 1;
-    overflow-y: auto;
+    padding-bottom: 40px;
+}
+
+:deep(.editor-container) {
+    height: auto !important;
+    overflow: visible !important;
 }
 
 .block-editor-inline-actions {
@@ -3198,7 +3252,7 @@ onBeforeUnmount(() => {
 
 /* ═══ Preset Selector List ═══ */
 .preset-selector-list {
-    padding: 8px 16px 20px;
+    padding: 0 16px 20px;
 }
 
 .ps-list {
@@ -3211,9 +3265,9 @@ onBeforeUnmount(() => {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 12px;
+    padding: 10px 10px;
     background: var(--menu-group-bg, rgba(0,0,0,0.02));
-    border: 2px solid var(--border-color, rgba(0,0,0,.08));
+    border: 2px solid #2c2d2e;
     border-radius: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -3544,5 +3598,35 @@ onBeforeUnmount(() => {
     width: 20px;
     height: 20px;
     fill: currentColor;
+}
+/* ── Sub-view Slide Animations ── */
+.ps-fwd-enter-active {
+    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.22s ease;
+}
+.ps-fwd-leave-active {
+    transition: transform 0.16s cubic-bezier(0.4, 0, 1, 1), opacity 0.16s ease;
+}
+.ps-fwd-enter-from {
+    transform: translateX(40px);
+    opacity: 0;
+}
+.ps-fwd-leave-to {
+    transform: translateX(-30px);
+    opacity: 0;
+}
+
+.ps-back-enter-active {
+    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.22s ease;
+}
+.ps-back-leave-active {
+    transition: transform 0.16s cubic-bezier(0.4, 0, 1, 1), opacity 0.16s ease;
+}
+.ps-back-enter-from {
+    transform: translateX(-40px);
+    opacity: 0;
+}
+.ps-back-leave-to {
+    transform: translateX(30px);
+    opacity: 0;
 }
 </style>
