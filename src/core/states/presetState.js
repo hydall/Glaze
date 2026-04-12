@@ -3,32 +3,7 @@ import { reactive, watch } from 'vue';
 import { userDefaultPresets } from './defaultPresets.js';
 import { logger } from '../../utils/logger.js';
 
-export const DEFAULT_PRESETS = {
-    'default': {
-        id: 'default',
-        name: 'Default',
-        blocks: [
-            { id: 'sys1', name: 'Main System', role: 'system', content: 'You are a helpful AI assistant.', enabled: true },
-            { id: 'user_persona', name: 'User Persona', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'block_user_persona' },
-            { id: 'char_card', name: 'Character Card', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'block_char_card' },
-            { id: 'scenario', name: 'Scenario', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'block_scenario' },
-            { id: 'example_dialogue', name: 'Dialogue Examples', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'block_example_dialogue' },
-            { id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_summary', depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' },
-            { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', depth: 4, insertion_mode: 'relative' },
-            { id: 'chat_history', name: 'Chat History', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'block_chat_history' }
-        ],
-        author: '',
-        image: '',
-        reasoningEnabled: false,
-        reasoningEffort: 'medium',
-        impersonationPrompt: '',
-        reasoningStart: '<think>',
-        reasoningEnd: '</think>',
-        mergePrompts: false,
-        mergeRole: 'system',
-        summaryPrompt: 'Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}\n\nSummary:'
-    }
-};
+export const DEFAULT_PRESETS = {};
 
 Object.assign(DEFAULT_PRESETS, userDefaultPresets);
 
@@ -38,7 +13,7 @@ export const presetState = reactive({
         character: {}, // charId -> presetId
         chat: {}       // chatId -> presetId
     },
-    globalPresetId: 'default',
+    globalPresetId: 'default_shino',
     initialized: false
 });
 
@@ -89,8 +64,8 @@ export async function initPresetState() {
             presetState.globalPresetId = savedId;
             logger.debug('[presetState] Loaded globalPresetId:', savedId);
         } else {
-            presetState.globalPresetId = 'default';
-            logger.debug('[presetState] Global preset fallback to default (reason: missing or invalid savedId)');
+            presetState.globalPresetId = 'default_shino';
+            logger.debug('[presetState] Global preset fallback to default_shino (reason: missing or invalid savedId)');
         }
 
         const savedConnections = localStorage.getItem('gz_preset_connections');
@@ -152,7 +127,7 @@ export function flushPresetSave() {
 
 export function setPresetConnection(type, targetId, presetId) {
     if (type === 'global') {
-        const newId = presetId || 'default';
+        const newId = presetId || 'default_shino';
         presetState.globalPresetId = newId;
         logger.debug('[presetState] Global preset set to:', newId);
     } else if (type === 'character' || type === 'chat') {
@@ -183,5 +158,5 @@ export function getEffectivePresetId(charId, chatId) {
 
 export function getEffectivePreset(charId, chatId) {
     const id = getEffectivePresetId(charId, chatId);
-    return presetState.presets[id] || presetState.presets['default'] || Object.values(presetState.presets)[0];
+    return presetState.presets[id] || presetState.presets['default_shino'] || Object.values(presetState.presets)[0];
 }
