@@ -32,13 +32,13 @@ import { lorebookState, getActiveLorebooksForContext } from '@/core/states/loreb
 import { presetState, getEffectivePreset, getEffectivePresetId } from '@/core/states/presetState.js';
 import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
 import { sendMessageNotification, clearMessageNotifications, startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
+import { addNotification } from '@/core/states/notificationsState.js';
 import { formatError } from '@/utils/errors.js';
 import { themeState } from '@/core/states/themeState.js';
 import { triggerChatImport } from '@/core/services/chatImporter.js';
 import { setTrackedContext } from '@/core/services/timeTracker.js';
 import ChatMessage from '@/components/chat/ChatMessage.vue';
 import ChatInput from '@/components/chat/ChatInput.vue';
-import ApiView from '@/views/ApiView.vue';
 import PresetView from '@/views/PresetView.vue';
 import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
 import LorebookSheet from '@/components/sheets/LorebookSheet.vue';
@@ -453,8 +453,14 @@ const onFsEditorClosed = async () => {
 };
 
 async function openChat(char, onBack, force = false) {
+    let targetSessionId = char.sessionId;
+    if (targetSessionId === undefined) {
+        const memData = await getChatData(char.id);
+        targetSessionId = memData ? memData.currentId : undefined;
+    }
+
     // Prevent reloading if the requested chat is already open and active
-    if (!force && activeChatChar && activeChatChar.id === char.id && (char.sessionId === undefined || activeChatChar.sessionId === char.sessionId) && !isOpeningChat) {
+    if (!force && activeChatChar && String(activeChatChar.id) === String(char.id) && String(activeChatChar.sessionId) === String(targetSessionId) && !isOpeningChat) {
         if (char.msgId) {
             const msgIdx = currentMessages.value.findIndex(m => m.id === char.msgId);
             if (msgIdx !== -1) {
@@ -1010,8 +1016,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 buttonText: t('btn_configure') || "Configure",
                 onButtonClick: () => {
                     closeBottomSheet();
-                    closeChat();
-                    window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-generation' }));
+                    openApiView();
                 }
             }
         });
@@ -1552,6 +1557,9 @@ async function handleImageRegenerate(msgIndex, { instruction, id }) {
     const loadingRe = new RegExp(`<span[^>]+class="[^"]*imggen-loading[^"]*"[^>]+data-iig-id="${idEsc}"[^>]*>(?:<span[^>]*>[\\s\\S]*?<\\/span>)*<\\/span>`, 'g');
     const context = { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null };
 
+    startGenerationNotification(t('imggen_notification_title') || 'Glaze', t('imggen_notification_body') || 'Generating image...');
+    addNotification(t('imggen_notification_body') || 'Generating image...', 'info');
+
     try {
         const dataUrl = await generateImage(instruction, context);
         const latest = currentMessages.value[msgIndex]?.text || msg.text;
@@ -1563,6 +1571,8 @@ async function handleImageRegenerate(msgIndex, { instruction, id }) {
         msg.text = latest.replace(loadingRe, makeErrorHtml(instruction, id, err.message));
         msg.swipes[msg.swipeId || 0] = msg.text;
         updateSessionMessage(char, msgIndex, msg);
+    } finally {
+        stopGenerationNotification();
     }
 }
 
@@ -1943,13 +1953,14 @@ function openMessageActions(msg, index) {
 }
 
 function enterEditMode(msg) {
-    const { text, map } = prepareEditText(msg?.text || '');
+    msg._iigMap = msg._iigMap || {};
+    const { text, map } = prepareEditText(msg?.text || '', msg._iigMap);
     msg.editText = text;
     msg._base64Map = map;
     msg.isEditing = true;
 }
 
-function normalizeImgGenHtmlForEditing(text) {
+function normalizeImgGenHtmlForEditing(text, iigMap) {
     if (!text) return text;
 
     const makeTag = (instruction) => `<img data-iig-instruction='${instruction}' src="[IMG:GEN]">`;
@@ -1969,6 +1980,14 @@ function normalizeImgGenHtmlForEditing(text) {
         (wrapperHtml) => {
             const instruction = extractInstruction(wrapperHtml);
             if (!instruction) return wrapperHtml;
+            
+            if (iigMap) {
+                const mSrc = wrapperHtml.match(/src="([^"]+)"/i);
+                const mId = wrapperHtml.match(/data-iig-id="([^"]+)"/i);
+                if (mSrc && mSrc[1]) {
+                    iigMap[instruction] = { dataUrl: mSrc[1], id: mId ? mId[1] : `iig_${Date.now()}` };
+                }
+            }
             return makeTag(instruction);
         }
     );
@@ -1979,6 +1998,14 @@ function normalizeImgGenHtmlForEditing(text) {
         (imgHtml) => {
             const instruction = extractInstruction(imgHtml);
             if (!instruction) return imgHtml;
+            
+            if (iigMap) {
+                const mSrc = imgHtml.match(/src="([^"]+)"/i);
+                const mId = imgHtml.match(/data-iig-id="([^"]+)"/i);
+                if (mSrc && mSrc[1]) {
+                    iigMap[instruction] = { dataUrl: mSrc[1], id: mId ? mId[1] : `iig_${Date.now()}` };
+                }
+            }
             return makeTag(instruction);
         }
     );
@@ -2004,8 +2031,8 @@ function normalizeImgGenHtmlForEditing(text) {
     return text;
 }
 
-function prepareEditText(text) {
-    text = normalizeImgGenHtmlForEditing(text);
+function prepareEditText(text, iigMap) {
+    text = normalizeImgGenHtmlForEditing(text, iigMap);
 
     const map = {};
     let idx = 0;
@@ -2032,6 +2059,25 @@ function restoreEditText(text, map) {
 function saveEdit(msg, index) {
     let newText = restoreEditText(msg.editText || "", msg._base64Map);
     delete msg._base64Map;
+    
+    const iigMap = msg._iigMap || {};
+    newText = newText.replace(
+        /<img\b[^>]*?(?:data-iig-instruction='([^']*)'[^>]*?src="\[IMG:GEN\]"|src="\[IMG:GEN\]"[^>]*?data-iig-instruction='([^']*?)')[^>]*?>/g,
+        (match, inst1, inst2) => {
+            const raw = inst1 ?? inst2 ?? '{}';
+            if (iigMap[raw]) {
+                const { dataUrl, id } = iigMap[raw];
+                let instrObj = {};
+                try {
+                     instrObj = JSON.parse(raw.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
+                } catch(e) { }
+                return makeResultHtml(instrObj, id, dataUrl);
+            }
+            return match;
+        }
+    );
+    delete msg._iigMap;
+
     let newReasoning = msg.reasoning;
 
     const { start: tagStart, end: tagEnd } = getReasoningTags();
@@ -2059,12 +2105,28 @@ function saveEdit(msg, index) {
     msg.isEditing = false;
     updateSessionMessage(activeChatChar, index, msg);
     delete msg.editText;
+
+    if (newText.includes('[IMG:GEN]')) {
+        processMessageImages(msg.text, (updatedText) => {
+            const mIdx = currentMessages.value.findIndex(m => m.id === msg.id);
+            if (mIdx !== -1) {
+                const currentMsg = currentMessages.value[mIdx];
+                currentMsg.text = updatedText;
+                if (currentMsg.swipes) currentMsg.swipes[currentMsg.swipeId || 0] = updatedText;
+                updateSessionMessage(activeChatChar, mIdx, currentMsg);
+            }
+        }, {
+            messages: currentMessages.value,
+            currentMsgIndex: index
+        }).catch(e => console.error('[ImageGen] processMessageImages failed:', e));
+    }
 }
 
 function cancelEdit(msg) {
     msg.isEditing = false;
     delete msg.editText;
     delete msg._base64Map;
+    delete msg._iigMap;
 }
 
 function saveGuidance(msg, index, newGuidance) {
@@ -2115,12 +2177,7 @@ async function startImpersonation(guidanceText = null) {
                 buttonText: t('btn_configure') || "Configure",
                 onButtonClick: () => {
                     closeBottomSheet();
-                    closeChat();
-                    window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-generation' }));
-                    setTimeout(() => {
-                        window.dispatchEvent(new CustomEvent('change-generation-tab', { detail: 'subview-preset' }));
-                        window.dispatchEvent(new CustomEvent('scroll-to-impersonation'));
-                    }, 100);
+                    openApiView();
                 }
             }
         });
@@ -2432,9 +2489,7 @@ async function openChatStatsSheet(char = activeChatChar) {
 }
 
 function openApiView() {
-    if (apiView.value) {
-        apiView.value.open();
-    }
+    window.dispatchEvent(new CustomEvent('open-api-sheet'));
 }
 
 function openPresetView() {
@@ -2834,7 +2889,7 @@ onUnmounted(() => {
 
         </div>
 
-        <ApiView ref="apiView" />
+        <div style="display: none;"></div>
         <PresetView ref="presetView" :active-chat-char="activeChar" :chat-history="currentMessages" :is-generating="isGenerating" />
         <CharacterCardSheet ref="charCardSheet" />
         <LorebookSheet ref="lorebookSheet" />

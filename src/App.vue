@@ -13,6 +13,7 @@ const ChatView = defineAsyncComponent(() => import('@/views/ChatView.vue'));
 const ThemeSettingsView = defineAsyncComponent(() => import('@/views/Menu/Settings/ThemeSettingsView.vue'));
 const SettingsView = defineAsyncComponent(() => import('@/views/Menu/Settings/SettingsView.vue'));
 const OnboardingView = defineAsyncComponent(() => import('@/views/OnboardingView.vue'));
+const ApiView = defineAsyncComponent(() => import('@/views/ApiView.vue'));
 
 const Editor = defineAsyncComponent(() => import('@/components/editors/GenericEditor.vue'));
 const FullScreenEditor = defineAsyncComponent(() => import('@/components/editors/FullScreenEditor.vue'));
@@ -62,6 +63,7 @@ const connectionsSheetRef = ref(null);
 const lorebookSheetRef = ref(null);
 const backupSheetRef = ref(null);
 const presetViewRef = ref(null);
+const apiViewRef = ref(null);
 
 const isHeaderEditorMode = ref(false);
 
@@ -537,6 +539,12 @@ const onOpenPresetSheet = (e) => {
     });
 };
 
+const onOpenApiSheet = () => {
+    waitForComponent(apiViewRef, (comp) => {
+        comp.open();
+    });
+};
+
 const onHeaderSetupEditor = () => { isHeaderEditorMode.value = true; };
 const onHeaderSetupGeneration = () => { isHeaderEditorMode.value = false; };
 const onHeaderReset = () => { isHeaderEditorMode.value = false; };
@@ -608,6 +616,7 @@ onMounted(async () => {
     window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.addEventListener('open-backup-sheet', onOpenBackupSheet);
     window.addEventListener('open-preset-sheet', onOpenPresetSheet);
+    window.addEventListener('open-api-sheet', onOpenApiSheet);
     window.addEventListener('header-setup-editor', onHeaderSetupEditor);
     window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.addEventListener('header-reset', onHeaderReset);
@@ -656,6 +665,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.removeEventListener('open-backup-sheet', onOpenBackupSheet);
     window.removeEventListener('open-preset-sheet', onOpenPresetSheet);
+    window.removeEventListener('open-api-sheet', onOpenApiSheet);
     window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
     window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.removeEventListener('header-reset', onHeaderReset);
@@ -804,6 +814,7 @@ watch(currentView, () => {
   <LorebookSheet ref="lorebookSheetRef" />
   <BackupSheet ref="backupSheetRef" />
   <PresetView ref="presetViewRef" />
+  <ApiView ref="apiViewRef" />
   <NotificationsSheet />
   <DragDropOverlay />
 
