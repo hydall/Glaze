@@ -35,5 +35,9 @@ export {
     setChatLetterSpacing,
     setChatFont,
     exportThemePreset,
-    importThemePreset
+    importThemePreset,
+    setUiTextColor,
+    setUiTextGrayColor,
+    setUiFontMode,
+    setChatFontMode
 } from '@/core/states/themeState.js';

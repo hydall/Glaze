@@ -317,12 +317,8 @@ defineExpose({ open, close });
 
 .bs-separator {
     height: 1px;
-    background: var(--border-color, rgba(0,0,0,0.08));
-    margin: 8px 0;
-}
-
-body.dark-theme .bs-separator {
     background: rgba(255, 255, 255, 0.1);
+    margin: 8px 0;
 }
 
 /* Progress View Layout */
@@ -354,14 +350,10 @@ body.dark-theme .bs-separator {
 .progress-bar-container {
     width: 100%;
     height: 8px;
-    background: var(--border-color, rgba(0,0,0,0.08));
+    background: rgba(255, 255, 255, 0.1);
     border-radius: 4px;
     margin-top: 16px;
     overflow: hidden;
-}
-
-body.dark-theme .progress-bar-container {
-    background: rgba(255, 255, 255, 0.1);
 }
 
 .progress-bar {

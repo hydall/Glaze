@@ -20,18 +20,6 @@
         }
     </style>
     <script src="/src/webviewCheck.js"></script>
-    <script>
-        // Мгновенная установка фона в зависимости от темы (если сохранена)
-        try {
-            const mode = localStorage.getItem('gz_theme_mode'); // Ключ из APPSettings
-            const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            // Если явно светлая тема или системная светлая - ставим белый фон
-            if (mode === 'light' || (mode === 'system' && !isSystemDark)) {
-                document.documentElement.style.backgroundColor = '#ffffff';
-                document.body.style.backgroundColor = '#ffffff';
-            }
-        } catch (e) { }
-    </script>
 </head>
 
 <body class="preload">

@@ -10,6 +10,22 @@ export const mandatoryBlocks = [
     { id: "guided_generation", i18n: "block_guided_generation", name: "Guided Generation", role: "system", content: "[System Note: {{guidance}}]", isStatic: true, enabled: true }
 ];
 
+const BLOCK_TO_ST_MAP = {
+    'user_persona': 'personaDescription',
+    'char_card': 'charDescription',
+    'char_personality': 'charPersonality',
+    'scenario': 'scenario',
+    'chat_history': 'chatHistory',
+    'example_dialogue': 'dialogueExamples',
+    'worldInfoBefore': 'worldInfoBefore',
+    'worldInfoAfter': 'worldInfoAfter',
+    'guided_generation': 'guided_generation'
+};
+
+const ST_TO_BLOCK_MAP = Object.fromEntries(
+    Object.entries(BLOCK_TO_ST_MAP).map(([k, v]) => [v, k])
+);
+
 export function convertSTPreset(data, fileName) {
     const orderedBlocks = [];
     const usedMandatory = new Set();
@@ -27,15 +43,7 @@ export function convertSTPreset(data, fileName) {
     }
 
     const mapToMandatory = (identifier) => {
-        if (identifier === 'personaDescription') return 'user_persona';
-        if (identifier === 'charDescription') return 'char_card';
-        if (identifier === 'charPersonality') return 'char_personality';
-        if (identifier === 'scenario') return 'scenario';
-        if (identifier === 'chatHistory') return 'chat_history';
-        if (identifier === 'dialogueExamples') return 'example_dialogue';
-        if (identifier === 'worldInfoBefore') return 'worldInfoBefore';
-        if (identifier === 'worldInfoAfter') return 'worldInfoAfter';
-        return null;
+        return ST_TO_BLOCK_MAP[identifier] || null;
     };
 
     const processBlock = (item, isStashed = false) => {
@@ -107,9 +115,10 @@ export function convertSTPreset(data, fileName) {
         placement: r.placement || [2],
         disabled: r.disabled !== undefined ? r.disabled : false,
         markdownOnly: r.markdownOnly || false,
+        promptOnly: r.promptOnly || false,
         runOnEdit: r.runOnEdit || false,
         macroRules: (r.substituteRegex || 0).toString(),
-        ephemerality: [1, 2], // Hardcoded default based on ST behavior if not provided
+        ephemerality: r.ephemerality || (r.markdownOnly === true && r.promptOnly === false ? [1] : r.markdownOnly === false && r.promptOnly === true ? [2] : [1, 2]),
         minDepth: r.minDepth || null,
         maxDepth: r.maxDepth || null
     })) : [];
@@ -164,16 +173,10 @@ export function exportSTPreset(preset) {
 
     if (preset.blocks) {
         preset.blocks.forEach((b) => {
-            let identifier = b.id;
-            if (b.id === 'user_persona') identifier = 'personaDescription';
-            else if (b.id === 'char_card') identifier = 'charDescription';
-            else if (b.id === 'char_personality') identifier = 'charPersonality';
-            else if (b.id === 'scenario') identifier = 'scenario';
-            else if (b.id === 'chat_history') identifier = 'chatHistory';
-            else if (b.id === 'example_dialogue') identifier = 'dialogueExamples';
+            const identifier = BLOCK_TO_ST_MAP[b.id] || b.id;
 
             const enabled = b.enabled !== undefined ? b.enabled : true;
-            const isMarker = !!b.isStatic || ["personaDescription", "charDescription", "charPersonality", "scenario", "chatHistory", "dialogueExamples", "worldInfoBefore", "worldInfoAfter"].includes(identifier);
+            const isMarker = !!b.isStatic || !!ST_TO_BLOCK_MAP[identifier];
             const isSystem = isMarker || ["main", "nsfw", "jailbreak", "enhanceDefinitions"].includes(identifier);
 
             const promptObj = {
@@ -194,10 +197,12 @@ export function exportSTPreset(preset) {
 
             data.prompts.push(promptObj);
 
-            data.prompt_order[1].order.push({
-                identifier: identifier,
-                enabled: enabled
-            });
+            if (!b.isStashed) {
+                data.prompt_order[1].order.push({
+                    identifier: identifier,
+                    enabled: enabled
+                });
+            }
         });
 
         // Add worldInfoBefore and worldInfoAfter if missing, as ST expects them
@@ -225,7 +230,8 @@ export function exportSTPreset(preset) {
             trimStrings: r.trimOut ? r.trimOut.split('\n') : [],
             placement: r.placement || [2],
             disabled: r.disabled !== undefined ? r.disabled : false,
-            markdownOnly: r.markdownOnly !== undefined ? r.markdownOnly : false,
+            markdownOnly: r.ephemerality ? r.ephemerality.includes(1) && !r.ephemerality.includes(2) : (r.markdownOnly !== undefined ? r.markdownOnly : false),
+            promptOnly: r.ephemerality ? r.ephemerality.includes(2) && !r.ephemerality.includes(1) : (r.promptOnly !== undefined ? r.promptOnly : false),
             runOnEdit: r.runOnEdit !== undefined ? r.runOnEdit : false,
             substituteRegex: r.macroRules ? parseInt(r.macroRules) || 0 : 0,
             ephemerality: r.ephemerality || [1, 2],

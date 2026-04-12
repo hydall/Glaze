@@ -113,7 +113,7 @@ export async function generateChatResponse({
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
     let apiConfig = getEffectiveApiConfig();
-    let { apiKey, apiUrl, model, stream, requestReasoning, temp, topP, maxTokens, contextSize } = apiConfig;
+    let { apiKey, apiUrl, model, stream, requestReasoning, reasoningEffort, temp, topP, maxTokens, contextSize } = apiConfig;
 
     const t = (key) => translations[currentLang.value]?.[key] || key;
 
@@ -126,7 +126,7 @@ export async function generateChatResponse({
                 buttonText: t('btn_configure') || "Configure",
                 onButtonClick: () => {
                     closeBottomSheet();
-                    window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-generation' }));
+                    window.dispatchEvent(new CustomEvent('open-api-sheet'));
                 }
             }
         });
@@ -154,6 +154,9 @@ export async function generateChatResponse({
 
     if (activePreset && typeof activePreset.reasoningEnabled === 'boolean') {
         requestReasoning = activePreset.reasoningEnabled;
+    }
+    if (activePreset && activePreset.reasoningEffort) {
+        reasoningEffort = activePreset.reasoningEffort;
     }
 
     // Get Persona object for macros
@@ -234,6 +237,7 @@ export async function generateChatResponse({
             bigInfo: {
                 icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
                 description: t('msg_context_limit') || "The preset prompts exceed the context limit. Please increase Context Size or reduce prompt length.",
+                glossaryChip: { term: 'context', hint: t('context_limit_glossary_hint') || 'Learn more:', label: t('context_limit_glossary_chip') || 'Context' },
                 buttonText: t('btn_ok') || "OK",
                 onButtonClick: () => closeBottomSheet()
             }
@@ -248,6 +252,7 @@ export async function generateChatResponse({
         temperature: temp,
         top_p: topP,
         stream: stream,
+        reasoning_effort: reasoningEffort || 'medium'
     };
 
     if (maxTokens > 0) {
@@ -258,20 +263,6 @@ export async function generateChatResponse({
         requestBody.stop = [stopString];
     }
 
-    // Google Gemini specific reasoning config
-    if (apiUrl.includes('generativelanguage.googleapis.com')) {
-        if (requestReasoning) {
-            requestBody.extra_body = {
-                google: {
-                    thinking_config: {
-                        include_thoughts: true
-                    }
-                }
-            };
-        }
-    } else {
-        requestBody.include_reasoning = requestReasoning; // OpenRouter/DeepSeek specific
-    }
 
     // Save for preview
     lastPrompt = JSON.parse(JSON.stringify(requestBody));

@@ -6,6 +6,7 @@ import Editor from '@/components/editors/GenericEditor.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { db } from '@/utils/db.js';
+import HelpTip from '@/components/ui/HelpTip.vue';
 
 const sheet = ref(null);
 const character = ref({});
@@ -73,6 +74,9 @@ defineExpose({ open, close });
 
 <template>
     <SheetView ref="sheet" :title="t('block_char_card')">
+        <template #header-title>
+            <HelpTip term="character" />
+        </template>
         <Editor 
             :model-value="character" 
             :config="config" 

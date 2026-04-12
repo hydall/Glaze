@@ -13,11 +13,12 @@ const ChatView = defineAsyncComponent(() => import('@/views/ChatView.vue'));
 const ThemeSettingsView = defineAsyncComponent(() => import('@/views/Menu/Settings/ThemeSettingsView.vue'));
 const SettingsView = defineAsyncComponent(() => import('@/views/Menu/Settings/SettingsView.vue'));
 const OnboardingView = defineAsyncComponent(() => import('@/views/OnboardingView.vue'));
+const ApiView = defineAsyncComponent(() => import('@/views/ApiView.vue'));
 
 const Editor = defineAsyncComponent(() => import('@/components/editors/GenericEditor.vue'));
 const FullScreenEditor = defineAsyncComponent(() => import('@/components/editors/FullScreenEditor.vue'));
 
-const HoloCardViewer = defineAsyncComponent(() => import('@/components/media/HoloCardViewer.vue'));
+// const HoloCardViewer = defineAsyncComponent(() => import('@/components/media/HoloCardViewer.vue'));
 const ImageViewer = defineAsyncComponent(() => import('@/components/media/ImageViewer.vue'));
 import AppToast from '@/components/ui/AppToast.vue';
 
@@ -26,6 +27,7 @@ const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/Lor
 const BackupSheet = defineAsyncComponent(() => import('@/components/sheets/BackupSheet.vue'));
 const NotificationsSheet = defineAsyncComponent(() => import('@/components/sheets/NotificationsSheet.vue'));
 const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/GlossarySheet.vue'));
+const DragDropOverlay = defineAsyncComponent(() => import('@/components/ui/DragDropOverlay.vue'));
 import { Capacitor } from '@capacitor/core';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { initSettings } from '@/core/config/APISettings.js';
@@ -61,6 +63,7 @@ const connectionsSheetRef = ref(null);
 const lorebookSheetRef = ref(null);
 const backupSheetRef = ref(null);
 const presetViewRef = ref(null);
+const apiViewRef = ref(null);
 
 const isHeaderEditorMode = ref(false);
 
@@ -476,16 +479,10 @@ const onOpenOnboarding = () => { isOnboarding.value = true; };
 const onTriggerOpenImage = (e) => {
     const { src, name, description, onCloseCallback } = e.detail;
     logger.debug('[App] trigger-open-image. Current Mode:', imageViewerMode.value);
-    if (imageViewerMode.value === 'holo' || imageViewerMode.value === 'holocards') {
-        window.dispatchEvent(new CustomEvent('open-holocards', {
-            detail: { src, name, description, onCloseCallback }
-        }));
-    } else {
-        logger.debug('[App] Dispatching open-image-viewer');
-        window.dispatchEvent(new CustomEvent('open-image-viewer', {
-            detail: { src, description, onCloseCallback }
-        }));
-    }
+    logger.debug('[App] trigger-open-image. Always using default viewer.');
+    window.dispatchEvent(new CustomEvent('open-image-viewer', {
+        detail: { src, description, onCloseCallback }
+    }));
 };
 
 const onOpenFsRequest = (e) => { openFsEditor(e.detail); };
@@ -527,6 +524,23 @@ const onOpenLorebookEntry = (e) => {
 
 const onOpenBackupSheet = () => {
     waitForComponent(backupSheetRef, (comp) => {
+        comp.open();
+    });
+};
+
+const onOpenPresetSheet = (e) => {
+    waitForComponent(presetViewRef, (comp) => {
+        const presetId = e?.detail?.presetId;
+        if (presetId) {
+            comp.openPreset(presetId, true);
+        } else {
+            comp.open();
+        }
+    });
+};
+
+const onOpenApiSheet = () => {
+    waitForComponent(apiViewRef, (comp) => {
         comp.open();
     });
 };
@@ -601,6 +615,8 @@ onMounted(async () => {
     window.addEventListener('open-item-editor', onOpenItemEditor);
     window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.addEventListener('open-backup-sheet', onOpenBackupSheet);
+    window.addEventListener('open-preset-sheet', onOpenPresetSheet);
+    window.addEventListener('open-api-sheet', onOpenApiSheet);
     window.addEventListener('header-setup-editor', onHeaderSetupEditor);
     window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.addEventListener('header-reset', onHeaderReset);
@@ -648,6 +664,8 @@ onBeforeUnmount(() => {
     window.removeEventListener('open-item-editor', onOpenItemEditor);
     window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.removeEventListener('open-backup-sheet', onOpenBackupSheet);
+    window.removeEventListener('open-preset-sheet', onOpenPresetSheet);
+    window.removeEventListener('open-api-sheet', onOpenApiSheet);
     window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
     window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.removeEventListener('header-reset', onHeaderReset);
@@ -775,7 +793,7 @@ watch(currentView, () => {
     />
 
     <!-- Holo Cards Viewer -->
-    <HoloCardViewer />
+    <!-- <HoloCardViewer /> -->
 
     <!-- Standard Image Viewer -->
     <ImageViewer />
@@ -796,7 +814,9 @@ watch(currentView, () => {
   <LorebookSheet ref="lorebookSheetRef" />
   <BackupSheet ref="backupSheetRef" />
   <PresetView ref="presetViewRef" />
+  <ApiView ref="apiViewRef" />
   <NotificationsSheet />
+  <DragDropOverlay />
 
 </template>
 
@@ -852,7 +872,7 @@ watch(currentView, () => {
 }
 
 #main-container.keyboard-open {
-    padding-bottom: var(--keyboard-overlap, 300px) !important;
+    padding-bottom: var(--keyboard-overlap, 0px) !important;
 }
 
 .active-view::-webkit-scrollbar-track {

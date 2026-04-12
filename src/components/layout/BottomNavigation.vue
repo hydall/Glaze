@@ -82,11 +82,11 @@ onUnmounted(() => {
     transition: background-color 0.3s ease, border-top-color 0.3s ease;
 
     /* Glass Effect */
-    background-color: rgba(255, 255, 255, var(--element-opacity, 0.8));
+    background-color: rgba(30, 30, 30, var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 20px));
     -webkit-backdrop-filter: blur(var(--element-blur, 20px));
     background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
 }
 
 .tab-btn {
@@ -102,10 +102,6 @@ onUnmounted(() => {
 
 .tab-btn.active {
     color: var(--vk-blue);
-}
-
-body.dark-theme .tabbar {
-    background-color: rgba(30, 30, 30, var(--element-opacity, 0.8));
 }
 
 .tab-icon {
@@ -127,7 +123,7 @@ span.ripple {
     border-radius: 50%;
     transform: scale(0);
     animation: ripple 600ms linear;
-    background-color: rgba(0, 0, 0, 0.1);
+    background-color: rgba(255, 255, 255, 0.1);
     pointer-events: none;
 }
 
@@ -136,9 +132,5 @@ span.ripple {
         transform: scale(4);
         opacity: 0;
     }
-}
-
-body.dark-theme span.ripple {
-    background-color: rgba(255, 255, 255, 0.1);
 }
 </style>

@@ -119,7 +119,7 @@ function setupEditorHeader(title, onBack, actions) {
     toggleTabbar(false);
 }
 
-function setupChatHeader(char, currentSessionId, callbacks) {
+function setupChatHeader(char, currentSessionId, callbacks, sessionName) {
     clearHeader('chat');
     state.showChatInfo = true;
     state.showActions = true;
@@ -127,7 +127,7 @@ function setupChatHeader(char, currentSessionId, callbacks) {
     
     const safeName = (char && char.name) ? char.name : "Unknown";
     state.chat.name = safeName.length > 20 ? safeName.substring(0, 20) + '...' : safeName;
-    state.chat.session = `Session #${currentSessionId}`;
+    state.chat.session = sessionName || `Session #${currentSessionId}`;
     state.chat.avatar = char && char.avatar ? char.avatar : null;
     state.chat.color = char && char.color ? char.color : '';
     state.chat.initial = (safeName[0] || "?").toUpperCase();
@@ -321,8 +321,8 @@ const handleAvatarClick = (e) => {
 
 // Listeners for external events (from header.js bridge)
 const onSetupChat = (e) => {
-    const { char, currentSessionId, callbacks } = e.detail;
-    setupChatHeader(char, currentSessionId, callbacks);
+    const { char, currentSessionId, callbacks, sessionName } = e.detail;
+    setupChatHeader(char, currentSessionId, callbacks, sessionName);
 };
 
 const onUpdateAvatar = (e) => {
@@ -661,14 +661,14 @@ defineExpose({ updateHeader });
     min-height: 56px;
     height: auto;
     padding-top: 0;
-    background-color: rgba(255, 255, 255, var(--element-opacity, 0.8));
+    background-color: rgba(30, 30, 30, var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 12px)) ;
     -webkit-backdrop-filter: blur(var(--element-blur, 12px)) ;
     background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
     border-radius: 20px;
     margin: 10px 16px 0 16px;
     margin-top: calc(var(--sat) + 10px);
@@ -679,10 +679,6 @@ defineExpose({ updateHeader });
     transition: background-color var(--transition-speed) ease, margin-top var(--transition-speed) ease, transform var(--transition-speed) ease-in-out, height var(--transition-speed) ease, clip-path var(--transition-speed) ease-in-out !important;
     box-sizing: border-box;
     clip-path: inset(0 0 0 0);
-}
-
-body.dark-theme .app-header {
-    background-color: rgba(30, 30, 30, var(--element-opacity, 0.8));
 }
 
 .app-header.no-border {
@@ -768,12 +764,8 @@ body.dark-theme .app-header {
     height: 8px;
     border-radius: 50%;
     background: #ff4444;
-    border: 1.5px solid var(--bg-color, #fff);
+    border: 1.5px solid rgba(30, 30, 30, 0.8);
     pointer-events: none;
-}
-
-body.dark-theme .notif-badge {
-    border-color: rgba(30, 30, 30, 0.8);
 }
 
 .header-default-group {
@@ -921,17 +913,12 @@ body.dark-theme .notif-badge {
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
-    background: rgba(var(--vk-blue-rgb), 0.1);
+    background: rgba(var(--vk-blue-rgb), 0.15);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(var(--vk-blue-rgb), 0.2);
+    border: 1px solid rgba(var(--vk-blue-rgb), 0.3);
     border-radius: 12px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-}
-
-body.dark-theme .lb-banner-glass {
-    background: rgba(var(--vk-blue-rgb), 0.15);
-    border-color: rgba(var(--vk-blue-rgb), 0.3);
 }
 
 .lb-banner-text {
@@ -945,10 +932,6 @@ body.dark-theme .lb-banner-glass {
     overflow: hidden;
     min-width: 0;
     line-height: 1.2;
-}
-
-body.dark-theme .lb-banner-text {
-    color: var(--vk-blue);
 }
 
 .lb-label-group {

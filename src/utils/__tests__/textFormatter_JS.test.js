@@ -21,7 +21,8 @@ describe('textFormatter JS protection', () => {
         expect(output).toContain('<script>alert(1)</script>');
         expect(output).toContain('<p>Paragraph 2</p>');
         // Script should NOT be inside <p>
-        expect(output).not.toMatch(/<p>[\s\S]*?<script/);
+        // Ensure `<script>` doesn't appear before the corresponding `</p>`
+        expect(output).not.toMatch(/<p>(?:(?!<\/p>).)*<script/);
     });
 
     it('should handle unclosed script blocks during streaming by rendering as code', () => {

@@ -3,6 +3,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
+import HelpTip from '@/components/ui/HelpTip.vue';
 
 const props = defineProps({
     modelValue: { type: Object, required: true },
@@ -216,6 +217,29 @@ function openFsEditor(field, index = -1) {
     // Dispatch global event for App.vue to catch
     window.dispatchEvent(new CustomEvent('open-fs-request', { detail: payload }));
 }
+
+function openSelectSelector(field) {
+    const items = field.options.map(opt => ({
+        label: t(opt.label) || opt.label,
+        icon: item.value[field.key] === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            item.value[field.key] = opt.value;
+            autoSave();
+            closeBottomSheet();
+        }
+    }));
+    showBottomSheet({
+        title: t(field.label) || field.label,
+        items: items
+    });
+}
+
+function getSelectedLabel(field) {
+    const val = item.value[field.key];
+    const opt = field.options.find(o => o.value === val);
+    if (!opt) return val;
+    return t(opt.label) || opt.label;
+}
 </script>
 
 <template>
@@ -241,12 +265,17 @@ function openFsEditor(field, index = -1) {
                     
                 <div v-for="(field, fIdx) in section.fields" :key="fIdx" class="settings-item">
                     
-                    <!-- Label Row -->
-                    <div class="label-row" v-if="field.expandable || field.type === 'greeting_list'">
-                        <label>{{ t(field.label) || field.label }}</label> 
+                    <div class="label-row" v-if="field.expandable || field.type === 'greeting_list' || field.helpTerm">
+                        <label>
+                            {{ t(field.label) || field.label }}
+                            <HelpTip v-if="field.helpTerm" :term="field.helpTerm" />
+                        </label> 
                         <div v-if="field.expandable" class="expand-btn" @click="openFsEditor(field.key)"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
                     </div>
-                    <label v-else-if="field.type !== 'greeting_list'">{{ t(field.label) || field.label }}</label>
+                    <label v-else-if="field.type !== 'greeting_list'">
+                        {{ t(field.label) || field.label }}
+                        <HelpTip v-if="field.helpTerm" :term="field.helpTerm" />
+                    </label>
 
                     <!-- Inputs -->
                     <input v-if="field.type === 'text'" type="text" v-model="item[field.key]" @input="autoSave" :placeholder="field.placeholder ? t(field.placeholder) : ''">
@@ -281,9 +310,10 @@ function openFsEditor(field, index = -1) {
                         </div>
                     </div>
 
-                    <select v-else-if="field.type === 'select'" v-model="item[field.key]" class="vk-select" @change="autoSave" style="width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-gray); color: var(--text-black);">
-                        <option v-for="opt in field.options" :key="opt.value" :value="opt.value">{{ t(opt.label) || opt.label }}</option>
-                    </select>
+                    <div v-else-if="field.type === 'select'" class="clickable-selector" @click="openSelectSelector(field)">
+                        <span>{{ getSelectedLabel(field) }}</span>
+                        <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
                     
                     <div v-else-if="field.type === 'info'" class="info-field">
                         {{ field.text || item[field.key] }}
@@ -386,20 +416,12 @@ function openFsEditor(field, index = -1) {
     text-transform: uppercase;
     color: var(--vk-blue);
     letter-spacing: 0.5px;
-    border-bottom: 1px solid rgba(0,0,0,0.03);
-}
-
-body.dark-theme .group-header {
-    border-bottom: 1px solid rgba(255,255,255,0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .settings-item {
     padding: 16px;
-    border-bottom: 1px solid rgba(0,0,0,0.05);
-}
-
-body.dark-theme .settings-item {
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .settings-item:last-child {
@@ -459,9 +481,10 @@ select {
     width: 100%;
     padding: 10px 12px;
     border-radius: 10px;
-    border: 1px solid var(--border-color);
-    background-color: rgba(255,255,255,0.5);
+    border: 1px solid rgba(255,255,255,0.1);
+    background-color: rgba(0,0,0,0.2);
     font-size: 15px;
+    color: var(--text-black);
     transition: border-color 0.2s, background-color 0.2s;
 }
 
@@ -470,25 +493,8 @@ input[type="number"]:focus,
 textarea:focus,
 select:focus {
     border-color: var(--vk-blue);
-    background-color: #fff;
-    outline: none;
-}
-
-body.dark-theme input[type="text"],
-body.dark-theme input[type="number"],
-body.dark-theme textarea,
-body.dark-theme select {
-    background-color: rgba(0,0,0,0.2);
-    border-color: rgba(255,255,255,0.1);
-    color: var(--text-black);
-}
-
-body.dark-theme input[type="text"]:focus,
-body.dark-theme input[type="number"]:focus,
-body.dark-theme textarea:focus,
-body.dark-theme select:focus {
-    border-color: var(--vk-blue);
     background-color: rgba(0,0,0,0.4);
+    outline: none;
 }
 
 .greeting-list-container {
@@ -498,14 +504,10 @@ body.dark-theme select:focus {
 }
 
 .greeting-item {
-    background: rgba(0,0,0,0.03);
+    background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border-color);
     border-radius: 10px;
     padding: 10px;
-}
-
-body.dark-theme .greeting-item {
-    background: rgba(255,255,255,0.03);
 }
 
 .greeting-header {
@@ -587,5 +589,30 @@ body.dark-theme .greeting-item {
     width: 20px;
     height: 20px;
     fill: currentColor;
+}
+
+.clickable-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-item);
+    border: 1px solid var(--border-color);
+    padding: 0 16px;
+    height: 48px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 15px;
+    transition: background 0.2s;
+}
+
+.clickable-selector:active {
+    background: var(--bg-item-active);
+}
+
+.clickable-selector svg {
+    width: 24px;
+    height: 24px;
+    fill: var(--text-gray);
+    opacity: 0.5;
 }
 </style>

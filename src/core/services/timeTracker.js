@@ -50,3 +50,5 @@ export const getTrackedTime = (scope, charId = null, sessionId = null) => {
     }
     return 0;
 };
+
+export const getActiveContext = () => ({ charId: activeCharId, sessionId: activeSessionId });

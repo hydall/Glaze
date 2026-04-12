@@ -15,6 +15,7 @@ import { Toast } from '@capacitor/toast';
 import { saveFile } from '@/core/services/fileSaver.js';
 import SheetView from '@/components/ui/SheetView.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import RegexSheet from '@/components/sheets/RegexSheet.vue';
 import { logger } from '../utils/logger.js';
 
 const emit = defineEmits(['open-fs']);
@@ -42,7 +43,7 @@ const effectivePersona = computed(() => getEffectivePersona(props.activeChatChar
 const showAdvancedSettings = ref(false);
 
 const genSheetBodyRef = ref(null);
-let savedScrollPos = 0;
+const scrollPositions = { list: 0, editor: 0, 'block-editor': 0 };
 
 const headerState = reactive({
     title: '',
@@ -67,10 +68,21 @@ function close() {
     sheet.value?.close();
 }
 
-async function openPreset(id) {
+function onSheetClose() {
+    openedFromRegex.value = false;
+    flushPresetSave();
+    scrollPositions.list = 0;
+    scrollPositions.editor = 0;
+    scrollPositions['block-editor'] = 0;
+}
+
+const openedFromRegex = ref(false);
+
+async function openPreset(id, fromRegex = false) {
     await initPresetState();
     await loadPresets();
     editingPresetId.value = id;
+    openedFromRegex.value = fromRegex;
     sheet.value?.open();
     updateHeaderState();
 }
@@ -111,24 +123,47 @@ function openSquashRoleSelector() {
     });
 }
 
+function openReasoningEffortSelector() {
+    const options = [
+        { value: 'low', label: t('reasoning_effort_low') || 'Low' },
+        { value: 'medium', label: t('reasoning_effort_medium') || 'Medium' },
+        { value: 'high', label: t('reasoning_effort_high') || 'High' }
+    ];
+
+    const items = options.map(opt => ({
+        label: opt.label,
+        icon: currentPreset.value.reasoningEffort === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            currentPreset.value.reasoningEffort = opt.value;
+            closeBottomSheet();
+        }
+    }));
+
+    showBottomSheet({
+        title: t('label_reasoning_effort') || 'Reasoning Effort',
+        items
+    });
+}
+
 // --- Editor State ---
+const editingPresetId = ref(null);
+const optimisticGlobalPresetId = ref(null);
 const isEditingBlock = ref(false);
 const editingBlockId = ref(null);
 const showStash = ref(false);
+const navDirection = ref('forward');
 
-const activeBlocks = computed(() => {
-    if (!currentPreset.value || !currentPreset.value.blocks) return [];
-    return currentPreset.value.blocks.filter(b => !b.isStashed);
+watch([editingPresetId, isEditingBlock], ([newE, newB], [oldE, oldB]) => {
+    const getLevel = (e, b) => b ? 2 : (e ? 1 : 0);
+    const newL = getLevel(newE, newB);
+    const oldL = getLevel(oldE, oldB);
+    if (newL > oldL) navDirection.value = 'forward';
+    else if (newL < oldL) navDirection.value = 'back';
+
+    // Reset scroll when opening a different preset or a different block
+    if (newE && newE !== oldE) scrollPositions.editor = 0;
+    if (newB && !oldB) scrollPositions['block-editor'] = 0;
 });
-
-const stashedBlocks = computed(() => {
-    if (!currentPreset.value || !currentPreset.value.blocks) return [];
-    return currentPreset.value.blocks.filter(b => b.isStashed);
-});
-
-// --- Computed ---
-const editingPresetId = ref(null);
-const optimisticGlobalPresetId = ref(null);
 
 const effectivePresetId = computed(() => {
     const charId = props.activeChatChar?.id;
@@ -144,8 +179,30 @@ const currentPresetId = computed(() => {
 
 const currentPreset = computed(() => {
     const id = currentPresetId.value;
-    return presetState.presets[id] || presetState.presets['default'] || Object.values(presetState.presets)[0];
+    return presetState.presets[id] || presetState.presets['default_shino'] || Object.values(presetState.presets)[0];
 });
+
+const activeBlocks = computed(() => {
+    if (!currentPreset.value || !currentPreset.value.blocks) return [];
+    return currentPreset.value.blocks.filter(b => !b.isStashed);
+});
+
+const stashedBlocks = computed(() => {
+    if (!currentPreset.value || !currentPreset.value.blocks) return [];
+    return currentPreset.value.blocks.filter(b => b.isStashed);
+});
+
+const regexSheetRef = ref(null);
+const presetRegexCount = computed(() => currentPreset.value?.regexes?.length || 0);
+function openRegexSheetFromPreset() {
+    if (openedFromRegex.value) {
+        close();
+    } else {
+        regexSheetRef.value?.open();
+    }
+}
+
+// --- Other Computed ---
 
 const activePresetName = computed(() => {
     const id = effectivePresetId.value;
@@ -213,12 +270,7 @@ function openLevelSelector(level) {
         });
     }
 
-    const entries = Object.entries(presetState.presets).sort((a, b) => {
-        const wA = getPresetWeight(a[0], a[1]);
-        const wB = getPresetWeight(b[0], b[1]);
-        if (wA !== wB) return wA - wB;
-        return a[1].name.localeCompare(b[1].name);
-    });
+    const entries = Object.entries(presetState.presets).sort(comparePresetEntries);
 
     entries.forEach(([id, preset]) => {
         const tokens = getPresetTokens(preset);
@@ -257,12 +309,7 @@ function openLevelSelector(level) {
 }
 
 function openPresetEditorSelector() {
-    const entries = Object.entries(presetState.presets).sort((a, b) => {
-        const wA = getPresetWeight(a[0], a[1]);
-        const wB = getPresetWeight(b[0], b[1]);
-        if (wA !== wB) return wA - wB;
-        return a[1].name.localeCompare(b[1].name);
-    });
+    const entries = Object.entries(presetState.presets).sort(comparePresetEntries);
 
     const cardItems = entries.map(([id, preset]) => {
         const tokens = getPresetTokens(preset);
@@ -367,6 +414,10 @@ const extendedReplaceMacros = (text) => {
 const getPresetTokens = (preset) => {
     if (!preset) return 0;
     let content = "";
+    // Include Impersonation Prompt
+    if (preset.impersonationPrompt) {
+        content += preset.impersonationPrompt + "\n";
+    }
     // Include Enabled Blocks
     if (preset.blocks) {
         preset.blocks.forEach(b => {
@@ -386,12 +437,12 @@ const displayedEditingTokens = ref(0);
 
 const activePresetTokens = computed(() => {
     const id = effectivePresetId.value;
-    const preset = presetState.presets[id] || presetState.presets['default'];
+    const preset = presetState.presets[id] || presetState.presets['default_shino'];
     return getPresetTokens(preset);
 });
 const displayedActiveTokens = ref(0);
 
-const globalTokens = computed(() => getPresetTokens(presetState.presets[presetState.globalPresetId] || presetState.presets['default']));
+const globalTokens = computed(() => getPresetTokens(presetState.presets[presetState.globalPresetId] || presetState.presets['default_shino']));
 const charTokens = computed(() => {
     const charId = props.activeChatChar?.id;
     const id = charId ? presetState.connections.character[charId] : null;
@@ -445,20 +496,44 @@ const getBlockTokens = (blockOrContent) => {
 
 const getPresetWeight = (id, preset) => {
     if (preset.isFeatured) return -3;
-    if (id === 'default') return -2;
+    if (id === 'default_shino') return -2;
     if (DEFAULT_PRESETS[id]) return -1;
     return 0;
+};
+
+const getPresetCreatedAt = (id, preset) => {
+    if (!preset) return 0;
+    if (typeof preset.createdAt === 'number' && Number.isFinite(preset.createdAt)) return preset.createdAt;
+
+    const derived = Number.parseInt(String(id), 36);
+    return Number.isFinite(derived) ? derived : 0;
+};
+
+const comparePresetEntries = (a, b) => {
+    const wA = getPresetWeight(a[0], a[1]);
+    const wB = getPresetWeight(b[0], b[1]);
+    if (wA !== wB) return wA - wB;
+
+    const tA = getPresetCreatedAt(a[0], a[1]);
+    const tB = getPresetCreatedAt(b[0], b[1]);
+    if (tA !== tB) return tA - tB; // oldest first
+
+    return (a[1]?.name || '').localeCompare(b[1]?.name || '');
 };
 
 // Sorted preset entries for the selector list
 const sortedPresetEntries = computed(() => {
     return Object.entries(presetState.presets)
-        .sort((a, b) => {
-            const wA = getPresetWeight(a[0], a[1]);
-            const wB = getPresetWeight(b[0], b[1]);
-            if (wA !== wB) return wA - wB;
-            return a[1].name.localeCompare(b[1].name);
-        });
+        .sort(comparePresetEntries);
+});
+
+// Pre-computed token cache for the preset list — avoids calling getPresetTokens per card on every render
+const presetTokenCache = computed(() => {
+    const cache = {};
+    for (const [id, preset] of Object.entries(presetState.presets)) {
+        cache[id] = getPresetTokens(preset);
+    }
+    return cache;
 });
 
 // Get connection type for a preset relative to current char/chat
@@ -500,6 +575,7 @@ async function loadPresets() {
     for (const key in presetState.presets) {
         const preset = presetState.presets[key];
         if (preset.reasoningEnabled === undefined) preset.reasoningEnabled = false;
+        if (preset.reasoningEffort === undefined) preset.reasoningEffort = 'medium';
         if (preset.parseInlineReasoning === undefined) preset.parseInlineReasoning = false;
         if (preset.mergePrompts === undefined) preset.mergePrompts = false;
         if (preset.mergeRole === undefined) preset.mergeRole = 'system';
@@ -589,12 +665,14 @@ function createNewPreset() {
                 const id = Date.now().toString(36);
                 presetState.presets[id] = {
                     id: id,
+                    createdAt: Date.now(),
                     name: name,
                     blocks: [],
                     author: '',
                     image: '',
                     impersonationPrompt: '',
                     reasoningEnabled: false,
+                    reasoningEffort: 'medium',
                     parseInlineReasoning: false,
                     reasoningStart: '<think>',
                     reasoningEnd: '</think>',
@@ -632,12 +710,7 @@ function openPresetSelector() {
     const charId = props.activeChatChar?.id;
     const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
     
-    const entries = Object.entries(presetState.presets).sort((a, b) => {
-        const wA = getPresetWeight(a[0], a[1]);
-        const wB = getPresetWeight(b[0], b[1]);
-        if (wA !== wB) return wA - wB;
-        return a[1].name.localeCompare(b[1].name);
-    });
+    const entries = Object.entries(presetState.presets).sort(comparePresetEntries);
 
     entries.forEach(([id, preset]) => {
         const tokens = getPresetTokens(preset);
@@ -1082,19 +1155,13 @@ function openCopyBlockPicker(presetId, preset) {
 }
 
 function updateHeaderState() {
-    if (isEditingBlock.value) {
-        headerState.title = t('header_prompt_edit') || 'Edit Prompt';
+    headerState.title = t('sheet_title_presets') || 'Presets';
+    if (isEditingBlock.value || editingPresetId.value) {
         headerState.showBack = true;
-        headerState.actions = [];
-    } else if (editingPresetId.value) {
-        headerState.title = currentPreset.value?.name || t('subtab_preset') || 'Preset';
-        headerState.showBack = true;
-        headerState.actions = [];
     } else {
-        headerState.title = t('sheet_title_presets') || 'Presets';
         headerState.showBack = false;
-        headerState.actions = [];
     }
+    headerState.actions = [];
 }
 
 function goBackFromEditor() {
@@ -1164,11 +1231,6 @@ function openStashSheet() {
 function openBlockEditor(blockId) {
     logger.debug('[GenerationView] openBlockEditor', blockId);
     
-    // Save scroll pos before opening
-    if (genSheetBodyRef.value) {
-        savedScrollPos = genSheetBodyRef.value.scrollTop;
-    }
-
     editingBlockId.value = blockId;
     
     const block = currentPreset.value.blocks.find(b => b.id === blockId);
@@ -1187,13 +1249,28 @@ function closeBlockEditor() {
     logger.debug('[GenerationView] closeBlockEditor');
     isEditingBlock.value = false;
     editingBlockId.value = null;
-    // Restore Generation Header
     nextTick(() => {
         updateHeaderState();
-        if (genSheetBodyRef.value) {
-            genSheetBodyRef.value.scrollTop = savedScrollPos;
-        }
     });
+}
+
+function onTransitionBeforeLeave(el) {
+    const key = el.getAttribute('data-scroll-key');
+    const scroller = genSheetBodyRef.value?.closest('.sheet-view-body');
+    if (key && scroller) {
+        scrollPositions[key] = scroller.scrollTop || 0;
+    }
+}
+
+function onTransitionBeforeEnter(el) {
+    const key = el.getAttribute('data-scroll-key');
+    if (key && scrollPositions[key] !== undefined) {
+        const scroller = genSheetBodyRef.value?.closest('.sheet-view-body');
+        if (scroller) {
+            scroller.scrollTop = scrollPositions[key];
+            nextTick(() => { scroller.scrollTop = scrollPositions[key]; });
+        }
+    }
 }
 
 function deleteActiveBlock() {
@@ -1381,6 +1458,7 @@ function processImportedPreset(data, defaultName) {
 
     const newId = Date.now().toString();
     preset.id = newId;
+    if (preset.createdAt === undefined) preset.createdAt = Date.now();
     presetState.presets[newId] = preset;
     editingPresetId.value = newId;
     updateHeaderState();
@@ -1448,12 +1526,12 @@ const editorConfig = computed(() => {
         const block = activeEditBlock.value;
         const mode = block.insertion_mode || 'relative';
         const fields = [
-            { key: 'role', label: 'label_role', type: 'select', options: [
+            { key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role', options: [
                 { value: 'system', label: 'role_system' },
                 { value: 'user', label: 'role_user' },
                 { value: 'assistant', label: 'role_assistant' }
             ]},
-            { key: 'insertion_mode', label: 'label_injection_point', type: 'select', options: [
+            { key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection', options: [
                 { value: 'relative', label: 'injection_relative' },
                 { value: 'depth', label: 'injection_depth' }
             ]},
@@ -1471,7 +1549,7 @@ const editorConfig = computed(() => {
         
         if (activeEditBlock.value.id !== 'chat_history') {
             fields.push({ 
-                key: 'role', label: 'label_role', type: 'select', 
+                key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role',
                 options: [
                     { value: 'system', label: 'role_system' },
                     { value: 'user', label: 'role_user' },
@@ -1481,7 +1559,7 @@ const editorConfig = computed(() => {
         }
 
         fields.push({
-            key: 'insertion_mode', label: 'label_injection_point', type: 'select',
+            key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection',
             options: [
                 { value: 'relative', label: 'injection_relative' },
                 { value: 'depth', label: 'injection_depth' }
@@ -1507,7 +1585,7 @@ const editorConfig = computed(() => {
     const genericFields = [
         { key: 'name', label: 'label_block_name', type: 'text' },
         { 
-            key: 'role', label: 'label_role', type: 'select', 
+            key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role',
             options: [
                 { value: 'system', label: 'role_system' },
                 { value: 'user', label: 'role_user' },
@@ -1515,7 +1593,7 @@ const editorConfig = computed(() => {
             ]
         },
         {
-            key: 'insertion_mode', label: 'label_injection_point', type: 'select',
+            key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection',
             options: [
                 { value: 'relative', label: 'injection_relative' },
                 { value: 'depth', label: 'injection_depth' }
@@ -1730,6 +1808,7 @@ function openAuthorsNoteSheet() {
         title: t('magic_authors_notes'),
         helpTip: 'authornote',
         content: content,
+        isSolid: true,
         headerAction: { icon: getToggleIcon(data.enabled), onClick: toggleAction },
         onClose: () => {
             if (debounceTimer) clearTimeout(debounceTimer);
@@ -1822,6 +1901,7 @@ function openSummarySheet() {
         title: t('magic_summary'), 
         helpTip: 'summary',
         content: content,
+        isSolid: true,
         onClose: () => {
             if (debounceTimer) clearTimeout(debounceTimer);
             save();
@@ -1885,10 +1965,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack" :actions="headerState.actions" @back="goBackFromEditor" @close="flushPresetSave">
+    <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack" :actions="headerState.actions" :z-index="11500" @back="goBackFromEditor" @close="onSheetClose">
         <div class="gen-sheet-body" ref="genSheetBodyRef">
+            <Transition :name="navDirection === 'forward' ? 'ps-fwd' : 'ps-back'" mode="out-in" @before-leave="onTransitionBeforeLeave" @before-enter="onTransitionBeforeEnter">
         <!-- ═══ SELECTOR LIST VIEW ═══ -->
-        <div class="preset-selector-list" v-if="!isEditingBlock && !editingPresetId">
+        <div class="preset-selector-list" v-if="!isEditingBlock && !editingPresetId" key="list" data-scroll-key="list">
             <div class="ps-list">
                 <div v-for="[id, preset] in sortedPresetEntries" :key="id"
                      class="ps-card"
@@ -1911,7 +1992,7 @@ onBeforeUnmount(() => {
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px;">
                             <div class="ps-card-badge" :class="{ 'ps-with-bg': !!preset.image }">
                                 <svg viewBox="0 0 24 24" class="ps-badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                                {{ getPresetTokens(preset) }}
+                                {{ presetTokenCache[id] }}
                             </div>
                             <div class="ps-card-meta" :class="{ 'ps-with-bg': !!preset.image }">
                                 <span v-if="preset.author">by {{ preset.author }}</span>
@@ -1927,10 +2008,7 @@ onBeforeUnmount(() => {
                                  :class="['ps-conn-' + (getPresetConnectionType(id) || 'none'), { 'ps-with-bg': !!preset.image }]"
                                  @click="openPresetConnections(id, $event)"
                                  :title="t('header_connections') || 'Connections'">
-                                <svg v-if="getPresetConnectionType(id) === 'chat'" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
-                                <svg v-else-if="getPresetConnectionType(id) === 'character'" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-                                <svg v-else-if="getPresetConnectionType(id) === 'global'" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-                                <svg v-else viewBox="0 0 24 24"><path d="M17 16l-4-4V8.82C14.16 8.4 15 7.3 15 6c0-1.66-1.34-3-3-3S9 4.34 9 6c0 1.3.84 2.4 2 2.82V12l-4 4H3v5h5v-3.05l4-4.2 4 4.2V21h5v-5h-4z"/></svg>
+                                <svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
                             </div>
                         </div>
                         <!-- Edit pencil -->
@@ -1948,8 +2026,8 @@ onBeforeUnmount(() => {
             </div>
         </div>
 
-        <!-- ═══ EDITOR VIEW (existing dashboard) ═══ -->
-        <div class="prompt-builder-wrapper" v-if="!isEditingBlock && editingPresetId">
+        <!-- ═══ EDITOR VIEW ═══ -->
+        <div class="prompt-builder-wrapper" v-else-if="!isEditingBlock && editingPresetId" key="editor" data-scroll-key="editor">
 
                 <!-- Consolidated Dashboard and Blocks Container -->
                 <div class="preset-dashboard" :class="{ 'has-background': !!currentPreset.image }" :style="currentPreset.image ? { 'background-image': 'url(' + currentPreset.image + ')' } : {}">
@@ -1973,12 +2051,18 @@ onBeforeUnmount(() => {
 
                     <div class="dashboard-utils-row">
                         <div class="utils-left">
-                            <div v-if="stashedBlocks.length > 0" 
-                                 class="header-stash-btn" 
+                            <div v-if="stashedBlocks.length > 0"
+                                 class="header-stash-btn"
                                  @click.stop="openStashSheet"
                                  :title="t('stash') || 'Stash'">
                                 <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6 10H6v-2h8v2zm4-4H6v-2h12v2z"/></svg>
                                 <span class="stash-count-dot">{{ stashedBlocks.length }}</span>
+                            </div>
+                            <div class="header-stash-btn"
+                                 @click.stop="openRegexSheetFromPreset"
+                                 :title="t('menu_regex') || 'Regex'">
+                                <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+                                <span v-if="presetRegexCount > 0" class="stash-count-dot">{{ presetRegexCount }}</span>
                             </div>
                         </div>
                         <div class="utils-right">
@@ -2050,10 +2134,10 @@ onBeforeUnmount(() => {
                 <Transition name="expand">
                     <div v-if="showAdvancedSettings" class="advanced-settings-panel">
                         <div class="menu-group">
-                            <div class="section-header">{{ t('section_postprocessing') || 'Prompt Postprocessing' }} <HelpTip term="preset-merge"/></div>
+                            <div class="section-header">{{ t('section_postprocessing') || 'Prompt Postprocessing' }}</div>
                             <div class="settings-item-checkbox" @click.capture="currentPreset.noAssistant ? Toast.show({ text: t('hint_merge_locked') || 'Required by NoAssistant mode — single block', duration: 'short', position: 'bottom' }) : null">
                                 <div class="settings-text-col">
-                                    <label>{{ t('label_merge_prompts') || 'Merge Prompts' }}</label>
+                                    <label>{{ t('label_merge_prompts') || 'Merge Prompts' }} <HelpTip term="preset-merge"/></label>
                                     <div class="settings-desc">{{ t('desc_merge_prompts') || 'Combine adjacent blocks into one message' }}</div>
                                 </div>
                                 <input type="checkbox" v-model="currentPreset.mergePrompts" class="vk-switch" :disabled="currentPreset.noAssistant">
@@ -2096,14 +2180,7 @@ onBeforeUnmount(() => {
                             <div class="section-header">{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/></div>
                             <div class="settings-item-checkbox">
                                 <div class="settings-text-col">
-                                <label>{{ t('label_reasoning') || 'Request Native Reasoning' }}</label>
-                                <div class="settings-desc">{{ t('desc_reasoning') || 'Shows model native reasoning' }}</div>
-                                </div>
-                                <input type="checkbox" v-model="currentPreset.reasoningEnabled" class="vk-switch">
-                            </div>
-                            <div class="settings-item-checkbox">
-                                <div class="settings-text-col">
-                                <label>{{ t('label_parse_inline_reasoning') || 'Parse Inline Reasoning' }}</label>
+                                <label>{{ t('label_parse_inline_reasoning') || 'Parse Inline Reasoning' }} <HelpTip term="preset-reasoning-inline"/></label>
                                 <div class="settings-desc">{{ t('desc_parse_inline_reasoning') || 'Extracts reasoning from the message body and inserts it into the reasoning block' }}</div>
                                 </div>
                                 <input type="checkbox" v-model="currentPreset.parseInlineReasoning" class="vk-switch">
@@ -2120,6 +2197,13 @@ onBeforeUnmount(() => {
                             <div class="section-header">{{ t('label_preset_prompts') || 'Function Prompts' }}</div>
                             <div class="settings-item">
                                 <div class="label-row">
+                                    <label>{{ t('label_impersonation_prompt') || 'Impersonation Prompt' }}</label>
+                                    <div class="expand-btn" @click="handleOpenFs('impersonationPrompt')"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                                </div>
+                                <textarea v-model="currentPreset.impersonationPrompt" rows="3" :placeholder="t('placeholder_impersonation_prompt') || 'Prompt to trigger impersonation...'"></textarea>
+                            </div>
+                            <div class="settings-item">
+                                <div class="label-row">
                                     <label>{{ t('label_summary_prompt') || 'Summary Prompt' }}</label>
                                     <div class="expand-btn" @click="handleOpenFs('summaryPrompt')"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
                                 </div>
@@ -2132,7 +2216,7 @@ onBeforeUnmount(() => {
             </div>
 
         <!-- Block Editor View -->
-        <div v-if="isEditingBlock" class="block-editor-view editor-fixed-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; background: var(--app-bg);">
+        <div v-else-if="isEditingBlock" class="block-editor-view" key="block-editor" data-scroll-key="block-editor" style="background: var(--app-bg); min-height: 100%;">
             <div class="block-editor-scroll">
                 <Editor v-model="editorProxy" :config="editorConfig" @open-fs="(data) => emit('open-fs', data)">
                     <template #footer>
@@ -2150,12 +2234,15 @@ onBeforeUnmount(() => {
                 </Editor>
             </div>
         </div>
-            </div>
+            </Transition>
+        </div>
     </SheetView>
 
-    <input 
-        type="file" 
-        id="preset-file-input" 
+    <RegexSheet ref="regexSheetRef" :active-chat-char="activeChatChar" :inside-preset="true" :z-index="11800" />
+
+    <input
+        type="file"
+        id="preset-file-input"
         style="display: none" 
         accept=".json" 
         @change="onFileSelected"
@@ -2171,7 +2258,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* API Status Base Style (moved from inline) */
-.api-status {
+.conn-badge {
     display: flex; 
     align-items: center; 
     font-size: 0.75em; 
@@ -2247,16 +2334,12 @@ onBeforeUnmount(() => {
   color: var(--vk-blue);
   padding: 0 14px;
   border-radius: 16px;
-  background-color: var(--white);
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
   backdrop-filter: blur(var(--element-blur, 12px));
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
   border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
   transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
   overflow: hidden;
-}
-
-:global(body.dark-theme) .preset-selector {
-  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
 }
 
 .preset-selector:active {
@@ -2304,7 +2387,7 @@ onBeforeUnmount(() => {
 
 .block-content {
     flex: 1;
-    padding: 10px 5px;
+    padding: 10px 0;
     display: flex;
     align-items: center;
     overflow: hidden;
@@ -2515,10 +2598,41 @@ onBeforeUnmount(() => {
 .header-btn svg { width: 24px; height: 24px; fill: currentColor; }
 
 .gen-sheet-tabs { padding: 10px 16px; flex-shrink: 0; }
-.gen-sheet-body { flex: 1; overflow-y: auto; position: relative;}
+.gen-sheet-body { 
+    position: relative; 
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.clickable-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-item);
+    border: 1px solid var(--border-color);
+    padding: 0 16px;
+    height: 44px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+    margin-top: 4px;
+}
+
+.clickable-selector:active {
+    background: var(--bg-item-active);
+}
+
+.clickable-selector svg {
+    width: 20px;
+    height: 20px;
+    fill: var(--text-gray);
+    opacity: 0.5;
+}
 
 .preset-overview-block {
-    margin: 8px 16px 0;
+    margin: 0 16px 16px;
     padding: 12px;
     background: rgba(var(--vk-blue-rgb), 0.05);
     border: 1px solid var(--border-color);
@@ -2530,8 +2644,8 @@ onBeforeUnmount(() => {
 
 .preset-dashboard {
     /* Base styling for when no image is present */
-    margin: 8px 16px;
-    padding: 12px 12px 0;
+    margin: 0 16px 16px;
+    padding: 12px 0 0;
     background: rgba(var(--vk-blue-rgb), 0.05);
     border: 1px solid var(--border-color);
     border-radius: 16px;
@@ -2549,7 +2663,6 @@ onBeforeUnmount(() => {
     background-position: top center;
     background-repeat: no-repeat;
     background-color: transparent;
-    padding: 12px 12px 0;
     min-height: auto;
     justify-content: flex-start;
 }
@@ -2559,17 +2672,8 @@ onBeforeUnmount(() => {
     position: absolute;
     top: 0; left: 0; width: 100%; height: 100%;
     /* Fade from dark at top to app background color at bottom */
-    background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 80px, var(--app-bg) 200px);
-    z-index: 0;
-}
-
-.preset-dashboard.has-background > * {
-    position: relative;
-    z-index: 1;
-}
-
-body.dark-theme .preset-dashboard.has-background::before {
     background: linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.6) 80px, var(--app-bg) 200px);
+    z-index: 0;
 }
 
 .preset-dashboard.has-background .active-preset-name,
@@ -2627,13 +2731,14 @@ body.dark-theme .preset-dashboard.has-background::before {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 4px;
+    padding: 0 16px;
     margin-top: 24px;
 }
 
 .utils-left, .utils-right {
     display: flex;
     align-items: center;
+    gap: 8px;
 }
 
 .header-dots-btn {
@@ -2669,8 +2774,6 @@ body.dark-theme .preset-dashboard.has-background::before {
     z-index: 1;
     display: flex;
     flex-direction: column;
-    margin-left: -12px;
-    margin-right: -12px;
 }
 
 /* Removed active scaling for the whole dashboard since it contains interactive elements now */
@@ -2691,7 +2794,7 @@ body.dark-theme .preset-dashboard.has-background::before {
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;
-    padding: 0 8px;
+    padding: 0 20px;
 }
 
 .active-row-content {
@@ -2719,6 +2822,8 @@ body.dark-theme .preset-dashboard.has-background::before {
     align-items: center;
     gap: 4px;
     min-width: 0;
+    position: relative;
+    z-index: 10;
 }
 
 .active-preset-name {
@@ -2798,12 +2903,8 @@ body.dark-theme .preset-dashboard.has-background::before {
 }
 
 .hierarchy-item.active {
-    background: white;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-}
-
-body.dark-theme .hierarchy-item.active {
     background: #2c2c2e;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
 
 .hierarchy-item.empty {
@@ -2946,10 +3047,6 @@ body.dark-theme .hierarchy-item.active {
 .stash-section {
     margin-top: 16px;
     padding-top: 16px;
-    border-top: 1px solid rgba(0,0,0,0.05);
-}
-
-body.dark-theme .stash-section {
     border-top: 1px solid rgba(255,255,255,0.05);
 }
 
@@ -3003,15 +3100,10 @@ body.dark-theme .stash-section {
     align-items: center;
     justify-content: space-between;
     padding: 8px 12px;
-    background: rgba(0,0,0,0.03);
-    border: 1px solid rgba(0,0,0,0.05);
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.05);
     border-radius: 10px;
     gap: 12px;
-}
-
-body.dark-theme .stashed-item {
-    background: rgba(255,255,255,0.03);
-    border-color: rgba(255,255,255,0.05);
 }
 
 .stashed-info {
@@ -3134,8 +3226,12 @@ body.dark-theme .stashed-item {
 }
 
 .block-editor-scroll {
-    flex: 1;
-    overflow-y: auto;
+    padding-bottom: 40px;
+}
+
+:deep(.editor-container) {
+    height: auto !important;
+    overflow: visible !important;
 }
 
 .block-editor-inline-actions {
@@ -3182,7 +3278,7 @@ body.dark-theme .stashed-item {
 
 /* ═══ Preset Selector List ═══ */
 .preset-selector-list {
-    padding: 8px 16px 20px;
+    padding: 0 16px 20px;
 }
 
 .ps-list {
@@ -3195,9 +3291,9 @@ body.dark-theme .stashed-item {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 12px;
+    padding: 10px 10px;
     background: var(--menu-group-bg, rgba(0,0,0,0.02));
-    border: 2px solid var(--border-color, rgba(0,0,0,.08));
+    border: 2px solid #2c2d2e;
     border-radius: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -3340,7 +3436,7 @@ body.dark-theme .stashed-item {
 
 .ps-card-meta {
     font-size: 12px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
@@ -3528,5 +3624,35 @@ body.dark-theme .stashed-item {
     width: 20px;
     height: 20px;
     fill: currentColor;
+}
+/* ── Sub-view Slide Animations ── */
+.ps-fwd-enter-active {
+    transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.12s ease;
+}
+.ps-fwd-leave-active {
+    transition: transform 0.1s cubic-bezier(0.4, 0, 1, 1), opacity 0.1s ease;
+}
+.ps-fwd-enter-from {
+    transform: translateX(30px);
+    opacity: 0;
+}
+.ps-fwd-leave-to {
+    transform: translateX(-20px);
+    opacity: 0;
+}
+
+.ps-back-enter-active {
+    transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.12s ease;
+}
+.ps-back-leave-active {
+    transition: transform 0.1s cubic-bezier(0.4, 0, 1, 1), opacity 0.1s ease;
+}
+.ps-back-enter-from {
+    transform: translateX(-30px);
+    opacity: 0;
+}
+.ps-back-leave-to {
+    transform: translateX(20px);
+    opacity: 0;
 }
 </style>

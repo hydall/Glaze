@@ -35,12 +35,7 @@ import { toastState } from '@/core/states/toastState.js';
     -webkit-user-select: none;
 }
 
-/* Dark theme */
-:global(.dark-theme .app-toast) {
-    background: rgba(240, 240, 240, 0.92);
-    color: #111;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-}
+
 
 .toast-enter-active {
     transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);

@@ -41,7 +41,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
+    font-size: calc(var(--ui-font-size, 15px) + 5px);
     color: var(--vk-blue);
     font-weight: 500;
 }
@@ -86,7 +86,7 @@
 .title,
 .item-title {
     font-weight: 500;
-    font-size: 16px;
+    font-size: calc(var(--ui-font-size, 15px) + 1px);
     color: var(--text-dark-gray);
     margin-bottom: 2px;
     line-height: 20px;
@@ -96,7 +96,7 @@
 }
 
 .item-subtitle {
-    font-size: 13px;
+    font-size: calc(var(--ui-font-size, 15px) - 2px);
     color: var(--text-gray);
     line-height: 16px;
     white-space: nowrap;
@@ -110,7 +110,7 @@
 
 .item-edit-btn {
     padding: 12px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -158,16 +158,16 @@
 }
 
 .item-meta {
-    font-size: 12px;
-    color: var(--text-light-gray);
+    font-size: calc(var(--ui-font-size, 15px) - 3px);
+    color: var(--text-gray);
     margin-left: 8px;
     white-space: nowrap;
 }
 
 .item-version {
-    font-size: 11px;
+    font-size: calc(var(--ui-font-size, 15px) - 4px);
     vertical-align: super;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     margin-left: 4px;
     line-height: 0;
 }
@@ -188,7 +188,7 @@
     align-items: center;
     justify-content: center;
     color: white;
-    font-size: 16px;
+    font-size: calc(var(--ui-font-size, 15px) + 1px);
     font-weight: 500;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
     cursor: pointer;
@@ -331,7 +331,7 @@
 }
 
 .empty-state-text {
-    font-size: 16px;
+    font-size: calc(var(--ui-font-size, 15px) + 1px);
     font-weight: 500;
     opacity: 0.7;
 }
@@ -339,50 +339,15 @@
 /* Segmented Control (Tabs) */
 .segmented-control {
     display: flex;
-    background-color: rgba(0, 0, 0, 0.05);
+    background-color: rgba(255, 255, 255, 0.1);
     border-radius: 10px;
     padding: 4px;
     position: relative;
     isolation: isolate;
 }
 
-.sub-tab-btn {
-    flex: 1;
-    text-align: center;
-    padding: 6px 0;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-gray);
-    cursor: pointer;
-    transition: color 0.2s ease;
-    position: relative;
-    z-index: 2;
-}
-
 .sub-tab-btn.active {
     background-color: transparent;
-    color: #fff;
+    color: var(--text-black);
     box-shadow: none;
-}
-
-.tab-glider {
-    position: absolute;
-    top: 4px;
-    bottom: 4px;
-    left: 4px;
-    background-color: var(--vk-blue);
-    border-radius: 8px;
-    z-index: 1;
-    transition: transform 0.25s cubic-bezier(0.2, 0, 0.2, 1);
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-}
-
-body.dark-theme .segmented-control {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
-body.dark-theme .sub-tab-btn.active {
-    background-color: transparent;
-    color: #fff;
 }

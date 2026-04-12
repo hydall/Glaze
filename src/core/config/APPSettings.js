@@ -10,15 +10,6 @@ export function setLanguage(lang) {
     localStorage.setItem('gz_lang', lang);
 }
 
-export const themeMode = ref(localStorage.getItem('gz_theme') || 'system');
-export function setThemeMode(mode) {
-    themeMode.value = mode;
-    localStorage.setItem('gz_theme', mode);
-}
-export function getThemeMode() {
-    return themeMode.value;
-}
-
 export const imageViewerMode = ref(localStorage.getItem('gz_image_viewer') || 'default');
 logger.debug('[APPSettings] Initial imageViewerMode:', imageViewerMode.value);
 

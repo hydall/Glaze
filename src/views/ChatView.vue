@@ -31,14 +31,14 @@ import { createNewSession as dbCreateSession, deleteSession as dbDeleteSession, 
 import { lorebookState, getActiveLorebooksForContext } from '@/core/states/lorebookState.js';
 import { presetState, getEffectivePreset, getEffectivePresetId } from '@/core/states/presetState.js';
 import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
-import { sendMessageNotification, clearMessageNotifications } from '@/core/services/notificationService.js';
+import { sendMessageNotification, clearMessageNotifications, startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
+import { addNotification } from '@/core/states/notificationsState.js';
 import { formatError } from '@/utils/errors.js';
 import { themeState } from '@/core/states/themeState.js';
 import { triggerChatImport } from '@/core/services/chatImporter.js';
 import { setTrackedContext } from '@/core/services/timeTracker.js';
 import ChatMessage from '@/components/chat/ChatMessage.vue';
 import ChatInput from '@/components/chat/ChatInput.vue';
-import ApiView from '@/views/ApiView.vue';
 import PresetView from '@/views/PresetView.vue';
 import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
 import LorebookSheet from '@/components/sheets/LorebookSheet.vue';
@@ -427,11 +427,13 @@ async function setupHeader(char = activeChatChar) {
     if (!char) return;
     const data = await getChatData(char.id);
     const initialSessionId = char.sessionId || (data ? data.currentId : '...');
+    const sessionName = data?.sessionNames?.[initialSessionId];
 
     window.dispatchEvent(new CustomEvent('header-setup-chat', { 
         detail: { 
             char, 
             currentSessionId: initialSessionId, 
+            sessionName,
             callbacks: {
                 onActionsClick: () => openSessionsSheet(char),
                 onBackClick: () => {
@@ -451,8 +453,14 @@ const onFsEditorClosed = async () => {
 };
 
 async function openChat(char, onBack, force = false) {
+    let targetSessionId = char.sessionId;
+    if (targetSessionId === undefined) {
+        const memData = await getChatData(char.id);
+        targetSessionId = memData ? memData.currentId : undefined;
+    }
+
     // Prevent reloading if the requested chat is already open and active
-    if (!force && activeChatChar && activeChatChar.id === char.id && (char.sessionId === undefined || activeChatChar.sessionId === char.sessionId) && !isOpeningChat) {
+    if (!force && activeChatChar && String(activeChatChar.id) === String(char.id) && String(activeChatChar.sessionId) === String(targetSessionId) && !isOpeningChat) {
         if (char.msgId) {
             const msgIdx = currentMessages.value.findIndex(m => m.id === char.msgId);
             if (msgIdx !== -1) {
@@ -483,7 +491,8 @@ async function openChat(char, onBack, force = false) {
 
     isOpeningChat = true;
     isLoading.value = true;
-    
+
+    try {
     // Attempt to migrate legacy stats locally
     await migrateStatsIfNeeded();
 
@@ -648,7 +657,29 @@ async function openChat(char, onBack, force = false) {
     if (dirty) {
         await db.saveChat(char.id, chatData);
     }
-    
+
+    // Cleanup stuck imggen-loading states (saved during interrupted generation).
+    // Convert them back to canonical <img data-iig-instruction='...' src="[IMG:GEN]"> so
+    // processMessageImages can pick them up and regenerate on this load.
+    {
+        const loadingSpanRe = /<span\b[^>]*\bclass="[^"]*\bimggen-loading\b[^"]*"[^>]*data-iig-instruction='([^']*)'[^>]*>(?:<span[^>]*>[^<]*<\/span>)*<\/span>/g;
+        let dirtyImggen = false;
+        const fixText = (t) => t ? t.replace(loadingSpanRe, (_, enc) => `<img data-iig-instruction='${enc}' src="[IMG:GEN]">`) : t;
+        for (const msg of msgs) {
+            if (!msg?.text?.includes('imggen-loading')) continue;
+            const newText = fixText(msg.text);
+            if (newText !== msg.text) {
+                msg.text = newText;
+                if (msg.swipes) msg.swipes = msg.swipes.map(fixText);
+                dirtyImggen = true;
+            }
+        }
+        if (dirtyImggen) {
+            chatData.sessions[currentSessionId] = msgs;
+            await db.saveChat(char.id, chatData);
+        }
+    }
+
     currentMessages.value = msgs;
     
     // First Message Logic
@@ -780,11 +811,13 @@ async function openChat(char, onBack, force = false) {
         }));
     }
 
-    isLoading.value = false;
-    isOpeningChat = false;
-    if (pendingCutoffRecalc) {
-        pendingCutoffRecalc = false;
-        updateContextCutoff();
+    } finally {
+        isLoading.value = false;
+        isOpeningChat = false;
+        if (pendingCutoffRecalc) {
+            pendingCutoffRecalc = false;
+            updateContextCutoff();
+        }
     }
 }
 
@@ -983,8 +1016,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 buttonText: t('btn_configure') || "Configure",
                 onButtonClick: () => {
                     closeBottomSheet();
-                    closeChat();
-                    window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-generation' }));
+                    openApiView();
                 }
             }
         });
@@ -1320,7 +1352,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     const m = currentMessages.value[targetIndex];
                     m.triggeredLorebooks = loreEntries.map(e => ({
                         id: e.id,
-                        name: e.keys?.[0] || e.name || 'Entry',
+                        // Lorebook entry display name: ST-compatible field is `comment`
+                        name: e.comment || e.name || e.keys?.[0] || 'Entry',
                         content: e.content,
                         lorebookName: e.lorebookName,
                         lorebookId: e.lorebookId
@@ -1413,7 +1446,10 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             processMessageImages(msg.text, (updatedText) => {
                 msg.text = updatedText;
                 msg.swipes[msg.swipeId || 0] = updatedText;
-                updateSessionMessage(char, foundIndex, msg);
+                // Only persist to DB once all images are resolved (no loading states remain)
+                if (!updatedText.includes('imggen-loading')) {
+                    updateSessionMessage(char, foundIndex, msg);
+                }
             }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: currentMessages.value, currentMsgIndex: foundIndex }).then(finalText => {
                 if (finalText !== msg.text) {
                     msg.text = finalText;
@@ -1469,7 +1505,10 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     processMessageImages(response, (updatedText) => {
                         msg.text = updatedText;
                         msg.swipes[msg.swipeId || 0] = updatedText;
-                        db.saveChat(char.id, bgData);
+                        // Only persist to DB once all images are resolved (no loading states remain)
+                        if (!updatedText.includes('imggen-loading')) {
+                            db.saveChat(char.id, bgData);
+                        }
                     }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: bgData.sessions[sessionId], currentMsgIndex: bIdx }).then(finalText => {
                         if (finalText !== msg.text) {
                             msg.text = finalText;
@@ -1508,15 +1547,18 @@ async function handleImageRegenerate(msgIndex, { instruction, id }) {
     const idEsc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const loadingHtml = makeLoadingHtml(instruction, id);
     const toLoading = (text) => text
-        .replace(new RegExp(`<span[^>]+class="imggen-error"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/button><\\/span>`, 'g'), loadingHtml)
-        .replace(new RegExp(`<span[^>]+class="imggen-result-wrapper"[^>]*>[\\s\\S]*?data-iig-id="${idEsc}"[\\s\\S]*?<\\/span>`, 'g'), loadingHtml);
+        .replace(new RegExp(`<span[^>]+class="[^"]*imggen-error[^"]*"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/button><\\/span>`, 'g'), loadingHtml)
+        .replace(new RegExp(`<span[^>]+class="[^"]*imggen-result-wrapper[^"]*"[^>]*>[\\s\\S]*?data-iig-id="${idEsc}"[\\s\\S]*?<\\/span>`, 'g'), loadingHtml);
 
     msg.text = toLoading(msg.text);
     msg.swipes[msg.swipeId || 0] = msg.text;
     updateSessionMessage(char, msgIndex, msg);
 
-    const loadingRe = new RegExp(`<span[^>]+class="imggen-loading"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/span>`, 'g');
+    const loadingRe = new RegExp(`<span[^>]+class="[^"]*imggen-loading[^"]*"[^>]+data-iig-id="${idEsc}"[^>]*>(?:<span[^>]*>[\\s\\S]*?<\\/span>)*<\\/span>`, 'g');
     const context = { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null };
+
+    startGenerationNotification(t('imggen_notification_title') || 'Glaze', t('imggen_notification_body') || 'Generating image...');
+    addNotification(t('imggen_notification_body') || 'Generating image...', 'info');
 
     try {
         const dataUrl = await generateImage(instruction, context);
@@ -1529,6 +1571,8 @@ async function handleImageRegenerate(msgIndex, { instruction, id }) {
         msg.text = latest.replace(loadingRe, makeErrorHtml(instruction, id, err.message));
         msg.swipes[msg.swipeId || 0] = msg.text;
         updateSessionMessage(char, msgIndex, msg);
+    } finally {
+        stopGenerationNotification();
     }
 }
 
@@ -1809,9 +1853,7 @@ function openMessageActions(msg, index) {
             icon: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
             onClick: () => {
                 closeBottomSheet();
-                let textToEdit = msg.text;
-                msg.editText = textToEdit;
-                msg.isEditing = true;
+                enterEditMode(msg);
             }
         });
     }
@@ -1910,10 +1952,134 @@ function openMessageActions(msg, index) {
     showBottomSheet({ title: t('sheet_title_msg_actions'), items });
 }
 
+function enterEditMode(msg) {
+    msg._iigMap = msg._iigMap || {};
+    const { text, map } = prepareEditText(msg?.text || '', msg._iigMap);
+    msg.editText = text;
+    msg._base64Map = map;
+    msg.isEditing = true;
+}
+
+function normalizeImgGenHtmlForEditing(text, iigMap) {
+    if (!text) return text;
+
+    const makeTag = (instruction) => `<img data-iig-instruction='${instruction}' src="[IMG:GEN]">`;
+
+    const extractInstruction = (chunk) => {
+        if (!chunk) return null;
+        const m1 = chunk.match(/\bdata-iig-instruction='([^']*)'/i);
+        if (m1?.[1] != null) return m1[1];
+        const m2 = chunk.match(/\bdata-iig-instruction="([^"]*)"/i);
+        if (m2?.[1] != null) return m2[1];
+        return null;
+    };
+
+    // Result wrapper (contains base64 src + options button) → canonical [IMG:GEN] tag.
+    text = text.replace(
+        /<span\b[^>]*\bclass="[^"]*\bimggen-result-wrapper\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
+        (wrapperHtml) => {
+            const instruction = extractInstruction(wrapperHtml);
+            if (!instruction) return wrapperHtml;
+            
+            if (iigMap) {
+                const mSrc = wrapperHtml.match(/src="([^"]+)"/i);
+                const mId = wrapperHtml.match(/data-iig-id="([^"]+)"/i);
+                if (mSrc && mSrc[1]) {
+                    iigMap[instruction] = { dataUrl: mSrc[1], id: mId ? mId[1] : `iig_${Date.now()}` };
+                }
+            }
+            return makeTag(instruction);
+        }
+    );
+
+    // Standalone imggen-result <img> (in case wrapper was stripped elsewhere) → canonical [IMG:GEN] tag.
+    text = text.replace(
+        /<img\b[^>]*\bclass="[^"]*\bimggen-result\b[^"]*"[^>]*>/gi,
+        (imgHtml) => {
+            const instruction = extractInstruction(imgHtml);
+            if (!instruction) return imgHtml;
+            
+            if (iigMap) {
+                const mSrc = imgHtml.match(/src="([^"]+)"/i);
+                const mId = imgHtml.match(/data-iig-id="([^"]+)"/i);
+                if (mSrc && mSrc[1]) {
+                    iigMap[instruction] = { dataUrl: mSrc[1], id: mId ? mId[1] : `iig_${Date.now()}` };
+                }
+            }
+            return makeTag(instruction);
+        }
+    );
+
+    // Loading / Error / Disabled blocks → canonical [IMG:GEN] tag.
+    text = text.replace(
+        /<span\b[^>]*\bclass="[^"]*\bimggen-loading\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
+        (spanHtml) => {
+            const instruction = extractInstruction(spanHtml);
+            if (!instruction) return spanHtml;
+            return makeTag(instruction);
+        }
+    );
+    text = text.replace(
+        /<span\b[^>]*\bclass="[^"]*\bimggen-error\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
+        (spanHtml) => {
+            const instruction = extractInstruction(spanHtml);
+            if (!instruction) return spanHtml;
+            return makeTag(instruction);
+        }
+    );
+
+    return text;
+}
+
+function prepareEditText(text, iigMap) {
+    text = normalizeImgGenHtmlForEditing(text, iigMap);
+
+    const map = {};
+    let idx = 0;
+    const cleaned = text.replace(
+        /(<img\b[^>]*\bsrc=")([^"]{256,})("[^>]*>)/gi,
+        (match, before, src, after) => {
+            const key = `[IMG:SRC:${idx}]`;
+            map[key] = src;
+            idx++;
+            return before + key + after;
+        }
+    );
+    return { text: cleaned, map };
+}
+
+function restoreEditText(text, map) {
+    if (!map) return text;
+    for (const [key, src] of Object.entries(map)) {
+        text = text.replace(key, src);
+    }
+    return text;
+}
+
 function saveEdit(msg, index) {
-    let newText = msg.editText || "";
-    let newReasoning = msg.reasoning;
+    let newText = restoreEditText(msg.editText || "", msg._base64Map);
+    delete msg._base64Map;
     
+    const iigMap = msg._iigMap || {};
+    newText = newText.replace(
+        /<img\b[^>]*?(?:data-iig-instruction='([^']*)'[^>]*?src="\[IMG:GEN\]"|src="\[IMG:GEN\]"[^>]*?data-iig-instruction='([^']*?)')[^>]*?>/g,
+        (match, inst1, inst2) => {
+            const raw = inst1 ?? inst2 ?? '{}';
+            if (iigMap[raw]) {
+                const { dataUrl, id } = iigMap[raw];
+                let instrObj = {};
+                try {
+                     instrObj = JSON.parse(raw.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
+                } catch(e) { }
+                return makeResultHtml(instrObj, id, dataUrl);
+            }
+            return match;
+        }
+    );
+    delete msg._iigMap;
+
+    let newReasoning = msg.reasoning;
+
     const { start: tagStart, end: tagEnd } = getReasoningTags();
 
     if (tagStart && tagEnd) {
@@ -1939,11 +2105,28 @@ function saveEdit(msg, index) {
     msg.isEditing = false;
     updateSessionMessage(activeChatChar, index, msg);
     delete msg.editText;
+
+    if (newText.includes('[IMG:GEN]')) {
+        processMessageImages(msg.text, (updatedText) => {
+            const mIdx = currentMessages.value.findIndex(m => m.id === msg.id);
+            if (mIdx !== -1) {
+                const currentMsg = currentMessages.value[mIdx];
+                currentMsg.text = updatedText;
+                if (currentMsg.swipes) currentMsg.swipes[currentMsg.swipeId || 0] = updatedText;
+                updateSessionMessage(activeChatChar, mIdx, currentMsg);
+            }
+        }, {
+            messages: currentMessages.value,
+            currentMsgIndex: index
+        }).catch(e => console.error('[ImageGen] processMessageImages failed:', e));
+    }
 }
 
 function cancelEdit(msg) {
     msg.isEditing = false;
     delete msg.editText;
+    delete msg._base64Map;
+    delete msg._iigMap;
 }
 
 function saveGuidance(msg, index, newGuidance) {
@@ -1994,12 +2177,7 @@ async function startImpersonation(guidanceText = null) {
                 buttonText: t('btn_configure') || "Configure",
                 onButtonClick: () => {
                     closeBottomSheet();
-                    closeChat();
-                    window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-generation' }));
-                    setTimeout(() => {
-                        window.dispatchEvent(new CustomEvent('change-generation-tab', { detail: 'subview-preset' }));
-                        window.dispatchEvent(new CustomEvent('scroll-to-impersonation'));
-                    }, 100);
+                    openApiView();
                 }
             }
         });
@@ -2219,6 +2397,7 @@ async function openSessionsSheet(char) {
         title: t('history_title') + ' ',
         helpTip: 'sessions',
         cardItems: cardItems,
+        isSolid: true,
         headerAction: {
             icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
             onClick: () => {
@@ -2311,9 +2490,7 @@ async function openChatStatsSheet(char = activeChatChar) {
 }
 
 function openApiView() {
-    if (apiView.value) {
-        apiView.value.open();
-    }
+    window.dispatchEvent(new CustomEvent('open-api-sheet'));
 }
 
 function openPresetView() {
@@ -2658,7 +2835,7 @@ onUnmounted(() => {
                     @swipe="(dir) => changeSwipe(vItem.item.originalIndex, dir, true)"
                     @change-greeting="(dir) => changeGreeting(vItem.item.originalIndex, dir, true)"
                     @regenerate="(mode, guidanceText) => regenerateMessage(vItem.item.originalIndex, mode, guidanceText)"
-                    @edit="() => { vItem.item.data.editText = vItem.item.data.text; vItem.item.data.isEditing = true; }"
+                    @edit="() => enterEditMode(vItem.item.data)"
                     @save-edit="saveEdit(vItem.item.data, vItem.item.originalIndex)"
                     @cancel-edit="cancelEdit(vItem.item.data)"
                     @save-guidance="(text) => saveGuidance(vItem.item.data, vItem.item.originalIndex, text)"
@@ -2713,7 +2890,7 @@ onUnmounted(() => {
 
         </div>
 
-        <ApiView ref="apiView" />
+        <div style="display: none;"></div>
         <PresetView ref="presetView" :active-chat-char="activeChar" :chat-history="currentMessages" :is-generating="isGenerating" />
         <CharacterCardSheet ref="charCardSheet" />
         <LorebookSheet ref="lorebookSheet" />
@@ -2797,7 +2974,7 @@ onUnmounted(() => {
 .msg-time {
     margin-left: auto;
     font-size: 12px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
 }
 
 /* Typing Indicator (VK Style Pencil) */
@@ -2856,7 +3033,7 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     padding: 16px 0;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     font-size: 11px;
     font-weight: 500;
     text-transform: uppercase;
@@ -2878,7 +3055,7 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     padding: 16px 0;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     font-size: 11px;
     font-weight: 500;
     text-transform: uppercase;
@@ -2984,14 +3161,14 @@ onUnmounted(() => {
 }
 
 
-body.dark-theme .msg-switcher {
+.msg-switcher {
     background-color: rgba(30, 30, 30, var(--element-opacity, 0.6));
-    color: #aaa;
+    color: var(--text-gray);
 }
 
 /* Code Blocks */
 .code-block {
-    background-color: rgba(0, 0, 0, 0.05);
+    background-color: rgba(255, 255, 255, 0.1);
     border-radius: 6px;
     padding: 10px;
     margin: 8px 0;
@@ -3000,11 +3177,6 @@ body.dark-theme .msg-switcher {
     font-size: 13px;
     white-space: pre;
     color: var(--text-black);
-}
-
-body.dark-theme .code-block {
-    background-color: rgba(255, 255, 255, 0.1);
-    color: #e1e3e6;
 }
 
 .edit-btn.save svg {
@@ -3016,9 +3188,6 @@ body.dark-theme .code-block {
 }
 
 .edit-btn:hover {
-    background-color: rgba(0,0,0,0.05);
-}
-body.dark-theme .edit-btn:hover {
     background-color: rgba(255,255,255,0.1);
 }
 
@@ -3186,10 +3355,6 @@ body.dark-theme .edit-btn:hover {
 .app-header.scroll-hidden {
     transform: none;
     transform: translateY(-250%);
-}
-
-body.dark-theme .message-section {
-    border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 
 /* Text Change Animations */

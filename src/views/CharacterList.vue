@@ -290,6 +290,7 @@ const favorites = computed(() => {
 onMounted(() => {
   loadCharacters();
   window.addEventListener('header-search', (e) => searchQuery.value = e.detail);
+  window.addEventListener('character-updated', loadCharacters);
 });
 
 // Custom Directive for Long Press
@@ -468,6 +469,7 @@ const handleCharClick = (e, char) => {
 };
 
 onUnmounted(() => {
+  window.removeEventListener('character-updated', loadCharacters);
 });
 
 defineExpose({ onAddCharacter });
@@ -591,7 +593,7 @@ defineExpose({ onAddCharacter });
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
   backdrop-filter: blur(var(--element-blur, 12px));
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
   border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
@@ -599,10 +601,6 @@ defineExpose({ onAddCharacter });
   color: var(--vk-blue);
   transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
   flex-shrink: 0;
-}
-
-:global(body.dark-theme) .sort-dir-btn {
-  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
 }
 
 .sort-dir-btn:active {
@@ -632,16 +630,12 @@ defineExpose({ onAddCharacter });
   color: var(--vk-blue);
   padding: 0 14px;
   border-radius: 16px;
-  background-color: var(--white);
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
   backdrop-filter: blur(var(--element-blur, 12px));
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
   border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
   transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
   overflow: hidden;
-}
-
-:global(body.dark-theme) .preset-selector {
-  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
 }
 
 .preset-selector:active {

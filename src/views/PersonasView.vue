@@ -1,13 +1,33 @@
 <script setup>
-import { ref, onMounted } from 'vue';
-import { allPersonas, activePersona, setActivePersona, loadPersonas } from '@/core/states/personaState.js';
+import { ref, computed, onMounted } from 'vue';
+import { allPersonas, activePersona, setActivePersona, loadPersonas, personaConnections } from '@/core/states/personaState.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import SheetView from '@/components/ui/SheetView.vue';
+import HelpTip from '@/components/ui/HelpTip.vue';
 
 const sheet = ref(null);
 
+const props = defineProps({
+    activeChatChar: { type: Object, default: null }
+});
+
 const t = (key) => translations[currentLang.value]?.[key] || key;
+
+const contextCharId = computed(() => props.activeChatChar?.id || null);
+const contextChatId = computed(() => {
+    const id = props.activeChatChar?.id;
+    const sid = props.activeChatChar?.sessionId;
+    if (!id) return null;
+    return sid ? `${id}_${sid}` : null;
+});
+
+function getPersonaConnectionType(personaId) {
+    if (contextChatId.value && personaConnections?.chat?.[contextChatId.value] === personaId) return 'chat';
+    if (contextCharId.value && personaConnections?.character?.[contextCharId.value] === personaId) return 'character';
+    if (activePersona.value?.id === personaId) return 'global';
+    return null;
+}
 
 const openEditor = (index) => {
     window.dispatchEvent(new CustomEvent('open-persona-editor', {
@@ -47,6 +67,9 @@ onMounted(() => {
 
 <template>
     <SheetView ref="sheet" :fit-content="false" :title="t('tab_personas') || 'Personas'" :actions="[{ icon: '<svg viewBox=\'0 0 24 24\'><path d=\'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z\'/></svg>', onClick: () => openEditor(-1) }]">
+        <template #header-title>
+            <HelpTip term="persona" />
+        </template>
         <div class="view-content">
             <div class="personas-list">
                 <div v-if="!allPersonas || allPersonas.length === 0" class="empty-state">
@@ -68,8 +91,8 @@ onMounted(() => {
                         <div class="persona-prompt">{{ persona.prompt || t('no_prompt') || 'No prompt' }}</div>
                     </div>
                     <div class="persona-actions">
-                        <button class="icon-btn" @click.stop="openConnectionManager(persona)">
-                            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                        <button class="activation-btn" :class="getPersonaConnectionType(persona.id) || 'disabled'" @click.stop="openConnectionManager(persona)">
+                            <svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
                         </button>
                         <button class="icon-btn" @click.stop="openEditor(index)">
                             <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
@@ -86,8 +109,6 @@ onMounted(() => {
 
 .view-content {
     padding: 16px;
-    overflow-y: auto;
-    height: 100%;
     box-sizing: border-box;
 }
 
@@ -176,6 +197,38 @@ onMounted(() => {
     height: 20px;
     fill: currentColor;
 }
+
+.activation-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: var(--text-gray);
+    background: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s;
+}
+
+.activation-btn:active {
+    transform: scale(0.9);
+    opacity: 0.8;
+}
+
+.activation-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+.activation-btn.global { color: #34c759; }
+.activation-btn.character { color: #af52de; }
+.activation-btn.chat { color: #ff9500; }
+.activation-btn.disabled { opacity: 0.5; }
 
 .empty-state {
     text-align: center;

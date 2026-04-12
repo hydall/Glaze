@@ -176,7 +176,7 @@ export async function executeRequest({
                         const delta = json.choices[0].delta;
                         if (delta && (delta.content || delta.reasoning_content)) {
                             const content = delta.content || "";
-                            const reasoning = delta.reasoning_content || null;
+                            const reasoning = (requestReasoning && delta.reasoning_content) || null;
 
                             if (content) logger.debug(content);
 
@@ -338,7 +338,7 @@ export async function executeRequest({
         } else if (isIos) {
             try {
                 await BackgroundMode.disable();
-            } catch (e) {}
+            } catch (e) { }
         }
     }
 }

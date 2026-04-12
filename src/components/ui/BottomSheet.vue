@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { translations, t } from '@/utils/i18n.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import { bottomSheetState } from '@/core/states/bottomSheetState.js';
 const props = defineProps({
     visible: Boolean,
     locked: { type: Boolean, default: false }, // when true, prevents backdrop/drag dismiss
@@ -15,7 +16,8 @@ const props = defineProps({
     bigInfo: Object, // { icon, description, buttonText, buttonDisabled, onButtonClick, glossaryChip: { term, label } }
     sessionItems: Array, // [{ title, count, time, preview, isActive, onClick, onDelete }]
     cardItems: Array, // [{ label, sublabel, icon, onClick }]
-    input: Object // { placeholder, value, confirmLabel, onConfirm }
+    input: Object, // { placeholder, value, confirmLabel, onConfirm }
+    isSolid: Boolean
 });
 
 const emit = defineEmits(['close']);
@@ -194,7 +196,7 @@ onBeforeUnmount(() => {
         <div class="modal-backdrop" @click="locked ? undefined : close()"></div>
         <div class="bottom-sheet-content" @click.stop 
              :style="{ transform: isDragging ? `translateY(${currentDragY}px)` : '' }"
-             :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen }">
+             :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid }">
             <div class="sheet-handle-bar"
                  @touchstart="onHandleTouchStart"
                  @touchmove.prevent="onHandleTouchMove"
@@ -675,19 +677,25 @@ onBeforeUnmount(() => {
 
 .bottom-sheet-content {
     z-index: 2;
-    background-color: rgba(var(--theme-ui-color-rgb, 255, 255, 255), var(--element-opacity, 0.8)) !important;
+    background-color: rgba(var(--theme-ui-color-rgb, 30, 30, 30), var(--element-opacity, 0.8)) !important;
     backdrop-filter: blur(var(--element-blur, 20px));
     -webkit-backdrop-filter: blur(var(--element-blur, 20px));
     background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
-    border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
-    box-shadow: 0 -5px 20px rgba(0,0,0,0.1);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 -5px 20px rgba(0,0,0,0.3);
     transition: background-color 0.3s ease, transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
     border-top-left-radius: 20px;
     border-top-right-radius: 20px;
 }
+.bottom-sheet-content.is-solid {
+    background-color: var(--app-bg) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background-image: none !important;
+}
 
 .bottom-sheet-content.keyboard-open {
-    padding-bottom: calc(var(--keyboard-overlap, var(--keyboard-height, 300px)) + 10px + var(--sab, 0px));
+    padding-bottom: calc(var(--keyboard-overlap, 0px) + 10px + var(--sab, 0px));
     max-height: 95vh;
 }
 
@@ -695,11 +703,7 @@ onBeforeUnmount(() => {
     transition: none;
 }
 
-body.dark-theme .bottom-sheet-content {
-    background-color: rgba(var(--theme-ui-color-rgb, 30, 30, 30), var(--element-opacity, 0.8)) !important;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 -5px 20px rgba(0,0,0,0.3);
-}
+
 
 /* Card Items (Triggered style) */
 .sheet-card-list {
@@ -714,7 +718,7 @@ body.dark-theme .bottom-sheet-content {
     align-items: center;
     padding: 10px 12px;
     background: var(--menu-group-bg, rgba(0, 0, 0, 0.02));
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid #555555;
     border-radius: 12px;
     gap: 12px;
     cursor: pointer;
@@ -752,11 +756,6 @@ body.dark-theme .bottom-sheet-content {
 }
 
 .triggered-item-card.is-active {
-    background: rgba(var(--vk-blue-rgb), 0.15);
-    border-color: rgba(var(--vk-blue-rgb), 0.3);
-}
-
-body.dark-theme .triggered-item-card.is-active {
     background: rgba(var(--vk-blue-rgb), 0.2);
     border-color: rgba(var(--vk-blue-rgb), 0.4);
 }
@@ -862,7 +861,7 @@ body.dark-theme .triggered-item-card.is-active {
 
 .triggered-item-card .item-sublabel {
     font-size: 12px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;

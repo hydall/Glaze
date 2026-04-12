@@ -324,14 +324,10 @@ const setTab = (tab) => {
 
 /* Stats card */
 .stats-card {
-    background: rgba(var(--ui-bg-rgb), 0.5);
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 16px;
     overflow: hidden;
-}
-:global(body.dark-theme) .stats-card {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.08);
 }
 .stat-item {
     display: flex;
@@ -361,9 +357,6 @@ const setTab = (tab) => {
     flex: 1;
     min-width: 0;
 }
-:global(body.dark-theme) .stat-label {
-    color: #e1e3e6;
-}
 .stat-value {
     font-size: 15px;
     color: var(--text-gray);
@@ -378,11 +371,8 @@ const setTab = (tab) => {
 }
 .stat-separator {
     height: 0.5px;
-    background: var(--border-color, rgba(0, 0, 0, 0.08));
-    margin-left: 64px;
-}
-:global(body.dark-theme) .stat-separator {
     background: rgba(255, 255, 255, 0.06);
+    margin-left: 64px;
 }
 
 /* Character picker */
@@ -391,21 +381,14 @@ const setTab = (tab) => {
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
-    background: rgba(var(--ui-bg-rgb), 0.5);
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 14px;
     cursor: pointer;
     transition: background 0.15s ease;
     -webkit-tap-highlight-color: transparent;
 }
 .char-picker:active {
-    background: rgba(var(--ui-bg-rgb), 0.8);
-}
-:global(body.dark-theme) .char-picker {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.08);
-}
-:global(body.dark-theme) .char-picker:active {
     background: rgba(255, 255, 255, 0.1);
 }
 .char-picker-avatar {
@@ -441,13 +424,10 @@ const setTab = (tab) => {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-:global(body.dark-theme) .char-picker-name {
-    color: #e1e3e6;
-}
 .char-picker-chevron {
     width: 20px;
     height: 20px;
-    color: var(--text-light-gray, #99a2ad);
+    color: var(--text-gray, #99a2ad);
     flex-shrink: 0;
     transition: transform 0.2s ease;
 }
@@ -457,18 +437,14 @@ const setTab = (tab) => {
 
 /* Dropdown */
 .char-dropdown {
-    background: rgba(var(--ui-bg-rgb), 0.85);
+    background: rgba(40, 40, 40, 0.9);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 14px;
     overflow: hidden;
     max-height: 240px;
     overflow-y: auto;
-}
-:global(body.dark-theme) .char-dropdown {
-    background: rgba(40, 40, 40, 0.9);
-    border-color: rgba(255, 255, 255, 0.08);
 }
 .char-dropdown-item {
     display: flex;
@@ -480,19 +456,13 @@ const setTab = (tab) => {
     -webkit-tap-highlight-color: transparent;
 }
 .char-dropdown-item:active {
-    background: rgba(0, 0, 0, 0.04);
-}
-:global(body.dark-theme) .char-dropdown-item:active {
     background: rgba(255, 255, 255, 0.06);
 }
 .char-dropdown-item.active {
     background: rgba(var(--vk-blue-rgb, 81, 129, 184), 0.08);
 }
 .char-dropdown-item + .char-dropdown-item {
-    border-top: 0.5px solid var(--border-color, rgba(0, 0, 0, 0.06));
-}
-:global(body.dark-theme) .char-dropdown-item + .char-dropdown-item {
-    border-top-color: rgba(255, 255, 255, 0.06);
+    border-top: 0.5px solid rgba(255, 255, 255, 0.06);
 }
 .char-dropdown-avatar {
     width: 32px;
@@ -525,9 +495,6 @@ const setTab = (tab) => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-:global(body.dark-theme) .char-dropdown-name {
-    color: #e1e3e6;
 }
 .char-dropdown-check {
     width: 20px;

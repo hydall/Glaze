@@ -1003,7 +1003,7 @@ defineExpose({
     100% { opacity: 1; max-height: 100px; }
 }
 
-:global(body.dark-theme) .guidance-editable { color: #fff; }
+.guidance-editable { color: var(--text-black); }
 
 .chat-action-btn:active {
     transform: scale(0.95);
@@ -1048,8 +1048,8 @@ defineExpose({
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 20px));
     -webkit-backdrop-filter: blur(var(--element-blur, 20px));
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
-    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1058,7 +1058,7 @@ defineExpose({
     pointer-events: none;
     transition: opacity 0.3s ease, transform 0.2s, background-color 0.3s;
     z-index: 95;
-    color: var(--text-gray);
+    color: var(--text-black);
     -webkit-user-select: none;
     user-select: none;
 }
@@ -1068,16 +1068,7 @@ defineExpose({
 }
 
 
-
-/* Dark Theme Support via global selector since body is outside scope */
-:global(body.dark-theme) .chat-input-bar { background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)); }
-:global(body.dark-theme) .chat-input-editable { color: #fff; }
-:global(body.dark-theme) .scroll-bottom-btn {
-    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
-    border: 1px solid rgba(255,255,255,0.1);
-    color: #e1e3e6;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-}
+.chat-input-editable { color: var(--text-black); }
 
 .chat-status-gradient-bottom {
     position: absolute;

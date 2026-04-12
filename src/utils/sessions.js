@@ -33,6 +33,13 @@ export async function switchSession(charId, sessionId) {
     return data.currentId;
 }
 
+export async function renameSession(charId, sessionId, newName) {
+    const data = await db.getChat(charId);
+    if (!data.sessionNames) data.sessionNames = {};
+    data.sessionNames[sessionId] = newName;
+    await db.saveChat(charId, data);
+}
+
 export function getAllGreetings(char, persona) {
     if (!char) return [];
     let greetings = [char.first_mes];

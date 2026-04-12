@@ -2,7 +2,8 @@ import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { db } from '@/utils/db.js';
 
 export const PROVIDER_BLACKLIST = [
-    { name: 'EllyAI', match: 'ellyai' }
+    { name: 'EllyAI', match: 'ellyai' },
+    { name: 'MegaLLM', match: 'megallm' }
 ];
 
 export function getBlacklistedProvider(url) {
@@ -20,6 +21,7 @@ export async function initSettings() {
     if (localStorage.getItem('gz_api_reasoning_end') === null) localStorage.setItem('gz_api_reasoning_end', '</think>');
     if (localStorage.getItem('gz_api_auto_hide_images') === null) localStorage.setItem('gz_api_auto_hide_images', 'false');
     if (localStorage.getItem('gz_api_auto_hide_images_n') === null) localStorage.setItem('gz_api_auto_hide_images_n', '1');
+    if (localStorage.getItem('gz_api_reasoning_effort') === null) localStorage.setItem('gz_api_reasoning_effort', 'medium');
 }
 
 export function normalizeEndpoint(url) {
@@ -51,7 +53,8 @@ export function getApiConfig() {
         topP: parseFloat(localStorage.getItem('gz_api_topp')) || 0.9,
         maxTokens: isNaN(mt) ? 8000 : mt,
         autoHideImages: localStorage.getItem('gz_api_auto_hide_images') === 'true',
-        autoHideImagesN: parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10)
+        autoHideImagesN: parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10),
+        reasoningEffort: localStorage.getItem('gz_api_reasoning_effort') || 'medium'
     };
 }
 

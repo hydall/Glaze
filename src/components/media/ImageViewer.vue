@@ -71,11 +71,13 @@ const onTouchStart = (e) => {
         startPointX = pointX;
         startPointY = pointY;
 
-        const rect = containerRef.value.getBoundingClientRect();
-        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        startPinchX = cx - rect.left - rect.width / 2;
-        startPinchY = cy - rect.top - rect.height / 2;
+        if (containerRef.value) {
+            const rect = containerRef.value.getBoundingClientRect();
+            const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+            const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+            startPinchX = cx - rect.left - rect.width / 2;
+            startPinchY = cy - rect.top - rect.height / 2;
+        }
     } else if (e.touches.length === 1) {
         isDragging = true;
         startX = e.touches[0].clientX - pointX;
@@ -94,18 +96,20 @@ const onTouchMove = (e) => {
         if (startDist > 0) {
             const newScale = Math.max(1, Math.min(startScale * (dist / startDist), 5));
             
-            const rect = containerRef.value.getBoundingClientRect();
-            const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-            const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-            const currentPinchX = cx - rect.left - rect.width / 2;
-            const currentPinchY = cy - rect.top - rect.height / 2;
+            if (containerRef.value) {
+                const rect = containerRef.value.getBoundingClientRect();
+                const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                const currentPinchX = cx - rect.left - rect.width / 2;
+                const currentPinchY = cy - rect.top - rect.height / 2;
 
-            const scaleRatio = newScale / startScale;
-            pointX = currentPinchX - (startPinchX - startPointX) * scaleRatio;
-            pointY = currentPinchY - (startPinchY - startPointY) * scaleRatio;
-            scale = newScale;
-            
-            updateTransform();
+                const scaleRatio = newScale / startScale;
+                pointX = currentPinchX - (startPinchX - startPointX) * scaleRatio;
+                pointY = currentPinchY - (startPinchY - startPointY) * scaleRatio;
+                scale = newScale;
+                
+                updateTransform();
+            }
         }
     } else if (e.touches.length === 1 && isDragging && scale > 1) {
         pointX = e.touches[0].clientX - startX;
@@ -132,7 +136,7 @@ const onContainerClick = (e) => {
         e.preventDefault();
         e.stopPropagation();
         if (scale > 1) resetZoom();
-        else {
+        else if (containerRef.value) {
             scale = 2.5;
             const rect = containerRef.value.getBoundingClientRect();
             const tapX = e.clientX - rect.left - rect.width / 2;
@@ -181,7 +185,7 @@ watch(visible, (newVal) => {
                 <Transition name="prompt-fade">
                     <div v-if="promptText && promptVisible" class="image-viewer-prompt" @click.stop>{{ promptText }}</div>
                 </Transition>
-                <div id="image-viewer-close-btn" class="close-btn-trigger" @click="handleCloseClick" style="position: absolute; top: calc(20px + var(--sat)); right: 20px; z-index: 20020; padding: 10px; cursor: pointer; background: rgba(0,0,0,0.5); border-radius: 50%;">
+                <div id="image-viewer-close-btn" class="close-btn-trigger" @click="handleCloseClick" style="position: absolute; top: calc(20px + var(--sat)); right: 20px; z-index: 20020; width: 44px; height: 44px; cursor: pointer; background: rgba(0,0,0,0.5); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
                     <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:white;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                 </div>
             </div>

@@ -9,11 +9,13 @@ export const keyboardOverlap = ref(0);
 let _scrollResetRaf = null;
 
 export function initKeyboard() {
+    isNativeKeyboard.value = Capacitor.isNativePlatform();
     isKeyboardOpen.value = document.body.classList.contains('keyboard-open');
 
-    // Set default keyboard height for drawer
     const savedKbHeight = localStorage.getItem('gz_keyboard_height');
-    document.documentElement.style.setProperty('--keyboard-height', savedKbHeight ? `${savedKbHeight}px` : '300px');
+    const kbH = savedKbHeight ? `${savedKbHeight}px` : '300px';
+    document.documentElement.style.setProperty('--keyboard-height', kbH);
+    document.documentElement.style.setProperty('--keyboard-overlap', '0px');
 
     Keyboard.setResizeMode({ mode: KeyboardResize.None }).catch(() => { });
 
@@ -32,6 +34,8 @@ export function initKeyboard() {
                 document.documentElement.style.setProperty('--keyboard-overlap', `${info.keyboardHeight}px`);
                 keyboardOverlap.value = info.keyboardHeight;
                 localStorage.setItem('gz_keyboard_height', info.keyboardHeight);
+            } else {
+                applyKeyboardOverlap();
             }
         });
 
@@ -148,13 +152,6 @@ export function applyKeyboardOverlap(height) {
     if (height !== undefined) {
         document.documentElement.style.setProperty('--keyboard-height', `${height}px`);
         document.documentElement.style.setProperty('--keyboard-overlap', `${height}px`);
-    } else {
-        const cs = getComputedStyle(document.documentElement);
-        const overlap = cs.getPropertyValue('--keyboard-overlap').trim();
-        if (overlap === '0px' || !overlap) {
-            const kbH = cs.getPropertyValue('--keyboard-height').trim() || '300px';
-            document.documentElement.style.setProperty('--keyboard-overlap', kbH);
-        }
     }
 }
 

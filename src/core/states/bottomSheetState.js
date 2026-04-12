@@ -5,6 +5,7 @@ import { hideKeyboard } from '@/core/services/keyboardHandler.js';
 export const bottomSheetState = ref({
     visible: false,
     locked: false,
+    isSolid: false,
     title: '',
     helpTip: null,
     content: null,
@@ -21,6 +22,7 @@ export function showBottomSheet(config) {
     bottomSheetState.value = {
         visible: true,
         locked: config.locked || false,
+        isSolid: config.isSolid || false,
         title: config.title || '',
         helpTip: config.helpTip || null,
         content: config.content || null,

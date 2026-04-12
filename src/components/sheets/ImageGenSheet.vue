@@ -3,8 +3,10 @@ import { ref, computed, watch } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
+import HelpTip from '@/components/ui/HelpTip.vue';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { getImageGenSettings, saveImageGenSettings, fetchImageModels, saveAdditionalReferences } from '@/core/services/imageGenService.js';
+import { getImageGenSettings, saveImageGenSettings, fetchImageModels, saveAdditionalReferences, checkImageGenConnection } from '@/core/services/imageGenService.js';
+import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -13,6 +15,28 @@ const settings = ref(getImageGenSettings());
 const models = ref([]);
 const isFetchingModels = ref(false);
 const fetchError = ref('');
+
+// Connection status
+const apiStatus = ref('idle'); // idle | connecting | connected | failed
+const errorMessage = ref('');
+let checkDebounceTimer = null;
+
+async function checkConnection() {
+    apiStatus.value = 'connecting';
+    errorMessage.value = '';
+    try {
+        await checkImageGenConnection();
+        apiStatus.value = 'connected';
+    } catch (e) {
+        apiStatus.value = 'failed';
+        errorMessage.value = e.message || 'Connection failed';
+    }
+}
+
+function scheduleCheck() {
+    if (checkDebounceTimer) clearTimeout(checkDebounceTimer);
+    checkDebounceTimer = setTimeout(checkConnection, 900);
+}
 
 // Additional references
 const refImageInput = ref(null);
@@ -23,6 +47,7 @@ const open = () => {
     models.value = [];
     fetchError.value = '';
     sheet.value?.open();
+    if (settings.value.enabled) checkConnection();
 };
 
 const save = () => {
@@ -30,6 +55,12 @@ const save = () => {
 };
 
 watch(settings, save, { deep: true });
+
+// Re-check connection when connectivity-relevant fields change
+watch(
+    () => [settings.value.apiType, settings.value.endpoint, settings.value.apiKey, settings.value.enabled],
+    ([, , , enabled]) => { if (enabled) scheduleCheck(); else { apiStatus.value = 'idle'; errorMessage.value = ''; } }
+);
 
 const onFetchModels = async () => {
     isFetchingModels.value = true;
@@ -202,33 +233,28 @@ defineExpose({ open });
 
 <template>
     <SheetView ref="sheet" :title="t('imggen_title') || 'Image Generation'">
-        <div class="gen-sheet-body">
-
-            <!-- Enable toggle -->
-            <div class="menu-group">
-                <div class="settings-item-checkbox">
-                    <div class="settings-text-col">
-                        <label>{{ t('imggen_enabled') || 'Enable image generation' }}</label>
-                        <div class="settings-desc">{{ t('imggen_enabled_desc') || 'Auto-generate images from AI tags' }}</div>
-                    </div>
-                    <input type="checkbox" v-model="settings.enabled" class="vk-switch">
-                </div>
+        <template #header-title>
+            <HelpTip term="image-gen" />
+        </template>
+        <template #header-right>
+            <div class="header-toggle" style="align-items: center; display: flex; padding-right: 8px;">
+                 <input type="checkbox" v-model="settings.enabled" class="vk-switch">
             </div>
+        </template>
 
+        <div class="gen-sheet-body">
             <template v-if="settings.enabled">
 
                 <!-- Connection -->
+                <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
+                    <div class="preset-selector" @click="openApiTypeSelector">
+                        <span>{{ settings.apiType === 'openai' ? 'OpenAI' : settings.apiType === 'gemini' ? 'Gemini' : 'Naistera' }}</span>
+                        <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
+                </ConnectionStatus>
+
                 <div class="menu-group">
                     <div class="section-header">{{ t('section_connection') || 'Connection' }}</div>
-
-                    <!-- API Type selector row -->
-                    <div class="settings-item selector-row" @click="openApiTypeSelector">
-                        <label>{{ t('imggen_api_type') || 'API Type' }}</label>
-                        <div class="selector-value">
-                            <span>{{ settings.apiType === 'openai' ? 'OpenAI' : settings.apiType === 'gemini' ? 'Gemini' : 'Naistera' }}</span>
-                            <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                        </div>
-                    </div>
 
                     <!-- Naistera hint -->
                     <a v-if="showNaisteraOptions" href="https://naistera.org/prompt" target="_blank" class="naistera-hint-box">
@@ -456,10 +482,36 @@ defineExpose({ open });
 
 <style scoped>
 .gen-sheet-body {
-    flex: 1;
-    overflow-y: auto;
     position: relative;
-    padding-top: 8px;
+}
+
+.preset-selector {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--vk-blue);
+  padding: 0 14px;
+  border-radius: 16px;
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
+  transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
+  overflow: hidden;
+}
+
+.preset-selector:active {
+  transform: scale(0.95);
+  opacity: 0.8;
+}
+
+.preset-selector svg {
+    width: 20px;
+    height: 20px;
 }
 
 .naistera-hint-box {
@@ -721,4 +773,6 @@ defineExpose({ open });
     color: var(--vk-blue);
     word-break: break-all;
 }
+
+
 </style>

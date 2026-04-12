@@ -1,6 +1,37 @@
 {
     "categories": [
         {
+            "id": "faq",
+            "label": "FAQ",
+            "terms": [
+                {
+                    "id": "faq-where-cards",
+                    "name": "Where to get character cards?",
+                    "desc": "[[character]] cards in SillyTavern format are available on several community websites. [Chub.ai](https://chub.ai) (Character Hub) is the largest repository — search, preview, and download cards directly as .json files ready to import into Glaze. For characters from Janitor AI, use [datacat.run](https://datacat.run) to export any character as a card file — including private ones and those with proxy disabled. [Backyard.ai](https://backyard.ai) also has a library of cards you can download."
+                },
+                {
+                    "id": "faq-thinking-in-message",
+                    "name": "Why is the model thinking inside the message?",
+                    "desc": "The model is sending its reasoning (chain of thought) inside the response text rather than in a separate block. See [[preset-reasoning|Reasoning]] — enable 'Parse Inline Reasoning' to automatically extract thinking from tags like <think>...</think> and display it in a separate reasoning block."
+                },
+                {
+                    "id": "faq-where-llm",
+                    "name": "Where to find an LLM?",
+                    "desc": "You need an [[api|API provider]] — a service that gives you access to AI models. After signing up, you'll get an API endpoint and key to enter in Glaze's API settings."
+                },
+                {
+                    "id": "faq-censorship",
+                    "name": "The model is censoring my messages",
+                    "desc": "Try a good preset — for example, fawnie from the built-in presets. Make sure to use at least inline CoT (the additional thinking feature in the preset). Note that censorship can also depend on the provider, even if the model is the same. It's not just the chat that matters — all data in the preset affects this, including your [[persona]] and [[character]] card. The model can be triggered by sexual descriptions in them."
+                },
+                {
+                    "id": "faq-which-models",
+                    "name": "Which models should I use?",
+                    "desc": "A few options for different tastes and budgets. Bang for the buck — DeepSeek V3.2. Middle ground — Gemini 3.1 Pro. Flagship model — Claude Sonnet 4.6 / Opus 4.6. For those tired of the rest — GLM 5.1. Others aren't really worth the attention — either because of poor context size or mediocre writing."
+                }
+            ]
+        },
+        {
             "id": "basics",
             "label": "Basics",
             "terms": [
@@ -14,6 +45,12 @@
                     "id": "token",
                     "name": "Token",
                     "desc": "The smallest piece of text the AI reads and writes — roughly 3/4 of a word. Every message you type and every reply you get is counted in tokens. There's also a limit: once the conversation is too long, the oldest messages get cut off. More tokens = higher cost and slower replies."
+                },
+                {
+                    "id": "context",
+                    "name": "Context",
+                    "alt": "Context Window, Context Size",
+                    "desc": "The maximum amount of [[token]]s the AI can see at once — its working memory. Everything Glaze sends (system instructions, [[preset]] blocks, [[lorebook]] entries, chat history, and the new reply) must fit inside this window. When the conversation grows too long, older messages are trimmed to stay within the limit. Context Size is set in model settings and must not exceed the model's maximum."
                 },
                 {
                     "id": "api",
@@ -112,6 +149,22 @@
                     "id": "magic-drawer",
                     "name": "Quick Access",
                     "desc": "A side panel that slides in during a chat. All necessary chat settings are located here: [[character]] info, active [[lorebook]] entries, Author's Note, summary, sessions, preset, and persona settings. Open it with the wand button in the chat input area."
+                },
+                {
+                    "id": "triggered-items",
+                    "name": "Triggered Items",
+                    "desc": "An icon [icon:triggered-items] that appears on a message when at least one [[lorebook]] entry or [[regex]] script was activated during its generation. Tap it to see exactly which lorebook entries were injected and which regex scripts were applied to that message."
+                },
+                {
+                    "id": "request-preview",
+                    "name": "Request Preview",
+                    "desc": "A very handy tool to debug your prompt. It shows the exact [[chatcompletion|JSON Chat Completion]] payload Glaze is sending to the [[api|API provider]]. It's useful for debugging prompt issues, seeing how [[macro]]s are expanded, and checking which [[lorebook]] entries and [[regex]] scripts are being injected. You can view the request both in a formatted view and as raw JSON."
+                },
+                {
+                    "id": "image-gen",
+                    "name": "Image Generation",
+                    "alt": "AI Images",
+                    "desc": "A background service that monitors messages for image generation tags (like `[IMG:GEN]`). When a tag is detected, it handles the API request to OpenAI, Google, or Naistera to generate an inline image directly in the chat. It can also send visual references — such as character avatars or your own custom images — to help the AI maintain consistency in the generated art."
                 }
             ]
         },
@@ -188,6 +241,11 @@
                     "name": "Reasoning",
                     "alt": "Chain of Thought",
                     "desc": "Some AI models 'think out loud' before giving their final answer, working through their reasoning step by step. 'Request Model Reasoning' only affects visibility and does not disable the model's thinking process. 'Parse Inline Reasoning' is made for cases when the model sends its thinking inside the response text rather than in a separate block — it extracts it from tags like <think>...</think> and displays it separately."
+                },
+                {
+                    "id": "preset-reasoning-inline",
+                    "name": "Parse Inline Reasoning",
+                    "desc": "Automatically extracts thinking/reasoning from the model's main message body and moves it to a separate UI block. This is especially useful for models like DeepSeek V3 that use tags like `<think>...</think>` instead of a dedicated reasoning field, and for presets designed to bypass native reasoning features by forcing the model to 'think out loud' directly in its response text."
                 }
             ]
         },
@@ -205,7 +263,7 @@
                     "id": "lorebook-keys",
                     "name": "Primary / Secondary Keys",
                     "alt": "Keywords",
-                    "desc": "The keywords that trigger a lorebook entry. When a primary keyword appears in the recent chat, the entry activates. Secondary keys act as an extra filter: the entry only fires if those are present too. The exact combination logic — AND, OR, NOT — is set in [[lorebook-logic]]."
+                    "desc": "The keywords that trigger a lorebook entry. When a primary keyword appears in the recent chat, the entry activates. Secondary keys act as an extra filter: the entry only fires if those are present too. The exact combination logic — AND, OR, NOT — is set in [[lorebook-logic]]. To see which entries actually fired for a given message, check [[triggered-items]]."
                 },
                 {
                     "id": "lorebook-logic",
@@ -246,7 +304,7 @@
                 {
                     "id": "regex",
                     "name": "Regex Scripts",
-                    "desc": "Special scripts that find text matching a specified pattern and replace it with a specified template. Control what kind of text it affects via [[regex-placement]]."
+                    "desc": "Special scripts that find text matching a specified pattern and replace it with a specified template. Control what kind of text it affects via [[regex-placement]]. To see which scripts were applied to a specific message, check [[triggered-items]]."
                 },
                 {
                     "id": "regex-placement",
@@ -280,32 +338,6 @@
                     "name": "Themes",
                     "alt": "Appearance",
                     "desc": "Customize how the app looks. Switch between light and dark mode, change the accent color, set custom colors for message bubbles, pick fonts for the UI and chat, and control the transparency and blur of background elements. Theme settings apply globally across all chats."
-                }
-            ]
-        },
-        {
-            "id": "faq",
-            "label": "FAQ",
-            "terms": [
-                {
-                    "id": "faq-where-cards",
-                    "name": "Where to get character cards?",
-                    "desc": "[[character]] cards in SillyTavern format are available on several community websites. [Chub.ai](https://chub.ai) (Character Hub) is the largest repository — search, preview, and download cards directly as .json files ready to import into Glaze. For characters from Janitor AI, use [datacat.run](https://datacat.run) to export any character as a card file — including private ones and those with proxy disabled. [Backyard.ai](https://backyard.ai) also has a library of cards you can download."
-                },
-                {
-                    "id": "faq-thinking-in-message",
-                    "name": "Why is the model thinking inside the message?",
-                    "desc": "The model is sending its reasoning (chain of thought) inside the response text rather than in a separate block. See [[preset-reasoning|Reasoning]] — enable 'Parse Inline Reasoning' to automatically extract thinking from tags like <think>...</think> and display it in a separate reasoning block."
-                },
-                {
-                    "id": "faq-where-llm",
-                    "name": "Where to find an LLM?",
-                    "desc": "You need an [[api|API provider]] — a service that gives you access to AI models. After signing up, you'll get an API endpoint and key to enter in Glaze's API settings."
-                },
-                {
-                    "id": "faq-censorship",
-                    "name": "The model is censoring my messages",
-                    "desc": "Try a good preset — for example, fawnie from the built-in presets. Make sure to use at least inline CoT (the additional thinking feature in the preset). Note that censorship can also depend on the provider, even if the model is the same. It's not just the chat that matters — all data in the preset affects this, including your [[persona]] and [[character]] card. The model can be triggered by sexual descriptions in them."
                 }
             ]
         }

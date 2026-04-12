@@ -1,9 +1,9 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
-import { themeState, setAccentColor, setUiColor, setBackgroundImage, setCustomFont, setBgOpacity, setBgBlur, setElementOpacity, setElementBlur, PRESET_COLORS, PRESET_UI_COLORS, createPreset, getPresets, deletePreset, switchPreset, setThemeModeState, setChatLayout, setUserBubbleColor, setCharBubbleColor, setUserQuoteColor, setCharQuoteColor, setUserTextColor, setCharTextColor, setUserItalicColor, setCharItalicColor, setUiFontSize, setUiLetterSpacing, setChatFontSize, setChatLetterSpacing, setChatFont, exportThemePreset, importThemePreset, updatePresetMeta, setBorderWidth, setBorderColor, setBorderOpacity, setNoiseOpacity, setNoiseIntensity, setBgNoiseOpacity, setBgNoiseIntensity } from '@/core/states/themeState.js';
+import { ref, onMounted, computed, watch } from 'vue';
+import { themeState, setAccentColor, setUiColor, setBackgroundImage, setCustomFont, setBgOpacity, setBgBlur, setElementOpacity, setElementBlur, PRESET_COLORS, PRESET_UI_COLORS, createPreset, getPresets, deletePreset, switchPreset, setChatLayout, setUserBubbleColor, setCharBubbleColor, setUserQuoteColor, setCharQuoteColor, setUserTextColor, setCharTextColor, setUserItalicColor, setCharItalicColor, setUiFontSize, setUiLetterSpacing, setChatFontSize, setChatLetterSpacing, setChatFont, exportThemePreset, importThemePreset, updatePresetMeta, setBorderWidth, setBorderColor, setBorderOpacity, setNoiseOpacity, setNoiseIntensity, setBgNoiseOpacity, setBgNoiseIntensity, setUiTextColor, setUiTextGrayColor, setUiFontMode, setChatFontMode } from '@/core/states/themeState.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 import { translations } from '@/utils/i18n.js';
-import { currentLang, setThemeMode, getThemeMode } from '@/core/config/APPSettings.js';
+import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { updateAppColors } from '@/core/services/ui.js';
 import ColorPickerSheet from '@/components/sheets/ColorPickerSheet.vue';
@@ -21,6 +21,37 @@ const colorPickerState = ref({
 const openColorPicker = (target, title, currentValue, presets = [], allowAuto = false, autoText = 'Auto') => {
     colorPickerState.value = { visible: true, title, target, modelValue: currentValue, presetColors: presets, allowAuto, autoText };
 };
+
+const openFontSizeSelector = (type) => {
+    const isUI = type === 'ui';
+    const currentValue = isUI ? themeState.uiFontSize : themeState.chatFontSize;
+    const title = isUI ? t('theme_font_size') : t('theme_font_size');
+    
+    showBottomSheet({
+        title: title || 'Font Size',
+        items: [
+            {
+                label: t('theme_system_font_size') || 'System',
+                icon: currentValue === 'system' ? '<svg viewBox="0 0 24 24" style="fill:currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>' : null,
+                onClick: () => {
+                    if (isUI) setUiFontSize('system');
+                    else setChatFontSize('system');
+                    closeBottomSheet();
+                }
+            },
+            {
+                label: t('theme_custom_font_size') || 'Custom',
+                icon: currentValue !== 'system' ? '<svg viewBox="0 0 24 24" style="fill:currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>' : null,
+                onClick: () => {
+                    if (isUI && themeState.uiFontSize === 'system') setUiFontSize(15);
+                    if (!isUI && themeState.chatFontSize === 'system') setChatFontSize(15);
+                    closeBottomSheet();
+                }
+            }
+        ]
+    });
+};
+
 const onColorSelected = (color) => {
     switch(colorPickerState.value.target) {
         case 'accent': setAccentColor(color || PRESET_COLORS[0]); break;
@@ -34,6 +65,8 @@ const onColorSelected = (color) => {
         case 'userItalic': setUserItalicColor(color); break;
         case 'charItalic': setCharItalicColor(color); break;
         case 'borderColor': setBorderColor(color); break;
+        case 'uiText': setUiTextColor(color); break;
+        case 'uiTextGray': setUiTextGrayColor(color); break;
     }
 };
 
@@ -42,7 +75,6 @@ const fontInput = ref(null);
 const chatFontInput = ref(null);
 const themeImportInput = ref(null);
 const presets = ref([]);
-const activeThemeMode = ref(getThemeMode());
 const activeTab = ref('general');
 const activeChatSubTab = ref('font');
 
@@ -53,20 +85,7 @@ const loadPresetsList = async () => {
 };
 
 onMounted(() => {
-    if (activeThemeMode.value === 'system') {
-        setTheme('dark');
-    } else {
-        setThemeModeState(activeThemeMode.value);
-    }
     loadPresetsList();
-});
-
-const themeModeLabel = computed(() => {
-    const map = {
-        'dark': t('theme_dark') || 'Dark',
-        'light': t('theme_light') || 'Light'
-    };
-    return map[activeThemeMode.value] || activeThemeMode.value;
 });
 
 const activePresetName = computed(() => {
@@ -77,6 +96,13 @@ const activePresetName = computed(() => {
 const activePresetAuthor = computed(() => {
     const p = presets.value.find(x => x.id === themeState.activePresetId);
     return p ? p.author : '';
+});
+
+watch(() => themeState.accentColor, (newVal) => {
+    const index = presets.value.findIndex(p => p.id === themeState.activePresetId);
+    if (index !== -1) {
+        presets.value[index].accentColor = newVal;
+    }
 });
 const getContrastColor = (hex) => {
     if (!hex) return 'white';
@@ -140,19 +166,10 @@ const handleDeletePreset = (id) => {
 const handleApplyPreset = async (preset) => {
     await switchPreset(preset.id);
     updateAppColors();
-    activeThemeMode.value = getThemeMode();
     await loadPresetsList();
 };
 
-const openThemeModeSelector = () => {
-    showBottomSheet({
-        title: t('theme_title') || 'Theme',
-        items: [
-            { label: t('theme_dark') || 'Dark', onClick: () => setTheme('dark') },
-            { label: t('theme_light') || 'Light', onClick: () => setTheme('light') }
-        ]
-    });
-};
+
 
 const openPresetSelector = () => {
     const cardItems = presets.value.map(p => {
@@ -320,7 +337,6 @@ const onThemeFileSelected = async (event) => {
             const json = JSON.parse(e.target.result);
             const newPreset = await importThemePreset(json, file.name.replace(/\.json$/i, ''));
             updateAppColors();
-            activeThemeMode.value = getThemeMode();
             await loadPresetsList();
         } catch (err) {
             console.error('Error importing theme:', err);
@@ -337,18 +353,35 @@ const getPresetName = (id) => {
     return p ? p.name : (t('theme_preset_unknown') || 'Unknown');
 };
 
-const setTheme = async (mode) => {
-    setThemeMode(mode);
-    updateAppColors();
-    activeThemeMode.value = mode;
-    setThemeModeState(mode);
-    
-    closeBottomSheet();
+
+
+const onBackgroundImageSelected = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (re) => {
+        const dataUrl = re.target.result;
+        setBackgroundImage(file);
+        
+        // Update local presets list instantly for the dropdown/selector
+        const index = presets.value.findIndex(p => p.id === themeState.activePresetId);
+        if (index !== -1) {
+            presets.value[index].bgImage = dataUrl;
+        }
+    };
+    reader.readAsDataURL(file);
 };
 
 const handleResetBackground = async () => {
     await setBackgroundImage(null);
     if (bgInput.value) bgInput.value.value = '';
+    
+    // Update local presets list instantly for the dropdown/selector
+    const index = presets.value.findIndex(p => p.id === themeState.activePresetId);
+    if (index !== -1) {
+        presets.value[index].bgImage = null;
+    }
 };
 
 const handleResetFont = async () => {
@@ -359,6 +392,76 @@ const handleResetFont = async () => {
 const handleResetChatFont = async () => {
     await setChatFont(null);
     if (chatFontInput.value) chatFontInput.value.value = '';
+};
+
+const checkIcon = '<svg viewBox="0 0 24 24" style="fill:currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>';
+
+const uiFontModeLabel = computed(() => {
+    switch (themeState.uiFontMode) {
+        case 'system': return t('theme_font_system') || 'System';
+        case 'custom': return themeState.customFontName || (t('theme_font_custom') || 'Custom');
+        default: return 'Glaze (Inter)';
+    }
+});
+
+const chatFontModeLabel = computed(() => {
+    switch (themeState.chatFontMode) {
+        case 'system': return t('theme_font_system') || 'System';
+        case 'glaze': return 'Glaze (Inter)';
+        case 'custom': return themeState.chatFontName || (t('theme_font_custom') || 'Custom');
+        default: return t('theme_font_inherit_ui') || 'Same as UI';
+    }
+});
+
+const openUiFontSelector = () => {
+    showBottomSheet({
+        title: t('theme_ui_font') || 'App Interface Font',
+        items: [
+            {
+                label: t('theme_font_system') || 'System',
+                icon: themeState.uiFontMode === 'system' ? checkIcon : null,
+                onClick: () => { setUiFontMode('system'); closeBottomSheet(); }
+            },
+            {
+                label: 'Glaze (Inter)',
+                icon: themeState.uiFontMode === 'glaze' ? checkIcon : null,
+                onClick: () => { setUiFontMode('glaze'); closeBottomSheet(); }
+            },
+            {
+                label: t('theme_font_custom') || 'Custom...',
+                icon: themeState.uiFontMode === 'custom' ? checkIcon : null,
+                onClick: () => { closeBottomSheet(); fontInput.value.click(); }
+            }
+        ]
+    });
+};
+
+const openChatFontSelector = () => {
+    showBottomSheet({
+        title: t('theme_chat_font') || 'Chat Messages Font',
+        items: [
+            {
+                label: t('theme_font_inherit_ui') || 'Same as UI',
+                icon: themeState.chatFontMode === 'ui' ? checkIcon : null,
+                onClick: () => { setChatFontMode('ui'); closeBottomSheet(); }
+            },
+            {
+                label: t('theme_font_system') || 'System',
+                icon: themeState.chatFontMode === 'system' ? checkIcon : null,
+                onClick: () => { setChatFontMode('system'); closeBottomSheet(); }
+            },
+            {
+                label: 'Glaze (Inter)',
+                icon: themeState.chatFontMode === 'glaze' ? checkIcon : null,
+                onClick: () => { setChatFontMode('glaze'); closeBottomSheet(); }
+            },
+            {
+                label: t('theme_font_custom') || 'Custom...',
+                icon: themeState.chatFontMode === 'custom' ? checkIcon : null,
+                onClick: () => { closeBottomSheet(); chatFontInput.value.click(); }
+            }
+        ]
+    });
 };
 
 const viewStyle = computed(() => {
@@ -379,13 +482,15 @@ const getContrastColorRGB = (hex) => {
 };
 
 const chatPreviewStyle = computed(() => ({
-    '--chat-font-size': `${themeState.chatFontSize}px`,
+    '--chat-font-size': themeState.chatFontSize === 'system' ? '' : `${themeState.chatFontSize}px`,
     '--chat-letter-spacing': `${themeState.chatLetterSpacing}px`,
     '--user-bubble-color-rgb': getContrastColorRGB(themeState.userBubbleColor || themeState.accentColor),
     '--char-bubble-color-rgb': getContrastColorRGB(themeState.charBubbleColor || 'var(--bg-gray)'),
     '--user-reply-color': themeState.userQuoteColor || themeState.accentColor,
     '--char-reply-color': themeState.charQuoteColor || themeState.accentColor,
-    fontFamily: themeState.chatFontName ? 'GlazeChatFont' : 'inherit'
+    fontFamily: themeState.chatFontMode === 'custom' && themeState.chatFontName ? 'GlazeChatFont' :
+                themeState.chatFontMode === 'system' ? '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' :
+                themeState.chatFontMode === 'glaze' ? '"Inter", sans-serif' : 'inherit'
 }));
 </script>
 
@@ -417,14 +522,7 @@ const chatPreviewStyle = computed(() => ({
         </div>
 
         <div v-if="activeTab === 'general'">
-            <div class="menu-group">
-                <div class="section-header">{{ t('theme_title') || 'Theme' }}</div>
-                <div class="menu-item" @click="openThemeModeSelector">
-                    <svg class="menu-icon" viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
-                    <div class="menu-text">{{ t('menu_theme') }}</div>
-                    <div class="menu-value">{{ themeModeLabel }}</div>
-                </div>
-            </div>
+
 
             <div v-if="themeState.activePresetId !== 'default'">
                 <div class="menu-group" style="display: block;">
@@ -437,26 +535,45 @@ const chatPreviewStyle = computed(() => ({
 
                 <div class="menu-group" style="display: block;">
                     <div class="section-header">{{ t('theme_ui_font') || 'App Interface Font' }}</div>
-                    <div class="menu-item" @click="fontInput.click()">
+                    <div class="menu-item" @click="openUiFontSelector">
                         <svg class="menu-icon" viewBox="0 0 24 24"><path d="M9.93 13.5h4.14L12 7.98zM20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-4.05 16.5l-1.14-3H9.17l-1.12 3H5.96l5.11-13h1.86l5.11 13h-2.09z"/></svg>
-                        <div class="menu-text">{{ themeState.customFontName || (t('theme_select_font') || 'Select Font') }}</div>
+                        <div class="menu-text" style="flex:1;">{{ t('theme_font') || 'Font' }}</div>
+                        <div style="font-size: 14px; opacity: 0.7;">{{ uiFontModeLabel }}</div>
                     </div>
-                    <div v-if="themeState.customFontName" class="menu-item" @click="handleResetFont">
+                    <div v-if="themeState.uiFontMode === 'custom'" class="menu-item" @click="handleResetFont">
                         <svg class="menu-icon" viewBox="0 0 24 24" style="fill: #ff4444;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                         <div class="menu-text" style="color: #ff4444;">{{ t('theme_reset_font') || 'Reset Font' }}</div>
                     </div>
                     <input type="file" ref="fontInput" accept=".ttf,.otf,.woff,.woff2" style="display: none;" @change="(e) => setCustomFont(e.target.files[0])">
 
+                    <div class="menu-item color-item" @click="openColorPicker('uiText', t('theme_ui_text_color') || 'Text Color', themeState.uiTextColor, PRESET_UI_COLORS, true)">
+                        <div class="menu-text" style="flex:1;">{{ t('theme_ui_text_color') || 'Text Color' }}</div>
+                        <div class="color-pill" :style="{ backgroundColor: themeState.uiTextColor || 'var(--text-black)', border: !themeState.uiTextColor ? '1px solid var(--text-gray)' : 'none' }">
+                            <span v-if="!themeState.uiTextColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Auto</span>
+                        </div>
+                    </div>
+                    <div class="menu-item color-item" @click="openColorPicker('uiTextGray', t('theme_ui_text_gray_color') || 'Secondary Text Color', themeState.uiTextGrayColor, PRESET_UI_COLORS, true)">
+                        <div class="menu-text" style="flex:1;">{{ t('theme_ui_text_gray_color') || 'Secondary Text Color' }}</div>
+                        <div class="color-pill" :style="{ backgroundColor: themeState.uiTextGrayColor || 'var(--text-gray)', border: !themeState.uiTextGrayColor ? '1px solid var(--text-gray)' : 'none' }">
+                            <span v-if="!themeState.uiTextGrayColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Auto</span>
+                        </div>
+                    </div>
+
                     <div style="height: 1px; background: rgba(128,128,128,0.1); margin: 0 16px;"></div>
 
-                    <div style="padding: 16px;">
-                        <div style="margin-bottom: 20px;">
-                            <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size: 14px;">
-                                <label>{{ t('theme_font_size') || 'Font Size' }}</label>
-                                <span>{{ themeState.uiFontSize }}px</span>
-                            </div>
-                            <input type="range" min="12" max="20" step="1" :value="themeState.uiFontSize" @input="(e) => setUiFontSize(parseInt(e.target.value))">
+                    <div class="menu-item" @click="openFontSizeSelector('ui')">
+                        <svg class="menu-icon" viewBox="0 0 24 24"><path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z"/></svg>
+                        <div class="menu-text" style="flex:1;">{{ t('theme_font_size') || 'Font Size' }}</div>
+                        <div style="font-size: 14px; opacity: 0.7;">
+                            {{ themeState.uiFontSize === 'system' ? (t('theme_system_font_size') || 'System') : themeState.uiFontSize + 'px' }}
                         </div>
+                    </div>
+                    
+                    <div v-if="themeState.uiFontSize !== 'system'" style="padding: 0 16px; margin-bottom: 20px;">
+                        <input type="range" min="12" max="20" step="1" :value="themeState.uiFontSize" @input="(e) => setUiFontSize(parseInt(e.target.value))">
+                    </div>
+
+                    <div style="padding: 0 16px 16px 16px;">
                         <div>
                             <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size: 14px;">
                                 <label>{{ t('theme_letter_spacing') || 'Letter Spacing' }}</label>
@@ -551,7 +668,7 @@ const chatPreviewStyle = computed(() => ({
                         <svg class="menu-icon" viewBox="0 0 24 24" style="fill: #ff4444;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                         <div class="menu-text" style="color: #ff4444;">{{ t('theme_reset_background') }}</div>
                     </div>
-                    <input type="file" ref="bgInput" accept="image/*" style="display: none;" @change="(e) => setBackgroundImage(e.target.files[0])">
+                    <input type="file" ref="bgInput" accept="image/*" style="display: none;" @change="onBackgroundImageSelected">
                     <div v-if="themeState.hasBackgroundImage">
                         <div style="height: 1px; background: rgba(128,128,128,0.1); margin: 0 16px;"></div>
                         <div style="padding: 16px;">
@@ -676,25 +793,32 @@ const chatPreviewStyle = computed(() => ({
                 <div v-if="themeState.activePresetId !== 'default'">
                     <div class="menu-group" style="display: block;">
                         <div class="section-header">{{ t('theme_chat_font') || 'Chat Messages Font' }}</div>
-                        <div class="menu-item" @click="chatFontInput.click()">
+                        <div class="menu-item" @click="openChatFontSelector">
                             <svg class="menu-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-3 12H7v-2h10v2zm0-3H7V9h10v2zm0-3H7V6h10v2z"/></svg>
-                            <div class="menu-text">{{ themeState.chatFontName || (t('theme_select_font') || 'Select Font') }}</div>
+                            <div class="menu-text" style="flex:1;">{{ t('theme_font') || 'Font' }}</div>
+                            <div style="font-size: 14px; opacity: 0.7;">{{ chatFontModeLabel }}</div>
                         </div>
-                        <div v-if="themeState.chatFontName" class="menu-item" @click="handleResetChatFont">
+                        <div v-if="themeState.chatFontMode === 'custom'" class="menu-item" @click="handleResetChatFont">
                             <svg class="menu-icon" viewBox="0 0 24 24" style="fill: #ff4444;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                             <div class="menu-text" style="color: #ff4444;">{{ t('theme_reset_font') || 'Reset Font' }}</div>
                         </div>
                         <input type="file" ref="chatFontInput" accept=".ttf,.otf,.woff,.woff2" style="display: none;" @change="(e) => setChatFont(e.target.files[0])">
 
                         <div style="height: 1px; background: rgba(128,128,128,0.1); margin: 0 16px;"></div>
-                        <div style="padding: 16px;">
-                            <div style="margin-bottom: 20px;">
-                                <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size: 14px;">
-                                    <label>{{ t('theme_font_size') || 'Font Size' }}</label>
-                                    <span>{{ themeState.chatFontSize }}px</span>
-                                </div>
-                                <input type="range" min="12" max="24" step="1" :value="themeState.chatFontSize" @input="(e) => setChatFontSize(parseInt(e.target.value))">
+
+                        <div class="menu-item" @click="openFontSizeSelector('chat')">
+                            <svg class="menu-icon" viewBox="0 0 24 24"><path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z"/></svg>
+                            <div class="menu-text" style="flex:1;">{{ t('theme_font_size') || 'Font Size' }}</div>
+                            <div style="font-size: 14px; opacity: 0.7;">
+                                {{ themeState.chatFontSize === 'system' ? (t('theme_system_font_size') || 'System') : themeState.chatFontSize + 'px' }}
                             </div>
+                        </div>
+
+                        <div v-if="themeState.chatFontSize !== 'system'" style="padding: 0 16px; margin-bottom: 20px;">
+                            <input type="range" min="12" max="24" step="1" :value="themeState.chatFontSize" @input="(e) => setChatFontSize(parseInt(e.target.value))">
+                        </div>
+
+                        <div style="padding: 0 16px 16px 16px;">
                             <div style="margin-bottom: 20px;">
                                 <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size: 14px;">
                                     <label>{{ t('theme_letter_spacing') || 'Letter Spacing' }}</label>
@@ -802,9 +926,6 @@ const chatPreviewStyle = computed(() => ({
     min-height: 48px;
 }
 
-.viewStyle {
-}
-
 /* Tabs */
 .tabs-container {
     display: flex;
@@ -827,14 +948,8 @@ const chatPreviewStyle = computed(() => ({
 }
 
 .tab.active {
-    background: white;
-    color: var(--text-black);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-}
-
-body.dark-theme .tab.active {
     background: rgba(255,255,255,0.1);
-    color: white;
+    color: var(--text-black);
 }
 
 /* Sub-tabs */
@@ -909,7 +1024,7 @@ body.dark-theme .tab.active {
 .msg-time {
     margin-left: auto;
     font-size: 12px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
 }
 
 .msg-body {
@@ -945,7 +1060,7 @@ body.dark-theme .tab.active {
 
 .msg-index {
     font-size: 11px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     display: flex;
     align-items: center;
 }
@@ -1058,7 +1173,7 @@ body.dark-theme .tab.active {
     gap: 8px;
     margin-top: 4px;
     font-size: 11px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     opacity: 0.8;
 }
 
@@ -1109,6 +1224,7 @@ body.dark-theme .tab.active {
     overflow: hidden;
     border-radius: 50%;
     -webkit-mask-image: -webkit-radial-gradient(white, black);
+    mask-image: radial-gradient(white, black);
 }
 .custom-picker input {
     position: absolute;

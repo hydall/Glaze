@@ -31,7 +31,7 @@
                     </div>
                 </div>
             </div>
-            <div id="holocards-close-btn" class="close-btn-trigger" @click="close" style="position: absolute; top: calc(20px + var(--sat)); right: 20px; z-index: 20020; padding: 10px; cursor: pointer; background: rgba(0,0,0,0.5); border-radius: 50%;">
+            <div id="holocards-close-btn" class="close-btn-trigger" @click="close" style="position: absolute; top: calc(20px + var(--sat)); right: 20px; z-index: 20020; width: 44px; height: 44px; cursor: pointer; background: rgba(0,0,0,0.5); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
                 <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:white;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
             </div>
         </div>
@@ -248,6 +248,7 @@ onUnmounted(() => {
     filter: drop-shadow(0 20px 40px rgba(0,0,0,0.6));
     transform: translateZ(0);
     -webkit-mask-image: -webkit-radial-gradient(white, black);
+    mask-image: radial-gradient(white, black);
     backface-visibility: hidden;
 }
 

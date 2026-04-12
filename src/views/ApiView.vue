@@ -7,6 +7,7 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/states/bottomSheetState.js';
 import SheetView from '@/components/ui/SheetView.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
 
 const sheet = ref(null);
 
@@ -26,17 +27,14 @@ const apiSettings = reactive({
     topP: 0.9,
     stream: true,
     autoHideImages: false,
-    autoHideImagesN: 1
+    autoHideImagesN: 1,
+    reasoningEnabled: false,
+    reasoningEffort: 'medium'
 });
 
 const showApiKey = ref(false);
 
-const errorBanner = reactive({
-    show: false,
-    message: '',
-    isTransitioning: false
-});
-
+const errorMessage = ref('');
 const apiStatus = ref('idle'); // idle, connecting, connected, failed
 const availableModels = ref([]);
 const apiPresets = ref([]);
@@ -90,6 +88,8 @@ function loadApiSettings() {
     apiSettings.stream = localStorage.getItem('gz_api_stream') === 'true';
     apiSettings.autoHideImages = localStorage.getItem('gz_api_auto_hide_images') === 'true';
     apiSettings.autoHideImagesN = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
+    apiSettings.reasoningEnabled = localStorage.getItem('gz_api_request_reasoning') === 'true';
+    apiSettings.reasoningEffort = localStorage.getItem('gz_api_reasoning_effort') || 'medium';
 }
 
 function saveApiSetting(key, value) {
@@ -111,7 +111,9 @@ function saveApiSetting(key, value) {
             'gz_api_topp': 'topp',
             'gz_api_stream': 'stream',
             'gz_api_auto_hide_images': 'auto_hide_images',
-            'gz_api_auto_hide_images_n': 'auto_hide_images_n'
+            'gz_api_auto_hide_images_n': 'auto_hide_images_n',
+            'gz_api_request_reasoning': 'reasoning_enabled',
+            'gz_api_reasoning_effort': 'reasoning_effort'
         };
         if (map[key]) {
             activeApiPreset.value[map[key]] = value;
@@ -160,62 +162,8 @@ async function checkConnection() {
     } catch (e) {
         console.warn(e);
         apiStatus.value = 'failed';
-        showErrorBanner(e.message || 'Connection failed');
+        errorMessage.value = e.message || 'Connection failed';
     }
-}
-
-function showErrorBanner(msg) {
-    errorBanner.message = msg;
-    errorBanner.show = true;
-}
-
-function copyErrorBannerText() {
-    if (!errorBanner.message) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(errorBanner.message);
-    }
-}
-
-watch(apiStatus, (newStatus) => {
-    if (newStatus !== 'failed' && errorBanner.show) {
-        errorBanner.show = false;
-    }
-});
-
-function onBannerBeforeEnter(el) {
-    errorBanner.isTransitioning = true;
-    el.style.height = '0';
-    el.style.opacity = '0';
-}
-
-function onBannerEnter(el, done) {
-    el.offsetHeight; // force reflow
-    el.style.transition = 'all 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
-    el.style.height = el.scrollHeight + 'px';
-    el.style.opacity = '1';
-    el.addEventListener('transitionend', done, { once: true });
-}
-
-function onBannerAfterEnter(el) {
-    el.style.height = 'auto';
-    errorBanner.isTransitioning = false;
-}
-
-function onBannerBeforeLeave(el) {
-    errorBanner.isTransitioning = true;
-    el.style.height = el.offsetHeight + 'px';
-}
-
-function onBannerLeave(el, done) {
-    el.offsetHeight; // force reflow
-    el.style.transition = 'all 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
-    el.style.height = '0';
-    el.style.opacity = '0';
-    el.addEventListener('transitionend', done, { once: true });
-}
-
-function onBannerAfterLeave() {
-    errorBanner.isTransitioning = false;
 }
 
 function openModelSelector() {
@@ -229,6 +177,29 @@ function openModelSelector() {
     })) : [{ label: t('no_models_found') || "No models found", onClick: closeBottomSheet }];
 
     showBottomSheet({ title: "Select Model", items });
+}
+
+function openReasoningEffortSelector() {
+    const options = [
+        { value: 'low', label: t('reasoning_effort_low') || 'Low' },
+        { value: 'medium', label: t('reasoning_effort_medium') || 'Medium' },
+        { value: 'high', label: t('reasoning_effort_high') || 'High' }
+    ];
+
+    const items = options.map(opt => ({
+        label: opt.label,
+        icon: apiSettings.reasoningEffort === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            apiSettings.reasoningEffort = opt.value;
+            saveApiSetting('gz_api_reasoning_effort', opt.value);
+            closeBottomSheet();
+        }
+    }));
+
+    showBottomSheet({
+        title: t('label_reasoning_effort') || 'Reasoning Effort',
+        items
+    });
 }
 
 function createNewApiPreset() {
@@ -251,7 +222,8 @@ function createNewApiPreset() {
                     topp: apiSettings.topP,
                     stream: apiSettings.stream,
                     auto_hide_images: apiSettings.autoHideImages,
-                    auto_hide_images_n: apiSettings.autoHideImagesN
+                    auto_hide_images_n: apiSettings.autoHideImagesN,
+                    reasoning_effort: apiSettings.reasoningEffort
                 };
 
                 apiPresets.value.push(newPreset);
@@ -280,6 +252,7 @@ function applyApiPreset(p) {
     
     apiSettings.autoHideImages = (p.auto_hide_images === true || p.auto_hide_images === 'true');
     apiSettings.autoHideImagesN = parseInt(p.auto_hide_images_n || '1', 10);
+    apiSettings.reasoningEffort = p.reasoning_effort || 'medium';
     
     saveApiSetting('api-endpoint', p.endpoint);
     saveApiSetting('api-key', p.key);
@@ -291,6 +264,7 @@ function applyApiPreset(p) {
     saveApiSetting('gz_api_stream', p.stream);
     saveApiSetting('gz_api_auto_hide_images', apiSettings.autoHideImages.toString());
     saveApiSetting('gz_api_auto_hide_images_n', apiSettings.autoHideImagesN.toString());
+    saveApiSetting('gz_api_reasoning_effort', apiSettings.reasoningEffort);
     
     checkConnection();
 }
@@ -477,44 +451,13 @@ onBeforeUnmount(() => {
 <template>
     <SheetView ref="sheet" :title="headerState.title">
         <div class="gen-sheet-body">
-                <div class="section-header section-header-flex">
+                <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
                     <div class="preset-selector" @click="openApiPresetSelector">
                         <span>{{ activeApiPreset?.name || 'Default' }}</span>
                         <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
                     </div>
-                    <div class="api-status" @click="checkConnection">
-                        <div class="status-dot" :class="apiStatus"></div>
-                        <Transition name="status-fade" mode="out-in">
-                            <span class="status-text" :key="apiStatus">{{ t('status_' + apiStatus) || apiStatus }}</span>
-                        </Transition>
-                    </div>
-                </div>
+                </ConnectionStatus>
 
-                <!-- Glassy Error Banner -->
-                <Transition 
-                    name="error-banner-fade"
-                    @before-enter="onBannerBeforeEnter"
-                    @enter="onBannerEnter"
-                    @after-enter="onBannerAfterEnter"
-                    @before-leave="onBannerBeforeLeave"
-                    @leave="onBannerLeave"
-                    @after-leave="onBannerAfterLeave"
-                    :css="false"
-                >
-                    <div v-if="errorBanner.show" class="gen-error-banner">
-                        <div class="error-banner-container">
-                            <div class="error-window">
-                                <div class="error-header">
-                                    <span>ERROR</span>
-                                    <div class="error-copy-btn" @click.stop="copyErrorBannerText">
-                                        <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
-                                    </div>
-                                </div>
-                                <div class="error-content">{{ errorBanner.message }}</div>
-                            </div>
-                        </div>
-                    </div>
-                </Transition>
                 <div class="menu-group">
                     <div class="section-header">{{ t('section_connection') || 'Connection' }} <HelpTip term="api"/></div>
                     <div class="settings-item">
@@ -576,7 +519,7 @@ onBeforeUnmount(() => {
 
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
-                            <label>{{ t('label_auto_hide_images') || 'Auto-hide images' }}</label>
+                            <label>{{ t('label_auto_hide_images') || 'Auto-hide images' }} <HelpTip term="image-gen"/></label>
                             <div class="settings-desc">{{ t('desc_auto_hide_images') || 'Hide images after N assistant responses' }}</div>
                         </div>
                         <input type="checkbox" v-model="apiSettings.autoHideImages" @change="onApiInput('gz_api_auto_hide_images', $event.target.checked)" class="vk-switch">
@@ -589,37 +532,30 @@ onBeforeUnmount(() => {
                         </div>
                     </Transition>
                 </div>
+
+                <div class="menu-group">
+                    <div class="section-header">{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/></div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_show_reasoning') || 'Show Native Reasoning' }}</label>
+                            <div class="settings-desc">{{ t('desc_show_reasoning') || "Shows reasoning_content. Doesn't affect model's reasoning." }}</div>
+                        </div>
+                        <input type="checkbox" v-model="apiSettings.reasoningEnabled" @change="onApiInput('gz_api_request_reasoning', $event.target.checked)" class="vk-switch">
+                    </div>
+                    <div class="settings-item" @click="openReasoningEffortSelector">
+                        <label>{{ t('label_reasoning_effort') || 'Reasoning Effort' }}</label>
+                        <div class="clickable-selector">
+                            <span>{{ t('reasoning_effort_' + apiSettings.reasoningEffort) || apiSettings.reasoningEffort }}</span>
+                            <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                        </div>
+                    </div>
+                </div>
         </div>
     </SheetView>
 
 </template>
 
 <style scoped>
-/* API Status Base Style */
-.api-status {
-    display: flex;
-    align-items: center;
-    font-size: 0.75em;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 16px;
-    font-weight: normal;
-    text-transform: none;
-    transition: all 0.3s ease;
-}
-
-.status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background-color: orange;
-    margin-right: 6px;
-    transition: background-color 0.3s ease;
-}
-.status-dot.connecting { background-color: orange; }
-.status-dot.connected { background-color: #4CAF50; }
-.status-dot.failed { background-color: #ff4444; }
-
 .preset-selector {
   height: 32px;
   display: flex;
@@ -631,16 +567,12 @@ onBeforeUnmount(() => {
   color: var(--vk-blue);
   padding: 0 14px;
   border-radius: 16px;
-  background-color: var(--white);
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
   backdrop-filter: blur(var(--element-blur, 12px));
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
   border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
   transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
   overflow: hidden;
-}
-
-:global(body.dark-theme) .preset-selector {
-  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
 }
 
 .preset-selector:active {
@@ -652,101 +584,6 @@ onBeforeUnmount(() => {
     width: 20px;
     height: 20px;
     fill: currentColor;
-}
-
-.status-fade-enter-active,
-.status-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-.status-fade-enter-from,
-.status-fade-leave-to {
-  opacity: 0;
-  transform: translateY(5px);
-}
-
-/* Glassy Error Banner */
-.gen-error-banner {
-    width: 100%;
-    z-index: 100;
-    overflow: hidden;
-}
-
-.error-banner-container {
-    padding: 10px 16px;
-}
-
-.error-window {
-    display: block;
-    background-color: rgba(255, 242, 242, 0.9);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid #ff3b30;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(255, 59, 48, 0.1);
-    overflow: hidden;
-}
-
-body.dark-theme .error-window {
-    background-color: rgba(43, 14, 14, 0.85);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.error-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background-color: rgba(255, 59, 48, 0.1);
-    padding: 6px 12px;
-    border-bottom: 1px solid rgba(255, 59, 48, 0.2);
-}
-
-body.dark-theme .error-header {
-    background-color: rgba(255, 59, 48, 0.2);
-    border-bottom: 1px solid rgba(255, 59, 48, 0.3);
-}
-
-.error-header span {
-    color: #ff3b30;
-    font-size: 10px;
-    font-weight: bold;
-    letter-spacing: 1px;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.error-copy-btn {
-    cursor: pointer;
-    color: #ff3b30;
-    opacity: 0.7;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2px;
-    border-radius: 4px;
-    transition: all 0.2s;
-}
-
-.error-copy-btn:hover {
-    opacity: 1;
-    background-color: rgba(255, 59, 48, 0.1);
-}
-
-.error-copy-btn svg {
-    width: 14px;
-    height: 14px;
-    fill: currentColor;
-}
-
-.error-content {
-    padding: 10px 12px;
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    font-size: 12px;
-    color: #c42b2b;
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
-body.dark-theme .error-content {
-    color: #ffb3b3;
 }
 
 .gen-sheet-header {
@@ -764,5 +601,30 @@ body.dark-theme .error-content {
     font-size: 17px;
 }
 
-.gen-sheet-body { flex: 1; overflow-y: auto; position: relative;}
+.gen-sheet-body { position: relative; }
+
+.clickable-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-item);
+    border: 1px solid var(--border-color);
+    padding: 0 16px;
+    height: 48px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 15px;
+    transition: background 0.2s;
+}
+
+.clickable-selector:active {
+    background: var(--bg-item-active);
+}
+
+.clickable-selector svg {
+    width: 24px;
+    height: 24px;
+    fill: var(--text-gray);
+    opacity: 0.5;
+}
 </style>

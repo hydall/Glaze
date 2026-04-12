@@ -4,14 +4,16 @@ import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { getEffectivePreset, savePresets } from '@/core/states/presetState.js';
+import { getEffectivePreset, getEffectivePresetId, savePresets } from '@/core/states/presetState.js';
 import { exportSTRegex } from '@/core/services/regexService.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 
 
 const props = defineProps({
-    activeChatChar: { type: Object, default: null }
+    activeChatChar: { type: Object, default: null },
+    insidePreset: { type: Boolean, default: false },
+    zIndex: { type: Number, default: 11000 }
 });
 
 const sheet = ref(null);
@@ -28,6 +30,14 @@ const presetRegexes = computed(() => {
     const chatId = charId && sessionId ? `${charId}_${sessionId}` : null;
     const preset = getEffectivePreset(charId, chatId);
     return preset?.regexes || [];
+});
+
+const effectivePresetName = computed(() => {
+    const charId = props.activeChatChar?.id;
+    const sessionId = props.activeChatChar?.sessionId;
+    const chatId = charId && sessionId ? `${charId}_${sessionId}` : null;
+    const preset = getEffectivePreset(charId, chatId);
+    return preset?.name || 'Default';
 });
 
 // Global state
@@ -96,7 +106,7 @@ function goBack() {
     }
 }
 
-function createNewScript() {
+function createNewScript(toPreset = false) {
     const newScript = {
         id: Date.now().toString(),
         name: t('action_create_new') || 'New Script',
@@ -111,29 +121,72 @@ function createNewScript() {
         minDepth: null,
         maxDepth: null
     };
-    scripts.value.push(newScript);
-    selectScript(newScript, false);
-    saveScripts();
+    if (toPreset) {
+        const charId = props.activeChatChar?.id;
+        const sessionId = props.activeChatChar?.sessionId;
+        const chatId = charId && sessionId ? `${charId}_${sessionId}` : null;
+        const preset = getEffectivePreset(charId, chatId);
+        if (preset) {
+            if (!preset.regexes) preset.regexes = [];
+            preset.regexes.push(newScript);
+        }
+        selectScript(newScript, true);
+        savePresets();
+    } else {
+        scripts.value.push(newScript);
+        selectScript(newScript, false);
+        saveScripts();
+    }
 }
+
+const importTargetPreset = ref(false);
 
 function handleAddScript() {
     showBottomSheet({
         title: t('menu_regex') || 'Regex Scripts',
         items: [
             {
-                label: t('action_create_new') || 'Create New',
+                label: t('regex_add_to_preset') || `Add to Preset`,
                 icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
                 onClick: () => {
                     closeBottomSheet();
-                    createNewScript();
+                    showBottomSheet({
+                        title: effectivePresetName.value,
+                        items: [
+                            {
+                                label: t('action_create_new') || 'Create New',
+                                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+                                onClick: () => { closeBottomSheet(); createNewScript(true); }
+                            },
+                            {
+                                label: t('action_import') || 'Import from file',
+                                icon: '<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
+                                onClick: () => { closeBottomSheet(); importTargetPreset.value = true; fileInput.value?.click(); }
+                            }
+                        ]
+                    });
                 }
             },
             {
-                label: t('action_import') || 'Import from file',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
+                label: t('regex_add_globally') || 'Add Globally',
+                icon: '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>',
                 onClick: () => {
                     closeBottomSheet();
-                    fileInput.value?.click();
+                    showBottomSheet({
+                        title: t('regex_global_scripts') || 'Global Regexes',
+                        items: [
+                            {
+                                label: t('action_create_new') || 'Create New',
+                                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+                                onClick: () => { closeBottomSheet(); createNewScript(false); }
+                            },
+                            {
+                                label: t('action_import') || 'Import from file',
+                                icon: '<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
+                                onClick: () => { closeBottomSheet(); importTargetPreset.value = false; fileInput.value?.click(); }
+                            }
+                        ]
+                    });
                 }
             }
         ]
@@ -158,9 +211,15 @@ async function handleFileSelect(event) {
             
             // Ephemerality: ST's promptOnly means it's ONLY for prompt (2)
             // If promptOnly is false, it's for both display (1) and prompt (2)
-            const ephemerality = item.ephemerality || (item.promptOnly === true ? [2] : [1, 2]);
+            let ephemerality = item.ephemerality;
+            if (!ephemerality) {
+                if (item.markdownOnly === true && item.promptOnly === false) ephemerality = [1];
+                else if (item.markdownOnly === false && item.promptOnly === true) ephemerality = [2];
+                else if (item.markdownOnly === true && item.promptOnly === true) ephemerality = [1, 2];
+                else ephemerality = [1, 2];
+            }
 
-            scripts.value.push({
+            const script = {
                 id: Date.now().toString() + Math.random(),
                 name,
                 regex,
@@ -169,15 +228,33 @@ async function handleFileSelect(event) {
                 placement,
                 disabled: item.disabled ?? false,
                 markdownOnly: item.markdownOnly ?? false,
+                promptOnly: item.promptOnly ?? false,
                 runOnEdit: item.runOnEdit ?? false,
                 macroRules: (item.substituteRegex ?? 0).toString(),
                 ephemerality,
                 minDepth: item.minDepth ?? null,
                 maxDepth: item.maxDepth ?? null
-            });
+            };
+            if (importTargetPreset.value) {
+                const charId = props.activeChatChar?.id;
+                const sessionId = props.activeChatChar?.sessionId;
+                const chatId = charId && sessionId ? `${charId}_${sessionId}` : null;
+                const preset = getEffectivePreset(charId, chatId);
+                if (preset) {
+                    if (!preset.regexes) preset.regexes = [];
+                    preset.regexes.push(script);
+                }
+            } else {
+                scripts.value.push(script);
+            }
         });
 
-        saveScripts();
+        if (importTargetPreset.value) {
+            savePresets();
+        } else {
+            saveScripts();
+        }
+        importTargetPreset.value = false;
         // Clear input to allow re-importing the same file
         event.target.value = '';
     } catch (e) {
@@ -290,21 +367,57 @@ function handleScriptMenu(script, index, isPreset = false) {
     });
 }
 
+function openMacroSelector() {
+    const items = macroOptions.value.map(opt => ({
+        label: opt.label,
+        icon: activeScript.value.macroRules === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            activeScript.value.macroRules = opt.value;
+            closeBottomSheet();
+        }
+    }));
+    showBottomSheet({
+        title: t('regex_macros_find') || 'Macros',
+        items: items
+    });
+}
+
+
+function openPresetSheet() {
+    if (props.insidePreset) {
+        close();
+    } else {
+        const charId = props.activeChatChar?.id;
+        const sessionId = props.activeChatChar?.sessionId;
+        const chatId = charId && sessionId ? `${charId}_${sessionId}` : null;
+        const presetId = getEffectivePresetId(charId, chatId);
+        window.dispatchEvent(new CustomEvent('open-preset-sheet', { detail: { presetId } }));
+    }
+}
+
 defineExpose({ open, close });
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="sheetTitle" :show-back="showBackBtn" :actions="sheetActions" @back="goBack" @close="handleSheetClose">
+    <SheetView ref="sheet" :title="sheetTitle" :show-back="showBackBtn" :actions="sheetActions" :z-index="zIndex" @back="goBack" @close="handleSheetClose">
+        <template #header-title>
+            <HelpTip term="regex" />
+        </template>
         <template #header>
             <input type="file" ref="fileInput" accept=".json" style="display: none;" @change="handleFileSelect">
         </template>
 
         <div class="sheet-body">
             <div v-if="currentView === 'list'" class="list-view">
-                
+
                 <!-- Preset Regexes -->
                 <div class="list-section" v-if="presetRegexes.length > 0">
                     <div class="section-title">{{ t('regex_preset_scripts') || 'Preset Regexes' }}</div>
+                    <div class="preset-chip" @click="openPresetSheet()">
+                        <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                        <span>{{ effectivePresetName }}</span>
+                        <svg class="chip-arrow" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                    </div>
                     <div class="list-container">
                         <div v-for="(script, index) in presetRegexes" :key="script.id || index" class="list-item" @click="selectScript(script, true)">
                             <div class="item-info">
@@ -404,10 +517,11 @@ defineExpose({ open, close });
 
                         <div class="menu-group compact">
                             <div class="section-header">{{ t('regex_macros_find') || 'Macros in Find Regex' }} <HelpTip term="regex-macros"/></div>
-                            <div class="settings-item select-item">
-                                <select v-model="activeScript.macroRules" class="vk-select">
-                                    <option v-for="opt in macroOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                                </select>
+                            <div class="settings-item select-item" @click="openMacroSelector">
+                                <div class="clickable-selector">
+                                    <span>{{ macroOptions.find(o => o.value === activeScript.macroRules)?.label || activeScript.macroRules }}</span>
+                                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                                </div>
                             </div>
                         </div>
 
@@ -443,8 +557,7 @@ defineExpose({ open, close });
 .section-title { padding: 0 16px 4px; font-weight: 600; font-size: 13px; color: var(--text-gray); text-transform: uppercase; }
 .empty-state { padding: 40px; text-align: center; color: var(--text-gray); }
 .list-container { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-.list-item { display: flex; align-items: center; padding: 16px; background: rgba(255, 255, 255, var(--element-opacity, 0.7)); backdrop-filter: blur(10px); border-radius: 16px; border: 1px solid rgba(var(--vk-blue-rgb), 0.1); cursor: pointer; }
-body.dark-theme .list-item { background: rgba(30, 30, 32, var(--element-opacity, 0.7)); border-color: rgba(255,255,255,0.05); }
+.list-item { display: flex; align-items: center; padding: 16px; background: rgba(30, 30, 32, var(--element-opacity, 0.7)); backdrop-filter: blur(10px); border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); cursor: pointer; }
 .item-info { flex: 1; overflow: hidden; margin-right: 12px; }
 .item-name { font-weight: 600; font-size: 16px; color: var(--text-black); }
 .item-meta { font-size: 13px; color: var(--text-gray); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -453,8 +566,28 @@ body.dark-theme .list-item { background: rgba(30, 30, 32, var(--element-opacity,
 .action-btn.more { color: var(--text-gray); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
 .action-btn svg { width: 20px; height: 20px; fill: currentColor; }
 
-.hint-banner { background: linear-gradient(to right, rgba(60, 80, 110, 0.8), rgba(60, 80, 110, 0.6)); border: 1px solid rgba(100, 150, 200, 0.3); border-radius: 8px; padding: 10px 16px; margin: 12px 16px; display: flex; align-items: center; justify-content: space-between; color: white; font-size: 14px; font-weight: 500;}
-body.dark-theme .hint-banner { background: linear-gradient(to right, rgba(40, 60, 90, 0.8), rgba(40, 60, 90, 0.6)); }
+.preset-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 16px 8px;
+    padding: 6px 12px 6px 10px;
+    background: rgba(var(--vk-blue-rgb), 0.12);
+    border: 1px solid rgba(var(--vk-blue-rgb), 0.25);
+    border-radius: 20px;
+    cursor: pointer;
+    color: var(--vk-blue);
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.2s;
+    max-width: calc(100% - 32px);
+}
+.preset-chip:active { background: rgba(var(--vk-blue-rgb), 0.22); }
+.preset-chip > svg:first-child { width: 14px; height: 14px; fill: currentColor; flex-shrink: 0; }
+.preset-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-chip .chip-arrow { width: 16px; height: 16px; fill: currentColor; opacity: 0.7; flex-shrink: 0; }
+
+.hint-banner { background: linear-gradient(to right, rgba(40, 60, 90, 0.8), rgba(40, 60, 90, 0.6)); border: 1px solid rgba(100, 150, 200, 0.3); border-radius: 8px; padding: 10px 16px; margin: 12px 16px; display: flex; align-items: center; justify-content: space-between; color: white; font-size: 14px; font-weight: 500;}
 .hint-banner .info-icon { width: 20px; height: 20px; border-radius: 50%; background: #ff9800; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; }
 
 .options-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
@@ -467,8 +600,7 @@ body.dark-theme .hint-banner { background: linear-gradient(to right, rgba(40, 60
 
 .settings-item.compact { padding: 12px; border: none; }
 .settings-item label { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
-.settings-item label .help-icon { color: var(--text-gray); font-size: 12px; background: rgba(0,0,0,0.1); width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-weight: bold; }
-body.dark-theme .settings-item label .help-icon { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
+.settings-item label .help-icon { color: rgba(255,255,255,0.6); font-size: 12px; background: rgba(255,255,255,0.1); width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-weight: bold; }
 
 .settings-item-checkbox.compact { padding: 10px 20px; border-bottom: none; }
 .checkbox-container { display: flex; align-items: center; gap: 12px; width: 100%; }
@@ -477,12 +609,10 @@ body.dark-theme .settings-item label .help-icon { background: rgba(255,255,255,0
 
 .depth-row { display: flex; gap: 12px; margin: 0 16px; }
 @media (min-width: 600px) { .depth-row { margin: 0; } }
-.depth-item { flex: 1; background: rgba(255, 255, 255, var(--element-opacity, 0.7)); backdrop-filter: blur(10px); border-radius: 20px; border: 1px solid rgba(var(--vk-blue-rgb), 0.1); }
-body.dark-theme .depth-item { background: rgba(30, 30, 32, var(--element-opacity, 0.7)); border-color: rgba(255,255,255,0.05); }
+.depth-item { flex: 1; background: rgba(30, 30, 32, var(--element-opacity, 0.7)); backdrop-filter: blur(10px); border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); }
 
 .select-item { padding: 8px 20px; border: none; }
-.vk-select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.1); background: rgba(255,255,255,0.4); color: var(--text-black); font-family: inherit; font-size: 14px; outline: none; }
-body.dark-theme .vk-select { background: rgba(0,0,0,0.2); border-color: rgba(255,255,255,0.1); color: white; }
+.vk-select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: var(--text-black); font-family: inherit; font-size: 14px; outline: none; }
 
 .vk-switch { appearance: none; width: 44px; height: 24px; background: #e9e9ea; border-radius: 12px; position: relative; transition: 0.3s; cursor: pointer; }
 .vk-switch:checked { background: var(--vk-blue); }
@@ -491,6 +621,32 @@ body.dark-theme .vk-select { background: rgba(0,0,0,0.2); border-color: rgba(255
 .small-switch { width: 36px; height: 20px; }
 .small-switch::after { width: 16px; height: 16px; }
 .small-switch:checked::after { transform: translateX(16px); }
+
+.clickable-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-item);
+    border: 1px solid var(--border-color);
+    padding: 0 16px;
+    height: 44px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.clickable-selector:active {
+    background: var(--bg-item-active);
+}
+
+.clickable-selector svg {
+    width: 20px;
+    height: 20px;
+    fill: var(--text-gray);
+    opacity: 0.5;
+}
+
 
 
 </style>

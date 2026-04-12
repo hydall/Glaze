@@ -1,26 +1,10 @@
 :root {
     --vk-blue: #7996ce;
-    --vk-header-bg: #ffffff;
-    --bg-gray: #edeef0;
-    --text-black: #000000;
-    --text-dark-gray: #222222;
-    --text-gray: #818c99;
-    --text-light-gray: #99a2ad;
-    --border-color: #d7d8db;
-    --white: #ffffff;
-    --active-tab: #7996ce;
-    --inactive-tab: #99a2ad;
-    --separator-color: #f0f0f0;
-}
-
-/* Native Dark Mode Support (Prevents white flash on load) */
-body.dark-theme {
     --vk-header-bg: #19191a;
     --bg-gray: #0a0a0a;
     --text-black: #e1e3e6;
-    --text-dark-gray: #ffffff;
+    --text-dark-gray: #e1e3e6;
     --text-gray: #b0b8c1;
-    --text-light-gray: #76787a;
     --border-color: #2c2d2e;
     --white: #19191a;
     --active-tab: #71aaeb;

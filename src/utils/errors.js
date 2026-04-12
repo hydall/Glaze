@@ -107,7 +107,7 @@ export function initGlobalErrorHandling() {
                     to { opacity: 1; }
                 }
 
-                .error-card {
+                                .error-card {
                     width: calc(100% - 32px);
                     max-width: 400px;
                     text-align: center;
@@ -120,14 +120,9 @@ export function initGlobalErrorHandling() {
                     background-color: rgba(var(--ui-bg-rgb, 255, 255, 255), var(--element-opacity, 0.8));
                     backdrop-filter: blur(var(--element-blur, 20px));
                     -webkit-backdrop-filter: blur(var(--element-blur, 20px));
-                    border: var(--border-width, 1px) solid var(--border-color, rgba(0, 0, 0, 0.05));
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-                    animation: errorCardIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-                }
-
-                body.dark-theme .error-card {
-                    border-color: var(--border-color, rgba(255, 255, 255, 0.1));
+                    border: var(--border-width, 1px) solid var(--border-color, rgba(255, 255, 255, 0.1));
                     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+                    animation: errorCardIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
                 }
 
                 @keyframes errorCardIn {
@@ -140,33 +135,24 @@ export function initGlobalErrorHandling() {
                     top: 14px; right: 14px;
                     width: 36px; height: 36px;
                     border-radius: 50%;
-                    background: rgba(0, 0, 0, 0.06);
+                    background: rgba(255, 255, 255, 0.1);
                     display: flex;
                     align-items: center;
                     justify-content: center;
                     cursor: pointer;
                     z-index: 10;
                     transition: all 0.2s ease;
-                    border: 1px solid rgba(0, 0, 0, 0.03);
-                }
-
-                body.dark-theme .error-close-btn {
-                    background: rgba(255, 255, 255, 0.1);
-                    border-color: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.05);
                 }
 
                 .error-close-btn:active {
                     transform: scale(0.9) translateZ(0);
-                    background-color: rgba(0, 0, 0, 0.1);
-                }
-
-                body.dark-theme .error-close-btn:active {
                     background-color: rgba(255, 255, 255, 0.15);
                 }
 
                 .error-close-btn svg {
                     width: 20px; height: 20px;
-                    fill: var(--text-light-gray, #99a2ad);
+                    fill: var(--text-gray, #99a2ad);
                 }
 
                 .error-header {
@@ -242,16 +228,11 @@ export function initGlobalErrorHandling() {
 
 
                 /* Terminal block */
-                .error-terminal {
+                                .error-terminal {
                     margin: 0 16px 16px;
                     border-radius: 12px;
                     overflow: hidden;
-                    border: 1px solid rgba(0, 0, 0, 0.06);
-                    background: rgba(0, 0, 0, 0.03);
-                }
-
-                body.dark-theme .error-terminal {
-                    border-color: rgba(255, 255, 255, 0.08);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
                     background: rgba(0, 0, 0, 0.2);
                 }
 
@@ -260,11 +241,7 @@ export function initGlobalErrorHandling() {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-                }
-
-                body.dark-theme .error-terminal-header {
-                    border-bottom-color: rgba(255, 255, 255, 0.06);
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
                 }
 
                 .error-terminal-label {
@@ -295,25 +272,17 @@ export function initGlobalErrorHandling() {
                     padding: 12px;
                     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                     font-size: 11px;
-                    color: var(--text-black, #333);
+                    color: #d4d4d4;
                     word-break: break-all;
                     max-height: 180px;
                     overflow-y: auto;
                     text-align: left;
                 }
 
-                body.dark-theme .error-list {
-                    color: #d4d4d4;
-                }
-
                 .error-list-item {
                     margin-bottom: 10px;
                     padding-bottom: 10px;
-                    border-bottom: 1px dashed rgba(0, 0, 0, 0.08);
-                }
-
-                body.dark-theme .error-list-item {
-                    border-bottom-color: rgba(255, 255, 255, 0.08);
+                    border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
                 }
 
                 .error-list-item:last-child {
@@ -329,14 +298,10 @@ export function initGlobalErrorHandling() {
                 }
 
                 .error-list-item-details {
-                    color: var(--text-gray, #818c99);
+                    color: #aaa;
                     padding-left: 14px;
                     line-height: 1.4;
                     text-align: left;
-                }
-
-                body.dark-theme .error-list-item-details {
-                    color: #aaa;
                 }
             `;
             document.head.appendChild(style);

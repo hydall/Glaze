@@ -30,14 +30,14 @@ const sheetStyle = computed(() => {
             return { 
                 transform: 'translate3d(0, 100%, 0)',
                 height: 'auto',
-                paddingBottom: 'calc(0px + var(--sab, 0px))',
+                paddingBottom: '0px',
                 '--sheet-translate': '0px'
             };
         }
         return { 
             transform: 'translate3d(0, 100vh, 0)',
             height: '100vh',
-            paddingBottom: isExpanded.value ? 'calc(0vh + var(--sab, 0px))' : 'calc(15vh + var(--sab, 0px))',
+            paddingBottom: isExpanded.value ? '0vh' : '15vh',
             '--sheet-translate': isExpanded.value ? '0vh' : '15vh'
         };
     }
@@ -47,7 +47,7 @@ const sheetStyle = computed(() => {
         return { 
             transform: `translate3d(0, ${t}px, 0)`,
             height: 'auto',
-            paddingBottom: 'calc(0px + var(--sab, 0px))',
+            paddingBottom: '0px',
             '--sheet-translate': `${t}px`
         };
     }
@@ -61,7 +61,7 @@ const sheetStyle = computed(() => {
         return {
             height: `calc(100vh + ${Math.abs(targetTranslateVh)}vh)`,
             transform: 'translate3d(0, 0, 0)',
-            paddingBottom: 'calc(0px + var(--sab, 0px))',
+            paddingBottom: '0px',
             '--sheet-translate': '0vh'
         };
     } else {
@@ -70,7 +70,7 @@ const sheetStyle = computed(() => {
         return {
             height: '100vh',
             transform: `translate3d(0, ${t}vh, 0)`,
-            paddingBottom: `calc(${t}vh + var(--sab, 0px))`,
+            paddingBottom: `${t}vh`,
             '--sheet-translate': `${t}vh`
         };
     }
@@ -304,7 +304,9 @@ onBeforeUnmount(() => {
                             </button>
                         </div>
                         
-                        <slot name="header-bottom"></slot>
+                        <div class="sc-sheet-header-bottom" v-if="$slots['header-bottom']">
+                            <slot name="header-bottom"></slot>
+                        </div>
                     </div>
                     
                     <!-- Slot for a custom header (title, buttons) -->
@@ -375,7 +377,6 @@ onBeforeUnmount(() => {
 
 .sheet-view-content.expanded {
     border-radius: 0;
-    padding-top: calc(var(--sat) + 10px) !important;
 }
 
 .sheet-view-content.is-dragging {
@@ -384,10 +385,49 @@ onBeforeUnmount(() => {
 
 
 .sheet-header-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
     flex-shrink: 0;
     touch-action: none;
-    cursor: grab;
-    background-color: var(--app-bg);
+    z-index: 10;
+    padding-bottom: 12px;
+    pointer-events: none;
+}
+
+.sheet-view-content.expanded .sheet-header-area {
+    padding-top: var(--sat);
+}
+
+.sheet-header-area::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(to bottom, 
+        rgba(var(--ui-bg-rgb), 0.85) 0%, 
+        rgba(var(--ui-bg-rgb), 0) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 40%, 
+        transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 40%, 
+        transparent 100%
+    );
+    z-index: -1;
+}
+
+.sheet-header-area > * {
+    pointer-events: auto;
 }
 
 .sheet-handle-bar {
@@ -399,7 +439,6 @@ onBeforeUnmount(() => {
     flex-shrink: 0;
     cursor: grab;
     touch-action: none;
-    background-color: var(--app-bg);
 }
 
 .sheet-view-content.fit-content .sheet-handle-bar {
@@ -420,6 +459,45 @@ onBeforeUnmount(() => {
     position: relative;
     display: flex;
     flex-direction: column;
+    padding-top: 80px;
+    scroll-padding-top: 80px;
+    padding-bottom: var(--sab, 0px);
+}
+
+.sheet-view-content:has(.sc-sheet-tabs) .sheet-view-body,
+.sheet-view-content:has(.sc-sheet-header-bottom) .sheet-view-body {
+    padding-top: 140px;
+    scroll-padding-top: 140px;
+}
+
+.sheet-view-content:has(.sc-sheet-tabs):has(.sc-sheet-header-bottom) .sheet-view-body {
+    padding-top: 200px;
+    scroll-padding-top: 200px;
+}
+
+.sheet-view-content.expanded .sheet-view-body {
+    padding-top: calc(80px + var(--sat, 0px));
+    scroll-padding-top: calc(80px + var(--sat, 0px));
+}
+
+.sheet-view-content.expanded:has(.sc-sheet-tabs) .sheet-view-body,
+.sheet-view-content.expanded:has(.sc-sheet-header-bottom) .sheet-view-body {
+    padding-top: calc(140px + var(--sat, 0px));
+    scroll-padding-top: calc(140px + var(--sat, 0px));
+}
+
+.sheet-view-content.expanded:has(.sc-sheet-tabs):has(.sc-sheet-header-bottom) .sheet-view-body {
+    padding-top: calc(200px + var(--sat, 0px));
+    scroll-padding-top: calc(200px + var(--sat, 0px));
+}
+
+.sheet-view-body::-webkit-scrollbar-track {
+    margin-top: 80px;
+}
+
+.sheet-view-content:has(.sc-sheet-tabs) .sheet-view-body::-webkit-scrollbar-track,
+.sheet-view-content:has(.sc-sheet-header-bottom) .sheet-view-body::-webkit-scrollbar-track {
+    margin-top: 140px;
 }
 
 .sheet-view-body .active-view  {
@@ -429,12 +507,7 @@ onBeforeUnmount(() => {
 .sc-sheet-header-wrapper {
     display: flex;
     flex-direction: column;
-    border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
     flex-shrink: 0;
-}
-
-body.dark-theme .sc-sheet-header-wrapper {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .sc-sheet-header {
@@ -484,20 +557,9 @@ body.dark-theme .sc-sheet-header-wrapper {
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 20px));
     -webkit-backdrop-filter: blur(var(--element-blur, 20px));
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-    transition: all 0.2s ease;
-}
-
-.sc-header-btn:active {
-    transform: scale(0.9);
-    opacity: 0.8;
-}
-
-:global(body.dark-theme) .sc-header-btn {
-    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
 }
 
 .sc-header-btn.back-btn {
@@ -527,17 +589,13 @@ body.dark-theme .sc-sheet-header-wrapper {
     padding: 10px 8px;
     border: none;
     border-radius: 12px;
-    background: rgba(0, 0, 0, 0.03);
+    background: rgba(255, 255, 255, 0.04);
     color: var(--text-gray);
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
     font-family: inherit;
-}
-
-body.dark-theme .sc-sheet-tab {
-    background: rgba(255, 255, 255, 0.04);
 }
 
 .sc-sheet-tab svg {

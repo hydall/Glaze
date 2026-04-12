@@ -142,34 +142,22 @@ defineExpose({ open });
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    background: rgba(0, 0, 0, 0.06);
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
-    z-index: 10;
-    transition: all 0.2s ease;
-    border: 1px solid rgba(0, 0, 0, 0.03);
-}
-
-body.dark-theme .about-close-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.05);
 }
 
 .about-close-btn:active {
     transform: scale(0.9) translateZ(0);
-    background-color: rgba(0, 0, 0, 0.1);
-}
-
-body.dark-theme .about-close-btn:active {
     background-color: rgba(255, 255, 255, 0.15);
 }
 
 .about-close-btn svg {
     width: 20px;
     height: 20px;
-    fill: var(--text-light-gray, #99a2ad);
+    fill: var(--text-gray, #99a2ad);
 }
 
 /* — Header — */
@@ -185,17 +173,11 @@ body.dark-theme .about-close-btn:active {
     width: 72px;
     height: 72px;
     border-radius: 22px;
-    background: var(--white, #fff);
+    background: rgba(255, 255, 255, 0.05);
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
     margin-bottom: 4px;
-}
-
-body.dark-theme .about-logo-wrapper {
-    background: rgba(255, 255, 255, 0.05);
-    box-shadow: none;
 }
 
 .about-logo {

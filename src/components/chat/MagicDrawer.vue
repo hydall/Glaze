@@ -6,7 +6,7 @@ import { attachRipple } from '@/core/services/ui.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { lorebookState, initLorebookState } from '@/core/states/lorebookState.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
-import { getEffectivePersona, personaConnections } from '@/core/states/personaState.js';
+import { getEffectivePersona } from '@/core/states/personaState.js';
 import { getEffectivePreset, presetState } from '@/core/states/presetState.js';
 import { db } from '@/utils/db.js';
 import { getLastPrompt } from '@/core/services/generationService.js';
@@ -47,18 +47,17 @@ const dragSrcIndex = ref(-1);
 let longPressTimer = null;
 
 const allAvailableItems = [
-    { id: 'notes', i18n: 'magic_authors_notes', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z', event: 'magic-notes' },
+    { id: 'notes', i18n: 'magic_authors_notes', icon: 'M3 10h11v2H3v-2zm0-2h11V6H3v2zm0 8h7v-2H3v2zm15.01-3.13l.71-.71c.39-.39 1.02-.39 1.41 0l.71.71c.39.39.39 1.02 0 1.41l-.71.71-2.12-2.12zm-.71.71l-5.3 5.3V21h2.12l5.3-5.3-2.12-2.12z', event: 'magic-notes' },
     { id: 'summary', i18n: 'magic_summary', icon: 'M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z', event: 'magic-summary' },
     { id: 'sessions', i18n: 'history_title', fallback: 'Sessions', icon: 'M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z', event: 'magic-sessions' },
     { id: 'stats', i18n: 'action_chat_stats', icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z', event: 'magic-stats' },
     { id: 'char-card', i18n: 'block_char_card', icon: 'M3 5v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H5c-1.11 0-2 .9-2 2zm12 4c0 1.66-1.34 3-3 3s-3-1.34-3-3 1.34-3 3-3 3 1.34 3 3zm-9 8c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1H6v-1z', event: 'magic-char-card' },
     { id: 'lorebooks', i18n: 'menu_lorebooks', fallback: 'World Info', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z', event: 'magic-lorebooks' },
-    { id: 'regex', i18n: 'menu_regex', fallback: 'Regex Scripts', icon: 'M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H9v-2h6v2zm0-5H9v-2h6v2zm0-5H9V6h6v2z', event: 'magic-regex' },
-    { id: 'api', i18n: 'tab_api', fallback: 'API', icon: 'M7.77 6.76L6.23 5.48.82 12l5.41 6.52 1.54-1.28L3.42 12l4.35-5.24zM7 13h2v-2H7v2zm10-2h-2v2h2v-2zm-6 2h2v-2h-2v2zm6.77-7.52l-1.54 1.28L20.58 12l-4.35 5.24 1.54 1.28L23.18 12l-5.41-6.52z', event: 'magic-api' },
+    { id: 'regex', i18n: 'menu_regex', fallback: 'Regex Scripts', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z', event: 'magic-regex' },
+    { id: 'api', i18n: 'tab_api', fallback: 'API', icon: 'M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z', event: 'magic-api' },
     { id: 'presets', i18n: 'subtab_preset', fallback: 'Presets', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z', event: 'magic-presets' },
-    { id: 'preview', i18n: 'magic_request_preview', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z', event: 'request-preview' },
+    { id: 'preview', i18n: 'magic_request_preview', icon: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z', event: 'request-preview' },
     { id: 'personas', i18n: 'tab_personas', fallback: 'Personas', icon: 'M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1z', event: 'magic-personas' },
-    { id: 'connections', i18n: 'header_connections', fallback: 'Bindings', icon: 'M17 16l-4-4V8.82C14.16 8.4 15 7.3 15 6c0-1.66-1.34-3-3-3S9 4.34 9 6c0 1.3.84 2.4 2 2.82V12l-4 4H3v5h5v-3.05l4-4.2 4 4.2V21h5v-5h-4z', event: 'magic-connections' },
     { id: 'image-gen', i18n: 'imggen_title', fallback: 'Image Gen', icon: 'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z', event: 'magic-image-gen' },
     { id: 'glossary', i18n: 'menu_glossary', fallback: 'Glossary', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z', event: 'magic-glossary' }
 ];
@@ -104,7 +103,10 @@ const loadItems = () => {
 const items = ref(loadItems());
 
 const displayItems = computed(() => {
-    const list = items.value.map((item, index) => ({ ...item, originalIndex: index }));
+    const list = items.value.map((item, index) => {
+        const canonical = allAvailableItems.find(a => a.id === item.id);
+        return { ...item, ...(canonical || {}), originalIndex: index };
+    });
     if (isEditing.value && canAdd.value) {
         list.push({ isAddBtn: true, id: 'add-btn' });
     }
@@ -134,9 +136,6 @@ const handleAction = (item) => {
     if (isEditing.value) return;
     if (item.id === 'personas') {
         personasSheet.value?.open();
-    } else if (item.id === 'connections') {
-        window.dispatchEvent(new CustomEvent('open-connections'));
-        emit('close');
     } else if (item.id === 'image-gen') {
         emit('magic-image-gen');
         emit('close');
@@ -253,6 +252,7 @@ const lorebookEntryCount = computed(() => {
 const sessionCount = ref(0);
 const messageCount = ref(0);
 const chatHistory = ref([]);
+const resolvedSessionId = ref(null);
 
 const globalRegexScripts = ref([]);
 const activeApiPresetName = ref('');
@@ -285,6 +285,7 @@ const loadStatsData = async () => {
     if (charData && charData.sessions) {
         sessionCount.value = Object.keys(charData.sessions).length;
         const sessionId = props.activeChar.sessionId || charData.currentId;
+        resolvedSessionId.value = sessionId || null;
         if (charData.sessions[sessionId]) {
             const history = charData.sessions[sessionId];
             messageCount.value = history.length;
@@ -292,6 +293,18 @@ const loadStatsData = async () => {
         }
     }
 };
+
+const effectiveChatId = computed(() => {
+    const charId = props.activeChar?.id;
+    if (!charId) return null;
+    const sessionId = props.activeChar?.sessionId || resolvedSessionId.value;
+    return sessionId ? `${charId}_${sessionId}` : null;
+});
+
+const effectivePersonaName = computed(() => {
+    const persona = getEffectivePersona(props.activeChar?.id, effectiveChatId.value);
+    return persona?.name || '';
+});
 
 const resolveBlockContent = (block, preset, activeChar, persona, history) => {
     if (!block) return '';
@@ -385,20 +398,6 @@ const generationTokens = computed(() => {
 
 const imageGenEnabled = computed(() => getImageGenSettings().enabled);
 
-const activeConnectionsCount = computed(() => {
-    let count = 0;
-    if (props.activeChar?.id) {
-        // Preset connections
-        if (presetState.connections.character[props.activeChar.id]) count++;
-        const chatId = props.activeChar.sessionId ? `${props.activeChar.id}_${props.activeChar.sessionId}` : null;
-        if (chatId && presetState.connections.chat[chatId]) count++;
-        
-        // Persona connections
-        if (personaConnections.character[props.activeChar.id]) count++;
-        if (chatId && personaConnections.chat[chatId]) count++;
-    }
-    return count;
-});
 
 watch(() => props.visible, (val) => {
     if (val) {
@@ -453,12 +452,11 @@ defineExpose({
                                 <span class="item-status" v-else-if="item.id === 'presets'"><span>{{ activePresetName }} · {{ activePresetTokens }} {{ pluralize(activePresetTokens, 'count_tokens') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'summary'"><span>{{ summaryTokens }} {{ pluralize(summaryTokens, 'count_tokens') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'char-card'"><span>{{ cardTokens }} {{ pluralize(cardTokens, 'count_tokens') }}</span></span>
-                                <span class="item-status" v-else-if="item.id === 'personas'"><span>{{ personaTokens }} {{ pluralize(personaTokens, 'count_tokens') }}</span></span>
+                                <span class="item-status" v-else-if="item.id === 'personas'"><span>{{ effectivePersonaName || (t('label_default') || 'Default') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'sessions'"><span>{{ sessionCount }} {{ pluralize(sessionCount, 'count_sessions') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'stats'"><span>{{ messageCount }} {{ pluralize(messageCount, 'count_messages') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'regex'"><span>{{ activeRegexCount }} {{ pluralize(activeRegexCount, 'count_scripts') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'api'"><span>{{ activeApiPresetName }}</span></span>
-                                <span class="item-status" v-else-if="item.id === 'connections'"><span>{{ activeConnectionsCount }} {{ pluralize(activeConnectionsCount, 'count_bindings') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'image-gen'"><span>{{ imageGenEnabled ? (t('imggen_status_on') || 'On') : (t('imggen_status_off') || 'Off') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'preview' && generationTokens > 0"><span>{{ generationTokens }} {{ pluralize(generationTokens, 'count_tokens') }}</span></span>
                             </div>
@@ -483,7 +481,7 @@ defineExpose({
             </div>
         </div>
     </Transition>
-    <PersonasSheet ref="personasSheet" />
+    <PersonasSheet ref="personasSheet" :active-chat-char="props.activeChar" />
 </template>
 
 <style scoped>
@@ -495,25 +493,66 @@ defineExpose({
     right: 0px;
     width: auto;
     height: calc(var(--keyboard-height, 300px));
-    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.95));
+    background-color: rgba(20, 20, 22, 0.85);
     backdrop-filter: blur(var(--element-blur, 30px));
     -webkit-backdrop-filter: blur(var(--element-blur, 30px));
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 24px 24px 0 0;
     display: flex;
     flex-direction: column;
     padding: 0;
     overflow: hidden;
     z-index: 1000;
-    box-shadow: 0 -10px 40px rgba(0,0,0,0.2);
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.2);
 }
 
 .drawer-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 20px;
+    padding: 14px 20px 48px 20px;
     flex-shrink: 0;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.drawer-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(to bottom, 
+        rgba(20, 20, 22, 0.85) 0%, 
+        rgba(20, 20, 22, 0) 100%
+    );
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 15%, 
+        rgba(0, 0, 0, 0.8) 35%,
+        rgba(0, 0, 0, 0.4) 60%,
+        transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 15%, 
+        rgba(0, 0, 0, 0.8) 35%,
+        rgba(0, 0, 0, 0.4) 60%,
+        transparent 100%
+    );
+    z-index: -1;
+}
+
+.drawer-header > * {
+    pointer-events: auto;
+    opacity: 1 !important;
 }
 
 .drawer-title {
@@ -528,11 +567,16 @@ defineExpose({
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
-    padding: 4px 10px calc(30px + var(--sab)) 10px;
+    scroll-padding-top: 60px;
+    padding: 60px 10px calc(20px + var(--sab)) 10px;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px 6px;
     align-content: start;
+}
+
+.drawer-content::-webkit-scrollbar-track {
+    margin-top: 60px;
 }
 
 .drawer-enter-active,
@@ -553,21 +597,20 @@ defineExpose({
     min-width: 0;
     min-height: 48px;
     cursor: pointer;
-    background-color: rgba(var(--ui-bg-rgb), 0.3);
+    background-color: rgba(255, 255, 255, 0.04);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 14px;
     padding: 6px 8px;
     transition: transform 0.2s cubic-bezier(0.2, 0, 0.2, 1), background-color 0.2s ease, border-color 0.2s ease;
     display: flex;
     align-items: center;
-    overflow: hidden;
 }
 
 .magic-item:active {
     transform: scale(0.96);
-    background-color: rgba(var(--ui-bg-rgb), 0.5);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .magic-item-content {
@@ -593,7 +636,7 @@ defineExpose({
 .card-icon svg {
     width: 100%;
     height: 100%;
-    fill: var(--text-black);
+    fill: #ffffff;
     opacity: 0.8;
 }
 
@@ -624,7 +667,6 @@ defineExpose({
     font-size: 9px;
     font-weight: 400;
     color: var(--text-gray);
-    opacity: 0.7;
     margin-top: 1px;
     white-space: nowrap;
     overflow: hidden;
@@ -654,7 +696,7 @@ defineExpose({
 .edit-toggle {
     height: 34px;
     padding: 0 14px;
-    background-color: rgba(var(--ui-bg-rgb), 0.08);
+    background-color: rgba(255, 255, 255, 0.06);
     border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
     border-radius: 17px;
     display: flex;
@@ -662,6 +704,7 @@ defineExpose({
     gap: 8px;
     cursor: pointer;
     transition: all 0.2s ease;
+    color: var(--text-gray);
 }
 
 .edit-toggle:active {
@@ -709,20 +752,5 @@ defineExpose({
     fill: currentColor;
 }
 
-/* Dark Theme Support */
-:global(body.dark-theme) .magic-drawer { 
-    background-color: rgba(20, 20, 22, 0.85); 
-    border-color: rgba(255,255,255,0.08); 
-}
-:global(body.dark-theme) .drawer-title { color: #ffffff; }
-:global(body.dark-theme) .magic-item { 
-    background-color: rgba(255, 255, 255, 0.04); 
-    border-color: rgba(255, 255, 255, 0.06); 
-}
-:global(body.dark-theme) .magic-item:active { background-color: rgba(255, 255, 255, 0.08); }
-:global(body.dark-theme) .item-label { color: #f0f0f0; }
-:global(body.dark-theme) .card-icon svg { fill: #ffffff; }
-:global(body.dark-theme) .edit-toggle { background-color: rgba(255, 255, 255, 0.06); color: #aaaaaa; }
-:global(body.dark-theme) .edit-toggle span { color: #aaaaaa; }
-:global(body.dark-theme) .item-status { color: #8a8a8e; }
+
 </style>
