@@ -47,6 +47,12 @@
                     "desc": "The smallest piece of text the AI reads and writes — roughly 3/4 of a word. Every message you type and every reply you get is counted in tokens. There's also a limit: once the conversation is too long, the oldest messages get cut off. More tokens = higher cost and slower replies."
                 },
                 {
+                    "id": "context",
+                    "name": "Context",
+                    "alt": "Context Window, Context Size",
+                    "desc": "The maximum amount of [[token]]s the AI can see at once — its working memory. Everything Glaze sends (system instructions, [[preset]] blocks, [[lorebook]] entries, chat history, and the new reply) must fit inside this window. When the conversation grows too long, older messages are trimmed to stay within the limit. Context Size is set in model settings and must not exceed the model's maximum."
+                },
+                {
                     "id": "api",
                     "name": "API",
                     "alt": "Proxy, Provider, Server",
