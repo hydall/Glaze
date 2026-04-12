@@ -30,14 +30,14 @@ const sheetStyle = computed(() => {
             return { 
                 transform: 'translate3d(0, 100%, 0)',
                 height: 'auto',
-                paddingBottom: 'calc(0px + var(--sab, 0px))',
+                paddingBottom: '0px',
                 '--sheet-translate': '0px'
             };
         }
         return { 
             transform: 'translate3d(0, 100vh, 0)',
             height: '100vh',
-            paddingBottom: isExpanded.value ? 'calc(0vh + var(--sab, 0px))' : 'calc(15vh + var(--sab, 0px))',
+            paddingBottom: isExpanded.value ? '0vh' : '15vh',
             '--sheet-translate': isExpanded.value ? '0vh' : '15vh'
         };
     }
@@ -47,7 +47,7 @@ const sheetStyle = computed(() => {
         return { 
             transform: `translate3d(0, ${t}px, 0)`,
             height: 'auto',
-            paddingBottom: 'calc(0px + var(--sab, 0px))',
+            paddingBottom: '0px',
             '--sheet-translate': `${t}px`
         };
     }
@@ -61,7 +61,7 @@ const sheetStyle = computed(() => {
         return {
             height: `calc(100vh + ${Math.abs(targetTranslateVh)}vh)`,
             transform: 'translate3d(0, 0, 0)',
-            paddingBottom: 'calc(0px + var(--sab, 0px))',
+            paddingBottom: '0px',
             '--sheet-translate': '0vh'
         };
     } else {
@@ -70,7 +70,7 @@ const sheetStyle = computed(() => {
         return {
             height: '100vh',
             transform: `translate3d(0, ${t}vh, 0)`,
-            paddingBottom: `calc(${t}vh + var(--sab, 0px))`,
+            paddingBottom: `${t}vh`,
             '--sheet-translate': `${t}vh`
         };
     }
@@ -377,7 +377,6 @@ onBeforeUnmount(() => {
 
 .sheet-view-content.expanded {
     border-radius: 0;
-    padding-top: calc(var(--sat) + 10px) !important;
 }
 
 .sheet-view-content.is-dragging {
@@ -397,6 +396,10 @@ onBeforeUnmount(() => {
     pointer-events: none;
 }
 
+.sheet-view-content.expanded .sheet-header-area {
+    padding-top: var(--sat);
+}
+
 .sheet-header-area::before {
     content: '';
     position: absolute;
@@ -412,14 +415,12 @@ onBeforeUnmount(() => {
     -webkit-backdrop-filter: blur(16px);
     mask-image: linear-gradient(to bottom, 
         black 0%, 
-        black 65%, 
-        rgba(0, 0, 0, 0.6) 85%,
+        black 40%, 
         transparent 100%
     );
     -webkit-mask-image: linear-gradient(to bottom, 
         black 0%, 
-        black 65%, 
-        rgba(0, 0, 0, 0.6) 85%,
+        black 40%, 
         transparent 100%
     );
     z-index: -1;
@@ -460,6 +461,7 @@ onBeforeUnmount(() => {
     flex-direction: column;
     padding-top: 80px;
     scroll-padding-top: 80px;
+    padding-bottom: var(--sab, 0px);
 }
 
 .sheet-view-content:has(.sc-sheet-tabs) .sheet-view-body,
@@ -471,6 +473,22 @@ onBeforeUnmount(() => {
 .sheet-view-content:has(.sc-sheet-tabs):has(.sc-sheet-header-bottom) .sheet-view-body {
     padding-top: 200px;
     scroll-padding-top: 200px;
+}
+
+.sheet-view-content.expanded .sheet-view-body {
+    padding-top: calc(80px + var(--sat, 0px));
+    scroll-padding-top: calc(80px + var(--sat, 0px));
+}
+
+.sheet-view-content.expanded:has(.sc-sheet-tabs) .sheet-view-body,
+.sheet-view-content.expanded:has(.sc-sheet-header-bottom) .sheet-view-body {
+    padding-top: calc(140px + var(--sat, 0px));
+    scroll-padding-top: calc(140px + var(--sat, 0px));
+}
+
+.sheet-view-content.expanded:has(.sc-sheet-tabs):has(.sc-sheet-header-bottom) .sheet-view-body {
+    padding-top: calc(200px + var(--sat, 0px));
+    scroll-padding-top: calc(200px + var(--sat, 0px));
 }
 
 .sheet-view-body::-webkit-scrollbar-track {
