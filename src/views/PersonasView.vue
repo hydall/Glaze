@@ -4,6 +4,7 @@ import { allPersonas, activePersona, setActivePersona, loadPersonas, personaConn
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import SheetView from '@/components/ui/SheetView.vue';
+import HelpTip from '@/components/ui/HelpTip.vue';
 
 const sheet = ref(null);
 
@@ -66,6 +67,9 @@ onMounted(() => {
 
 <template>
     <SheetView ref="sheet" :fit-content="false" :title="t('tab_personas') || 'Personas'" :actions="[{ icon: '<svg viewBox=\'0 0 24 24\'><path d=\'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z\'/></svg>', onClick: () => openEditor(-1) }]">
+        <template #header-title>
+            <HelpTip term="persona" />
+        </template>
         <div class="view-content">
             <div class="personas-list">
                 <div v-if="!allPersonas || allPersonas.length === 0" class="empty-state">
