@@ -2,6 +2,7 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 import { logger } from '../../utils/logger.js';
 import { ForegroundService } from '@capawesome-team/capacitor-android-foreground-service';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { getActiveContext } from '@/core/services/timeTracker.js';
 
 const MessagingStyleNotification = registerPlugin('MessagingStyleNotification');
 
@@ -152,8 +153,13 @@ export function consumePendingNotificationData() {
 }
 
 export async function sendMessageNotification(title, body, icon, charId, sessionId, msgId) {
-    // Don't notify if app is open and visible
-    if (document.visibilityState === 'visible') return;
+    // Don't notify if app is open and visible AND looking at this exact chat and session
+    if (document.visibilityState === 'visible') {
+        const activeContext = getActiveContext();
+        if (String(activeContext.charId) === String(charId) && String(activeContext.sessionId) === String(sessionId)) {
+            return;
+        }
+    }
 
     logger.debug("[NotificationService] Sending notification for charId:", charId);
 
