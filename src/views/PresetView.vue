@@ -43,7 +43,7 @@ const effectivePersona = computed(() => getEffectivePersona(props.activeChatChar
 const showAdvancedSettings = ref(false);
 
 const genSheetBodyRef = ref(null);
-let savedScrollPos = 0;
+const scrollPositions = { list: 0, editor: 0, 'block-editor': 0 };
 
 const headerState = reactive({
     title: '',
@@ -71,6 +71,9 @@ function close() {
 function onSheetClose() {
     openedFromRegex.value = false;
     flushPresetSave();
+    scrollPositions.list = 0;
+    scrollPositions.editor = 0;
+    scrollPositions['block-editor'] = 0;
 }
 
 const openedFromRegex = ref(false);
@@ -156,6 +159,10 @@ watch([editingPresetId, isEditingBlock], ([newE, newB], [oldE, oldB]) => {
     const oldL = getLevel(oldE, oldB);
     if (newL > oldL) navDirection.value = 'forward';
     else if (newL < oldL) navDirection.value = 'back';
+
+    // Reset scroll when opening a different preset or a different block
+    if (newE && newE !== oldE) scrollPositions.editor = 0;
+    if (newB && !oldB) scrollPositions['block-editor'] = 0;
 });
 
 const effectivePresetId = computed(() => {
@@ -1215,12 +1222,6 @@ function openStashSheet() {
 function openBlockEditor(blockId) {
     logger.debug('[GenerationView] openBlockEditor', blockId);
     
-    // Save scroll pos before opening
-    const scroller = genSheetBodyRef.value?.closest('.sheet-view-body');
-    if (scroller) {
-        savedScrollPos = scroller.scrollTop;
-    }
-
     editingBlockId.value = blockId;
     
     const block = currentPreset.value.blocks.find(b => b.id === blockId);
@@ -1239,14 +1240,28 @@ function closeBlockEditor() {
     logger.debug('[GenerationView] closeBlockEditor');
     isEditingBlock.value = false;
     editingBlockId.value = null;
-    // Restore Generation Header
     nextTick(() => {
         updateHeaderState();
+    });
+}
+
+function onTransitionBeforeLeave(el) {
+    const key = el.getAttribute('data-scroll-key');
+    const scroller = genSheetBodyRef.value?.closest('.sheet-view-body');
+    if (key && scroller) {
+        scrollPositions[key] = scroller.scrollTop || 0;
+    }
+}
+
+function onTransitionBeforeEnter(el) {
+    const key = el.getAttribute('data-scroll-key');
+    if (key && scrollPositions[key] !== undefined) {
         const scroller = genSheetBodyRef.value?.closest('.sheet-view-body');
         if (scroller) {
-            scroller.scrollTop = savedScrollPos;
+            scroller.scrollTop = scrollPositions[key];
+            nextTick(() => { scroller.scrollTop = scrollPositions[key]; });
         }
-    });
+    }
 }
 
 function deleteActiveBlock() {
@@ -1941,9 +1956,9 @@ onBeforeUnmount(() => {
 <template>
     <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack" :actions="headerState.actions" :z-index="11500" @back="goBackFromEditor" @close="onSheetClose">
         <div class="gen-sheet-body" ref="genSheetBodyRef">
-            <Transition :name="navDirection === 'forward' ? 'ps-fwd' : 'ps-back'" mode="out-in">
+            <Transition :name="navDirection === 'forward' ? 'ps-fwd' : 'ps-back'" mode="out-in" @before-leave="onTransitionBeforeLeave" @before-enter="onTransitionBeforeEnter">
         <!-- ═══ SELECTOR LIST VIEW ═══ -->
-        <div class="preset-selector-list" v-if="!isEditingBlock && !editingPresetId" key="list">
+        <div class="preset-selector-list" v-if="!isEditingBlock && !editingPresetId" key="list" data-scroll-key="list">
             <div class="ps-list">
                 <div v-for="[id, preset] in sortedPresetEntries" :key="id"
                      class="ps-card"
@@ -2001,7 +2016,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- ═══ EDITOR VIEW ═══ -->
-        <div class="prompt-builder-wrapper" v-else-if="!isEditingBlock && editingPresetId" key="editor">
+        <div class="prompt-builder-wrapper" v-else-if="!isEditingBlock && editingPresetId" key="editor" data-scroll-key="editor">
 
                 <!-- Consolidated Dashboard and Blocks Container -->
                 <div class="preset-dashboard" :class="{ 'has-background': !!currentPreset.image }" :style="currentPreset.image ? { 'background-image': 'url(' + currentPreset.image + ')' } : {}">
@@ -2190,7 +2205,7 @@ onBeforeUnmount(() => {
             </div>
 
         <!-- Block Editor View -->
-        <div v-else-if="isEditingBlock" class="block-editor-view" key="block-editor" style="background: var(--app-bg); min-height: 100%;">
+        <div v-else-if="isEditingBlock" class="block-editor-view" key="block-editor" data-scroll-key="block-editor" style="background: var(--app-bg); min-height: 100%;">
             <div class="block-editor-scroll">
                 <Editor v-model="editorProxy" :config="editorConfig" @open-fs="(data) => emit('open-fs', data)">
                     <template #footer>
