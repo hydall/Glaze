@@ -7,7 +7,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
-import { convertSTPreset, exportSTPreset, mandatoryBlocks } from '@/core/services/presetImportService.js';
+import { convertSTPreset, convertLatexPreset, exportSTPreset, detectPresetFormat, finalizeImportedPreset, mandatoryBlocks } from '@/core/services/presetImportService.js';
 import { generateSummary } from '@/core/services/generationService.js';
 import { presetState, initPresetState, setPresetConnection, getEffectivePresetId, DEFAULT_PRESETS, flushPresetSave } from '@/core/states/presetState.js';
 import { Browser } from '@capacitor/browser';
@@ -1419,48 +1419,23 @@ function onFileSelected(event) {
 }
 
 function processImportedPreset(data, defaultName) {
-    if (!data.prompts || !Array.isArray(data.prompts)) {
-        alert("Invalid ST format: 'prompts' array missing.");
+    const format = detectPresetFormat(data);
+    let preset;
+
+    if (format === 'latex') {
+        preset = convertLatexPreset(data, defaultName);
+    } else if (format === 'sillytavern') {
+        preset = convertSTPreset(data, defaultName);
+    } else if (format === 'glaze') {
+        preset = data;
+    } else {
+        alert("Unknown preset format. Expected SillyTavern, LaTeX, or Glaze JSON.");
         return;
     }
 
-    const preset = convertSTPreset(data, defaultName);
-    
-    // Ensure insertion_mode for all blocks
-    preset.blocks.forEach(b => {
-        if (b.id !== 'authors_note' && b.id !== 'summary' && !b.insertion_mode) {
-            b.insertion_mode = 'relative';
-        }
-    });
-    
-    // Ensure static blocks
-    if (!preset.blocks.find(b => b.id === 'summary')) {
-         const historyIdx = preset.blocks.findIndex(b => b.id === 'chat_history');
-         const insertIdx = historyIdx !== -1 ? historyIdx : preset.blocks.length;
-         preset.blocks.splice(insertIdx, 0, { id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_summary', depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' });
-    }
-    if (!preset.blocks.find(b => b.id === 'authors_note')) {
-         const historyIdx = preset.blocks.findIndex(b => b.id === 'chat_history');
-         const insertIdx = historyIdx !== -1 ? historyIdx + 1 : preset.blocks.length;
-         preset.blocks.splice(insertIdx, 0, { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', insertion_mode: 'relative' });
-    }
-    if (!preset.blocks.find(b => b.id === 'guided_generation')) {
-         const authorsIdx = preset.blocks.findIndex(b => b.id === 'authors_note');
-         const historyIdx = preset.blocks.findIndex(b => b.id === 'chat_history');
-         const insertIdx = authorsIdx !== -1 ? authorsIdx + 1 : (historyIdx !== -1 ? historyIdx + 1 : preset.blocks.length);
-         preset.blocks.splice(insertIdx, 0, { id: 'guided_generation', name: 'Guided Generation', role: 'system', content: '[System Note: {{guidance}}]', enabled: true, isStatic: true, i18n: 'block_guided_generation', insertion_mode: 'relative' });
-    }
-    if (!preset.guidedGenerationPrompt) preset.guidedGenerationPrompt = '[Generate your next reply according to these instructions: {{guidance}}]';
-    if (!preset.guidedImpersonationPrompt) preset.guidedImpersonationPrompt = '[Instead of replying for {{char}}, impersonate {{user}} according to these instructions: {{guidance}}]';
-    if (!preset.summaryPrompt) {
-        preset.summaryPrompt = 'Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}\n\nSummary:';
-    }
-
-    const newId = Date.now().toString();
-    preset.id = newId;
-    if (preset.createdAt === undefined) preset.createdAt = Date.now();
-    presetState.presets[newId] = preset;
-    editingPresetId.value = newId;
+    preset = finalizeImportedPreset(preset);
+    presetState.presets[preset.id] = preset;
+    editingPresetId.value = preset.id;
     updateHeaderState();
 }
 

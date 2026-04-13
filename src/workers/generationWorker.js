@@ -346,7 +346,17 @@ function buildPromptMessagesWorker(args) {
         });
     }
 
+    const isLatexMode = activePreset?.latexMode === true;
+    const hasLorebookMacro = isLatexMode && activePreset.blocks?.some(b => b.content?.includes('{lorebooks}'));
+
+    const getAllLoreContent = () => {
+        const allEntries = [];
+        Object.values(loreByPosition).forEach(entries => allEntries.push(...entries));
+        return allEntries.map(e => e.content).filter(Boolean).join('\n');
+    };
+
     const injectLore = (pos) => {
+        if (hasLorebookMacro) return;
         if (loreByPosition[pos] && loreByPosition[pos].length > 0) {
             loreByPosition[pos].forEach(msg => {
                 if (mergePrompts) mergeBuffer.push(msg.content);
@@ -359,7 +369,7 @@ function buildPromptMessagesWorker(args) {
         }
     };
 
-    injectLore(4);
+    if (!hasLorebookMacro) injectLore(4);
 
     let summaryText = null;
     if (summary) {
@@ -380,6 +390,28 @@ function buildPromptMessagesWorker(args) {
                 relativeBlocks.push(block);
             }
         });
+
+        const LATEX_BLOCK_CONTENT = {
+            '{personality}': () => char ? `Personality: ${char.personality || ''}` : '',
+            '{bot_description}': () => char ? `Character Name: ${char.name || 'Character'}\nDescription: ${char.description || char.desc || ''}` : '',
+            '{user_persona}': () => personaObj ? `User Name: ${personaObj.name || 'User'}\nUser Description: ${personaObj.prompt || ''}` : '',
+            '{scenario}': () => char ? `Scenario: ${char.scenario || ''}` : '',
+            '{example_dialogs}': () => char ? (char.mes_example || '') : '',
+            '{example_dialogue}': () => char ? (char.mes_example || '') : '',
+            '{lorebooks}': () => getAllLoreContent(),
+            '{summary}': () => summaryText || ''
+        };
+
+        const resolveLatexMacros = (text) => {
+            if (!text) return text;
+            let result = text;
+            for (const [macro, resolver] of Object.entries(LATEX_BLOCK_CONTENT)) {
+                if (result.includes(macro)) {
+                    result = result.split(macro).join(resolver());
+                }
+            }
+            return result;
+        };
 
         const resolveBlockContent = (block) => {
             let content = "";
@@ -415,7 +447,8 @@ function buildPromptMessagesWorker(args) {
 
             if (!content) return null;
 
-            // Execute macros on the final block content to catch embedded setvar/getvar
+            content = resolveLatexMacros(content);
+
             content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
 
             return { content, role };
@@ -443,7 +476,7 @@ function buildPromptMessagesWorker(args) {
         relativeBlocks.forEach(block => {
             if (block.id === 'chat_history') {
                 if (mergePrompts) flushMergeBuffer();
-                Object.keys(loreByPosition).forEach(pos => injectLore(pos));
+                if (!hasLorebookMacro) Object.keys(loreByPosition).forEach(pos => injectLore(pos));
 
                 let historyMsgs = [];
                 if (history) {

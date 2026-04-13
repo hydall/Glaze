@@ -1,3 +1,52 @@
+export function generateId(length = 6) {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2, length);
+}
+
+export function detectPresetFormat(data) {
+    if (data.tabs && Array.isArray(data.tabs)) return 'latex';
+    if (data.prompts && Array.isArray(data.prompts)) return 'sillytavern';
+    if (data.blocks && Array.isArray(data.blocks)) return 'glaze';
+    return null;
+}
+
+export function finalizeImportedPreset(preset) {
+    if (!preset.blocks) preset.blocks = [];
+
+    preset.blocks.forEach(b => {
+        if (b.id !== 'authors_note' && b.id !== 'summary' && !b.insertion_mode) {
+            b.insertion_mode = 'relative';
+        }
+    });
+
+    if (!preset.blocks.find(b => b.id === 'summary')) {
+        const historyIdx = preset.blocks.findIndex(b => b.id === 'chat_history');
+        const insertIdx = historyIdx !== -1 ? historyIdx : preset.blocks.length;
+        preset.blocks.splice(insertIdx, 0, { id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_summary', depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' });
+    }
+    if (!preset.blocks.find(b => b.id === 'authors_note')) {
+        const historyIdx = preset.blocks.findIndex(b => b.id === 'chat_history');
+        const insertIdx = historyIdx !== -1 ? historyIdx + 1 : preset.blocks.length;
+        preset.blocks.splice(insertIdx, 0, { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', insertion_mode: 'relative' });
+    }
+    if (!preset.blocks.find(b => b.id === 'guided_generation')) {
+        const authorsIdx = preset.blocks.findIndex(b => b.id === 'authors_note');
+        const historyIdx = preset.blocks.findIndex(b => b.id === 'chat_history');
+        const insertIdx = authorsIdx !== -1 ? authorsIdx + 1 : (historyIdx !== -1 ? historyIdx + 1 : preset.blocks.length);
+        preset.blocks.splice(insertIdx, 0, { id: 'guided_generation', name: 'Guided Generation', role: 'system', content: '[System Note: {{guidance}}]', enabled: true, isStatic: true, i18n: 'block_guided_generation', insertion_mode: 'relative' });
+    }
+
+    if (!preset.guidedGenerationPrompt) preset.guidedGenerationPrompt = '[Generate your next reply according to these instructions: {{guidance}}]';
+    if (!preset.guidedImpersonationPrompt) preset.guidedImpersonationPrompt = '[Instead of replying for {{char}}, impersonate {{user}} according to these instructions: {{guidance}}]';
+    if (!preset.summaryPrompt) {
+        preset.summaryPrompt = 'Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}\n\nSummary:';
+    }
+
+    const newId = Date.now().toString();
+    preset.id = newId;
+    if (preset.createdAt === undefined) preset.createdAt = Date.now();
+    return preset;
+}
+
 export const mandatoryBlocks = [
     { id: "worldInfoBefore", i18n: "block_wi_before", name: "World Info Before", role: "system", content: "", isStatic: true, enabled: true },
     { id: "user_persona", i18n: "block_user_persona", name: "User Persona", role: "system", content: "", isStatic: true, enabled: true },
@@ -133,6 +182,165 @@ export function convertSTPreset(data, fileName) {
         mergeRole: 'system',
         blocks: orderedBlocks,
         regexes: regexes
+    };
+}
+
+export const LATEX_MACRO_MAP = {
+    '{personality}': 'char_personality',
+    '{bot_description}': 'char_card',
+    '{user_persona}': 'user_persona',
+    '{scenario}': 'scenario',
+    '{example_dialogs}': 'example_dialogue',
+    '{example_dialogue}': 'example_dialogue',
+    '{lorebooks}': 'worldInfoBefore',
+    '{summary}': 'summary'
+};
+
+export const LATEX_MACRO_TO_BLOCK = Object.fromEntries(
+    Object.entries(LATEX_MACRO_MAP).map(([macro, blockId]) => [macro, blockId])
+);
+
+export function getLatexMacroBlockIds(content) {
+    if (!content) return [];
+    const ids = new Set();
+    for (const macro of Object.keys(LATEX_MACRO_MAP)) {
+        if (content.includes(macro)) {
+            ids.add(LATEX_MACRO_MAP[macro]);
+        }
+    }
+    return [...ids];
+}
+
+export function convertLatexPreset(data, fileName) {
+    const orderedBlocks = [];
+    const usedMandatory = new Set();
+    const disabledNativeIds = new Set();
+
+    const LATEX_TITLE_TO_BLOCK = {
+        'persona': 'user_persona',
+        'char description': 'char_card',
+        'character card': 'char_card',
+        'char personality': 'char_personality',
+        'character personality': 'char_personality',
+        'scenario': 'scenario',
+        'world info before': 'worldInfoBefore',
+        'world info after': 'worldInfoAfter',
+        'chat history': 'chat_history',
+        'dialogue examples': 'example_dialogue',
+        'example dialogue': 'example_dialogue',
+        'author\'s note': 'authors_note',
+        'summary': 'summary',
+        'guided generation': 'guided_generation'
+    };
+
+    const normalizeTitle = (title) => {
+        const lower = (title || '').toLowerCase().replace(/[━─🏳️✏️🛑🧑‍🔧🧠🧍📜]/gu, '').trim();
+        for (const [key, blockId] of Object.entries(LATEX_TITLE_TO_BLOCK)) {
+            if (lower.includes(key)) return blockId;
+        }
+        return null;
+    };
+
+    const tabs = data.tabs || [];
+
+    const LATEX_MACRO_ALIASES = {
+        '{bot_persona}': '{personality}'
+    };
+
+    const normalizeTabContent = (content) => {
+        if (!content) return content;
+        let result = content;
+        for (const [alias, canonical] of Object.entries(LATEX_MACRO_ALIASES)) {
+            result = result.split(alias).join(canonical);
+        }
+        return result;
+    };
+
+    const allTabContent = tabs.map(t => normalizeTabContent(t.content || '')).join('\n');
+    const macroReferencedBlockIds = getLatexMacroBlockIds(allTabContent);
+
+    tabs.forEach((tab) => {
+        const tabId = tab.id || generateId();
+        const tabTitle = tab.title || '';
+        const tabContent = normalizeTabContent(tab.content || '');
+        const tabRole = tab.role || 'system';
+        const tabEnabled = tab.enabled !== undefined ? tab.enabled : true;
+        const tabDepth = tab.injectionDepth || 0;
+        const isPinned = tab.isPinned || false;
+
+        const mandatoryMatch = normalizeTitle(tabTitle);
+        if (mandatoryMatch && !usedMandatory.has(mandatoryMatch)) {
+            const mb = mandatoryBlocks.find(b => b.id === mandatoryMatch);
+            if (mb) {
+                if (macroReferencedBlockIds.includes(mandatoryMatch)) {
+                    disabledNativeIds.add(mandatoryMatch);
+                    orderedBlocks.push({
+                        ...mb,
+                        enabled: false,
+                        isStashed: false,
+                        content: mandatoryMatch === 'guided_generation' ? mb.content : tabContent
+                    });
+                } else {
+                    orderedBlocks.push({
+                        ...mb,
+                        enabled: tabEnabled,
+                        isStashed: false,
+                        content: mandatoryMatch === 'guided_generation' ? mb.content : tabContent
+                    });
+                }
+                usedMandatory.add(mandatoryMatch);
+                return;
+            }
+        }
+
+        let insertion_mode = 'relative';
+        let depth = 4;
+        if (tabDepth > 0) {
+            insertion_mode = 'depth';
+            depth = tabDepth;
+        }
+
+        orderedBlocks.push({
+            id: tabId,
+            name: tabTitle,
+            content: tabContent,
+            enabled: tabEnabled,
+            isStashed: false,
+            role: tabRole,
+            insertion_mode,
+            depth
+        });
+    });
+
+    macroReferencedBlockIds.forEach(blockId => {
+        if (!usedMandatory.has(blockId)) {
+            const mb = mandatoryBlocks.find(b => b.id === blockId);
+            if (mb) {
+                disabledNativeIds.add(blockId);
+                orderedBlocks.push({ ...mb, enabled: false, isStashed: false });
+                usedMandatory.add(blockId);
+            }
+        }
+    });
+
+    mandatoryBlocks.forEach(mb => {
+        if (!usedMandatory.has(mb.id)) {
+            orderedBlocks.push({ ...mb });
+        }
+    });
+
+    return {
+        name: data.name || fileName || "Imported Preset",
+        reasoningEnabled: false,
+        impersonationPrompt: "",
+        reasoningStart: "",
+        reasoningEnd: "",
+        mergePrompts: !!data.mergeConsecutiveRoles,
+        mergeRole: 'system',
+        blocks: orderedBlocks,
+        regexes: [],
+        latexMode: true,
+        disabledNativeIds: [...disabledNativeIds]
     };
 }
 
