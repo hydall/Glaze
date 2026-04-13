@@ -2,13 +2,13 @@ import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
 import { db } from '@/utils/db.js';
+import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
 
 const DROPBOX_APP_KEY = import.meta.env.VITE_DROPBOX_APP_KEY || '';
 const REDIRECT_URI_NATIVE = 'com.hydall.glaze://oauth/dropbox';
 const REDIRECT_URI_WEB = `${window.location.origin}/oauth/dropbox`;
 const API_BASE = 'https://api.dropboxapi.com/2';
 const CONTENT_BASE = 'https://content.dropboxapi.com/2';
-const TOKEN_KEY = 'gz_sync_tokens';
 
 function getRedirectUri() {
     return Capacitor.isNativePlatform() ? REDIRECT_URI_NATIVE : REDIRECT_URI_WEB;
@@ -29,21 +29,21 @@ async function sha256(text) {
 }
 
 async function getTokens() {
-    const all = await db.get(TOKEN_KEY);
+    const all = await db.get(SYNC_TOKENS_KEY);
     if (!all) return null;
     return all.dropbox || null;
 }
 
 async function saveTokens(tokens) {
-    const all = (await db.get(TOKEN_KEY)) || {};
+    const all = (await db.get(SYNC_TOKENS_KEY)) || {};
     all.dropbox = tokens;
-    await db.queuedSet(TOKEN_KEY, all);
+    await db.queuedSet(SYNC_TOKENS_KEY, all);
 }
 
 async function clearTokens() {
-    const all = (await db.get(TOKEN_KEY)) || {};
+    const all = (await db.get(SYNC_TOKENS_KEY)) || {};
     delete all.dropbox;
-    await db.queuedSet(TOKEN_KEY, all);
+    await db.queuedSet(SYNC_TOKENS_KEY, all);
 }
 
 async function getValidToken() {

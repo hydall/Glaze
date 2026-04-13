@@ -1,7 +1,8 @@
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import { db } from '@/utils/db.js';
 
 const STORAGE_KEY = 'gz_sync_settings';
+export const SYNC_TOKENS_KEY = 'gz_sync_tokens';
 
 const PROVIDERS = {
     DROPBOX: 'dropbox',
@@ -143,7 +144,7 @@ export async function initSyncState() {
             }
         }
 
-        const tokens = await db.get('gz_sync_tokens');
+        const tokens = await db.get(SYNC_TOKENS_KEY);
         if (tokens && syncProvider.value) {
             const providerTokens = tokens[syncProvider.value];
             if (!providerTokens || !providerTokens.access_token) {
