@@ -34,6 +34,8 @@ export const syncSettings = reactive({
 
 let messagesSinceLastSync = 0;
 
+export const accountInfo = ref(null);
+
 export const isSyncConfigured = computed(() => syncProvider.value !== null);
 
 export const autoSyncThreshold = computed({

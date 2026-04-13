@@ -26,6 +26,7 @@ const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
 const BackupSheet = defineAsyncComponent(() => import('@/components/sheets/BackupSheet.vue'));
 const NotificationsSheet = defineAsyncComponent(() => import('@/components/sheets/NotificationsSheet.vue'));
+const SyncSheet = defineAsyncComponent(() => import('@/components/sheets/SyncSheet.vue'));
 const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/GlossarySheet.vue'));
 const DragDropOverlay = defineAsyncComponent(() => import('@/components/ui/DragDropOverlay.vue'));
 import { Capacitor } from '@capacitor/core';
@@ -44,6 +45,7 @@ import { logger } from './utils/logger.js';
 import { generateMissingThumbnails } from '@/utils/characterIO.js';
 import { initLorebookState } from '@/core/states/lorebookState.js';
 import { initPresetState } from '@/core/states/presetState.js';
+import { initSyncState } from '@/core/states/syncState.js';
 import { startTracking } from '@/core/services/timeTracker.js';
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -62,6 +64,7 @@ const chatViewRef = ref(null);
 const connectionsSheetRef = ref(null);
 const lorebookSheetRef = ref(null);
 const backupSheetRef = ref(null);
+const syncSheetRef = ref(null);
 const presetViewRef = ref(null);
 const apiViewRef = ref(null);
 
@@ -529,6 +532,12 @@ const onOpenBackupSheet = () => {
     });
 };
 
+const onOpenSyncSheet = () => {
+    waitForComponent(syncSheetRef, (comp) => {
+        comp.open();
+    });
+};
+
 const onOpenPresetSheet = (e) => {
     waitForComponent(presetViewRef, (comp) => {
         const presetId = e?.detail?.presetId;
@@ -581,7 +590,8 @@ onMounted(async () => {
     await Promise.all([
         initLorebookState(),
         initPresetState(),
-        loadPersonas()
+        loadPersonas(),
+        initSyncState()
     ]);
     
     startTracking();
@@ -616,6 +626,7 @@ onMounted(async () => {
     window.addEventListener('open-item-editor', onOpenItemEditor);
     window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.addEventListener('open-backup-sheet', onOpenBackupSheet);
+    window.addEventListener('open-sync-sheet', onOpenSyncSheet);
     window.addEventListener('open-preset-sheet', onOpenPresetSheet);
     window.addEventListener('open-api-sheet', onOpenApiSheet);
     window.addEventListener('header-setup-editor', onHeaderSetupEditor);
@@ -665,6 +676,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('open-item-editor', onOpenItemEditor);
     window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.removeEventListener('open-backup-sheet', onOpenBackupSheet);
+    window.removeEventListener('open-sync-sheet', onOpenSyncSheet);
     window.removeEventListener('open-preset-sheet', onOpenPresetSheet);
     window.removeEventListener('open-api-sheet', onOpenApiSheet);
     window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
@@ -814,6 +826,7 @@ watch(currentView, () => {
   <ConnectionsSheet ref="connectionsSheetRef" />
   <LorebookSheet ref="lorebookSheetRef" />
   <BackupSheet ref="backupSheetRef" />
+  <SyncSheet ref="syncSheetRef" />
   <PresetView ref="presetViewRef" />
   <ApiView ref="apiViewRef" />
   <NotificationsSheet />
