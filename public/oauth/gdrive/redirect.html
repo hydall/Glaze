@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head><title>Glaze OAuth Redirect</title></head>
+<body>
+<script>
+const url = new URL(window.location.href);
+const code = url.searchParams.get('code');
+const state = url.searchParams.get('state');
+const error = url.searchParams.get('error');
+
+if (error) {
+    document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">Authorization failed: ' + error + '</p>';
+} else if (code) {
+    window.location.href = 'com.hydall.glaze://oauth/gdrive?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state || '');
+} else {
+    document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">No authorization code received.</p>';
+}
+</script>
+</body>
+</html>

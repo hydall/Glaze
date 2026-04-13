@@ -13,6 +13,7 @@ import {
     clearSyncProgress, saveSettings, accountInfo
 } from '@/core/states/syncState.js';
 import * as dropboxAdapter from '@/core/services/adapters/dropboxAdapter.js';
+import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
 import { generateSyncKey, hasSyncKey, restoreKeyFromPhrase } from '@/core/services/crypto/keyManager.js';
 import { fullPush, fullPull, fullSync, checkSyncReadiness } from '@/core/services/syncService.js';
 
@@ -22,6 +23,7 @@ defineProps({ zIndex: { type: Number, default: 1005 } });
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const isConnecting = ref(false);
+const isConnectingGdrive = ref(false);
 const isDisconnecting = ref(false);
 const showRecoveryPhrase = ref(false);
 const recoveryPhrase = ref('');
@@ -76,8 +78,27 @@ const connectDropbox = async () => {
     } catch (e) {
         console.error('[SyncSheet] Dropbox connect failed:', e);
         setSyncError(e.message);
+        alert(e.message);
     } finally {
         isConnecting.value = false;
+    }
+};
+
+const connectGdrive = async () => {
+    isConnectingGdrive.value = true;
+    try {
+        await gdriveAdapter.connect();
+        setProvider(PROVIDERS.GDRIVE);
+        const info = await gdriveAdapter.getAccountInfo();
+        accountInfo.value = info;
+        const ready = await checkSyncReadiness();
+        localSyncStatus.value = ready.ready ? 'connected' : 'no_key';
+    } catch (e) {
+        console.error('[SyncSheet] Google Drive connect failed:', e);
+        setSyncError(e.message);
+        alert(e.message);
+    } finally {
+        isConnectingGdrive.value = false;
     }
 };
 
@@ -87,6 +108,8 @@ const disconnectProvider = async () => {
     try {
         if (syncProvider.value === PROVIDERS.DROPBOX) {
             await dropboxAdapter.disconnect();
+        } else if (syncProvider.value === PROVIDERS.GDRIVE) {
+            await gdriveAdapter.disconnect();
         }
         clearProvider();
         accountInfo.value = null;
@@ -164,15 +187,7 @@ const doPull = async () => {
         const result = await fullPull();
         syncResult.value = { type: 'pull', ...result };
         if (syncConflicts.value.length > 0) {
-            showBottomSheet({
-                title: t('sync_conflicts_found') || 'Conflicts Found',
-                bigInfo: {
-                    icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#FF9800"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
-                    description: `${syncConflicts.value.length} ${t('sync_conflict_desc') || 'conflict(s) detected. Local versions were kept.'}`,
-                    buttonText: t('btn_ok') || 'OK',
-                    onButtonClick: () => closeBottomSheet()
-                }
-            });
+            window.dispatchEvent(new CustomEvent('open-conflict-sheet'));
         }
     } catch (e) {
         console.error('[SyncSheet] Pull failed:', e);
@@ -201,6 +216,10 @@ const doFullSync = async () => {
     } finally {
         isSyncing.value = false;
     }
+};
+
+const openConflictSheet = () => {
+    window.dispatchEvent(new CustomEvent('open-conflict-sheet'));
 };
 
 const open = () => {
@@ -236,8 +255,18 @@ onMounted(async () => {
                         <span v-else>Dropbox</span>
                     </button>
 
+                    <button class="bs-btn bs-gdrive-btn" @click="connectGdrive" :disabled="isConnectingGdrive" style="margin-top:8px">
+                        <svg viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l4.58 7.5L12.29 11 7.71 3.5zm1.14 0L19.41 3.5 12.86 15H1.72l5.13-11.5zm10.01 0L13.72 15l4.58 7.5 5.55-11.5-5-7.5z"/></svg>
+                        <span v-if="isConnectingGdrive">{{ t('sync_connecting') || 'Connecting...' }}</span>
+                        <span v-else>Google Drive</span>
+                    </button>
+
                     <div class="bs-hint">
-                        {{ t('sync_hint_dropbox') || 'Your data will be encrypted before upload. Only you can read it.' }}
+                        {{ t('sync_hint_cloud') || 'Your data will be encrypted before upload. Only you can read it.' }}
+                    </div>
+
+                    <div v-if="syncLastError && !syncProvider" class="sync-error-msg">
+                        {{ syncLastError }}
                     </div>
                 </div>
 
@@ -258,11 +287,16 @@ onMounted(async () => {
                     <div class="sync-status-card">
                         <div class="sync-provider-badge">
                             <svg v-if="syncProvider === 'dropbox'" viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M7.5 2L2 6l3.75 3L2 12l5.5 4 3.75-3 3.75 3 5.5-4-4.5-3L20.5 6 15 2l-3.75 3L7.5 2zm3.75 10L7.5 15l3.75 3 3.75-3-3.75-3z"/></svg>
+                            <svg v-else-if="syncProvider === 'gdrive'" viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M7.71 3.5L1.15 15l4.58 7.5L12.29 11 7.71 3.5zm1.14 0L19.41 3.5 12.86 15H1.72l5.13-11.5zm10.01 0L13.72 15l4.58 7.5 5.55-11.5-5-7.5z"/></svg>
                             <span class="sync-provider-name">{{ providerLabel }}</span>
                             <span class="sync-status-dot" :class="{ connected: localSyncStatus === 'connected' && syncStatus !== SYNC_STATUS.ERROR, error: syncStatus === SYNC_STATUS.ERROR, syncing: syncStatus === SYNC_STATUS.SYNCING }"></span>
                         </div>
                         <div class="sync-status-text" v-if="accountInfo">{{ accountInfo.email }}</div>
                         <div class="sync-status-text">{{ statusLabel }}</div>
+                    <button v-if="syncConflicts.length > 0" class="sync-resolve-btn" @click="openConflictSheet">
+                        <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+                        <span>{{ syncConflicts.length }} {{ t('sync_conflicts') || 'conflicts' }} — {{ t('sync_resolve') || 'Resolve' }}</span>
+                    </button>
                     </div>
 
                     <!-- Sync result -->
@@ -437,6 +471,16 @@ onMounted(async () => {
     transform: scale(0.98);
 }
 
+.bs-gdrive-btn {
+    background: #4285F4;
+    color: white;
+    box-shadow: 0 4px 12px rgba(66, 133, 244, 0.3);
+}
+
+.bs-gdrive-btn:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
 .bs-secondary-btn {
     background: rgba(var(--vk-blue-rgb), 0.1);
     color: var(--vk-blue);
@@ -546,6 +590,44 @@ onMounted(async () => {
 .sync-status-text {
     font-size: 13px;
     color: var(--text-gray, #8e8e93);
+}
+
+.sync-resolve-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(255, 149, 0, 0.1);
+    color: #FF9500;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+    margin-top: 4px;
+}
+
+.sync-resolve-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+}
+
+.sync-resolve-btn:active {
+    background: rgba(255, 149, 0, 0.2);
+    transform: scale(0.98);
+}
+
+.sync-error-msg {
+    font-size: 13px;
+    color: #ff3b30;
+    background: rgba(255, 59, 48, 0.08);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-top: 4px;
+    line-height: 1.4;
 }
 
 .sync-result-card {

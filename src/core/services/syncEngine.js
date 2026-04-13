@@ -160,18 +160,21 @@ export async function pullEntities(adapter, key, onProgress, onConflict) {
         const cloudModified = file.serverModified ? new Date(file.serverModified).getTime() : 0;
 
         const localChar = await getLocalCharacter(charId);
-        if (localChar && localChar.updatedAt && localChar.updatedAt > cloudModified) {
-            if (onConflict) {
-                conflicts.push({ type: ENTITY_TYPES.CHARACTER, id: charId, local: localChar, cloudModified });
-            }
+        const downloadResult = await adapter.download(file.path_display || file.path);
+        if (!downloadResult) {
+            if (onProgress) onProgress('characters', i + 1, charFiles.length);
             continue;
         }
 
-        const result = await adapter.download(file.path_display || file.path);
-        if (result) {
-            const encrypted = JSON.parse(result.data);
-            const decrypted = await decryptEntity(encrypted, key);
-            await db.put('characters', decrypted);
+        const encrypted = JSON.parse(downloadResult.data);
+        const cloudEntity = await decryptEntity(encrypted, key);
+
+        if (localChar && localChar.updatedAt && localChar.updatedAt > cloudModified) {
+            if (onConflict) {
+                conflicts.push({ type: ENTITY_TYPES.CHARACTER, id: charId, name: localChar.name || charId, local: localChar, cloud: cloudEntity, cloudModified });
+            }
+        } else {
+            await db.put('characters', cloudEntity);
             pulled++;
         }
         if (onProgress) onProgress('characters', i + 1, charFiles.length);
@@ -184,18 +187,21 @@ export async function pullEntities(adapter, key, onProgress, onConflict) {
         const cloudModified = file.serverModified ? new Date(file.serverModified).getTime() : 0;
 
         const localPersona = await getLocalPersona(personaId);
-        if (localPersona && localPersona.updatedAt && localPersona.updatedAt > cloudModified) {
-            if (onConflict) {
-                conflicts.push({ type: ENTITY_TYPES.PERSONA, id: personaId, local: localPersona, cloudModified });
-            }
+        const downloadResult = await adapter.download(file.path_display || file.path);
+        if (!downloadResult) {
+            if (onProgress) onProgress('personas', i + 1, personaFiles.length);
             continue;
         }
 
-        const result = await adapter.download(file.path_display || file.path);
-        if (result) {
-            const encrypted = JSON.parse(result.data);
-            const decrypted = await decryptEntity(encrypted, key);
-            await db.put('personas', decrypted);
+        const encrypted = JSON.parse(downloadResult.data);
+        const cloudEntity = await decryptEntity(encrypted, key);
+
+        if (localPersona && localPersona.updatedAt && localPersona.updatedAt > cloudModified) {
+            if (onConflict) {
+                conflicts.push({ type: ENTITY_TYPES.PERSONA, id: personaId, name: localPersona.name || personaId, local: localPersona, cloud: cloudEntity, cloudModified });
+            }
+        } else {
+            await db.put('personas', cloudEntity);
             pulled++;
         }
         if (onProgress) onProgress('personas', i + 1, personaFiles.length);
@@ -208,18 +214,22 @@ export async function pullEntities(adapter, key, onProgress, onConflict) {
         const cloudModified = file.serverModified ? new Date(file.serverModified).getTime() : 0;
 
         const localChat = await getLocalChat(charId);
-        if (localChat && localChat.updatedAt && localChat.updatedAt > cloudModified) {
-            if (onConflict) {
-                conflicts.push({ type: ENTITY_TYPES.CHAT, id: charId, local: localChat, cloudModified });
-            }
+        const downloadResult = await adapter.download(file.path_display || file.path);
+        if (!downloadResult) {
+            if (onProgress) onProgress('chats', i + 1, chatFiles.length);
             continue;
         }
 
-        const result = await adapter.download(file.path_display || file.path);
-        if (result) {
-            const encrypted = JSON.parse(result.data);
-            const decrypted = await decryptEntity(encrypted, key);
-            await db.saveChat(charId, decrypted);
+        const encrypted = JSON.parse(downloadResult.data);
+        const cloudEntity = await decryptEntity(encrypted, key);
+        const chatName = getChatName(localChat, cloudEntity, charId);
+
+        if (localChat && localChat.updatedAt && localChat.updatedAt > cloudModified) {
+            if (onConflict) {
+                conflicts.push({ type: ENTITY_TYPES.CHAT, id: charId, name: chatName, local: localChat, cloud: cloudEntity, cloudModified });
+            }
+        } else {
+            await db.saveChat(charId, cloudEntity);
             pulled++;
         }
         if (onProgress) onProgress('chats', i + 1, chatFiles.length);
@@ -313,6 +323,29 @@ async function getLocalPersona(id) {
 
 async function getLocalChat(charId) {
     return db.getChat(charId);
+}
+
+function getChatName(localChat, cloudChat, charId) {
+    const msgs = cloudChat?.messages || localChat?.messages || [];
+    if (msgs.length > 0) {
+        const first = msgs[0];
+        const text = first.mes || first.content || '';
+        const preview = text.substring(0, 40).replace(/\n/g, ' ');
+        return preview || charId;
+    }
+    return charId;
+}
+
+export async function resolveConflict(conflict, choice) {
+    const entity = choice === 'cloud' ? conflict.cloud : conflict.local;
+    if (conflict.type === ENTITY_TYPES.CHARACTER) {
+        await db.put('characters', entity);
+    } else if (conflict.type === ENTITY_TYPES.PERSONA) {
+        await db.put('personas', entity);
+    } else if (conflict.type === ENTITY_TYPES.CHAT) {
+        await db.saveChat(conflict.id, entity);
+    }
+    return entity;
 }
 
 export { ENTITY_TYPES, CLOUD_BASE, cloudPath, getDeviceId };

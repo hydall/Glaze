@@ -1,10 +1,12 @@
 import { syncProvider, syncStatus, SYNC_STATUS, setSyncProgress, clearSyncProgress, setSyncError, updateLastSyncTime, addConflict, clearConflicts, resetMessageCounter, PROVIDERS } from '@/core/states/syncState.js';
 import * as dropboxAdapter from '@/core/services/adapters/dropboxAdapter.js';
+import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
 import { pushEntities, pullEntities } from '@/core/services/syncEngine.js';
 import { getSyncKey, hasSyncKey } from '@/core/services/crypto/keyManager.js';
 
 function getAdapter() {
     if (syncProvider.value === PROVIDERS.DROPBOX) return dropboxAdapter;
+    if (syncProvider.value === PROVIDERS.GDRIVE) return gdriveAdapter;
     throw new Error('No sync provider connected');
 }
 

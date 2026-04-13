@@ -27,6 +27,7 @@ const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/Lor
 const BackupSheet = defineAsyncComponent(() => import('@/components/sheets/BackupSheet.vue'));
 const NotificationsSheet = defineAsyncComponent(() => import('@/components/sheets/NotificationsSheet.vue'));
 const SyncSheet = defineAsyncComponent(() => import('@/components/sheets/SyncSheet.vue'));
+const ConflictSheet = defineAsyncComponent(() => import('@/components/sheets/ConflictSheet.vue'));
 const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/GlossarySheet.vue'));
 const DragDropOverlay = defineAsyncComponent(() => import('@/components/ui/DragDropOverlay.vue'));
 import { Capacitor } from '@capacitor/core';
@@ -45,7 +46,8 @@ import { logger } from './utils/logger.js';
 import { generateMissingThumbnails } from '@/utils/characterIO.js';
 import { initLorebookState } from '@/core/states/lorebookState.js';
 import { initPresetState } from '@/core/states/presetState.js';
-import { initSyncState } from '@/core/states/syncState.js';
+import { initSyncState, syncProvider } from '@/core/states/syncState.js';
+import { fullPull, checkSyncReadiness } from '@/core/services/syncService.js';
 import { startTracking } from '@/core/services/timeTracker.js';
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -65,6 +67,7 @@ const connectionsSheetRef = ref(null);
 const lorebookSheetRef = ref(null);
 const backupSheetRef = ref(null);
 const syncSheetRef = ref(null);
+const conflictSheetRef = ref(null);
 const presetViewRef = ref(null);
 const apiViewRef = ref(null);
 
@@ -538,6 +541,12 @@ const onOpenSyncSheet = () => {
     });
 };
 
+const onOpenConflictSheet = () => {
+    waitForComponent(conflictSheetRef, (comp) => {
+        comp.open();
+    });
+};
+
 const onOpenPresetSheet = (e) => {
     waitForComponent(presetViewRef, (comp) => {
         const presetId = e?.detail?.presetId;
@@ -596,6 +605,14 @@ onMounted(async () => {
     
     startTracking();
     
+    if (syncProvider.value) {
+        checkSyncReadiness().then(ready => {
+            if (ready.ready) {
+                fullPull().catch(e => console.warn('[App] Background pull failed:', e));
+            }
+        });
+    }
+    
     initRipple();
     initThemeToggle();
     initViewportFix();
@@ -627,6 +644,7 @@ onMounted(async () => {
     window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.addEventListener('open-backup-sheet', onOpenBackupSheet);
     window.addEventListener('open-sync-sheet', onOpenSyncSheet);
+    window.addEventListener('open-conflict-sheet', onOpenConflictSheet);
     window.addEventListener('open-preset-sheet', onOpenPresetSheet);
     window.addEventListener('open-api-sheet', onOpenApiSheet);
     window.addEventListener('header-setup-editor', onHeaderSetupEditor);
@@ -677,6 +695,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.removeEventListener('open-backup-sheet', onOpenBackupSheet);
     window.removeEventListener('open-sync-sheet', onOpenSyncSheet);
+    window.removeEventListener('open-conflict-sheet', onOpenConflictSheet);
     window.removeEventListener('open-preset-sheet', onOpenPresetSheet);
     window.removeEventListener('open-api-sheet', onOpenApiSheet);
     window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
@@ -827,6 +846,7 @@ watch(currentView, () => {
   <LorebookSheet ref="lorebookSheetRef" />
   <BackupSheet ref="backupSheetRef" />
   <SyncSheet ref="syncSheetRef" />
+  <ConflictSheet ref="conflictSheetRef" />
   <PresetView ref="presetViewRef" />
   <ApiView ref="apiViewRef" />
   <NotificationsSheet />
