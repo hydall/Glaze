@@ -817,7 +817,8 @@ defineExpose({ open, openEntry, close, openLorebook });
     display: flex;
     flex-direction: column;
     color: var(--text-gray);
-    overflow-y: hidden; /* Child will scroll */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     width: 100%;
 }
 
