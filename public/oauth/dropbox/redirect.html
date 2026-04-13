@@ -12,11 +12,8 @@ if (error) {
     document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">Authorization failed: ' + error + '</p>';
 } else if (code) {
     if (window.opener) {
-        window.opener.postMessage({ type: 'gdrive-oauth', code, state }, '*');
+        window.opener.postMessage({ type: 'dropbox-oauth', code, state }, '*');
     }
-    try {
-        window.location.href = 'com.hydall.glaze://oauth/gdrive?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state || '');
-    } catch {}
     document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">Authorization successful! You can close this tab.</p>';
 } else {
     document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">No authorization code received.</p>';

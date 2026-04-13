@@ -6,7 +6,7 @@ import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
 
 const DROPBOX_APP_KEY = import.meta.env.VITE_DROPBOX_APP_KEY || '';
 const REDIRECT_URI_NATIVE = 'com.hydall.glaze://oauth/dropbox';
-const REDIRECT_URI_WEB = `${window.location.origin}/oauth/dropbox`;
+const REDIRECT_URI_WEB = 'http://localhost:5173/oauth/dropbox/redirect.html';
 const API_BASE = 'https://api.dropboxapi.com/2';
 const CONTENT_BASE = 'https://content.dropboxapi.com/2';
 
@@ -21,6 +21,7 @@ function generateRandomString(length) {
 }
 
 async function sha256(text) {
+    if (!crypto.subtle) return null;
     const encoder = new TextEncoder();
     const data = encoder.encode(text);
     const hash = await crypto.subtle.digest('SHA-256', data);
@@ -103,6 +104,7 @@ export async function connect() {
 
     const verifier = generateRandomString(64);
     const challenge = await sha256(verifier);
+    const usePlain = !challenge;
     const redirectUri = getRedirectUri();
     const state = generateRandomString(16);
 
@@ -112,8 +114,8 @@ export async function connect() {
     const authUrl = new URL('https://www.dropbox.com/oauth2/authorize');
     authUrl.searchParams.set('client_id', DROPBOX_APP_KEY);
     authUrl.searchParams.set('response_type', 'code');
-    authUrl.searchParams.set('code_challenge', challenge);
-    authUrl.searchParams.set('code_challenge_method', 'S256');
+    authUrl.searchParams.set('code_challenge', usePlain ? verifier : challenge);
+    authUrl.searchParams.set('code_challenge_method', usePlain ? 'plain' : 'S256');
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('token_access_type', 'offline');
     authUrl.searchParams.set('state', state);
@@ -146,6 +148,8 @@ export async function connect() {
         const code = await waitForWebOAuth(authUrl.toString(), state);
         if (code) {
             await exchangeCodeForToken(code, verifier, redirectUri);
+        } else {
+            throw new Error('Authorization cancelled');
         }
     }
 }
@@ -158,30 +162,42 @@ function waitForWebOAuth(authUrl, expectedState) {
         const top = window.screenY + (window.outerHeight - height) / 2;
         const win = window.open(authUrl, 'dropbox-auth', `width=${width},height=${height},left=${left},top=${top}`);
 
-        const interval = setInterval(() => {
-            try {
-                if (win.closed) {
-                    clearInterval(interval);
+        let resolved = false;
+
+        const onMessage = (e) => {
+            if (resolved) return;
+            if (e.data?.type === 'dropbox-oauth') {
+                resolved = true;
+                cleanup();
+                const state = e.data.state;
+                if (state !== expectedState) {
+                    console.error('[dropboxAdapter] State mismatch');
                     resolve(null);
                     return;
                 }
-                const url = win.location.href;
-                if (url && (url.includes('code=') || url.includes('error='))) {
-                    clearInterval(interval);
-                    const params = new URL(url).searchParams;
-                    const code = params.get('code');
-                    const state = params.get('state');
-                    win.close();
+                resolve(e.data.code || null);
+            }
+        };
 
-                    if (state !== expectedState) {
-                        console.error('[dropboxAdapter] State mismatch');
-                        resolve(null);
-                        return;
-                    }
-                    resolve(code);
+        const interval = setInterval(() => {
+            if (resolved) return;
+            try {
+                if (win.closed) {
+                    cleanup();
+                    resolve(null);
                 }
-            } catch {}
-        }, 500);
+            } catch {
+                cleanup();
+                resolve(null);
+            }
+        }, 1000);
+
+        const cleanup = () => {
+            clearInterval(interval);
+            window.removeEventListener('message', onMessage);
+        };
+
+        window.addEventListener('message', onMessage);
     });
 }
 
@@ -350,19 +366,34 @@ async function contentDownload(path, accessToken) {
     return { data: text, metadata };
 }
 
+const APP_FOLDER_PREFIX = '/Glaze';
+
+function stripAppFolderPrefix(path) {
+    if (path === APP_FOLDER_PREFIX || path === APP_FOLDER_PREFIX + '/') return '';
+    if (path.startsWith(APP_FOLDER_PREFIX + '/')) return path.slice(APP_FOLDER_PREFIX.length);
+    return path;
+}
+
 export async function ensureFolder(path) {
-    try {
-        await apiCall('/files/create_folder_v2', { path, autorename: false });
-    } catch (e) {
-        if (e.message?.includes('conflict') || e.message?.includes('already_exists')) {
-            return;
+    const strippedPath = stripAppFolderPrefix(path);
+    const parts = strippedPath.split('/').filter(Boolean);
+    if (parts.length === 0) return;
+    let currentPath = '';
+    for (const part of parts) {
+        currentPath = currentPath + '/' + part;
+        try {
+            await apiCall('/files/create_folder_v2', { path: currentPath, autorename: false });
+        } catch (e) {
+            if (e.message?.includes('conflict') || e.message?.includes('already_exists')) {
+                continue;
+            }
+            throw e;
         }
-        throw e;
     }
 }
 
 export async function listFolder(path) {
-    return apiCall('/files/list_folder', { path, recursive: false, include_deleted: false });
+    return apiCall('/files/list_folder', { path: stripAppFolderPrefix(path) || '', recursive: false, include_deleted: false });
 }
 
 export async function listFolderContinue(cursor) {
@@ -370,15 +401,15 @@ export async function listFolderContinue(cursor) {
 }
 
 export async function upload(path, data) {
-    return contentUpload(path, data);
+    return contentUpload(stripAppFolderPrefix(path), data);
 }
 
 export async function download(path) {
-    return contentDownload(path);
+    return contentDownload(stripAppFolderPrefix(path));
 }
 
 export async function deleteFile(path) {
-    return apiCall('/files/delete_v2', { path });
+    return apiCall('/files/delete_v2', { path: stripAppFolderPrefix(path) });
 }
 
 export async function getAccountInfo() {
