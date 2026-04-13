@@ -4,7 +4,8 @@ import { db } from '@/utils/db.js';
 const KEY_STORAGE_KEY = 'gz_sync_key';
 const SALT_STORAGE_KEY = 'gz_sync_salt';
 
-import * as bip39 from 'bip39';
+import { generateMnemonic, mnemonicToEntropy, validateMnemonic } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 
 export async function generateSyncKey() {
     const key = await generateAesKey();
@@ -12,8 +13,7 @@ export async function generateSyncKey() {
     const salt = generateSalt(16);
     const saltBase64 = arrayBufferToBase64(salt.buffer);
 
-    const entropy = crypto.getRandomValues(new Uint8Array(16));
-    const mnemonic = bip39.entropyToMnemonic(entropy);
+    const mnemonic = generateMnemonic(wordlist, 128);
 
     await db.queuedSet(KEY_STORAGE_KEY, exportedKey);
     await db.queuedSet(SALT_STORAGE_KEY, saltBase64);
@@ -44,11 +44,11 @@ export async function hasSyncKey() {
 export async function restoreKeyFromPhrase(mnemonic) {
     const trimmed = mnemonic.trim().toLowerCase();
 
-    if (!bip39.validateMnemonic(trimmed)) {
+    if (!validateMnemonic(trimmed, wordlist)) {
         throw new Error('Invalid recovery phrase. Please check your 12-word phrase and try again.');
     }
 
-    const entropy = bip39.mnemonicToEntropy(trimmed);
+    const entropy = mnemonicToEntropy(trimmed, wordlist);
     const entropyBytes = hexToBytes(entropy);
 
     const encoder = new TextEncoder();
