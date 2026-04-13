@@ -346,13 +346,13 @@ function buildPromptMessagesWorker(args) {
         });
     }
 
-    const isLatexMode = activePreset?.latexMode === true;
-    const hasLorebookMacro = isLatexMode && activePreset.blocks?.some(b => b.content?.includes('{lorebooks}'));
+    const hasLorebookMacro = activePreset?.blocks?.some(b => b.enabled !== false && !b.isStashed && b.content?.includes('{{lorebooks}}'));
 
-    const getAllLoreContent = () => {
-        const allEntries = [];
-        Object.values(loreByPosition).forEach(entries => allEntries.push(...entries));
-        return allEntries.map(e => e.content).filter(Boolean).join('\n');
+    const getLorebookContent = () => {
+        return allLoreEntries
+            .map(entry => replaceMacros(entry.content || "", char, personaObj, sessionVars, notifyObj))
+            .filter(Boolean)
+            .join('\n\n');
     };
 
     const injectLore = (pos) => {
@@ -371,11 +371,12 @@ function buildPromptMessagesWorker(args) {
 
     if (!hasLorebookMacro) injectLore(4);
 
+    let summaryRawContent = null;
     let summaryText = null;
     if (summary) {
-        const content = typeof summary === 'object' ? summary.content : summary;
+        summaryRawContent = typeof summary === 'object' ? summary.content : summary;
         const prefix = (typeof summary === 'object' && summary.prefix) ? summary.prefix : 'Summary: ';
-        if (content) summaryText = `[${prefix}${content}]`;
+        if (summaryRawContent) summaryText = `[${prefix}${summaryRawContent}]`;
     }
 
     if (activePreset && activePreset.blocks) {
@@ -391,24 +392,14 @@ function buildPromptMessagesWorker(args) {
             }
         });
 
-        const LATEX_BLOCK_CONTENT = {
-            '{personality}': () => char ? `Personality: ${char.personality || ''}` : '',
-            '{bot_description}': () => char ? `Character Name: ${char.name || 'Character'}\nDescription: ${char.description || char.desc || ''}` : '',
-            '{user_persona}': () => personaObj ? `User Name: ${personaObj.name || 'User'}\nUser Description: ${personaObj.prompt || ''}` : '',
-            '{scenario}': () => char ? `Scenario: ${char.scenario || ''}` : '',
-            '{example_dialogs}': () => char ? (char.mes_example || '') : '',
-            '{example_dialogue}': () => char ? (char.mes_example || '') : '',
-            '{lorebooks}': () => getAllLoreContent(),
-            '{summary}': () => summaryText || ''
-        };
-
-        const resolveLatexMacros = (text) => {
+        const resolveDynamicMacros = (text) => {
             if (!text) return text;
             let result = text;
-            for (const [macro, resolver] of Object.entries(LATEX_BLOCK_CONTENT)) {
-                if (result.includes(macro)) {
-                    result = result.split(macro).join(resolver());
-                }
+            if (result.includes('{{lorebooks}}')) {
+                result = result.split('{{lorebooks}}').join(getLorebookContent());
+            }
+            if (result.includes('{{summary}}')) {
+                result = result.split('{{summary}}').join(summaryRawContent || '');
             }
             return result;
         };
@@ -447,9 +438,8 @@ function buildPromptMessagesWorker(args) {
 
             if (!content) return null;
 
-            content = resolveLatexMacros(content);
-
             content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
+            content = resolveDynamicMacros(content);
 
             return { content, role };
         };

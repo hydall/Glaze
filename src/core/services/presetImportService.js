@@ -185,27 +185,21 @@ export function convertSTPreset(data, fileName) {
     };
 }
 
-export const LATEX_MACRO_MAP = {
-    '{personality}': 'char_personality',
-    '{bot_description}': 'char_card',
-    '{user_persona}': 'user_persona',
-    '{scenario}': 'scenario',
-    '{example_dialogs}': 'example_dialogue',
-    '{example_dialogue}': 'example_dialogue',
-    '{lorebooks}': 'worldInfoBefore',
-    '{summary}': 'summary'
+export const LATEX_MACRO_DISABLE_MAP = {
+    '{bot_persona}': ['char_personality', 'char_card'],
+    '{user_persona}': ['user_persona'],
+    '{scenario}': ['scenario'],
+    '{example_dialogs}': ['example_dialogue'],
+    '{lorebooks}': ['worldInfoBefore', 'worldInfoAfter'],
+    '{summary}': ['summary', 'authors_note']
 };
 
-export const LATEX_MACRO_TO_BLOCK = Object.fromEntries(
-    Object.entries(LATEX_MACRO_MAP).map(([macro, blockId]) => [macro, blockId])
-);
-
-export function getLatexMacroBlockIds(content) {
+export function getLatexMacroDisabledBlockIds(content) {
     if (!content) return [];
     const ids = new Set();
-    for (const macro of Object.keys(LATEX_MACRO_MAP)) {
+    for (const [macro, blockIds] of Object.entries(LATEX_MACRO_DISABLE_MAP)) {
         if (content.includes(macro)) {
-            ids.add(LATEX_MACRO_MAP[macro]);
+            blockIds.forEach(id => ids.add(id));
         }
     }
     return [...ids];
@@ -243,54 +237,47 @@ export function convertLatexPreset(data, fileName) {
 
     const tabs = data.tabs || [];
 
-    const LATEX_MACRO_ALIASES = {
-        '{bot_persona}': '{personality}'
+    const LATEX_TO_GLAZE_MACRO = {
+        '{bot_persona}': '{{personality}}',
+        '{user_persona}': '{{persona}}',
+        '{scenario}': '{{scenario}}',
+        '{example_dialogs}': '{{mesExamples}}',
+        '{lorebooks}': '{{lorebooks}}',
+        '{summary}': '{{summary}}'
     };
 
-    const normalizeTabContent = (content) => {
+    const convertLatexMacrosToGlaze = (content) => {
         if (!content) return content;
         let result = content;
-        for (const [alias, canonical] of Object.entries(LATEX_MACRO_ALIASES)) {
-            result = result.split(alias).join(canonical);
+        for (const [latex, glaze] of Object.entries(LATEX_TO_GLAZE_MACRO)) {
+            result = result.split(latex).join(glaze);
         }
         return result;
     };
 
-    const allTabContent = tabs.map(t => normalizeTabContent(t.content || '')).join('\n');
-    const macroReferencedBlockIds = getLatexMacroBlockIds(allTabContent);
+    const allTabContent = tabs.map(t => t.content || '').join('\n');
+    const macroReferencedBlockIds = getLatexMacroDisabledBlockIds(allTabContent);
 
     tabs.forEach((tab) => {
         const tabId = tab.id || generateId();
         const tabTitle = tab.title || '';
-        const tabContent = normalizeTabContent(tab.content || '');
+        const tabContent = convertLatexMacrosToGlaze(tab.content || '');
         const tabRole = tab.role || 'system';
         const tabEnabled = tab.enabled !== undefined ? tab.enabled : true;
         const tabDepth = tab.injectionDepth || 0;
-        const isPinned = tab.isPinned || false;
 
         const mandatoryMatch = normalizeTitle(tabTitle);
+
+        if (mandatoryMatch === 'chat_history') {
+            usedMandatory.add('chat_history');
+            const mb = mandatoryBlocks.find(b => b.id === 'chat_history');
+            if (mb) orderedBlocks.push({ ...mb });
+            return;
+        }
+
         if (mandatoryMatch && !usedMandatory.has(mandatoryMatch)) {
-            const mb = mandatoryBlocks.find(b => b.id === mandatoryMatch);
-            if (mb) {
-                if (macroReferencedBlockIds.includes(mandatoryMatch)) {
-                    disabledNativeIds.add(mandatoryMatch);
-                    orderedBlocks.push({
-                        ...mb,
-                        enabled: false,
-                        isStashed: false,
-                        content: mandatoryMatch === 'guided_generation' ? mb.content : tabContent
-                    });
-                } else {
-                    orderedBlocks.push({
-                        ...mb,
-                        enabled: tabEnabled,
-                        isStashed: false,
-                        content: mandatoryMatch === 'guided_generation' ? mb.content : tabContent
-                    });
-                }
-                usedMandatory.add(mandatoryMatch);
-                return;
-            }
+            disabledNativeIds.add(mandatoryMatch);
+            usedMandatory.add(mandatoryMatch);
         }
 
         let insertion_mode = 'relative';
@@ -313,21 +300,30 @@ export function convertLatexPreset(data, fileName) {
     });
 
     macroReferencedBlockIds.forEach(blockId => {
+        if (blockId === 'chat_history') return;
         if (!usedMandatory.has(blockId)) {
-            const mb = mandatoryBlocks.find(b => b.id === blockId);
-            if (mb) {
-                disabledNativeIds.add(blockId);
-                orderedBlocks.push({ ...mb, enabled: false, isStashed: false });
-                usedMandatory.add(blockId);
-            }
+            disabledNativeIds.add(blockId);
+            usedMandatory.add(blockId);
         }
     });
 
     mandatoryBlocks.forEach(mb => {
-        if (!usedMandatory.has(mb.id)) {
+        if (disabledNativeIds.has(mb.id)) {
+            orderedBlocks.push({ ...mb, enabled: false, isStashed: false });
+        } else if (!usedMandatory.has(mb.id)) {
             orderedBlocks.push({ ...mb });
         }
     });
+
+    const EXTRA_DISABLED_BLOCKS = {
+        'authors_note': { id: 'authors_note', name: "Author's Note", role: 'system', content: '', isStatic: true, i18n: 'magic_authors_notes', enabled: false, isStashed: false, insertion_mode: 'relative' },
+        'summary': { id: 'summary', name: 'Summary', role: 'system', content: '', isStatic: true, i18n: 'magic_summary', enabled: false, isStashed: false, depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' }
+    };
+    for (const [blockId, blockDef] of Object.entries(EXTRA_DISABLED_BLOCKS)) {
+        if (disabledNativeIds.has(blockId)) {
+            orderedBlocks.push({ ...blockDef });
+        }
+    }
 
     return {
         name: data.name || fileName || "Imported Preset",
@@ -339,7 +335,6 @@ export function convertLatexPreset(data, fileName) {
         mergeRole: 'system',
         blocks: orderedBlocks,
         regexes: [],
-        latexMode: true,
         disabledNativeIds: [...disabledNativeIds]
     };
 }
