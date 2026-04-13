@@ -7,6 +7,7 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { db } from '@/utils/db.js';
 import { logger } from './logger.js';
 import { saveFile } from '../core/services/fileSaver.js';
+import { importSTLorebook } from '@/core/states/lorebookState.js';
 
 // ─── Import ──────────────────────────────────────────────────────────────────
 
@@ -144,6 +145,18 @@ function normalizeCharacterData(json) {
         data.avatar = null;
     }
     return data;
+}
+
+export async function extractCharacterBook(charData) {
+    const cb = charData.character_book;
+    if (!cb || (!cb.entries && !cb.name)) return null;
+
+    const lbName = cb.name || `${charData.name || 'Character'} Lorebook`;
+    const lorebook = await importSTLorebook({ ...cb, name: lbName }, lbName);
+
+    delete charData.character_book;
+
+    return lorebook;
 }
 
 function fileToBase64(file) {

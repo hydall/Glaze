@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
-import { parseCharacterCard } from '@/utils/characterIO.js';
+import { parseCharacterCard, extractCharacterBook } from '@/utils/characterIO.js';
 import { db } from '@/utils/db.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { translations } from '@/utils/i18n.js';
@@ -61,6 +61,7 @@ const onDrop = async (e) => {
                 if (!charData.id) {
                     charData.id = Date.now().toString();
                 }
+                await extractCharacterBook(charData);
                 await db.saveCharacter(charData, -1);
                 
                 // Notify UI to update

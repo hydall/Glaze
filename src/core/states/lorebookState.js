@@ -353,32 +353,36 @@ export async function importSTLorebook(json, fileName = 'Imported') {
             id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
             name: json.name || fileName.replace('.json', ''),
             enabled: true,
-            entries: normalizedEntries.map(entry => ({
-                id: entry.uid?.toString() || (Date.now() + Math.random()).toString(36),
-                keys: Array.isArray(entry.key) ? entry.key : (entry.key || '').split(',').map(k => k.trim()).filter(k => k),
-                content: entry.content || '',
-                enabled: entry.enabled !== false && entry.disable !== true,
-                secondary_keys: Array.isArray(entry.keysecondary) ? entry.keysecondary : (entry.keysecondary || '').split(',').map(k => k.trim()).filter(k => k),
-                comment: entry.comment || '',
-                order: entry.order !== undefined ? entry.order : 100,
-                probability: entry.probability !== undefined ? entry.probability : 100,
-                constant: entry.constant || false,
-                selectiveLogic: entry.selectiveLogic ?? 0,
-                matchWholeWords: entry.matchWholeWords ?? null,
-                caseSensitive: entry.caseSensitive ?? null,
-                useGroupScoring: entry.useGroupScoring ?? null,
-                scanDepth: entry.scanDepth,
-                position: (entry.position === 0) ? 'worldInfoBefore' : (entry.position === 1) ? 'worldInfoAfter' : (entry.position ?? 'worldInfoBefore'),
-                characterFilter: entry.characterFilter,
-                preventRecursion: entry.preventRecursion || false,
-                delayUntilRecursion: entry.delayUntilRecursion || false,
-                sticky: entry.sticky || 0,
-                cooldown: entry.cooldown || 0,
-                delay: entry.delay || 0,
-                group: entry.group || '',
-                groupProminence: entry.groupProminence || 100,
-                ignoreBudget: entry.ignoreBudget || false
-            }))
+            entries: normalizedEntries.map(entry => {
+                const rawKeys = entry.keys || entry.key || [];
+                const rawSecondary = entry.secondary_keys || entry.keysecondary || [];
+                return {
+                    id: entry.uid?.toString() || (Date.now() + Math.random()).toString(36),
+                    keys: Array.isArray(rawKeys) ? rawKeys : String(rawKeys || '').split(',').map(k => k.trim()).filter(k => k),
+                    content: entry.content || '',
+                    enabled: entry.enabled !== false && entry.disable !== true,
+                    secondary_keys: Array.isArray(rawSecondary) ? rawSecondary : String(rawSecondary || '').split(',').map(k => k.trim()).filter(k => k),
+                    comment: entry.comment || '',
+                    order: entry.order !== undefined ? entry.order : 100,
+                    probability: entry.probability !== undefined ? entry.probability : 100,
+                    constant: entry.constant || false,
+                    selectiveLogic: entry.selectiveLogic ?? 0,
+                    matchWholeWords: entry.matchWholeWords ?? null,
+                    caseSensitive: entry.caseSensitive ?? null,
+                    useGroupScoring: entry.useGroupScoring ?? null,
+                    scanDepth: entry.scanDepth,
+                    position: (entry.position === 0) ? 'worldInfoBefore' : (entry.position === 1) ? 'worldInfoAfter' : (entry.position ?? 'worldInfoBefore'),
+                    characterFilter: entry.characterFilter,
+                    preventRecursion: entry.preventRecursion || false,
+                    delayUntilRecursion: entry.delayUntilRecursion || false,
+                    sticky: entry.sticky || 0,
+                    cooldown: entry.cooldown || 0,
+                    delay: entry.delay || 0,
+                    group: entry.group || '',
+                    groupProminence: entry.groupProminence || 100,
+                    ignoreBudget: entry.ignoreBudget || false
+                };
+            })
         };
 
         lorebookState.lorebooks.push(newLb);
