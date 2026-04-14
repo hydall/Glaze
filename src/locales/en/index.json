@@ -875,5 +875,14 @@
     "catalog_error_extract": "Failed to submit for extraction",
     "catalog_extracting": "Extracting...",
     "catalog_extract_progress": "DataCat is fetching the character from JanitorAI. This may take a minute.",
-    "btn_retry": "Retry"
+    "btn_retry": "Retry",
+    "label_api_type": "API Type",
+    "label_auth_type": "Authentication",
+    "label_oauth_status": "Authorization",
+    "oauth_authorized": "Authorized",
+    "oauth_not_authorized": "Not authorized",
+    "oauth_native_hint": "After authorizing, copy the code from the page and paste it here:",
+    "btn_authorize": "Authorize",
+    "btn_logout": "Logout",
+    "btn_submit": "Submit"
 }

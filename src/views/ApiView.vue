@@ -12,10 +12,12 @@ function handleBack() {
         sheet.value?.close();
     }
 }
-import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getBlacklistedProvider, ANTHROPIC_MODELS } from '@/core/config/APISettings.js';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
+import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getBlacklistedProvider } from '@/core/config/APISettings.js';
 import { getEmbeddingConfig, saveEmbeddingSetting, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { testEmbeddingConnection } from '@/core/services/embeddingService.js';
-import { startOAuthFlow } from '@/core/services/oauthService.js';
+import { beginAuthorize, completeAuthorize } from '@/core/services/anthropicOAuthService.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
 import { initRipple } from '@/core/services/ui.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -50,8 +52,12 @@ const apiSettings = reactive({
 });
 
 const showApiKey = ref(false);
-const oauthStatus = ref('idle');
 const oauthError = ref('');
+// Pending authorization attempt: { pkce, authUrl } after user taps Authorize,
+// reset once tokens are exchanged or the user logs out. While non-null the
+// paste UI is visible; while null only the Authorize button is shown.
+const oauthPending = ref(null);
+const oauthCallbackInput = ref('');
 
 const embeddingSettings = reactive({
     useSame: true,
@@ -249,8 +255,8 @@ function onApiTypeChange(value) {
         saveApiPresets(apiPresets.value);
     }
     if (value === 'anthropic' && !apiSettings.model.startsWith('claude-')) {
-        apiSettings.model = ANTHROPIC_MODELS[0];
-        saveApiSetting('api-model', ANTHROPIC_MODELS[0]);
+        apiSettings.model = '';
+        saveApiSetting('api-model', '');
     }
     checkConnection();
 }
@@ -264,19 +270,34 @@ function onAuthTypeChange(value) {
     }
 }
 
-async function startAuthorize() {
-    oauthStatus.value = 'authorizing';
+function startAuthorize() {
     oauthError.value = '';
+    oauthCallbackInput.value = '';
+    // Each tap generates a fresh PKCE pair and opens the browser.
+    // If the user taps twice, the first attempt's code becomes unusable —
+    // that's fine, they clearly abandoned it.
+    oauthPending.value = beginAuthorize();
+    if (Capacitor.isNativePlatform()) {
+        Browser.open({ url: oauthPending.value.authUrl, presentationStyle: 'popover' }).catch(() => {});
+    } else {
+        window.open(oauthPending.value.authUrl, '_blank');
+    }
+}
+
+async function submitAuthorize() {
+    const input = oauthCallbackInput.value.trim();
+    if (!input || !oauthPending.value) return;
     try {
-        const tokens = await startOAuthFlow();
+        const tokens = await completeAuthorize(input, oauthPending.value.pkce);
         if (activeApiPreset.value) {
             activeApiPreset.value.oauth = tokens;
             saveApiPresets(apiPresets.value);
         }
-        oauthStatus.value = 'authorized';
+        oauthPending.value = null;
+        oauthCallbackInput.value = '';
+        oauthError.value = '';
         checkConnection();
     } catch (e) {
-        oauthStatus.value = 'error';
         oauthError.value = e.message || 'Authorization failed';
     }
 }
@@ -286,7 +307,8 @@ function oauthLogout() {
         activeApiPreset.value.oauth = null;
         saveApiPresets(apiPresets.value);
     }
-    oauthStatus.value = 'idle';
+    oauthPending.value = null;
+    oauthError.value = '';
 }
 
 async function checkConnection() {
@@ -308,8 +330,9 @@ async function checkConnection() {
             apiStatus.value = 'connected';
         } catch (e) {
             console.warn(e);
-            availableModels.value = [...ANTHROPIC_MODELS];
-            apiStatus.value = 'connected';
+            availableModels.value = [];
+            apiStatus.value = 'failed';
+            errorMessage.value = e.message || 'Failed to fetch models';
         }
         return;
     }
@@ -415,11 +438,10 @@ function applyApiPreset(p) {
     saveApiSetting('gz_api_type', apiSettings.apiType);
     saveApiSetting('gz_api_auth_type', apiSettings.authType);
 
-    if (p.oauth?.access_token) {
-        oauthStatus.value = 'authorized';
-    } else {
-        oauthStatus.value = 'idle';
-    }
+    // Discard any pending authorization from the previous preset — its PKCE
+    // belongs to a different oauth slot and should not be completed here.
+    oauthPending.value = null;
+    oauthError.value = '';
 
     apiSettings.endpoint = p.endpoint;
     apiSettings.key = p.key;
@@ -661,7 +683,7 @@ onBeforeUnmount(() => {
                             <label>{{ t('label_auth_type') || 'Authentication' }}</label>
                             <select :value="apiSettings.authType" @change="onAuthTypeChange($event.target.value)" class="vk-select">
                                 <option value="key">API Key</option>
-                                <option value="oauth">OAuth (Claude.ai)</option>
+                                <option value="oauth">OAuth (Claude.ai via Code)</option>
                             </select>
                         </div>
                     </template>
@@ -685,12 +707,19 @@ onBeforeUnmount(() => {
                                         <div class="status-dot failed"></div>
                                         <span>{{ t('oauth_not_authorized') || 'Not authorized' }}</span>
                                     </div>
-                                    <button class="vk-btn vk-btn-primary" @click="startAuthorize" :disabled="oauthStatus === 'authorizing'">
-                                        {{ oauthStatus === 'authorizing' ? (t('oauth_authorizing') || 'Authorizing...') : (t('btn_authorize') || 'Authorize') }}
+                                    <button class="vk-btn vk-btn-primary" @click="startAuthorize">
+                                        {{ t('btn_authorize') || 'Authorize' }}
                                     </button>
                                 </template>
                             </div>
                             <div v-if="oauthError" class="oauth-error">{{ oauthError }}</div>
+                            <div v-if="oauthPending && !hasOAuthTokens" class="oauth-web-paste">
+                                <p>{{ t('oauth_native_hint') || 'After authorizing, copy the code from the page and paste it here:' }}</p>
+                                <input type="text" v-model="oauthCallbackInput" placeholder="paste code" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                                <button class="vk-btn vk-btn-primary" @click="submitAuthorize" :disabled="!oauthCallbackInput.trim()">
+                                    {{ t('btn_submit') || 'Submit' }}
+                                </button>
+                            </div>
                         </div>
                     </template>
 
@@ -942,6 +971,24 @@ onBeforeUnmount(() => {
     color: #ff3b30;
     font-size: 12px;
     margin-top: 4px;
+}
+
+.oauth-web-paste {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.oauth-web-paste p {
+    font-size: 12px;
+    color: var(--text-gray);
+    margin: 0;
+}
+
+.oauth-web-paste input {
+    font-size: 12px;
+    padding: 6px 8px;
 }
 
 .vk-select {

@@ -881,5 +881,14 @@
     "catalog_error_extract": "Не удалось отправить на извлечение",
     "catalog_extracting": "Извлечение...",
     "catalog_extract_progress": "DataCat загружает персонажа с JanitorAI. Это может занять минуту.",
-    "btn_retry": "Повторить"
+    "btn_retry": "Повторить",
+    "label_api_type": "Тип API",
+    "label_auth_type": "Аутентификация",
+    "label_oauth_status": "Авторизация",
+    "oauth_authorized": "Авторизован",
+    "oauth_not_authorized": "Не авторизован",
+    "oauth_native_hint": "После авторизации скопируйте код со страницы и вставьте сюда:",
+    "btn_authorize": "Авторизоваться",
+    "btn_logout": "Выйти",
+    "btn_submit": "Отправить"
 }

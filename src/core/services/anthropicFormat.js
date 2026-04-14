@@ -1,5 +1,6 @@
 const ANTHROPIC_VERSION = '2023-06-01';
-const ANTHROPIC_OAUTH_BETA = 'oauth-2025-04-20';
+//const ANTHROPIC_OAUTH_BETA = 'oauth-2025-04-20';
+const ANTHROPIC_OAUTH_BETA = 'claude-code-20250219,files-api-2025-04-14,oauth-2025-04-20,interleaved-thinking-2025-05-14';
 
 /**
  * Convert an OpenAI-compatible request body to the Anthropic Messages API format.
@@ -12,7 +13,7 @@ const ANTHROPIC_OAUTH_BETA = 'oauth-2025-04-20';
 export function convertToAnthropicBody(requestBody, options = {}) {
     const { requestReasoning = false } = options;
 
-    // 1. Separate system messages from the rest
+    // Separate system messages from the rest
     const systemBlocks = [];
     const nonSystemMessages = [];
 
@@ -26,7 +27,7 @@ export function convertToAnthropicBody(requestBody, options = {}) {
         }
     }
 
-    // 2. Convert image blocks inside array-content messages
+    // Convert image blocks inside array-content messages
     const convertedMessages = nonSystemMessages.map(msg => {
         if (!Array.isArray(msg.content)) return msg;
         return {
@@ -37,12 +38,7 @@ export function convertToAnthropicBody(requestBody, options = {}) {
         };
     });
 
-    // 3. Ensure the first message is user role
-    if (convertedMessages.length === 0 || convertedMessages[0].role !== 'user') {
-        convertedMessages.unshift({ role: 'user', content: '' });
-    }
-
-    // 4. Merge consecutive same-role messages (string content only)
+    // Merge consecutive same-role messages (string content only)
     const mergedMessages = [];
     for (const msg of convertedMessages) {
         const prev = mergedMessages[mergedMessages.length - 1];
@@ -53,7 +49,7 @@ export function convertToAnthropicBody(requestBody, options = {}) {
         }
     }
 
-    // 5. Build base result
+    // Build base result
     const result = {
         model: requestBody.model,
         messages: mergedMessages,
@@ -61,12 +57,12 @@ export function convertToAnthropicBody(requestBody, options = {}) {
         stream: requestBody.stream,
     };
 
-    // 6. System blocks
+    // System blocks
     if (systemBlocks.length > 0) {
         result.system = systemBlocks;
     }
 
-    // 7. Thinking / sampling parameters
+    // Thinking / sampling parameters
     if (requestReasoning) {
         result.thinking = { type: 'adaptive' };
         // Temperature is incompatible with thinking — omit it
@@ -80,7 +76,7 @@ export function convertToAnthropicBody(requestBody, options = {}) {
         }
     }
 
-    // 8. stop → stop_sequences
+    // stop → stop_sequences
     if (requestBody.stop !== undefined) {
         result.stop_sequences = requestBody.stop;
     }

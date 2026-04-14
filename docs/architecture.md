@@ -46,6 +46,7 @@ src/
 |   +-- config/
 |   |   +-- APISettings.js          # API endpoint/key/model config (localStorage)
 |   |   +-- APPSettings.js          # App preferences (lang, theme mode, toggles)
+|   |   +-- embeddingSettings.js    # Embedding/vector lore config
 |   +-- services/
 |   |   +-- generationService.js    # Prompt building orchestration
 |   |   +-- llmApi.js               # HTTP requests + SSE streaming
@@ -61,6 +62,18 @@ src/
 |   |   +-- presetImportService.js  # Preset import
 |   |   +-- backupService.js        # Full backup export/import (ZIP via JSZip)
 |   |   +-- stBackupImporter.js     # SillyTavern backup ZIP import
+|   |   +-- embeddingService.js     # Embedding computation for vector lorebook matching
+|   |   +-- anthropicFormat.js      # OpenAI <-> Anthropic messages/events translation
+|   |   +-- anthropicOAuthService.js # Claude.ai OAuth (PKCE) for keyless auth
+|   |   +-- syncService.js          # Public fullPush/fullPull/fullSync entry points
+|   |   +-- syncEngine.js           # Manifest-v2 diff/push/pull, conflict detection
+|   |   +-- syncQueue.js            # Retry queue with exponential backoff
+|   |   +-- adapters/
+|   |   |   +-- dropboxAdapter.js   # Dropbox OAuth2 + Files API
+|   |   |   +-- gdriveAdapter.js    # Google Drive OAuth2 + Drive v3 API
+|   |   +-- crypto/
+|   |       +-- syncCrypto.js       # AES-GCM + PBKDF2 primitives
+|   |       +-- keyManager.js       # Sync key derivation/storage, encrypt/decrypt wrappers
 |   +-- states/
 |       +-- bottomSheetState.js     # Global bottom sheet (notifications, menus, errors)
 |       +-- lorebookState.js        # Lorebook scanning and activation
@@ -69,6 +82,7 @@ src/
 |       +-- presetState.js          # Prompt presets (blocks, connections, effective preset)
 |       +-- themeState.js           # Visual themes (colors, fonts, backgrounds, ~1100 LOC)
 |       +-- toastState.js           # Custom in-app toast system
+|       +-- syncState.js            # Cloud sync status, provider, progress, conflicts
 |       +-- defaultPresets.js       # Built-in preset definitions
 +-- utils/
 |   +-- db.js                       # IndexedDB wrapper (SillyCradleDB)
@@ -83,14 +97,16 @@ src/
 |   +-- errors.js                   # Error formatting (JSON extraction from API responses)
 |   +-- logger.js                   # Dev-only logger (debug/info suppressed in prod)
 |   +-- tavoBackupReader.js         # Pure-JS LMDB reader for Isar-based Tavo backups
-+-- views/
-|   +-- ChatView.vue                # Main chat interface
-|   +-- CharacterList.vue           # Character browser
-|   +-- DialogList.vue              # Active chat sessions
-|   +-- PresetView.vue              # Preset editor/selector
-|   +-- ApiView.vue                 # API configuration UI
-|   +-- OnboardingView.vue          # First-run tutorial
-|   +-- PersonasView.vue            # Persona management
+|   +-- vectorMath.js                # Cosine similarity and vector utilities
+|   +-- presetBlockIds.js            # Canonical preset block id constants
++-- views/                           # Note: some are top-level routes (currentView), others are overlay sheets opened imperatively via refs
+|   +-- ChatView.vue                # Main chat interface (route: view-chat)
+|   +-- CharacterList.vue           # Character browser (route: view-characters)
+|   +-- DialogList.vue              # Active chat sessions (route: view-dialogs)
+|   +-- PresetView.vue              # Preset editor — overlay sheet (opened via ref; also hosts "Generation" sub-tab UI)
+|   +-- ApiView.vue                 # API configuration — overlay sheet (opened via ref)
+|   +-- OnboardingView.vue          # First-run tutorial (overlay)
+|   +-- PersonasView.vue            # Persona manager — used as sheet inside MagicDrawer
 |   +-- Menu/
 |       +-- MenuView.vue            # Main menu
 |       +-- AboutView.vue           # About page
@@ -114,6 +130,8 @@ src/
 |   |   +-- AppToast.vue            # Custom in-app toast
 |   |   +-- HelpTip.vue             # Clickable help tip -> opens glossary
 |   |   +-- ShadowContent.vue       # Shadow DOM content renderer (style isolation)
+|   |   +-- ConnectionStatus.vue    # OAuth/API connection status indicator
+|   |   +-- DragDropOverlay.vue     # Drag-and-drop file import overlay
 |   +-- sheets/
 |   |   +-- CharacterCardSheet.vue  # Character detail viewer
 |   |   +-- LorebookSheet.vue       # Lorebook editor
@@ -126,6 +144,8 @@ src/
 |   |   +-- GlossarySheet.vue       # In-app glossary of terms
 |   |   +-- NotificationsSheet.vue  # Notification center
 |   |   +-- ColorPickerSheet.vue    # Color picker for themes
+|   |   +-- SyncSheet.vue           # Cloud sync setup/status UI
+|   |   +-- ConflictSheet.vue       # Sync conflict resolution (keep local vs cloud)
 |   +-- editors/
 |   |   +-- GenericEditor.vue       # Dynamic form editor
 |   |   +-- FullScreenEditor.vue    # Large text editor
@@ -184,6 +204,11 @@ window.addEventListener('navigate-to', (e) => { currentView.value = e.detail; })
 | `open-holocards` | Open holocard viewer |
 | `open-image-viewer` | Open image viewer |
 | `open-onboarding` | Open onboarding tutorial |
+| `trigger-open-image` | Open image viewer with specific source/messageId (detail = { src, messageId? }) |
+| `change-generation-tab` | Switch PresetView sub-tab (detail = 'subview-api' \| 'subview-preset') |
+| `scroll-to-impersonation` | Scroll PresetView to impersonation block |
+| `gl-back` | Glossary view back action |
+| `gl-header-update` | Update glossary header title (detail = { title, showBack? }) |
 
 **Header events:**
 
@@ -198,6 +223,7 @@ window.addEventListener('navigate-to', (e) => { currentView.value = e.detail; })
 | `header-scroll-hidden` | Toggle header visibility on scroll |
 | `header-update-avatar` | Update avatar in header |
 | `header-chat-search` / `header-chat-search-toggle` | Chat search controls |
+| `header-search` | Generic search input value (detail = query) |
 | `header-show-lb-banner` | Show lorebook activation banner |
 
 **Data events:**
@@ -211,6 +237,7 @@ window.addEventListener('navigate-to', (e) => { currentView.value = e.detail; })
 | `settings-changed` | App settings changed |
 | `language-changed` | Language switched |
 | `fs-editor-closed` | Full-screen editor closed |
+| `sync-data-refreshed` | Cloud sync pulled new data (detail = pull result with breakdown) |
 
 **Imperative component access** via template refs:
 ```js
@@ -333,6 +360,35 @@ showToast(text, duration?)  // Show toast with auto-dismiss (default 2500ms)
 toastState                  // reactive: { visible, text, duration }
 ```
 
+### syncState.js
+
+Cloud sync state (Dropbox/Google Drive).
+
+```js
+// Exports:
+syncStatus        // ref: 'idle' | 'syncing' | 'error' | 'conflict'
+syncProvider      // ref: 'dropbox' | 'gdrive' | null
+syncLastError     // ref
+lastSyncTime      // ref (timestamp)
+syncProgress      // reactive: { phase, current, total }
+syncConflicts     // ref: conflict[]
+syncSettings      // reactive: { autoSyncEnabled, autoSyncMessageCount, provider }
+accountInfo       // ref: { name, email, accountId }
+autoSyncEnabled   // computed (get/set, persists)
+autoSyncThreshold // computed (1-50 clamp, persists)
+
+isSyncConfigured, shouldAutoSync, incrementMessageCounter, resetMessageCounter
+setProvider, clearProvider, updateLastSyncTime, setSyncError
+addConflict, removeConflict, clearConflicts
+initSyncState, saveSettings
+
+PROVIDERS         // { DROPBOX: 'dropbox', GDRIVE: 'gdrive' }
+SYNC_STATUS       // { IDLE, SYNCING, ERROR, CONFLICT }
+SYNC_TOKENS_KEY   // 'gz_sync_tokens' (IndexedDB keyvalue key)
+```
+
+Settings persist to localStorage (`gz_sync_settings`). Tokens live in IndexedDB under `gz_sync_tokens` shaped as `{ dropbox: {...}, gdrive: {...} }`.
+
 ---
 
 ## 3. Services
@@ -440,6 +496,25 @@ importSTBackupFromZip(zipFile, onProgress) // Import SillyTavern backup ZIP
 importTavoBackupFromZip(zipFile, onProgress) // Import Tavo backup (LMDB/Isar)
 ```
 
+### syncService.js — Cloud Sync Public API
+
+High-level push/pull/sync entry points. See the dedicated **Cloud Sync** section for the full pipeline.
+
+```js
+fullPush()               // Upload local manifest + changed entities
+fullPull()               // Download manifest; apply changes; raise conflicts
+fullSync()               // fullPush() then fullPull()
+checkSyncReadiness()     // -> { ready, reason? }
+```
+
+### embeddingService.js — Vector Lore Matching
+
+Computes embeddings for lorebook entries + chat history, enabling vector-similarity matching as an alternative to keyword matching. Config lives in `core/config/embeddingSettings.js`. Similarity math in `utils/vectorMath.js`.
+
+### anthropicOAuthService.js — Claude OAuth (brief)
+
+PKCE flow against `claude.ai/oauth/authorize` using the Claude Code CLI client id. Public entry points: `beginAuthorize()`, `completeAuthorize(input, pkce)`, `getValidAccessToken(oauth, presetId, onTokenRefresh)`. Token refresh is deduplicated per preset. (Fuller documentation deferred until the feature stabilizes.)
+
 ---
 
 ## 4. Config System
@@ -496,6 +571,9 @@ setEnterToSubmit(), setHideHelpTips(), setDialogGrouping(), ...
 | `gz_theme_presets` | Theme preset array |
 | `gz_theme_bg` | Background image (data URI) |
 | `gz_theme_font` | Custom font (data URI) |
+| `gz_sync_tokens` | OAuth tokens per provider: `{ dropbox: {...}, gdrive: {...} }` |
+| `gz_sync_manifest_v2` | Last-known local sync manifest |
+| `gz_api_connection_presets` | API connection presets (migrated from localStorage) |
 
 **DB queue pattern** (prevents race conditions):
 ```js
@@ -520,6 +598,11 @@ function queueDbOp(op) {
 | `regex_scripts` | Regex transformation scripts |
 | `gz_persona_connections` | Persona-to-char/chat mappings |
 | `gz_preset_connections` | Preset-to-char/chat mappings |
+| `gz_sync_settings` | Sync auto-sync toggle, threshold, provider |
+| `gz_sync_device_id` | Per-device sync id (for manifest tagging) |
+| `gz_dropbox_pkce_verifier` / `gz_dropbox_pkce_state` | Ephemeral PKCE (cleared after exchange) |
+| `gz_gdrive_pkce_verifier` / `gz_gdrive_pkce_state` | Ephemeral PKCE (cleared after exchange) |
+| `gz_electron_oauth_port` | Local loopback port used by Electron OAuth redirect |
 
 ---
 
@@ -594,30 +677,165 @@ postMessage({ id, success: true, data: { messages, loreEntries, cutoffIndex, sta
 
 ---
 
-## 8. UI Architecture
+## 8. Cloud Sync
+
+Optional, off-by-default sync to Dropbox or Google Drive via OAuth2 PKCE.
+
+### Layers
+
+```
+UI (SyncSheet, ConflictSheet)
+   |
+syncService.js       fullPush / fullPull / fullSync
+   |
+syncEngine.js        Manifest v2 diff, push/pull, conflict detection, apply
+   |
+adapters/*.js        Provider-specific OAuth + HTTP (uniform contract)
+   |
+Dropbox / Google Drive REST APIs
+```
+
+### Role separation
+
+- **`syncEngine`** — the only layer that understands domain entities (characters, personas, chats, lorebooks, etc.). Reads/writes IndexedDB stores and localStorage, builds the manifest, detects conflicts. Does not know which provider is behind the adapter.
+- **`adapter`** — knows nothing about entities. Given a path, it puts or gets bytes. Handles OAuth and provider-specific HTTP quirks. Normalizes responses into one shape so the engine is provider-agnostic.
+- **`syncService`** — orchestration. Picks the active adapter from `syncState`, drives `pushEntities` / `pullEntities`, feeds progress/errors into reactive state, exposes the simple `fullPush/fullPull/fullSync` surface the UI consumes.
+
+Adding a new provider = one new file in `adapters/` implementing the contract. Engine and service untouched.
+
+### Adapter contract
+
+Both `dropboxAdapter.js` and `gdriveAdapter.js` expose the same interface. `gdriveAdapter` normalizes Drive v3 file entries into the Dropbox-shaped `{ '.tag', name, path_display, serverModified, id }` so `syncEngine` can treat them uniformly.
+
+| Export | Purpose |
+|---|---|
+| `connect()` | OAuth2 PKCE. Native → `@capacitor/browser` + `App.appUrlOpen`; web → popup + `postMessage`; Electron → loopback `127.0.0.1:port` (IPC via `oauth-start-server`) |
+| `disconnect()` | Revoke token + clear stored credentials |
+| `isConnected()` | Validate stored token; auto-refresh if expired |
+| `ensureFolder(path)` | Create missing folders recursively under `/Glaze` |
+| `upload(path, data)` | Write file (string or object auto-serialized) |
+| `download(path)` | -> `{ data, metadata }` or `null` |
+| `listFolder(path)` | -> `{ entries, has_more, cursor? }` |
+| `listFolderContinue(cursor)` | Pagination (Dropbox-shaped; Drive is flat-listed so returns empty) |
+| `deleteFile(fileOrPath)` | Accepts string path or entry object (`.path_display` or `.id`) |
+| `getAccountInfo()` | -> `{ name, email, accountId }` |
+
+### Config (env)
+
+```
+VITE_DROPBOX_APP_KEY
+VITE_DROPBOX_REDIRECT_NATIVE   # default: com.hydall.glaze://oauth/dropbox
+VITE_DROPBOX_REDIRECT_WEB      # default: ${origin}/oauth/dropbox/redirect.html
+
+VITE_GDRIVE_CLIENT_ID
+VITE_GDRIVE_CLIENT_SECRET      # optional (desktop/installed app)
+VITE_GDRIVE_REDIRECT_NATIVE    # default: com.hydall.glaze://oauth/gdrive
+VITE_GDRIVE_REDIRECT_WEB       # default: ${origin}/oauth/gdrive/redirect.html
+```
+
+OAuth landing pages for the web flow live in `public/oauth/{dropbox,gdrive}/redirect.html` and relay the auth code back to the opener via `postMessage`.
+
+### syncEngine — manifest v2
+
+Single source of truth at `/Glaze/manifest.json`:
+
+```js
+{
+    version: 2,
+    deviceId,
+    lastSync: <timestamp>,
+    createdAt,
+    entries: {
+        "character:<id>": { type, id, path, updatedAt, hash, deleted },
+        "persona:<id>":   { ... },
+        "chat:<id>":      { ... },
+        "lorebooks:lorebooks":     { ... },
+        "api_presets:api_presets": { ... },
+        "theme_presets:theme_presets": { ... },
+        "local_storage:local_storage": { ... }   // whitelisted keys only
+    }
+}
+```
+
+`hash` is SHA-256 over normalized JSON — enables fast skip when local and cloud are identical.
+
+**Push** (`pushEntities`): for each manifest key, upload when `cloud` is missing, hashes differ, timestamps differ, or delete flag flipped. Finally upload the new manifest.
+
+**Pull** (`pullEntities`): for each key newer in cloud, apply via `applyCloudEntry` (writes to correct IndexedDB store / localStorage). If a key is newer locally than cloud **and** hashes differ, it is raised as a conflict instead of overwritten.
+
+**Conflict resolution**: `syncConflicts` in `syncState` collects the list; `ConflictSheet.vue` presents each one with "keep local" / "keep cloud" choice. `syncEngine.resolveConflict(conflict, choice)` applies it.
+
+**Deletions**: local deletes are marked in IndexedDB via `getSyncDeletedEntries` / `clearSyncDeletedEntry` so they survive until propagated to the cloud manifest.
+
+### Encryption (optional)
+
+`core/services/crypto/syncCrypto.js` — AES-GCM-256 + PBKDF2-SHA256 (600k iterations). Key is derived from a user recovery phrase. When enabled, entity files land as `<id>.enc` with `{ iv, data }` (base64) JSON wrappers; manifest itself is never encrypted.
+
+`keyManager.js` wraps `hasSyncKey()`, `getSyncKey()`, `encryptForSync(data, key)`, `decryptFromSync(encrypted, key)`. `syncEngine.detectEncryptionState()` toggles encrypted mode based on whether a key is provisioned.
+
+### Retry / Queue
+
+`syncQueue.js` — promise-chain queue with exponential backoff (3 retries, 1s base, 30s cap). Non-retryable on 4xx (except 408/429) and AbortError. Exposes `enqueue()`, `pauseQueue()`, `resumeQueue()`, `abortQueue()`, `clearQueue()`.
+
+### Auto-sync
+
+`syncState.shouldAutoSync()` returns true when `autoSyncEnabled` + a provider is connected + message counter since last sync exceeds `autoSyncMessageCount` (default 5, clamped 1–50). Caller (usually chat generation completion) invokes `fullSync()`.
+
+### Key files
+
+- `src/core/services/syncService.js` — public fullPush/fullPull/fullSync
+- `src/core/services/syncEngine.js` — manifest diff/apply, push/pull, conflicts, wipe
+- `src/core/services/syncQueue.js` — retry with backoff
+- `src/core/services/adapters/dropboxAdapter.js` — Dropbox OAuth + Files API
+- `src/core/services/adapters/gdriveAdapter.js` — Google Drive OAuth + Drive v3
+- `src/core/services/crypto/syncCrypto.js` — AES-GCM, PBKDF2
+- `src/core/services/crypto/keyManager.js` — key lifecycle + encrypt/decrypt wrappers
+- `src/core/states/syncState.js` — reactive status, settings, conflicts
+- `src/components/sheets/SyncSheet.vue` — setup / status UI
+- `src/components/sheets/ConflictSheet.vue` — conflict resolution UI
+- `public/oauth/{dropbox,gdrive}/redirect.html` — web OAuth landing pages
+
+---
+
+## 9. UI Architecture
 
 ### View hierarchy (lazy-loaded with defineAsyncComponent)
 
+Top-level routes switched via `currentView` ref in App.vue:
+
 ```
-App.vue (currentView routing)
-+-- DialogList.vue        — active chat sessions list
-+-- CharacterList.vue     — character browser/search
-+-- ChatView.vue          — main chat (messages, input, sheets)
-|   +-- ChatMessage.vue   — message bubble
-|   +-- ChatInput.vue     — text input
-|   +-- MagicDrawer.vue   — side panel
+App.vue (currentView routing — via v-if on currentView)
++-- DialogList.vue         — view-dialogs (active chat sessions)
++-- CharacterList.vue      — view-characters (character browser/search)
++-- MenuView.vue           — view-menu (main menu)
++-- GlossarySheet.vue      — view-glossary (imported as GlossaryView, rendered with :view-mode="true")
++-- ThemeSettingsView.vue  — view-theme-settings
++-- SettingsView.vue       — view-settings
++-- ChatView.vue           — view-chat (messages, input, host for ApiView/PresetView overlays and chat-scoped sheets)
+|   +-- ChatMessage.vue    — message bubble
+|   +-- ChatInput.vue      — text input
+|   +-- MagicDrawer.vue    — side panel (hosts PersonasSheet/PersonasView.vue and magic buttons)
 |   +-- [Sheet components] — context-specific modals
-+-- PresetView.vue        — preset editor
-+-- ApiView.vue           — API configuration
-+-- PersonasView.vue      — persona management
-+-- OnboardingView.vue    — first-run tutorial
-+-- Menu/
-    +-- MenuView.vue      — main menu
-    +-- AboutView.vue     — about page
-    +-- Settings/
-        +-- SettingsView.vue      — app settings (lang, toggles, display)
-        +-- ThemeSettingsView.vue  — theme customization (full engine UI)
++-- GenericEditor          — view-character-edit / view-persona-edit
 ```
+
+Overlay sheets/views rendered once at App.vue level (outside currentView) and shown imperatively via template refs or CustomEvents:
+
+```
+PresetView.vue (ref: presetViewRef)       — global preset manager overlay
+ApiView.vue (ref: apiViewRef)             — global API config overlay
+OnboardingView.vue                        — first-run tutorial
+BottomSheet (global modal system)
+ConnectionsSheet, LorebookSheet, BackupSheet, NotificationsSheet
+SyncSheet, ConflictSheet                  — cloud sync
+FullScreenEditor                          — large text input
+HoloCardViewer, ImageViewer               — media overlays
+AppToast                                  — transient toast
+```
+
+**Note on `view-generation`**: this id is dispatched via `navigate-to` but does NOT route a top-level view. It is consumed by `AppHeader.vue` to flip header state into a two-tab mode (`subview-api` / `subview-preset`), used while the PresetView/ApiView overlays are open. Use `change-generation-tab` to switch between the sub-tabs.
+
+**GlossarySheet dual role**: the same component is both a sheet (via `open-glossary` event, shown inside ChatView) and a full view (imported in App.vue as `GlossaryView` with `:view-mode="true"`, routed via `navigate-to view-glossary`).
 
 ### Sheet components
 
@@ -666,7 +884,7 @@ showToast('Saved!', 2000);
 
 ---
 
-## 9. Capacitor Plugins & Platform Behavior
+## 10. Capacitor Plugins & Platform Behavior
 
 **App ID:** `com.hydall.glaze`
 
@@ -688,6 +906,8 @@ showToast('Saved!', 2000);
 | Background Mode | `@anuradev/capacitor-background-mode` | Keep app alive in background |
 | Safe Area | `@capacitor-community/safe-area` | Safe area insets |
 
+Non-Capacitor deps worth noting: `@scure/bip39` (sync recovery phrase), `js-sha256` (PKCE code challenge).
+
 ### `@capacitor/browser` details
 
 Opens system browser (SFSafariViewController on iOS, Chrome Custom Tabs on Android).
@@ -695,7 +915,7 @@ Used via `Browser.open({ url })` in AboutView and PresetView for external links.
 
 **Limitations:** No URL change monitoring, no navigation interception. Cannot be used to intercept OAuth callback URLs. Events: `browserPageLoaded` (no URL info), `browserFinished` (browser closed).
 
-**No InAppBrowser plugin installed.** No community WebView plugin with URL interception capability is present.
+OAuth flows rely on `App.appUrlOpen` deep links (native) / `postMessage` from our redirect landing page (web) — this works for providers whose `redirect_uri` we control (Dropbox, Google Drive). For Anthropic, `redirect_uri` is fixed to `console.anthropic.com/oauth/code/callback`, so the flow falls back to manual code paste.
 
 ### Platform-specific behavior
 
@@ -711,7 +931,7 @@ Used via `Browser.open({ url })` in AboutView and PresetView for external links.
 
 ---
 
-## 10. Key Design Patterns
+## 11. Key Design Patterns
 
 **Reactive state export** — modules export raw refs, imported directly:
 ```js
@@ -748,7 +968,7 @@ function processPromptAsync(payload) {
 
 ---
 
-## 11. Initialization Sequence (App.vue onMounted)
+## 12. Initialization Sequence (App.vue onMounted)
 
 ```
 1.  migrateScToGz()              — localStorage key migration (sc_ -> gz_)
@@ -757,7 +977,8 @@ function processPromptAsync(payload) {
 4.  Promise.all([
       initLorebookState(),       — Load lorebooks from IndexedDB
       initPresetState(),         — Load presets from localStorage
-      loadPersonas()             — Load personas from IndexedDB
+      loadPersonas(),            — Load personas from IndexedDB
+      initSyncState()            — Load sync settings + validate stored OAuth tokens
     ])
 5.  startTracking()              — Time tracking
 6.  UI inits (ripple, theme toggle, header dropdown, back button, viewport fix)
@@ -772,7 +993,7 @@ function processPromptAsync(payload) {
 
 ---
 
-## 12. Adding New Features
+## 13. Adding New Features
 
 **New view:**
 1. Create `src/views/MyView.vue` (Composition API, `<script setup>`)

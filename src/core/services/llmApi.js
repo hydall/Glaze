@@ -6,7 +6,8 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { logger } from '../../utils/logger.js';
 import { convertToAnthropicBody, buildAnthropicHeaders, parseAnthropicSSE, parseAnthropicResponse } from './anthropicFormat.js';
-import { getValidAccessToken } from './oauthService.js';
+import { getValidAccessToken } from './anthropicOAuthService.js';
+import { ANTHROPIC_API_URL } from '@/core/config/APISettings.js';
 
 export async function executeRequest({
     apiUrl,
@@ -83,7 +84,7 @@ export async function executeRequest({
             apiKey,
             accessToken
         });
-        requestUrl = 'https://api.anthropic.com/v1/messages';
+        requestUrl = `${ANTHROPIC_API_URL}/messages`;
     } else {
         headers = { 'Content-Type': 'application/json' };
         if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -93,6 +94,23 @@ export async function executeRequest({
     let finalRequestBody;
     if (apiType === 'anthropic') {
         finalRequestBody = convertToAnthropicBody(requestBody, { requestReasoning });
+
+        if (authType === 'oauth') {
+            const systemPrompt = {
+                type: 'text',
+                text: 'You are Claude Code, Anthropic\'s official CLI for Claude.'
+            };
+
+            if (finalRequestBody.system) {
+                if (Array.isArray(finalRequestBody.system)) {
+                    finalRequestBody.system.unshift(systemPrompt);
+                } else {
+                    finalRequestBody.system = [systemPrompt, finalRequestBody.system];
+                }
+            } else {
+                finalRequestBody.system = [systemPrompt];
+            }
+        }
     } else {
         finalRequestBody = requestBody;
     }
@@ -325,7 +343,7 @@ export async function executeRequest({
                             const delta = json.choices[0].delta;
                             if (delta && (delta.content || delta.reasoning_content)) {
                                 const content = delta.content || "";
-                                const reasoning = delta.reasoning_content || null;
+                                const reasoning = (requestReasoning && delta.reasoning_content) || null;
 
                                 if (content) logger.debug(content);
 

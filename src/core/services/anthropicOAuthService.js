@@ -1,10 +1,13 @@
-import { InAppBrowser } from '@capgo/inappbrowser';
+import { Capacitor } from '@capacitor/core';
+import { sha256 } from 'js-sha256';
 
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const AUTHORIZE_URL = 'https://claude.ai/oauth/authorize';
-const TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+const TOKEN_URL = Capacitor.isNativePlatform()
+    ? 'https://console.anthropic.com/v1/oauth/token'
+    : '/anthropic/oauth/token';
 const REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
-const SCOPE = 'org:create_api_key user:profile user:inference';
+const SCOPE = 'user:profile user:inference user:sessions:claude_code';
 
 // Buffer in milliseconds before expiry to trigger proactive refresh
 const EXPIRY_BUFFER_MS = 60000;
@@ -19,24 +22,22 @@ function base64url(bytes) {
         .replace(/=/g, '');
 }
 
-export async function generatePKCE() {
+function generatePKCE() {
     const verifierBytes = new Uint8Array(32);
     crypto.getRandomValues(verifierBytes);
     const code_verifier = base64url(verifierBytes);
 
-    const encoder = new TextEncoder();
-    const data = encoder.encode(code_verifier);
-    const digest = await crypto.subtle.digest('SHA-256', data);
+    const digest = sha256.arrayBuffer(code_verifier);
     const code_challenge = base64url(new Uint8Array(digest));
 
-    const stateBytes = new Uint8Array(16);
+    const stateBytes = new Uint8Array(32);
     crypto.getRandomValues(stateBytes);
     const state = base64url(stateBytes);
 
     return { code_verifier, code_challenge, state };
 }
 
-export function buildAuthorizationURL(pkce) {
+function buildAuthorizationURL(pkce) {
     const params = new URLSearchParams({
         client_id: CLIENT_ID,
         response_type: 'code',
@@ -50,7 +51,31 @@ export function buildAuthorizationURL(pkce) {
     return `${AUTHORIZE_URL}?${params.toString().replace(/\+/g, '%20')}`;
 }
 
-export async function exchangeCodeForTokens(code, codeVerifier, state) {
+// Parse a pasted callback value. Accepts either the full callback URL
+// (https://console.anthropic.com/oauth/code/callback?code=...&state=...)
+// or the raw authorization code shown on the callback page.
+// Manual paste is under direct user control, so state validation is skipped —
+// there is no CSRF surface when the user copies the code by hand.
+function parseCallbackInput(input) {
+    const trimmed = input.trim();
+    let code = null;
+
+    if (/^https?:\/\//i.test(trimmed)) {
+        code = new URL(trimmed).searchParams.get('code');
+    } else {
+        // Raw paste. Claude Code's CLI flow displays the code as `code#state`.
+        code = trimmed.split('#')[0] || null;
+    }
+
+    // Defensive: the `code` value may embed `#state` even when pasted via URL.
+    if (code && code.includes('#')) {
+        code = code.split('#')[0] || null;
+    }
+
+    return code;
+}
+
+async function exchangeCodeForTokens(code, pkce) {
     const response = await fetch(TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -58,9 +83,9 @@ export async function exchangeCodeForTokens(code, codeVerifier, state) {
             grant_type: 'authorization_code',
             client_id: CLIENT_ID,
             code,
-            code_verifier: codeVerifier,
+            code_verifier: pkce.code_verifier,
             redirect_uri: REDIRECT_URI,
-            state
+            state: pkce.state
         })
     });
 
@@ -101,6 +126,34 @@ async function refreshAccessToken(refreshToken) {
     };
 }
 
+// Public API -----------------------------------------------------------------
+
+/**
+ * Begin an authorization attempt. Generates a fresh PKCE pair and builds the
+ * authorize URL. Opening the URL in a browser is the caller's responsibility
+ * (native: Capacitor Browser, web: window.open or copyable link).
+ *
+ * The caller must keep the returned `pkce` around until the user pastes the
+ * code back and calls `completeAuthorize(code, pkce)`.
+ */
+export function beginAuthorize() {
+    const pkce = generatePKCE();
+    const authUrl = buildAuthorizationURL(pkce);
+    return { pkce, authUrl };
+}
+
+/**
+ * Complete an authorization attempt. `input` is either the full callback URL
+ * or the raw code (optionally with `#state` suffix) the user copied from the
+ * callback page. `pkce` must be the object returned by `beginAuthorize`.
+ */
+export async function completeAuthorize(input, pkce) {
+    const code = parseCallbackInput(input);
+    if (!code) throw new Error('No authorization code found');
+    if (!pkce) throw new Error('Missing PKCE state — tap Authorize first');
+    return exchangeCodeForTokens(code, pkce);
+}
+
 export async function getValidAccessToken(oauth, presetId, onTokenRefresh) {
     if (!oauth) {
         throw new Error('Not authenticated');
@@ -130,73 +183,7 @@ export async function getValidAccessToken(oauth, presetId, onTokenRefresh) {
     return refreshPromise;
 }
 
-export async function startOAuthFlow() {
-    const pkce = await generatePKCE();
-    const authUrl = buildAuthorizationURL(pkce);
-
-    return new Promise((resolve, reject) => {
-        let settled = false;
-
-        const cleanup = () => {
-            InAppBrowser.removeAllListeners();
-        };
-
-        InAppBrowser.addListener('urlChangeEvent', async ({ url }) => {
-            if (settled) return;
-            if (!url.includes('console.anthropic.com/oauth/code/callback')) return;
-
-            settled = true;
-            cleanup();
-
-            try {
-                await InAppBrowser.close();
-            } catch (e) {
-                console.warn('Failed to close InAppBrowser:', e);
-            }
-
-            try {
-                const params = new URL(url).searchParams;
-                const code = params.get('code');
-                const state = params.get('state');
-
-                if (!code) {
-                    reject(new Error('No authorization code in callback URL'));
-                    return;
-                }
-
-                if (state !== pkce.state) {
-                    reject(new Error('OAuth state mismatch'));
-                    return;
-                }
-
-                const tokens = await exchangeCodeForTokens(code, pkce.code_verifier, state);
-                resolve(tokens);
-            } catch (e) {
-                reject(e);
-            }
-        });
-
-        InAppBrowser.addListener('browserFinished', () => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            reject(new Error('Authorization cancelled by user'));
-        });
-
-        InAppBrowser.openWebView({
-            url: authUrl,
-            title: 'Authorize with Claude',
-            isPresentAfterPageLoad: true
-        }).catch(e => {
-            if (!settled) {
-                settled = true;
-                cleanup();
-                reject(e);
-            }
-        });
-    });
-}
-
-export function _resetRefreshPromises() {
-    refreshPromises.clear();
-}
+// Test-only exports. Not part of the public API — do not import from production code.
+export const __testing = {
+    resetRefreshPromises: () => refreshPromises.clear()
+};

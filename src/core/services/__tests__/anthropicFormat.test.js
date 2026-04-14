@@ -73,7 +73,7 @@ describe('convertToAnthropicBody', () => {
 
     // --- Message ordering ---
 
-    it('prepends empty user message if first non-system message is assistant', () => {
+    it('keeps assistant as the first message when no user message precedes it', () => {
         const body = {
             ...baseBody,
             messages: [
@@ -82,8 +82,29 @@ describe('convertToAnthropicBody', () => {
             ],
         };
         const result = convertToAnthropicBody(body);
-        expect(result.messages[0]).toEqual({ role: 'user', content: '' });
-        expect(result.messages[1].role).toBe('assistant');
+        expect(result.messages).toEqual([{ role: 'assistant', content: 'Hello!' }]);
+    });
+
+    it('preserves assistant-first prefill sequence without a synthetic user turn', () => {
+        const body = {
+            ...baseBody,
+            messages: [
+                { role: 'assistant', content: 'Hello!' },
+                { role: 'user', content: 'Continue.' },
+            ],
+        };
+        const result = convertToAnthropicBody(body);
+        expect(result.messages).toEqual([
+            { role: 'assistant', content: 'Hello!' },
+            { role: 'user', content: 'Continue.' },
+        ]);
+    });
+
+    it('passes through an empty messages array untouched', () => {
+        const body = { ...baseBody, messages: [] };
+        const result = convertToAnthropicBody(body);
+        expect(result.messages).toEqual([]);
+        expect(result.system).toBeUndefined();
     });
 
     it('merges consecutive same-role messages joining with \\n\\n', () => {
@@ -100,13 +121,14 @@ describe('convertToAnthropicBody', () => {
         expect(result.messages[1]).toEqual({ role: 'assistant', content: 'Reply.' });
     });
 
-    it('handles empty messages array after system extraction by adding empty user message', () => {
+    it('produces an empty messages array when only system messages are provided', () => {
         const body = {
             ...baseBody,
             messages: [{ role: 'system', content: 'Sys only.' }],
         };
         const result = convertToAnthropicBody(body);
-        expect(result.messages).toEqual([{ role: 'user', content: '' }]);
+        expect(result.messages).toEqual([]);
+        expect(result.system).toEqual([{ type: 'text', text: 'Sys only.' }]);
     });
 
     // --- Sampling parameters ---
@@ -260,7 +282,7 @@ describe('buildAnthropicHeaders', () => {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer tok-abc123',
             'anthropic-version': '2023-06-01',
-            'anthropic-beta': 'oauth-2025-04-20',
+            'anthropic-beta': 'claude-code-20250219,files-api-2025-04-14,oauth-2025-04-20,interleaved-thinking-2025-05-14',
         });
     });
 });

@@ -6,14 +6,12 @@ export const PROVIDER_BLACKLIST = [
     { name: 'MegaLLM', match: 'megallm' }
 ];
 
-export const ANTHROPIC_MODELS = [
-    'claude-opus-4-5',
-    'claude-sonnet-4-5',
-    'claude-haiku-4-5',
-];
-
-const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1';
-export { ANTHROPIC_API_URL };
+// On web, browser CORS is blocked at the organization level even with the
+// dangerous-direct-browser-access header, so route through the vite dev proxy
+// (see vite.config.js). On native, CapacitorHttp bypasses CORS → hit direct.
+export const ANTHROPIC_API_URL = Capacitor.isNativePlatform()
+    ? 'https://api.anthropic.com/v1'
+    : '/anthropic/v1';
 
 export function getBlacklistedProvider(url) {
     if (!url) return null;
@@ -75,35 +73,39 @@ export async function fetchRemoteModels(endpoint, key, apiType, authType, oauth)
     if (!endpoint && apiType !== 'anthropic') throw new Error("No endpoint");
 
     if (apiType === 'anthropic') {
-        const headers = { 'anthropic-version': '2023-06-01' };
-        if (authType === 'oauth' && oauth) {
+        const headers = {
+            'anthropic-version': '2023-06-01'
+        };
+        if (authType === 'oauth' && oauth?.access_token) {
             headers['Authorization'] = `Bearer ${oauth.access_token}`;
             headers['anthropic-beta'] = 'oauth-2025-04-20';
         } else if (key) {
             headers['x-api-key'] = key;
         } else {
-            return [...ANTHROPIC_MODELS];
+            throw new Error('Not authenticated');
         }
 
-        try {
-            let data;
-            const url = `${ANTHROPIC_API_URL}/models`;
-            if (Capacitor.isNativePlatform()) {
-                const response = await CapacitorHttp.get({ url, headers });
-                if (response.status >= 400) throw new Error(`HTTP ${response.status}`);
-                data = response.data;
-            } else {
-                const res = await fetch(url, { headers });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                data = await res.json();
+        let data;
+        const url = `${ANTHROPIC_API_URL}/models`;
+        if (Capacitor.isNativePlatform()) {
+            const response = await CapacitorHttp.get({ url, headers });
+            if (response.status >= 400) {
+                const body = typeof response.data === 'object' ? JSON.stringify(response.data) : String(response.data || '');
+                throw new Error(`HTTP ${response.status} ${body}`);
             }
-            if (data.data && Array.isArray(data.data)) {
-                return data.data.map(m => m.id).sort();
+            data = response.data;
+        } else {
+            const res = await fetch(url, { headers });
+            if (!res.ok) {
+                const body = await res.text().catch(() => '');
+                throw new Error(`HTTP ${res.status} ${body}`);
             }
-            return [...ANTHROPIC_MODELS];
-        } catch {
-            return [...ANTHROPIC_MODELS];
+            data = await res.json();
         }
+        if (data?.data && Array.isArray(data.data)) {
+            return data.data.map(m => m.id).sort();
+        }
+        throw new Error('Unexpected /v1/models response shape');
     }
 
     if (!endpoint) throw new Error("No endpoint");

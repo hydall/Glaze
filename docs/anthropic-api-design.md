@@ -249,15 +249,22 @@ redirect_uri:   https://console.anthropic.com/oauth/code/callback
 scope:          org:create_api_key user:profile user:inference
 ```
 
+### Browser context
+
+Authorize URLs are launched in `@capacitor/browser`, which uses **Chrome Custom Tabs** on Android and **SFSafariViewController** on iOS — in-process system browsers that share cookies and user-agent with real Chrome/Safari, so Google treats them as trusted during the Claude.ai login step.
+
+Trade-off: the host app cannot read the URL of pages loaded inside them (hard platform security boundary). To work around this, the authorize URL includes `code=true`, which makes Claude.ai render the authorization code on the callback page itself (same UX as Claude Code CLI). The user copies the code and pastes it back. Both native and web hosts use the same paste-based flow; only the mechanism that opens the authorize URL differs.
+
 ### Flow
 
 1. **User taps "Authorize"** in ApiView
-2. **Generate PKCE** parameters:
+2. **Generate PKCE** parameters (synchronous):
    - `code_verifier` = 32 random bytes → base64url
-   - `code_challenge` = SHA-256(code_verifier) → base64url
+   - `code_challenge` = SHA-256(code_verifier) → base64url (via `js-sha256`,
+     not Web Crypto — `crypto.subtle` is unavailable over plain `http://` or
+     `file://`, which the Android WebView uses for locally bundled assets)
    - `state` = 32 random bytes → base64url
-3. **Store** `{ code_verifier, state, created_at }` in memory (temporary, ~10 min TTL)
-4. **Build authorization URL:**
+3. **Build authorization URL**:
    ```
    https://claude.ai/oauth/authorize?
      code=true
@@ -269,27 +276,32 @@ scope:          org:create_api_key user:profile user:inference
      &code_challenge_method=S256
      &state={state}
    ```
-5. **Register listener first**, then **open InAppBrowser** (WebView).
-   Note: verify during implementation that `urlChangeEvent` fires on HTTP redirects.
-   If not, alternatives: `browserPageLoaded` event, or polling URL.
-   ```js
-   import { InAppBrowser } from '@capgo/inappbrowser';
-
-   // Register listener BEFORE opening WebView to avoid missing the redirect
-   InAppBrowser.addListener('urlChangeEvent', async ({ url }) => {
-       if (url.includes('console.anthropic.com/oauth/code/callback')) {
-           const params = new URL(url).searchParams;
-           const code = params.get('code');
-           const state = params.get('state');
-           await InAppBrowser.close();
-           // Validate state, exchange code for tokens
-       }
-   });
-
-   await InAppBrowser.openWebView({ url: authorizationUrl });
-   ```
-7. **Validate state** against stored PKCE data
-8. **Exchange code for tokens:**
+4. **Open the authorize URL** depending on platform:
+   - **Native (Android/iOS):** auto-launch Custom Tabs / SFSafariViewController.
+     ```js
+     import { Browser } from '@capacitor/browser';
+     await Browser.open({ url: authorizationUrl, presentationStyle: 'popover' });
+     ```
+   - **Web / Electron:** do **not** auto-open (popups trigger the same captcha
+     wall as WebViews). Instead, render the authorize URL as a copyable text
+     field with a Copy button. The user opens it manually in their own Chrome /
+     Firefox / Safari.
+5. **User authorizes in the system browser.** After the redirect, the callback
+   page at `https://console.anthropic.com/oauth/code/callback` displays the
+   authorization code (because of `code=true`). Claude.ai's CLI-style callback
+   renders the value as `{code}#{state}`.
+6. **User copies the displayed value** and pastes it into the paste field in
+   ApiView. On native they dismiss Custom Tabs first (back/X) to return to the
+   app; on web they just switch back to the app tab.
+7. **Parse the pasted value.** Accepted formats:
+   - Full callback URL (`https://.../callback?code=X&state=Y`)
+   - Raw `code#state` (Claude.ai's CLI format)
+   - Bare code with no state (fallback; state check is skipped — manual paste
+     has no CSRF surface)
+8. **Validate state** when it was provided. If the paste included a state,
+   it must match the PKCE state we generated. If not provided, skip — the user
+   is visibly in control.
+9. **Exchange code for tokens:**
    ```
    POST https://console.anthropic.com/v1/oauth/token
    Content-Type: application/json
@@ -304,16 +316,46 @@ scope:          org:create_api_key user:profile user:inference
    }
    ```
    Response: `{ access_token, refresh_token, expires_in }`
-9. **Save tokens** into the preset's `oauth` field:
-   ```js
-   preset.oauth = {
-       access_token: '...',
-       refresh_token: '...',
-       expires_at: Date.now() + expires_in * 1000
-   };
-   saveApiPresets(apiPresets);
-   ```
-10. **Update UI** — show "Authorized" status with expiry time
+10. **Save tokens** into the preset's `oauth` field:
+    ```js
+    preset.oauth = {
+        access_token: '...',
+        refresh_token: '...',
+        expires_at: Date.now() + expires_in * 1000
+    };
+    saveApiPresets(apiPresets);
+    ```
+11. **Close the system browser** (native only; no-op on web) and update UI to
+    show "Authorized" with expiry time.
+
+### Two-step API
+
+The flow is split into two pure functions — no flow object, no promises, no
+state machine:
+
+```js
+beginAuthorize() → { pkce, authUrl }
+    // Generates a fresh PKCE pair and builds the authorize URL.
+    // On native, also opens the system browser. On web, the caller shows
+    // authUrl in a copyable field.
+
+completeAuthorize(input, pkce) → Promise<tokens>
+    // input: raw code, code#state, or full callback URL.
+    // pkce: the object returned by beginAuthorize.
+    // Parses the code and POSTs to the token endpoint.
+```
+
+The caller keeps `pending = { pkce, authUrl }` as a ref. Tapping Authorize
+overwrites it with a fresh attempt; submitting consumes it; logging out
+clears it. There is no re-entry guard — a second tap simply regenerates
+PKCE and invalidates the first attempt, which is the correct behaviour for
+a user who abandoned the first browser window.
+
+There is also no OAuth `state` validation on submit. The `state` parameter
+exists to protect redirect-based flows from CSRF, but manual paste is under
+direct user control — there is no attacker-controlled redirect to defend
+against. The parameter is still generated and sent (the authorize server
+requires it) but not checked on the way back.
 
 ### Token refresh
 
@@ -385,6 +427,15 @@ If Anthropic API returns 401:
 
 Set `preset.oauth = null`, save presets. Update UI to show "Not authorized" state.
 
+### Historical note: embedded WebView was rejected
+
+An earlier prototype used `@capgo/inappbrowser` (full embedded WebView with `urlChangeEvent`) to capture the callback URL silently. Abandoned because:
+
+1. **Google blocks OAuth in embedded WebViews** ([2016 policy](https://developers.googleblog.com/2016/08/modernizing-oauth-interactions-in-native-apps.html)) — `accounts.google.com` refuses to render the login form in detected embedded user-agents. Since Claude.ai's primary login is Google Sign-In, this broke auth for most users.
+2. **Web fallback is a no-op** — `@capgo/inappbrowser`'s web implementation is a stub; `openWebView()` resolves immediately and never emits `urlChangeEvent`. No dev/Electron test path.
+
+The current paste-based flow (`@capacitor/browser` + `code=true`) sidesteps both issues.
+
 ---
 
 ## 6. New Module: oauthService.js
@@ -392,30 +443,40 @@ Set `preset.oauth = null`, save presets. Update UI to show "Not authorized" stat
 New service at `src/core/services/oauthService.js`. Encapsulates all OAuth logic:
 
 ```js
-// Exports:
-generatePKCE()                    // Returns { code_verifier, code_challenge, state }
-buildAuthorizationURL(pkce)       // Returns URL string
-startOAuthFlow()                  // Opens InAppBrowser, returns Promise<tokens>
-exchangeCodeForTokens(code, code_verifier, state)  // POST to token endpoint
-getValidAccessToken()             // Returns valid token, refreshing if needed
-isAuthenticated()                 // Check if tokens exist
-getTokenExpiration()              // Returns Date or null
-logout()                          // Delete tokens
+// Public exports:
+beginAuthorize()                  // Returns { pkce, authUrl }. Opens system browser on native.
+completeAuthorize(input, pkce)    // Parses input (code / code#state / full URL),
+                                  // exchanges for tokens. Returns Promise<tokens>.
+getValidAccessToken(oauth, presetId, onTokenRefresh)  // Returns valid token, refreshing if needed
 ```
+
+`generatePKCE`, `buildAuthorizationURL`, and the token-exchange/refresh
+helpers are kept as module-internal functions — there are no other callers.
 
 ### PKCE implementation
 
-Uses Web Crypto API (available in browser and Capacitor WebView):
+Uses `js-sha256` for the digest instead of `crypto.subtle.digest`. Reason:
+`crypto.subtle` is only exposed in secure contexts (HTTPS, `localhost`, or
+isolated extension contexts). Capacitor on Android bundles assets under
+`http://localhost` via a custom scheme handler — in practice `crypto.subtle`
+is available there, but it is **not** available when the app is loaded from
+`file://` or when built for Electron without a secure loader. Using the
+userland `js-sha256` package removes the platform dependency and lets
+`generatePKCE()` stay synchronous (it has no `await`).
 
 ```js
-async function generatePKCE() {
-    const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+import { sha256 } from 'js-sha256';
+
+function generatePKCE() {
+    const verifierBytes = new Uint8Array(32);
+    crypto.getRandomValues(verifierBytes);
     const code_verifier = base64url(verifierBytes);
 
-    const challengeBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code_verifier));
-    const code_challenge = base64url(new Uint8Array(challengeBuffer));
+    const digest = sha256.arrayBuffer(code_verifier);
+    const code_challenge = base64url(new Uint8Array(digest));
 
-    const stateBytes = crypto.getRandomValues(new Uint8Array(32));
+    const stateBytes = new Uint8Array(32);
+    crypto.getRandomValues(stateBytes);
     const state = base64url(stateBytes);
 
     return { code_verifier, code_challenge, state };
@@ -426,6 +487,20 @@ function base64url(bytes) {
         .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 ```
+
+### Manual-paste flow implementation
+
+The split is entirely in the caller's hands:
+
+- `beginAuthorize()` generates PKCE, builds the URL, and on native calls
+  `Browser.open({ url: authUrl })`. It returns immediately — no waiting, no
+  listeners, no timeout. On web it just returns the URL and lets the view
+  render a copy field.
+- `completeAuthorize(input, pkce)` strips `#state` and query params to
+  recover the raw code, then POSTs to the token endpoint. It never touches
+  the browser — closing the system tab is the user's job (swipe back on
+  Custom Tabs, close tab on desktop). This keeps the service stateless: no
+  `settled` flag, no `Browser.close`, no timeout, no ownership checks.
 
 ### Token storage
 
@@ -477,6 +552,7 @@ No endpoint field (hardcoded). Model selector shows a predefined list.
 
 ### Anthropic + OAuth
 
+Idle / authorized:
 ```
 Auth:            [▼ OAuth]
 Status:          ● Authorized (expires 15:30)    [Logout]
@@ -485,6 +561,26 @@ Status:          ○ Not authorized                [Authorize]
 Model:           [▼ claude-sonnet-4-20250514]
 ☑ Streaming response
 ```
+
+While authorizing (paste mode):
+```
+Status:          ○ Not authorized                [Cancel]
+
+  [web only]
+  1. Open this link in your browser and authorize:
+  [https://claude.ai/oauth/authorize?...    ]  [Copy]
+
+  [native only]
+  After authorizing, copy the code from the page and paste it here:
+
+  [paste code or callback URL__________________]
+  [Submit]
+```
+
+The paste field is always rendered during `authorizing`. The "open this
+link" block is only rendered when `!Capacitor.isNativePlatform()`, because
+on native the system browser is already open and showing the authorize
+page — the URL would be redundant.
 
 ### Auth type switcher
 
@@ -514,8 +610,13 @@ const ANTHROPIC_MODELS = [
 ### New files
 - `src/core/services/oauthService.js` — OAuth PKCE flow, token management
 
-### New dependency
-- `@capgo/inappbrowser` — InAppBrowser with URL monitoring for OAuth callback
+### New dependencies
+- `@capacitor/browser` — system browser (Chrome Custom Tabs on Android,
+  SFSafariViewController on iOS). Launches the authorize URL in a trusted
+  context that Google OAuth accepts. See section 5 for why an embedded
+  WebView (`@capgo/inappbrowser`) was rejected.
+- `js-sha256` — synchronous SHA-256 for PKCE. Removes the dependency on
+  `crypto.subtle`, which is gated on secure contexts.
 
 ### Modified files
 
@@ -524,8 +625,8 @@ const ANTHROPIC_MODELS = [
 | `src/core/config/APISettings.js` | Add `apiType`, `authType` to `getApiConfig()` return. Add `apiType`, `authType` to default preset structure. |
 | `src/core/services/llmApi.js` | Accept `apiType`, `authType`. When anthropic: build Anthropic headers, convert request body, parse Anthropic SSE format, handle 401 retry with OAuth refresh. |
 | `src/core/services/generationService.js` | Pass `apiType`, `authType` through to `executeRequest()`. For anthropic, skip OpenRouter/Gemini-specific reasoning config. |
-| `src/views/ApiView.vue` | Add API type dropdown. Conditionally render fields based on `apiType`/`authType`. Add OAuth authorize button, status display, logout. Add Anthropic model selector. |
-| `package.json` | Add `@capgo/inappbrowser` dependency. |
+| `src/views/ApiView.vue` | Add API type dropdown. Conditionally render fields based on `apiType`/`authType`. Add OAuth authorize button, status display, logout. Add paste-mode UI (copyable authorize URL on web, paste field on both). Add Anthropic model selector. |
+| `package.json` | Add `@capacitor/browser` and `js-sha256` dependencies. |
 | `capacitor.config.json` | No changes expected (plugin auto-registers). |
 
 ### Unchanged files

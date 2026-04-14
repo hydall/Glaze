@@ -412,22 +412,6 @@ export async function generateChatResponse({
         requestBody.stop = [stopString];
     }
 
-    // Provider-specific reasoning config (skip for Anthropic — handled natively in llmApi)
-    if (apiConfig.apiType !== 'anthropic') {
-        if (apiUrl.includes('generativelanguage.googleapis.com')) {
-            if (requestReasoning) {
-                requestBody.extra_body = {
-                    google: {
-                        thinking_config: {
-                            include_thoughts: true
-                        }
-                    }
-                };
-            }
-        } else {
-            requestBody.include_reasoning = requestReasoning; // OpenRouter/DeepSeek specific
-        }
-    }
 
     // Save for preview
     lastPrompt = JSON.parse(JSON.stringify(requestBody));
@@ -658,8 +642,7 @@ export async function generateSummary({ history, prompt, controller, apiConfigOv
         requestBody: {
             model,
             messages: [{ role: 'user', content: finalPrompt }],
-            temperature: temp,
-            max_tokens: apiConfig.maxTokens
+            temperature: temp
         },
         controller,
         callbacks: {
@@ -1051,9 +1034,13 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
     };
     const { apiKey, apiUrl, model, temp } = effectiveConfig;
 
-    if (!apiUrl || !model) {
+    if ((effectiveConfig.apiType !== 'anthropic' && !apiUrl) || !model) {
         throw new Error("API Not Configured");
     }
+
+    const apiPresets = await getApiPresets();
+    const activeApiPresetId = localStorage.getItem('gz_active_api_preset_id') || 'default';
+    const activeApiPreset = apiPresets.find(p => p.id === activeApiPresetId) || apiPresets[0];
 
     const defaultPrompt = [
         'Create exactly one concise long-term memory entry from the following roleplay segment.',
@@ -1080,6 +1067,15 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
     await executeRequest({
         apiUrl,
         apiKey,
+        apiType: effectiveConfig.apiType || 'openai',
+        authType: effectiveConfig.authType || 'key',
+        oauth: activeApiPreset?.oauth || null,
+        onTokenRefresh: (newOAuth) => {
+            if (activeApiPreset) {
+                activeApiPreset.oauth = newOAuth;
+                saveApiPresets(apiPresets);
+            }
+        },
         requestBody: {
             model,
             messages: [{ role: 'user', content: finalPrompt }],

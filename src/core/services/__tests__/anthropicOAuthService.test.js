@@ -1,87 +1,81 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { generatePKCE, buildAuthorizationURL, getValidAccessToken, _resetRefreshPromises } from '../oauthService.js';
+import { getValidAccessToken, beginAuthorize, __testing } from '../anthropicOAuthService.js';
+
+const { resetRefreshPromises } = __testing;
 
 // ---------------------------------------------------------------------------
-// generatePKCE
+// beginAuthorize — covers PKCE generation and authorize URL building
 // ---------------------------------------------------------------------------
 
-describe('generatePKCE', () => {
-    it('generates code_verifier, code_challenge, and state (all truthy)', async () => {
-        const pkce = await generatePKCE();
-        expect(pkce.code_verifier).toBeTruthy();
-        expect(pkce.code_challenge).toBeTruthy();
-        expect(pkce.state).toBeTruthy();
+describe('beginAuthorize', () => {
+    describe('pkce', () => {
+        it('generates code_verifier, code_challenge, and state (all truthy)', () => {
+            const { pkce } = beginAuthorize();
+            expect(pkce.code_verifier).toBeTruthy();
+            expect(pkce.code_challenge).toBeTruthy();
+            expect(pkce.state).toBeTruthy();
+        });
+
+        it('all values are base64url-encoded', () => {
+            const { pkce } = beginAuthorize();
+            const base64url = /^[A-Za-z0-9_-]+$/;
+            expect(pkce.code_verifier).toMatch(base64url);
+            expect(pkce.code_challenge).toMatch(base64url);
+            expect(pkce.state).toMatch(base64url);
+        });
+
+        it('generates different values each call', () => {
+            const a = beginAuthorize().pkce;
+            const b = beginAuthorize().pkce;
+            expect(a.code_verifier).not.toBe(b.code_verifier);
+            expect(a.code_challenge).not.toBe(b.code_challenge);
+            expect(a.state).not.toBe(b.state);
+        });
     });
 
-    it('all values are base64url-encoded', async () => {
-        const pkce = await generatePKCE();
-        const base64url = /^[A-Za-z0-9_-]+$/;
-        expect(pkce.code_verifier).toMatch(base64url);
-        expect(pkce.code_challenge).toMatch(base64url);
-        expect(pkce.state).toMatch(base64url);
-    });
+    describe('authUrl', () => {
+        it('contains the correct authorize base URL', () => {
+            const { authUrl } = beginAuthorize();
+            expect(authUrl).toContain('https://claude.ai/oauth/authorize');
+        });
 
-    it('generates different values each call', async () => {
-        const pkce1 = await generatePKCE();
-        const pkce2 = await generatePKCE();
-        expect(pkce1.code_verifier).not.toBe(pkce2.code_verifier);
-        expect(pkce1.code_challenge).not.toBe(pkce2.code_challenge);
-        expect(pkce1.state).not.toBe(pkce2.state);
-    });
-});
+        it('contains client_id', () => {
+            const { authUrl } = beginAuthorize();
+            expect(authUrl).toContain('client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e');
+        });
 
-// ---------------------------------------------------------------------------
-// buildAuthorizationURL
-// ---------------------------------------------------------------------------
+        it('contains response_type=code', () => {
+            const { authUrl } = beginAuthorize();
+            expect(authUrl).toContain('response_type=code');
+        });
 
-describe('buildAuthorizationURL', () => {
-    let pkce;
+        it('contains URL-encoded redirect_uri', () => {
+            const { authUrl } = beginAuthorize();
+            expect(authUrl).toContain('redirect_uri=');
+            expect(authUrl).toContain(encodeURIComponent('https://console.anthropic.com/oauth/code/callback'));
+        });
 
-    beforeEach(async () => {
-        pkce = await generatePKCE();
-    });
+        it('contains URL-encoded scope', () => {
+            const { authUrl } = beginAuthorize();
+            expect(authUrl).toContain('scope=');
+            expect(authUrl).toContain(encodeURIComponent('user:profile user:inference user:sessions:claude_code'));
+        });
 
-    it('contains the correct authorize base URL', () => {
-        const url = buildAuthorizationURL(pkce);
-        expect(url).toContain('https://claude.ai/oauth/authorize');
-    });
+        it('contains code_challenge derived from pkce and code_challenge_method=S256', () => {
+            const { pkce, authUrl } = beginAuthorize();
+            expect(authUrl).toContain(`code_challenge=${pkce.code_challenge}`);
+            expect(authUrl).toContain('code_challenge_method=S256');
+        });
 
-    it('contains client_id', () => {
-        const url = buildAuthorizationURL(pkce);
-        expect(url).toContain('client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e');
-    });
+        it('contains state derived from pkce', () => {
+            const { pkce, authUrl } = beginAuthorize();
+            expect(authUrl).toContain(`state=${pkce.state}`);
+        });
 
-    it('contains response_type=code', () => {
-        const url = buildAuthorizationURL(pkce);
-        expect(url).toContain('response_type=code');
-    });
-
-    it('contains URL-encoded redirect_uri', () => {
-        const url = buildAuthorizationURL(pkce);
-        expect(url).toContain('redirect_uri=');
-        expect(url).toContain(encodeURIComponent('https://console.anthropic.com/oauth/code/callback'));
-    });
-
-    it('contains URL-encoded scope', () => {
-        const url = buildAuthorizationURL(pkce);
-        expect(url).toContain('scope=');
-        expect(url).toContain(encodeURIComponent('org:create_api_key user:profile user:inference'));
-    });
-
-    it('contains code_challenge and code_challenge_method=S256', () => {
-        const url = buildAuthorizationURL(pkce);
-        expect(url).toContain(`code_challenge=${pkce.code_challenge}`);
-        expect(url).toContain('code_challenge_method=S256');
-    });
-
-    it('contains state', () => {
-        const url = buildAuthorizationURL(pkce);
-        expect(url).toContain(`state=${pkce.state}`);
-    });
-
-    it('contains code=true', () => {
-        const url = buildAuthorizationURL(pkce);
-        expect(url).toContain('code=true');
+        it('contains code=true', () => {
+            const { authUrl } = beginAuthorize();
+            expect(authUrl).toContain('code=true');
+        });
     });
 });
 
@@ -91,7 +85,7 @@ describe('buildAuthorizationURL', () => {
 
 describe('getValidAccessToken', () => {
     beforeEach(() => {
-        _resetRefreshPromises();
+        resetRefreshPromises();
         global.fetch = vi.fn();
     });
 

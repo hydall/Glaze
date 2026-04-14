@@ -90,6 +90,7 @@ captures/
 !CLAUDE.md
 !CONTRIBUTING.md
 /.claude
+/.serena
 docs/index.html
 /tavo-backup
 /dist_electron
