@@ -12,6 +12,7 @@ import { db } from '@/utils/db.js';
 import { getLastPrompt } from '@/core/services/generationService.js';
 import { getImageGenSettings } from '@/core/services/imageGenService.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
+import { normalizeBlockId } from '@/utils/presetBlockIds.js';
 import { getApiPresets } from '@/core/config/APISettings.js';
 import PersonasSheet from '@/views/PersonasView.vue';
 
@@ -310,18 +311,19 @@ const effectivePersonaName = computed(() => {
 
 const resolveBlockContent = (block, preset, activeChar, persona, history) => {
     if (!block) return '';
-    if (block.id === 'chat_history') {
+    const blockId = normalizeBlockId(block.id);
+    if (blockId === 'chat_history') {
         if (!history || history.length === 0) return '';
         return history.map(m => `${m.role === 'user' ? (persona?.name || 'User') : (activeChar?.name || 'Char')}: ${m.text}`).join('\n');
     }
-    if (block.id === 'authors_note') return activeChar?.authors_note || '';
-    if (block.id === 'summary') return activeChar?.summary || '';
-    if (block.id === 'user_persona') return persona?.prompt || '';
-    if (block.id === 'char_card') return activeChar?.description || activeChar?.desc || '';
-    if (block.id === 'char_personality' || block.id === 'char_persona') return activeChar?.personality || '';
-    if (block.id === 'scenario') return activeChar?.scenario || '';
-    if (block.id === 'example_dialogue') return activeChar?.mes_example || '';
-    if (block.id === 'first_message') return activeChar?.first_mes || '';
+    if (blockId === 'authors_note') return activeChar?.authors_note || '';
+    if (blockId === 'summary') return activeChar?.summary || '';
+    if (blockId === 'user_persona') return persona?.prompt || '';
+    if (blockId === 'char_card') return activeChar?.description || activeChar?.desc || '';
+    if (blockId === 'char_personality' || blockId === 'char_persona') return activeChar?.personality || '';
+    if (blockId === 'scenario') return activeChar?.scenario || '';
+    if (blockId === 'example_dialogue') return activeChar?.mes_example || '';
+    if (blockId === 'first_message') return activeChar?.first_mes || '';
     return block.content || '';
 };
 

@@ -6,6 +6,7 @@ import Editor from '@/components/editors/GenericEditor.vue';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
+import { normalizeBlockId } from '@/utils/presetBlockIds.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { convertSTPreset, convertLatexPreset, exportSTPreset, detectPresetFormat, finalizeImportedPreset, mandatoryBlocks } from '@/core/services/presetImportService.js';
 import { generateSummary } from '@/core/services/generationService.js';
@@ -374,22 +375,23 @@ const activeEditBlock = computed(() => {
 
 const resolveBlockContent = (block) => {
     if (!block) return '';
+    const blockId = normalizeBlockId(block.id);
     
-    if (block.id === 'chat_history') {
+    if (blockId === 'chat_history') {
         if (!props.chatHistory || props.chatHistory.length === 0) return '';
         return props.chatHistory.map(m => `${m.role === 'user' ? (m.persona?.name || 'User') : (props.activeChatChar?.name || 'Char')}: ${m.text}`).join('\n');
     }
     
-    if (block.id === 'guided_generation') return block.content || '[System Note: {{guidance}}]';
-    if (block.id === 'authors_note') return props.activeChatChar?.authors_note || '';
-    if (block.id === 'summary') return props.activeChatChar?.summary || '';
+    if (blockId === 'guided_generation') return block.content || '[System Note: {{guidance}}]';
+    if (blockId === 'authors_note') return props.activeChatChar?.authors_note || '';
+    if (blockId === 'summary') return props.activeChatChar?.summary || '';
     
-    if (block.id === 'user_persona') return effectivePersona.value?.prompt || '';
-    if (block.id === 'char_card') return props.activeChatChar?.description || '';
-    if (block.id === 'char_personality' || block.id === 'char_persona') return props.activeChatChar?.personality || '';
-    if (block.id === 'scenario') return props.activeChatChar?.scenario || '';
-    if (block.id === 'example_dialogue') return props.activeChatChar?.mes_example || '';
-    if (block.id === 'first_message') return props.activeChatChar?.first_mes || '';
+    if (blockId === 'user_persona') return effectivePersona.value?.prompt || '';
+    if (blockId === 'char_card') return props.activeChatChar?.description || props.activeChatChar?.desc || '';
+    if (blockId === 'char_personality' || blockId === 'char_persona') return props.activeChatChar?.personality || '';
+    if (blockId === 'scenario') return props.activeChatChar?.scenario || '';
+    if (blockId === 'example_dialogue') return props.activeChatChar?.mes_example || '';
+    if (blockId === 'first_message') return props.activeChatChar?.first_mes || '';
 
     return block.content || '';
 };
@@ -1651,7 +1653,7 @@ const editorProxy = computed({
 });
 
 function getBlockIcon(block) {
-    if (block.id === 'chat_history') {
+    if (normalizeBlockId(block.id) === 'chat_history') {
         return '<path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>';
     }
     return getRoleIcon(block.role);

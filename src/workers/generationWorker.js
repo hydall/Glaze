@@ -1,4 +1,5 @@
 import { replaceMacros } from '../utils/macroEngine.js';
+import { normalizeBlockId } from '../utils/presetBlockIds.js';
 
 let GPTTokenizer = null;
 const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
@@ -428,10 +429,14 @@ function buildPromptMessagesWorker(args) {
 
         activePreset.blocks.forEach(block => {
             if (!block.enabled || block.isStashed) return;
-            if (block.insertion_mode === 'depth' && block.id !== 'chat_history') {
-                depthBlocks.push(block);
+            const normalizedId = normalizeBlockId(block.id);
+            const normalizedBlock = normalizedId === block.id
+                ? block
+                : { ...block, id: normalizedId, originalId: block.id };
+            if (normalizedBlock.insertion_mode === 'depth' && normalizedBlock.id !== 'chat_history') {
+                depthBlocks.push(normalizedBlock);
             } else {
-                relativeBlocks.push(block);
+                relativeBlocks.push(normalizedBlock);
             }
         });
 
