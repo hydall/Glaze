@@ -387,7 +387,20 @@ const activeRegexCount = computed(() => {
 
 const notesTokens = computed(() => estimateTokens(props.activeChar?.authors_note));
 const summaryTokens = computed(() => estimateTokens(props.activeChar?.summary));
-const cardTokens = computed(() => estimateTokens((props.activeChar?.name || '') + '\n' + (props.activeChar?.description || props.activeChar?.desc || '')));
+const cardTokens = computed(() => {
+    const char = props.activeChar;
+    if (!char) return 0;
+
+    const parts = [
+        char.name,
+        char.description || char.desc,
+        char.personality,
+        char.scenario,
+        char.mes_example
+    ].filter(Boolean);
+
+    return estimateTokens(parts.join('\n\n'));
+});
 
 const personaTokens = computed(() => {
     const persona = getEffectivePersona(props.activeChar?.id, props.activeChar?.sessionId ? `${props.activeChar.id}_${props.activeChar.sessionId}` : null);

@@ -132,6 +132,8 @@
     "placeholder_enter_name": "Enter name",
     "label_char_prompt": "Character Prompt",
     "label_description": "Description",
+    "label_char_macro_name": "Macro Name",
+    "placeholder_char_macro_name": "Optional {{char}} override, e.g. Narrator",
     "label_creator_notes": "Creator Notes",
     "label_tags": "Tags",
     "label_personality": "Personality",

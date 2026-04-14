@@ -131,6 +131,8 @@
     "placeholder_enter_name": "Введите имя",
     "label_char_prompt": "Промпт персонажа",
     "label_description": "Описание",
+    "label_char_macro_name": "Имя для макроса",
+    "placeholder_char_macro_name": "Необязательно: подмена {{char}}, например Narrator",
     "label_creator_notes": "Заметки автора",
     "label_tags": "Теги",
     "label_personality": "Личность",

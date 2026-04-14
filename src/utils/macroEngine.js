@@ -7,7 +7,7 @@ export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyO
     // Single-line: {{// comment}}
     result = result.replace(/\{\{\/\/[^}]*\}\}/g, '');
 
-    const charName = char ? char.name : "Character";
+    const charName = char ? (char.macro_name || char.name) : "Character";
     const charDesc = char ? (char.description || char.desc || "") : "";
     const charScenario = char ? (char.scenario || "") : "";
     const charPersonality = char ? (char.personality || "") : "";

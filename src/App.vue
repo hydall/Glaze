@@ -391,6 +391,7 @@ const characterEditorConfig = [
         title: 'section_basic_info',
         fields: [
             { key: 'name', label: 'label_name', type: 'text' },
+            { key: 'macro_name', label: 'label_char_macro_name', type: 'text', placeholder: 'placeholder_char_macro_name' },
             { key: 'description', label: 'label_description', type: 'textarea', rows: 3, expandable: true },
             { key: 'creator_notes', label: 'label_creator_notes', type: 'textarea', rows: 2 },
             { key: 'tags', label: 'label_tags', type: 'tags' }

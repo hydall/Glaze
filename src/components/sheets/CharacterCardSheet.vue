@@ -17,6 +17,7 @@ const config = computed(() => [
         title: 'section_basic_info',
         fields: [
             { key: 'name', label: 'label_name', type: 'text', placeholder: 'placeholder_enter_name' },
+            { key: 'macro_name', label: 'label_char_macro_name', type: 'text', placeholder: 'placeholder_char_macro_name' },
             { key: 'description', label: 'label_description', type: 'textarea', rows: 4, placeholder: 'placeholder_char_desc', expandable: true },
             { key: 'first_mes', label: 'label_first_mes', type: 'greeting_list', rows: 4, placeholder: 'placeholder_greeting' }
         ]
