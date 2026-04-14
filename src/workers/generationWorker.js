@@ -316,12 +316,24 @@ function buildNoAssistantHistory(historyMsgs, userPrefix, charPrefix, squashRole
     return lines.join('\n');
 }
 
+function buildBlockSourceReplacements(char, personaObj, sessionVars, notifyObj, summaryRawContent, getLorebookContent) {
+    return [
+        { macro: '{{description}}', replacement: char?.description || char?.desc || '', source: 'character' },
+        { macro: '{{scenario}}', replacement: char?.scenario || '', source: 'character' },
+        { macro: '{{personality}}', replacement: char?.personality || '', source: 'character' },
+        { macro: '{{mesExamples}}', replacement: char?.mes_example || '', source: 'character' },
+        { macro: '{{summary}}', replacement: summaryRawContent || '', source: 'summary' },
+        { macro: '{{lorebooks}}', replacement: getLorebookContent(), source: 'lorebook' }
+    ];
+}
+
 function buildPromptMessagesWorker(args) {
     let { char, history, summary, activePreset, mergePrompts, mergeRole, noAssistant, userPrefix, charPrefix, squashRole, personaObj, authorsNote, guidanceText, guidanceType, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
     if (noAssistant) mergePrompts = true;
 
     const messages = [];
-    let mergeBuffer = [];
+    let mergeSourcesBuffer = [];
+    let mergeContentBuffer = [];
     let allLoreEntries = [];
     let notifyObj = { varsChanged: false };
 
@@ -329,14 +341,27 @@ function buildPromptMessagesWorker(args) {
     const sessionId = char?.sessionId || "current";
     const chatId = char?.id && char?.sessionId ? `${char.id}_${char.sessionId}` : null;
 
-    // Combine regexes
     const presetRegexes = activePreset?.regexes || [];
     const allScripts = [...presetRegexes, ...globalRegexes];
 
     const flushMergeBuffer = () => {
-        if (mergeBuffer.length > 0) {
-            messages.push({ role: mergeRole || 'system', content: mergeBuffer.join('\n'), blockName: 'merged prompt' });
-            mergeBuffer = [];
+        if (mergeContentBuffer.length > 0) {
+            const content = mergeContentBuffer.join('\n');
+            const sources = [];
+            for (const s of mergeSourcesBuffer) {
+                const existing = sources.find(x => x.source === s.source);
+                if (existing) existing.tokens += s.tokens;
+                else sources.push({ ...s });
+            }
+            messages.push({
+                role: mergeRole || 'system',
+                content,
+                blockName: 'merged prompt',
+                sources,
+                _allSources: mergeSourcesBuffer.slice()
+            });
+            mergeContentBuffer = [];
+            mergeSourcesBuffer = [];
         }
     };
 
@@ -347,11 +372,15 @@ function buildPromptMessagesWorker(args) {
 
         loreEntries.forEach(entry => {
             const pos = entry.position ?? 0;
+            const content = replaceMacros(entry.content || "", char, personaObj, sessionVars, notifyObj);
+            const tokens = estimateTokens(content);
             const msg = {
                 role: 'system',
-                content: replaceMacros(entry.content || "", char, personaObj, sessionVars, notifyObj),
+                content,
                 blockName: `Lorebook: ${entry.comment || entry.keys?.[0] || 'Entry'}`,
-                isLorebook: true
+                isLorebook: true,
+                sources: tokens > 0 ? [{ source: 'lorebook', tokens }] : [],
+                _allSources: tokens > 0 ? [{ source: 'lorebook', tokens }] : []
             };
             if (loreByPosition[pos]) loreByPosition[pos].push(msg);
             else loreByPosition[0].push(msg);
@@ -371,8 +400,10 @@ function buildPromptMessagesWorker(args) {
         if (hasLorebookMacro) return;
         if (loreByPosition[pos] && loreByPosition[pos].length > 0) {
             loreByPosition[pos].forEach(msg => {
-                if (mergePrompts) mergeBuffer.push(msg.content);
-                else {
+                if (mergePrompts) {
+                    mergeContentBuffer.push(msg.content);
+                    if (msg._allSources) mergeSourcesBuffer.push(...msg._allSources);
+                } else {
                     flushMergeBuffer();
                     messages.push(msg);
                 }
@@ -419,6 +450,7 @@ function buildPromptMessagesWorker(args) {
         const resolveBlockContent = (block) => {
             let content = "";
             let role = block.role || "system";
+            let primarySource = 'preset';
 
             if (block.id === 'guided_generation') {
                 const isImpersonation = guidanceType === 'impersonation';
@@ -428,21 +460,38 @@ function buildPromptMessagesWorker(args) {
                     : (activePreset?.guidedGenerationPrompt || '[Generate your next reply according to these instructions: {{guidance}}]');
                 content = template.replace(/\{\{guidance\}\}/gi, guidanceText || '');
             }
-            else if (block.id === 'user_persona') content = `User Name: ${personaObj.name}\nUser Description: ${personaObj.prompt || ""}`;
-            else if (block.id === 'char_card') content = `Character Name: ${char.name}\nDescription: ${char.description || char.desc}`;
-            else if (block.id === 'char_personality') content = `Personality: ${char.personality}`;
-            else if (block.id === 'scenario') content = `Scenario: ${char.scenario}`;
-            else if (block.id === 'example_dialogue') content = char.mes_example || "";
+            else if (block.id === 'user_persona') {
+                content = `User Name: ${personaObj.name}\nUser Description: ${personaObj.prompt || ""}`;
+                primarySource = 'preset';
+            }
+            else if (block.id === 'char_card') {
+                content = `Character Name: ${char.name}\nDescription: ${char.description || char.desc}`;
+                primarySource = 'character';
+            }
+            else if (block.id === 'char_personality') {
+                content = `Personality: ${char.personality}`;
+                primarySource = 'character';
+            }
+            else if (block.id === 'scenario') {
+                content = `Scenario: ${char.scenario}`;
+                primarySource = 'character';
+            }
+            else if (block.id === 'example_dialogue') {
+                content = char.mes_example || "";
+                primarySource = 'character';
+            }
             else if (block.id === 'authors_note') {
                 if (authorsNote && authorsNote.content) {
                     content = authorsNote.content;
                     if (authorsNote.role) role = authorsNote.role;
+                    primarySource = 'authorsNote';
                 } else return null;
             }
             else if (block.id === 'summary') {
                 if (summaryText) {
                     content = summaryText;
                     if (typeof summary === 'object' && summary.role) role = summary.role;
+                    primarySource = 'summary';
                 } else return null;
             } else {
                 content = block.content;
@@ -450,10 +499,47 @@ function buildPromptMessagesWorker(args) {
 
             if (!content) return null;
 
-            content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
-            content = resolveDynamicMacros(content);
+            const sourceMacros = [
+                { regex: /\{\{description\}\}/gi, value: char?.description || char?.desc || '', source: 'character' },
+                { regex: /\{\{scenario\}\}/gi, value: char?.scenario || '', source: 'character' },
+                { regex: /\{\{personality\}\}/gi, value: char?.personality || '', source: 'character' },
+                { regex: /\{\{mesExamples\}\}/gi, value: char?.mes_example || '', source: 'character' },
+                { regex: /\{\{summary\}\}/gi, value: summaryRawContent || '', source: 'summary' },
+                { regex: /\{\{lorebooks\}\}/gi, value: getLorebookContent(), source: 'lorebook' }
+            ];
 
-            return { content, role };
+            const sources = [];
+            let literalTemplate = content;
+            for (const sm of sourceMacros) {
+                const matches = content.match(sm.regex);
+                if (matches && matches.length > 0) {
+                    const tokens = estimateTokens(sm.value) * matches.length;
+                    if (tokens > 0) sources.push({ source: sm.source, tokens });
+                    literalTemplate = literalTemplate.replace(sm.regex, '');
+                }
+            }
+
+            content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
+            literalTemplate = replaceMacros(literalTemplate, char, personaObj, sessionVars, notifyObj);
+
+            if (content.includes('{{lorebooks}}')) {
+                content = content.split('{{lorebooks}}').join(getLorebookContent());
+            }
+            if (content.includes('{{summary}}')) {
+                content = content.split('{{summary}}').join(summaryRawContent || '');
+            }
+
+            const literalTokens = estimateTokens(literalTemplate);
+            if (literalTokens > 0) {
+                sources.push({ source: primarySource, tokens: literalTokens });
+            } else if (sources.length === 0) {
+                const totalTokens = estimateTokens(content);
+                if (totalTokens > 0) {
+                    sources.push({ source: primarySource, tokens: totalTokens });
+                }
+            }
+
+            return { content, role, sources, primarySource };
         };
 
         const resolvedDepthBlocks = depthBlocks.map(block => {
@@ -464,12 +550,26 @@ function buildPromptMessagesWorker(args) {
             if (resolved.role === 'user') placement = 1;
             else if (resolved.role === 'assistant') placement = 2;
 
+            const preRegexTokens = estimateTokens(resolved.content);
             resolved.content = applyRegexes(resolved.content, placement, 2, allScripts, { char, persona: personaObj, sessionVars, charId, sessionId, notifyObj });
+            const postRegexTokens = estimateTokens(resolved.content);
+
+            if (preRegexTokens > 0 && postRegexTokens > 0 && resolved.sources.length > 0) {
+                const scale = postRegexTokens / preRegexTokens;
+                resolved.sources = resolved.sources.map(s => ({ source: s.source, tokens: Math.max(0, Math.round(s.tokens * scale)) }));
+            } else if (postRegexTokens > 0) {
+                resolved.sources = [{ source: resolved.primarySource, tokens: postRegexTokens }];
+            } else {
+                resolved.sources = [];
+            }
 
             return {
                 role: resolved.role,
                 content: resolved.content,
                 blockName: block.name,
+                blockId: block.id,
+                sources: resolved.sources,
+                _allSources: resolved.sources,
                 depth: block.depth || 0,
                 isDepth: true
             };
@@ -485,17 +585,19 @@ function buildPromptMessagesWorker(args) {
                     historyMsgs = history.map((m, i) => {
                         let content = m.content !== undefined ? m.content : (m.text || m.mes || "");
 
-                        // Macros and Regex
                         content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
                         const placement = m.role === 'user' ? 1 : 2;
                         content = applyRegexes(content, placement, 2, allScripts, { char, persona: personaObj, sessionVars, charId, sessionId, notifyObj });
 
+                        const tokens = estimateTokens(content);
                         return {
                             role: m.role || (m.isUser ? 'user' : 'assistant'),
                             content: content,
                             image: m.image,
                             isHistory: true,
-                            chatId: m.chatId !== undefined ? m.chatId : (m.originalIndex !== undefined ? m.originalIndex : i)
+                            chatId: m.chatId !== undefined ? m.chatId : (m.originalIndex !== undefined ? m.originalIndex : i),
+                            sources: tokens > 0 ? [{ source: 'history', tokens }] : [],
+                            _allSources: tokens > 0 ? [{ source: 'history', tokens }] : []
                         };
                     });
                 }
@@ -503,7 +605,15 @@ function buildPromptMessagesWorker(args) {
                 if (noAssistant) {
                     const combinedContent = buildNoAssistantHistory(historyMsgs, userPrefix, charPrefix, squashRole);
                     if (combinedContent) {
-                        messages.push({ role: 'assistant', content: combinedContent, blockName: 'chat_history', isHistory: true });
+                        const tokens = estimateTokens(combinedContent);
+                        messages.push({
+                            role: 'assistant',
+                            content: combinedContent,
+                            blockName: 'chat_history',
+                            isHistory: true,
+                            sources: tokens > 0 ? [{ source: 'history', tokens }] : [],
+                            _allSources: tokens > 0 ? [{ source: 'history', tokens }] : []
+                        });
                     }
                     return;
                 }
@@ -536,10 +646,13 @@ function buildPromptMessagesWorker(args) {
                 return;
             }
 
-            let { content, role } = resolved;
+            let { content, role, sources, primarySource } = resolved;
 
             if (mergePrompts && role !== 'assistant') {
-                if (content) mergeBuffer.push(content);
+                if (content) {
+                    mergeContentBuffer.push(content);
+                    if (sources) mergeSourcesBuffer.push(...sources);
+                }
             } else {
                 if (mergePrompts) flushMergeBuffer();
 
@@ -547,9 +660,27 @@ function buildPromptMessagesWorker(args) {
                 if (role === 'user') placement = 1;
                 else if (role === 'assistant') placement = 2;
 
+                const preRegexTokens = estimateTokens(content);
                 content = applyRegexes(content, placement, 2, allScripts, { char, persona: personaObj, sessionVars, charId, sessionId, notifyObj });
+                const postRegexTokens = estimateTokens(content);
 
-                const msg = { role: role, content: content, blockName: block.name };
+                if (preRegexTokens > 0 && postRegexTokens > 0 && sources.length > 0) {
+                    const scale = postRegexTokens / preRegexTokens;
+                    sources = sources.map(s => ({ source: s.source, tokens: Math.max(0, Math.round(s.tokens * scale)) }));
+                } else if (postRegexTokens > 0) {
+                    sources = [{ source: primarySource, tokens: postRegexTokens }];
+                } else {
+                    sources = [];
+                }
+
+                const msg = {
+                    role: role,
+                    content: content,
+                    blockName: block.name,
+                    blockId: block.id,
+                    sources,
+                    _allSources: sources
+                };
                 messages.push(msg);
             }
 
@@ -558,16 +689,37 @@ function buildPromptMessagesWorker(args) {
         });
         if (mergePrompts) flushMergeBuffer();
     } else {
-        messages.push({ role: "system", content: "You are a helpful assistant." });
-        if (summaryText) messages.push({ role: "system", content: summaryText });
+        const fallbackTokens = estimateTokens("You are a helpful assistant.");
+        messages.push({
+            role: "system",
+            content: "You are a helpful assistant.",
+            sources: fallbackTokens > 0 ? [{ source: 'preset', tokens: fallbackTokens }] : [],
+            _allSources: fallbackTokens > 0 ? [{ source: 'preset', tokens: fallbackTokens }] : []
+        });
+        if (summaryText) {
+            const sTokens = estimateTokens(summaryText);
+            messages.push({
+                role: "system",
+                content: summaryText,
+                sources: sTokens > 0 ? [{ source: 'summary', tokens: sTokens }] : [],
+                _allSources: sTokens > 0 ? [{ source: 'summary', tokens: sTokens }] : []
+            });
+        }
         if (history) {
             for (const m of history) {
-                messages.push({ ...m, isHistory: true });
+                const content = m.content !== undefined ? m.content : (m.text || m.mes || "");
+                const tokens = estimateTokens(content);
+                messages.push({
+                    ...m,
+                    content,
+                    isHistory: true,
+                    sources: tokens > 0 ? [{ source: 'history', tokens }] : [],
+                    _allSources: tokens > 0 ? [{ source: 'history', tokens }] : []
+                });
             }
         }
     }
 
-    // Remove prompt blocks that ended up empty after macro/regex processing
     const filteredMessages = messages.filter(m => {
         if (m.isHistory) return true;
         return m.content && m.content.trim().length > 0;
@@ -591,15 +743,33 @@ self.onmessage = async function (e) {
             const staticMessages = messages.filter(m => !m.isHistory);
             const historyMessages = messages.filter(m => m.isHistory);
             const loreReserveTokens = getLorebookReserve(payload.globalSettings, safeContext);
+
+            const sourceKeys = ['character', 'preset', 'summary', 'authorsNote', 'lorebook', 'history'];
+            const sourceTotals = {};
+            for (const k of sourceKeys) sourceTotals[k] = 0;
+
+            let staticTokens = 0;
+            for (const m of staticMessages) {
+                const msgTokens = estimateTokens(m.content);
+                staticTokens += msgTokens;
+
+                const msgSources = m._allSources || m.sources || [];
+                for (const s of msgSources) {
+                    if (sourceKeys.includes(s.source)) {
+                        sourceTotals[s.source] += s.tokens;
+                    }
+                }
+            }
+
             const breakdown = {
                 safeContext,
                 maxTokens,
                 contextSize,
-                character: 0,
-                preset: 0,
-                summary: 0,
-                authorsNote: 0,
-                lorebook: 0,
+                character: sourceTotals.character,
+                preset: sourceTotals.preset,
+                summary: sourceTotals.summary,
+                authorsNote: sourceTotals.authorsNote,
+                lorebook: sourceTotals.lorebook,
                 lorebookReserve: loreReserveTokens,
                 history: 0,
                 fixedBase: 0,
@@ -612,30 +782,16 @@ self.onmessage = async function (e) {
                 historyMessagesHiddenByContext: 0
             };
 
-            let staticTokens = 0;
-            for (const m of staticMessages) {
-                const tokens = estimateTokens(m.content);
-                staticTokens += tokens;
-
-                if (m.isLorebook) breakdown.lorebook += tokens;
-                else if (m.blockName === 'Summary') breakdown.summary += tokens;
-                else if (m.blockName === 'authors_note') breakdown.authorsNote += tokens;
-                else if (m.blockName === 'char_card' || m.blockName === 'Character' || /Character Name:/i.test(m.content || '')) breakdown.character += tokens;
-                else breakdown.preset += tokens;
-            }
-
-            breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.summary + breakdown.authorsNote;
+            breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.summary + breakdown.authorsNote + breakdown.lorebook;
             breakdown.fixedTotal = breakdown.fixedBase + breakdown.lorebookReserve;
 
             let availableForHistory = safeContext - breakdown.fixedTotal;
             breakdown.availableForHistory = Math.max(0, availableForHistory);
             let finalMessages = [];
             let cutoffIndex = -1;
-
             let cutoffOriginalIndex = -1;
 
             if (breakdown.fixedTotal >= safeContext) {
-                // Out of context entirely just based on prompt
                 finalMessages = staticMessages;
                 cutoffIndex = historyMessages.length;
                 cutoffOriginalIndex = Number.MAX_SAFE_INTEGER;
@@ -664,7 +820,6 @@ self.onmessage = async function (e) {
 
                 const keptHistoryMessages = historyMessages.slice(cutoffIndex);
 
-                // Reconstruct final messages array keeping the order
                 for (const m of messages) {
                     if (!m.isHistory || keptHistoryMessages.includes(m)) {
                         finalMessages.push(m);

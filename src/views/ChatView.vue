@@ -225,27 +225,37 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const contextSegments = computed(() => {
     const breakdown = contextBreakdown.value;
-    if (!breakdown || !breakdown.safeContext) return [];
+    if (!breakdown || !breakdown.safeContext) return { used: [], reserve: null };
 
     const total = breakdown.safeContext;
     const toPercent = (value) => Math.max(0, Math.min(100, (value / total) * 100));
-    const segments = [];
+    const used = [];
 
-    const fixedTokens = breakdown.character + breakdown.preset + breakdown.authorsNote;
-    if (fixedTokens > 0) {
-        segments.push({ key: 'fixed', value: fixedTokens, percent: toPercent(fixedTokens), className: 'segment-fixed' });
+    if (breakdown.character > 0) {
+        used.push({ key: 'character', value: breakdown.character, percent: toPercent(breakdown.character), className: 'segment-character' });
+    }
+    if (breakdown.preset > 0) {
+        used.push({ key: 'preset', value: breakdown.preset, percent: toPercent(breakdown.preset), className: 'segment-fixed' });
+    }
+    if (breakdown.authorsNote > 0) {
+        used.push({ key: 'authorsNote', value: breakdown.authorsNote, percent: toPercent(breakdown.authorsNote), className: 'segment-authors-note' });
     }
     if (breakdown.summary > 0) {
-        segments.push({ key: 'summary', value: breakdown.summary, percent: toPercent(breakdown.summary), className: 'segment-summary' });
+        used.push({ key: 'summary', value: breakdown.summary, percent: toPercent(breakdown.summary), className: 'segment-summary' });
+    }
+    if (breakdown.lorebook > 0) {
+        used.push({ key: 'lorebook', value: breakdown.lorebook, percent: toPercent(breakdown.lorebook), className: 'segment-lorebook' });
     }
     if (breakdown.history > 0) {
-        segments.push({ key: 'history', value: breakdown.history, percent: toPercent(breakdown.history), className: 'segment-history' });
-    }
-    if (breakdown.lorebookReserve > 0) {
-        segments.push({ key: 'lorebookReserve', value: breakdown.lorebookReserve, percent: toPercent(breakdown.lorebookReserve), className: 'segment-lorebook-reserve' });
+        used.push({ key: 'history', value: breakdown.history, percent: toPercent(breakdown.history), className: 'segment-history' });
     }
 
-    return segments;
+    return {
+        used,
+        reserve: breakdown.lorebookReserve > 0
+            ? { key: 'lorebookReserve', value: breakdown.lorebookReserve, percent: toPercent(breakdown.lorebookReserve), className: 'segment-lorebook-reserve' }
+            : null
+    };
 });
 
 const contextBreakdownItems = computed(() => {
@@ -254,12 +264,24 @@ const contextBreakdownItems = computed(() => {
 
     return [
         { key: 'character', label: 'Character', value: breakdown.character || 0 },
-        { key: 'preset', label: 'Preset', value: (breakdown.preset || 0) + (breakdown.authorsNote || 0) },
+        { key: 'preset', label: 'Preset', value: breakdown.preset || 0 },
+        { key: 'authorsNote', label: 'Author\'s Note', value: breakdown.authorsNote || 0 },
         { key: 'summary', label: 'Summary', value: breakdown.summary || 0 },
+        { key: 'lorebook', label: 'Lorebook Used', value: breakdown.lorebook || 0 },
         { key: 'lorebookReserve', label: 'Lorebook Reserve', value: breakdown.lorebookReserve || 0 },
         { key: 'history', label: 'History', value: breakdown.history || 0 }
     ];
 });
+
+const contextLegendItems = computed(() => [
+    { key: 'character', label: 'Character', className: 'segment-character' },
+    { key: 'preset', label: 'Preset', className: 'segment-fixed' },
+    { key: 'authorsNote', label: 'Author\'s Note', className: 'segment-authors-note' },
+    { key: 'summary', label: 'Summary', className: 'segment-summary' },
+    { key: 'lorebook', label: 'Lorebook Used', className: 'segment-lorebook' },
+    { key: 'history', label: 'History', className: 'segment-history' },
+    { key: 'lorebookReserve', label: 'Lorebook Reserve', className: 'segment-lorebook-reserve' }
+]);
 
 const visibleHistoryMessages = computed(() => {
     return currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
@@ -542,7 +564,7 @@ function openHistoryContextSettings() {
         </div>
         <div class="context-sheet-note">Hide top messages recommendation appears when visible history reaches the configured threshold.</div>
         <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="history-context-cancel">Cancel</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="history-context-back">Back</button>
             <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="history-context-save">Save</button>
         </div>
     `;
@@ -550,9 +572,12 @@ function openHistoryContextSettings() {
     const fillInput = content.querySelector('#history-fill-threshold');
     const hideInput = content.querySelector('#history-hide-percent');
     const saveBtn = content.querySelector('#history-context-save');
-    const cancelBtn = content.querySelector('#history-context-cancel');
+    const backBtn = content.querySelector('#history-context-back');
 
-    cancelBtn.addEventListener('click', () => closeBottomSheet());
+    backBtn.addEventListener('click', () => {
+        closeBottomSheet();
+        setTimeout(() => openContextSheet(), 250);
+    });
     saveBtn.addEventListener('click', () => {
         persistHistoryContextSettings(fillInput?.value, hideInput?.value);
         closeBottomSheet();
@@ -644,8 +669,20 @@ async function openContextSheet() {
     const content = document.createElement('div');
     content.className = 'context-sheet';
 
-    const segmentHtml = contextSegments.value.map(segment => `
+    const usedWidth = Math.max(0, 100 - (contextSegments.value.reserve?.percent || 0));
+    const segmentHtml = contextSegments.value.used.map(segment => `
         <div class="chat-context-segment ${segment.className}" style="width:${segment.percent}%"></div>
+    `).join('');
+
+    const reserveHtml = contextSegments.value.reserve
+        ? `<div class="chat-context-reserve ${contextSegments.value.reserve.className}" style="width:${contextSegments.value.reserve.percent}%"></div>`
+        : '';
+
+    const legendHtml = contextLegendItems.value.map(segment => `
+        <div class="context-legend-item">
+            <span class="context-legend-swatch ${segment.className}"></span>
+            <span>${segment.label}</span>
+        </div>
     `).join('');
 
     const breakdownHtml = contextBreakdownItems.value.map(item => `
@@ -662,15 +699,15 @@ async function openContextSheet() {
         </div>
     ` : '';
 
-    const hideButtonHtml = shouldRecommendHide.value ? `
-        <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="context-hide-btn">Hide top ${preview.count}</button>
-    ` : '';
+    const hideButtonLabel = preview.count
+        ? `Hide top ${preview.count}`
+        : 'Hide top messages';
 
     content.innerHTML = `
         <div class="context-sheet-summary">
             <div class="context-sheet-kpi">
                 <strong>${used}</strong>
-                <span>used / ${safeContext}</span>
+                <span>used / ${breakdown.contextSize || safeContext}</span>
             </div>
             <div class="context-sheet-kpi">
                 <strong>${remaining}</strong>
@@ -681,12 +718,16 @@ async function openContextSheet() {
                 <span>history fill</span>
             </div>
         </div>
-        <div class="chat-context-bar context-sheet-bar">${segmentHtml}</div>
+        <div class="chat-context-bar context-sheet-bar">
+            <div class="chat-context-used" style="width:${usedWidth}%">${segmentHtml}</div>
+            ${reserveHtml}
+        </div>
+        <div class="context-legend">${legendHtml}</div>
         <div class="context-breakdown">${breakdownHtml}</div>
         ${recommendationHtml}
         <div class="context-sheet-actions">
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="context-hide-btn">${hideButtonLabel}</button>
             <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="context-settings-btn">Settings</button>
-            ${hideButtonHtml}
         </div>
     `;
 
@@ -718,7 +759,6 @@ async function setupHeader(char = activeChatChar) {
             sessionName,
             callbacks: {
                 onActionsClick: () => openSessionsSheet(char),
-                onContextClick: () => openContextSheet(),
                 onBackClick: () => {
                     closeChat();
                     if (currentOnBack) currentOnBack();
@@ -3156,6 +3196,7 @@ onUnmounted(() => {
                 @search-prev="prevSearchResult"
                 @magic-impersonate="startImpersonation"
                 @magic-notes="presetView.openAuthorsNoteSheet()"
+                @magic-context="openContextSheet()"
                 @magic-stats="openChatStatsSheet()"
                 @magic-summary="presetView.openSummarySheet()"
                 @magic-sessions="openSessionsSheet(activeChatChar)"
@@ -3303,12 +3344,28 @@ onUnmounted(() => {
 }
 
 .chat-context-bar {
+    position: relative;
     display: flex;
     width: 100%;
     height: 10px;
     overflow: hidden;
     border-radius: 999px;
-    background: rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.chat-context-used {
+    display: flex;
+    height: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+}
+
+.chat-context-reserve {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    box-shadow: inset 2px 0 0 rgba(0, 0, 0, 0.35);
 }
 
 .chat-context-segment {
@@ -3319,12 +3376,24 @@ onUnmounted(() => {
     background: #8f8f95;
 }
 
+.segment-character {
+    background: #4f8cff;
+}
+
 .segment-history {
     background: #d8b84a;
 }
 
 .segment-summary {
-    background: #8f6bff;
+    background: #1ec8ff;
+}
+
+.segment-authors-note {
+    background: #7a6cff;
+}
+
+.segment-lorebook {
+    background: #ff8c42;
 }
 
 .segment-lorebook-reserve {
@@ -3345,15 +3414,18 @@ onUnmounted(() => {
 .context-sheet-kpi {
     padding: 12px;
     border-radius: 14px;
-    background: rgba(255, 255, 255, var(--element-opacity, 0.72));
+    background: rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(var(--element-blur, 20px));
     text-align: center;
+    color: var(--text-black);
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .context-sheet-kpi strong {
     display: block;
     font-size: 18px;
     line-height: 1.2;
+    color: var(--text-black);
 }
 
 .context-sheet-kpi span {
@@ -3365,6 +3437,28 @@ onUnmounted(() => {
 
 .context-sheet-bar {
     margin-bottom: 14px;
+}
+
+.context-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-bottom: 14px;
+}
+
+.context-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-gray);
+}
+
+.context-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex-shrink: 0;
 }
 
 .context-breakdown {
@@ -3379,7 +3473,8 @@ onUnmounted(() => {
     gap: 12px;
     padding: 10px 12px;
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .context-breakdown-row span {
@@ -3388,6 +3483,7 @@ onUnmounted(() => {
 
 .context-breakdown-row strong {
     font-weight: 600;
+    color: var(--text-black);
 }
 
 .context-recommendation {

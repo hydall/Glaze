@@ -249,6 +249,8 @@
     "stat_gen_time": "Время генерации",
     "notification_generating": "Генерация ответа...",
     "magic_authors_notes": "Заметки автора",
+    "label_tokenizer": "Токенайзер",
+    "label_hide_top_messages": "Скрыть верхние сообщения",
     "magic_summary": "Саммари чата",
     "summary_title": "Текущее саммари",
     "unique_for_chat": "Содержимое уникально для каждого чата",

@@ -224,7 +224,10 @@ export async function generateChatResponse({
     }
 
     if (callbacks.onPromptReady) {
-        callbacks.onPromptReady({ loreEntries: result.loreEntries });
+        callbacks.onPromptReady({
+            loreEntries: result.loreEntries,
+            contextBreakdown: result.contextBreakdown || null
+        });
     }
 
     let messages = result.messages;
@@ -368,6 +371,8 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             apiConfig
         }));
 
+        const result = await processPromptAsync(payload);
+
         const resolvedCutoff = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
             ? result.cutoffOriginalIndex
             : result.cutoffIndex;
@@ -385,8 +390,12 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
     }
 }
 
-export async function generateSummary({ history, prompt, controller }) {
-    const { apiKey, apiUrl, model, temp } = getEffectiveApiConfig();
+export async function generateSummary({ history, prompt, controller, apiConfigOverride = null }) {
+    const effectiveConfig = {
+        ...getEffectiveApiConfig(),
+        ...(apiConfigOverride || {})
+    };
+    const { apiKey, apiUrl, model, temp } = effectiveConfig;
 
     if (!apiUrl || !model) {
         throw new Error("API Not Configured");

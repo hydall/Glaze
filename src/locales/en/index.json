@@ -249,6 +249,8 @@
     "stat_gen_time": "Generation Time",
     "notification_generating": "Generating response...",
     "magic_authors_notes": "Author's Notes",
+    "label_tokenizer": "Tokenizer",
+    "label_hide_top_messages": "Hide top messages",
     "magic_summary": "Chat Summary",
     "summary_title": "Current Summary",
     "unique_for_chat": "Content is unique for each chat",

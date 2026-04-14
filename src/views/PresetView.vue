@@ -1797,14 +1797,22 @@ function openSummarySheet() {
     const char = props.activeChatChar;
     const block = currentPreset.value.blocks.find(b => b.id === 'summary');
     if (!block) return;
+
+    const SUMMARY_CUSTOM_MODEL_ENABLED_KEY = 'gz_summary_custom_model_enabled';
+    const SUMMARY_CUSTOM_MODEL_KEY = 'gz_summary_custom_model';
     
     const data = {
         role: block.role || 'system',
         insertion_mode: block.insertion_mode || 'relative',
         depth: block.depth !== undefined ? block.depth : 4,
-        content: char.summary || '',
+        savedContent: char.summary || '',
+        draftContent: char.summary || '',
         prefix: block.prefix || 'Summary: '
     };
+    let isGenerating = false;
+    let debounceTimer = null;
+    let useCustomModel = localStorage.getItem(SUMMARY_CUSTOM_MODEL_ENABLED_KEY) === 'true';
+    let customModel = localStorage.getItem(SUMMARY_CUSTOM_MODEL_KEY) || '';
     
     const helpTipHtml = (term) => `
         <button class="help-tip" data-term="${term}" type="button" tabindex="-1" style="width:20px;height:20px;padding:0;border:none;background:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;opacity:0.4;color:var(--text-gray);vertical-align:middle;margin-left:4px;">
@@ -1813,13 +1821,27 @@ function openSummarySheet() {
     `;
 
     const content = document.createElement('div');
+    content.className = 'summary-sheet';
     content.innerHTML = `
         <div class="settings-item"><label>${t('label_role')}${helpTipHtml('preset-role')}</label><select id="summary-role" class="settings-select"><option value="system" ${data.role === 'system' ? 'selected' : ''}>${t('role_system') || 'System'}</option><option value="user" ${data.role === 'user' ? 'selected' : ''}>${t('role_user') || 'User'}</option><option value="assistant" ${data.role === 'assistant' ? 'selected' : ''}>${t('role_assistant') || 'Assistant'}</option></select></div>
         <div class="settings-item"><label>${t('label_injection_point')}${helpTipHtml('preset-injection')}</label><select id="summary-mode" class="settings-select"><option value="relative" ${data.insertion_mode === 'relative' ? 'selected' : ''}>${t('injection_relative')}</option><option value="depth" ${data.insertion_mode === 'depth' ? 'selected' : ''}>${t('injection_depth')}</option></select></div>
         <div class="settings-item" id="summary-depth-container" style="${data.insertion_mode === 'depth' ? '' : 'display:none'}"><label>${t('label_depth')}</label><input type="number" id="summary-depth" value="${data.depth}" placeholder="${t('placeholder_depth')}"></div>
         <div class="settings-item"><label>${t('label_prefix') || 'Prefix'}</label><input type="text" id="summary-prefix" value="${data.prefix}" placeholder="Summary: "></div>
-        <div class="settings-item"><label>${t('label_content')}</label><textarea id="summary-content" rows="8" placeholder="${t('summary_placeholder')}">${data.content}</textarea></div>
-        <div class="settings-item"><button id="btn-auto-summary" class="btn-save" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;"><svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L10 12.17l7.59-7.59L19 6l-9 11z"/></svg>${t('btn_auto_summary')}</button></div>
+        <div class="settings-item-checkbox">
+            <label>${t('label_custom_model') || 'Custom summary model'}</label>
+            <input type="checkbox" id="summary-custom-model-enabled" class="vk-switch" ${useCustomModel ? 'checked' : ''}>
+        </div>
+        <div class="settings-item" id="summary-custom-model-row" style="${useCustomModel ? '' : 'display:none'}"><label>${t('label_model') || 'Model'}</label><input type="text" id="summary-custom-model" value="${customModel}" placeholder="${t('label_model') || 'Model'}"></div>
+        <div class="summary-status-row">
+            <div class="summary-status-badge" id="summary-status-badge">${data.savedContent ? 'Saved summary present' : 'No saved summary yet'}</div>
+            <div class="summary-status-text" id="summary-status-text">Draft editing is separate until you press Save.</div>
+        </div>
+        <div class="settings-item"><label>${t('label_content')}</label><textarea id="summary-content" rows="8" placeholder="${t('summary_placeholder')}">${data.draftContent}</textarea></div>
+        <div class="summary-action-grid">
+            <button id="btn-summary-generate" class="btn-save summary-action-btn summary-action-secondary">Generate Draft</button>
+            <button id="btn-summary-update" class="btn-save summary-action-btn summary-action-secondary">Update Draft</button>
+            <button id="btn-summary-save" class="btn-save summary-action-btn">Save</button>
+        </div>
     `;
 
     content.querySelectorAll('.help-tip').forEach(btn => {
@@ -1829,14 +1851,36 @@ function openSummarySheet() {
         };
     });
 
-    let debounceTimer = null;
     const save = () => {
         block.role = content.querySelector('#summary-role').value;
         block.insertion_mode = content.querySelector('#summary-mode').value;
         let parsedDepth = parseInt(content.querySelector('#summary-depth').value);
         block.depth = isNaN(parsedDepth) ? 0 : parsedDepth;
         block.prefix = content.querySelector('#summary-prefix').value;
-        char.summary = content.querySelector('#summary-content').value;
+    };
+
+    const persistSummaryModelSettings = () => {
+        useCustomModel = !!content.querySelector('#summary-custom-model-enabled')?.checked;
+        customModel = content.querySelector('#summary-custom-model')?.value?.trim() || '';
+        localStorage.setItem(SUMMARY_CUSTOM_MODEL_ENABLED_KEY, String(useCustomModel));
+        localStorage.setItem(SUMMARY_CUSTOM_MODEL_KEY, customModel);
+    };
+
+    const updateDraftState = (text) => {
+        data.draftContent = text;
+        const isDirty = data.draftContent !== data.savedContent;
+        const statusBadge = content.querySelector('#summary-status-badge');
+        const statusText = content.querySelector('#summary-status-text');
+        if (statusBadge) {
+            statusBadge.textContent = isDirty
+                ? 'Draft has unsaved changes'
+                : (data.savedContent ? 'Draft matches saved summary' : 'No saved summary yet');
+        }
+        if (statusText) {
+            statusText.textContent = isDirty
+                ? 'Press Save to apply this summary to the chat.'
+                : 'Draft editing is separate until you press Save.';
+        }
     };
 
     const debouncedSave = () => {
@@ -1851,26 +1895,72 @@ function openSummarySheet() {
     });
     content.querySelector('#summary-depth').addEventListener('input', save);
     content.querySelector('#summary-prefix').addEventListener('input', save);
-    content.querySelector('#summary-content').addEventListener('input', debouncedSave);
+    content.querySelector('#summary-content').addEventListener('input', (e) => {
+        updateDraftState(e.target.value);
+        debouncedSave();
+    });
+    content.querySelector('#summary-custom-model-enabled').addEventListener('change', (e) => {
+        content.querySelector('#summary-custom-model-row').style.display = e.target.checked ? 'block' : 'none';
+        persistSummaryModelSettings();
+    });
+    content.querySelector('#summary-custom-model').addEventListener('input', persistSummaryModelSettings);
 
-    content.querySelector('#btn-auto-summary').addEventListener('click', async (e) => {
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        const originalHtml = btn.innerHTML;
-        btn.innerHTML = `<div class="app-loader-spinner" style="width:20px;height:20px;border-width:2px;"></div>`;
+    const runSummaryGeneration = async (mode) => {
+        if (isGenerating) return;
+        isGenerating = true;
+        const generateBtn = content.querySelector('#btn-summary-generate');
+        const updateBtn = content.querySelector('#btn-summary-update');
+        const saveBtn = content.querySelector('#btn-summary-save');
+        const originalGenerateHtml = generateBtn.innerHTML;
+        const originalUpdateHtml = updateBtn.innerHTML;
+        generateBtn.disabled = true;
+        updateBtn.disabled = true;
+        saveBtn.disabled = true;
+        if (mode === 'generate') {
+            generateBtn.innerHTML = `<div class="app-loader-spinner" style="width:20px;height:20px;border-width:2px;"></div>`;
+        } else {
+            updateBtn.innerHTML = `<div class="app-loader-spinner" style="width:20px;height:20px;border-width:2px;"></div>`;
+        }
         try {
             const historyText = props.chatHistory.filter(m => !m.isHidden && !m.isTyping).slice(-50).map(m => `${m.role === 'user' ? (m.persona?.name || 'User') : char.name}: ${m.text}`).join('\n');
+            const currentDraft = content.querySelector('#summary-content').value.trim();
+            const promptBase = currentPreset.value.summaryPrompt;
+            const prompt = mode === 'update' && currentDraft
+                ? `${promptBase}\n\nCurrent summary draft:\n${currentDraft}\n\nUpdate the draft summary to reflect the conversation more accurately.`
+                : promptBase;
             const summary = await generateSummary({
                 history: historyText,
-                prompt: currentPreset.value.summaryPrompt
+                prompt,
+                apiConfigOverride: useCustomModel && customModel ? { model: customModel } : null
             });
             content.querySelector('#summary-content').value = summary;
-            save();
-        } catch (e) { console.error(e); } finally {
-            btn.disabled = false;
-            btn.innerHTML = originalHtml;
+            updateDraftState(summary);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            isGenerating = false;
+            generateBtn.disabled = false;
+            updateBtn.disabled = false;
+            saveBtn.disabled = false;
+            generateBtn.innerHTML = originalGenerateHtml;
+            updateBtn.innerHTML = originalUpdateHtml;
         }
+    };
+
+    content.querySelector('#btn-summary-generate').addEventListener('click', () => {
+        runSummaryGeneration('generate');
     });
+    content.querySelector('#btn-summary-update').addEventListener('click', () => {
+        runSummaryGeneration('update');
+    });
+    content.querySelector('#btn-summary-save').addEventListener('click', () => {
+        save();
+        data.savedContent = content.querySelector('#summary-content').value;
+        char.summary = data.savedContent;
+        updateDraftState(data.savedContent);
+        closeBottomSheet();
+    });
+    updateDraftState(data.draftContent);
 
     showBottomSheet({ 
         title: t('magic_summary'), 
@@ -2604,6 +2694,51 @@ onBeforeUnmount(() => {
     height: 20px;
     fill: var(--text-gray);
     opacity: 0.5;
+}
+
+.summary-sheet {
+    padding-bottom: 4px;
+}
+
+.summary-status-row {
+    margin: 4px 16px 12px;
+    padding: 12px;
+    border-radius: 14px;
+    background: rgba(var(--vk-blue-rgb), 0.06);
+    border: 1px solid var(--border-color);
+}
+
+.summary-status-badge {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.summary-status-text {
+    font-size: 13px;
+    color: var(--text-gray);
+    line-height: 1.45;
+}
+
+.summary-action-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    padding: 0 16px 16px;
+}
+
+.summary-action-btn {
+    margin-top: 0;
+}
+
+.summary-action-secondary {
+    background: rgba(var(--vk-blue-rgb), 0.1);
+    color: var(--vk-blue);
+}
+
+@media (max-width: 520px) {
+    .summary-action-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .preset-overview-block {

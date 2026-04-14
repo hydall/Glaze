@@ -12,8 +12,8 @@ export const lorebookState = reactive({
         scanDepth: 1000,
         contextPercent: 100,
         budgetCap: 0,
-        reserveMode: 'tokens',
-        reserveValue: 0,
+        reserveMode: 'percent',
+        reserveValue: 10,
         minActivations: 0,
         maxDepth: 0,
         maxRecursionSteps: 0,
@@ -46,12 +46,12 @@ export async function initLorebookState() {
                 lorebookState.lorebooks = data.lorebooks;
                 if (data.settings) {
                     if (data.settings.reserveMode === undefined) {
-                        data.settings.reserveMode = 'tokens';
+                        data.settings.reserveMode = 'percent';
                     }
                     if (data.settings.reserveValue === undefined) {
                         const legacyBudget = Number(data.settings.budgetCap || 0);
                         const legacyPercent = Number(data.settings.contextPercent || 0);
-                        data.settings.reserveValue = legacyBudget > 0 ? legacyBudget : Math.max(legacyPercent, 0);
+                        data.settings.reserveValue = legacyBudget > 0 ? legacyBudget : Math.max(legacyPercent, 10);
                         if (legacyBudget <= 0 && legacyPercent > 0) {
                             data.settings.reserveMode = 'percent';
                         }

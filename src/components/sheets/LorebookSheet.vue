@@ -228,6 +228,12 @@ function openOptionSelector({ title, options, currentValue, onSelect }) {
     showBottomSheet({ title, items });
 }
 
+function getReserveModeLabel() {
+    return lorebookState.globalSettings.reserveMode === 'tokens'
+        ? (t('label_budget_cap') || 'Exact tokens')
+        : (t('label_context_percent') || 'Percent');
+}
+
 // activation now managed via LorebookConnectionsSheet
 
 // --- Lifecycle ---
@@ -444,14 +450,25 @@ defineExpose({ open, openEntry, close, openLorebook });
                                 <input type="number" v-model="lorebookState.globalSettings.scanDepth">
                             </div>
                              <div class="settings-col">
-                                <label>{{ t('label_context_percent') }}</label>
-                                <input type="number" v-model="lorebookState.globalSettings.contextPercent">
+                                <label>Lorebook reserve mode</label>
+                                <div class="clickable-selector" @click="openOptionSelector({
+                                    title: 'Lorebook reserve mode',
+                                    options: [
+                                        { value: 'percent', label: t('label_context_percent') || 'Percent' },
+                                        { value: 'tokens', label: t('label_budget_cap') || 'Exact tokens' }
+                                    ],
+                                    currentValue: lorebookState.globalSettings.reserveMode,
+                                    onSelect: (v) => lorebookState.globalSettings.reserveMode = v
+                                })">
+                                    <span>{{ getReserveModeLabel() }}</span>
+                                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                                </div>
                             </div>
                         </div>
                          <div class="settings-row">
                             <div class="settings-col">
-                                <label>{{ t('label_budget_cap') }}</label>
-                                <input type="number" v-model="lorebookState.globalSettings.budgetCap">
+                                <label>{{ lorebookState.globalSettings.reserveMode === 'tokens' ? (t('label_budget_cap') || 'Exact tokens') : (t('label_context_percent') || 'Reserve percent') }}</label>
+                                <input type="number" v-model="lorebookState.globalSettings.reserveValue" :min="lorebookState.globalSettings.reserveMode === 'tokens' ? 0 : 1" :max="lorebookState.globalSettings.reserveMode === 'tokens' ? undefined : 100">
                             </div>
                              <div class="settings-col">
                                 <label>{{ t('label_min_activations') }}</label>
