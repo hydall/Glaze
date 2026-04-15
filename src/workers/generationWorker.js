@@ -45,6 +45,8 @@ function escapeRegex(string) {
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
 }
 
+const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\\u201C\\u201D\\u2018\\u2019\\u00AB\\u00BB(){}\\[\\]—–]';
+
 function sanitizeRegexFlags(flags) {
     const valid = new Set(['g', 'i', 'm', 's', 'u', 'y']);
     let out = '';
@@ -194,6 +196,20 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
                 const sourceText = `${text ?? ''}`;
                 const sourceKey = `${key}`;
                 const flags = caseSensitive ? '' : 'i';
+
+                if (wholeWords === 'glaze') {
+                    const escaped = escapeRegex(sourceKey);
+                    const pattern = `(?:^|${GLAZE_BOUNDARIES})${escaped}(?:$|${GLAZE_BOUNDARIES})`;
+                    const regex = tryCreateRegex(pattern, flags);
+                    if (regex) return regex.test(sourceText);
+                    const haystack = caseSensitive ? sourceText : sourceText.toLowerCase();
+                    const needle = caseSensitive ? sourceKey : sourceKey.toLowerCase();
+                    if (!needle) return false;
+                    const escapedNeedle = escapeRegex(needle);
+                    const fallback = tryCreateRegex(`(?:^|${GLAZE_BOUNDARIES})${escapedNeedle}(?:$|${GLAZE_BOUNDARIES})`, caseSensitive ? '' : 'i');
+                    return fallback ? fallback.test(haystack) : false;
+                }
+
                 let pattern = sourceKey;
                 if (wholeWords) pattern = `\\b${pattern}\\b`;
 
@@ -202,8 +218,6 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
                     return regex.test(sourceText);
                 }
 
-                // iOS WebKit can throw RangeError for pathological patterns.
-                // Fallback to literal matching to avoid crashing the worker.
                 const haystack = caseSensitive ? sourceText : sourceText.toLowerCase();
                 const needle = caseSensitive ? sourceKey : sourceKey.toLowerCase();
                 if (!needle) return false;

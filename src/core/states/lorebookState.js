@@ -5,6 +5,8 @@ function escapeRegex(string) {
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
 }
 
+const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\\u201C\\u201D\\u2018\\u2019\\u00AB\\u00BB(){}\\[\\]—–]';
+
 // --- State Definition ---
 export const lorebookState = reactive({
     lorebooks: [],
@@ -219,16 +221,34 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
                 if (!key) return false;
                 const sourceText = `${text ?? ''}`;
                 const sourceKey = `${key}`;
+                const flags = caseSensitive ? '' : 'i';
+
+                if (wholeWords === 'glaze') {
+                    const escaped = escapeRegex(sourceKey);
+                    const pattern = `(?:^|${GLAZE_BOUNDARIES})${escaped}(?:$|${GLAZE_BOUNDARIES})`;
+                    try {
+                        return new RegExp(pattern, flags).test(sourceText);
+                    } catch (e) {
+                        const haystack = caseSensitive ? sourceText : sourceText.toLowerCase();
+                        const needle = caseSensitive ? sourceKey : sourceKey.toLowerCase();
+                        if (!needle) return false;
+                        const escapedNeedle = escapeRegex(needle);
+                        try {
+                            return new RegExp(`(?:^|${GLAZE_BOUNDARIES})${escapedNeedle}(?:$|${GLAZE_BOUNDARIES})`, caseSensitive ? '' : 'i').test(haystack);
+                        } catch (e2) {
+                            return false;
+                        }
+                    }
+                }
+
                 let pattern = sourceKey;
                 if (wholeWords) {
                     pattern = `\\b${pattern}\\b`;
                 }
-                const flags = caseSensitive ? '' : 'i';
                 try {
                     const regex = new RegExp(pattern, flags);
                     return regex.test(sourceText);
                 } catch (e) {
-                    // Prevent crashes on invalid/pathological patterns by using literal fallback.
                     const haystack = caseSensitive ? sourceText : sourceText.toLowerCase();
                     const needle = caseSensitive ? sourceKey : sourceKey.toLowerCase();
                     if (!needle) return false;

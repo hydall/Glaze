@@ -492,6 +492,8 @@
     "logic_not_all": "НЕ все (Основные И Не все из фильтра)",
     "label_case_sensitive": "Регистрозависимость",
     "label_match_whole_words": "Целые слова",
+    "match_whole_words_st": "ST (\\b)",
+    "match_whole_words_glaze": "Glaze (Пунктуация)",
     "label_group_scoring": "Групповой скоринг",
     "match_global": "Как в глобальных",
     "on": "Вкл",

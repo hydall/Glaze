@@ -497,9 +497,21 @@ defineExpose({ open, openEntry, close, openLorebook });
                              <label>{{ t('label_case_sensitive_global') }}</label>
                              <input type="checkbox" v-model="lorebookState.globalSettings.caseSensitive" class="vk-switch small-switch">
                         </div>
-                         <div class="settings-item-checkbox small-checkbox">
+                         <div class="settings-item">
                              <label>{{ t('label_match_whole_words_global') }}</label>
-                             <input type="checkbox" v-model="lorebookState.globalSettings.matchWholeWords" class="vk-switch small-switch">
+                             <div class="clickable-selector" @click="openOptionSelector({
+                                 title: t('label_match_whole_words_global'),
+                                 options: [
+                                     { value: false, label: t('off') },
+                                     { value: true, label: t('match_whole_words_st') },
+                                     { value: 'glaze', label: t('match_whole_words_glaze') }
+                                 ],
+                                 currentValue: lorebookState.globalSettings.matchWholeWords,
+                                 onSelect: (v) => lorebookState.globalSettings.matchWholeWords = v
+                             })">
+                                 <span>{{ lorebookState.globalSettings.matchWholeWords === 'glaze' ? t('match_whole_words_glaze') : (lorebookState.globalSettings.matchWholeWords ? t('match_whole_words_st') : t('off')) }}</span>
+                                 <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                             </div>
                         </div>
                     </div>
                 </div>

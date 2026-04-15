@@ -486,6 +486,8 @@
     "logic_not_all": "NOT All (Has Primary AND Not All Filters)",
     "label_case_sensitive": "Case Sensitive",
     "label_match_whole_words": "Match Whole Words",
+    "match_whole_words_st": "ST (\\b)",
+    "match_whole_words_glaze": "Glaze (Punctuation)",
     "label_group_scoring": "Group Scoring",
     "match_global": "Match Global",
     "on": "On",
