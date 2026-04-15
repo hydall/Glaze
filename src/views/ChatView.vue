@@ -2885,7 +2885,19 @@ defineExpose({
     restoreHeader,
     openLorebookEntry,
     openPersonas: () => { chatInputRef.value?.openPersonas(); },
-    initChat: () => {} // No-op, initialization is in onMounted
+    initChat: () => {},
+    // Desktop right-panel magic handlers
+    openPresetView,
+    openApiView,
+    openLorebookSheet,
+    openRegexSheet,
+    openChatStatsSheet: () => openChatStatsSheet(),
+    openCharCard,
+    openSessionsSheet: () => openSessionsSheet(activeChatChar),
+    openImageGenSheet,
+    openGlossarySheet,
+    openAuthorsNoteSheet: () => presetView.value?.openAuthorsNoteSheet(),
+    openSummarySheet: () => presetView.value?.openSummarySheet(),
 });
 
 const onGenerationEnded = (e) => {

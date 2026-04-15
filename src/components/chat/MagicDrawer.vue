@@ -20,7 +20,8 @@ const personasSheet = ref(null);
 
 const props = defineProps({
     visible: { type: Boolean, default: false },
-    activeChar: { type: Object, default: null }
+    activeChar: { type: Object, default: null },
+    sidebarMode: { type: Boolean, default: false }
 });
 
 const emit = defineEmits([
@@ -432,8 +433,8 @@ defineExpose({
 </script>
 
 <template>
-    <Transition name="drawer">
-        <div v-if="visible" class="magic-drawer" @click.stop>
+    <Transition :name="sidebarMode ? '' : 'drawer'">
+        <div v-if="sidebarMode || visible" class="magic-drawer" :class="{ 'magic-drawer-sidebar': sidebarMode }" @click.stop>
             <div class="drawer-header">
                 <div class="drawer-title">{{ t('sheet_title_magic_drawer') || 'Magic Drawer' }}</div>
                 <div class="edit-toggle" @click="toggleEdit">

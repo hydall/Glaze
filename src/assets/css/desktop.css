@@ -1,0 +1,163 @@
+/* ===== DESKTOP LAYOUT ===== */
+/* Applied when .desktop-mode class is set on .app-layout */
+
+/* App body wrapper: always fills remaining space after header */
+.app-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Desktop: app-body becomes a flex row */
+.desktop-mode .app-body {
+    display: flex;
+    flex-direction: row;
+}
+
+/* Desktop main gets flex growth */
+.desktop-mode .app-body > #main-container {
+    flex: 1;
+    min-width: 0;
+}
+
+/* ---- Desktop overrides (requires .desktop-mode on .app-layout) ---- */
+
+/* Header: pull out of absolute flow */
+.desktop-mode .header-container {
+    position: static !important;
+    width: 100%;
+    pointer-events: auto;
+}
+
+/* Footer: hidden — BottomNav lives in the left sidebar */
+.desktop-mode .footer-container {
+    display: none !important;
+}
+
+/* Views: no header/footer padding compensation on desktop */
+.desktop-mode .view {
+    padding-top: 16px !important;
+    padding-bottom: 16px !important;
+}
+
+.desktop-mode .sub-view {
+    padding-top: 16px !important;
+    padding-bottom: 16px !important;
+}
+
+/* #main-container: in-flow flex child */
+.desktop-mode #main-container {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    width: auto !important;
+    height: 100% !important;
+}
+
+/* ChatView: relative, fills its column */
+.desktop-mode #view-chat {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 1 !important;
+}
+
+/* Chat container: no fixed-header top padding */
+.desktop-mode .chat-container {
+    padding-top: 8px !important;
+}
+
+/* Chat input wrapper: relative instead of absolute */
+.desktop-mode .chat-input-wrapper {
+    position: relative !important;
+    bottom: auto !important;
+    width: 100% !important;
+}
+
+/* Hide mobile-only magic button and its bottom drawer */
+.desktop-mode #btn-magic {
+    display: none !important;
+}
+
+.desktop-mode .chat-input-container .magic-drawer {
+    display: none !important;
+}
+
+/* Status gradients: not needed on desktop */
+.desktop-mode .chat-status-gradient,
+.desktop-mode .chat-status-gradient-bottom {
+    display: none;
+}
+
+/* ---- Left sidebar ---- */
+.desktop-sidebar-left {
+    width: 280px;
+    min-width: 200px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+    background-color: rgba(var(--ui-bg-rgb), 0.4);
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+}
+
+/* DialogList inside the sidebar fills the space */
+.desktop-sidebar-left > *:not(.desktop-sidebar-nav) {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.desktop-sidebar-left .view {
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+}
+
+/* BottomNavigation in sidebar */
+.desktop-sidebar-nav {
+    flex-shrink: 0;
+}
+
+.desktop-sidebar-nav .tabbar {
+    border-radius: 0 !important;
+    margin: 0 !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+
+/* ---- Right sidebar ---- */
+.desktop-sidebar-right {
+    width: 300px;
+    min-width: 200px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-left: 1px solid rgba(255, 255, 255, 0.07);
+    background-color: rgba(var(--ui-bg-rgb), 0.4);
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+}
+
+/* ---- MagicDrawer sidebar mode ---- */
+.magic-drawer-sidebar {
+    position: relative !important;
+    bottom: auto !important;
+    left: auto !important;
+    right: auto !important;
+    width: 100% !important;
+    height: 100% !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background-color: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    z-index: 1 !important;
+}
