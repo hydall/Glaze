@@ -7,7 +7,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import BackupSheet from '@/components/sheets/BackupSheet.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { convertSTPreset } from '@/core/services/presetImportService.js';
+import { convertSTPreset, convertLatexPreset, detectPresetFormat, finalizeImportedPreset } from '@/core/services/presetImportService.js';
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { presetState, initPresetState, savePresets, setPresetConnection } from '@/core/states/presetState.js';
 import { isKeyboardOpen as globalKeyboardOpen } from '@/core/services/keyboardHandler.js';
@@ -293,28 +293,34 @@ function triggerPresetImport() {
             
             initPresetState();
 
-            // Logic to handle ST format or internal format
-            if (data.prompts && Array.isArray(data.prompts)) {
-                // ST Format conversion
-                const preset = convertSTPreset(data, file.name.replace(/\.json$/i, ''));
-                const newId = Date.now().toString();
-                presetState.presets[newId] = preset;
-                setPresetConnection('global', null, newId);
-            } else {
-                // Assume internal format (dictionary or single object)
+            const format = detectPresetFormat(data);
+            let preset;
+
+            if (format === 'latex') {
+                preset = convertLatexPreset(data, file.name.replace(/\.json$/i, ''));
+            } else if (format === 'sillytavern') {
+                preset = convertSTPreset(data, file.name.replace(/\.json$/i, ''));
+            } else if (format === 'glaze') {
                 if (data.blocks) {
-                     const id = Date.now().toString();
-                     presetState.presets[id] = data;
-                     setPresetConnection('global', null, id);
+                    preset = data;
                 } else {
-                     Object.assign(presetState.presets, data);
+                    Object.assign(presetState.presets, data);
+                    savePresets();
+                    next();
+                    return;
                 }
+            } else {
+                alert(translations[currentLang.value]?.onboarding_import_error || 'Unknown preset format');
+                return;
             }
-            
+
+            preset = finalizeImportedPreset(preset);
+            presetState.presets[preset.id] = preset;
+            setPresetConnection('global', null, preset.id);
             savePresets();
             next();
         } catch (err) {
-            alert(t('onboarding_import_error') + err.message);
+            alert(translations[currentLang.value]?.onboarding_import_error + err.message);
         }
     };
     input.click();

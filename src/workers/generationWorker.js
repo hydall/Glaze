@@ -346,7 +346,17 @@ function buildPromptMessagesWorker(args) {
         });
     }
 
+    const hasLorebookMacro = activePreset?.blocks?.some(b => b.enabled !== false && !b.isStashed && b.content?.includes('{{lorebooks}}'));
+
+    const getLorebookContent = () => {
+        return allLoreEntries
+            .map(entry => replaceMacros(entry.content || "", char, personaObj, sessionVars, notifyObj))
+            .filter(Boolean)
+            .join('\n\n');
+    };
+
     const injectLore = (pos) => {
+        if (hasLorebookMacro) return;
         if (loreByPosition[pos] && loreByPosition[pos].length > 0) {
             loreByPosition[pos].forEach(msg => {
                 if (mergePrompts) mergeBuffer.push(msg.content);
@@ -359,13 +369,14 @@ function buildPromptMessagesWorker(args) {
         }
     };
 
-    injectLore(4);
+    if (!hasLorebookMacro) injectLore(4);
 
+    let summaryRawContent = null;
     let summaryText = null;
     if (summary) {
-        const content = typeof summary === 'object' ? summary.content : summary;
+        summaryRawContent = typeof summary === 'object' ? summary.content : summary;
         const prefix = (typeof summary === 'object' && summary.prefix) ? summary.prefix : 'Summary: ';
-        if (content) summaryText = `[${prefix}${content}]`;
+        if (summaryRawContent) summaryText = `[${prefix}${summaryRawContent}]`;
     }
 
     if (activePreset && activePreset.blocks) {
@@ -380,6 +391,18 @@ function buildPromptMessagesWorker(args) {
                 relativeBlocks.push(block);
             }
         });
+
+        const resolveDynamicMacros = (text) => {
+            if (!text) return text;
+            let result = text;
+            if (result.includes('{{lorebooks}}')) {
+                result = result.split('{{lorebooks}}').join(getLorebookContent());
+            }
+            if (result.includes('{{summary}}')) {
+                result = result.split('{{summary}}').join(summaryRawContent || '');
+            }
+            return result;
+        };
 
         const resolveBlockContent = (block) => {
             let content = "";
@@ -415,8 +438,8 @@ function buildPromptMessagesWorker(args) {
 
             if (!content) return null;
 
-            // Execute macros on the final block content to catch embedded setvar/getvar
             content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
+            content = resolveDynamicMacros(content);
 
             return { content, role };
         };
@@ -443,7 +466,7 @@ function buildPromptMessagesWorker(args) {
         relativeBlocks.forEach(block => {
             if (block.id === 'chat_history') {
                 if (mergePrompts) flushMergeBuffer();
-                Object.keys(loreByPosition).forEach(pos => injectLore(pos));
+                if (!hasLorebookMacro) Object.keys(loreByPosition).forEach(pos => injectLore(pos));
 
                 let historyMsgs = [];
                 if (history) {
