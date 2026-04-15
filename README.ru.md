@@ -46,6 +46,7 @@ Glaze — это локальный, удобный для новичков ИИ
 
 - **Android** — Установите APK-файл напрямую на ваше устройство.
 - **iOS** — Установите IPA-файл методом неофициальной загрузки (sideloading) с помощью [AltStore](https://altstore.io/) или аналогичного инструмента. Приложение пока недоступно в App Store.
+- **Windows и Linux*** — Загрузите установщик для поддерживаемой ОС и запустите его прямо на своем компьютере. 
 
 ## 🛠️ Разработка
 
@@ -60,7 +61,7 @@ Glaze создан на базе Vue 3 и Capacitor и предлагает пр
 ### 🏗️ Настройка
 
 ```bash
-git clone https://github.com/user/glaze.git
+git clone https://github.com/hydall/glaze.git
 cd glaze
 npm install
 ```

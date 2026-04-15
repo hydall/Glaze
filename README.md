@@ -46,6 +46,7 @@ Download the latest release from the [Releases](../../releases) page.
 
 - **Android** — Install the APK directly on your device.
 - **iOS** — Sideload the IPA using [AltStore](https://altstore.io/) or a similar tool. App Store distribution is not yet available.
+- **Windows and Linux*** - Download the installer of your supported OS and run directly on your PC.
 
 ## 🛠️ Development
 

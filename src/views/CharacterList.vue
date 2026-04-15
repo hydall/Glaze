@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { triggerCharacterImport } from '@/utils/characterIO.js';
+import { triggerCharacterImport, extractCharacterBook } from '@/utils/characterIO.js';
 import { exportCharacterAsV2Json, exportCharacterAsV2Png } from '@/utils/characterIO.js';
 import { triggerChatImport } from '@/core/services/chatImporter.js';
 import { db } from '@/utils/db.js';
@@ -87,9 +87,8 @@ const onAddCharacter = () => {
                                 if (!charData.id) {
                                     charData.id = Date.now().toString();
                                 }
-                                // Save to IndexedDB
+                                await extractCharacterBook(charData);
                                 await db.saveCharacter(charData, -1);
-                                // Reload the list
                                 await loadCharacters();
                             } catch (e) {
                                 console.error("Failed to save character", e);
