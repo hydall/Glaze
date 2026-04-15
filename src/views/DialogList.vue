@@ -43,7 +43,7 @@ const loadData = async () => {
         Object.keys(chatsData).forEach(charId => {
             const charData = chatsData[charId];
             const char = charMap.get(charId);
-            if (!char) return;
+            if (!char || !charData) return;
 
             const sessions = charData.sessions || (Array.isArray(charData) ? { 1: charData } : {});
             const currentId = charData.currentId || 1;

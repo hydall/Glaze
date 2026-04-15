@@ -141,6 +141,7 @@ async function loadPickerData() {
         Object.keys(chatsData).forEach(charId => {
             const char = allCharacters.value.find(c => c.id === charId);
             const data = chatsData[charId];
+            if (!data) return;
             const sess = data.sessions || (Array.isArray(data) ? { 1: data } : {});
             Object.keys(sess).forEach(sid => {
                 sessions.push({
