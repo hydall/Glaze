@@ -468,8 +468,11 @@ export async function listFolder(path) {
     if (parts.length === 0 || (parts.length === 1 && parts[0] === FOLDER_NAME)) {
         parentId = await getGlazeFolderId();
     } else {
-        const { parentId: resolvedParent } = await resolvePathToParent(path);
-        parentId = resolvedParent;
+        const folderName = parts[parts.length - 1];
+        const parentPath = '/' + parts.slice(0, -1).join('/');
+        const { parentId: resolvedParent } = await resolvePathToParent(parentPath || `/${FOLDER_NAME}`);
+        const folder = await findFolderByName(folderName, resolvedParent);
+        parentId = folder;
     }
 
     if (!parentId) return { entries: [] };
@@ -498,14 +501,23 @@ export async function listFolderContinue() {
     return { entries: [], has_more: false };
 }
 
-export async function deleteFile(path) {
-    const { parentId, fileName } = await resolvePathToParent(path);
-    const file = await findFileByName(fileName, parentId);
+export async function deleteFile(fileOrPath) {
+    let fileId = null;
 
-    if (!file) return null;
+    if (typeof fileOrPath === 'object' && fileOrPath?.id) {
+        fileId = fileOrPath.id;
+    } else {
+        const path = typeof fileOrPath === 'string'
+            ? fileOrPath
+            : (fileOrPath?.path_display || fileOrPath?.path || '');
+        const { parentId, fileName } = await resolvePathToParent(path);
+        const file = await findFileByName(fileName, parentId);
+        if (!file) return null;
+        fileId = file.id;
+    }
 
     const response = await apiRequest(
-        `${API_BASE}/files/${file.id}`,
+        `${API_BASE}/files/${fileId}`,
         { method: 'DELETE' }
     );
 

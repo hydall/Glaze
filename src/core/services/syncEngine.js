@@ -1,5 +1,5 @@
-import { db } from '@/utils/db.js';
-import { getSyncKey, encryptForSync, decryptFromSync, hasSyncKey } from '@/core/services/crypto/keyManager.js';
+import { db, getSyncDeletedEntries, clearSyncDeletedEntry } from '@/utils/db.js';
+import { encryptForSync, decryptFromSync, hasSyncKey } from '@/core/services/crypto/keyManager.js';
 
 const CLOUD_BASE = '/Glaze';
 
@@ -50,6 +50,30 @@ async function decryptEntity(encrypted, key) {
     return decryptFromSync(encrypted, key);
 }
 
+const MANIFEST_VERSION = 2;
+
+function entryKey(type, id) {
+    return `${type}:${id}`;
+}
+
+function clone(obj) {
+    return JSON.parse(JSON.stringify(obj));
+}
+
+async function getCloudVerificationCandidate(adapter) {
+    const cloudFiles = await listAllFiles(adapter);
+    const candidate = cloudFiles.find(file => {
+        const path = file.path_display || file.path || '';
+        return path !== cloudPath(ENTITY_TYPES.MANIFEST);
+    });
+
+    if (!candidate) {
+        return null;
+    }
+
+    return adapter.download(candidate.path_display || candidate.path);
+}
+
 export async function cloudHasData(adapter) {
     try {
         const result = await adapter.download(cloudPath(ENTITY_TYPES.MANIFEST));
@@ -59,70 +83,53 @@ export async function cloudHasData(adapter) {
     }
 }
 
+export async function verifyCloudKey(adapter, key) {
+    const candidate = await getCloudVerificationCandidate(adapter);
+    if (!candidate) return true;
+
+    const encrypted = JSON.parse(candidate.data);
+    await decryptEntity(encrypted, key);
+    return true;
+}
+
 export async function buildManifest(lastSync, deviceId) {
     return {
-        version: 1,
+        version: MANIFEST_VERSION,
         deviceId: deviceId || getDeviceId(),
         lastSync: lastSync || 0,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        entries: {}
     };
 }
 
-export async function pushEntities(adapter, key, onProgress) {
-    const lastSync = await readManifest(adapter);
-    const lastSyncTime = lastSync?.lastSync || 0;
-    const now = Date.now();
-    let pushed = 0;
-    let skipped = 0;
+async function computeSyncHash(data) {
+    const normalized = JSON.stringify(data ?? null);
+    const bytes = new TextEncoder().encode(normalized);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
-    const characters = await db.getAll('characters');
-    const count = characters.length;
-    for (let i = 0; i < count; i++) {
-        const char = characters[i];
-        if (!char.updatedAt || char.updatedAt > lastSyncTime) {
-            const encrypted = await encryptEntity(char, key);
-            await adapter.upload(cloudPath(ENTITY_TYPES.CHARACTER, char.id), JSON.stringify(encrypted));
-            pushed++;
-        } else {
-            skipped++;
-        }
-        if (onProgress) onProgress('characters', i + 1, count);
+async function readCloudManifestV2(adapter) {
+    const manifest = await readManifest(adapter);
+    if (manifest?.version === MANIFEST_VERSION && manifest?.entries) {
+        return manifest;
     }
+    return null;
+}
 
-    const personas = await db.getAll('personas');
-    const pCount = personas.length;
-    for (let i = 0; i < pCount; i++) {
-        const persona = personas[i];
-        if (!persona.updatedAt || persona.updatedAt > lastSyncTime) {
-            const encrypted = await encryptEntity(persona, key);
-            await adapter.upload(cloudPath(ENTITY_TYPES.PERSONA, persona.id), JSON.stringify(encrypted));
-            pushed++;
-        } else {
-            skipped++;
-        }
-        if (onProgress) onProgress('personas', i + 1, pCount);
-    }
+async function readLocalManifestV2() {
+    return (await db.get('gz_sync_manifest_v2')) || null;
+}
 
-    const chats = await db.getChats();
-    const chatIds = Object.keys(chats);
-    const cCount = chatIds.length;
-    for (let i = 0; i < cCount; i++) {
-        const charId = chatIds[i];
-        const chatData = chats[charId];
-        if (chatData.updatedAt && chatData.updatedAt > lastSyncTime) {
-            const encrypted = await encryptEntity(chatData, key);
-            await adapter.upload(cloudPath(ENTITY_TYPES.CHAT, charId), JSON.stringify(encrypted));
-            pushed++;
-        } else {
-            skipped++;
-        }
-        if (onProgress) onProgress('chats', i + 1, cCount);
-    }
+async function writeLocalManifestV2(manifest) {
+    await db.set('gz_sync_manifest_v2', manifest);
+}
 
+async function collectSingletonEntries() {
     const singletons = [
-        { type: ENTITY_TYPES.LOREBOOKS, data: await db.get('gz_lorebooks'), id: 'lorebooks' },
-        { type: ENTITY_TYPES.API_PRESETS, data: await db.get('gz_api_connection_presets'), id: 'api_presets' },
-        { type: ENTITY_TYPES.THEME_PRESETS, data: await db.get('gz_theme_presets'), id: 'theme_presets' }
+        { type: ENTITY_TYPES.LOREBOOKS, id: 'lorebooks', data: await db.get('gz_lorebooks') },
+        { type: ENTITY_TYPES.API_PRESETS, id: 'api_presets', data: await db.get('gz_api_connection_presets') },
+        { type: ENTITY_TYPES.THEME_PRESETS, id: 'theme_presets', data: await db.get('gz_theme_presets') }
     ];
 
     const lsData = {};
@@ -131,172 +138,325 @@ export async function pushEntities(adapter, key, onProgress) {
         const v = localStorage.getItem(k);
         if (v !== null) lsData[k] = v;
     }
-    if (Object.keys(lsData).length > 0) {
-        singletons.push({ type: ENTITY_TYPES.LOCAL_STORAGE, data: lsData, id: 'local_storage' });
+    singletons.push({ type: ENTITY_TYPES.LOCAL_STORAGE, id: 'local_storage', data: Object.keys(lsData).length > 0 ? lsData : null });
+    return singletons;
+}
+
+async function buildLocalManifestV2() {
+    const manifest = await buildManifest(Date.now(), getDeviceId());
+    const previousManifest = await readLocalManifestV2();
+    const previousEntries = previousManifest?.entries || {};
+    manifest.entries = {};
+
+    const characters = await db.getAll('characters');
+    for (const char of characters) {
+        if (!char?.id) continue;
+        const hash = await computeSyncHash(char);
+        const previousEntry = previousEntries[entryKey(ENTITY_TYPES.CHARACTER, char.id)];
+        manifest.entries[entryKey(ENTITY_TYPES.CHARACTER, char.id)] = {
+            type: ENTITY_TYPES.CHARACTER,
+            id: char.id,
+            path: cloudPath(ENTITY_TYPES.CHARACTER, char.id),
+            updatedAt: char.updatedAt || previousEntry?.updatedAt || Date.now(),
+            hash,
+            deleted: false
+        };
     }
 
-    for (let i = 0; i < singletons.length; i++) {
-        const { type, data, id } = singletons[i];
-        if (data !== null && data !== undefined) {
-            const encrypted = await encryptEntity(data, key);
-            await adapter.upload(cloudPath(type, id), JSON.stringify(encrypted));
-            pushed++;
+    const personas = await db.getAll('personas');
+    for (const persona of personas) {
+        if (!persona?.id) continue;
+        const hash = await computeSyncHash(persona);
+        const previousEntry = previousEntries[entryKey(ENTITY_TYPES.PERSONA, persona.id)];
+        manifest.entries[entryKey(ENTITY_TYPES.PERSONA, persona.id)] = {
+            type: ENTITY_TYPES.PERSONA,
+            id: persona.id,
+            path: cloudPath(ENTITY_TYPES.PERSONA, persona.id),
+            updatedAt: persona.updatedAt || previousEntry?.updatedAt || Date.now(),
+            hash,
+            deleted: false
+        };
+    }
+
+    const chats = await db.getChats();
+    for (const [charId, chatData] of Object.entries(chats || {})) {
+        const hash = await computeSyncHash(chatData);
+        const previousEntry = previousEntries[entryKey(ENTITY_TYPES.CHAT, charId)];
+        manifest.entries[entryKey(ENTITY_TYPES.CHAT, charId)] = {
+            type: ENTITY_TYPES.CHAT,
+            id: charId,
+            path: cloudPath(ENTITY_TYPES.CHAT, charId),
+            updatedAt: chatData?.updatedAt || previousEntry?.updatedAt || Date.now(),
+            hash,
+            deleted: false
+        };
+    }
+
+    const singletons = await collectSingletonEntries();
+    for (const item of singletons) {
+        if (item.data === null || item.data === undefined) continue;
+        const manifestKey = entryKey(item.type, item.id);
+        const hash = await computeSyncHash(item.data);
+        const previousEntry = previousEntries[manifestKey];
+        manifest.entries[entryKey(item.type, item.id)] = {
+            type: item.type,
+            id: item.id,
+            path: cloudPath(item.type, item.id),
+            updatedAt: previousEntry?.hash === hash && !previousEntry?.deleted
+                ? previousEntry.updatedAt
+                : Date.now(),
+            hash,
+            deleted: false
+        };
+    }
+
+    const deletions = await getSyncDeletedEntries();
+    for (const [key, deletion] of Object.entries(deletions)) {
+        manifest.entries[key] = {
+            type: deletion.type,
+            id: deletion.id,
+            path: cloudPath(deletion.type, deletion.id),
+            updatedAt: deletion.updatedAt,
+            hash: null,
+            deleted: true
+        };
+    }
+
+    manifest.lastSync = Date.now();
+    return manifest;
+}
+
+async function readCloudEntityByEntry(adapter, entry, key) {
+    const result = await adapter.download(entry.path);
+    if (!result) return null;
+    const encrypted = JSON.parse(result.data);
+    return decryptEntity(encrypted, key);
+}
+
+async function applyCloudEntry(adapter, entry, key) {
+    if (entry.deleted) {
+        if (entry.type === ENTITY_TYPES.CHARACTER) {
+            await db.delete('characters', entry.id);
+        } else if (entry.type === ENTITY_TYPES.PERSONA) {
+            await db.delete('personas', entry.id);
+        } else if (entry.type === ENTITY_TYPES.CHAT) {
+            await db.delete('keyvalue', `gz_chat_${entry.id}`);
         }
-        if (onProgress) onProgress('settings', i + 1, singletons.length);
+        await clearSyncDeletedEntry(entry.type, entry.id);
+        return null;
     }
 
-    const manifest = await buildManifest(now, getDeviceId());
-    await adapter.upload(cloudPath(ENTITY_TYPES.MANIFEST), JSON.stringify(manifest));
+    const entity = await readCloudEntityByEntry(adapter, entry, key);
+    if (entry.type === ENTITY_TYPES.CHARACTER) {
+        await db.put('characters', entity);
+        await clearSyncDeletedEntry(entry.type, entry.id);
+    } else if (entry.type === ENTITY_TYPES.PERSONA) {
+        await db.put('personas', entity);
+        await clearSyncDeletedEntry(entry.type, entry.id);
+    } else if (entry.type === ENTITY_TYPES.CHAT) {
+        await db.set(`gz_chat_${entry.id}`, entity);
+        await clearSyncDeletedEntry(entry.type, entry.id);
+    } else if (entry.type === ENTITY_TYPES.LOREBOOKS) {
+        await db.queuedSet('gz_lorebooks', entity);
+    } else if (entry.type === ENTITY_TYPES.API_PRESETS) {
+        await db.queuedSet('gz_api_connection_presets', entity);
+    } else if (entry.type === ENTITY_TYPES.THEME_PRESETS) {
+        await db.queuedSet('gz_theme_presets', entity);
+    } else if (entry.type === ENTITY_TYPES.LOCAL_STORAGE) {
+        for (const [lsKey, lsVal] of Object.entries(entity || {})) {
+            localStorage.setItem(lsKey, lsVal);
+        }
+    }
+    return entity;
+}
 
-    return { pushed, skipped, total: pushed + skipped };
+function getBreakdownBucket(type) {
+    if (type === ENTITY_TYPES.CHARACTER) return 'characters';
+    if (type === ENTITY_TYPES.PERSONA) return 'personas';
+    if (type === ENTITY_TYPES.CHAT) return 'chats';
+    return 'settings';
+}
+
+function needsConflict(localEntry, cloudEntry) {
+    return !!localEntry && !localEntry.deleted && localEntry.updatedAt > cloudEntry.updatedAt;
+}
+
+async function getLocalConflictEntity(type, id) {
+    if (type === ENTITY_TYPES.CHARACTER) return getLocalCharacter(id);
+    if (type === ENTITY_TYPES.PERSONA) return getLocalPersona(id);
+    if (type === ENTITY_TYPES.CHAT) return getLocalChat(id);
+    return null;
+}
+
+function getConflictName(type, localEntity, cloudEntity, id) {
+    if (type === ENTITY_TYPES.CHARACTER || type === ENTITY_TYPES.PERSONA) {
+        return localEntity?.name || cloudEntity?.name || id;
+    }
+    if (type === ENTITY_TYPES.CHAT) {
+        return getChatName(localEntity, cloudEntity, id);
+    }
+    return id;
+}
+
+async function deleteCloudFileIfExists(adapter, entry) {
+    try {
+        await adapter.deleteFile(entry.path);
+    } catch {
+        // Ignore missing payload deletes; manifest remains source of truth.
+    }
+}
+
+async function pushManifestV2(adapter, key, onProgress) {
+    const cloudManifest = await readCloudManifestV2(adapter);
+    const localManifest = await buildLocalManifestV2();
+    const cloudEntries = cloudManifest?.entries || {};
+    const breakdown = { characters: 0, personas: 0, chats: 0, settings: 0 };
+    let pushed = 0;
+    let skipped = 0;
+
+    const allKeys = new Set([...Object.keys(localManifest.entries), ...Object.keys(cloudEntries)]);
+    const allEntries = Array.from(allKeys);
+
+    for (let i = 0; i < allEntries.length; i++) {
+        const keyName = allEntries[i];
+        const localEntry = localManifest.entries[keyName];
+        const cloudEntry = cloudEntries[keyName];
+        const phase = getBreakdownBucket((localEntry || cloudEntry)?.type);
+
+        if (!localEntry) {
+            if (onProgress) onProgress(phase, i + 1, allEntries.length);
+            continue;
+        }
+
+        const shouldUpload = !cloudEntry
+            || localEntry.deleted !== cloudEntry.deleted
+            || localEntry.updatedAt > cloudEntry.updatedAt
+            || localEntry.hash !== cloudEntry.hash;
+
+        if (!shouldUpload) {
+            skipped++;
+            if (onProgress) onProgress(phase, i + 1, allEntries.length);
+            continue;
+        }
+
+        if (localEntry.deleted) {
+            await deleteCloudFileIfExists(adapter, localEntry);
+        } else {
+            let payload = null;
+            if (localEntry.type === ENTITY_TYPES.CHARACTER) payload = await getLocalCharacter(localEntry.id);
+            else if (localEntry.type === ENTITY_TYPES.PERSONA) payload = await getLocalPersona(localEntry.id);
+            else if (localEntry.type === ENTITY_TYPES.CHAT) payload = await getLocalChat(localEntry.id);
+            else {
+                const singletons = await collectSingletonEntries();
+                payload = singletons.find(item => item.type === localEntry.type && item.id === localEntry.id)?.data ?? null;
+            }
+
+            if (payload !== null && payload !== undefined) {
+                const encrypted = await encryptEntity(payload, key);
+                await adapter.upload(localEntry.path, JSON.stringify(encrypted));
+            }
+        }
+
+        pushed++;
+        breakdown[phase]++;
+        if (onProgress) onProgress(phase, i + 1, allEntries.length);
+    }
+
+    localManifest.lastSync = Date.now();
+    localManifest.createdAt = cloudManifest?.createdAt || Date.now();
+    await adapter.upload(cloudPath(ENTITY_TYPES.MANIFEST), JSON.stringify(localManifest));
+    await writeLocalManifestV2(localManifest);
+
+    return { pushed, skipped, total: pushed + skipped, breakdown };
+}
+
+async function pullManifestV2(adapter, key, onProgress, onConflict) {
+    const cloudManifest = await readCloudManifestV2(adapter);
+    if (!cloudManifest) {
+        throw new Error('Cloud manifest v2 not found');
+    }
+
+    const localManifest = await buildLocalManifestV2();
+    const cloudEntries = cloudManifest.entries || {};
+    const localEntries = localManifest.entries || {};
+    const allKeys = new Set([...Object.keys(cloudEntries), ...Object.keys(localEntries)]);
+    const allEntries = Array.from(allKeys);
+    const breakdown = { characters: 0, personas: 0, chats: 0, settings: 0 };
+    const decryptErrors = [];
+    const conflicts = [];
+    let pulled = 0;
+
+    for (let i = 0; i < allEntries.length; i++) {
+        const keyName = allEntries[i];
+        const cloudEntry = cloudEntries[keyName];
+        const localEntry = localEntries[keyName];
+        const phase = getBreakdownBucket((cloudEntry || localEntry)?.type);
+
+        if (!cloudEntry) {
+            if (onProgress) onProgress(phase, i + 1, allEntries.length);
+            continue;
+        }
+
+        const cloudIsNewer = !localEntry || cloudEntry.updatedAt > localEntry.updatedAt || cloudEntry.hash !== localEntry.hash || cloudEntry.deleted !== localEntry.deleted;
+        if (!cloudIsNewer) {
+            if (onProgress) onProgress(phase, i + 1, allEntries.length);
+            continue;
+        }
+
+        if (needsConflict(localEntry, cloudEntry)) {
+            const localEntity = await getLocalConflictEntity(cloudEntry.type, cloudEntry.id);
+            let cloudEntity = null;
+            if (!cloudEntry.deleted) {
+                try {
+                    cloudEntity = await readCloudEntityByEntry(adapter, cloudEntry, key);
+                } catch (e) {
+                    decryptErrors.push({ type: cloudEntry.type, id: cloudEntry.id, error: e.message });
+                    if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                    continue;
+                }
+            }
+            const conflict = {
+                type: cloudEntry.type,
+                id: cloudEntry.id,
+                name: getConflictName(cloudEntry.type, localEntity, cloudEntity, cloudEntry.id),
+                local: localEntity,
+                cloud: cloudEntity,
+                cloudModified: cloudEntry.updatedAt
+            };
+            conflicts.push(conflict);
+            if (onConflict) onConflict(conflict);
+            if (onProgress) onProgress(phase, i + 1, allEntries.length);
+            continue;
+        }
+
+        try {
+            await applyCloudEntry(adapter, cloudEntry, key);
+            pulled++;
+            breakdown[phase]++;
+        } catch (e) {
+            decryptErrors.push({ type: cloudEntry.type, id: cloudEntry.id, error: e.message });
+        }
+
+        if (onProgress) onProgress(phase, i + 1, allEntries.length);
+    }
+
+    await writeLocalManifestV2(clone(cloudManifest));
+
+    if (pulled === 0 && conflicts.length === 0 && decryptErrors.length > 0 && Object.keys(cloudEntries).length > 0) {
+        throw new Error('Cloud data was found, but none of it could be decrypted. Restore the correct recovery phrase and try again.');
+    }
+
+    return { pulled, conflicts, decryptErrors, breakdown };
+}
+
+export async function pushEntities(adapter, key, onProgress) {
+    return pushManifestV2(adapter, key, onProgress);
 }
 
 export async function pullEntities(adapter, key, onProgress, onConflict) {
     const keyAvailable = await hasSyncKey();
     if (!keyAvailable) throw new Error('Encryption key not available. Set up encryption first.');
-
-    const manifest = await readManifest(adapter);
-    const localLastSync = manifest?.lastSync || 0;
-
-    const cloudFiles = await listAllFiles(adapter);
-    let pulled = 0;
-    let conflicts = [];
-
-    const charFiles = cloudFiles.filter(f => f.path.startsWith(`${CLOUD_BASE}/characters/`));
-    const charErrors = [];
-    for (let i = 0; i < charFiles.length; i++) {
-        const file = charFiles[i];
-        const charId = file.path.replace(`${CLOUD_BASE}/characters/`, '').replace('.enc', '');
-        const cloudModified = file.serverModified ? new Date(file.serverModified).getTime() : 0;
-
-        const localChar = await getLocalCharacter(charId);
-        const downloadResult = await adapter.download(file.path_display || file.path);
-        if (!downloadResult) {
-            if (onProgress) onProgress('characters', i + 1, charFiles.length);
-            continue;
-        }
-
-        let cloudEntity;
-        try {
-            const encrypted = JSON.parse(downloadResult.data);
-            cloudEntity = await decryptEntity(encrypted, key);
-        } catch (e) {
-            console.warn(`[syncEngine] Failed to decrypt character ${charId}:`, e);
-            charErrors.push({ type: ENTITY_TYPES.CHARACTER, id: charId, error: e.message });
-            if (onProgress) onProgress('characters', i + 1, charFiles.length);
-            continue;
-        }
-
-        if (localChar && localChar.updatedAt && localChar.updatedAt > cloudModified) {
-            if (onConflict) {
-                conflicts.push({ type: ENTITY_TYPES.CHARACTER, id: charId, name: localChar.name || charId, local: localChar, cloud: cloudEntity, cloudModified });
-            }
-        } else {
-            await db.put('characters', cloudEntity);
-            pulled++;
-        }
-        if (onProgress) onProgress('characters', i + 1, charFiles.length);
-    }
-
-    const personaFiles = cloudFiles.filter(f => f.path.startsWith(`${CLOUD_BASE}/personas/`));
-    for (let i = 0; i < personaFiles.length; i++) {
-        const file = personaFiles[i];
-        const personaId = file.path.replace(`${CLOUD_BASE}/personas/`, '').replace('.enc', '');
-        const cloudModified = file.serverModified ? new Date(file.serverModified).getTime() : 0;
-
-        const localPersona = await getLocalPersona(personaId);
-        const downloadResult = await adapter.download(file.path_display || file.path);
-        if (!downloadResult) {
-            if (onProgress) onProgress('personas', i + 1, personaFiles.length);
-            continue;
-        }
-
-        let cloudEntity;
-        try {
-            const encrypted = JSON.parse(downloadResult.data);
-            cloudEntity = await decryptEntity(encrypted, key);
-        } catch (e) {
-            console.warn(`[syncEngine] Failed to decrypt persona ${personaId}:`, e);
-            if (onProgress) onProgress('personas', i + 1, personaFiles.length);
-            continue;
-        }
-
-        if (localPersona && localPersona.updatedAt && localPersona.updatedAt > cloudModified) {
-            if (onConflict) {
-                conflicts.push({ type: ENTITY_TYPES.PERSONA, id: personaId, name: localPersona.name || personaId, local: localPersona, cloud: cloudEntity, cloudModified });
-            }
-        } else {
-            await db.put('personas', cloudEntity);
-            pulled++;
-        }
-        if (onProgress) onProgress('personas', i + 1, personaFiles.length);
-    }
-
-    const chatFiles = cloudFiles.filter(f => f.path.startsWith(`${CLOUD_BASE}/chats/`));
-    for (let i = 0; i < chatFiles.length; i++) {
-        const file = chatFiles[i];
-        const charId = file.path.replace(`${CLOUD_BASE}/chats/`, '').replace('.enc', '');
-        const cloudModified = file.serverModified ? new Date(file.serverModified).getTime() : 0;
-
-        const localChat = await getLocalChat(charId);
-        const downloadResult = await adapter.download(file.path_display || file.path);
-        if (!downloadResult) {
-            if (onProgress) onProgress('chats', i + 1, chatFiles.length);
-            continue;
-        }
-
-        let cloudEntity;
-        try {
-            const encrypted = JSON.parse(downloadResult.data);
-            cloudEntity = await decryptEntity(encrypted, key);
-        } catch (e) {
-            console.warn(`[syncEngine] Failed to decrypt chat ${charId}:`, e);
-            if (onProgress) onProgress('chats', i + 1, chatFiles.length);
-            continue;
-        }
-        const chatName = getChatName(localChat, cloudEntity, charId);
-
-        if (localChat && localChat.updatedAt && localChat.updatedAt > cloudModified) {
-            if (onConflict) {
-                conflicts.push({ type: ENTITY_TYPES.CHAT, id: charId, name: chatName, local: localChat, cloud: cloudEntity, cloudModified });
-            }
-        } else {
-            await db.saveChat(charId, cloudEntity);
-            pulled++;
-        }
-        if (onProgress) onProgress('chats', i + 1, chatFiles.length);
-    }
-
-    const singletonFiles = [
-        { path: cloudPath(ENTITY_TYPES.LOREBOOKS, 'lorebooks'), type: ENTITY_TYPES.LOREBOOKS, key: 'gz_lorebooks' },
-        { path: cloudPath(ENTITY_TYPES.API_PRESETS, 'api_presets'), type: ENTITY_TYPES.API_PRESETS, key: 'gz_api_connection_presets' },
-        { path: cloudPath(ENTITY_TYPES.THEME_PRESETS, 'theme_presets'), type: ENTITY_TYPES.THEME_PRESETS, key: 'gz_theme_presets' },
-        { path: cloudPath(ENTITY_TYPES.LOCAL_STORAGE, 'local_storage'), type: ENTITY_TYPES.LOCAL_STORAGE, key: null }
-    ];
-
-    for (let i = 0; i < singletonFiles.length; i++) {
-        const { path, key: dbKey } = singletonFiles[i];
-        const result = await adapter.download(path);
-        if (result) {
-            try {
-                const encrypted = JSON.parse(result.data);
-                const decrypted = await decryptEntity(encrypted, key);
-                if (dbKey) {
-                    await db.queuedSet(dbKey, decrypted);
-                } else {
-                    for (const [lsKey, lsVal] of Object.entries(decrypted)) {
-                        localStorage.setItem(lsKey, lsVal);
-                    }
-                }
-                pulled++;
-            } catch (e) {
-                console.warn(`[syncEngine] Failed to decrypt ${path}:`, e);
-            }
-        }
-        if (onProgress) onProgress('settings', i + 1, singletonFiles.length);
-    }
-
-    return { pulled, conflicts };
+    return pullManifestV2(adapter, key, onProgress, onConflict);
 }
 
 async function readManifest(adapter) {
@@ -380,7 +540,7 @@ export async function wipeCloudData(adapter, onProgress) {
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
         try {
-            await adapter.deleteFile(file.path_display || file.path);
+            await adapter.deleteFile(file);
             deleted++;
         } catch (e) {
             console.warn(`[syncEngine] Failed to delete ${file.path}:`, e);
@@ -394,6 +554,16 @@ export async function wipeCloudData(adapter, onProgress) {
 
 export async function resolveConflict(conflict, choice) {
     const entity = choice === 'cloud' ? conflict.cloud : conflict.local;
+    if (choice === 'cloud' && !entity) {
+        if (conflict.type === ENTITY_TYPES.CHARACTER) {
+            await db.delete('characters', conflict.id);
+        } else if (conflict.type === ENTITY_TYPES.PERSONA) {
+            await db.delete('personas', conflict.id);
+        } else if (conflict.type === ENTITY_TYPES.CHAT) {
+            await db.delete('keyvalue', `gz_chat_${conflict.id}`);
+        }
+        return null;
+    }
     if (conflict.type === ENTITY_TYPES.CHARACTER) {
         await db.put('characters', entity);
     } else if (conflict.type === ENTITY_TYPES.PERSONA) {

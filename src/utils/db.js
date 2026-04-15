@@ -1,8 +1,10 @@
 const DB_NAME = 'SillyCradleDB';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 const STORE_KEYVALUE = 'keyvalue';
 const STORE_CHARACTERS = 'characters';
 const STORE_PERSONAS = 'personas';
+const STORE_EMBEDDINGS = 'embeddings';
+const SYNC_DELETIONS_KEY = 'gz_sync_deleted_entries';
 
 function toPlain(data) {
     return JSON.parse(JSON.stringify(data));
@@ -451,4 +453,31 @@ export async function migrateScToGz() {
 
     localStorage.setItem('gz_migration_done', '1');
     console.log('[migrateScToGz] Migration from sc_ to gz_ complete.');
+}
+
+export async function getSyncDeletedEntries() {
+    return (await db.get(SYNC_DELETIONS_KEY)) || {};
+}
+
+export async function setSyncDeletedEntries(entries) {
+    await db.set(SYNC_DELETIONS_KEY, entries || {});
+}
+
+export async function markSyncDeletedEntry(type, id) {
+    if (!type || !id) return;
+    const entries = await getSyncDeletedEntries();
+    entries[`${type}:${id}`] = {
+        type,
+        id,
+        deleted: true,
+        updatedAt: Date.now()
+    };
+    await setSyncDeletedEntries(entries);
+}
+
+export async function clearSyncDeletedEntry(type, id) {
+    if (!type || !id) return;
+    const entries = await getSyncDeletedEntries();
+    delete entries[`${type}:${id}`];
+    await setSyncDeletedEntries(entries);
 }

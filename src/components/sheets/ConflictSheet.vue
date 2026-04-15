@@ -9,7 +9,7 @@ import { fullPush } from '@/core/services/syncService.js';
 import { syncStatus } from '@/core/states/syncState.js';
 
 const sheet = ref(null);
-defineProps({ zIndex: { type: Number, default: 1006 } });
+defineProps({ zIndex: { type: Number, default: 11050 } });
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
 

@@ -14,9 +14,10 @@ import {
 } from '@/core/states/syncState.js';
 import * as dropboxAdapter from '@/core/services/adapters/dropboxAdapter.js';
 import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
-import { generateSyncKey, hasSyncKey, restoreKeyFromPhrase } from '@/core/services/crypto/keyManager.js';
+import { generateSyncKey, hasSyncKey, restoreKeyFromPhrase, deleteSyncKey, getSyncKey } from '@/core/services/crypto/keyManager.js';
 import { fullPush, fullPull, fullSync, checkSyncReadiness } from '@/core/services/syncService.js';
-import { cloudHasData, wipeCloudData } from '@/core/services/syncEngine.js';
+import { cloudHasData, verifyCloudKey, wipeCloudData } from '@/core/services/syncEngine.js';
+import { db } from '@/utils/db.js';
 
 const sheet = ref(null);
 defineProps({ zIndex: { type: Number, default: 1005 } });
@@ -35,6 +36,16 @@ const restoreError = ref('');
 const restoreSuccess = ref(false);
 const localSyncStatus = ref('');
 const syncResult = ref(null);
+
+function formatSyncBreakdown(result) {
+    if (!result?.breakdown) return '';
+    const parts = [];
+    if (result.breakdown.characters) parts.push(`${result.breakdown.characters} ${t('header_characters') || 'characters'}`);
+    if (result.breakdown.personas) parts.push(`${result.breakdown.personas} ${t('menu_personas') || 'personas'}`);
+    if (result.breakdown.chats) parts.push(`${result.breakdown.chats} ${t('tab_dialogs') || 'chats'}`);
+    if (result.breakdown.settings) parts.push(`${result.breakdown.settings} ${t('title_settings') || 'settings'}`);
+    return parts.join(', ');
+}
 const isSyncing = ref(false);
 const isWiping = ref(false);
 
@@ -61,6 +72,16 @@ const progressLabel = computed(() => {
     if (syncProgress.total > 0) return `${phase} (${syncProgress.current}/${syncProgress.total})`;
     return phase;
 });
+
+async function resetSyncIdentityAfterWipe() {
+    await deleteSyncKey();
+    await db.delete('keyvalue', 'gz_sync_manifest_v2');
+    await db.delete('keyvalue', 'gz_sync_deleted_entries');
+    localStorage.removeItem('gz_sync_device_id');
+
+    localSyncStatus.value = 'no_key';
+    restoreSuccess.value = false;
+}
 
 function formatTimeAgo(ts) {
     const diff = Math.floor((Date.now() - ts) / 1000);
@@ -111,17 +132,32 @@ const connectGdrive = async () => {
 };
 
 const afterConnect = async () => {
+    const adapter = getAdapter();
+    if (!adapter) return;
+
+    const hasCloudData = await cloudHasData(adapter);
     const hasKey = await hasSyncKey();
     if (hasKey) {
+        if (hasCloudData) {
+            try {
+                const key = await getSyncKey();
+                if (!key) throw new Error('Failed to load sync key');
+                await verifyCloudKey(adapter, key);
+            } catch (e) {
+                await deleteSyncKey();
+                localSyncStatus.value = 'no_key';
+                restoreSuccess.value = false;
+                setSyncError('Saved recovery phrase does not match the cloud backup for this account. Restore the correct phrase.');
+                startRestore();
+                return;
+            }
+        }
+
         localSyncStatus.value = 'connected';
         restoreSuccess.value = false;
         return;
     }
 
-    const adapter = getAdapter();
-    if (!adapter) return;
-
-    const hasCloudData = await cloudHasData(adapter);
     if (hasCloudData) {
         localSyncStatus.value = 'no_key';
         startRestore();
@@ -152,6 +188,14 @@ const disconnectProvider = async () => {
 
 const setupEncryption = async () => {
     try {
+        const adapter = getAdapter();
+        if (adapter) {
+            const hasCloudData = await cloudHasData(adapter);
+            if (hasCloudData) {
+                throw new Error('Cloud data already exists for this account. Restore your recovery phrase instead of creating a new encryption key.');
+            }
+        }
+
         const result = await generateSyncKey();
         recoveryPhrase.value = result.recoveryPhrase;
         showRecoveryPhrase.value = true;
@@ -178,7 +222,21 @@ const doRestore = async () => {
     restoreError.value = '';
     try {
         console.log('[SyncSheet] Restoring key from phrase...');
-        await restoreKeyFromPhrase(restorePhraseInput.value.trim());
+        const restoredKey = await restoreKeyFromPhrase(restorePhraseInput.value.trim());
+
+        const adapter = getAdapter();
+        if (adapter) {
+            const hasCloudBackup = await cloudHasData(adapter);
+            if (hasCloudBackup) {
+                try {
+                    await verifyCloudKey(adapter, restoredKey);
+                } catch {
+                    await deleteSyncKey();
+                    throw new Error('This recovery phrase does not match the cloud backup for the connected account.');
+                }
+            }
+        }
+
         console.log('[SyncSheet] Key restored successfully');
         showRestorePhrase.value = false;
         if (syncProvider.value) {
@@ -264,6 +322,11 @@ const doWipe = async () => {
         const adapter = getAdapter();
         if (!adapter) throw new Error('No provider connected');
         const result = await wipeCloudData(adapter);
+        await resetSyncIdentityAfterWipe();
+        const setup = await generateSyncKey();
+        recoveryPhrase.value = setup.recoveryPhrase;
+        showRecoveryPhrase.value = true;
+        localSyncStatus.value = 'connected';
         syncResult.value = { type: 'wipe', ...result };
     } catch (e) {
         console.error('[SyncSheet] Wipe failed:', e);
@@ -357,16 +420,28 @@ onMounted(async () => {
                         </div>
                         <div class="sync-status-text" v-if="accountInfo">{{ accountInfo.email }}</div>
                         <div class="sync-status-text">{{ statusLabel }}</div>
+                    </div>
+
                     <button v-if="syncConflicts.length > 0" class="sync-resolve-btn" @click="openConflictSheet">
                         <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
                         <span>{{ syncConflicts.length }} {{ t('sync_conflicts') || 'conflicts' }} — {{ t('sync_resolve') || 'Resolve' }}</span>
                     </button>
+
+                    <div v-if="syncConflicts.length > 0" class="sync-conflict-banner">
+                        <div class="sync-conflict-banner-copy">
+                            <div class="sync-conflict-banner-title">{{ t('sync_conflicts_title') || 'Sync Conflicts' }}</div>
+                            <div class="sync-conflict-banner-text">{{ syncConflicts.length }} {{ t('sync_conflicts_pending') || 'unresolved conflict(s)' }}</div>
+                        </div>
+                        <button class="sync-inline-conflict-btn" @click="openConflictSheet">{{ t('sync_resolve') || 'Resolve' }}</button>
                     </div>
 
                     <!-- Sync result -->
                     <div v-if="syncResult" class="sync-result-card" :class="syncResult.type">
-                        <span v-if="syncResult.type === 'push'">{{ t('sync_push_result') || 'Pushed' }}: {{ syncResult.pushed }} {{ t('sync_items') || 'items' }}</span>
-                        <span v-else-if="syncResult.type === 'pull'">{{ t('sync_pull_result') || 'Pulled' }}: {{ syncResult.pulled }} {{ t('sync_items') || 'items' }}, {{ syncResult.conflicts.length }} {{ t('sync_conflicts') || 'conflicts' }}</span>
+                        <span v-if="syncResult.type === 'push'">{{ t('sync_push_result') || 'Pushed' }}: {{ syncResult.pushed }} {{ t('sync_items') || 'items' }}<template v-if="formatSyncBreakdown(syncResult)"> ({{ formatSyncBreakdown(syncResult) }})</template></span>
+                        <template v-else-if="syncResult.type === 'pull'">
+                            <span>{{ t('sync_pull_result') || 'Pulled' }}: {{ syncResult.pulled }} {{ t('sync_items') || 'items' }}<template v-if="formatSyncBreakdown(syncResult)"> ({{ formatSyncBreakdown(syncResult) }})</template>, {{ syncResult.conflicts.length }} {{ t('sync_conflicts') || 'conflicts' }}</span>
+                            <button v-if="syncResult.conflicts.length > 0" class="sync-inline-conflict-btn" @click="openConflictSheet">{{ t('sync_resolve') || 'Resolve' }}</button>
+                        </template>
                         <span v-else-if="syncResult.type === 'wipe'">{{ t('sync_wipe_result') || 'Deleted' }}: {{ syncResult.deleted }}/{{ syncResult.total }} {{ t('sync_items') || 'items' }}</span>
                         <span v-else>{{ t('sync_full_done') || 'Full sync complete' }}</span>
                     </div>
@@ -694,6 +769,34 @@ onMounted(async () => {
     transform: scale(0.98);
 }
 
+.sync-conflict-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(255, 149, 0, 0.08);
+    border: 1px solid rgba(255, 149, 0, 0.18);
+}
+
+.sync-conflict-banner-copy {
+    min-width: 0;
+}
+
+.sync-conflict-banner-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-black);
+    margin-bottom: 2px;
+}
+
+.sync-conflict-banner-text {
+    font-size: 12px;
+    color: var(--text-gray, #8e8e93);
+}
+
 .sync-error-msg {
     font-size: 13px;
     color: #ff3b30;
@@ -710,11 +813,31 @@ onMounted(async () => {
     border-radius: 8px;
     background: rgba(76, 175, 80, 0.1);
     color: #4CAF50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
 }
 
 .sync-result-card.pull {
     background: rgba(var(--vk-blue-rgb), 0.1);
     color: var(--vk-blue);
+}
+
+.sync-inline-conflict-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 6px 10px;
+    background: rgba(255, 149, 0, 0.14);
+    color: #ff9500;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.sync-inline-conflict-btn:active {
+    transform: scale(0.98);
 }
 
 .sync-progress {

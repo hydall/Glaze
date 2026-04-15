@@ -36,10 +36,12 @@ export const lorebookState = reactive({
 
 // --- Actions ---
 
-export async function initLorebookState() {
-    if (lorebookState.initialized) return;
+export async function initLorebookState(force = false) {
+    if (lorebookState.initialized && !force) return;
     try {
         const data = await db.get('gz_lorebooks');
+        lorebookState.lorebooks = [];
+        lorebookState.activations = { character: {}, chat: {} };
         if (data) {
             if (Array.isArray(data)) {
                 lorebookState.lorebooks = data;

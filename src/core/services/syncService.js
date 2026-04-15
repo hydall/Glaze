@@ -77,6 +77,7 @@ export async function fullPull() {
             syncStatus.value = SYNC_STATUS.IDLE;
         }
         clearSyncProgress();
+        window.dispatchEvent(new CustomEvent('sync-data-refreshed', { detail: result }));
         return result;
     } catch (e) {
         setSyncError(e.message);

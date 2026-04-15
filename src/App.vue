@@ -38,7 +38,7 @@ import { updateLanguage } from '@/utils/i18n.js';
 import { currentLang, imageViewerMode } from '@/core/config/APPSettings.js';
 import { initRipple, initThemeToggle, initHeaderDropdown, initBackButton, initViewportFix } from '@/core/services/ui.js';
 import { bottomSheetState, closeBottomSheet, showBottomSheet } from '@/core/states/bottomSheetState.js';
-import { db, migrateScToGz } from '@/utils/db.js';
+import { db, migrateScToGz, markSyncDeletedEntry } from '@/utils/db.js';
 import { translations } from '@/utils/i18n.js';
 import { addPersona, updatePersona, deletePersona, allPersonas, loadPersonas } from '@/core/states/personaState.js';
 import { checkAndRequestNotifications, consumePendingNotificationData } from '@/core/services/notificationService.js';
@@ -264,6 +264,7 @@ async function handleHeaderDelete() {
                             const char = editingCharacter.value;
                             if (char && char.id && db.deleteCharacter) {
                                 await db.deleteCharacter(char.id);
+                                await markSyncDeletedEntry('character', char.id);
                             } else {
                                 console.error('[App] Character ID is missing or db.deleteCharacter not found');
                             }
@@ -568,6 +569,23 @@ const onHeaderSetupEditor = () => { isHeaderEditorMode.value = true; };
 const onHeaderSetupGeneration = () => { isHeaderEditorMode.value = false; };
 const onHeaderReset = () => { isHeaderEditorMode.value = false; };
 
+const reloadSyncedData = async () => {
+    await Promise.all([
+        loadPersonas(),
+        initTheme(),
+        initLorebookState(true),
+        initPresetState(true)
+    ]);
+
+    if (characterListRef.value?.loadCharacters) {
+        await characterListRef.value.loadCharacters();
+    }
+};
+
+const onSyncDataRefreshed = async () => {
+    await reloadSyncedData();
+};
+
 const handleOpenChatEvent = async (e) => {
     logger.debug("[App] Received open-chat event:", e.detail);
     const data = e.detail;
@@ -650,6 +668,7 @@ onMounted(async () => {
     window.addEventListener('header-setup-editor', onHeaderSetupEditor);
     window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.addEventListener('header-reset', onHeaderReset);
+    window.addEventListener('sync-data-refreshed', onSyncDataRefreshed);
 
     // Initialize ResizeObserver for layout metrics
     layoutObserver = new ResizeObserver(() => {
@@ -701,6 +720,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
     window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.removeEventListener('header-reset', onHeaderReset);
+    window.removeEventListener('sync-data-refreshed', onSyncDataRefreshed);
     kbListeners.forEach(l => l.remove());
 });
 
