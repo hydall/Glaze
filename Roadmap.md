@@ -1,4 +1,4 @@
-﻿# Roadmap
+# Roadmap
 
 ## Purpose
 
@@ -439,6 +439,80 @@ Expected result:
 - [not done | not tested] A durable memory layer with deterministic ownership over chat history, reusable retrieval infrastructure, separate injection accounting, and import/export/sync-safe persistence.
 - [done | not tested] A durable memory layer foundation with deterministic ownership over chat history, separate injection accounting, tokenizer visibility, and Glaze chat round-trip persistence is now in place.
 
+## Post-Merge Conflict Audit (COMPLETED — 2026-04-16)
+
+Upstream принял PR #20 (cloud sync) → после этого PR #24 (vectorization-v2) показал 17 конфликтов. Upstream зарезолвил их сам. Наш PR #27 (memory books + lorebook fixes) тоже был принят.
+
+Current active work branch: `fast-fixes` (branched from `upstream/dev` after audit)
+
+### Merge topology
+```
+efbb4e5  ← common ancestor (tokenizer features)
+  ├── 9cff2fc  ← PR #20 merge (cloud sync into dev)
+  │     └── 15920df  ← merge dev into feat/vectorization-v2 (17 conflicts resolved here)
+  │           └── 906ee75  ← PR #24 merge (vectorization-v2 into dev)
+  │                 └── 886b4b1  ← merge dev into feat/memorybook
+  │                       └── 8ec4ff0  ← PR #27 merge (memorybook into dev)
+  │                             └── 8c58ff4, 867ff8d, 45cde4d  ← upstream fixes
+  └── c43a820  ← feat/vectorization-v2 branch tip
+```
+
+### Conflicting files (intersection of changes on both sides)
+7 files had overlapping changes between cloud sync and vectorization-v2:
+1. `.gitignore` — **A (structural)**: both added entries
+2. `CLAUDE.md` — **A (structural)**: both updated instructions
+3. `src/components/sheets/LorebookSheet.vue` — **B+C (behavioral + UI)**: vector UI + sync event listeners
+4. `src/core/states/lorebookState.js` — **B+D (behavioral + data model)**: vector indexing + sync force init + position handling
+5. `src/locales/en/index.json` — **A (structural)**: both added i18n keys
+6. `src/locales/ru/index.json` — **A (structural)**: both added i18n keys
+7. `src/utils/db.js` — **D (data model)**: embeddings store + sync helpers + updatedAt timestamps
+
+Additionally, `src/views/ChatView.vue` was changed on cloud sync side only (auto-sync + tokenizer property removal), but cloud sync PR itself had removed tokenizer computed properties. Our PR #27 restored them.
+
+### Audit results — ALL CLEAR
+
+| File | Status | Details |
+|------|--------|---------|
+| `generationService.js` | **IDENTICAL** upstream/dev ↔ our branch | All 6 memory/lorebook injection features present |
+| `generationWorker.js` | **IDENTICAL** | All 6 lorebook fixes present |
+| `lorebookState.js` | **upstream/dev is BETTER** | All 14 features present: vector + cloud sync + memory book |
+| `LorebookSheet.vue` | **upstream/dev is BETTER** | All 8 features present: vector UI + sync listeners + matchGlobal |
+| `ChatMessage.vue` | **IDENTICAL** | Memory coverage badge present |
+| `ChatView.vue` | **upstream/dev is COMPLETE** | Tokenizer props restored + auto-sync + all memory book code |
+| `db.js` | **upstream/dev is BETTER** | Cloud sync helpers added alongside vector storage |
+| Locale files | **IDENTICAL** | No diff |
+
+### Key findings
+1. **Tokenizer computed properties**: cloud sync PR (`9cff2fc`) accidentally removed them from ChatView.vue. Our PR #27 (`8ec4ff0`) restored them because our branch still had them. Final state in upstream/dev is correct.
+2. **LorebookSheet sync integration**: cloud sync added `sync-data-refreshed` event listener and `onUnmounted` cleanup. Our branch had a simpler `updateVectorReindexNotice`. Upstream/dev correctly merged both: the sync-aware version that checks ALL lorebooks + the event listener.
+3. **LorebookState force init**: cloud sync added `force` parameter and state reset. Upstream/dev correctly merged this alongside vectorization functions.
+4. **Minor edge case**: `lorebooksMacro` position slot in generationWorker.js is initialized but `injectLore('lorebooksMacro')` is never called directly. Entries with `position: 'lorebooksMacro'` only surface via `{{lorebooks}}` macro in preset blocks. Not a regression, pre-existing.
+
+### Decision
+- **No corrective branch needed.** All conflicts resolved correctly.
+- **Local `dev` synced** with `upstream/dev` at `45cde4d`.
+
+### Branch cleanup
+Deleted local branches:
+- `archive/feat/summary`
+- `archive/feat/tokenizer`
+- `feat/cloud-sync`
+- `feat/memorybook`
+- `feat/vectorization`
+- `feat/vectorization-v2`
+- `test-cloud-sync`
+
+Deleted remote branches on origin:
+- `origin/archive/feat/summary`
+- `origin/archive/feat/tokenizer`
+- `origin/feat/cloud-sync`
+- `origin/feat/memorybook`
+- `origin/feat/vectorization-v2`
+- `origin/fix/lorebook-macro-resolution`
+- `origin/test-cloud-sync`
+
+Remaining branches: `dev`, `main` (local); `upstream/dev`, `upstream/main`, `upstream/feature/desktop-layout` (remote).
+
 ## Suggested Execution Order
 
 The intended order of work is:
@@ -475,3 +549,104 @@ When returning to this roadmap after unrelated work:
 - memory books should converge vectorization and future cloud-sync-safe data modeling instead of inventing a third storage path;
 - cloud sync implementation lives in `feat/cloud-sync` / PR #20 and already includes encryption, delta sync, queueing, conflict resolution, and `updatedAt` support that memory books must reuse;
 - keep future retrieval work aligned with reusable vector infrastructure, not feature-specific hacks.
+
+## Fast Fixes — Mobile Testing Batch (ORDERED: easy → hard)
+
+Active branch: `fast-fixes`
+
+### ✅ DONE (Batch 1)
+1. **Fix: `memoryDraftTimer` is not defined (CRITICAL CRASH)**
+   - Status: `done | tested (code path)`
+   - Fix: Moved functions from `<script>` to `<script setup>` scope
+   - Testing: Message with `isTyping` should not crash Vue
+
+2. **Fix: vector search toggle should disable keyword search UI**
+   - Status: `done | tested (code path)`
+   - Fix: Hide keys/secondary keys/logic selectors when `vectorSearch=true`
+   - Testing: Enable vector search on entry → UI shows only index button and vector badges
+
+3. **Fix: embedding API key inheritance bug**
+   - Status: `done | tested (code path)`
+   - Fix: Reset `endpoint/key/model` fields when `useSame=true` in `loadEmbeddingSettings()`
+   - Testing: Switch from "Use LLM API" → fields should clear, not show LLM key
+
+4. **Fix: tokenizer doesn't count vector lorebook tokens in breakdown**
+   - Status: `done | tested (code path)`
+   - Fix: Add `vectorLore` to context breakdown, aggregate tokens from `newVectorEntries`
+   - Testing: Generate with vector lorebook entries → breakdown shows purple "Vector Lorebook" segment
+
+5. **Add NovelAI model to Naistera image generation**
+   - Status: `done | tested (code path)`
+   - Fix: Add 'novelai' to `normalizeNaisteraModel()`, UI selector, disable references for it
+   - Testing: Select NovelAI → no reference images sent (per API behavior)
+
+6. **Fix: LorebookSheet.vue build error (Invalid end tag)**
+   - Status: `done | tested`
+   - Fix: Removed extra `</div>` at line 1001, changed `<template v-if>` to `<div v-if>` for reliability
+   - Testing: `npm run build` passes without Vue template errors
+
+7. **Fix: Memory books Key Match Mode visible during vector search**
+   - Status: `done | not tested`
+   - Fix: Wrap Key Match Mode selector in `${!vectorEnabled ? '...' : ''}` in `openMemoryBooksSheet()`
+   - Testing: Enable vector search in Memory Books → Key Match Mode should be hidden
+
+### ⏳ PENDING (ordered by complexity)
+
+8. **Fix: lorebook injections shown for user but not assistant messages**
+   - Status: `not done | not tested`
+   - Complexity: easy
+   - Issue: Injection badges only appear on user messages, missing on assistant replies
+   - Investigation needed: Check `ChatMessage.vue` lorebook display, `loreEntries` storage per message
+   - Fix likely: Remove role-based filter in message rendering
+
+9. **Add i18n keys for new features**
+   - Status: `partially done` (need new keys)
+   - Complexity: easy
+   - Missing: `desc_vector_search_replaces_keys` already added; check remaining gaps
+
+10. **Fix: streaming quote formatting breaks mid-quote**
+    - Status: `not done | not tested`
+    - Complexity: medium
+    - Issue: Blue quote styling doesn't apply to streaming text when opening quote arrives without closing quote
+    - Root cause: `textFormatter.js` regex matches complete quote pairs only
+    - Fix options:
+      - Option A: Stateful quote tracking across delta updates (store open quote state)
+      - Option B: Client-side quote balancer that closes unclosed quotes for display
+      - Option C: Move quote coloring to CSS `::before`/`::after` pseudo-elements with dynamic insertion
+
+11. **Fix: messages stuck in "generating" state**
+    - Status: `not done | not tested`
+    - Complexity: medium-hard
+    - Issue: Message stays with typing indicator after generation should complete
+    - Symptoms: timer stops, "generating" label persists, no new text arrives
+    - Investigation areas:
+      - Streaming parser error handling in `generateChatResponse`
+      - `isTyping` flag cleanup on error/cancel
+      - `generatingStates` cleanup on app background/foreground
+      - Web stream reader `finally` blocks
+
+12. **Research: SillyTavern vector search implementation**
+    - Status: `not done`
+    - Complexity: medium (research only)
+    - Goal: Compare ST's approach to ours for potential improvements
+    - Questions:
+      - Do they use chunking or per-entry embeddings?
+      - What similarity metric? (cosine vs dot vs euclidean)
+      - Hybrid search: how do they combine keyword + vector?
+      - Threshold vs top-k selection?
+    - Output: Structured comparison document
+
+13. **Infrastructure: Sync service migration to upstream project**
+    - Status: `not done`
+    - Complexity: hard
+    - Goal: Move cloud sync infrastructure (encryption, delta, queueing) to developer's repo
+    - Deliverables:
+      - Sync endpoint configuration guide (PC/Linux/iOS/Android)
+      - Error 400/402 troubleshooting runbook
+      - OAuth/app token setup instructions per platform
+
+### Branch Strategy (updated)
+- Current: `fast-fixes` from `upstream/dev`
+- Policy: **One feature per branch, always from upstream/dev or previous feature**
+- Never create branches from dev that contain multiple unmerged features
+- If feature B depends on feature A: branch B from A, not from dev

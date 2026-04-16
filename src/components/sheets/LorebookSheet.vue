@@ -918,8 +918,9 @@ defineExpose({ open, openEntry, close, openLorebook });
                 <div class="editor-scroll">
                     <div class="menu-group first-group">
                         <div class="section-header">{{ t('section_activation_logic') }} <HelpTip term="lorebook-keys"/></div>
-                        <div v-if="!activeEntry.constant">
-                            <div class="settings-item">
+                        <div v-if="activeEntry.vectorSearch" class="settings-desc" style="padding:8px 0;color:var(--text-gray);">{{ t('desc_vector_search_replaces_keys') }}</div>
+                        <div v-if="!activeEntry.vectorSearch && !activeEntry.constant">
+                        <div class="settings-item">
                                 <label>{{ t('label_primary_keys') }} <span class="hint">{{ t('hint_comma_separated') }}</span></label>
                                 <input type="text" :value="activeEntry.keys.join(', ')" @input="updateEntryKeys($event.target.value)" :placeholder="t('placeholder_keys')">
                             </div>
@@ -995,10 +996,10 @@ defineExpose({ open, openEntry, close, openLorebook });
                             <label>{{ t('label_secondary_keys') }} <span class="hint">{{ t('hint_optional') }}</span></label>
                             <input type="text" :value="activeEntry.secondary_keys?.join(', ')" @input="updateEntrySecondaryKeys($event.target.value)" :placeholder="t('placeholder_filters')">
                         </div>
-                    </div>
-                </div>
+                        </div>
+                        </div>
 
-                <div class="menu-group">
+                    <div class="menu-group">
                     <div class="section-header">{{ t('section_content_properties') }}</div>
                         <div class="settings-item">
                             <label>{{ t('label_content') }}</label>
