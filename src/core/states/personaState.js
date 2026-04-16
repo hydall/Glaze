@@ -1,5 +1,5 @@
 import { ref, computed, reactive } from 'vue';
-import { db, queueDbWrite } from '@/utils/db.js';
+import { db, queueDbWrite, markSyncDeletedEntry, clearSyncDeletedEntry } from '@/utils/db.js';
 
 const personas = ref([]);
 const activeIndex = ref(0);
@@ -99,6 +99,7 @@ export function addPersona(persona) {
     updateActiveStorage();
     queueDbWrite(async () => {
         await db.put('personas', newPersona);
+        await clearSyncDeletedEntry('persona', newPersona.id);
     });
     return newPersona;
 }
@@ -124,6 +125,7 @@ export function updatePersona(index, persona) {
 
         return queueDbWrite(async () => {
             await db.put('personas', newPersona);
+            await clearSyncDeletedEntry('persona', newPersona.id);
         });
     }
     return Promise.resolve();
@@ -181,8 +183,10 @@ export function deletePersona(index) {
         return queueDbWrite(async () => {
             try {
                 await db.delete('personas', p.id);
+                await markSyncDeletedEntry('persona', p.id);
                 if (defaultPersona) {
                     await db.put('personas', defaultPersona);
+                    await clearSyncDeletedEntry('persona', defaultPersona.id);
                 }
             } catch (e) {
                 console.error('[Personas] DB delete failed:', e);

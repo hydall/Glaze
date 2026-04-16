@@ -4,6 +4,7 @@ const STORE_KEYVALUE = 'keyvalue';
 const STORE_CHARACTERS = 'characters';
 const STORE_PERSONAS = 'personas';
 const STORE_EMBEDDINGS = 'embeddings';
+const SYNC_DELETIONS_KEY = 'gz_sync_deleted_entries';
 
 function toPlain(data) {
     return JSON.parse(JSON.stringify(data));
@@ -197,6 +198,9 @@ export const db = {
         if (!character.id) {
             character.id = Date.now().toString(36) + Math.random().toString(36).substr(2);
         }
+        if (!character.updatedAt) {
+            character.updatedAt = Date.now();
+        }
         await db.put(STORE_CHARACTERS, character);
     },
     deleteCharacter: async (id) => {
@@ -208,6 +212,9 @@ export const db = {
     savePersona: async (persona, index) => {
         if (!persona.id) {
             persona.id = Date.now().toString(36) + Math.random().toString(36).substr(2);
+        }
+        if (!persona.updatedAt) {
+            persona.updatedAt = Date.now();
         }
         await db.put(STORE_PERSONAS, persona);
     },
@@ -347,6 +354,7 @@ export const db = {
         return data;
     },
     saveChat: async (charId, chatData) => {
+        chatData.updatedAt = Date.now();
         await db.set(`gz_chat_${charId}`, chatData);
     },
     createSession: async (charId) => {
@@ -396,6 +404,48 @@ export const db = {
         await db.saveChat(charId, data);
     }
 };
+
+// ---------------------------------------------------------------------------
+// Sync helpers — bulk read/write for cloud sync operations
+// ---------------------------------------------------------------------------
+
+export async function getAllSyncableData() {
+    const characters = await db.getAll(STORE_CHARACTERS);
+    const personas = await db.getAll(STORE_PERSONAS);
+    const chats = await db.getChats();
+    const lorebooks = await db.get('gz_lorebooks');
+    const apiPresets = await db.get('gz_api_connection_presets');
+    const themePresets = await db.get('gz_theme_presets');
+
+    const localStorageData = {};
+    const syncKeys = [
+        'silly_cradle_presets',
+        'silly_cradle_current_preset_id',
+        'gz_preset_connections',
+        'regex_scripts',
+        'gz_active_persona_id',
+        'gz_persona_connections'
+    ];
+    for (const key of syncKeys) {
+        const val = localStorage.getItem(key);
+        if (val !== null) localStorageData[key] = val;
+    }
+
+    return {
+        characters,
+        personas,
+        chats,
+        lorebooks: lorebooks || null,
+        apiPresets: apiPresets || null,
+        themePresets: themePresets || null,
+        localStorage: localStorageData
+    };
+}
+
+export function touchUpdatedAt(entity) {
+    entity.updatedAt = Date.now();
+    return entity;
+}
 
 // ---------------------------------------------------------------------------
 // One-time migration: sc_ -> gz_ for both IndexedDB keyvalue store and localStorage
@@ -461,4 +511,31 @@ export async function migrateScToGz() {
 
     localStorage.setItem('gz_migration_done', '1');
     console.log('[migrateScToGz] Migration from sc_ to gz_ complete.');
+}
+
+export async function getSyncDeletedEntries() {
+    return (await db.get(SYNC_DELETIONS_KEY)) || {};
+}
+
+export async function setSyncDeletedEntries(entries) {
+    await db.set(SYNC_DELETIONS_KEY, entries || {});
+}
+
+export async function markSyncDeletedEntry(type, id) {
+    if (!type || !id) return;
+    const entries = await getSyncDeletedEntries();
+    entries[`${type}:${id}`] = {
+        type,
+        id,
+        deleted: true,
+        updatedAt: Date.now()
+    };
+    await setSyncDeletedEntries(entries);
+}
+
+export async function clearSyncDeletedEntry(type, id) {
+    if (!type || !id) return;
+    const entries = await getSyncDeletedEntries();
+    delete entries[`${type}:${id}`];
+    await setSyncDeletedEntries(entries);
 }

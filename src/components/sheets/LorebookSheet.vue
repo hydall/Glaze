@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -408,9 +408,42 @@ async function checkEntryEmbeddingStatus() {
     }
 }
 
+async function updateVectorReindexNotice() {
+    const vectorEntries = lorebookState.lorebooks.flatMap(lb =>
+        (lb.entries || []).filter(entry => entry.enabled !== false && entry.vectorSearch && entry.id)
+    );
+
+    if (vectorEntries.length === 0) {
+        missingVectorCount.value = 0;
+        needsVectorReindex.value = false;
+        return;
+    }
+
+    let missing = 0;
+    for (const entry of vectorEntries) {
+        const status = await getEmbeddingStatus(entry.id);
+        if (status !== 'indexed') missing++;
+    }
+
+    missingVectorCount.value = missing;
+    needsVectorReindex.value = missing > 0;
+}
+
+async function handleSyncDataRefreshed() {
+    await updateVectorReindexNotice();
+    if (activeLorebook.value) {
+        await loadIndexedStatuses();
+    }
+}
 onMounted(async () => {
     await initLorebookState();
     loadPickerData();
+    await updateVectorReindexNotice();
+    window.addEventListener('sync-data-refreshed', handleSyncDataRefreshed);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('sync-data-refreshed', handleSyncDataRefreshed);
 });
 
 // --- Navigation ---
@@ -532,7 +565,9 @@ function selectLorebook(lb) {
     searchQuery.value = '';
     indexProgress.value = null;
     loadIndexedStatuses();
+    updateVectorReindexNotice();
 }
+
 watch(() => lorebookState.lorebooks, () => {
     updateVectorReindexNotice();
 }, { deep: true });

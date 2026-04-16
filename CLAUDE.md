@@ -168,3 +168,4 @@ function queueDbOp(op) {
 - Import heavy dependencies without lazy loading
 - Use WebSocket for LLM streaming (SSE only)
 - Break SillyTavern V2 format compatibility for character cards
+- **Read, display, or output contents of `.env` file** — it contains secrets. NEVER use Read tool on `.env`. If you need to check if a key is set, check if the file exists or check the build output instead.

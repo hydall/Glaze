@@ -49,6 +49,8 @@ import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
 import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml } from '@/core/services/imageGenService.js';
 import { showToast } from '@/core/states/toastState.js';
+import { incrementMessageCounter, shouldAutoSync, resetMessageCounter } from '@/core/states/syncState.js';
+import { fullSync } from '@/core/services/syncService.js';
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 
@@ -223,98 +225,21 @@ window.forceScrollToBottom = () => { vsScrollToBottom('auto') };
 // Helper to access translations
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
-const contextSegments = computed(() => {
-    const breakdown = contextBreakdown.value;
-    if (!breakdown || !breakdown.safeContext) return { used: [], reserve: null };
-
-    const total = breakdown.safeContext;
-    const toPercent = (value) => Math.max(0, Math.min(100, (value / total) * 100));
-    const used = [];
-
-    if (breakdown.character > 0) {
-        used.push({ key: 'character', value: breakdown.character, percent: toPercent(breakdown.character), className: 'segment-character' });
+let autoSyncRunning = false;
+async function triggerAutoSyncCheck() {
+    incrementMessageCounter();
+    if (!shouldAutoSync()) return;
+    if (autoSyncRunning) return;
+    autoSyncRunning = true;
+    resetMessageCounter();
+    try {
+        await fullSync();
+    } catch (e) {
+        console.warn('[ChatView] Auto-sync failed:', e);
+    } finally {
+        autoSyncRunning = false;
     }
-    if (breakdown.preset > 0) {
-        used.push({ key: 'preset', value: breakdown.preset, percent: toPercent(breakdown.preset), className: 'segment-fixed' });
-    }
-    if (breakdown.authorsNote > 0) {
-        used.push({ key: 'authorsNote', value: breakdown.authorsNote, percent: toPercent(breakdown.authorsNote), className: 'segment-authors-note' });
-    }
-    if (breakdown.summary > 0) {
-        used.push({ key: 'summary', value: breakdown.summary, percent: toPercent(breakdown.summary), className: 'segment-summary' });
-    }
-    if (breakdown.lorebook > 0) {
-        used.push({ key: 'lorebook', value: breakdown.lorebook, percent: toPercent(breakdown.lorebook), className: 'segment-lorebook' });
-    }
-    if (breakdown.history > 0) {
-        used.push({ key: 'history', value: breakdown.history, percent: toPercent(breakdown.history), className: 'segment-history' });
-    }
-
-    return {
-        used,
-        reserve: breakdown.lorebookReserve > 0
-            ? { key: 'lorebookReserve', value: breakdown.lorebookReserve, percent: toPercent(breakdown.lorebookReserve), className: 'segment-lorebook-reserve' }
-            : null
-    };
-});
-
-const contextBreakdownItems = computed(() => {
-    const breakdown = contextBreakdown.value;
-    if (!breakdown) return [];
-
-    return [
-        { key: 'character', label: 'Character', value: breakdown.character || 0 },
-        { key: 'preset', label: 'Preset', value: breakdown.preset || 0 },
-        { key: 'authorsNote', label: 'Author\'s Note', value: breakdown.authorsNote || 0 },
-        { key: 'summary', label: 'Summary', value: breakdown.summary || 0 },
-        { key: 'lorebook', label: 'Lorebook Used', value: breakdown.lorebook || 0 },
-        { key: 'lorebookReserve', label: 'Lorebook Reserve', value: breakdown.lorebookReserve || 0 },
-        { key: 'history', label: 'History', value: breakdown.history || 0 }
-    ];
-});
-
-const contextLegendItems = computed(() => [
-    { key: 'character', label: 'Character', className: 'segment-character' },
-    { key: 'preset', label: 'Preset', className: 'segment-fixed' },
-    { key: 'authorsNote', label: 'Author\'s Note', className: 'segment-authors-note' },
-    { key: 'summary', label: 'Summary', className: 'segment-summary' },
-    { key: 'lorebook', label: 'Lorebook Used', className: 'segment-lorebook' },
-    { key: 'history', label: 'History', className: 'segment-history' },
-    { key: 'lorebookReserve', label: 'Lorebook Reserve', className: 'segment-lorebook-reserve' }
-]);
-
-const visibleHistoryMessages = computed(() => {
-    return currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
-});
-
-const historyUsagePercent = computed(() => {
-    const breakdown = contextBreakdown.value;
-    if (!breakdown) return 0;
-    const available = breakdown.availableForHistory || 0;
-    if (available <= 0) return breakdown.history > 0 ? 100 : 0;
-    return Math.max(0, Math.min(100, Math.round(((breakdown.history || 0) / available) * 100)));
-});
-
-const historyHidePreview = computed(() => {
-    const messages = visibleHistoryMessages.value;
-    const percent = Math.max(1, Math.min(95, historyHidePercent.value || 30));
-    if (!messages.length) return { count: 0, tokens: 0 };
-
-    const count = Math.max(1, Math.min(messages.length, Math.ceil(messages.length * percent / 100)));
-    const tokens = messages
-        .slice(0, count)
-        .reduce((sum, msg) => sum + estimateTokens(msg.text || ''), 0);
-
-    return { count, tokens };
-});
-
-const shouldRecommendHide = computed(() => {
-    const breakdown = contextBreakdown.value;
-    if (!breakdown || !breakdown.history) return false;
-    const threshold = Math.max(1, Math.min(100, historyFillThreshold.value || 85));
-    return historyUsagePercent.value >= threshold;
-});
-
+}
 
 // --- Search Logic ---
 watch(searchQuery, (newVal) => {
@@ -1752,6 +1677,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     guidanceType: msg.guidanceType
                 };
                 addMessageStats(char.id, sessionId, msg.tokens, response.length, msg.timestamp);
+                triggerAutoSyncCheck();
             } else {
                 msg.swipes[msg.swipeId || 0] = response;
                 if (!msg.swipesMeta[msg.swipeId || 0]) msg.swipesMeta[msg.swipeId || 0] = {};
@@ -1816,6 +1742,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                         msg.swipes[0] = response;
                         msg.swipesMeta[0] = { genTime: duration, reasoning: finalReasoning, tokens: msg.tokens };
                         addMessageStats(char.id, sessionId, msg.tokens, response.length, msg.timestamp);
+                        triggerAutoSyncCheck();
                     } else {
                         msg.swipes[msg.swipeId || 0] = response;
                         if (!msg.swipesMeta[msg.swipeId || 0]) msg.swipesMeta[msg.swipeId || 0] = {};

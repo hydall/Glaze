@@ -93,3 +93,4 @@ captures/
 /.claude
 docs/index.html
 /tavo-backup
+/dist_electron

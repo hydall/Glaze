@@ -26,6 +26,8 @@ const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
 const BackupSheet = defineAsyncComponent(() => import('@/components/sheets/BackupSheet.vue'));
 const NotificationsSheet = defineAsyncComponent(() => import('@/components/sheets/NotificationsSheet.vue'));
+const SyncSheet = defineAsyncComponent(() => import('@/components/sheets/SyncSheet.vue'));
+const ConflictSheet = defineAsyncComponent(() => import('@/components/sheets/ConflictSheet.vue'));
 const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/GlossarySheet.vue'));
 const DragDropOverlay = defineAsyncComponent(() => import('@/components/ui/DragDropOverlay.vue'));
 import { Capacitor } from '@capacitor/core';
@@ -36,7 +38,7 @@ import { updateLanguage } from '@/utils/i18n.js';
 import { currentLang, imageViewerMode } from '@/core/config/APPSettings.js';
 import { initRipple, initThemeToggle, initHeaderDropdown, initBackButton, initViewportFix } from '@/core/services/ui.js';
 import { bottomSheetState, closeBottomSheet, showBottomSheet } from '@/core/states/bottomSheetState.js';
-import { db, migrateScToGz } from '@/utils/db.js';
+import { db, migrateScToGz, markSyncDeletedEntry } from '@/utils/db.js';
 import { translations } from '@/utils/i18n.js';
 import { addPersona, updatePersona, deletePersona, allPersonas, loadPersonas } from '@/core/states/personaState.js';
 import { checkAndRequestNotifications, consumePendingNotificationData } from '@/core/services/notificationService.js';
@@ -44,6 +46,8 @@ import { logger } from './utils/logger.js';
 import { generateMissingThumbnails } from '@/utils/characterIO.js';
 import { initLorebookState } from '@/core/states/lorebookState.js';
 import { initPresetState } from '@/core/states/presetState.js';
+import { initSyncState, syncProvider } from '@/core/states/syncState.js';
+import { fullPull, checkSyncReadiness } from '@/core/services/syncService.js';
 import { startTracking } from '@/core/services/timeTracker.js';
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -62,6 +66,8 @@ const chatViewRef = ref(null);
 const connectionsSheetRef = ref(null);
 const lorebookSheetRef = ref(null);
 const backupSheetRef = ref(null);
+const syncSheetRef = ref(null);
+const conflictSheetRef = ref(null);
 const presetViewRef = ref(null);
 const apiViewRef = ref(null);
 
@@ -258,6 +264,7 @@ async function handleHeaderDelete() {
                             const char = editingCharacter.value;
                             if (char && char.id && db.deleteCharacter) {
                                 await db.deleteCharacter(char.id);
+                                await markSyncDeletedEntry('character', char.id);
                             } else {
                                 console.error('[App] Character ID is missing or db.deleteCharacter not found');
                             }
@@ -529,6 +536,18 @@ const onOpenBackupSheet = () => {
     });
 };
 
+const onOpenSyncSheet = () => {
+    waitForComponent(syncSheetRef, (comp) => {
+        comp.open();
+    });
+};
+
+const onOpenConflictSheet = () => {
+    waitForComponent(conflictSheetRef, (comp) => {
+        comp.open();
+    });
+};
+
 const onOpenPresetSheet = (e) => {
     waitForComponent(presetViewRef, (comp) => {
         const presetId = e?.detail?.presetId;
@@ -549,6 +568,23 @@ const onOpenApiSheet = () => {
 const onHeaderSetupEditor = () => { isHeaderEditorMode.value = true; };
 const onHeaderSetupGeneration = () => { isHeaderEditorMode.value = false; };
 const onHeaderReset = () => { isHeaderEditorMode.value = false; };
+
+const reloadSyncedData = async () => {
+    await Promise.all([
+        loadPersonas(),
+        initTheme(),
+        initLorebookState(true),
+        initPresetState(true)
+    ]);
+
+    if (characterListRef.value?.loadCharacters) {
+        await characterListRef.value.loadCharacters();
+    }
+};
+
+const onSyncDataRefreshed = async () => {
+    await reloadSyncedData();
+};
 
 const handleOpenChatEvent = async (e) => {
     logger.debug("[App] Received open-chat event:", e.detail);
@@ -581,10 +617,19 @@ onMounted(async () => {
     await Promise.all([
         initLorebookState(),
         initPresetState(),
-        loadPersonas()
+        loadPersonas(),
+        initSyncState()
     ]);
     
     startTracking();
+    
+    if (syncProvider.value) {
+        checkSyncReadiness().then(ready => {
+            if (ready.ready) {
+                fullPull().catch(e => console.warn('[App] Background pull failed:', e));
+            }
+        });
+    }
     
     initRipple();
     initThemeToggle();
@@ -616,11 +661,14 @@ onMounted(async () => {
     window.addEventListener('open-item-editor', onOpenItemEditor);
     window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.addEventListener('open-backup-sheet', onOpenBackupSheet);
+    window.addEventListener('open-sync-sheet', onOpenSyncSheet);
+    window.addEventListener('open-conflict-sheet', onOpenConflictSheet);
     window.addEventListener('open-preset-sheet', onOpenPresetSheet);
     window.addEventListener('open-api-sheet', onOpenApiSheet);
     window.addEventListener('header-setup-editor', onHeaderSetupEditor);
     window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.addEventListener('header-reset', onHeaderReset);
+    window.addEventListener('sync-data-refreshed', onSyncDataRefreshed);
 
     // Initialize ResizeObserver for layout metrics
     layoutObserver = new ResizeObserver(() => {
@@ -665,11 +713,14 @@ onBeforeUnmount(() => {
     window.removeEventListener('open-item-editor', onOpenItemEditor);
     window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.removeEventListener('open-backup-sheet', onOpenBackupSheet);
+    window.removeEventListener('open-sync-sheet', onOpenSyncSheet);
+    window.removeEventListener('open-conflict-sheet', onOpenConflictSheet);
     window.removeEventListener('open-preset-sheet', onOpenPresetSheet);
     window.removeEventListener('open-api-sheet', onOpenApiSheet);
     window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
     window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.removeEventListener('header-reset', onHeaderReset);
+    window.removeEventListener('sync-data-refreshed', onSyncDataRefreshed);
     kbListeners.forEach(l => l.remove());
 });
 
@@ -814,6 +865,8 @@ watch(currentView, () => {
   <ConnectionsSheet ref="connectionsSheetRef" />
   <LorebookSheet ref="lorebookSheetRef" />
   <BackupSheet ref="backupSheetRef" />
+  <SyncSheet ref="syncSheetRef" />
+  <ConflictSheet ref="conflictSheetRef" />
   <PresetView ref="presetViewRef" />
   <ApiView ref="apiViewRef" />
   <NotificationsSheet />

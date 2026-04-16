@@ -1,4 +1,4 @@
-import { db } from '@/utils/db.js';
+import { db, markSyncDeletedEntry } from '@/utils/db.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 
 // Helper to ensure data structure exists
@@ -18,6 +18,11 @@ export async function deleteSession(charId, sessionId) {
     if (data.authorsNotes && Object.prototype.hasOwnProperty.call(data.authorsNotes, sessionId)) {
         delete data.authorsNotes[sessionId];
         await db.saveChat(charId, data);
+    }
+
+    const refreshed = await db.get(`gz_chat_${charId}`);
+    if (!refreshed || !refreshed.sessions || Object.keys(refreshed.sessions).length === 0) {
+        await markSyncDeletedEntry('chat', charId);
     }
 
     return data.currentId;
