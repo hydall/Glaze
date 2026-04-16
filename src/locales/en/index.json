@@ -812,6 +812,7 @@
     "action_index_all": "Index All Vector Entries",
     "action_delete_indexes": "Delete Vector Indexes",
     "desc_vector_search_entry": "Match this entry by semantic similarity instead of keywords",
+    "desc_vector_search_replaces_keys": "Keyword search is disabled — this entry uses vector similarity only",
     "btn_index_entry": "Index Entry",
     "btn_indexing": "Indexing...",
     "btn_index_all": "Index All",

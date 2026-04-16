@@ -341,36 +341,6 @@ function formatElapsedSeconds(ms) {
     return `${Math.max(0, ms || 0) / 1000}`.replace(/(\.\d).*/, '$1') + 's';
 }
 
-function stopMemoryDraftProgress() {
-    if (memoryDraftTimer) {
-        clearInterval(memoryDraftTimer);
-        memoryDraftTimer = null;
-    }
-    memoryDraftState.value = {
-        active: false,
-        startedAt: 0,
-        elapsedMs: 0,
-        label: ''
-    };
-}
-
-function startMemoryDraftProgress(label = 'Generating memory draft') {
-    if (memoryDraftTimer) clearInterval(memoryDraftTimer);
-    const startedAt = Date.now();
-    memoryDraftState.value = {
-        active: true,
-        startedAt,
-        elapsedMs: 0,
-        label
-    };
-    memoryDraftTimer = setInterval(() => {
-        memoryDraftState.value = {
-            ...memoryDraftState.value,
-            active: true,
-            elapsedMs: Date.now() - startedAt
-        };
-    }, 100);
-}
 
 function genMemoryEntryId() {
     return `mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -625,6 +595,38 @@ const memoryDraftState = ref({
     label: ''
 });
 let memoryDraftTimer = null;
+
+function stopMemoryDraftProgress() {
+    if (memoryDraftTimer) {
+        clearInterval(memoryDraftTimer);
+        memoryDraftTimer = null;
+    }
+    memoryDraftState.value = {
+        active: false,
+        startedAt: 0,
+        elapsedMs: 0,
+        label: ''
+    };
+}
+
+function startMemoryDraftProgress(label = 'Generating memory draft') {
+    if (memoryDraftTimer) clearInterval(memoryDraftTimer);
+    const startedAt = Date.now();
+    memoryDraftState.value = {
+        active: true,
+        startedAt,
+        elapsedMs: 0,
+        label
+    };
+    memoryDraftTimer = setInterval(() => {
+        memoryDraftState.value = {
+            ...memoryDraftState.value,
+            active: true,
+            elapsedMs: Date.now() - startedAt
+        };
+    }, 100);
+}
+
 const onRegexChanged = () => { regexRevision.value++; };
 const contextBreakdown = ref(null);
 const HISTORY_FILL_THRESHOLD_KEY = 'gz_history_fill_threshold';
@@ -2194,6 +2196,9 @@ const contextSegments = computed(() => {
     if (breakdown.lorebook > 0) {
         used.push({ key: 'lorebook', value: breakdown.lorebook, percent: toPercent(breakdown.lorebook), className: 'segment-lorebook' });
     }
+    if (breakdown.vectorLore > 0) {
+        used.push({ key: 'vectorLore', value: breakdown.vectorLore, percent: toPercent(breakdown.vectorLore), className: 'segment-vector-lore' });
+    }
     if (breakdown.history > 0) {
         used.push({ key: 'history', value: breakdown.history, percent: toPercent(breakdown.history), className: 'segment-history' });
     }
@@ -2218,6 +2223,7 @@ const contextBreakdownItems = computed(() => {
         { key: 'memory', label: 'Memory', value: breakdown.memory || 0 },
         { key: 'summaryCombined', label: 'Summary Total', value: breakdown.summary || 0 },
         { key: 'lorebook', label: 'Lorebook Used', value: breakdown.lorebook || 0 },
+        { key: 'vectorLore', label: 'Vector Lorebook', value: breakdown.vectorLore || 0 },
         { key: 'lorebookReserve', label: 'Lorebook Reserve', value: breakdown.lorebookReserve || 0 },
         { key: 'history', label: 'History', value: breakdown.history || 0 }
     ];
@@ -2230,6 +2236,7 @@ const contextLegendItems = computed(() => [
     { key: 'summary', label: 'Summary', className: 'segment-summary' },
     { key: 'memory', label: 'Memory', className: 'segment-memory' },
     { key: 'lorebook', label: 'Lorebook Used', className: 'segment-lorebook' },
+    { key: 'vectorLore', label: 'Vector Lorebook', className: 'segment-vector-lore' },
     { key: 'history', label: 'History', className: 'segment-history' },
     { key: 'lorebookReserve', label: 'Lorebook Reserve', className: 'segment-lorebook-reserve' }
 ]);
@@ -5446,6 +5453,10 @@ onUnmounted(() => {
 
 .segment-lorebook {
     background: #ff8c42;
+}
+
+.segment-vector-lore {
+    background: #b06cf7;
 }
 
 .segment-lorebook-reserve {

@@ -1,4 +1,4 @@
-﻿# Roadmap
+# Roadmap
 
 ## Purpose
 
@@ -438,6 +438,78 @@ Important constraint:
 Expected result:
 - [not done | not tested] A durable memory layer with deterministic ownership over chat history, reusable retrieval infrastructure, separate injection accounting, and import/export/sync-safe persistence.
 - [done | not tested] A durable memory layer foundation with deterministic ownership over chat history, separate injection accounting, tokenizer visibility, and Glaze chat round-trip persistence is now in place.
+
+## Post-Merge Conflict Audit (COMPLETED — 2026-04-16)
+
+Upstream принял PR #20 (cloud sync) → после этого PR #24 (vectorization-v2) показал 17 конфликтов. Upstream зарезолвил их сам. Наш PR #27 (memory books + lorebook fixes) тоже был принят.
+
+### Merge topology
+```
+efbb4e5  ← common ancestor (tokenizer features)
+  ├── 9cff2fc  ← PR #20 merge (cloud sync into dev)
+  │     └── 15920df  ← merge dev into feat/vectorization-v2 (17 conflicts resolved here)
+  │           └── 906ee75  ← PR #24 merge (vectorization-v2 into dev)
+  │                 └── 886b4b1  ← merge dev into feat/memorybook
+  │                       └── 8ec4ff0  ← PR #27 merge (memorybook into dev)
+  │                             └── 8c58ff4, 867ff8d, 45cde4d  ← upstream fixes
+  └── c43a820  ← feat/vectorization-v2 branch tip
+```
+
+### Conflicting files (intersection of changes on both sides)
+7 files had overlapping changes between cloud sync and vectorization-v2:
+1. `.gitignore` — **A (structural)**: both added entries
+2. `CLAUDE.md` — **A (structural)**: both updated instructions
+3. `src/components/sheets/LorebookSheet.vue` — **B+C (behavioral + UI)**: vector UI + sync event listeners
+4. `src/core/states/lorebookState.js` — **B+D (behavioral + data model)**: vector indexing + sync force init + position handling
+5. `src/locales/en/index.json` — **A (structural)**: both added i18n keys
+6. `src/locales/ru/index.json` — **A (structural)**: both added i18n keys
+7. `src/utils/db.js` — **D (data model)**: embeddings store + sync helpers + updatedAt timestamps
+
+Additionally, `src/views/ChatView.vue` was changed on cloud sync side only (auto-sync + tokenizer property removal), but cloud sync PR itself had removed tokenizer computed properties. Our PR #27 restored them.
+
+### Audit results — ALL CLEAR
+
+| File | Status | Details |
+|------|--------|---------|
+| `generationService.js` | **IDENTICAL** upstream/dev ↔ our branch | All 6 memory/lorebook injection features present |
+| `generationWorker.js` | **IDENTICAL** | All 6 lorebook fixes present |
+| `lorebookState.js` | **upstream/dev is BETTER** | All 14 features present: vector + cloud sync + memory book |
+| `LorebookSheet.vue` | **upstream/dev is BETTER** | All 8 features present: vector UI + sync listeners + matchGlobal |
+| `ChatMessage.vue` | **IDENTICAL** | Memory coverage badge present |
+| `ChatView.vue` | **upstream/dev is COMPLETE** | Tokenizer props restored + auto-sync + all memory book code |
+| `db.js` | **upstream/dev is BETTER** | Cloud sync helpers added alongside vector storage |
+| Locale files | **IDENTICAL** | No diff |
+
+### Key findings
+1. **Tokenizer computed properties**: cloud sync PR (`9cff2fc`) accidentally removed them from ChatView.vue. Our PR #27 (`8ec4ff0`) restored them because our branch still had them. Final state in upstream/dev is correct.
+2. **LorebookSheet sync integration**: cloud sync added `sync-data-refreshed` event listener and `onUnmounted` cleanup. Our branch had a simpler `updateVectorReindexNotice`. Upstream/dev correctly merged both: the sync-aware version that checks ALL lorebooks + the event listener.
+3. **LorebookState force init**: cloud sync added `force` parameter and state reset. Upstream/dev correctly merged this alongside vectorization functions.
+4. **Minor edge case**: `lorebooksMacro` position slot in generationWorker.js is initialized but `injectLore('lorebooksMacro')` is never called directly. Entries with `position: 'lorebooksMacro'` only surface via `{{lorebooks}}` macro in preset blocks. Not a regression, pre-existing.
+
+### Decision
+- **No corrective branch needed.** All conflicts resolved correctly.
+- **Local `dev` synced** with `upstream/dev` at `45cde4d`.
+
+### Branch cleanup
+Deleted local branches:
+- `archive/feat/summary`
+- `archive/feat/tokenizer`
+- `feat/cloud-sync`
+- `feat/memorybook`
+- `feat/vectorization`
+- `feat/vectorization-v2`
+- `test-cloud-sync`
+
+Deleted remote branches on origin:
+- `origin/archive/feat/summary`
+- `origin/archive/feat/tokenizer`
+- `origin/feat/cloud-sync`
+- `origin/feat/memorybook`
+- `origin/feat/vectorization-v2`
+- `origin/fix/lorebook-macro-resolution`
+- `origin/test-cloud-sync`
+
+Remaining branches: `dev`, `main` (local); `upstream/dev`, `upstream/main`, `upstream/feature/desktop-layout` (remote).
 
 ## Suggested Execution Order
 

@@ -228,6 +228,7 @@ export async function generateChatResponse({
     }
 
     let newVectorEntries = [];
+    let vectorLoreTokens = 0;
     try {
         const vectorResults = await vectorSearchLorebooks(safeHistory || history, text, char, char?.sessionId);
         if (vectorResults.length > 0 && result.loreEntries) {
@@ -280,6 +281,8 @@ export async function generateChatResponse({
                 };
             })
             .filter(msg => msg.content && msg.content.trim().length > 0);
+
+        vectorLoreTokens = vectorLoreMessages.reduce((sum, m) => sum + (m._allSources?.[0]?.tokens || 0), 0);
 
         if (vectorLoreMessages.length > 0) {
             messages = injectVectorLoreMessages(messages, vectorLoreMessages);
@@ -338,12 +341,14 @@ export async function generateChatResponse({
             ? {
                 ...result.contextBreakdown,
                 memory: memoryInjection.tokens || 0,
+                vectorLore: vectorLoreTokens,
                 summaryBase: result.contextBreakdown.summary || 0,
                 summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
-                fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
-                totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
-                remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
+                lorebook: (result.contextBreakdown.lorebook || 0) + vectorLoreTokens,
+                fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
+                fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
+                totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
+                remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0) - vectorLoreTokens)
             }
             : null;
         callbacks.onPromptReady({

@@ -56,8 +56,8 @@ function loadEmbeddingSettings() {
     const config = getEmbeddingConfig();
     embeddingSettings.useSame = config.useSame;
     embeddingSettings.endpoint = config.useSame ? '' : config.endpoint.replace(/\/embeddings$/, '');
-    embeddingSettings.key = config.apiKey;
-    embeddingSettings.model = config.model;
+    embeddingSettings.key = config.useSame ? '' : config.apiKey;
+    embeddingSettings.model = config.useSame ? '' : config.model;
     embeddingSettings.target = config.target;
     embeddingSettings.scanDepth = config.scanDepth;
     embeddingSettings.threshold = config.threshold;
@@ -68,6 +68,9 @@ function loadEmbeddingSettings() {
 
 function onEmbeddingInput(key, value) {
     saveEmbeddingSetting(key, value);
+    if (key === 'gz_embedding_use_same') {
+        loadEmbeddingSettings();
+    }
 }
 
 async function testEmbedding() {
