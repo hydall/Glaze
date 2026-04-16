@@ -684,7 +684,7 @@ defineExpose({ open, openEntry, close, openLorebook });
                                 </div>
                             </div>
                         </div>
-                         <div class="settings-row">
+                        <div class="settings-row">
                             <div class="settings-col">
                                 <label>{{ lorebookState.globalSettings.reserveMode === 'tokens' ? (t('label_budget_cap') || 'Exact tokens') : t('label_lorebook_reserve_percent') }}</label>
                                 <input type="number" v-model="lorebookState.globalSettings.reserveValue" :min="lorebookState.globalSettings.reserveMode === 'tokens' ? 0 : 1" :max="lorebookState.globalSettings.reserveMode === 'tokens' ? undefined : 100">
@@ -692,6 +692,22 @@ defineExpose({ open, openEntry, close, openLorebook });
                              <div class="settings-col">
                                 <label>{{ t('label_min_activations') }}</label>
                                 <input type="number" v-model="lorebookState.globalSettings.minActivations">
+                            </div>
+                        </div>
+                        <div class="settings-item">
+                            <label>{{ t('label_injection_position') }}</label>
+                            <div class="clickable-selector" @click="openOptionSelector({
+                                title: t('label_injection_position'),
+                                options: [
+                                    { value: 'worldInfoBefore', label: '@worldInfoBefore (' + t('pos_before_char') + ')' },
+                                    { value: 'worldInfoAfter', label: '@worldInfoAfter (' + t('pos_after_char') + ')' },
+                                    { value: 'lorebooksMacro', label: '{{lorebooks}}' }
+                                ],
+                                currentValue: lorebookState.globalSettings.injectionPosition,
+                                onSelect: (v) => lorebookState.globalSettings.injectionPosition = v
+                            })">
+                                <span>{{ lorebookState.globalSettings.injectionPosition === 'worldInfoAfter' ? '@worldInfoAfter' : lorebookState.globalSettings.injectionPosition === 'lorebooksMacro' ? '{' + '{lorebooks}' + '}' : '@worldInfoBefore' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                             </div>
                         </div>
                         <div class="settings-row">
@@ -962,13 +978,15 @@ defineExpose({ open, openEntry, close, openLorebook });
                             <div class="clickable-selector" @click="openOptionSelector({
                                 title: t('label_injection_position'),
                                 options: [
+                                    { value: 'matchGlobal', label: t('match_global') },
                                     { value: 'worldInfoBefore', label: '@worldInfoBefore (' + t('pos_before_char') + ')' },
-                                    { value: 'worldInfoAfter', label: '@worldInfoAfter (' + t('pos_after_char') + ')' }
+                                    { value: 'worldInfoAfter', label: '@worldInfoAfter (' + t('pos_after_char') + ')' },
+                                    { value: 'lorebooksMacro', label: '{{lorebooks}}' }
                                 ],
                                 currentValue: activeEntry.position,
                                 onSelect: (v) => activeEntry.position = v
                             })">
-                                <span>{{ activeEntry.position === 'worldInfoBefore' ? '@worldInfoBefore' : '@worldInfoAfter' }}</span>
+                                <span>{{ activeEntry.position === 'worldInfoAfter' ? '@worldInfoAfter' : activeEntry.position === 'lorebooksMacro' ? '{' + '{lorebooks}' + '}' : activeEntry.position === 'matchGlobal' ? t('match_global') : '@worldInfoBefore' }}</span>
                                 <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                             </div>
                             <div class="settings-desc" style="margin-top: 6px;">{{ t('hint_lorebook_macro_override') }}</div>

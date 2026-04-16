@@ -244,6 +244,7 @@ export const lorebookState = reactive({
         maxDepth: 0,
         maxRecursionSteps: 0,
         insertionStrategy: 'character_first', // character_first, global_first
+        injectionPosition: 'worldInfoBefore',
         includeNames: true,
         recursiveScan: true,
         caseSensitive: false,
@@ -282,6 +283,9 @@ export async function initLorebookState() {
                             data.settings.reserveMode = 'percent';
                         }
                     }
+                    if (!data.settings.injectionPosition) {
+                        data.settings.injectionPosition = 'worldInfoBefore';
+                    }
                     Object.assign(lorebookState.globalSettings, data.settings);
                 }
                 if (data.activations) {
@@ -298,6 +302,7 @@ export async function initLorebookState() {
                     }
                     if (entry.position === 0) entry.position = 'worldInfoBefore';
                     if (entry.position === 1) entry.position = 'worldInfoAfter';
+                    if (!entry.position) entry.position = 'matchGlobal';
                 });
             });
         }
@@ -628,7 +633,11 @@ export async function importSTLorebook(json, fileName = 'Imported', options = {}
                     caseSensitive: entry.caseSensitive ?? null,
                     useGroupScoring: entry.useGroupScoring ?? null,
                     scanDepth: entry.scanDepth,
-                    position: (entry.position === 0) ? 'worldInfoBefore' : (entry.position === 1) ? 'worldInfoAfter' : (entry.position ?? 'worldInfoBefore'),
+                    position: (entry.position === 0)
+                        ? 'worldInfoBefore'
+                        : (entry.position === 1)
+                            ? 'worldInfoAfter'
+                            : ((entry.position === 'worldInfoBefore' || entry.position === 'worldInfoAfter' || entry.position === 'lorebooksMacro' || entry.position === 'matchGlobal') ? entry.position : 'matchGlobal'),
                     characterFilter: entry.characterFilter,
                     preventRecursion: entry.preventRecursion || false,
                     delayUntilRecursion: entry.delayUntilRecursion || false,
@@ -671,7 +680,7 @@ export function exportSTLorebook(lorebook) {
             constant: entry.constant || false,
             selective: (entry.secondary_keys && entry.secondary_keys.length > 0),
             order: entry.order ?? 100,
-            position: (entry.position === 'worldInfoBefore') ? 0 : (entry.position === 'worldInfoAfter') ? 1 : (entry.position ?? 0),
+            position: (entry.position === 'worldInfoAfter') ? 1 : 0,
             disable: entry.enabled === false,
             displayIndex: index,
             addMemo: true,

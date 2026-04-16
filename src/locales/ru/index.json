@@ -842,5 +842,5 @@
     "vector_error_network_error": "Сетевая ошибка при запросе embedding",
     "vector_error_invalid_response": "Embedding API вернул некорректный ответ",
     "vector_error_unknown": "Неизвестная ошибка индексации",
-    "hint_lorebook_macro_override": "Макрос {{lorebooks}} в пресете перезаписывает эти правила — все записи вставляются на место макроса."
+    "hint_lorebook_macro_override": "Выбери точку вставки для записи или \"Как в глобальных\", чтобы использовать дефолт лорбука. {{lorebooks}} теперь легальная цель вставки, а не глобальный override."
 }

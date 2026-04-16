@@ -836,5 +836,5 @@
     "vector_error_network_error": "Network error while requesting embeddings",
     "vector_error_invalid_response": "Embedding API returned an invalid response",
     "vector_error_unknown": "Unknown indexing error",
-    "hint_lorebook_macro_override": "The {{lorebooks}} macro in preset overrides these rules — all entries are injected at macro position instead."
+    "hint_lorebook_macro_override": "Choose a per-entry insertion point, or Match Global to follow the lorebook default. {{lorebooks}} is now a valid entry target instead of a global override."
 }

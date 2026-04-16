@@ -380,13 +380,15 @@ function buildPromptMessagesWorker(args) {
         }
     };
 
-    let loreByPosition = { 0: [], 1: [], 2: [], 3: [], 4: [] };
+    let loreByPosition = { worldInfoBefore: [], worldInfoAfter: [], lorebooksMacro: [] };
     if (lorebooks) {
         const loreEntries = scanLorebooksPure(history || [], char, "", chatId, lorebooks, globalSettings, activations);
         allLoreEntries = loreEntries;
 
         loreEntries.forEach(entry => {
-            const pos = entry.position ?? 0;
+            const pos = entry.position === 'matchGlobal'
+                ? (globalSettings?.injectionPosition || 'worldInfoBefore')
+                : (entry.position || 'worldInfoBefore');
             const content = replaceMacros(entry.content || "", char, personaObj, sessionVars, notifyObj);
             const tokens = estimateTokens(content);
             const msg = {
@@ -398,11 +400,9 @@ function buildPromptMessagesWorker(args) {
                 _allSources: tokens > 0 ? [{ source: 'lorebook', tokens }] : []
             };
             if (loreByPosition[pos]) loreByPosition[pos].push(msg);
-            else loreByPosition[0].push(msg);
+            else loreByPosition.worldInfoBefore.push(msg);
         });
     }
-
-    const hasLorebookMacro = activePreset?.blocks?.some(b => b.enabled !== false && !b.isStashed && b.content?.includes('{{lorebooks}}'));
 
     const getLorebookContent = () => {
         return allLoreEntries
@@ -412,7 +412,6 @@ function buildPromptMessagesWorker(args) {
     };
 
     const injectLore = (pos) => {
-        if (hasLorebookMacro) return;
         if (loreByPosition[pos] && loreByPosition[pos].length > 0) {
             loreByPosition[pos].forEach(msg => {
                 if (mergePrompts) {
@@ -427,7 +426,7 @@ function buildPromptMessagesWorker(args) {
         }
     };
 
-    if (!hasLorebookMacro) injectLore(4);
+    injectLore('worldInfoBefore');
 
     let summaryRawContent = null;
     let summaryText = null;
@@ -597,7 +596,7 @@ function buildPromptMessagesWorker(args) {
         relativeBlocks.forEach(block => {
             if (block.id === 'chat_history') {
                 if (mergePrompts) flushMergeBuffer();
-                if (!hasLorebookMacro) Object.keys(loreByPosition).forEach(pos => injectLore(pos));
+                injectLore('worldInfoAfter');
 
                 let historyMsgs = [];
                 if (history) {
@@ -655,13 +654,11 @@ function buildPromptMessagesWorker(args) {
                 return;
             }
 
-            if (block.id === 'char_card') injectLore(0);
-            if (block.id === 'example_messages') injectLore(2);
+            if (block.id === 'char_card') injectLore('worldInfoBefore');
 
             const resolved = resolveBlockContent(block);
             if (!resolved) {
-                if (block.id === 'char_card') injectLore(1);
-                if (block.id === 'example_messages') injectLore(3);
+                if (block.id === 'char_card') injectLore('worldInfoAfter');
                 return;
             }
 
@@ -703,8 +700,14 @@ function buildPromptMessagesWorker(args) {
                 messages.push(msg);
             }
 
-            if (block.id === 'char_card') injectLore(1);
-            if (block.id === 'example_messages') injectLore(3);
+            if (content.includes('{{lorebooks}}')) {
+                content = content.split('{{lorebooks}}').join(
+                    loreByPosition.lorebooksMacro.map(item => item.content).filter(Boolean).join('\n\n')
+                );
+                loreByPosition.lorebooksMacro = [];
+            }
+
+            if (block.id === 'char_card') injectLore('worldInfoAfter');
         });
         if (mergePrompts) flushMergeBuffer();
     } else {

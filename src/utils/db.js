@@ -45,6 +45,14 @@ function ensureMemoryBookSessionData(chatData) {
     return chatData;
 }
 
+function ensureMemoryEntry(entry) {
+    if (!entry || typeof entry !== 'object') return entry;
+    if (!Array.isArray(entry.keys)) entry.keys = [];
+    if (!Array.isArray(entry.glazeKeys)) entry.glazeKeys = [];
+    if (typeof entry.vectorSearch !== 'boolean') entry.vectorSearch = false;
+    return entry;
+}
+
 function normalizeChatData(chatData) {
     if (!chatData || typeof chatData !== 'object') {
         return { currentId: 1, sessions: { 1: [] }, memoryBooks: {} };
@@ -73,6 +81,8 @@ function normalizeChatData(chatData) {
                     maxInjectedEntries: 3,
                     batchSize: 1,
                         parallelJobs: 1,
+                        vectorSearchEnabled: false,
+                        keyMatchMode: 'plain',
                         generationSource: 'current',
                         generationModel: '',
                         generationUseCurrentModelOverride: false,
@@ -89,6 +99,8 @@ function normalizeChatData(chatData) {
             if (!memoryBook.id) memoryBook.id = `memorybook_${sessionId}`;
             if (!Array.isArray(memoryBook.entries)) memoryBook.entries = [];
             if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
+            memoryBook.entries.forEach(ensureMemoryEntry);
+            memoryBook.pendingDrafts.forEach(ensureMemoryEntry);
             if (!memoryBook.settings || typeof memoryBook.settings !== 'object') {
                 memoryBook.settings = {};
             }
@@ -96,6 +108,8 @@ function normalizeChatData(chatData) {
             if (!Number.isFinite(memoryBook.settings.maxInjectedEntries)) memoryBook.settings.maxInjectedEntries = 3;
             if (!Number.isFinite(memoryBook.settings.batchSize)) memoryBook.settings.batchSize = 1;
             if (!Number.isFinite(memoryBook.settings.parallelJobs)) memoryBook.settings.parallelJobs = 1;
+            if (typeof memoryBook.settings.vectorSearchEnabled !== 'boolean') memoryBook.settings.vectorSearchEnabled = false;
+            if (!['plain', 'glaze', 'both'].includes(memoryBook.settings.keyMatchMode)) memoryBook.settings.keyMatchMode = 'plain';
             if (!memoryBook.settings.generationSource) memoryBook.settings.generationSource = 'current';
             if (typeof memoryBook.settings.generationModel !== 'string') memoryBook.settings.generationModel = '';
             if (typeof memoryBook.settings.generationUseCurrentModelOverride !== 'boolean') memoryBook.settings.generationUseCurrentModelOverride = false;

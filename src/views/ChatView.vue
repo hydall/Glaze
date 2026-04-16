@@ -121,6 +121,31 @@ function genMemoryEntryId() {
 function genMemoryPromptId() {
     return `memprompt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
+
+function normalizeMemoryEntryShape(entry) {
+    if (!entry || typeof entry !== 'object') return entry;
+    if (!Array.isArray(entry.keys)) entry.keys = [];
+    if (!Array.isArray(entry.glazeKeys)) entry.glazeKeys = [];
+    if (typeof entry.vectorSearch !== 'boolean') entry.vectorSearch = false;
+    return entry;
+}
+
+function parseMemoryKeyInput(value) {
+    return [...new Set(String(value || '')
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean))].slice(0, 24);
+}
+
+function buildMemoryKeysFromText(text, fallback = []) {
+    const normalizedFallback = Array.isArray(fallback)
+        ? fallback.map(item => String(item || '').trim()).filter(Boolean)
+        : [];
+    const words = String(text || '')
+        .match(/[\p{L}\p{N}_-]{4,}/gu) || [];
+    const uniqueWords = [...new Set(words.map(word => word.trim()))];
+    return [...new Set([...normalizedFallback, ...uniqueWords])].slice(0, 12);
+}
 </script>
 
 <script setup>
@@ -137,6 +162,7 @@ import { translations } from '@/utils/i18n.js';
 import { generateChatResponse, calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
 import { executeRequest } from '@/core/services/llmApi.js';
 import { getApiConfig } from '@/core/config/APISettings.js';
+import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { animateTextChange, updateAppColors, initHeaderScroll, initRipple } from '@/core/services/ui.js';
 import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/states/bottomSheetState.js';
 import { db } from '@/utils/db.js';
@@ -162,6 +188,147 @@ import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
 import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml } from '@/core/services/imageGenService.js';
 import { showToast } from '@/core/states/toastState.js';
+
+async function indexMemoryEntryIfNeeded(entry, charId, sessionId) {
+    if (!entry?.vectorSearch) return;
+    const generationService = await import('@/core/services/generationService.js');
+    if (typeof generationService.indexMemoryEntryForSession === 'function') {
+        await generationService.indexMemoryEntryForSession(entry, charId, sessionId);
+    }
+}
+
+async function deleteMemoryEntryIndexIfPresent(entryId) {
+    if (!entryId) return;
+    const generationService = await import('@/core/services/generationService.js');
+    if (typeof generationService.deleteMemoryEntryIndex === 'function') {
+        await generationService.deleteMemoryEntryIndex(entryId);
+    }
+}
+
+async function reindexMemoryEntry(entry, charId, sessionId) {
+    if (!entry?.id || !entry?.vectorSearch) return;
+    await deleteMemoryEntryIndexIfPresent(entry.id);
+    await indexMemoryEntryIfNeeded(entry, charId, sessionId);
+}
+
+function shouldEnableMemoryVectorSearch() {
+    const config = getEmbeddingConfig();
+    return !!(config?.enabled && isEmbeddingConfigured());
+}
+
+function getMemoryVectorSearchEnabled(memoryBook) {
+    if (!memoryBook || typeof memoryBook !== 'object') return false;
+    if (!memoryBook.settings || typeof memoryBook.settings !== 'object') memoryBook.settings = {};
+    if (typeof memoryBook.settings.vectorSearchEnabled !== 'boolean') {
+        const hasExistingVectorEntries = [
+            ...(Array.isArray(memoryBook.entries) ? memoryBook.entries : []),
+            ...(Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
+        ].some(entry => entry?.vectorSearch);
+        memoryBook.settings.vectorSearchEnabled = hasExistingVectorEntries || shouldEnableMemoryVectorSearch();
+    }
+    return !!memoryBook.settings.vectorSearchEnabled && shouldEnableMemoryVectorSearch();
+}
+
+function getMemoryKeyMatchMode(memoryBook) {
+    if (!memoryBook || typeof memoryBook !== 'object') return 'plain';
+    if (!memoryBook.settings || typeof memoryBook.settings !== 'object') memoryBook.settings = {};
+    if (!['plain', 'glaze', 'both'].includes(memoryBook.settings.keyMatchMode)) {
+        memoryBook.settings.keyMatchMode = 'plain';
+    }
+    return memoryBook.settings.keyMatchMode;
+}
+
+function setMemoryVectorSearchOnEntries(memoryBook, enabled) {
+    const nextValue = !!enabled;
+    (Array.isArray(memoryBook?.entries) ? memoryBook.entries : []).forEach(entry => {
+        entry.vectorSearch = nextValue;
+    });
+    (Array.isArray(memoryBook?.pendingDrafts) ? memoryBook.pendingDrafts : []).forEach(entry => {
+        entry.vectorSearch = nextValue;
+    });
+}
+
+async function reindexAllMemoryEntries(memoryBook, charId, sessionId) {
+    const entries = (Array.isArray(memoryBook?.entries) ? memoryBook.entries : [])
+        .filter(entry => entry?.id && entry?.content && entry.vectorSearch);
+    for (const entry of entries) {
+        await reindexMemoryEntry(entry, charId, sessionId);
+    }
+}
+
+async function openMemoryEntryEditor(entryId) {
+    if (!activeChatChar || !entryId) return;
+
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const entry = memoryBook.entries.find(item => item.id === entryId);
+    if (!entry) return;
+
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+    content.innerHTML = `
+        <div class="settings-item">
+            <label>Title</label>
+            <input id="memory-entry-title" type="text" value="${(entry.title || '').replace(/"/g, '&quot;')}" placeholder="Memory title">
+        </div>
+        <div class="settings-item">
+            <label>Content</label>
+            <textarea id="memory-entry-content" rows="8" placeholder="Memory text">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+        </div>
+        <div class="settings-item">
+            <label>Keys</label>
+            <input id="memory-entry-keys" type="text" value="${(Array.isArray(entry.keys) ? entry.keys.join(', ') : '').replace(/"/g, '&quot;')}" placeholder="key one, key two">
+            <div class="context-sheet-note">Only this field is used for keyword retrieval.</div>
+        </div>
+        <div class="context-sheet-actions">
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-entry-cancel">Cancel</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-entry-save">Save</button>
+        </div>
+    `;
+
+    content.querySelector('#memory-entry-cancel')?.addEventListener('click', () => {
+        closeBottomSheet();
+        setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
+    });
+
+    content.querySelector('#memory-entry-save')?.addEventListener('click', async () => {
+        const nextTitle = content.querySelector('#memory-entry-title')?.value?.trim() || 'Untitled memory';
+        const nextContent = content.querySelector('#memory-entry-content')?.value?.trim() || '';
+        const nextKeys = parseMemoryKeyInput(content.querySelector('#memory-entry-keys')?.value);
+
+        if (!nextContent) {
+            showToast('Memory content is required');
+            return;
+        }
+
+        const retrievalChanged = JSON.stringify(entry.keys || []) !== JSON.stringify(nextKeys)
+            || String(entry.content || '') !== nextContent;
+
+        entry.title = nextTitle;
+        entry.content = nextContent;
+        entry.keys = nextKeys;
+        entry.updatedAt = Date.now();
+        normalizeMemoryEntryShape(entry);
+        memoryBook.updatedAt = Date.now();
+        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
+        chatData.sessions[sessionId] = currentMessages.value;
+
+        try {
+            if (getMemoryVectorSearchEnabled(memoryBook) && retrievalChanged) {
+                await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
+            }
+            await db.saveChat(activeChatChar.id, chatData);
+            closeBottomSheet();
+            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
+        } catch (error) {
+            console.error('Failed to save memory entry:', error);
+            showToast(`Memory save failed: ${formatError(error)}`);
+        }
+    });
+
+    showBottomSheet({ title: 'Edit Memory Entry', content, isSolid: true });
+}
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 
@@ -226,7 +393,9 @@ const builtInMemoryPrompts = [
             'Use only facts that are explicitly supported by the segment.',
             'Do not infer completed outcomes, approvals, registrations, or decisions unless clearly stated.',
             'Keep concrete names exactly as used in the segment.',
-            'Return only the memory entry text.',
+            'Return plain text in this exact format:',
+            'Memory: <one concise memory entry>',
+            'Keys: <comma-separated retrieval keys, or empty if vector retrieval should dominate>',
             '',
             '{{history}}'
         ].join('\n')
@@ -239,7 +408,9 @@ const builtInMemoryPrompts = [
             'Keep the source language exactly as written.',
             'Focus on lasting developments, obligations, status changes, accepted items, revealed facts, or relationship changes.',
             'Do not speculate beyond the text.',
-            'Return one compact memory entry only.',
+            'Return plain text in this exact format:',
+            'Memory: <one compact memory entry>',
+            'Keys: <comma-separated retrieval keys, or empty if not needed>',
             '',
             '{{history}}'
         ].join('\n')
@@ -252,7 +423,9 @@ const builtInMemoryPrompts = [
             'Preserve the original language and exact names from the segment.',
             'Only include information directly supported by the text.',
             'If no durable relationship-relevant development exists, summarize the most durable factual development instead.',
-            'Return only the memory entry text.',
+            'Return plain text in this exact format:',
+            'Memory: <one concise memory entry>',
+            'Keys: <comma-separated retrieval keys, or empty if not needed>',
             '',
             '{{history}}'
         ].join('\n')
@@ -346,6 +519,37 @@ function buildMemoryDraftSummaryExcerpt(summary) {
     return '';
 }
 
+function parseMemoryDraftResponse(rawText, fallbackKeys = []) {
+    const text = String(rawText || '').trim();
+    const lines = text.split(/\r?\n/);
+    let memory = '';
+    let keysLine = '';
+
+    for (const line of lines) {
+        if (!memory && /^memory\s*:/i.test(line)) {
+            memory = line.replace(/^memory\s*:/i, '').trim();
+            continue;
+        }
+        if (!keysLine && /^keys\s*:/i.test(line)) {
+            keysLine = line.replace(/^keys\s*:/i, '').trim();
+        }
+    }
+
+    if (!memory) {
+        const nonMeta = lines.filter(line => !/^keys\s*:/i.test(line)).join('\n').trim();
+        memory = nonMeta.replace(/^memory\s*:/i, '').trim();
+    }
+
+    const parsedKeys = keysLine
+        ? keysLine.split(',').map(item => item.trim()).filter(Boolean)
+        : [];
+
+    return {
+        content: memory || text,
+        keys: parsedKeys.length ? parsedKeys : buildMemoryKeysFromText(memory || text, fallbackKeys)
+    };
+}
+
 function openMemoryPromptPreview(item, options = {}) {
     if (!item) return;
     const { onClose } = options;
@@ -379,6 +583,7 @@ async function createMemoryFromSelection() {
     const chatData = await getChatData(activeChatChar.id);
     const sessionId = activeChatChar.sessionId || chatData.currentId;
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
     const selectedIds = selected.map(msg => msg.id);
     const firstMessage = selected[0];
     const lastMessage = selected[selected.length - 1];
@@ -386,11 +591,18 @@ async function createMemoryFromSelection() {
         .map(msg => `${msg.role === 'user' ? (msg.persona?.name || 'User') : (activeChatChar?.name || 'Character')}: ${msg.text || ''}`.trim())
         .filter(Boolean)
         .slice(0, 6);
+    const content = previewLines.join('\n').slice(0, 2000);
+    const personaNames = selected
+        .map(msg => msg.role === 'user' ? (msg.persona?.name || 'User') : (activeChatChar?.name || 'Character'))
+        .filter(Boolean);
 
-    memoryBook.entries.push({
+    const createdEntry = normalizeMemoryEntryShape({
         id: genMemoryEntryId(),
         title: `Memory ${memoryBook.entries.length + 1}`,
-        content: previewLines.join('\n').slice(0, 2000),
+        content,
+        keys: buildMemoryKeysFromText(content, personaNames),
+        glazeKeys: [],
+        vectorSearch: vectorEnabled,
         messageIds: selectedIds,
         messageRange: {
             startMessageId: firstMessage.id,
@@ -401,11 +613,13 @@ async function createMemoryFromSelection() {
         createdAt: Date.now(),
         updatedAt: Date.now()
     });
+    memoryBook.entries.push(createdEntry);
 
     memoryBook.updatedAt = Date.now();
     reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
     chatData.sessions[sessionId] = currentMessages.value;
     await db.saveChat(activeChatChar.id, chatData);
+    await indexMemoryEntryIfNeeded(createdEntry, activeChatChar.id, sessionId);
     clearSelection();
 }
 
@@ -418,6 +632,7 @@ async function generateMemoryDraftFromSelection() {
     const chatData = await getChatData(activeChatChar.id);
     const sessionId = activeChatChar.sessionId || chatData.currentId;
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
     const summary = chatData?.summaries?.[sessionId] || null;
     const playerName = selected.find(msg => msg?.role === 'user')?.persona?.name || activePersona.value?.name || 'User';
     const history = selected
@@ -460,12 +675,16 @@ async function generateMemoryDraftFromSelection() {
         const draftText = await generateMemoryDraft({ history, prompt: finalPrompt, apiConfigOverride });
         const firstMessage = selected[0];
         const lastMessage = selected[selected.length - 1];
+        const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, activeChatChar?.name || 'Character']);
 
         if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
-        memoryBook.pendingDrafts.push({
+        memoryBook.pendingDrafts.push(normalizeMemoryEntryShape({
             id: genMemoryEntryId(),
             title: `Draft ${memoryBook.pendingDrafts.length + 1}`,
-            content: (draftText || '').trim(),
+            content: (parsedDraft.content || '').trim(),
+            keys: parsedDraft.keys,
+            glazeKeys: [],
+            vectorSearch: vectorEnabled,
             messageIds: selected.map(msg => msg.id),
             messageRange: {
                 startMessageId: firstMessage.id,
@@ -475,7 +694,7 @@ async function generateMemoryDraftFromSelection() {
             source: 'auto',
             createdAt: Date.now(),
             updatedAt: Date.now()
-        });
+        }));
         memoryBook.updatedAt = Date.now();
         await db.saveChat(activeChatChar.id, chatData);
         showToast('Memory draft created');
@@ -489,6 +708,10 @@ async function generateMemoryDraftFromSelection() {
 
 function openMemoryTextPreview(entry, kind = 'Memory') {
     if (!entry) return;
+    const keys = Array.isArray(entry.keys) && entry.keys.length
+        ? entry.keys.map(key => `<span class="memory-chip">${String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`).join('')
+        : '<span class="context-sheet-note">No keys yet</span>';
+    const isApprovedEntry = kind === 'Memory Entry';
     const content = document.createElement('div');
     content.className = 'context-sheet';
     content.innerHTML = `
@@ -496,11 +719,65 @@ function openMemoryTextPreview(entry, kind = 'Memory') {
             <label>${kind}</label>
             <div class="context-sheet-note">${(entry.title || kind).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
         </div>
+        <div class="settings-item">
+            <label>Retrieval</label>
+            <div class="context-sheet-note">Vector search: ${entry.vectorSearch ? 'enabled' : 'disabled'}</div>
+            <div class="memory-chip-list">${keys}</div>
+        </div>
         <div class="memory-entry-fulltext">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
         <div class="context-sheet-actions">
+            ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-edit">Edit</button>` : ''}
+            ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-reindex">Reindex</button>` : ''}
+            ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary memory-preview-delete" id="memory-preview-delete">Delete</button>` : ''}
             <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-preview-close">Close</button>
         </div>
     `;
+    content.querySelector('#memory-preview-edit')?.addEventListener('click', () => {
+        closeBottomSheet();
+        setTimeout(() => openMemoryEntryEditor(entry.id), 50);
+    });
+    content.querySelector('#memory-preview-reindex')?.addEventListener('click', async () => {
+        if (!activeChatChar) return;
+        const chatData = await getChatData(activeChatChar.id);
+        const sessionId = activeChatChar.sessionId || chatData.currentId;
+        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+        if (!getMemoryVectorSearchEnabled(memoryBook)) {
+            showToast('Enable Memory Books vector search first');
+            return;
+        }
+        const reindexButton = content.querySelector('#memory-preview-reindex');
+        try {
+            reindexButton.disabled = true;
+            reindexButton.textContent = 'Reindexing...';
+            showToast('Reindexing memory entry...', 1500);
+            entry.vectorSearch = true;
+            await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
+            entry.updatedAt = Date.now();
+            memoryBook.updatedAt = Date.now();
+            await db.saveChat(activeChatChar.id, chatData);
+            showToast('Memory entry reindexed');
+        } catch (error) {
+            console.error('Failed to reindex memory entry:', error);
+            showToast(`Reindex failed: ${formatError(error)}`);
+        } finally {
+            reindexButton.disabled = false;
+            reindexButton.textContent = 'Reindex';
+        }
+    });
+    content.querySelector('#memory-preview-delete')?.addEventListener('click', async () => {
+        if (!activeChatChar) return;
+        const chatData = await getChatData(activeChatChar.id);
+        const sessionId = activeChatChar.sessionId || chatData.currentId;
+        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+        await deleteMemoryEntryIndexIfPresent(entry.id);
+        memoryBook.entries = memoryBook.entries.filter(item => item.id !== entry.id);
+        memoryBook.updatedAt = Date.now();
+        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
+        chatData.sessions[sessionId] = currentMessages.value;
+        await db.saveChat(activeChatChar.id, chatData);
+        closeBottomSheet();
+        setTimeout(() => openMemoryBooksSheet(), 50);
+    });
     content.querySelector('#memory-preview-close')?.addEventListener('click', () => closeBottomSheet());
     showBottomSheet({ title: kind, content, isSolid: true });
 }
@@ -866,6 +1143,7 @@ async function openMemoryBooksSheet() {
     const chatData = await getChatData(activeChatChar.id);
     const sessionId = activeChatChar.sessionId || chatData.currentId;
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
     const content = document.createElement('div');
     content.className = 'context-sheet';
 
@@ -876,14 +1154,19 @@ async function openMemoryBooksSheet() {
             const status = entry.status || 'active';
             const count = Array.isArray(entry.messageIds) ? entry.messageIds.length : 0;
             const preview = (entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180);
+            const keysMeta = Array.isArray(entry.keys) && entry.keys.length
+                ? ` • ${entry.keys.slice(0, 3).map(key => String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')).join(', ')}`
+                : '';
+            const retrievalMeta = vectorEnabled ? ' • hybrid' : ' • keys';
+            const badges = `${vectorEnabled ? '<span class="memory-status-badge vector">vec</span>' : ''}${entry.id ? '<span class="memory-status-badge indexed">idx</span>' : ''}`;
             return `
                 <div class="memory-entry-card" data-entry-id="${entry.id}">
                     <div class="memory-entry-head">
                         <div>
                             <div class="memory-entry-title">${(entry.title || 'Untitled memory').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-                            <div class="memory-entry-meta">${status} • ${count} messages</div>
+                            <div class="memory-entry-meta">${status} • ${count} messages${retrievalMeta}${keysMeta}</div>
                         </div>
-                        <button type="button" class="memory-entry-delete" data-entry-delete="${entry.id}">Delete</button>
+                        <div class="memory-status-badges">${badges}</div>
                     </div>
                     <div class="memory-entry-preview">${preview || 'No content yet'}</div>
                 </div>
@@ -893,14 +1176,20 @@ async function openMemoryBooksSheet() {
     const draftCards = pendingDrafts.length
         ? pendingDrafts.map(entry => {
             const preview = (entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180);
+            const keysMeta = Array.isArray(entry.keys) && entry.keys.length
+                ? ` • ${entry.keys.slice(0, 3).map(key => String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')).join(', ')}`
+                : '';
+            const retrievalMeta = vectorEnabled ? ' • hybrid' : ' • keys';
+            const badges = `${vectorEnabled ? '<span class="memory-status-badge vector">vec</span>' : ''}`;
             return `
                 <div class="memory-entry-card" data-draft-id="${entry.id}">
                     <div class="memory-entry-head">
                         <div>
                             <div class="memory-entry-title">${(entry.title || 'Untitled draft').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-                            <div class="memory-entry-meta">pending approval</div>
+                            <div class="memory-entry-meta">pending approval${retrievalMeta}${keysMeta}</div>
                         </div>
                         <div class="memory-draft-actions">
+                            ${badges}
                             <button type="button" class="memory-entry-approve" data-draft-approve="${entry.id}">Approve</button>
                             <button type="button" class="memory-entry-delete" data-draft-delete="${entry.id}">Delete</button>
                         </div>
@@ -916,8 +1205,25 @@ async function openMemoryBooksSheet() {
             <label>Current Session</label>
             <div class="context-sheet-note">${activeChatChar.name || 'Character'} • session ${sessionId}</div>
         </div>
+        <div class="settings-item">
+            <label>Key Match Mode</label>
+            <div class="clickable-selector" id="memory-sheet-key-mode-selector">
+                <span>${getMemoryKeyMatchMode(memoryBook) === 'glaze' ? 'Glaze boundaries' : getMemoryKeyMatchMode(memoryBook) === 'both' ? 'Plain + Glaze' : 'Plain contains'}</span>
+                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+            </div>
+            <div class="context-sheet-note">Keyword retrieval uses only the entry Keys field.</div>
+        </div>
+        <div class="settings-item-checkbox">
+            <div class="settings-text-col">
+                <label>Vector Search</label>
+                <div class="settings-desc">One shared retrieval mode for all memory entries in this session.</div>
+            </div>
+            <input id="memory-sheet-vector-toggle" type="checkbox" class="vk-switch" ${vectorEnabled ? 'checked' : ''} ${shouldEnableMemoryVectorSearch() ? '' : 'disabled'}>
+        </div>
+        ${shouldEnableMemoryVectorSearch() ? '' : '<div class="context-sheet-note">Embeddings are not configured, so vector search is unavailable.</div>'}
         <div class="context-sheet-actions" style="margin-bottom: 12px;">
             <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-sheet-settings">Generation Settings</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-sheet-reindex" ${vectorEnabled ? '' : 'disabled'}>Reindex All</button>
             <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-sheet-close">Close</button>
         </div>
         ${draftCards ? `<div class="memory-entry-list" style="margin-bottom: 12px;">${draftCards}</div>` : ''}
@@ -927,6 +1233,88 @@ async function openMemoryBooksSheet() {
     content.querySelector('#memory-sheet-settings')?.addEventListener('click', () => {
         closeBottomSheet();
         setTimeout(() => openMemoryGenerationSettings(), 50);
+    });
+    content.querySelector('#memory-sheet-key-mode-selector')?.addEventListener('click', () => {
+        closeBottomSheet();
+        showBottomSheet({
+            title: 'Memory Key Match Mode',
+            items: [
+                {
+                    label: 'Plain contains',
+                    onClick: async () => {
+                        memoryBook.settings.keyMatchMode = 'plain';
+                        memoryBook.updatedAt = Date.now();
+                        await db.saveChat(activeChatChar.id, chatData);
+                        closeBottomSheet();
+                        setTimeout(() => openMemoryBooksSheet(), 50);
+                    }
+                },
+                {
+                    label: 'Glaze boundaries',
+                    onClick: async () => {
+                        memoryBook.settings.keyMatchMode = 'glaze';
+                        memoryBook.updatedAt = Date.now();
+                        await db.saveChat(activeChatChar.id, chatData);
+                        closeBottomSheet();
+                        setTimeout(() => openMemoryBooksSheet(), 50);
+                    }
+                },
+                {
+                    label: 'Plain + Glaze',
+                    onClick: async () => {
+                        memoryBook.settings.keyMatchMode = 'both';
+                        memoryBook.updatedAt = Date.now();
+                        await db.saveChat(activeChatChar.id, chatData);
+                        closeBottomSheet();
+                        setTimeout(() => openMemoryBooksSheet(), 50);
+                    }
+                }
+            ]
+        });
+    });
+    content.querySelector('#memory-sheet-vector-toggle')?.addEventListener('change', async (event) => {
+        const enabled = !!event.target.checked;
+        memoryBook.settings.vectorSearchEnabled = enabled;
+        setMemoryVectorSearchOnEntries(memoryBook, enabled);
+        memoryBook.updatedAt = Date.now();
+        try {
+            if (enabled) {
+                showToast('Reindexing memory entries...', 1500);
+                await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
+                showToast('Memory vector search enabled');
+            } else {
+                const approvedEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
+                for (const entry of approvedEntries) {
+                    await deleteMemoryEntryIndexIfPresent(entry.id);
+                }
+                showToast('Memory vector search disabled');
+            }
+            await db.saveChat(activeChatChar.id, chatData);
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        } catch (error) {
+            console.error('Failed to toggle memory vector search:', error);
+            showToast(`Vector toggle failed: ${formatError(error)}`);
+        }
+    });
+    content.querySelector('#memory-sheet-reindex')?.addEventListener('click', async () => {
+        const button = content.querySelector('#memory-sheet-reindex');
+        try {
+            button.disabled = true;
+            button.textContent = 'Reindexing...';
+            showToast('Reindexing memory entries...', 1500);
+            await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
+            memoryBook.updatedAt = Date.now();
+            await db.saveChat(activeChatChar.id, chatData);
+            showToast('Memory entries reindexed');
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        } catch (error) {
+            console.error('Failed to reindex memory entries:', error);
+            showToast(`Reindex failed: ${formatError(error)}`);
+            button.disabled = false;
+            button.textContent = 'Reindex All';
+        }
     });
     content.querySelector('#memory-sheet-close')?.addEventListener('click', () => closeBottomSheet());
     content.querySelectorAll('[data-entry-id]').forEach(card => {
@@ -952,6 +1340,7 @@ async function openMemoryBooksSheet() {
     content.querySelectorAll('[data-entry-delete]').forEach(btn => {
         btn.addEventListener('click', async () => {
             const entryId = btn.getAttribute('data-entry-delete');
+            await deleteMemoryEntryIndexIfPresent(entryId);
             memoryBook.entries = memoryBook.entries.filter(entry => entry.id !== entryId);
             memoryBook.updatedAt = Date.now();
             reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
@@ -966,12 +1355,14 @@ async function openMemoryBooksSheet() {
             const draftId = btn.getAttribute('data-draft-approve');
             const draft = memoryBook.pendingDrafts.find(entry => entry.id === draftId);
             if (!draft) return;
-            memoryBook.entries.push({ ...draft, status: 'active' });
+            const approvedEntry = normalizeMemoryEntryShape({ ...draft, status: 'active', vectorSearch: vectorEnabled });
+            memoryBook.entries.push(approvedEntry);
             memoryBook.pendingDrafts = memoryBook.pendingDrafts.filter(entry => entry.id !== draftId);
             memoryBook.updatedAt = Date.now();
             reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
             chatData.sessions[sessionId] = currentMessages.value;
             await db.saveChat(activeChatChar.id, chatData);
+            await indexMemoryEntryIfNeeded(approvedEntry, activeChatChar.id, sessionId);
             closeBottomSheet();
             setTimeout(() => openMemoryBooksSheet(), 50);
         });
@@ -4975,6 +5366,24 @@ onUnmounted(() => {
     white-space: pre-wrap;
 }
 
+.memory-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.memory-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    color: #7ee787;
+    background: rgba(126, 231, 135, 0.12);
+    border: 1px solid rgba(126, 231, 135, 0.22);
+}
+
 .memory-entry-delete {
     border: none;
     border-radius: 999px;
@@ -4983,6 +5392,38 @@ onUnmounted(() => {
     color: #ff6b6b;
     font-size: 12px;
     font-weight: 600;
+}
+
+.memory-status-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.memory-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.memory-status-badge.vector {
+    background: rgba(30, 200, 255, 0.14);
+    color: #1ec8ff;
+}
+
+.memory-status-badge.indexed {
+    background: rgba(126, 231, 135, 0.12);
+    color: #7ee787;
+}
+
+.memory-preview-delete {
+    color: #ff6b6b;
 }
 
 .memory-draft-actions {

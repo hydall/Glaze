@@ -247,7 +247,7 @@ Architecture direction:
 
 Recommended implementation shape:
 - [done | not tested] Introduce a dedicated memory book container persisted per chat/session, instead of storing memory books as ordinary lorebooks only.
-- [not done | not tested] Keep each memory entry lorebook-compatible internally: `content`, `keys`, `vectorSearch`, retrieval hints, indexing status, and embedding records remain aligned with the lorebook/vector pipeline.
+- [done | not tested] Keep each memory entry lorebook-compatible internally at the schema level: `content`, `keys`, `vectorSearch`, and `glazeKeys` are now present so retrieval wiring can build on stable entry fields.
 - [done | not tested] Add memory-specific metadata on top of the entry data:
   - `messageRange` / explicit message IDs covered by the entry
   - source session ID
@@ -288,8 +288,9 @@ Planned execution order:
 - [not done | not tested] Surface stale/orphaned state in the memory UI instead of silently keeping broken data.
 
 4.3. Retrieval and prompt injection integration:
-- [not done | not tested] Reuse vector indexing/search for memory entries via a separate `sourceType` such as `memory_entry`.
-- [not done | not tested] Support the same activation styles as lorebooks where useful: vectors, keys, and Glaze keys.
+- [done | not tested] Reuse vector indexing/search for memory entries via a separate `sourceType` such as `memory_entry`.
+- [done | not tested] Support the same activation styles as lorebooks where useful: vectors, keys, and Glaze keys.
+: runtime retrieval now supports key/glaze-key matching plus vector-backed memory entry search; deeper worker-level unification can remain follow-up cleanup.
 - [done | not tested] Keep normal lorebook activation limits separate from memory activation limits.
 - [done | not tested] Inject retrieved memories into the summary block path or an adjacent dedicated memory-summary block, not into the normal lorebook block.
 - [done | not tested] Expose separate memory context accounting in generation metadata so the UI can show memory independently from lorebooks.
@@ -315,7 +316,13 @@ Current implementation status notes:
 - [done | not tested] Normal generation now injects selected memory-book entries as a separate memory context block and records triggered memories on the source message.
 - [done | not tested] Dialog export now includes a Glaze full-fidelity chat format that preserves memory books, message refs, and memory coverage metadata.
 - [done | not tested] ST chat import/export now preserves Glaze message IDs, context refs, memory coverage, and triggered memories in `extra` when available.
+- [done | not tested] Memory entries and drafts now persist retrieval-facing fields (`keys`, `glazeKeys`, `vectorSearch`) and surface them in Memory Books preview UI.
+- [done | not tested] Approved memory entries can now be edited after approval, including title/content/keys/Glaze keys updates, per-entry `vectorSearch` toggle changes, and manual `Reindex` actions from the Memory Books UI.
+- [done | not tested] Memory Books now expose a session-level vector-search toggle and a selectable key match mode; keyword retrieval uses only the entry `Keys` field while preview cards keep inline `Edit` / `Reindex` / `Delete` actions.
+- [done | not tested] Memory generation prompts now ask for both memory text and optional retrieval keys in a simple text format (`Memory:` / `Keys:`), avoiding JSON-only contracts.
+- [done | not tested] Draft parsing now supports vector-first usage: if the model leaves `Keys:` empty, fallback keys are generated automatically while vector retrieval can still dominate when configured.
 - [not done | not tested] Replace the temporary bottom-sheet implementation with a dedicated polished memory sheet component before considering the UI complete.
+- [done | not tested] Lorebook insertion now has a global default injection position and per-entry `Match Global` / `{{lorebooks}}` targets, so the `{{lorebooks}}` macro is legal at the lorebook-entry level instead of acting as a preset-wide override.
 
 4.5. Import/export/bootstrap and cloud-sync-safe serialization:
 - [not done | not tested] On chat import, add an initial segmentation/bootstrap flow that can create first-pass memory entries automatically from imported message history.
@@ -398,6 +405,10 @@ Manual verification that must stay visible in the roadmap:
 - [not done | not tested] Verify that closing prompt preview returns to `Memory Generation` or the prompt manager instead of closing the whole flow.
 - [not done | not tested] Verify that memory injections count separately from lorebook injections during generation.
 - [not done | not tested] Verify that tokenizer visualization shows memory usage with summary-style accounting.
+- [not done | not tested] Verify that editing an approved memory entry correctly updates persisted content/keys and does not break message coverage metadata.
+- [not done | not tested] Verify that disabling `vectorSearch` deletes the memory-entry embedding, and re-enabling or manual `Reindex` rebuilds it correctly.
+- [not done | not tested] Verify that the Memory Books key match mode (`plain` / `glaze` / `both`) changes retrieval as expected while using only the `Keys` field.
+- [not done | not tested] Verify that lorebook entries set to `Match Global`, `@worldInfoBefore`, `@worldInfoAfter`, and `{{lorebooks}}` inject at the expected locations without preset-level override regressions.
 - [not done | not tested] Verify that backup export/import preserves memory books and rebuilds any derived vectors safely.
 - [not done | not tested] Verify that future cloud-sync serialization can round-trip memory books without duplication or orphaned entries.
 - [not done | not tested] Verify that Glaze-to-Glaze export/import preserves memory books, per-message markers, and memory generation settings without loss.
