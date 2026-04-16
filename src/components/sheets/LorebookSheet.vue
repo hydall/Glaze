@@ -142,26 +142,6 @@ const failedEntryMap = ref(new Map());
 const needsVectorReindex = ref(false);
 const missingVectorCount = ref(0);
 
-async function updateVectorReindexNotice() {
-    if (!activeLorebook.value) {
-        needsVectorReindex.value = false;
-        missingVectorCount.value = 0;
-        return;
-    }
-
-    let missing = 0;
-    for (const entry of activeLorebook.value.entries) {
-        if (!entry?.vectorSearch || !entry?.id) continue;
-        const status = await getEmbeddingStatus(entry.id);
-        if (status !== 'indexed') {
-            missing++;
-        }
-    }
-
-    missingVectorCount.value = missing;
-    needsVectorReindex.value = missing > 0;
-}
-
 const failedEntries = computed(() => {
     if (!activeLorebook.value) return [];
     return activeLorebook.value.entries
