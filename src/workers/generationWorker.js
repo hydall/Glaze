@@ -164,7 +164,7 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
 
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
-            if (entry.enabled !== false) {
+            if (entry.enabled !== false && !entry.vectorSearch) {
                 if (char && entry.characterFilter) {
                     const { isExclude, names } = entry.characterFilter;
                     if (names && names.length > 0) {

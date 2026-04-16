@@ -88,6 +88,8 @@ captures/
 !README.md
 !CLAUDE.md
 !CONTRIBUTING.md
+!AGENTS.md
+!Roadmap.md
 /.claude
 docs/index.html
 /tavo-backup

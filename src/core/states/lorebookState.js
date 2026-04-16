@@ -1,11 +1,235 @@
 import { reactive, watch } from 'vue';
 import { db } from '@/utils/db.js';
+import { getEmbeddings } from '@/core/services/embeddingService.js';
+import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
+import { findTopK } from '@/utils/vectorMath.js';
 
 function escapeRegex(string) {
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
 }
 
 const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\\u201C\\u201D\\u2018\\u2019\\u00AB\\u00BB(){}\\[\\]—–]';
+
+function normalizeHybridText(text = '') {
+    return text
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s-]+/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function getHybridTokens(text = '') {
+    return normalizeHybridText(text)
+        .split(' ')
+        .filter(token => token.length >= 3);
+}
+
+function getEntryDescriptorTexts(entry) {
+    const descriptors = [];
+    if (entry.comment) descriptors.push(String(entry.comment));
+    if (Array.isArray(entry.keys)) descriptors.push(...entry.keys.map(v => String(v)));
+
+    const content = String(entry.content || '');
+    if (content) {
+        const lines = content
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(Boolean)
+            .slice(0, 4);
+        descriptors.push(...lines);
+    }
+
+    return descriptors;
+}
+
+function uniqueStrings(values = [], limit = 32) {
+    const seen = new Set();
+    const result = [];
+    for (const value of values) {
+        const raw = String(value || '').trim();
+        const normalized = normalizeHybridText(raw);
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        result.push(raw);
+        if (result.length >= limit) break;
+    }
+    return result;
+}
+
+function extractRetrievalHints(entry) {
+    const hints = [];
+
+    if (entry.comment) hints.push(String(entry.comment));
+    if (Array.isArray(entry.keys)) hints.push(...entry.keys.map(v => String(v)));
+
+    const content = String(entry.content || '');
+    if (content) {
+        const lines = content
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(Boolean)
+            .slice(0, 8);
+
+        hints.push(...lines);
+
+        for (const line of lines) {
+            const colonIndex = line.indexOf(':');
+            if (colonIndex > 0) {
+                const label = line.slice(0, colonIndex).trim();
+                const value = line.slice(colonIndex + 1).trim();
+                if (label) hints.push(label);
+                if (value) {
+                    hints.push(value);
+                    value.split(/[;,]|\band\b|\bи\b/iu)
+                        .map(part => part.trim())
+                        .filter(Boolean)
+                        .forEach(part => hints.push(part));
+                }
+            }
+        }
+    }
+
+    return uniqueStrings(hints, 32);
+}
+
+function buildEmbeddingRecord(entry, lorebookId, vector, textHash) {
+    return {
+        id: entry.id,
+        sourceType: 'lorebook_entry',
+        sourceId: lorebookId,
+        vector,
+        textHash,
+        retrievalHints: extractRetrievalHints(entry),
+        updatedAt: Date.now()
+    };
+}
+
+function buildEmbeddingErrorRecord(entry, lorebookId, textHash, error) {
+    return {
+        id: entry.id,
+        sourceType: 'lorebook_entry',
+        sourceId: lorebookId,
+        vector: null,
+        textHash,
+        retrievalHints: extractRetrievalHints(entry),
+        error,
+        updatedAt: Date.now()
+    };
+}
+
+function getIndexingErrorDetails(type, message = '') {
+    const safeMessage = String(message || '').trim();
+    return {
+        type,
+        message: safeMessage,
+        retryable: !['empty_text', 'missing_entry_id'].includes(type),
+        updatedAt: Date.now()
+    };
+}
+
+function classifyIndexingError(error) {
+    const message = String(error?.message || error || '').trim();
+    const lower = message.toLowerCase();
+
+    if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('abort')) {
+        return getIndexingErrorDetails('timeout', message || 'Embedding request timed out');
+    }
+    if (lower.includes('endpoint not configured')) {
+        return getIndexingErrorDetails('config_endpoint', message || 'Embedding endpoint not configured');
+    }
+    if (lower.includes('model not configured')) {
+        return getIndexingErrorDetails('config_model', message || 'Embedding model not configured');
+    }
+    if (lower.includes('embedding api error')) {
+        return getIndexingErrorDetails('api_error', message || 'Embedding API request failed');
+    }
+    if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('network error')) {
+        return getIndexingErrorDetails('network_error', message || 'Network error while requesting embeddings');
+    }
+    if (lower.includes('invalid embedding response')) {
+        return getIndexingErrorDetails('invalid_response', message || 'Embedding API returned an invalid response');
+    }
+
+    return getIndexingErrorDetails('unknown', message || 'Unknown indexing error');
+}
+
+function getEntryIndexingText(entry, target) {
+    return (target === 'keys'
+        ? (entry.keys || []).join(', ')
+        : (entry.content || '')).trim();
+}
+
+async function saveEmbeddingError(entry, lorebookId, textHash, error) {
+    await db.saveEmbedding(buildEmbeddingErrorRecord(entry, lorebookId, textHash, error));
+}
+
+function buildEmbeddingFingerprint(entry, text) {
+    return JSON.stringify({
+        text,
+        retrievalHints: extractRetrievalHints(entry)
+    });
+}
+
+function scoreHybridBoost(entry, queryText) {
+    const normalizedQuery = normalizeHybridText(queryText);
+    if (!normalizedQuery) return 0;
+
+    const queryTokens = new Set(getHybridTokens(queryText));
+    if (queryTokens.size === 0) return 0;
+
+    let boost = 0;
+    const names = [entry.comment, ...(Array.isArray(entry.keys) ? entry.keys : [])]
+        .filter(Boolean)
+        .map(value => String(value));
+
+    for (const name of names) {
+        const normalizedName = normalizeHybridText(name);
+        if (!normalizedName) continue;
+
+        if (normalizedQuery.includes(normalizedName)) {
+            boost = Math.max(boost, 0.18);
+        }
+
+        const nameTokens = getHybridTokens(name);
+        let overlap = 0;
+        for (const token of nameTokens) {
+            if (queryTokens.has(token)) overlap++;
+        }
+
+        if (overlap > 0) {
+            boost = Math.max(boost, Math.min(0.12, overlap * 0.04));
+        }
+    }
+
+    return boost;
+}
+
+function scoreDescriptorBoost(entry, queryText) {
+    const queryTokens = new Set(getHybridTokens(queryText));
+    if (queryTokens.size === 0) return 0;
+
+    let boost = 0;
+    const descriptors = [
+        ...getEntryDescriptorTexts(entry),
+        ...(Array.isArray(entry.retrievalHints) ? entry.retrievalHints : [])
+    ];
+
+    for (const descriptor of descriptors) {
+        const descriptorTokens = getHybridTokens(descriptor);
+        if (descriptorTokens.length === 0) continue;
+
+        let overlap = 0;
+        for (const token of descriptorTokens) {
+            if (queryTokens.has(token)) overlap++;
+        }
+
+        if (overlap > 0) {
+            boost = Math.max(boost, Math.min(0.1, overlap * 0.025));
+        }
+    }
+
+    return boost;
+}
 
 // --- State Definition ---
 export const lorebookState = reactive({
@@ -188,15 +412,14 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
     let candidates = [];
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
-            if (entry.enabled !== false) {
-                // Character Filter check
+            if (entry.enabled !== false && !entry.vectorSearch) {
                 if (char && entry.characterFilter) {
                     const { isExclude, names } = entry.characterFilter;
                     if (names && names.length > 0) {
                         const charName = (char.name || "").toLowerCase();
                         const isInCategory = names.some(n => charName.includes(n.toLowerCase()));
-                        if (isExclude && isInCategory) return; // Excluded
-                        if (!isExclude && !isInCategory) return; // Not in allowed list
+                        if (isExclude && isInCategory) return;
+                        if (!isExclude && !isInCategory) return;
                     }
                 }
                 candidates.push({ ...entry, lorebookName: lb.name, lorebookId: lb.id });
@@ -373,8 +596,9 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
     return allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
 }
 
-export async function importSTLorebook(json, fileName = 'Imported') {
+export async function importSTLorebook(json, fileName = 'Imported', options = {}) {
     try {
+        const { enabled = true, activationScope = null, activationTargetId = null } = options;
         let normalizedEntries = [];
         const entriesRaw = json.entries || [];
 
@@ -387,7 +611,7 @@ export async function importSTLorebook(json, fileName = 'Imported') {
         const newLb = {
             id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
             name: json.name || fileName.replace('.json', ''),
-            enabled: true,
+            enabled,
             entries: normalizedEntries.map(entry => {
                 const rawKeys = entry.keys || entry.key || [];
                 const rawSecondary = entry.secondary_keys || entry.keysecondary || [];
@@ -421,6 +645,15 @@ export async function importSTLorebook(json, fileName = 'Imported') {
         };
 
         lorebookState.lorebooks.push(newLb);
+        if (activationScope === 'character' && activationTargetId) {
+            if (!lorebookState.activations.character) lorebookState.activations.character = {};
+            if (!lorebookState.activations.character[activationTargetId]) {
+                lorebookState.activations.character[activationTargetId] = [];
+            }
+            if (!lorebookState.activations.character[activationTargetId].includes(newLb.id)) {
+                lorebookState.activations.character[activationTargetId].push(newLb.id);
+            }
+        }
         return newLb;
     } catch (err) {
         throw new Error('Invalid SillyTavern Lorebook format: ' + err.message);
@@ -478,4 +711,322 @@ export function exportSTLorebook(lorebook) {
     });
 
     return { entries };
+}
+
+async function computeTextHash(text) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function indexLorebookEntry(entry, lorebookId) {
+    if (!isEmbeddingConfigured()) return;
+    if (!entry.id) {
+        throw new Error('Entry ID is missing');
+    }
+
+    const config = getEmbeddingConfig();
+    const text = getEntryIndexingText(entry, config.target);
+
+    const textHash = await computeTextHash(buildEmbeddingFingerprint(entry, text));
+
+    if (!text) {
+        const error = getIndexingErrorDetails('empty_text', 'Entry text is empty for current embedding target');
+        await saveEmbeddingError(entry, lorebookId, textHash, error);
+        throw new Error(error.message);
+    }
+
+    const existing = await db.getEmbedding(entry.id);
+    if (existing && existing.textHash === textHash) return;
+
+    const vectors = await getEmbeddings([text]);
+    if (!vectors || !vectors[0]) {
+        const error = getIndexingErrorDetails('empty_embedding', 'Embedding API returned no vector');
+        await saveEmbeddingError(entry, lorebookId, textHash, error);
+        throw new Error(error.message);
+    }
+
+    await db.saveEmbedding(buildEmbeddingRecord(entry, lorebookId, vectors[0], textHash));
+}
+
+export async function indexLorebookEntries(lorebookId, onProgress, options = {}) {
+    const lb = lorebookState.lorebooks.find(l => l.id === lorebookId);
+    if (!lb) return { indexed: 0, skipped: 0, failed: 0, total: 0 };
+
+    const retryFailedOnly = options.retryFailedOnly === true;
+    const entries = lb.entries.filter(e => e.enabled !== false && e.vectorSearch);
+    if (entries.length === 0) return { indexed: 0, skipped: 0, failed: 0, total: 0, failures: [], retriedFailedOnly: retryFailedOnly };
+
+    const config = getEmbeddingConfig();
+    let indexed = 0;
+    let skipped = 0;
+    let failed = 0;
+    const failures = [];
+    const processedEntries = [];
+
+    for (const entry of entries) {
+        if (!retryFailedOnly) {
+            processedEntries.push(entry);
+            continue;
+        }
+
+        const existing = await db.getEmbedding(entry.id);
+        if (existing?.error) {
+            processedEntries.push(entry);
+        }
+    }
+
+    if (processedEntries.length === 0) {
+        return { indexed: 0, skipped: 0, failed: 0, total: 0, failures: [], retriedFailedOnly: retryFailedOnly };
+    }
+
+    for (let i = 0; i < processedEntries.length; i++) {
+        const entry = processedEntries[i];
+        const text = getEntryIndexingText(entry, config.target);
+        const textHash = await computeTextHash(buildEmbeddingFingerprint(entry, text));
+
+        if (!text) {
+            const error = getIndexingErrorDetails('empty_text', 'Entry text is empty for current embedding target');
+            await saveEmbeddingError(entry, lb.id, textHash, error);
+            failures.push({ entryId: entry.id, comment: entry.comment || '', keys: entry.keys || [], error });
+            failed++;
+            if (onProgress) onProgress(i + 1, processedEntries.length);
+            continue;
+        }
+
+        const existing = await db.getEmbedding(entry.id);
+        if (existing && existing.textHash === textHash) {
+            skipped++;
+            if (onProgress) onProgress(i + 1, processedEntries.length);
+            continue;
+        }
+
+        try {
+            const vectors = await getEmbeddings([text]);
+            if (vectors && vectors[0]) {
+                await db.saveEmbedding(buildEmbeddingRecord(entry, lorebookId, vectors[0], textHash));
+                indexed++;
+            } else {
+                const error = getIndexingErrorDetails('empty_embedding', 'Embedding API returned no vector');
+                await saveEmbeddingError(entry, lb.id, textHash, error);
+                failures.push({ entryId: entry.id, comment: entry.comment || '', keys: entry.keys || [], error });
+                failed++;
+            }
+        } catch (e) {
+            console.warn('[indexLorebookEntries] Failed for entry', entry.id, e);
+            const error = classifyIndexingError(e);
+            await saveEmbeddingError(entry, lb.id, textHash, error);
+            failures.push({ entryId: entry.id, comment: entry.comment || '', keys: entry.keys || [], error });
+            failed++;
+        }
+
+        if (onProgress) onProgress(i + 1, processedEntries.length);
+    }
+
+    return { indexed, skipped, failed, total: processedEntries.length, failures, retriedFailedOnly: retryFailedOnly };
+}
+
+export async function getEmbeddingStatus(entryId) {
+    const record = await db.getEmbedding(entryId);
+    if (!record) return 'none';
+    if (record.error) return 'error';
+    return 'indexed';
+}
+
+export async function getEmbeddingRecord(entryId) {
+    return db.getEmbedding(entryId);
+}
+
+export async function deleteLorebookEntryEmbedding(entryId) {
+    if (!entryId) return;
+    await db.deleteEmbedding(entryId);
+}
+
+export async function deleteLorebookEmbeddings(lorebookId) {
+    const allEmbeddings = await db.getEmbeddingsBySource('lorebook_entry');
+    const targets = allEmbeddings.filter(record => record.sourceId === lorebookId);
+    for (const record of targets) {
+        await db.deleteEmbedding(record.id);
+    }
+}
+
+export async function vectorSearchLorebooks(history = [], currentText = '', char = null, chatId = null) {
+    const config = getEmbeddingConfig();
+    if (!config.enabled) {
+        console.info('[vectorSearchLorebooks] skipped: vector search disabled');
+        return [];
+    }
+    if (!isEmbeddingConfigured()) {
+        console.info('[vectorSearchLorebooks] skipped: embedding config incomplete');
+        return [];
+    }
+
+    const charId = char?.id;
+
+    const activeLorebooks = lorebookState.lorebooks.filter(lb => {
+        if (lb.enabled) return true;
+        if (charId && lorebookState.activations?.character?.[charId]?.includes(lb.id)) return true;
+        if (chatId && lorebookState.activations?.chat?.[chatId]?.includes(lb.id)) return true;
+        return false;
+    });
+
+    if (activeLorebooks.length === 0) {
+        console.info('[vectorSearchLorebooks] skipped: no active lorebooks for context', {
+            charId,
+            chatId,
+            totalLorebooks: lorebookState.lorebooks.length
+        });
+        return [];
+    }
+
+    const vectorEntries = [];
+    activeLorebooks.forEach(lb => {
+        lb.entries.forEach(entry => {
+            if (entry.enabled !== false && entry.vectorSearch) {
+                vectorEntries.push({ ...entry, lorebookName: lb.name, lorebookId: lb.id });
+            }
+        });
+    });
+
+    if (vectorEntries.length === 0) {
+        console.info('[vectorSearchLorebooks] skipped: no vector-enabled entries', {
+            activeLorebooks: activeLorebooks.length
+        });
+        return [];
+    }
+
+    const allEmbeddings = await db.getEmbeddingsBySource('lorebook_entry');
+    const embeddingMap = new Map(allEmbeddings.map(e => [e.id, e]));
+
+    const candidates = [];
+    for (const entry of vectorEntries) {
+        const emb = embeddingMap.get(entry.id);
+        if (emb && emb.vector) {
+            candidates.push({ ...entry, vector: emb.vector, retrievalHints: emb.retrievalHints || [] });
+        }
+    }
+
+    if (candidates.length === 0) {
+        console.info('[vectorSearchLorebooks] skipped: no indexed vector candidates', {
+            vectorEntries: vectorEntries.length,
+            storedEmbeddings: allEmbeddings.length
+        });
+        return [];
+    }
+
+    const scanDepth = config.scanDepth || 5;
+    const recentHistory = history.slice(-scanDepth);
+    const recentUserParts = recentHistory
+        .filter(m => m.role === 'user')
+        .map(m => m.content)
+        .filter(Boolean);
+    const currentTextTrimmed = currentText && currentText.trim() ? currentText.trim() : '';
+    const focusedQueryParts = recentUserParts.length > 0 ? [...recentUserParts] : [];
+    if (currentTextTrimmed) {
+        focusedQueryParts.push(currentTextTrimmed);
+    }
+    const fallbackQueryParts = recentHistory.map(m => m.content).filter(Boolean);
+    if (currentTextTrimmed) {
+        fallbackQueryParts.push(currentTextTrimmed);
+    }
+
+    const focusedQueryText = focusedQueryParts.join('\n');
+    const fallbackQueryText = fallbackQueryParts.join('\n');
+    const queryText = (focusedQueryParts.length > 0 ? focusedQueryParts : fallbackQueryParts).join('\n');
+    if (!queryText.trim()) {
+        console.info('[vectorSearchLorebooks] skipped: empty query text', {
+            historyMessages: history.length,
+            hasCurrentText: !!(currentText && currentText.trim())
+        });
+        return [];
+    }
+
+    console.info('[vectorSearchLorebooks] querying embeddings', {
+        charId,
+        chatId,
+        activeLorebooks: activeLorebooks.length,
+        vectorEntries: vectorEntries.length,
+        indexedCandidates: candidates.length,
+        historyMessages: history.length,
+        userMessagesUsed: recentUserParts.length,
+        focusedQueryLength: focusedQueryText.length,
+        fallbackQueryLength: fallbackQueryText.length,
+        hasCurrentText: !!(currentText && currentText.trim()),
+        queryLength: queryText.length,
+        threshold: config.threshold || 0.6,
+        topK: config.topK || 5
+    });
+
+    try {
+        const hybridQueryText = focusedQueryText || fallbackQueryText;
+
+        const runSearch = async (text, label) => {
+            if (!text || !text.trim()) return [];
+            console.info('[vectorSearchLorebooks] embedding query', {
+                label,
+                queryLength: text.length
+            });
+            const queryVectors = await getEmbeddings([text]);
+            if (!queryVectors || !queryVectors[0]) {
+                console.info('[vectorSearchLorebooks] skipped: embedding API returned no query vector', { label });
+                return [];
+            }
+
+            const vectorResults = findTopK(queryVectors[0], candidates, candidates.length, 0);
+            return vectorResults.map(result => {
+                const hybridBoost = scoreHybridBoost(result, hybridQueryText);
+                const descriptorBoost = scoreDescriptorBoost(result, hybridQueryText);
+                return {
+                    ...result,
+                    score: Math.min(1, result.score + hybridBoost + descriptorBoost),
+                    hybridBoost,
+                    descriptorBoost,
+                    searchLabel: label
+                };
+            });
+        };
+
+        const focusedResults = await runSearch(focusedQueryText, 'focused');
+        let fallbackResults = [];
+        if (fallbackQueryParts.length > focusedQueryParts.length) {
+            console.info('[vectorSearchLorebooks] retrying with fallback query');
+            fallbackResults = await runSearch(fallbackQueryText, 'fallback');
+        }
+
+        const combined = new Map();
+        for (const result of [...focusedResults, ...fallbackResults]) {
+            const existing = combined.get(result.id);
+            if (!existing || result.score > existing.score) {
+                combined.set(result.id, result);
+            }
+        }
+
+        const results = Array.from(combined.values())
+            .sort((a, b) => b.score - a.score)
+            .filter(result => result.score >= (config.threshold || 0.6))
+            .slice(0, config.topK || 5);
+
+        console.info('[vectorSearchLorebooks] results ready', {
+            matches: results.length,
+            topScores: results.slice(0, 15).map(r => ({
+                id: r.id,
+                name: r.comment || r.keys?.[0] || 'Entry',
+                lorebookName: r.lorebookName,
+                score: Number(r.score?.toFixed?.(4) || r.score),
+                hybridBoost: Number(r.hybridBoost?.toFixed?.(4) || r.hybridBoost || 0),
+                descriptorBoost: Number(r.descriptorBoost?.toFixed?.(4) || r.descriptorBoost || 0),
+                source: r.searchLabel
+            }))
+        });
+        return results.map(r => ({
+            ...r,
+            vectorScore: r.score,
+            vector: undefined
+        }));
+    } catch (e) {
+        console.warn('[vectorSearchLorebooks] Error:', e);
+        throw e;
+    }
 }

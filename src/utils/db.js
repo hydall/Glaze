@@ -100,6 +100,10 @@ export const db = {
                         };
                     }
                 }
+
+                if (!db.objectStoreNames.contains(STORE_EMBEDDINGS)) {
+                    db.createObjectStore(STORE_EMBEDDINGS, { keyPath: 'id' });
+                }
             };
             request.onsuccess = (e) => resolve(e.target.result);
             request.onerror = (e) => reject(e.target.error);
@@ -220,6 +224,50 @@ export const db = {
             await db.delete(STORE_PERSONAS, personas[index].id);
         }
     },
+    // Embedding specific logic
+    getEmbedding: async (id) => {
+        const database = await db.open();
+        return new Promise((resolve, reject) => {
+            const tx = database.transaction(STORE_EMBEDDINGS, 'readonly');
+            const store = tx.objectStore(STORE_EMBEDDINGS);
+            const req = store.get(id);
+            req.onsuccess = () => {
+                resolve(req.result);
+                database.close();
+            };
+            req.onerror = () => {
+                reject(req.error);
+                database.close();
+            };
+        });
+    },
+    getAllEmbeddings: async () => {
+        return db.getAll(STORE_EMBEDDINGS);
+    },
+    getEmbeddingsBySource: async (sourceType) => {
+        const all = await db.getAll(STORE_EMBEDDINGS);
+        return all.filter(e => e.sourceType === sourceType);
+    },
+    saveEmbedding: async (embeddingRecord) => {
+        await db.put(STORE_EMBEDDINGS, embeddingRecord);
+    },
+    deleteEmbedding: async (id) => {
+        await db.delete(STORE_EMBEDDINGS, id);
+    },
+    deleteEmbeddingsBySource: async (sourceType) => {
+        const all = await db.getAll(STORE_EMBEDDINGS);
+        const toDelete = all.filter(e => e.sourceType === sourceType);
+        const database = await db.open();
+        return new Promise((resolve, reject) => {
+            const tx = database.transaction(STORE_EMBEDDINGS, 'readwrite');
+            const store = tx.objectStore(STORE_EMBEDDINGS);
+            for (const item of toDelete) {
+                store.delete(item.id);
+            }
+            tx.oncomplete = () => { database.close(); resolve(); };
+            tx.onerror = () => { database.close(); reject(tx.error); };
+        });
+    },
     // Chat specific logic
     getChats: async () => {
         const database = await db.open();
@@ -310,13 +358,23 @@ export const db = {
         await db.set(`gz_chat_${charId}`, chatData);
     },
     createSession: async (charId) => {
-        let data = await db.getChat(charId);
-
+        let data = await db.get(`gz_chat_${charId}`);
         if (!data) {
-            data = { currentId: 1, sessions: { 1: [] } };
+            const legacyChats = await db.get('gz_chats');
+            if (legacyChats && legacyChats[charId]) {
+                data = await db.getChat(charId);
+            } else {
+                data = { currentId: 1, sessions: { 1: [] } };
+                await db.saveChat(charId, data);
+                return 1;
+            }
         }
         if (!data.sessions) {
             data.sessions = { 1: [] };
+        }
+        if (!data.currentId) {
+            const ids = Object.keys(data.sessions).map(Number);
+            data.currentId = ids.length > 0 ? Math.max(...ids) : 1;
         }
 
         const ids = Object.keys(data.sessions).map(Number);
