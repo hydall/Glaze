@@ -34,6 +34,9 @@ function ensureSessionMemoryBook(chatData, sessionId) {
             settings: {
                 enabled: true,
                 maxInjectedEntries: 3,
+                autoCreateInterval: 12,
+                useDelayedAutomation: true,
+                injectionTarget: 'summary_block',
                 batchSize: 1,
                 parallelJobs: 1,
                 generationSource: 'current',
@@ -48,7 +51,147 @@ function ensureSessionMemoryBook(chatData, sessionId) {
             updatedAt: 0
         };
     }
+    if (!memoryBooksHasAutomationState(chatData.memoryBooks[sessionId])) {
+        chatData.memoryBooks[sessionId].automation = createMemoryAutomationState();
+    }
     return chatData.memoryBooks[sessionId];
+}
+
+function createMemoryAutomationState() {
+    return {
+        lastProcessedMessageCount: 0,
+        pendingTrigger: null,
+        isGeneratingDraft: false
+    };
+}
+
+function memoryBooksHasAutomationState(memoryBook) {
+    return !!(memoryBook && typeof memoryBook.automation === 'object');
+}
+
+function ensureMemoryAutomationState(memoryBook) {
+    if (!memoryBooksHasAutomationState(memoryBook)) {
+        memoryBook.automation = createMemoryAutomationState();
+    }
+    if (!Number.isFinite(Number(memoryBook.automation.lastProcessedMessageCount)) || Number(memoryBook.automation.lastProcessedMessageCount) < 0) {
+        memoryBook.automation.lastProcessedMessageCount = 0;
+    }
+    if (typeof memoryBook.automation.isGeneratingDraft !== 'boolean') {
+        memoryBook.automation.isGeneratingDraft = false;
+    }
+    if (memoryBook.automation.pendingTrigger && typeof memoryBook.automation.pendingTrigger !== 'object') {
+        memoryBook.automation.pendingTrigger = null;
+    }
+    return memoryBook.automation;
+}
+
+function getStableVisibleMessages(messages) {
+    return (Array.isArray(messages) ? messages : []).filter(msg => msg && !msg.isTyping && !msg.isHidden && !msg.isError);
+}
+
+function countStableConversationMessages(messages) {
+    return getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char').length;
+}
+
+function getLastStableConversationRole(messages) {
+    const visible = getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char');
+    return visible.length ? visible[visible.length - 1].role : null;
+}
+
+function computeDelayedWaitExchanges(triggerRole) {
+    return triggerRole === 'user' ? 2 : 1;
+}
+
+function countCompletedExchangesSince(startCount, currentCount) {
+    return Math.max(0, Math.floor(Math.max(0, currentCount - startCount) / 2));
+}
+
+function normalizeAutoCreateInterval(memoryBook) {
+    const raw = Number(memoryBook?.settings?.autoCreateInterval || 12);
+    return Math.max(1, Math.min(200, Number.isFinite(raw) ? Math.round(raw) : 12));
+}
+
+function resolvePendingTriggerMessages(stableMessages, pendingTrigger) {
+    if (!pendingTrigger || !Array.isArray(stableMessages) || !stableMessages.length) return [];
+
+    const storedIds = Array.isArray(pendingTrigger.messageIds)
+        ? pendingTrigger.messageIds.filter(Boolean)
+        : [];
+    if (storedIds.length) {
+        const idSet = new Set(storedIds);
+        const matched = stableMessages.filter(msg => idSet.has(msg.id));
+        if (matched.length === storedIds.length) {
+            return storedIds
+                .map(id => matched.find(msg => msg.id === id))
+                .filter(Boolean);
+        }
+    }
+
+    const startIndex = Math.max(0, Number(pendingTrigger.windowStartIndex) || 0);
+    const endIndex = Math.max(startIndex, Number(pendingTrigger.windowEndIndex) || startIndex);
+    return stableMessages.slice(startIndex, endIndex + 1);
+}
+
+function buildBootstrapSegments(messages, interval) {
+    const stableMessages = getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char');
+    const normalizedInterval = Math.max(1, interval);
+    const segments = [];
+    let cursor = 0;
+
+    while (cursor + normalizedInterval <= stableMessages.length) {
+        let endExclusive = cursor + normalizedInterval;
+        const baseLastRole = stableMessages[endExclusive - 1]?.role || null;
+
+        // Prefer ending on assistant/character turns when a short extension can avoid
+        // cutting a conversational exchange in an awkward place.
+        if (baseLastRole === 'user') {
+            const extensionLimit = Math.min(stableMessages.length, endExclusive + 2);
+            while (endExclusive < extensionLimit && stableMessages[endExclusive]?.role !== 'char') {
+                endExclusive += 1;
+            }
+            if (endExclusive < extensionLimit && stableMessages[endExclusive]?.role === 'char') {
+                endExclusive += 1;
+            }
+        }
+
+        const segment = stableMessages.slice(cursor, endExclusive);
+        if (segment.length) segments.push(segment);
+        cursor = endExclusive;
+    }
+
+    return segments;
+}
+
+function arraysEqual(a = [], b = []) {
+    return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+function calculateMessageOverlapRatio(leftIds = [], rightIds = []) {
+    if (!leftIds.length || !rightIds.length) return 0;
+    const rightSet = new Set(rightIds);
+    const intersection = leftIds.filter(id => rightSet.has(id)).length;
+    return intersection / Math.max(leftIds.length, rightIds.length);
+}
+
+function findConflictingMemoryEntry(memoryBook, selectedIds, { includeDrafts = true, includeEntries = true, overlapThreshold = 0.8 } = {}) {
+    const normalizedSelectedIds = Array.isArray(selectedIds) ? selectedIds.filter(Boolean) : [];
+    if (!normalizedSelectedIds.length) return null;
+
+    const pools = [];
+    if (includeEntries) pools.push(...(Array.isArray(memoryBook?.entries) ? memoryBook.entries.map(entry => ({ kind: 'entry', item: entry })) : []));
+    if (includeDrafts) pools.push(...(Array.isArray(memoryBook?.pendingDrafts) ? memoryBook.pendingDrafts.map(entry => ({ kind: 'draft', item: entry })) : []));
+
+    for (const candidate of pools) {
+        const entryIds = normalizeEntryMessageIds(candidate.item);
+        if (!entryIds.length) continue;
+        if (arraysEqual(entryIds, normalizedSelectedIds)) {
+            return { ...candidate, reason: 'exact' };
+        }
+        if (calculateMessageOverlapRatio(entryIds, normalizedSelectedIds) >= overlapThreshold) {
+            return { ...candidate, reason: 'overlap' };
+        }
+    }
+    return null;
 }
 
 function normalizeEntryMessageIds(entry) {
@@ -112,6 +255,121 @@ function reconcileMemoryBookForMessages(memoryBook, messages) {
 function reconcileSessionMemoryState(chatData, sessionId, messages) {
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
     reconcileMemoryBookForMessages(memoryBook, messages);
+}
+
+async function runMemoryMaintenancePass(chatData, sessionId, { reindex = false } = {}) {
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const messages = Array.isArray(chatData?.sessions?.[sessionId]) ? chatData.sessions[sessionId] : [];
+    const survivingIds = new Set(messages.map(msg => msg?.id).filter(Boolean));
+    const existingEntryIds = new Set((Array.isArray(memoryBook.entries) ? memoryBook.entries : []).map(entry => entry?.id).filter(Boolean));
+
+    let staleMessages = 0;
+    let clearedDrafts = 0;
+    let removedEntries = 0;
+    let rebuildEntries = 0;
+
+    for (const msg of messages) {
+        if (!msg.memoryCoverage || typeof msg.memoryCoverage !== 'object') {
+            msg.memoryCoverage = createEmptyMemoryCoverage();
+        }
+        const before = Array.isArray(msg.memoryCoverage.entryIds) ? msg.memoryCoverage.entryIds : [];
+        const missingRefs = before.filter(id => !existingEntryIds.has(id));
+        if (missingRefs.length) {
+            msg.memoryCoverage.stale = true;
+            staleMessages += 1;
+        }
+    }
+
+    const approvedEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
+    const nextApprovedEntries = [];
+    for (const entry of approvedEntries) {
+        const ids = normalizeEntryMessageIds(entry);
+        const survivingEntryIds = ids.filter(id => survivingIds.has(id));
+        if (!survivingEntryIds.length) {
+            removedEntries += 1;
+            await deleteMemoryEntryIndexIfPresent(entry.id);
+            continue;
+        }
+        if (survivingEntryIds.length !== ids.length) {
+            rebuildEntries += 1;
+        }
+        nextApprovedEntries.push(entry);
+    }
+    memoryBook.entries = nextApprovedEntries;
+
+    const nextPendingDrafts = [];
+    for (const draft of Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : []) {
+        const ids = normalizeEntryMessageIds(draft);
+        const survivingDraftIds = ids.filter(id => survivingIds.has(id));
+        if (!survivingDraftIds.length) {
+            clearedDrafts += 1;
+            continue;
+        }
+        draft.messageIds = survivingDraftIds;
+        draft.messageRange = {
+            startMessageId: survivingDraftIds[0],
+            endMessageId: survivingDraftIds[survivingDraftIds.length - 1]
+        };
+        draft.updatedAt = Date.now();
+        nextPendingDrafts.push(draft);
+    }
+    memoryBook.pendingDrafts = nextPendingDrafts;
+
+    reconcileSessionMemoryState(chatData, sessionId, messages);
+
+    if (reindex) {
+        await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
+    }
+
+    const automation = ensureMemoryAutomationState(memoryBook);
+    automation.pendingTrigger = null;
+    automation.lastProcessedMessageCount = countStableConversationMessages(messages);
+    memoryBook.updatedAt = Date.now();
+    chatData.sessions[sessionId] = messages;
+    await db.saveChat(activeChatChar.id, chatData);
+
+    return {
+        staleMessages,
+        clearedDrafts,
+        removedEntries,
+        rebuildEntries,
+        reindexed: !!reindex
+    };
+}
+
+function formatElapsedSeconds(ms) {
+    return `${Math.max(0, ms || 0) / 1000}`.replace(/(\.\d).*/, '$1') + 's';
+}
+
+function stopMemoryDraftProgress() {
+    if (memoryDraftTimer) {
+        clearInterval(memoryDraftTimer);
+        memoryDraftTimer = null;
+    }
+    memoryDraftState.value = {
+        active: false,
+        startedAt: 0,
+        elapsedMs: 0,
+        label: ''
+    };
+}
+
+function startMemoryDraftProgress(label = 'Generating memory draft') {
+    if (memoryDraftTimer) clearInterval(memoryDraftTimer);
+    const startedAt = Date.now();
+    memoryDraftState.value = {
+        active: true,
+        startedAt,
+        elapsedMs: 0,
+        label
+    };
+    memoryDraftTimer = setInterval(() => {
+        memoryDraftState.value = {
+            ...memoryDraftState.value,
+            active: true,
+            elapsedMs: Date.now() - startedAt
+        };
+    }, 100);
 }
 
 function genMemoryEntryId() {
@@ -358,6 +616,13 @@ const lorebookSheet = ref(null);
 const regexSheet = ref(null);
 const activeChar = ref(null);
 const regexRevision = ref(0);
+const memoryDraftState = ref({
+    active: false,
+    startedAt: 0,
+    elapsedMs: 0,
+    label: ''
+});
+let memoryDraftTimer = null;
 const onRegexChanged = () => { regexRevision.value++; };
 const contextBreakdown = ref(null);
 const HISTORY_FILL_THRESHOLD_KEY = 'gz_history_fill_threshold';
@@ -628,10 +893,22 @@ async function generateMemoryDraftFromSelection() {
 
     const selected = currentMessages.value.filter(msg => msg && selectedMessages.value.has(msg.id));
     if (!selected.length) return;
+    clearSelection();
+    await generateMemoryDraftForMessages(selected, { openSheet: true, source: 'manual_draft' });
+}
+
+async function generateMemoryDraftForMessages(selectedMessages, { openSheet = false, source = 'auto_delayed' } = {}) {
+    if (!activeChatChar || !Array.isArray(selectedMessages) || !selectedMessages.length) return false;
+
+    const selected = selectedMessages.filter(msg => msg && !msg.isTyping && !msg.isHidden && !msg.isError);
+    if (!selected.length) return false;
 
     const chatData = await getChatData(activeChatChar.id);
     const sessionId = activeChatChar.sessionId || chatData.currentId;
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const automation = ensureMemoryAutomationState(memoryBook);
+    if (automation.isGeneratingDraft) return false;
+
     const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
     const summary = chatData?.summaries?.[sessionId] || null;
     const playerName = selected.find(msg => msg?.role === 'user')?.persona?.name || activePersona.value?.name || 'User';
@@ -669,12 +946,37 @@ async function generateMemoryDraftFromSelection() {
         summaryExcerpt ? `Summary excerpt:\n${summaryExcerpt}` : ''
     ].filter(Boolean).join('\n\n');
 
+    const firstMessage = selected[0];
+    const lastMessage = selected[selected.length - 1];
+    const selectedIds = selected.map(msg => msg.id).filter(Boolean);
+    if (!selectedIds.length) return false;
+
+    const conflictingEntry = findConflictingMemoryEntry(memoryBook, selectedIds, {
+        includeEntries: true,
+        includeDrafts: true,
+        overlapThreshold: source === 'manual_draft' ? 0.95 : 0.8
+    });
+    if (conflictingEntry) {
+        if (source === 'manual_draft') {
+            showToast(conflictingEntry.reason === 'exact'
+                ? 'A memory entry or draft already exists for this exact segment'
+                : 'A very similar memory entry or draft already covers most of this segment');
+        }
+        return false;
+    }
+
     try {
+        automation.isGeneratingDraft = true;
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+
+        startMemoryDraftProgress(source === 'manual_draft' ? 'Generating selected memory draft' : 'Generating memory draft');
+        if (bottomSheetState.title === 'Memory Books') {
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        }
         showToast('Generating memory draft...', 2000);
-        clearSelection();
         const draftText = await generateMemoryDraft({ history, prompt: finalPrompt, apiConfigOverride });
-        const firstMessage = selected[0];
-        const lastMessage = selected[selected.length - 1];
         const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, activeChatChar?.name || 'Character']);
 
         if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
@@ -685,25 +987,136 @@ async function generateMemoryDraftFromSelection() {
             keys: parsedDraft.keys,
             glazeKeys: [],
             vectorSearch: vectorEnabled,
-            messageIds: selected.map(msg => msg.id),
+            messageIds: selectedIds,
             messageRange: {
                 startMessageId: firstMessage.id,
                 endMessageId: lastMessage.id
             },
             status: 'pending_approval',
-            source: 'auto',
+            source,
             createdAt: Date.now(),
             updatedAt: Date.now()
         }));
         memoryBook.updatedAt = Date.now();
+        automation.isGeneratingDraft = false;
         await db.saveChat(activeChatChar.id, chatData);
+        stopMemoryDraftProgress();
         showToast('Memory draft created');
-        openMemoryBooksSheet();
+        if (openSheet) openMemoryBooksSheet();
+        return true;
     } catch (error) {
-        clearSelection();
+        automation.isGeneratingDraft = false;
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        stopMemoryDraftProgress();
         console.error('Failed to generate memory draft:', error);
         showToast(`Memory draft failed: ${formatError(error)}`);
+        return false;
     }
+}
+
+async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages, { allowImmediate = true } = {}) {
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const automation = ensureMemoryAutomationState(memoryBook);
+    const stableMessages = getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char');
+    const stableCount = stableMessages.length;
+    const interval = normalizeAutoCreateInterval(memoryBook);
+    const delayed = memoryBook.settings?.useDelayedAutomation !== false;
+    const lastRole = getLastStableConversationRole(stableMessages);
+
+    if (!stableCount || !lastRole) {
+        automation.lastProcessedMessageCount = stableCount;
+        automation.pendingTrigger = null;
+        return false;
+    }
+
+    if (automation.pendingTrigger) {
+        const completedExchanges = countCompletedExchangesSince(automation.pendingTrigger.triggerCount, stableCount);
+        if (completedExchanges >= automation.pendingTrigger.waitExchanges) {
+            const selected = resolvePendingTriggerMessages(stableMessages, automation.pendingTrigger);
+            const created = await generateMemoryDraftForMessages(selected, { source: 'auto_delayed' });
+            automation.lastProcessedMessageCount = stableCount;
+            automation.pendingTrigger = null;
+            memoryBook.updatedAt = Date.now();
+            await db.saveChat(activeChatChar.id, chatData);
+            return created;
+        }
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        return false;
+    }
+
+    if (!allowImmediate || automation.isGeneratingDraft || stableCount < interval) {
+        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount, stableCount);
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        return false;
+    }
+
+    const nextThreshold = Math.floor(stableCount / interval) * interval;
+    if (nextThreshold <= 0 || nextThreshold <= automation.lastProcessedMessageCount) {
+        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount, stableCount);
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        return false;
+    }
+
+    if (delayed) {
+        const windowEndExclusive = nextThreshold;
+        const windowStartIndex = Math.max(0, windowEndExclusive - interval);
+        const windowMessages = stableMessages.slice(windowStartIndex, windowEndExclusive);
+        automation.pendingTrigger = {
+            triggerCount: stableCount,
+            triggerRole: lastRole,
+            waitExchanges: computeDelayedWaitExchanges(lastRole),
+            windowStartIndex,
+            windowEndIndex: Math.max(windowStartIndex, windowEndExclusive - 1),
+            messageIds: windowMessages.map(msg => msg.id).filter(Boolean),
+            createdAt: Date.now()
+        };
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        return false;
+    }
+
+    const selected = stableMessages.slice(Math.max(0, stableCount - interval), stableCount);
+    const created = await generateMemoryDraftForMessages(selected, { source: 'auto_immediate' });
+    automation.lastProcessedMessageCount = stableCount;
+    memoryBook.updatedAt = Date.now();
+    await db.saveChat(activeChatChar.id, chatData);
+    return created;
+}
+
+async function bootstrapImportedMemoryDrafts(charId, sessionId) {
+    const chatData = await getChatData(charId);
+    if (!chatData?.sessions?.[sessionId]) return 0;
+
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const automation = ensureMemoryAutomationState(memoryBook);
+    const existingEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries.length : 0;
+    const existingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts.length : 0;
+    if (existingEntries > 0 || existingDrafts > 0) return 0;
+
+    const interval = normalizeAutoCreateInterval(memoryBook);
+    const segments = buildBootstrapSegments(chatData.sessions[sessionId], interval);
+    if (!segments.length) return 0;
+
+    let createdCount = 0;
+    automation.pendingTrigger = null;
+    for (const segment of segments) {
+        const created = await generateMemoryDraftForMessages(segment, { source: 'import_bootstrap' });
+        if (created) createdCount += 1;
+    }
+
+    const latestData = await getChatData(charId);
+    if (!latestData?.sessions?.[sessionId]) return createdCount;
+    const latestMemoryBook = ensureSessionMemoryBook(latestData, sessionId);
+    const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
+    latestAutomation.lastProcessedMessageCount = countStableConversationMessages(latestData.sessions[sessionId]);
+    latestAutomation.pendingTrigger = null;
+    latestMemoryBook.updatedAt = Date.now();
+    await db.saveChat(charId, latestData);
+    return createdCount;
 }
 
 function openMemoryTextPreview(entry, kind = 'Memory') {
@@ -782,6 +1195,68 @@ function openMemoryTextPreview(entry, kind = 'Memory') {
     showBottomSheet({ title: kind, content, isSolid: true });
 }
 
+async function openMessageMemoryCoverage(message) {
+    if (!activeChatChar || !message) return;
+
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const coverage = message.memoryCoverage && typeof message.memoryCoverage === 'object'
+        ? message.memoryCoverage
+        : createEmptyMemoryCoverage();
+    const entryIds = Array.isArray(coverage.entryIds) ? coverage.entryIds : [];
+    const matchedEntries = (Array.isArray(memoryBook.entries) ? memoryBook.entries : [])
+        .filter(entry => entryIds.includes(entry.id));
+
+    if (!matchedEntries.length) {
+        if (coverage.needsRebuild) {
+            showToast('This message is marked for memory rebuild');
+        } else if (coverage.stale) {
+            showToast('This message has stale memory coverage');
+        } else {
+            showToast('No linked memory entries for this message');
+        }
+        return;
+    }
+
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+    content.innerHTML = `
+        <div class="settings-item">
+            <label>Message Memory Coverage</label>
+            <div class="context-sheet-note">This message is linked to ${matchedEntries.length} memory ${matchedEntries.length === 1 ? 'entry' : 'entries'}.</div>
+            ${coverage.needsRebuild ? '<div class="context-sheet-note" style="color: var(--warning-color, #ffb84d);">Coverage needs rebuild.</div>' : ''}
+            ${coverage.stale ? '<div class="context-sheet-note" style="color: var(--danger-color, #ff6b6b);">Coverage is marked stale.</div>' : ''}
+        </div>
+        <div class="memory-entry-list">
+            ${matchedEntries.map(entry => `
+                <button type="button" class="memory-entry-card" data-coverage-entry-id="${entry.id}">
+                    <div class="memory-entry-title-row">
+                        <strong>${String(entry.title || 'Memory Entry').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong>
+                        <span class="context-sheet-note">${String(entry.status || 'active').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
+                    </div>
+                    <div class="context-sheet-note">${normalizeEntryMessageIds(entry).length} linked message${normalizeEntryMessageIds(entry).length === 1 ? '' : 's'}</div>
+                </button>
+            `).join('')}
+        </div>
+        <div class="context-sheet-actions">
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-coverage-close">Close</button>
+        </div>
+    `;
+
+    content.querySelectorAll('[data-coverage-entry-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const entryId = btn.getAttribute('data-coverage-entry-id');
+            const entry = matchedEntries.find(item => item.id === entryId);
+            if (!entry) return;
+            closeBottomSheet();
+            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
+        });
+    });
+    content.querySelector('#memory-coverage-close')?.addEventListener('click', () => closeBottomSheet());
+    showBottomSheet({ title: 'Message Memory Coverage', content, isSolid: true });
+}
+
 async function removeMemoryFromSelection() {
     if (!activeChatChar || selectedMessages.value.size === 0) return;
 
@@ -834,7 +1309,15 @@ async function openMemoryGenerationSettings() {
         endpoint: settings.generationEndpoint || '',
         apiKey: settings.generationApiKey || '',
         temperature: settings.generationTemperature,
-        promptPreset: settings.promptPreset || 'strict_factual'
+        promptPreset: settings.promptPreset || 'strict_factual',
+        autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
+            ? Number(settings.autoCreateInterval)
+            : 12,
+        useDelayedAutomation: settings.useDelayedAutomation !== false,
+        maxInjectedEntries: Number.isFinite(Number(settings.maxInjectedEntries)) && Number(settings.maxInjectedEntries) > 0
+            ? Number(settings.maxInjectedEntries)
+            : 3,
+        injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block'
     };
 
     const renderSheet = () => {
@@ -886,6 +1369,31 @@ async function openMemoryGenerationSettings() {
             <div class="settings-item">
                 <label>Temperature Override</label>
                 <input id="memory-temperature-input" type="number" min="0" max="2" step="0.05" value="${state.temperature ?? ''}" placeholder="Use current API temperature">
+            </div>
+            <div class="settings-item">
+                <label>Create Memory Every N Messages</label>
+                <input id="memory-auto-interval-input" type="number" min="1" max="200" step="1" value="${state.autoCreateInterval}" placeholder="12">
+                <div class="context-sheet-note">User-facing interval for future automatic memory creation and import bootstrap segmentation.</div>
+            </div>
+            <div class="settings-item-checkbox">
+                <div class="settings-text-col">
+                    <label>Work With Delay</label>
+                    <div class="settings-desc">Wait for extra turns before auto-creating a memory draft, so the last user message and latest assistant reply can still be edited or regenerated safely.</div>
+                </div>
+                <input id="memory-delayed-automation-toggle" type="checkbox" class="vk-switch" ${state.useDelayedAutomation ? 'checked' : ''}>
+            </div>
+            <div class="settings-item">
+                <label>Memory Entries In Prompt</label>
+                <input id="memory-max-injected-input" type="number" min="1" max="20" step="1" value="${state.maxInjectedEntries}" placeholder="3">
+                <div class="context-sheet-note">How many retrieved memory entries can be injected into the prompt at once.</div>
+            </div>
+            <div class="settings-item">
+                <label>Injection Target</label>
+                <div class="clickable-selector" id="memory-injection-target-selector">
+                    <span>${state.injectionTarget === 'summary_macro' ? '{{summary}} macro' : 'Chat summary block'}</span>
+                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                </div>
+                <div class="context-sheet-note">Choose whether retrieved memory context follows the dedicated summary block path or the {{summary}} macro location.</div>
             </div>
             <div id="memory-custom-fields" style="display:${state.source === 'custom' ? 'block' : 'none'};">
                 <div class="settings-item">
@@ -962,6 +1470,31 @@ async function openMemoryGenerationSettings() {
             setTimeout(() => openMemoryPromptPreview(selected, { onClose: openMemoryGenerationSettings }), 50);
         });
 
+        content.querySelector('#memory-injection-target-selector')?.addEventListener('click', () => {
+            closeBottomSheet();
+            showBottomSheet({
+                title: 'Memory Injection Target',
+                items: [
+                    {
+                        label: 'Chat summary block',
+                        onClick: () => {
+                            state.injectionTarget = 'summary_block';
+                            closeBottomSheet();
+                            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
+                        }
+                    },
+                    {
+                        label: '{{summary}} macro',
+                        onClick: () => {
+                            state.injectionTarget = 'summary_macro';
+                            closeBottomSheet();
+                            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
+                        }
+                    }
+                ]
+            });
+        });
+
         content.querySelector('#memory-current-model-override-toggle')?.addEventListener('change', (event) => {
             state.useCurrentModelOverride = event.target.checked;
             closeBottomSheet();
@@ -990,10 +1523,17 @@ async function openMemoryGenerationSettings() {
                 : '';
             const tempValue = content.querySelector('#memory-temperature-input')?.value?.trim();
             settings.generationTemperature = tempValue === '' ? null : Number(tempValue);
+            const autoIntervalValue = Number(content.querySelector('#memory-auto-interval-input')?.value || state.autoCreateInterval || 12);
+            settings.autoCreateInterval = Math.max(1, Math.min(200, Number.isFinite(autoIntervalValue) ? Math.round(autoIntervalValue) : 12));
+            settings.useDelayedAutomation = !!content.querySelector('#memory-delayed-automation-toggle')?.checked;
+            const maxInjectedValue = Number(content.querySelector('#memory-max-injected-input')?.value || state.maxInjectedEntries || 3);
+            settings.maxInjectedEntries = Math.max(1, Math.min(20, Number.isFinite(maxInjectedValue) ? Math.round(maxInjectedValue) : 3));
+            settings.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
             settings.promptPreset = settings.promptPreset || state.promptPreset || 'strict_factual';
             memoryBook.updatedAt = Date.now();
             await db.saveChat(activeChatChar.id, chatData);
             closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
         });
 
         return content;
@@ -1146,9 +1686,54 @@ async function openMemoryBooksSheet() {
     const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
     const content = document.createElement('div');
     content.className = 'context-sheet';
+    let refreshTimer = null;
 
     const entries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
     const pendingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [];
+    const stableConversationCount = countStableConversationMessages(currentMessages.value);
+    const generationSettingsSummary = [
+        `every ${normalizeAutoCreateInterval(memoryBook)} msgs`,
+        `${memoryBook.settings?.useDelayedAutomation !== false ? 'delayed' : 'immediate'}`,
+        `${memoryBook.settings?.injectionTarget === 'summary_macro' ? '{{summary}}' : 'summary block'}`,
+        `${Math.max(1, Math.min(20, Number(memoryBook.settings?.maxInjectedEntries || 3)))} in prompt`
+    ].join(' • ');
+    const statusSummary = entries.reduce((acc, entry) => {
+        const status = entry?.status === 'needs_rebuild' ? 'needs_rebuild' : 'active';
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+    }, { active: 0, needs_rebuild: 0 });
+    const staleCoverageCount = currentMessages.value.filter(msg => msg?.memoryCoverage?.stale).length;
+    const statusSummaryCard = `
+        <div class="memory-status-summary">
+            <div class="memory-status-summary-item ok">
+                <strong>${statusSummary.active || 0}</strong>
+                <span>active</span>
+            </div>
+            <div class="memory-status-summary-item warning">
+                <strong>${statusSummary.needs_rebuild || 0}</strong>
+                <span>needs rebuild</span>
+            </div>
+            <div class="memory-status-summary-item danger">
+                <strong>${staleCoverageCount || 0}</strong>
+                <span>stale messages</span>
+            </div>
+            <div class="memory-status-summary-item draft">
+                <strong>${pendingDrafts.length || 0}</strong>
+                <span>drafts</span>
+            </div>
+        </div>
+    `;
+    const draftProgressCard = memoryDraftState.value.active
+        ? `
+            <div class="memory-generation-status-card">
+                <div class="memory-generation-status-row">
+                    <strong>${(memoryDraftState.value.label || 'Generating memory draft').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong>
+                    <span>${formatElapsedSeconds(memoryDraftState.value.elapsedMs)}</span>
+                </div>
+                <div class="context-sheet-note">The draft is still being created. You can keep this sheet open and watch the timer update.</div>
+            </div>
+        `
+        : '';
     const entryCards = entries.length
         ? entries.map(entry => {
             const status = entry.status || 'active';
@@ -1158,9 +1743,12 @@ async function openMemoryBooksSheet() {
                 ? ` • ${entry.keys.slice(0, 3).map(key => String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')).join(', ')}`
                 : '';
             const retrievalMeta = vectorEnabled ? ' • hybrid' : ' • keys';
-            const badges = `${vectorEnabled ? '<span class="memory-status-badge vector">vec</span>' : ''}${entry.id ? '<span class="memory-status-badge indexed">idx</span>' : ''}`;
+            const statusBadge = status === 'needs_rebuild'
+                ? '<span class="memory-status-badge warning">needs rebuild</span>'
+                : '<span class="memory-status-badge ok">active</span>';
+            const badges = `${statusBadge}${vectorEnabled ? '<span class="memory-status-badge vector">vec</span>' : ''}${entry.id ? '<span class="memory-status-badge indexed">idx</span>' : ''}`;
             return `
-                <div class="memory-entry-card" data-entry-id="${entry.id}">
+                <div class="memory-entry-card ${status === 'needs_rebuild' ? 'is-warning' : ''}" data-entry-id="${entry.id}">
                     <div class="memory-entry-head">
                         <div>
                             <div class="memory-entry-title">${(entry.title || 'Untitled memory').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
@@ -1180,7 +1768,7 @@ async function openMemoryBooksSheet() {
                 ? ` • ${entry.keys.slice(0, 3).map(key => String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')).join(', ')}`
                 : '';
             const retrievalMeta = vectorEnabled ? ' • hybrid' : ' • keys';
-            const badges = `${vectorEnabled ? '<span class="memory-status-badge vector">vec</span>' : ''}`;
+            const badges = `<span class="memory-status-badge draft">draft</span>${vectorEnabled ? '<span class="memory-status-badge vector">vec</span>' : ''}`;
             return `
                 <div class="memory-entry-card" data-draft-id="${entry.id}">
                     <div class="memory-entry-head">
@@ -1199,12 +1787,41 @@ async function openMemoryBooksSheet() {
             `;
         }).join('')
         : '';
+    const sessionOverviewCard = `
+        <div class="memory-session-overview">
+            <div class="memory-session-overview-head">
+                <div>
+                    <div class="memory-session-title">${(activeChatChar.name || 'Character').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                    <div class="context-sheet-note">Session ${String(sessionId).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+                <div class="memory-session-chip">${stableConversationCount} stable msgs</div>
+            </div>
+            <div class="memory-session-overview-meta">${generationSettingsSummary.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        </div>
+    `;
+    const draftSection = draftCards
+        ? `
+            <div class="memory-sheet-section">
+                <div class="memory-sheet-section-head">
+                    <label>Pending Drafts</label>
+                    <span>${pendingDrafts.length}</span>
+                </div>
+                <div class="memory-entry-list" style="margin-bottom: 12px;">${draftCards}</div>
+            </div>
+        `
+        : '';
+    const entrySection = `
+        <div class="memory-sheet-section">
+            <div class="memory-sheet-section-head">
+                <label>Approved Memories</label>
+                <span>${entries.length}</span>
+            </div>
+            <div class="memory-entry-list">${entryCards}</div>
+        </div>
+    `;
 
     content.innerHTML = `
-        <div class="settings-item">
-            <label>Current Session</label>
-            <div class="context-sheet-note">${activeChatChar.name || 'Character'} • session ${sessionId}</div>
-        </div>
+        ${sessionOverviewCard}
         <div class="settings-item">
             <label>Key Match Mode</label>
             <div class="clickable-selector" id="memory-sheet-key-mode-selector">
@@ -1221,18 +1838,64 @@ async function openMemoryBooksSheet() {
             <input id="memory-sheet-vector-toggle" type="checkbox" class="vk-switch" ${vectorEnabled ? 'checked' : ''} ${shouldEnableMemoryVectorSearch() ? '' : 'disabled'}>
         </div>
         ${shouldEnableMemoryVectorSearch() ? '' : '<div class="context-sheet-note">Embeddings are not configured, so vector search is unavailable.</div>'}
+        ${statusSummaryCard}
         <div class="context-sheet-actions" style="margin-bottom: 12px;">
             <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-sheet-settings">Generation Settings</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-sheet-maintenance">Maintenance</button>
             <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-sheet-reindex" ${vectorEnabled ? '' : 'disabled'}>Reindex All</button>
             <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-sheet-close">Close</button>
         </div>
-        ${draftCards ? `<div class="memory-entry-list" style="margin-bottom: 12px;">${draftCards}</div>` : ''}
-        <div class="memory-entry-list">${entryCards}</div>
+        ${draftProgressCard}
+        ${draftSection}
+        ${entrySection}
     `;
 
     content.querySelector('#memory-sheet-settings')?.addEventListener('click', () => {
         closeBottomSheet();
         setTimeout(() => openMemoryGenerationSettings(), 50);
+    });
+    content.querySelector('#memory-sheet-maintenance')?.addEventListener('click', () => {
+        closeBottomSheet();
+        showBottomSheet({
+            title: 'Memory Maintenance',
+            items: [
+                {
+                    label: 'Cleanup coverage and drafts',
+                    onClick: async () => {
+                        try {
+                            const result = await runMemoryMaintenancePass(chatData, sessionId, { reindex: false });
+                            closeBottomSheet();
+                            showToast(`Maintenance complete: ${result.removedEntries} entries removed, ${result.clearedDrafts} drafts cleared, ${result.rebuildEntries} entries need rebuild`);
+                            setTimeout(() => openMemoryBooksSheet(), 50);
+                        } catch (error) {
+                            console.error('Memory maintenance failed:', error);
+                            showToast(`Maintenance failed: ${formatError(error)}`);
+                        }
+                    }
+                },
+                {
+                    label: 'Cleanup and reindex',
+                    onClick: async () => {
+                        try {
+                            const result = await runMemoryMaintenancePass(chatData, sessionId, { reindex: true });
+                            closeBottomSheet();
+                            showToast(`Maintenance + reindex complete: ${result.removedEntries} entries removed, ${result.clearedDrafts} drafts cleared`);
+                            setTimeout(() => openMemoryBooksSheet(), 50);
+                        } catch (error) {
+                            console.error('Memory maintenance reindex failed:', error);
+                            showToast(`Maintenance failed: ${formatError(error)}`);
+                        }
+                    }
+                },
+                {
+                    label: 'Back to Memory Books',
+                    onClick: () => {
+                        closeBottomSheet();
+                        setTimeout(() => openMemoryBooksSheet(), 50);
+                    }
+                }
+            ]
+        });
     });
     content.querySelector('#memory-sheet-key-mode-selector')?.addEventListener('click', () => {
         closeBottomSheet();
@@ -1355,6 +2018,18 @@ async function openMemoryBooksSheet() {
             const draftId = btn.getAttribute('data-draft-approve');
             const draft = memoryBook.pendingDrafts.find(entry => entry.id === draftId);
             if (!draft) return;
+            const draftIds = normalizeEntryMessageIds(draft);
+            const conflictingApproved = findConflictingMemoryEntry(memoryBook, draftIds, {
+                includeEntries: true,
+                includeDrafts: false,
+                overlapThreshold: 0.8
+            });
+            if (conflictingApproved) {
+                showToast(conflictingApproved.reason === 'exact'
+                    ? 'An approved memory entry already exists for this segment'
+                    : 'An approved memory entry already overlaps most of this draft');
+                return;
+            }
             const approvedEntry = normalizeMemoryEntryShape({ ...draft, status: 'active', vectorSearch: vectorEnabled });
             memoryBook.entries.push(approvedEntry);
             memoryBook.pendingDrafts = memoryBook.pendingDrafts.filter(entry => entry.id !== draftId);
@@ -1379,6 +2054,15 @@ async function openMemoryBooksSheet() {
     });
 
     showBottomSheet({ title: 'Memory Books', content, isSolid: true });
+
+    if (memoryDraftState.value.active) {
+        refreshTimer = setTimeout(() => {
+            if (bottomSheetState.title === 'Memory Books' && memoryDraftState.value.active) {
+                closeBottomSheet();
+                setTimeout(() => openMemoryBooksSheet(), 30);
+            }
+        }, 300);
+    }
 }
 
 async function deleteSelectedMessages() {
@@ -3090,6 +3774,15 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
 
             sendMessageNotification(char.name, response, char.avatar, char.id, sessionId, msgId);
 
+            if (guidanceType === 'GENERATION') {
+                const autoData = await getChatData(char.id);
+                if (autoData) {
+                    const autoSessionId = char.sessionId || autoData.currentId;
+                    autoData.sessions[autoSessionId] = currentMessages.value;
+                    await runMemoryAutomationAfterStableTurn(autoData, autoSessionId, currentMessages.value, { allowImmediate: true });
+                }
+            }
+
             // Notify application about generation end (after update)
             window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
         } else {
@@ -3142,6 +3835,11 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     }).catch(e => console.error('[ImageGen] background processMessageImages failed:', e));
                     
                     await db.saveChat(char.id, bgData);
+
+                    if (guidanceType === 'GENERATION') {
+                        await runMemoryAutomationAfterStableTurn(bgData, sessionId, bgData.sessions[sessionId], { allowImmediate: true });
+                    }
+
                     sendMessageNotification(char.name, response, char.avatar, char.id, sessionId, msgId);
                     
                     // Mark unread
@@ -4064,10 +4762,15 @@ async function openSessionsSheet(char) {
                                 icon: '<svg viewBox="0 0 24 24"><path d="M4 15h2v3h12v-3h2v3c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-3zm4.41-6.59L11 5.83V17h2V5.83l2.59 2.58L17 7l-5-5-5 5 1.41 1.41z"/></svg>',
                                 onClick: () => {
                                     closeBottomSheet();
-                                    triggerChatImport(char.id, null, async () => {
+                                    triggerChatImport(char.id, null, async (result) => {
                                         await loadChats();
-                                        const charObj = { ...char };
-                                        delete charObj.sessionId;
+                                        if (result?.sessionId) {
+                                            const createdDrafts = await bootstrapImportedMemoryDrafts(char.id, result.sessionId);
+                                            if (createdDrafts > 0) {
+                                                showToast(`Created ${createdDrafts} imported memory draft${createdDrafts === 1 ? '' : 's'}`);
+                                            }
+                                        }
+                                        const charObj = { ...char, sessionId: result?.sessionId || char.sessionId };
                                         openChat(charObj, null, true);
                                     });
                                 }
@@ -4389,6 +5092,7 @@ onBeforeUnmount(() => {
 
 onUnmounted(() => {
     setScrollLock(false);
+    stopMemoryDraftProgress();
     // Cleanup UI timers for ALL generating states, not just activeChatChar
     // This prevents leaked intervals and closures referencing unmounted reactive state
     for (const charId of Object.keys(generatingStates)) {
@@ -4485,6 +5189,7 @@ onUnmounted(() => {
                     @save-guidance="(text) => saveGuidance(vItem.item.data, vItem.item.originalIndex, text)"
                     @open-actions="openMessageActions(vItem.item.data, vItem.item.originalIndex)"
                     @open-avatar="openAvatar(vItem.item.data)"
+                    @open-memory-coverage="openMessageMemoryCoverage"
                     @toggle-selection="toggleSelection(vItem.item.data.id)"
                     @toggle-image-hidden="toggleImageHidden(vItem.item.data, vItem.item.originalIndex)"
                     @regenerate-image="(payload) => handleImageRegenerate(vItem.item.originalIndex, payload)"
@@ -4893,6 +5598,171 @@ onUnmounted(() => {
     background: rgba(255, 255, 255, 0.08);
 }
 
+.memory-generation-status-card {
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(30, 200, 255, 0.12);
+    border: 1px solid rgba(30, 200, 255, 0.28);
+}
+
+.memory-generation-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.memory-generation-status-row strong {
+    color: var(--text-black);
+    font-size: 14px;
+}
+
+.memory-generation-status-row span {
+    color: var(--vk-blue);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.memory-session-overview {
+    margin-bottom: 12px;
+    padding: 14px;
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(122, 108, 255, 0.14), rgba(30, 200, 255, 0.08));
+    border: 1px solid rgba(122, 108, 255, 0.22);
+}
+
+.memory-session-overview-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.memory-session-title {
+    color: var(--text-black);
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.memory-session-chip {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.5);
+    color: var(--text-black);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.memory-session-overview-meta {
+    color: var(--text-gray);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.memory-sheet-section {
+    margin-top: 12px;
+}
+
+.memory-sheet-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.memory-sheet-section-head label {
+    color: var(--text-black);
+    font-weight: 800;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.memory-sheet-section-head span {
+    min-width: 28px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-gray);
+    text-align: center;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.memory-status-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.memory-status-summary-item {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: center;
+}
+
+.memory-status-summary-item strong {
+    display: block;
+    color: var(--text-black);
+    font-size: 18px;
+    line-height: 1.1;
+}
+
+.memory-status-summary-item span {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-gray);
+    font-size: 12px;
+}
+
+.memory-status-summary-item.warning {
+    background: rgba(255, 184, 77, 0.12);
+    border-color: rgba(255, 184, 77, 0.3);
+}
+
+.memory-status-summary-item.danger {
+    background: rgba(255, 107, 107, 0.12);
+    border-color: rgba(255, 107, 107, 0.3);
+}
+
+.memory-status-summary-item.ok {
+    background: rgba(126, 231, 135, 0.12);
+    border-color: rgba(126, 231, 135, 0.3);
+}
+
+.memory-status-summary-item.draft {
+    background: rgba(122, 108, 255, 0.12);
+    border-color: rgba(122, 108, 255, 0.3);
+}
+
+.memory-entry-card.is-warning {
+    border-color: rgba(255, 184, 77, 0.35);
+    box-shadow: inset 0 0 0 1px rgba(255, 184, 77, 0.14);
+}
+
+.memory-status-badge.ok {
+    background: rgba(126, 231, 135, 0.16);
+    color: #2d8a39;
+}
+
+.memory-status-badge.warning {
+    background: rgba(255, 184, 77, 0.18);
+    color: #a85e00;
+}
+
+.memory-status-badge.draft {
+    background: rgba(122, 108, 255, 0.16);
+    color: #5b4bd0;
+}
+
 @media (max-width: 480px) {
     .context-sheet-summary {
         grid-template-columns: 1fr;
@@ -4900,6 +5770,15 @@ onUnmounted(() => {
 
     .context-sheet-actions {
         flex-direction: column;
+    }
+
+    .memory-status-summary {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .memory-session-overview-head {
+        flex-direction: column;
+        align-items: flex-start;
     }
 }
 

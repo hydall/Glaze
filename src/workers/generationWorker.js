@@ -380,6 +380,17 @@ function buildPromptMessagesWorker(args) {
         }
     };
 
+    const combineSources = (sourceItems = []) => {
+        const combined = [];
+        for (const s of sourceItems) {
+            if (!s || !s.source) continue;
+            const existing = combined.find(x => x.source === s.source);
+            if (existing) existing.tokens += s.tokens || 0;
+            else combined.push({ source: s.source, tokens: s.tokens || 0 });
+        }
+        return combined;
+    };
+
     let loreByPosition = { worldInfoBefore: [], worldInfoAfter: [], lorebooksMacro: [] };
     if (lorebooks) {
         const loreEntries = scanLorebooksPure(history || [], char, "", chatId, lorebooks, globalSettings, activations);
@@ -413,15 +424,26 @@ function buildPromptMessagesWorker(args) {
 
     const injectLore = (pos) => {
         if (loreByPosition[pos] && loreByPosition[pos].length > 0) {
-            loreByPosition[pos].forEach(msg => {
-                if (mergePrompts) {
+            if (mergePrompts) {
+                loreByPosition[pos].forEach(msg => {
                     mergeContentBuffer.push(msg.content);
                     if (msg._allSources) mergeSourcesBuffer.push(...msg._allSources);
-                } else {
-                    flushMergeBuffer();
-                    messages.push(msg);
+                });
+            } else {
+                flushMergeBuffer();
+                const combinedContent = loreByPosition[pos].map(msg => msg.content).filter(Boolean).join('\n\n');
+                const combinedSources = combineSources(loreByPosition[pos].flatMap(msg => msg._allSources || msg.sources || []));
+                if (combinedContent) {
+                    messages.push({
+                        role: 'system',
+                        content: combinedContent,
+                        blockName: pos === 'worldInfoAfter' ? 'Lorebook After' : 'Lorebook Before',
+                        isLorebook: true,
+                        sources: combinedSources,
+                        _allSources: combinedSources
+                    });
                 }
-            });
+            }
             loreByPosition[pos] = [];
         }
     };
@@ -689,6 +711,13 @@ function buildPromptMessagesWorker(args) {
                     sources = [];
                 }
 
+                if (content.includes('{{lorebooks}}')) {
+                    content = content.split('{{lorebooks}}').join(
+                        loreByPosition.lorebooksMacro.map(item => item.content).filter(Boolean).join('\n\n')
+                    );
+                    loreByPosition.lorebooksMacro = [];
+                }
+
                 const msg = {
                     role: role,
                     content: content,
@@ -698,13 +727,6 @@ function buildPromptMessagesWorker(args) {
                     _allSources: sources
                 };
                 messages.push(msg);
-            }
-
-            if (content.includes('{{lorebooks}}')) {
-                content = content.split('{{lorebooks}}').join(
-                    loreByPosition.lorebooksMacro.map(item => item.content).filter(Boolean).join('\n\n')
-                );
-                loreByPosition.lorebooksMacro = [];
             }
 
             if (block.id === 'char_card') injectLore('worldInfoAfter');

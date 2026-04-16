@@ -604,6 +604,7 @@ export async function importSTLorebook(json, fileName = 'Imported', options = {}
         const { enabled = true, activationScope = null, activationTargetId = null } = options;
         let normalizedEntries = [];
         const entriesRaw = json.entries || [];
+        const glazeMetaEntries = json?.glazeMetadata?.entries || {};
 
         if (Array.isArray(entriesRaw)) {
             normalizedEntries = entriesRaw;
@@ -615,9 +616,13 @@ export async function importSTLorebook(json, fileName = 'Imported', options = {}
             id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
             name: json.name || fileName.replace('.json', ''),
             enabled,
-            entries: normalizedEntries.map(entry => {
+            entries: normalizedEntries.map((entry, index) => {
                 const rawKeys = entry.keys || entry.key || [];
                 const rawSecondary = entry.secondary_keys || entry.keysecondary || [];
+                const metadataPosition = glazeMetaEntries?.[index]?.position;
+                const restoredPosition = (metadataPosition === 'worldInfoBefore' || metadataPosition === 'worldInfoAfter' || metadataPosition === 'lorebooksMacro' || metadataPosition === 'matchGlobal')
+                    ? metadataPosition
+                    : null;
                 return {
                     id: entry.uid?.toString() || (Date.now() + Math.random()).toString(36),
                     keys: Array.isArray(rawKeys) ? rawKeys : String(rawKeys || '').split(',').map(k => k.trim()).filter(k => k),
@@ -633,11 +638,11 @@ export async function importSTLorebook(json, fileName = 'Imported', options = {}
                     caseSensitive: entry.caseSensitive ?? null,
                     useGroupScoring: entry.useGroupScoring ?? null,
                     scanDepth: entry.scanDepth,
-                    position: (entry.position === 0)
+                    position: restoredPosition || ((entry.position === 0)
                         ? 'worldInfoBefore'
                         : (entry.position === 1)
                             ? 'worldInfoAfter'
-                            : ((entry.position === 'worldInfoBefore' || entry.position === 'worldInfoAfter' || entry.position === 'lorebooksMacro' || entry.position === 'matchGlobal') ? entry.position : 'matchGlobal'),
+                            : ((entry.position === 'worldInfoBefore' || entry.position === 'worldInfoAfter' || entry.position === 'lorebooksMacro' || entry.position === 'matchGlobal') ? entry.position : 'matchGlobal')),
                     characterFilter: entry.characterFilter,
                     preventRecursion: entry.preventRecursion || false,
                     delayUntilRecursion: entry.delayUntilRecursion || false,
@@ -670,7 +675,13 @@ export async function importSTLorebook(json, fileName = 'Imported', options = {}
 // Exports
 export function exportSTLorebook(lorebook) {
     const entries = {};
+    const glazeMetadata = { entries: {} };
+    const globalInjectionPosition = lorebookState.globalSettings?.injectionPosition || 'worldInfoBefore';
     (lorebook.entries || []).forEach((entry, index) => {
+        const rawPosition = entry.position || 'matchGlobal';
+        const resolvedPosition = rawPosition === 'matchGlobal' ? globalInjectionPosition : rawPosition;
+        const stPosition = resolvedPosition === 'worldInfoAfter' ? 1 : 0;
+
         entries[index.toString()] = {
             uid: index,
             key: entry.keys || [],
@@ -680,7 +691,7 @@ export function exportSTLorebook(lorebook) {
             constant: entry.constant || false,
             selective: (entry.secondary_keys && entry.secondary_keys.length > 0),
             order: entry.order ?? 100,
-            position: (entry.position === 'worldInfoAfter') ? 1 : 0,
+            position: stPosition,
             disable: entry.enabled === false,
             displayIndex: index,
             addMemo: true,
@@ -715,9 +726,13 @@ export function exportSTLorebook(lorebook) {
             triggers: [],
             ...(entry.characterFilter ? { characterFilter: entry.characterFilter } : {})
         };
+
+        glazeMetadata.entries[index.toString()] = {
+            position: rawPosition
+        };
     });
 
-    return { entries };
+    return { entries, glazeMetadata };
 }
 
 async function computeTextHash(text) {

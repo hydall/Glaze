@@ -31,7 +31,7 @@ const props = defineProps({
 const emit = defineEmits([
     'swipe', 'change-greeting', 'regenerate', 'edit', 'save-edit', 'cancel-edit',
     'open-actions', 'open-avatar', 'delete', 'toggle-selection', 'toggle-image-hidden',
-    'save-guidance', 'regenerate-image'
+    'save-guidance', 'regenerate-image', 'open-memory-coverage'
 ]);
 
 const triggeredItemsSheet = ref(null);
@@ -578,6 +578,14 @@ const memoryBadge = computed(() => {
     return null;
 });
 
+const openMemoryCoverage = () => {
+    const coverage = props.message.memoryCoverage;
+    if (!coverage || typeof coverage !== 'object') return;
+    const entryIds = Array.isArray(coverage.entryIds) ? coverage.entryIds : [];
+    if (!entryIds.length && !coverage.needsRebuild && !coverage.stale) return;
+    emit('open-memory-coverage', props.message);
+};
+
 const uiHideMsgId = ref(hideMessageId.value);
 const uiHideGenTime = ref(hideGenerationTime.value);
 const uiHideTokenCnt = ref(hideTokenCount.value);
@@ -617,7 +625,7 @@ onUnmounted(() => {
                 <span class="msg-name-label">{{ getDisplayName() }}</span>
                 <span class="msg-index gen-stat header-idx" v-if="!uiHideMsgId">#{{ index + 1 }}</span>
                 <sup v-if="message.role === 'char' && activeChatChar?.version" class="item-version">#{{ activeChatChar.version }}</sup>
-                <span v-if="memoryBadge" class="msg-memory-badge" :class="memoryBadge.className">{{ memoryBadge.label }}</span>
+                <button v-if="memoryBadge" type="button" class="msg-memory-badge" :class="memoryBadge.className" @click.stop="openMemoryCoverage">{{ memoryBadge.label }}</button>
                 <div v-if="message.triggeredLorebooks?.length || message.triggeredMemories?.length || combinedMessageData.regexes?.length" class="msg-lb-trigger-menu" @click.stop="openTriggeredSheet">
                     <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
                 </div>

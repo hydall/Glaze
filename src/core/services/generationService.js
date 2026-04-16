@@ -260,16 +260,9 @@ export async function generateChatResponse({
     let messages = result.messages;
 
     if (memoryInjection.messages.length > 0) {
-        const firstHistoryIndex = messages.findIndex(m => m.isHistory);
-        if (firstHistoryIndex === -1) {
-            messages = [...messages, ...memoryInjection.messages];
-        } else {
-            messages = [
-                ...messages.slice(0, firstHistoryIndex),
-                ...memoryInjection.messages,
-                ...messages.slice(firstHistoryIndex)
-            ];
-        }
+        messages = injectMemoryMessages(messages, memoryInjection, {
+            injectionTarget: memoryInjection.injectionTarget
+        });
     }
 
     if (newVectorEntries.length > 0) {
@@ -289,16 +282,7 @@ export async function generateChatResponse({
             .filter(msg => msg.content && msg.content.trim().length > 0);
 
         if (vectorLoreMessages.length > 0) {
-            const firstHistoryIndex = messages.findIndex(m => m.isHistory);
-            if (firstHistoryIndex === -1) {
-                messages = [...messages, ...vectorLoreMessages];
-            } else {
-                messages = [
-                    ...messages.slice(0, firstHistoryIndex),
-                    ...vectorLoreMessages,
-                    ...messages.slice(firstHistoryIndex)
-                ];
-            }
+            messages = injectVectorLoreMessages(messages, vectorLoreMessages);
 
             // Re-apply history trimming after late vector lore injection so we don't blow the effective context.
             const staticMessages = messages.filter(m => !m.isHistory);
@@ -724,7 +708,7 @@ export async function deleteMemoryEntryIndex(entryId) {
 async function buildMemoryInjection({ char, history, summary, safeContext }) {
     const charId = char?.id;
     const sessionId = char?.sessionId;
-    if (!charId || !sessionId) return { messages: [], entries: [], tokens: 0 };
+    if (!charId || !sessionId) return { messages: [], entries: [], tokens: 0, injectionTarget: 'summary_block', macroContent: '' };
 
     const chatData = await db.getChat(charId);
     const memoryBook = chatData?.memoryBooks?.[sessionId];
@@ -732,7 +716,7 @@ async function buildMemoryInjection({ char, history, summary, safeContext }) {
     const activeEntries = (Array.isArray(memoryBook?.entries) ? memoryBook.entries : [])
         .filter(entry => entry && (entry.status || 'active') === 'active' && (entry.content || '').trim());
 
-    if (!settings.enabled || !activeEntries.length) return { messages: [], entries: [], tokens: 0 };
+    if (!settings.enabled || !activeEntries.length) return { messages: [], entries: [], tokens: 0, injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block', macroContent: '' };
 
     const recentHistory = Array.isArray(history) ? history.slice(-12) : [];
     const historyText = recentHistory.map(item => item?.content || item?.text || '').filter(Boolean).join('\n').toLowerCase();
@@ -785,9 +769,13 @@ async function buildMemoryInjection({ char, history, summary, safeContext }) {
         .slice(0, Math.max(1, Math.min(5, settings.maxInjectedEntries || 3)))
         .map(item => item.entry);
 
-    if (!topEntries.length) return { messages: [], entries: [], tokens: 0 };
+    if (!topEntries.length) return { messages: [], entries: [], tokens: 0, injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block', macroContent: '' };
 
     const summaryExcerpt = buildSummaryExcerpt(summary);
+    const macroContent = topEntries
+        .map(entry => (entry.content || '').trim())
+        .filter(Boolean)
+        .join('\n\n');
     const content = [
         summaryExcerpt ? `Summary excerpt:\n${summaryExcerpt}` : '',
         'Memory context:',
@@ -795,7 +783,7 @@ async function buildMemoryInjection({ char, history, summary, safeContext }) {
     ].filter(Boolean).join('\n\n');
     const tokens = estimateTokens(content);
     if (!content || tokens <= 0 || tokens >= Math.max(256, Math.floor(safeContext * 0.35))) {
-        return { messages: [], entries: [], tokens: 0 };
+        return { messages: [], entries: [], tokens: 0, injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block', macroContent: '' };
     }
 
     return {
@@ -808,8 +796,100 @@ async function buildMemoryInjection({ char, history, summary, safeContext }) {
             _allSources: [{ source: 'memory', tokens }]
         }],
         entries: topEntries,
-        tokens
+        tokens,
+        injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block',
+        macroContent
     };
+}
+
+function findSummaryInsertIndex(messages) {
+    return messages.findIndex(msg => Array.isArray(msg?.sources) && msg.sources.some(source => source?.source === 'summary'));
+}
+
+function injectMemoryIntoSummaryMacro(messages, memoryInjection) {
+    if (!memoryInjection?.macroContent) return messages;
+
+    const summaryIndex = findSummaryInsertIndex(messages);
+    if (summaryIndex === -1) return null;
+
+    const summaryMessage = messages[summaryIndex];
+    const existingContent = String(summaryMessage?.content || '').trim();
+    const appendedContent = existingContent
+        ? `${existingContent}\n\n${memoryInjection.macroContent}`
+        : memoryInjection.macroContent;
+
+    const nextSources = Array.isArray(summaryMessage?.sources) ? [...summaryMessage.sources] : [];
+    const memorySource = nextSources.find(source => source?.source === 'memory');
+    if (memorySource) memorySource.tokens += memoryInjection.tokens || 0;
+    else if ((memoryInjection.tokens || 0) > 0) nextSources.push({ source: 'memory', tokens: memoryInjection.tokens || 0 });
+
+    const nextAllSources = Array.isArray(summaryMessage?._allSources) ? [...summaryMessage._allSources] : [];
+    if ((memoryInjection.tokens || 0) > 0) nextAllSources.push({ source: 'memory', tokens: memoryInjection.tokens || 0 });
+
+    return [
+        ...messages.slice(0, summaryIndex),
+        {
+            ...summaryMessage,
+            content: appendedContent,
+            sources: nextSources,
+            _allSources: nextAllSources
+        },
+        ...messages.slice(summaryIndex + 1)
+    ];
+}
+
+function injectMemoryMessages(messages, memoryInjection, settings = {}) {
+    if (!memoryInjection?.messages?.length) return messages;
+
+    const injectionTarget = settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
+    if (injectionTarget === 'summary_macro') {
+        const macroInjected = injectMemoryIntoSummaryMacro(messages, memoryInjection);
+        if (macroInjected) {
+            return macroInjected;
+        }
+    }
+
+    const firstHistoryIndex = messages.findIndex(m => m.isHistory);
+    if (firstHistoryIndex === -1) {
+        return [...messages, ...memoryInjection.messages];
+    }
+    return [
+        ...messages.slice(0, firstHistoryIndex),
+        ...memoryInjection.messages,
+        ...messages.slice(firstHistoryIndex)
+    ];
+}
+
+function injectVectorLoreMessages(messages, loreEntries) {
+    if (!Array.isArray(loreEntries) || !loreEntries.length) return messages;
+
+    const combinedContent = loreEntries.map(msg => msg.content || '').filter(Boolean).join('\n\n');
+    if (!combinedContent) return messages;
+
+    const sourceMap = new Map();
+    for (const item of loreEntries.flatMap(msg => msg._allSources || msg.sources || [])) {
+        if (!item?.source) continue;
+        sourceMap.set(item.source, (sourceMap.get(item.source) || 0) + (item.tokens || 0));
+    }
+    const combinedSources = [...sourceMap.entries()].map(([source, tokens]) => ({ source, tokens }));
+    const combinedMessage = {
+        role: 'system',
+        content: combinedContent,
+        blockName: 'Vector Lorebook',
+        isLorebook: true,
+        sources: combinedSources,
+        _allSources: combinedSources
+    };
+
+    const firstHistoryIndex = messages.findIndex(m => m.isHistory);
+    if (firstHistoryIndex === -1) {
+        return [...messages, combinedMessage];
+    }
+    return [
+        ...messages.slice(0, firstHistoryIndex),
+        combinedMessage,
+        ...messages.slice(firstHistoryIndex)
+    ];
 }
 
 export async function generateMemoryDraft({ history, prompt, controller, apiConfigOverride = null }) {

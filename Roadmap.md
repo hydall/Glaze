@@ -294,10 +294,13 @@ Planned execution order:
 - [done | not tested] Keep normal lorebook activation limits separate from memory activation limits.
 - [done | not tested] Inject retrieved memories into the summary block path or an adjacent dedicated memory-summary block, not into the normal lorebook block.
 - [done | not tested] Expose separate memory context accounting in generation metadata so the UI can show memory independently from lorebooks.
+- [done | not tested] Memory retrieval already behaves like a lightweight lorebook-style top-k selection pass: relevant entries are searched, ranked, capped by session settings, and injected into the prompt.
+- [done | not tested] Session settings already include a `maxInjectedEntries`-style memory cap (`количество мемори в памяти`) that controls how many retrieved memory entries can be added to the prompt.
+- [done | not tested] Expose an explicit memory injection target setting in UI so the user can choose whether memory entries are injected into the dedicated summary block path or through the `{{summary}}` macro location.
 
 4.4. UI and tokenizer visualization:
 - [done | not tested] Add per-message markers showing whether a message is already covered by a memory segment / memory entry.
-- [not done | not tested] Add a way to inspect which memory entry covers which message range directly from the chat UI.
+- [done | not tested] Add a way to inspect which memory entry covers which message range directly from the chat UI.
 - [done | not tested] Add a dedicated memory books window/sheet rather than burying the feature entirely inside the lorebook sheet.
 - [done | not tested] In the tokenizer/context breakdown, display memory usage as summary-like context rather than lorebook usage.
 - [done | not tested] In message trigger UI, show memory-triggered entries distinctly from regular lorebook hits.
@@ -319,13 +322,17 @@ Current implementation status notes:
 - [done | not tested] Memory entries and drafts now persist retrieval-facing fields (`keys`, `glazeKeys`, `vectorSearch`) and surface them in Memory Books preview UI.
 - [done | not tested] Approved memory entries can now be edited after approval, including title/content/keys/Glaze keys updates, per-entry `vectorSearch` toggle changes, and manual `Reindex` actions from the Memory Books UI.
 - [done | not tested] Memory Books now expose a session-level vector-search toggle and a selectable key match mode; keyword retrieval uses only the entry `Keys` field while preview cards keep inline `Edit` / `Reindex` / `Delete` actions.
+- [done | not tested] Memory Books now expose a user-facing session-level retrieved-entry cap (`maxInjectedEntries`) as the "количество мемори в памяти" control.
 - [done | not tested] Memory generation prompts now ask for both memory text and optional retrieval keys in a simple text format (`Memory:` / `Keys:`), avoiding JSON-only contracts.
 - [done | not tested] Draft parsing now supports vector-first usage: if the model leaves `Keys:` empty, fallback keys are generated automatically while vector retrieval can still dominate when configured.
 - [not done | not tested] Replace the temporary bottom-sheet implementation with a dedicated polished memory sheet component before considering the UI complete.
+- [done | not tested] Add an explicit session setting for "раз в сколько сообщений создается мемори" so automation/bootstrap can use a user-configurable interval instead of a hardcoded threshold.
+- [done | not tested] Add an explicit session setting for memory injection target selection: `{{summary}}` macro slot vs dedicated chat summary block injection.
 - [done | not tested] Lorebook insertion now has a global default injection position and per-entry `Match Global` / `{{lorebooks}}` targets, so the `{{lorebooks}}` macro is legal at the lorebook-entry level instead of acting as a preset-wide override.
+- [done | not tested] Lorebook ST round-trip now preserves Glaze-specific injection targets via `glazeMetadata`, so `Match Global` / `{{lorebooks}}` are not collapsed during export/import back into Glaze.
 
 4.5. Import/export/bootstrap and cloud-sync-safe serialization:
-- [not done | not tested] On chat import, add an initial segmentation/bootstrap flow that can create first-pass memory entries automatically from imported message history.
+- [done | not tested] On chat import, add an initial segmentation/bootstrap flow that can create first-pass memory drafts automatically from imported message history when the imported session has no existing memory-book state yet.
 - [done | not tested] Ensure exported chat or backup data includes memory book state in a deterministic form that can be rehydrated without manual repair.
 - [done | not tested] Keep SillyTavern-compatible chat export separate from full-fidelity Glaze-to-Glaze export. ST export may stay lossy, but Glaze-to-Glaze export/import must preserve memory books, message coverage markers, context refs, and related session metadata.
 - [done | not tested] Add a dedicated Glaze-to-Glaze chat/session format or extension path so memory-book state can round-trip without relying on ST JSONL fields that do not support Glaze metadata.
@@ -336,11 +343,18 @@ Current implementation status notes:
 
 4.6. Automation rules and quality tuning:
 - [not done | not tested] Define when automatic memory creation runs: for example after N new messages, after summary update, or on explicit background maintenance.
+- [done | not tested] Make the automatic creation interval user-configurable in UI as "раз в сколько сообщений создается мемори" instead of hardcoding the trigger threshold.
+- [done | not tested] Add a user-facing toggle for delayed automation (`работать с отставанием`) so automatic memory creation can intentionally wait for an extra user+assistant exchange before materializing a memory entry.
+- [done | not tested] Define delayed-trigger semantics for `Create memory every N messages`: when the threshold is reached on an assistant reply, wait until the user replies and receives one more assistant reply; when the threshold is reached on a user message, wait until that user message gets an assistant reply and then wait for one more full user+assistant exchange before creating the memory entry.
+- [not done | not tested] Keep delayed automation as the recommended default so users can still edit their last user turn or regenerate the latest assistant reply before a memory entry becomes fixed.
+- [done | not tested] A first session-level delayed automation engine now tracks pending auto-memory triggers and evaluates them after stable assistant reply completion in the normal generation flow.
 - [not done | not tested] Allow the system to create the first memory entry automatically when enough chat history exists.
-- [not done | not tested] Define how history is segmented into memory-worthy ranges and how overlap is handled.
-- [not done | not tested] Add deduplication/conflict rules so regenerated or imported memories do not stack duplicates.
+- [done | not tested] Define a first segmentation policy for auto/bootstrap flows: start from the user-configured `N`-message interval, but prefer ending segments on a nearby assistant reply so generated memory windows align better with completed exchanges.
+- [done | not tested] Add a first deduplication/conflict layer so exact-duplicate and high-overlap memory segments are blocked during draft generation and draft approval.
+- [done | not tested] Add a first session-wide Memory Books maintenance pass that can reconcile coverage, clear orphaned pending drafts, remove fully orphaned approved entries, and optionally reindex approved memory entries.
+- [done | not tested] Surface lifecycle state in the Memory Books manager with visible status badges and summary counters for active entries, drafts, needs-rebuild entries, and stale message coverage.
 - [not done | not tested] Add recency/importance controls only after the core lifecycle model is stable.
-- [not done | not tested] Add a proper memory-generation rules manager with built-in prompt presets, user-defined prompts, and prompt selection independent from the main chat preset.
+- [done | not tested] Add a proper first-pass memory-generation rules manager with built-in prompt presets, user-defined prompts, preview support, and prompt selection independent from the main chat preset.
 - [done | not tested] Add memory-generation temperature override independent from the main chat preset.
 - [done | not tested] Allow `current provider` memory generation to override only the model while still reusing the main endpoint/key.
 - [done | not tested] Ensure memory generation can preview the selected rule text before running drafts.
@@ -408,7 +422,11 @@ Manual verification that must stay visible in the roadmap:
 - [not done | not tested] Verify that editing an approved memory entry correctly updates persisted content/keys and does not break message coverage metadata.
 - [not done | not tested] Verify that disabling `vectorSearch` deletes the memory-entry embedding, and re-enabling or manual `Reindex` rebuilds it correctly.
 - [not done | not tested] Verify that the Memory Books key match mode (`plain` / `glaze` / `both`) changes retrieval as expected while using only the `Keys` field.
+- [not done | not tested] Verify that `Create memory every N messages` respects delayed mode correctly on both threshold cases: assistant-triggered thresholds wait one extra user+assistant exchange, and user-triggered thresholds wait for the current assistant reply plus one extra user+assistant exchange.
+- [not done | not tested] Verify that disabling `работать с отставанием` switches automation back to immediate threshold behavior without breaking edit/regenerate workflows.
 - [not done | not tested] Verify that lorebook entries set to `Match Global`, `@worldInfoBefore`, `@worldInfoAfter`, and `{{lorebooks}}` inject at the expected locations without preset-level override regressions.
+- [not done | not tested] Current known limitation: lorebook/memory entries now aggregate into single injected blocks per target, but when the target is a macro inside another preset block, the injected content still lands as a separate block adjacent to that area rather than truly inside the host block. Revisit later.
+- [not done | not tested] Verify that Glaze lorebook export/import preserves `Match Global` and `{{lorebooks}}` through the new `glazeMetadata` round-trip path.
 - [not done | not tested] Verify that backup export/import preserves memory books and rebuilds any derived vectors safely.
 - [not done | not tested] Verify that future cloud-sync serialization can round-trip memory books without duplication or orphaned entries.
 - [not done | not tested] Verify that Glaze-to-Glaze export/import preserves memory books, per-message markers, and memory generation settings without loss.
@@ -439,11 +457,12 @@ This order is deliberate:
 ## Next Up
 
 The immediate next milestone is:
+- [done | not tested] Lorebook injection/export fixes are folded into `feat/memorybook`; continue shipping them together with Memory Books instead of splitting a separate PR/branch.
 - [done | not tested] Vectors are in maintenance mode: WORKS, do not touch without a concrete bug report.
 - [not done | not tested] Improve vector ranking only if a real user-facing retrieval miss forces it.
 - [not done | not tested] Summary simple mode prompts — proper defaults and editability.
-- [not done | not tested] Memory books — finalize data model before writing implementation code.
-- [done | not tested] Memory books data model foundation exists; continue with generation UX and retrieval integration instead of reopening the schema.
+- [done | not tested] Memory books data model foundation exists; continue with generation UX, inspection UX, lifecycle cleanup, and automation instead of reopening the schema.
+- [not done | not tested] Finish the remaining Memory Books gaps in this branch, then ship one combined PR with both Memory Books and lorebook fixes.
 
 ## Resume Notes
 
