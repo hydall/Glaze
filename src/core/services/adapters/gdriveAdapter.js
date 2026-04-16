@@ -139,12 +139,22 @@ export async function connect() {
     const verifier = generateRandomString(64);
     const challenge = await sha256(verifier);
     const usePlain = !challenge;
-    const redirectUri = getRedirectUri();
     const state = generateRandomString(16);
 
     localStorage.setItem('gz_gdrive_pkce_verifier', verifier);
     localStorage.setItem('gz_gdrive_pkce_state', state);
 
+    if (isElectron()) {
+        const result = await waitForElectronOAuth(challenge, usePlain, state, verifier);
+        if (result) {
+            await exchangeCodeForToken(result.code, verifier, result.redirectUri);
+        } else {
+            throw new Error('Authorization cancelled');
+        }
+        return;
+    }
+
+    const redirectUri = getRedirectUri();
     const authUrl = new URL(AUTH_BASE);
     authUrl.searchParams.set('client_id', GDRIVE_CLIENT_ID);
     authUrl.searchParams.set('redirect_uri', redirectUri);
@@ -188,6 +198,70 @@ export async function connect() {
             throw new Error('Authorization cancelled');
         }
     }
+}
+
+function isElectron() {
+    return typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron');
+}
+
+async function waitForElectronOAuth(challenge, usePlain, state, verifier) {
+    const ipcRenderer = window.require('electron').ipcRenderer;
+    const port = await ipcRenderer.invoke('oauth-start-server');
+    const redirectUri = `http://127.0.0.1:${port}/oauth/callback`;
+
+    const authUrl = new URL(AUTH_BASE);
+    authUrl.searchParams.set('client_id', GDRIVE_CLIENT_ID);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('scope', SCOPES);
+    authUrl.searchParams.set('code_challenge', usePlain ? verifier : challenge);
+    authUrl.searchParams.set('code_challenge_method', usePlain ? 'plain' : 'S256');
+    authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('access_type', 'offline');
+    authUrl.searchParams.set('prompt', 'consent');
+
+    const width = 500;
+    const height = 600;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    const win = window.open(authUrl.toString(), 'gdrive-auth', `width=${width},height=${height},left=${left},top=${top}`);
+
+    return new Promise((resolve) => {
+        let resolved = false;
+
+        const cleanup = () => clearInterval(interval);
+
+        ipcRenderer.once('oauth-callback', (event, { code, state: returnedState, error }) => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
+            try { if (win && !win.closed) win.close(); } catch {}
+
+            if (error || !code) { resolve(null); return; }
+            if (returnedState !== state) {
+                console.error('[gdriveAdapter] State mismatch');
+                resolve(null);
+                return;
+            }
+            resolve({ code, redirectUri });
+        });
+
+        const interval = setInterval(() => {
+            if (resolved) return;
+            try {
+                if (win && win.closed) {
+                    resolved = true;
+                    cleanup();
+                    ipcRenderer.invoke('oauth-cancel-server');
+                    resolve(null);
+                }
+            } catch {
+                resolved = true;
+                cleanup();
+                resolve(null);
+            }
+        }, 1000);
+    });
 }
 
 function waitForWebOAuth(authUrl, expectedState) {
