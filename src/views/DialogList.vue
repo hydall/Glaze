@@ -474,6 +474,7 @@ defineExpose({ openNewChatPicker });
 
 onMounted(() => {
     loadData();
+    window.addEventListener('sync-data-refreshed', loadData);
     window.addEventListener('chat-updated', loadData);
     window.addEventListener('character-updated', loadData);
     window.addEventListener('chat-generation-started', onGenerationStarted);
@@ -482,6 +483,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+    window.removeEventListener('sync-data-refreshed', loadData);
     window.removeEventListener('chat-updated', loadData);
     window.removeEventListener('character-updated', loadData);
     window.removeEventListener('chat-generation-started', onGenerationStarted);

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head><title>Glaze OAuth Redirect</title></head>
+<body>
+<script>
+const url = new URL(window.location.href);
+const code = url.searchParams.get('code');
+const state = url.searchParams.get('state');
+const error = url.searchParams.get('error');
+
+if (error) {
+    document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">Authorization failed: ' + error + '</p>';
+} else if (code) {
+    if (window.opener) {
+        window.opener.postMessage({ type: 'gdrive-oauth', code, state }, '*');
+    }
+    try {
+        window.location.href = 'com.hydall.glaze://oauth/gdrive?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state || '');
+    } catch {}
+    document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">Authorization successful! You can close this tab.</p>';
+} else {
+    document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">No authorization code received.</p>';
+}
+</script>
+</body>
+</html>
