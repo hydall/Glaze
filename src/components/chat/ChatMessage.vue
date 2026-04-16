@@ -550,7 +550,7 @@ const showFooter = computed(() => {
         const hasSwipes = props.message.role === 'char' && props.message.swipes?.length > 1;
         const hasGreetings = props.index === 0 && props.message.role === 'char' && getAllGreetings(props.activeChatChar).length > 1;
         const hasRegenerate = ((props.message.role === 'user' && props.isLast) || props.message.isError) && !props.isGenerating && !props.message.isEditing;
-        const hasTriggeredItems = props.message.triggeredLorebooks?.length || combinedMessageData.value.regexes?.length;
+        const hasTriggeredItems = props.message.triggeredLorebooks?.length || props.message.triggeredMemories?.length || combinedMessageData.value.regexes?.length;
         return hasSwipes || hasGreetings || hasRegenerate || props.message.isEditing || hasTriggeredItems;
     }
     return true; // Always show in other layouts for meta/actions
@@ -565,6 +565,17 @@ const blacklistedErrorProvider = computed(() => {
 
 const tokenCount = computed(() => {
     return props.message.tokens || 0;
+});
+
+const memoryBadge = computed(() => {
+    const coverage = props.message.memoryCoverage;
+    if (!coverage || typeof coverage !== 'object') return null;
+    if (coverage.needsRebuild) return { label: 'REBUILD', className: 'needs-rebuild' };
+    if (coverage.stale) return { label: 'STALE', className: 'stale' };
+    if (Array.isArray(coverage.entryIds) && coverage.entryIds.length > 0) {
+        return { label: 'MEM', className: 'covered' };
+    }
+    return null;
 });
 
 const uiHideMsgId = ref(hideMessageId.value);
@@ -606,7 +617,8 @@ onUnmounted(() => {
                 <span class="msg-name-label">{{ getDisplayName() }}</span>
                 <span class="msg-index gen-stat header-idx" v-if="!uiHideMsgId">#{{ index + 1 }}</span>
                 <sup v-if="message.role === 'char' && activeChatChar?.version" class="item-version">#{{ activeChatChar.version }}</sup>
-                <div v-if="message.triggeredLorebooks?.length || combinedMessageData.regexes?.length" class="msg-lb-trigger-menu" @click.stop="openTriggeredSheet">
+                <span v-if="memoryBadge" class="msg-memory-badge" :class="memoryBadge.className">{{ memoryBadge.label }}</span>
+                <div v-if="message.triggeredLorebooks?.length || message.triggeredMemories?.length || combinedMessageData.regexes?.length" class="msg-lb-trigger-menu" @click.stop="openTriggeredSheet">
                     <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
                 </div>
             </span>
@@ -817,7 +829,7 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <div v-if="layoutMode === 'bubble' && (message.triggeredLorebooks?.length || combinedMessageData.regexes?.length)" class="msg-lb-trigger-menu" @click.stop="openTriggeredSheet">
+                <div v-if="layoutMode === 'bubble' && (message.triggeredLorebooks?.length || message.triggeredMemories?.length || combinedMessageData.regexes?.length)" class="msg-lb-trigger-menu" @click.stop="openTriggeredSheet">
                     <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
                 </div>
 
@@ -883,6 +895,19 @@ onUnmounted(() => {
                     <div class="item-info">
                         <div class="item-label">{{ lb.name }}</div>
                         <div class="item-sublabel">{{ lb.lorebookName }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="message.triggeredMemories?.length" class="triggered-group">
+                <div class="triggered-group-title">Memory Books</div>
+                <div v-for="mem in message.triggeredMemories" :key="mem.id" class="triggered-item-card static">
+                    <div class="item-icon">
+                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                    </div>
+                    <div class="item-info">
+                        <div class="item-label">{{ mem.name }}</div>
+                        <div class="item-sublabel">Memory entry</div>
                     </div>
                 </div>
             </div>
@@ -1048,6 +1073,39 @@ onUnmounted(() => {
     width: 14px;
     height: 14px;
     fill: currentColor;
+}
+
+.msg-memory-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    border: 1px solid transparent;
+    flex-shrink: 0;
+}
+
+.msg-memory-badge.covered {
+    color: #1ec8ff;
+    background: rgba(30, 200, 255, 0.12);
+    border-color: rgba(30, 200, 255, 0.35);
+}
+
+.msg-memory-badge.needs-rebuild {
+    color: #ffb347;
+    background: rgba(255, 179, 71, 0.12);
+    border-color: rgba(255, 179, 71, 0.35);
+}
+
+.msg-memory-badge.stale {
+    color: #ff7b7b;
+    background: rgba(255, 123, 123, 0.12);
+    border-color: rgba(255, 123, 123, 0.35);
 }
 
 .triggered-sheet-header {

@@ -8,7 +8,7 @@ import { translations, pluralize } from '@/utils/i18n.js';
 import { currentLang, dialogGrouping } from '@/core/config/APPSettings.js';
 import { attachLongPress } from '@/core/services/ui.js';
 import { getChatData, createNewSession, deleteSession, renameSession } from '@/utils/sessions.js';
-import { importSillyTavernChat, exportSillyTavernChat, pickChatFile } from '@/core/services/chatImporter.js';
+import { importSillyTavernChat, exportSillyTavernChat, exportGlazeChat, pickChatFile } from '@/core/services/chatImporter.js';
 import { allPersonas, loadPersonas } from '@/core/states/personaState.js';
 
 const props = defineProps({
@@ -227,6 +227,15 @@ const openActions = (chat, mode = 'flat') => {
             });
         }
         
+        items.push({
+            label: 'Export Chat (Glaze)',
+            icon: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14-5-5h3V8h4v4h3l-5 5z"/></svg>',
+            onClick: () => {
+                exportGlazeChat(chat);
+                closeBottomSheet();
+            }
+        });
+
         items.push({
             label: translations[currentLang.value]?.action_export_chat || 'Export Chat (JSONL)',
             icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',

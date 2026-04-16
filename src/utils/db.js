@@ -9,6 +9,110 @@ function toPlain(data) {
     return JSON.parse(JSON.stringify(data));
 }
 
+function ensureMessageMetadata(message) {
+    if (!message || typeof message !== 'object') return message;
+    if (!message.id) {
+        message.id = `legacy_${message.timestamp || Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    }
+    if (!Array.isArray(message.contextRefs)) {
+        message.contextRefs = [];
+    }
+    if (!message.memoryCoverage || typeof message.memoryCoverage !== 'object') {
+        message.memoryCoverage = {
+            entryIds: [],
+            needsRebuild: false,
+            stale: false
+        };
+    } else {
+        if (!Array.isArray(message.memoryCoverage.entryIds)) {
+            message.memoryCoverage.entryIds = [];
+        }
+        if (typeof message.memoryCoverage.needsRebuild !== 'boolean') {
+            message.memoryCoverage.needsRebuild = false;
+        }
+        if (typeof message.memoryCoverage.stale !== 'boolean') {
+            message.memoryCoverage.stale = false;
+        }
+    }
+    return message;
+}
+
+function ensureMemoryBookSessionData(chatData) {
+    if (!chatData || typeof chatData !== 'object') return chatData;
+    if (!chatData.memoryBooks || typeof chatData.memoryBooks !== 'object') {
+        chatData.memoryBooks = {};
+    }
+    return chatData;
+}
+
+function normalizeChatData(chatData) {
+    if (!chatData || typeof chatData !== 'object') {
+        return { currentId: 1, sessions: { 1: [] }, memoryBooks: {} };
+    }
+
+    if (!chatData.sessions || typeof chatData.sessions !== 'object') {
+        chatData.sessions = { 1: [] };
+    }
+
+    for (const [sessionId, messages] of Object.entries(chatData.sessions)) {
+        const safeMessages = Array.isArray(messages) ? messages.filter(Boolean) : [];
+        safeMessages.forEach(ensureMessageMetadata);
+        chatData.sessions[sessionId] = safeMessages;
+    }
+
+    ensureMemoryBookSessionData(chatData);
+
+    for (const sessionId of Object.keys(chatData.sessions)) {
+        if (!chatData.memoryBooks[sessionId] || typeof chatData.memoryBooks[sessionId] !== 'object') {
+                chatData.memoryBooks[sessionId] = {
+                    id: `memorybook_${sessionId}`,
+                    entries: [],
+                    pendingDrafts: [],
+                    settings: {
+                    enabled: true,
+                    maxInjectedEntries: 3,
+                    batchSize: 1,
+                        parallelJobs: 1,
+                        generationSource: 'current',
+                        generationModel: '',
+                        generationUseCurrentModelOverride: false,
+                        generationEndpoint: '',
+                        generationApiKey: '',
+                        generationTemperature: null,
+                        promptPreset: 'strict_factual',
+                        customPrompts: []
+                    },
+                    updatedAt: 0
+                };
+        } else {
+            const memoryBook = chatData.memoryBooks[sessionId];
+            if (!memoryBook.id) memoryBook.id = `memorybook_${sessionId}`;
+            if (!Array.isArray(memoryBook.entries)) memoryBook.entries = [];
+            if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
+            if (!memoryBook.settings || typeof memoryBook.settings !== 'object') {
+                memoryBook.settings = {};
+            }
+            if (typeof memoryBook.settings.enabled !== 'boolean') memoryBook.settings.enabled = true;
+            if (!Number.isFinite(memoryBook.settings.maxInjectedEntries)) memoryBook.settings.maxInjectedEntries = 3;
+            if (!Number.isFinite(memoryBook.settings.batchSize)) memoryBook.settings.batchSize = 1;
+            if (!Number.isFinite(memoryBook.settings.parallelJobs)) memoryBook.settings.parallelJobs = 1;
+            if (!memoryBook.settings.generationSource) memoryBook.settings.generationSource = 'current';
+            if (typeof memoryBook.settings.generationModel !== 'string') memoryBook.settings.generationModel = '';
+            if (typeof memoryBook.settings.generationUseCurrentModelOverride !== 'boolean') memoryBook.settings.generationUseCurrentModelOverride = false;
+            if (typeof memoryBook.settings.generationEndpoint !== 'string') memoryBook.settings.generationEndpoint = '';
+            if (typeof memoryBook.settings.generationApiKey !== 'string') memoryBook.settings.generationApiKey = '';
+            if (!(memoryBook.settings.generationTemperature === null || Number.isFinite(memoryBook.settings.generationTemperature))) {
+                memoryBook.settings.generationTemperature = null;
+            }
+            if (typeof memoryBook.settings.promptPreset !== 'string') memoryBook.settings.promptPreset = 'strict_factual';
+            if (!Array.isArray(memoryBook.settings.customPrompts)) memoryBook.settings.customPrompts = [];
+            if (!Number.isFinite(memoryBook.updatedAt)) memoryBook.updatedAt = 0;
+        }
+    }
+
+    return chatData;
+}
+
 // Global write queue — serializes all IndexedDB writes to prevent race conditions
 let _dbWriteQueue = Promise.resolve();
 
@@ -337,9 +441,7 @@ export const db = {
         if (!data) {
             data = { currentId: 1, sessions: { 1: [] } };
         }
-        if (!data.sessions) {
-            data.sessions = { 1: [] };
-        }
+        data = normalizeChatData(data);
         if (!data.currentId) {
             const ids = Object.keys(data.sessions).map(Number);
             data.currentId = ids.length > 0 ? Math.max(...ids) : 1;
@@ -347,7 +449,7 @@ export const db = {
         return data;
     },
     saveChat: async (charId, chatData) => {
-        await db.set(`gz_chat_${charId}`, chatData);
+        await db.set(`gz_chat_${charId}`, normalizeChatData(chatData));
     },
     createSession: async (charId) => {
         let data = await db.get(`gz_chat_${charId}`);

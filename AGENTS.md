@@ -53,3 +53,13 @@ gh pr create --base dev --title "..."
 - If working on a feature, the final commit must land on the feature branch, not on `dev`.
 - If starting follow-up work, create or switch to the correct feature branch before editing files.
 - Run `npm run build` before committing to verify no build errors.
+
+## Roadmap Maintenance
+
+- `Roadmap.md` must be kept current during implementation, not updated retroactively at the very end.
+- Break roadmap work into smaller concrete subtasks instead of leaving large vague items.
+- For each roadmap task or subtask, explicitly record:
+  - completion status: `done` / `not done`
+  - testing status: `tested` / `not tested`
+- When work is only partially completed, split the remaining scope into separate follow-up subtasks instead of leaving an ambiguous mixed-status item.
+- Use `Roadmap.md` to explicitly point the user to what still needs manual verification, so pending test coverage is visible in the roadmap itself.

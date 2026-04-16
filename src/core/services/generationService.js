@@ -10,6 +10,7 @@ import { presetState, initPresetState, getEffectivePreset } from '@/core/states/
 import { lorebookState, scanLorebooks, initLorebookState, vectorSearchLorebooks } from '@/core/states/lorebookState.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { applyRegexes } from '@/core/services/regexService.js';
+import { db } from '@/utils/db.js';
 import { logger } from '../../utils/logger.js';
 
 let lastPrompt = null;
@@ -247,7 +248,26 @@ export async function generateChatResponse({
     }
 
     const safeContext = contextSize - maxTokens;
+    const memoryInjection = await buildMemoryInjection({
+        char,
+        history: safeHistory || history,
+        summary,
+        safeContext
+    });
     let messages = result.messages;
+
+    if (memoryInjection.messages.length > 0) {
+        const firstHistoryIndex = messages.findIndex(m => m.isHistory);
+        if (firstHistoryIndex === -1) {
+            messages = [...messages, ...memoryInjection.messages];
+        } else {
+            messages = [
+                ...messages.slice(0, firstHistoryIndex),
+                ...memoryInjection.messages,
+                ...messages.slice(firstHistoryIndex)
+            ];
+        }
+    }
 
     if (newVectorEntries.length > 0) {
         const vectorLoreMessages = newVectorEntries
@@ -327,9 +347,22 @@ export async function generateChatResponse({
     }
 
     if (callbacks.onPromptReady) {
+        const contextBreakdown = result.contextBreakdown
+            ? {
+                ...result.contextBreakdown,
+                memory: memoryInjection.tokens || 0,
+                summaryBase: result.contextBreakdown.summary || 0,
+                summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
+                fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
+                fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
+                totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
+                remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
+            }
+            : null;
         callbacks.onPromptReady({
             loreEntries: result.loreEntries,
-            contextBreakdown: result.contextBreakdown || null
+            memoryEntries: memoryInjection.entries,
+            contextBreakdown
         });
     }
 
@@ -456,14 +489,33 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
         }));
 
         const result = await processPromptAsync(payload);
+        const memoryInjection = await buildMemoryInjection({
+            char,
+            history: safeHistory,
+            summary,
+            safeContext: safeContextLimit
+        });
 
         const resolvedCutoff = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
             ? result.cutoffOriginalIndex
             : result.cutoffIndex;
 
+        const contextBreakdown = result.contextBreakdown
+            ? {
+                ...result.contextBreakdown,
+                memory: memoryInjection.tokens || 0,
+                summaryBase: result.contextBreakdown.summary || 0,
+                summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
+                fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
+                fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
+                totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
+                remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
+            }
+            : null;
+
         return {
             cutoffIndex: resolvedCutoff,
-            contextBreakdown: result.contextBreakdown || null
+            contextBreakdown
         };
     } catch (e) {
         console.error("Calculate context worker error", e);
@@ -486,6 +538,150 @@ export async function generateSummary({ history, prompt, controller, apiConfigOv
     }
 
     const defaultPrompt = "Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}";
+    const template = prompt || defaultPrompt;
+
+    let finalPrompt = template.replace('{{history}}', history);
+    if (!template.includes('{{history}}')) {
+        finalPrompt = `${template}\n\n${history}`;
+    }
+
+    let result = "";
+
+    await executeRequest({
+        apiUrl,
+        apiKey,
+        requestBody: {
+            model,
+            messages: [{ role: 'user', content: finalPrompt }],
+            temperature: temp
+        },
+        controller,
+        callbacks: {
+            onComplete: (text) => { result = text; }
+        }
+    });
+
+    return result;
+}
+
+function normalizeMessageIdList(entry) {
+    if (!entry || typeof entry !== 'object') return [];
+    if (Array.isArray(entry.messageIds)) return [...new Set(entry.messageIds.filter(Boolean))];
+    const ids = [];
+    if (entry.messageRange?.startMessageId) ids.push(entry.messageRange.startMessageId);
+    if (entry.messageRange?.endMessageId && entry.messageRange.endMessageId !== entry.messageRange.startMessageId) ids.push(entry.messageRange.endMessageId);
+    return [...new Set(ids.filter(Boolean))];
+}
+
+function buildSummaryExcerpt(summary) {
+    if (!summary) return '';
+    if (typeof summary === 'string') return summary.trim().slice(0, 800);
+    if (typeof summary === 'object') {
+        if (typeof summary.content === 'string') return summary.content.trim().slice(0, 800);
+        return ['timeline', 'characterArcs', 'conflictsThreads', 'notHappenedYet', 'notes']
+            .map(key => summary[key])
+            .filter(value => typeof value === 'string' && value.trim())
+            .join('\n\n')
+            .slice(0, 800);
+    }
+    return '';
+}
+
+async function buildMemoryInjection({ char, history, summary, safeContext }) {
+    const charId = char?.id;
+    const sessionId = char?.sessionId;
+    if (!charId || !sessionId) return { messages: [], entries: [], tokens: 0 };
+
+    const chatData = await db.getChat(charId);
+    const memoryBook = chatData?.memoryBooks?.[sessionId];
+    const settings = memoryBook?.settings || {};
+    const activeEntries = (Array.isArray(memoryBook?.entries) ? memoryBook.entries : [])
+        .filter(entry => entry && (entry.status || 'active') === 'active' && (entry.content || '').trim());
+
+    if (!settings.enabled || !activeEntries.length) return { messages: [], entries: [], tokens: 0 };
+
+    const recentHistory = Array.isArray(history) ? history.slice(-12) : [];
+    const historyText = recentHistory.map(item => item?.content || item?.text || '').filter(Boolean).join('\n').toLowerCase();
+    const recentMessageIds = new Set(recentHistory.map(item => item?.messageId).filter(Boolean));
+    const recentLabels = new Set();
+    recentHistory.forEach(item => {
+        (Array.isArray(item?.contextRefs) ? item.contextRefs : []).forEach(ref => {
+            if (ref?.label) recentLabels.add(String(ref.label).toLowerCase());
+        });
+    });
+
+    const uniqueWords = [...new Set(historyText.match(/[\p{L}\p{N}_-]{4,}/gu) || [])].slice(0, 40);
+    const scoredEntries = activeEntries.map((entry, index) => {
+        const haystack = `${entry.title || ''}\n${entry.content || ''}`.toLowerCase();
+        const messageIds = normalizeMessageIdList(entry);
+        let score = 0;
+        if (messageIds.some(id => recentMessageIds.has(id))) score += 8;
+        (Array.isArray(entry.contextRefs) ? entry.contextRefs : []).forEach(ref => {
+            const label = String(ref?.label || '').toLowerCase();
+            if (label && recentLabels.has(label)) score += 3;
+        });
+        uniqueWords.forEach(word => {
+            if (haystack.includes(word)) score += 1;
+        });
+        score += Math.min(3, index / Math.max(activeEntries.length, 1));
+        return { entry, score };
+    });
+
+    const topEntries = scoredEntries
+        .filter(item => item.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, Math.max(1, Math.min(5, settings.maxInjectedEntries || 3)))
+        .map(item => item.entry);
+
+    if (!topEntries.length) return { messages: [], entries: [], tokens: 0 };
+
+    const summaryExcerpt = buildSummaryExcerpt(summary);
+    const content = [
+        summaryExcerpt ? `Summary excerpt:\n${summaryExcerpt}` : '',
+        'Memory context:',
+        ...topEntries.map(entry => `- ${(entry.title || 'Memory').trim()}: ${(entry.content || '').trim()}`)
+    ].filter(Boolean).join('\n\n');
+    const tokens = estimateTokens(content);
+    if (!content || tokens <= 0 || tokens >= Math.max(256, Math.floor(safeContext * 0.35))) {
+        return { messages: [], entries: [], tokens: 0 };
+    }
+
+    return {
+        messages: [{
+            role: 'system',
+            content,
+            blockName: 'Memory Book',
+            isMemory: true,
+            sources: [{ source: 'memory', tokens }],
+            _allSources: [{ source: 'memory', tokens }]
+        }],
+        entries: topEntries,
+        tokens
+    };
+}
+
+export async function generateMemoryDraft({ history, prompt, controller, apiConfigOverride = null }) {
+    const effectiveConfig = {
+        ...getEffectiveApiConfig(),
+        ...(apiConfigOverride || {})
+    };
+    const { apiKey, apiUrl, model, temp } = effectiveConfig;
+
+    if (!apiUrl || !model) {
+        throw new Error("API Not Configured");
+    }
+
+    const defaultPrompt = [
+        'Create exactly one concise long-term memory entry from the following roleplay segment.',
+        'Preserve the original language of the source segment. Do not translate it.',
+        'Use only facts that are explicitly supported by the segment.',
+        'Do not infer completed outcomes, registrations, approvals, or decisions unless the text clearly states them.',
+        'Focus on durable facts, developments, or relationship changes that should persist beyond immediate context.',
+        'Do not copy the dialogue verbatim.',
+        'Return only the memory entry text with no preface, label, or explanation.',
+        '',
+        '{{history}}'
+    ].join('\n');
     const template = prompt || defaultPrompt;
 
     let finalPrompt = template.replace('{{history}}', history);

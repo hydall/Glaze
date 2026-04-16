@@ -10,6 +10,18 @@ It is the source of truth for:
 - what is currently planned next;
 - the intended architecture direction, so work can resume after unrelated tasks without re-deciding old questions.
 
+## Task Tracking Rules
+
+Every roadmap item should be broken into smaller concrete subtasks whenever possible.
+
+For each task or subtask, always record:
+- completion status: `done` or `not done`
+- testing status: `tested` or `not tested`
+
+If something is only partially complete, split the unfinished portion into a separate follow-up subtask instead of leaving one broad mixed-status item.
+
+`Roadmap.md` should also explicitly call out what still requires manual user verification, so pending checks are visible and can be tested directly from the roadmap.
+
 ## Current Direction
 
 The current roadmap is:
@@ -212,37 +224,191 @@ Design answers:
 
 ### 4. Memory Books
 
-### 4. Memory Books
-
 Goal:
-Build a higher-level long-term memory system once summary and vector retrieval are in place.
+Build a higher-level long-term memory system on top of the already stabilized summary and vector layers, without introducing a second fragile lore/memory pipeline that will need a rewrite later.
 
-Target behavior:
-- The app can retain important long-term facts or developments beyond the immediate visible chat history.
-- Memory books should be retrievable and context-aware.
-- They should not be a fragile bolt-on; they should sit on top of summary + vector infrastructure.
+Current pain points that must be solved:
+- [not done | not tested] First memory creation is too manual. The user should not be forced to create the first memory entry by hand before automation can start.
+- [not done | not tested] There is no clear per-message marker showing which chat messages are already covered by memory book entries.
+- [not done | not tested] Deleting messages or branching a chat can leave orphaned / stale memories that no longer match the current chat history.
+- [not done | not tested] Imported chats cannot autonomously segment history and bootstrap memory entries from existing conversation data.
+- [not done | not tested] Memory books need to behave like lorebooks for retrieval features (vectors, keys, Glaze keys), but they must inject into the summary area and have a separate activation/count budget from normal lorebooks.
+- [not done | not tested] Memory usage should appear in the tokenizer/context UI as summary-like context, not as normal lorebook context.
+- [not done | not tested] Import/export and future cloud sync integration must not break when memory books are introduced.
+- [done | not tested] Cloud sync already exists on `feat/cloud-sync` / PR #20 with `syncEngine`, `syncService`, `syncQueue`, conflict resolution UI, encryption, and `updatedAt`-aware DB changes. Memory books must plug into that model instead of inventing a parallel sync path.
 
 Architecture direction:
-- Memory books should come after summary and vector layers are stable.
-- They should likely use:
-  - summary output as one source of durable information
-  - vector search for retrieval
-  - explicit storage and lifecycle rules
-- Memory entries should be manageable, inspectable, and eventually editable.
+- [done | not tested] Reuse the existing vector infrastructure rather than creating a separate memory retrieval engine. The current embeddings schema already supports future `sourceType` expansion beyond `lorebook_entry`.
+- [done | not tested] Reuse lorebook-style entry semantics for memory entries: keys, vector search, retrieval hints, and inspectable entry records remain the correct primitive.
+- [done | not tested] Do not make memory books just a hidden naming convention inside normal lorebooks. They need their own container/type so lifecycle, injection budget, UI, and sync/import behavior are explicit.
+- [done | not tested] Keep memory entries structurally compatible with lorebook entries where possible, but store memory-book metadata separately from normal lorebook presentation concerns.
+- [done | not tested] Message-range ownership must be first-class. Memory entries should track the message range or explicit message IDs they summarize so lifecycle operations can be deterministic.
+- [not done | not tested] Memory retrieval should inject into the summary block path, not the lorebook block path, and should have its own counter/budget separate from normal lorebook activations.
 
-Probable future components:
-- memory extraction rules
-- memory storage schema
-- retrieval strategy
-- conflict / duplication handling
-- recency / importance weighting
-- UI for browsing and managing memories
+Recommended implementation shape:
+- [done | not tested] Introduce a dedicated memory book container persisted per chat/session, instead of storing memory books as ordinary lorebooks only.
+- [not done | not tested] Keep each memory entry lorebook-compatible internally: `content`, `keys`, `vectorSearch`, retrieval hints, indexing status, and embedding records remain aligned with the lorebook/vector pipeline.
+- [done | not tested] Add memory-specific metadata on top of the entry data:
+  - `messageRange` / explicit message IDs covered by the entry
+  - source session ID
+  - derived segment hash/fingerprint
+  - lifecycle status (`active`, `stale`, `orphaned`, `needs_rebuild`)
+  - creation mode (`manual`, `auto`, `import_bootstrap`)
+- [not done | not tested] Treat the memory book as a dedicated chat-level data container that can feed a summary-like prompt block during generation while still reusing indexing/search internals.
+
+Why this shape is preferred:
+- [done | not tested] The generation pipeline already distinguishes `summary` and `lorebook` token sources, so memory books can be integrated as a summary-adjacent source without pretending they are ordinary lorebook injections.
+- [done | not tested] Messages already expose `triggeredLorebooks`, which means the chat UI already has a pattern for showing source-trigger metadata on individual messages.
+- [done | not tested] Chat lifecycle events already exist in `ChatView.vue` for delete, branch, import, and save flows, which gives a clear place to attach memory lifecycle maintenance.
+- [done | not tested] Import/export already goes through centralized chat/backup services, so a dedicated memory container is safer than hiding memory state inside ad hoc lorebook fields.
+
+Planned execution order:
+- [done | not tested] 4.1. Data model and persistence foundation.
+- [done | not tested] 4.2. Lifecycle maintenance tied to chat mutations.
+- [done | not tested] 4.3. Retrieval and prompt injection integration.
+- [done | not tested] 4.4. UI and tokenizer visualization.
+- [done | not tested] 4.5. Import/export/bootstrap and cloud-sync-safe serialization foundation in this branch.
+- [not done | not tested] 4.6. Automation rules and quality tuning.
+
+4.1. Data model and persistence foundation:
+- [done | not tested] Add a dedicated persisted memory-book container per chat/session.
+- [done | not tested] Define a memory entry schema that extends lorebook-compatible entry fields with message ownership metadata.
+- [done | not tested] Add deterministic identifiers for memory books and entries so imports, sync merges, and branch operations can reconcile data instead of duplicating it.
+- [done | not tested] Decide whether message ownership uses stable message IDs, timestamps, or both. Current recommendation: introduce explicit stable message IDs and keep timestamps as secondary metadata.
+- [done | not tested] Add DB migration / persistence support so memory books survive chat reloads, backup restore, and future sync.
+- [not done | not tested] Align memory persistence with the cloud-sync data model from PR #20: stable IDs, `updatedAt`, conflict-safe records, and deterministic serialization.
+
+4.2. Lifecycle maintenance tied to chat mutations:
+- [done | not tested] On message deletion, detect memory entries whose covered range is now invalid and mark or rebuild them instead of leaving stale memories behind.
+- [done | not tested] On chat branching, reconcile memory books explicitly instead of copying them blindly.
+- [done | not tested] Copy only memory entries whose covered message IDs/ranges are fully preserved inside the new branch history.
+- [done | not tested] If a memory entry only partially survives the fork boundary, do not keep it active; mark it as `needs_rebuild` or convert it into a draft for re-approval.
+- [done | not tested] If a memory entry belongs only to messages that do not exist in the child branch, remove it from the child branch entirely.
+- [not done | not tested] Add a maintenance pass that can recompute memory coverage for an entire session and clean up orphaned entries.
+- [not done | not tested] Surface stale/orphaned state in the memory UI instead of silently keeping broken data.
+
+4.3. Retrieval and prompt injection integration:
+- [not done | not tested] Reuse vector indexing/search for memory entries via a separate `sourceType` such as `memory_entry`.
+- [not done | not tested] Support the same activation styles as lorebooks where useful: vectors, keys, and Glaze keys.
+- [done | not tested] Keep normal lorebook activation limits separate from memory activation limits.
+- [done | not tested] Inject retrieved memories into the summary block path or an adjacent dedicated memory-summary block, not into the normal lorebook block.
+- [done | not tested] Expose separate memory context accounting in generation metadata so the UI can show memory independently from lorebooks.
+
+4.4. UI and tokenizer visualization:
+- [done | not tested] Add per-message markers showing whether a message is already covered by a memory segment / memory entry.
+- [not done | not tested] Add a way to inspect which memory entry covers which message range directly from the chat UI.
+- [done | not tested] Add a dedicated memory books window/sheet rather than burying the feature entirely inside the lorebook sheet.
+- [done | not tested] In the tokenizer/context breakdown, display memory usage as summary-like context rather than lorebook usage.
+- [done | not tested] In message trigger UI, show memory-triggered entries distinctly from regular lorebook hits.
+
+Current implementation status notes:
+- [done | not tested] Messages now store compact `contextRefs` and `memoryCoverage` metadata.
+- [done | not tested] Manual memory creation/removal from selected messages is available.
+- [done | not tested] A first visible `Memory Books` entry point exists in the magic drawer.
+- [done | not tested] `Memory Generation` currently supports provider source selection (`current` vs `custom`) and reuses the main API settings for `current` mode.
+- [done | not tested] `Current provider` mode now supports an optional model override without duplicating endpoint/key fields from the main API settings.
+- [done | not tested] `Memory Generation` now has its own rules/prompt preset selection, custom prompts, and temperature override, so memory generation can bypass the main preset configuration.
+- [done | not tested] Prompt rules can now be previewed before selection, and custom prompts can be viewed/edited directly from the manager.
+- [done | not tested] Closing prompt preview now returns to the originating memory sheet flow instead of dropping the user out of the settings/manager stack.
+- [done | not tested] Draft generation now includes a first continuity layer from nearby approved memories instead of sending the segment alone.
+- [done | not tested] Draft generation now also includes compact historical lore-trigger candidates and a summary excerpt for higher-quality extraction context.
+- [done | not tested] Normal generation now injects selected memory-book entries as a separate memory context block and records triggered memories on the source message.
+- [done | not tested] Dialog export now includes a Glaze full-fidelity chat format that preserves memory books, message refs, and memory coverage metadata.
+- [done | not tested] ST chat import/export now preserves Glaze message IDs, context refs, memory coverage, and triggered memories in `extra` when available.
+- [not done | not tested] Replace the temporary bottom-sheet implementation with a dedicated polished memory sheet component before considering the UI complete.
+
+4.5. Import/export/bootstrap and cloud-sync-safe serialization:
+- [not done | not tested] On chat import, add an initial segmentation/bootstrap flow that can create first-pass memory entries automatically from imported message history.
+- [done | not tested] Ensure exported chat or backup data includes memory book state in a deterministic form that can be rehydrated without manual repair.
+- [done | not tested] Keep SillyTavern-compatible chat export separate from full-fidelity Glaze-to-Glaze export. ST export may stay lossy, but Glaze-to-Glaze export/import must preserve memory books, message coverage markers, context refs, and related session metadata.
+- [done | not tested] Add a dedicated Glaze-to-Glaze chat/session format or extension path so memory-book state can round-trip without relying on ST JSONL fields that do not support Glaze metadata.
+- [not done | not tested] Keep embeddings export rules explicit: vectors may stay rebuildable/derived, but the core memory entries and message ownership metadata must persist.
+- [done | not tested] Design the stored format so cloud sync can merge or replace memory books predictably using stable IDs and updated timestamps, instead of treating them as opaque blobs.
+- [not done | not tested] Reuse the cloud-sync conflict model from PR #20 so memory books can participate in manual conflict resolution rather than bypassing it.
+- [not done | not tested] Extend cloud sync to include memory-book records and per-message memory metadata, so sync does not silently drop memory coverage or leave orphaned memory state across devices.
+
+4.6. Automation rules and quality tuning:
+- [not done | not tested] Define when automatic memory creation runs: for example after N new messages, after summary update, or on explicit background maintenance.
+- [not done | not tested] Allow the system to create the first memory entry automatically when enough chat history exists.
+- [not done | not tested] Define how history is segmented into memory-worthy ranges and how overlap is handled.
+- [not done | not tested] Add deduplication/conflict rules so regenerated or imported memories do not stack duplicates.
+- [not done | not tested] Add recency/importance controls only after the core lifecycle model is stable.
+- [not done | not tested] Add a proper memory-generation rules manager with built-in prompt presets, user-defined prompts, and prompt selection independent from the main chat preset.
+- [done | not tested] Add memory-generation temperature override independent from the main chat preset.
+- [done | not tested] Allow `current provider` memory generation to override only the model while still reusing the main endpoint/key.
+- [done | not tested] Ensure memory generation can preview the selected rule text before running drafts.
+- [done | not tested] Ensure prompt preview close returns to the relevant memory settings/manager sheet.
+
+Memory extraction context algorithm (fixed direction):
+- [not done | not tested] Do not reconstruct extraction context from the current live lorebook inject alone. It may differ from the lore context that existed when the target messages were generated.
+- [not done | not tested] Do not send the full set of triggered lore entries from all messages in the segment to the model. Message-level trigger history is an audit/debug source, not direct prompt payload.
+- [not done | not tested] For each message, store only compact trigger references needed for UI and reconstruction candidates:
+  - stable entry ID
+  - source type (`lorebook` / `memory`)
+  - optional compact label/title
+- [not done | not tested] For a target segment, build extraction context in two stages.
+
+Stage A. Candidate collection:
+- [not done | not tested] Collect the target message segment.
+- [not done | not tested] Collect the union of lore entry IDs that were actually triggered on messages inside the segment.
+- [done | not tested] Collect the nearest approved memory entries adjacent to the segment.
+- [done | not tested] Run lightweight retrieval on the segment text itself to get current top lore candidates.
+- [done | not tested] Optionally collect a compact summary excerpt and minimal setting context.
+
+Stage B. Candidate compression:
+- [not done | not tested] Rank lore candidates by a weighted score combining:
+  - trigger frequency within the segment
+  - recency inside the segment (later messages weigh more)
+  - direct entity/key overlap with the segment text
+  - current retrieval score from vector/keyword lookup
+- [not done | not tested] Deduplicate by entry ID before scoring.
+- [not done | not tested] Keep only a hard-capped top-k lore set for the model.
+- [not done | not tested] Keep only a hard-capped top-k memory continuity set for the model.
+- [not done | not tested] Drop low-value context aggressively instead of letting the prompt expand without bound.
+
+Prompt payload limits (initial target):
+- [not done | not tested] Message segment: one target segment only.
+- [done | not tested] Memory continuity context: 1-3 approved memory entries max.
+- [not done | not tested] Lore context: 3-5 lore entries max.
+- [not done | not tested] Summary context: one compact excerpt only when needed.
+- [not done | not tested] Setting/card context: compact fallback only, not full card by default.
+
+Initial ranking formula direction:
+- [not done | not tested] Historical trigger score is primary when reconstructing older segments.
+- [not done | not tested] Current retrieval score is secondary and used as a tie-breaker / recovery signal, not the sole source of truth.
+- [not done | not tested] Memory continuity relevance outranks generic recency.
+- [not done | not tested] Entries that match both historical triggers and current retrieval should be preferred.
+
+Implementation start order (to avoid refactor later):
+- [done | not tested] Step 1. Add stable message IDs and compact per-message trigger references.
+- [done | not tested] Step 2. Add dedicated memory book container + entry schema with message ownership metadata.
+- [done | not tested] Step 3. Add lifecycle helpers for delete/branch/import rebuild detection.
+- [done | not tested] Step 4. Add extraction-context builder with top-k compression.
+: implemented as a compact heuristic layer for memory continuity + lore-trigger candidates + summary excerpt; vector-backed memory retrieval is still future work.
+- [not done | not tested] Step 5. Add draft/approval workflow for one or multiple parallel memory generation jobs.
+- [done | not tested] Step 6. Add summary-path injection + tokenizer visualization.
+- [done | not tested] Step 7. Add backup/sync-safe persistence integration.
+
+Manual verification that must stay visible in the roadmap:
+- [not done | not tested] Verify that deleting covered messages marks the related memory entries stale or removes them correctly.
+- [not done | not tested] Verify that branching from the middle of a chat does not carry over active memories for messages that no longer exist in the child branch.
+- [not done | not tested] Verify that partially preserved memory entries after branch are downgraded to `needs_rebuild` instead of staying active.
+- [not done | not tested] Verify that imported chats can bootstrap first memories without requiring a manually created seed entry.
+- [not done | not tested] Verify that `Current provider` generation uses the override model while still keeping the main endpoint/key path unchanged.
+- [not done | not tested] Verify that closing prompt preview returns to `Memory Generation` or the prompt manager instead of closing the whole flow.
+- [not done | not tested] Verify that memory injections count separately from lorebook injections during generation.
+- [not done | not tested] Verify that tokenizer visualization shows memory usage with summary-style accounting.
+- [not done | not tested] Verify that backup export/import preserves memory books and rebuilds any derived vectors safely.
+- [not done | not tested] Verify that future cloud-sync serialization can round-trip memory books without duplication or orphaned entries.
+- [not done | not tested] Verify that Glaze-to-Glaze export/import preserves memory books, per-message markers, and memory generation settings without loss.
 
 Important constraint:
-- Do not start implementing memory books before the summary block and vector foundations are stable, otherwise the feature will be rebuilt later.
+- [done | not tested] Do not implement memory books as a quick lorebook hack that hides lifecycle state in entry text or comments. That would reintroduce later refactor pressure.
+- [done | not tested] Summary and vector foundations are stable enough to build on, but memory books should be added as a thin new layer over those primitives, not by forking them.
 
 Expected result:
-- A durable memory layer built on stable primitives rather than temporary shortcuts.
+- [not done | not tested] A durable memory layer with deterministic ownership over chat history, reusable retrieval infrastructure, separate injection accounting, and import/export/sync-safe persistence.
+- [done | not tested] A durable memory layer foundation with deterministic ownership over chat history, separate injection accounting, tokenizer visibility, and Glaze chat round-trip persistence is now in place.
 
 ## Suggested Execution Order
 
@@ -262,9 +428,11 @@ This order is deliberate:
 ## Next Up
 
 The immediate next milestone is:
-- vectors are in maintenance mode: WORKS, do not touch without a concrete bug report;
-- improve vector ranking only if a real user-facing retrieval miss forces it;
-- summary simple mode prompts — proper defaults and editability.
+- [done | not tested] Vectors are in maintenance mode: WORKS, do not touch without a concrete bug report.
+- [not done | not tested] Improve vector ranking only if a real user-facing retrieval miss forces it.
+- [not done | not tested] Summary simple mode prompts — proper defaults and editability.
+- [not done | not tested] Memory books — finalize data model before writing implementation code.
+- [done | not tested] Memory books data model foundation exists; continue with generation UX and retrieval integration instead of reopening the schema.
 
 ## Resume Notes
 
@@ -273,5 +441,7 @@ When returning to this roadmap after unrelated work:
 - vectorization infrastructure is done on `feat/vectorization-v2` (clean branch from `upstream/dev`);
 - entries with `vectorSearch: true` are excluded from keyword matching (both `lorebookState.js` and `generationWorker.js`);
 - vector QA coverage now includes automated end-to-end verification of the vector-only retrieval path;
-- local `dev` branch merges both `feat/cloud-sync` and `feat/vectorization-v2` for integration testing;
+- feature work now continues from `feat/memorybook`, created on top of `feat/vectorization-v2`;
+- memory books should converge vectorization and future cloud-sync-safe data modeling instead of inventing a third storage path;
+- cloud sync implementation lives in `feat/cloud-sync` / PR #20 and already includes encryption, delta sync, queueing, conflict resolution, and `updatedAt` support that memory books must reuse;
 - keep future retrieval work aligned with reusable vector infrastructure, not feature-specific hacks.
