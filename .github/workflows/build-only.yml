@@ -24,6 +24,10 @@ jobs:
         run: npm ci
 
       - name: Build Web Project
+        env:
+          VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
+          VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_CLIENT_ID }}
+          VITE_GDRIVE_CLIENT_SECRET: ${{ secrets.VITE_GDRIVE_CLIENT_SECRET }}
         run: npx vite build
 
       - name: Capacitor Sync
@@ -74,6 +78,9 @@ jobs:
         run: npm ci
 
       - name: Build Web Project
+        env:
+          VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
+          VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_ANDROID_CLIENT_ID }}
         run: npx vite build
 
       - name: Capacitor Sync Android
@@ -119,6 +126,10 @@ jobs:
         run: npm ci
 
       - name: Build Web Project
+        env:
+          VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
+          VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_CLIENT_ID }}
+          VITE_GDRIVE_CLIENT_SECRET: ${{ secrets.VITE_GDRIVE_CLIENT_SECRET }}
         run: npx vite build
 
       - name: Build Electron App
@@ -148,6 +159,10 @@ jobs:
           npm ci
 
       - name: Build Web Project
+        env:
+          VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
+          VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_CLIENT_ID }}
+          VITE_GDRIVE_CLIENT_SECRET: ${{ secrets.VITE_GDRIVE_CLIENT_SECRET }}
         run: npx vite build
 
       - name: Build Electron App

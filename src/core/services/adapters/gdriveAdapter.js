@@ -6,7 +6,7 @@ import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
 
 const GDRIVE_CLIENT_ID = import.meta.env.VITE_GDRIVE_CLIENT_ID || '';
 const GDRIVE_CLIENT_SECRET = import.meta.env.VITE_GDRIVE_CLIENT_SECRET || '';
-const REDIRECT_URI_NATIVE = 'https://danvitv.github.io/Glaze/oauth/gdrive/redirect.html';
+const REDIRECT_URI_NATIVE = 'com.hydall.glaze://oauth/gdrive';
 const REDIRECT_URI_WEB = 'http://localhost:5173/oauth/gdrive/redirect.html';
 const API_BASE = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
