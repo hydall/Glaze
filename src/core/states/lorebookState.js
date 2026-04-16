@@ -155,10 +155,23 @@ function classifyIndexingError(error) {
     return getIndexingErrorDetails('unknown', message || 'Unknown indexing error');
 }
 
+function buildMetadataLine(entry) {
+    const parts = [];
+    const comment = String(entry.comment || '').trim();
+    if (comment) parts.push(comment);
+    const keys = (entry.keys || []).map(k => String(k).trim()).filter(Boolean);
+    if (keys.length > 0) parts.push(keys.join(', '));
+    return parts.length > 0 ? parts.join(' | ') : '';
+}
+
 function getEntryIndexingText(entry, target) {
-    return (target === 'keys'
-        ? (entry.keys || []).join(', ')
-        : (entry.content || '')).trim();
+    if (target === 'keys') {
+        return (entry.keys || []).join(', ').trim();
+    }
+    const content = (entry.content || '').trim();
+    const meta = buildMetadataLine(entry);
+    if (!meta) return content;
+    return meta + '\n' + content;
 }
 
 async function saveEmbeddingError(entry, lorebookId, textHash, error) {
@@ -1044,14 +1057,20 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
     try {
         const hybridQueryText = focusedQueryText || fallbackQueryText;
 
+        function stripOOC(text) {
+            return text.replace(/\[OOC:\s*/gi, '').replace(/\(OOC:\s*/gi, '').replace(/\s*\]\s*/g, ' ').replace(/\s*\)\s*/g, ' ').trim();
+        }
+
         const runSearch = async (text, label) => {
             if (!text || !text.trim()) return [];
+            const cleanText = stripOOC(text);
             console.info('[vectorSearchLorebooks] embedding query', {
                 label,
-                queryLength: text.length,
-                queryPreview: text.substring(0, 200)
+                queryLength: cleanText.length,
+                queryPreview: cleanText.substring(0, 200),
+                originalPreview: text.substring(0, 200)
             });
-            const queryVectorsData = await getEmbeddings([text]);
+            const queryVectorsData = await getEmbeddings([cleanText]);
             if (!queryVectorsData || !queryVectorsData[0] || !queryVectorsData[0][0]?.vector) {
                 console.info('[vectorSearchLorebooks] skipped: embedding API returned no query vector', { label });
                 return [];
