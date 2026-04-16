@@ -234,7 +234,11 @@ export async function generateChatResponse({
         if (vectorResults.length > 0 && result.loreEntries) {
             const keywordIds = new Set(result.loreEntries.map(e => e.id));
             newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
-            result.loreEntries = [...result.loreEntries, ...newVectorEntries];
+            newVectorEntries.forEach(e => { e._source = 'vector'; });
+            result.loreEntries.forEach(e => { if (!e._source) e._source = 'keyword'; });
+            const keywordEntries = result.loreEntries.filter(e => e._source === 'keyword');
+            const vectorOnly = newVectorEntries.sort((a, b) => (b.vectorScore || 0) - (a.vectorScore || 0));
+            result.loreEntries = [...keywordEntries, ...vectorOnly];
         }
     } catch (e) {
         console.warn('[generateChatResponse] Vector search failed:', e);
