@@ -419,7 +419,7 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
     let candidates = [];
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
-            if (entry.enabled !== false && !entry.vectorSearch) {
+            if (entry.enabled !== false) {
                 if (char && entry.characterFilter) {
                     const { isExclude, names } = entry.characterFilter;
                     if (names && names.length > 0) {
@@ -1152,7 +1152,7 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
 
         const results = Array.from(combined.values())
             .sort((a, b) => b.score - a.score)
-            .filter(result => result.score >= (config.threshold || 0.45))
+            .filter(result => result.score >= (config.threshold || 0.55))
             .slice(0, config.topK || 5);
 
         console.info('[vectorSearchLorebooks] results ready', {

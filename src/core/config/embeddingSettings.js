@@ -25,7 +25,7 @@ export function getEmbeddingConfig() {
         target: localStorage.getItem('gz_embedding_target') || 'content',
         scanDepth: parseInt(localStorage.getItem('gz_embedding_scan_depth')) || 5,
         threshold: parseFloat(localStorage.getItem('gz_embedding_threshold')) || 0.45,
-        topK: parseInt(localStorage.getItem('gz_embedding_top_k')) || 15,
+        topK: parseInt(localStorage.getItem('gz_embedding_top_k')) || 10,
         maxChunkTokens: parseInt(localStorage.getItem('gz_embedding_max_chunk_tokens')) || 512,
         enabled: localStorage.getItem('gz_embedding_enabled') === 'true'
     };
