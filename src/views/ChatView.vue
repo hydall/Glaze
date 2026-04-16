@@ -3651,50 +3651,53 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         controller,
         callbacks: {
             onPromptReady: async ({ loreEntries, memoryEntries }) => {
-                let targetIndex = msgIndex;
-                // Place lorebooks on the user message that triggered this generation, if it exists
-                if (msgIndex > 0 && currentMessages.value[msgIndex - 1]?.role === 'user') {
-                    targetIndex = msgIndex - 1;
-                }
-                if (targetIndex !== -1 && currentMessages.value[targetIndex]) {
-                    const m = currentMessages.value[targetIndex];
-                    const triggeredLorebooks = loreEntries.map(e => ({
-                        id: e.id,
-                        // Lorebook entry display name: ST-compatible field is `comment`
-                        name: e.comment || e.name || e.keys?.[0] || 'Entry',
-                        content: e.content,
-                        lorebookName: e.lorebookName,
-                        lorebookId: e.lorebookId
-                    }));
-                    const triggeredMemories = (memoryEntries || []).map(entry => ({
-                        id: entry.id,
-                        name: entry.title || 'Memory',
-                        content: entry.content || '',
-                        messageIds: Array.isArray(entry.messageIds) ? entry.messageIds : []
-                    }));
-                    m.triggeredLorebooks = triggeredLorebooks;
-                    m.triggeredMemories = triggeredMemories;
-                    m.contextRefs = [
-                        ...triggeredLorebooks.map(entry => ({
+                const triggeredLorebooks = loreEntries.map(e => ({
+                    id: e.id,
+                    name: e.comment || e.name || e.keys?.[0] || 'Entry',
+                    content: e.content,
+                    lorebookName: e.lorebookName,
+                    lorebookId: e.lorebookId
+                }));
+                const triggeredMemories = (memoryEntries || []).map(entry => ({
+                    id: entry.id,
+                    name: entry.title || 'Memory',
+                    content: entry.content || '',
+                    messageIds: Array.isArray(entry.messageIds) ? entry.messageIds : []
+                }));
+                const contextRefs = [
+                    ...triggeredLorebooks.map(entry => ({
                         id: entry.id,
                         type: 'lorebook',
                         label: entry.name,
                         sourceId: entry.lorebookId || null,
                         sourceName: entry.lorebookName || null
-                        })),
-                        ...triggeredMemories.map(entry => ({
-                            id: entry.id,
-                            type: 'memory',
-                            label: entry.name,
-                            sourceId: sessionId,
-                            sourceName: 'Memory Book'
-                        }))
-                    ];
-                    const data = await getChatData(char.id);
-                    if (data) {
-                        data.sessions[sessionId] = currentMessages.value;
-                        await db.saveChat(char.id, data);
-                    }
+                    })),
+                    ...triggeredMemories.map(entry => ({
+                        id: entry.id,
+                        type: 'memory',
+                        label: entry.name,
+                        sourceId: sessionId,
+                        sourceName: 'Memory Book'
+                    }))
+                ];
+
+                const assignRefs = (m) => {
+                    m.triggeredLorebooks = triggeredLorebooks;
+                    m.triggeredMemories = triggeredMemories;
+                    m.contextRefs = contextRefs;
+                };
+
+                if (msgIndex !== -1 && currentMessages.value[msgIndex]) {
+                    assignRefs(currentMessages.value[msgIndex]);
+                }
+                if (msgIndex > 0 && currentMessages.value[msgIndex - 1]?.role === 'user') {
+                    assignRefs(currentMessages.value[msgIndex - 1]);
+                }
+
+                const data = await getChatData(char.id);
+                if (data) {
+                    data.sessions[sessionId] = currentMessages.value;
+                    await db.saveChat(char.id, data);
                 }
             },
             onUpdate,

@@ -837,5 +837,18 @@
     "vector_error_network_error": "Network error while requesting embeddings",
     "vector_error_invalid_response": "Embedding API returned an invalid response",
     "vector_error_unknown": "Unknown indexing error",
-    "hint_lorebook_macro_override": "Choose a per-entry insertion point, or Match Global to follow the lorebook default. {{lorebooks}} is now a valid entry target instead of a global override."
+    "hint_lorebook_macro_override": "Choose a per-entry insertion point, or Match Global to follow the lorebook default. {{lorebooks}} is now a valid entry target instead of a global override.",
+    "api_create_preset_desc": "Add new preset",
+    "api_presets": "API Presets",
+    "avatar": "Avatar",
+    "desc_show_reasoning": "Shows reasoning_content. Doesn't affect model's reasoning.",
+    "error_generation": "Generation Error",
+    "imggen_notification_body": "Generating image...",
+    "imggen_notification_title": "Glaze",
+    "label_custom_model": "Custom summary model",
+    "label_model": "Model",
+    "label_show_reasoning": "Show Native Reasoning",
+    "no_models_found": "No models found",
+    "no_prompt": "No prompt",
+    "top_p": "Top P"
 }

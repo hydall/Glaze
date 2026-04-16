@@ -593,16 +593,20 @@ Active branch: `fast-fixes`
 ### ⏳ PENDING (ordered by complexity)
 
 8. **Fix: lorebook injections shown for user but not assistant messages**
-   - Status: `not done | not tested`
-   - Complexity: easy
-   - Issue: Injection badges only appear on user messages, missing on assistant replies
-   - Investigation needed: Check `ChatMessage.vue` lorebook display, `loreEntries` storage per message
-   - Fix likely: Remove role-based filter in message rendering
+    - Status: `done | not tested`
+    - Complexity: easy
+    - Issue: Injection badges only appear on user messages, missing on assistant replies
+    - Root cause: `onPromptReady` in `ChatView.vue` redirected `triggeredLorebooks`/`triggeredMemories`/`contextRefs` to `msgIndex - 1` (user message) only
+    - Fix: Assign refs to both assistant message at `msgIndex` AND preceding user message at `msgIndex - 1`
+    - Branch: `feat/fast-fixes-batch3`
 
 9. **Add i18n keys for new features**
-   - Status: `partially done` (need new keys)
-   - Complexity: easy
-   - Missing: `desc_vector_search_replaces_keys` already added; check remaining gaps
+    - Status: `done | not tested`
+    - Complexity: easy
+    - Added 12 missing keys + 2 asymmetric fixes to both `en/index.json` and `ru/index.json`
+    - New keys: `api_create_preset_desc`, `api_presets`, `avatar`, `desc_show_reasoning`, `error_generation`, `imggen_notification_body`, `imggen_notification_title`, `label_custom_model`, `label_model`, `label_show_reasoning`, `no_models_found`, `no_prompt`
+    - Symmetry fixes: `top_p` → en, `regex_slash_commands` → ru
+    - Branch: `feat/fast-fixes-batch3`
 
 10. **Fix: streaming quote formatting breaks mid-quote**
     - Status: `not done | not tested`

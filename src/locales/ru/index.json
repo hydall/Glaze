@@ -843,5 +843,18 @@
     "vector_error_network_error": "Сетевая ошибка при запросе embedding",
     "vector_error_invalid_response": "Embedding API вернул некорректный ответ",
     "vector_error_unknown": "Неизвестная ошибка индексации",
-    "hint_lorebook_macro_override": "Выбери точку вставки для записи или \"Как в глобальных\", чтобы использовать дефолт лорбука. {{lorebooks}} теперь легальная цель вставки, а не глобальный override."
+    "hint_lorebook_macro_override": "Выбери точку вставки для записи или \"Как в глобальных\", чтобы использовать дефолт лорбука. {{lorebooks}} теперь легальная цель вставки, а не глобальный override.",
+    "api_create_preset_desc": "Добавить новый пресет",
+    "api_presets": "API пресеты",
+    "avatar": "Аватар",
+    "desc_show_reasoning": "Показывает reasoning_content. Не влияет на рассуждения модели.",
+    "error_generation": "Ошибка генерации",
+    "imggen_notification_body": "Генерация изображения...",
+    "imggen_notification_title": "Glaze",
+    "label_custom_model": "Кастомная модель саммари",
+    "label_model": "Модель",
+    "label_show_reasoning": "Показать нативное мышление",
+    "no_models_found": "Модели не найдены",
+    "no_prompt": "Нет промпта",
+    "regex_slash_commands": "Slash-команды"
 }
