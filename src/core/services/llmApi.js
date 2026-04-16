@@ -90,14 +90,20 @@ export async function executeRequest({
 
             const data = response.data;
             logger.debug("LLM Response (Native):", data);
+            
+            // Defensive check: ensure API returned valid structure
+            if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
+                throw new Error("Invalid API response structure (Native): " + JSON.stringify(data));
+            }
+            
             const content = data.choices[0].message.content;
             const rawReasoning = data.choices[0].message.reasoning_content;
 
-            let finalText = content;
+            let finalText = content || "";
             let finalReasoning = requestReasoning ? (rawReasoning || "") : "";
             let inlineReasoning = "";
 
-            if (hasInlineTags && content.includes(tagStart)) {
+            if (hasInlineTags && content && content.includes(tagStart)) {
                 const startIndex = content.indexOf(tagStart);
                 const endIndex = content.indexOf(tagEnd, startIndex);
                 if (endIndex !== -1) {
@@ -271,14 +277,20 @@ export async function executeRequest({
         } else {
             const data = await response.json();
             logger.debug("LLM Response:", data);
+            
+            // Defensive check: ensure API returned valid structure
+            if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
+                throw new Error("Invalid API response structure: " + JSON.stringify(data));
+            }
+            
             const content = data.choices[0].message.content;
             const rawReasoning = data.choices[0].message.reasoning_content;
 
-            let finalText = content;
+            let finalText = content || "";
             let finalReasoning = requestReasoning ? (rawReasoning || "") : "";
             let inlineReasoning = "";
 
-            if (hasInlineTags && content.includes(tagStart)) {
+            if (hasInlineTags && content && content.includes(tagStart)) {
                 const startIndex = content.indexOf(tagStart);
                 const endIndex = content.indexOf(tagEnd, startIndex);
                 if (endIndex !== -1) {

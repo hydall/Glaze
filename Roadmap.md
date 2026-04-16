@@ -617,15 +617,23 @@ Active branch: `fast-fixes`
     - Branch: `feat/fast-fixes-batch3`
 
 11. **Fix: messages stuck in "generating" state**
-    - Status: `not done | not tested`
+    - Status: `done | not tested`
     - Complexity: medium-hard
-    - Issue: Message stays with typing indicator after generation should complete
-    - Symptoms: timer stops, "generating" label persists, no new text arrives
-    - Investigation areas:
-      - Streaming parser error handling in `generateChatResponse`
-      - `isTyping` flag cleanup on error/cancel
-      - `generatingStates` cleanup on app background/foreground
-      - Web stream reader `finally` blocks
+    - Issue: Message stays with typing indicator after generation should complete (both streaming and non-streaming)
+    - Root causes found:
+      - Non-streaming mode: Invalid API responses (missing `data.choices[0]`) caused crashes without calling `onComplete`
+      - `onComplete`/`onError` handlers could fail with exceptions, leaving `isTyping=true`
+      - `onUnmounted` cleared timers but did NOT abort controllers or delete `generatingStates`, allowing background responses to update unmounted components
+      - No defensive checks in non-streaming JSON parsing
+    - Fixes applied:
+      - Added defensive validation before accessing `data.choices[0].message` in both Native and Web non-streaming paths (`llmApi.js:95-99, 276-280`)
+      - Wrapped `onComplete` handler in try/catch with `ensureCleanup()` fallback to guarantee `isTyping` cleared even on handler exceptions (`ChatView.vue:3734-3951`)
+      - Wrapped `onError` handler in try/catch with `ensureTypingCleared()` fallback (`ChatView.vue:3542-3638`)
+      - Added controller abort, timer cleanup, and localStorage flag removal in `onUnmounted` for ALL `generatingStates` (`ChatView.vue:5122-5159`)
+    - Files modified:
+      - `src/core/services/llmApi.js` (defensive checks for invalid API responses)
+      - `src/views/ChatView.vue` (robust error handling + unmount cleanup)
+    - Branch: `feat/fast-fixes-batch3`
 
 12. **Research: SillyTavern vector search implementation**
     - Status: `not done`
