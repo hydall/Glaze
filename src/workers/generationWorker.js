@@ -164,8 +164,9 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
 
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
-            // DUAL-CHANNEL: All entries participate in keyword scan, regardless of vectorSearch flag
-            if (entry.enabled !== false) {
+            // DUAL-CHANNEL: All entries participate in keyword scan, unless vectorSearch is enabled AND useKeywordSearch is explicitly disabled
+            const isVectorOnly = entry.vectorSearch && entry.useKeywordSearch === false;
+            if (entry.enabled !== false && !isVectorOnly) {
                 if (char && entry.characterFilter) {
                     const { isExclude, names } = entry.characterFilter;
                     if (names && names.length > 0) {

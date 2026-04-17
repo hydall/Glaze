@@ -42,7 +42,8 @@ function handleCreateEntry() {
         caseSensitive: null,
         matchWholeWords: null,
         useGroupScoring: null,
-        vectorSearch: false
+        vectorSearch: false,
+        useKeywordSearch: true
     };
     activeLorebook.value.entries.push(newEntry);
     selectEntry(newEntry, activeLorebook.value.entries.length - 1);
@@ -50,6 +51,10 @@ function handleCreateEntry() {
 }
 
 function selectEntry(entry, index) {
+    // Normalize useKeywordSearch for existing entries (default true for backward compatibility)
+    if (entry.useKeywordSearch === undefined) {
+        entry.useKeywordSearch = true;
+    }
     activeEntry.value = entry;
     activeEntryIndex.value = index;
     currentView.value = 'edit_entry';
@@ -918,8 +923,8 @@ defineExpose({ open, openEntry, close, openLorebook });
                 <div class="editor-scroll">
                     <div class="menu-group first-group">
                         <div class="section-header">{{ t('section_activation_logic') }} <HelpTip term="lorebook-keys"/></div>
-                        <div v-if="activeEntry.vectorSearch" class="settings-desc" style="padding:8px 0;color:var(--text-gray);">{{ t('desc_vector_search_replaces_keys') }}</div>
-                        <div v-if="!activeEntry.vectorSearch && !activeEntry.constant">
+                        <div v-if="activeEntry.vectorSearch" class="settings-desc" style="padding:8px 0;color:var(--text-success);">{{ t('desc_vector_search_supplements_keys') }}</div>
+                        <div v-if="!activeEntry.constant">
                         <div class="settings-item">
                                 <label>{{ t('label_primary_keys') }} <span class="hint">{{ t('hint_comma_separated') }}</span></label>
                                 <input type="text" :value="activeEntry.keys.join(', ')" @input="updateEntryKeys($event.target.value)" :placeholder="t('placeholder_keys')">
@@ -1076,6 +1081,13 @@ defineExpose({ open, openEntry, close, openLorebook });
                                 <div class="settings-desc">{{ activeEntry.constant ? t('desc_vector_disabled_for_constant') : t('desc_vector_search_entry') }}</div>
                             </div>
                             <input type="checkbox" v-model="activeEntry.vectorSearch" class="vk-switch" :disabled="activeEntry.constant">
+                        </div>
+                        <div v-if="activeEntry.vectorSearch && !activeEntry.constant" class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('label_use_keyword_search') }}</label>
+                                <div class="settings-desc">{{ t('desc_use_keyword_search') }}</div>
+                            </div>
+                            <input type="checkbox" v-model="activeEntry.useKeywordSearch" class="vk-switch">
                         </div>
                         <div v-if="activeEntry.vectorSearch && !activeEntry.constant" class="settings-item">
                             <button class="vk-btn-action" style="width:100%;" @click="handleIndexEntry" :disabled="indexingEntry">

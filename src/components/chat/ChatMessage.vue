@@ -901,7 +901,11 @@ onUnmounted(() => {
                         <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
                     </div>
                     <div class="item-info">
-                        <div class="item-label">{{ lb.name }}</div>
+                        <div class="item-label">
+                            {{ lb.name }}
+                            <span v-if="lb._source === 'keyword'" class="retrieval-badge keyword-badge">keyword</span>
+                            <span v-else-if="lb._source === 'vector'" class="retrieval-badge vector-badge">vector</span>
+                        </div>
                         <div class="item-sublabel">{{ lb.lorebookName }}</div>
                     </div>
                 </div>
@@ -1197,6 +1201,31 @@ onUnmounted(() => {
     font-size: 14px;
     font-weight: 500;
     color: var(--text-black);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.retrieval-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.keyword-badge {
+    background: rgba(52, 199, 89, 0.15);
+    color: #34c759;
+    border: 1px solid rgba(52, 199, 89, 0.3);
+}
+
+.vector-badge {
+    background: rgba(191, 90, 242, 0.15);
+    color: #bf5af2;
+    border: 1px solid rgba(191, 90, 242, 0.3);
 }
 
 .item-sublabel {

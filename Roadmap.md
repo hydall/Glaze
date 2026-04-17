@@ -824,11 +824,178 @@ Active branch: `fast-fixes`
     - Background/location detail enrichment from lorebooks
 
 ### Branch Strategy (updated)
-- Current: `feat/sync-infrastructure-fixes` (from `feat/multi-vector-retrieval`)
-- Previous: `feat/multi-vector-retrieval` (PR #30, open)
-- Policy: **Linear chain workflow** — each feature branches from previous feature, not from origin/dev
+- Current: `feat/refactor-tokenizer-memorybooks` (from `origin/dev` at 210efa4)
+- Previous: Merged branches deleted (bug-fixes, feat/dual-lorebook-debug)
+- Policy: **Linear chain workflow** — each feature branches from previous feature OR origin/dev for new chains
 - Never create branches from dev that contain multiple unmerged features
 - All PRs target `upstream/dev`, never `main`
+
+## Refactoring Phase — Tokenizer, Memory Books, Vectors/Lorebooks (Active)
+
+Branch: `feat/refactor-tokenizer-memorybooks`
+Status: In progress
+Goal: Clean up technical debt, fix UX issues, improve user-facing workflows
+
+### Analysis Summary
+
+Three deep-dive explorations completed on 2026-04-17:
+1. **Tokenizer**: Currently working correctly, recently fixed. No critical issues found. Uses SheetView bottom sheet pattern. Architecture is clean.
+2. **Memory Books**: Functionally complete but uses temporary bottom sheet UI. Many features marked `done | not tested`. Needs polished dedicated component.
+3. **Vectors/Lorebooks**: Backend dual-channel (vector+keyword) works correctly, but UI presents it as mutually exclusive. Creates user confusion.
+
+### Phase 1: Vector/Lorebook UX Fixes (CRITICAL — misleading UI)
+
+Status: `not done | not tested`
+
+**Problem**: Dual-channel retrieval is implemented and working in backend, but UI hides keyword fields when vector is enabled and shows "Vector search replaces keys" message. This is factually incorrect.
+
+**Root Cause Analysis**:
+- Backend (generationWorker.js:167): ALL entries participate in keyword scan regardless of `vectorSearch` flag
+- Backend (generationService.js:230-242): Vector results are merged with keyword results, deduplicated, keyword matches prioritized
+- Frontend (LorebookSheet.vue:922): Hides keyword UI when `vectorSearch: true`
+- Frontend (LorebookSheet.vue:921): Shows misleading "replaces keys" message
+
+**Tasks**:
+1. [not done | not tested] **Remove keyword UI hiding** (LorebookSheet.vue:922)
+   - Change: Remove `&& !activeEntry.vectorSearch` condition from `v-if`
+   - Show keyword fields at all times — they work regardless of vector flag
+   
+2. [not done | not tested] **Fix misleading "replaces keys" message** (LorebookSheet.vue:921)
+   - Old: "Vector search replaces keys"
+   - New: "Vector search supplements keyword matching (dual-channel retrieval)"
+   
+3. [not done | not tested] **Add retrieval source visibility**
+   - Show badges in triggered lorebooks UI: `[keyword]`, `[vector]`, `[hybrid]`
+   - Use existing `_source` tags from generationService.js:237-238
+   
+4. [not done | not tested] **Decouple constant from vectorSearch** (LorebookSheet.vue:1078)
+   - Remove `:disabled="activeEntry.constant"` from vector checkbox
+   - Allow vector indexing for constant entries (future-proofing)
+   
+5. [not done | not tested] **Optional: Add hybrid scoring visibility**
+   - Show `hybridBoost` and `descriptorBoost` values in debug/advanced UI
+   
+6. [not done | not tested] **Cleanup: Remove debug code** (lorebookState.js:1080-1110)
+   - Remove Asei-specific debug logging from production code
+   
+7. [not done | not tested] **Add keyword+vector statistics**
+   - Show summary in tokenizer or lorebook manager: "X by keyword, Y by vector, Z hybrid"
+
+**Files to modify**:
+- `src/components/sheets/LorebookSheet.vue` (lines 921, 922, 1078)
+- `src/core/states/lorebookState.js` (lines 1080-1110 cleanup)
+- `src/components/chat/ChatMessage.vue` (add retrieval source badges)
+
+### Phase 2: Memory Books UI Refactoring
+
+Status: `not done | not tested`
+
+**Problem**: All memory book UI uses temporary bottom sheet implementation in ChatView.vue. Should be dedicated polished component. Many lifecycle features are untested.
+
+**Tasks**:
+1. [not done | not tested] **Extract memory books UI into dedicated component**
+   - Create `src/components/sheets/MemoryBooksSheet.vue`
+   - Move logic from ChatView.vue:1684-2070 (openMemoryBooksSheet)
+   - Move settings from ChatView.vue:1300-1551 (openMemoryGenerationSettings)
+   - Move prompt manager from ChatView.vue:1553-1629 (openMemoryPromptManager)
+   
+2. [not done | not tested] **Add regenerate button to memory entry preview**
+   - Location: Memory entry edit/preview UI
+   - Behavior: Regenerate memory content for the same message range
+   - Disable if messages in range are still in active context window
+   
+3. [not done | not tested] **Fix: Memory menu in chat doesn't persist settings state**
+   - Settings from main Memory Books sheet should sync with in-chat memory UI
+   - Both should use same session.memoryBooks[sessionId].settings source
+   
+4. [not done | not tested] **Improve memory generation prompts**
+   - Reference: https://github.com/aikohanasaki/SillyTavern-MemoryBooks
+   - Current prompts write too little information
+   - Need more detailed, context-aware extraction
+   
+5. [not done | not tested] **Add comprehensive testing for memory lifecycle**
+   - Test: Message deletion → memory reconciliation (ChatView.vue:2072-2096)
+   - Test: Memory automation triggers (ChatView.vue:1022-1092)
+   - Test: Vector search toggle for memories
+   - Test: Draft generation and approval flow
+
+**Files to modify**:
+- NEW: `src/components/sheets/MemoryBooksSheet.vue`
+- `src/views/ChatView.vue` (extract logic, reduce from 5000+ lines)
+- Memory generation prompt presets (ChatView.vue:655-702)
+
+### Phase 3: Tokenizer Improvements (Optional)
+
+Status: `not done | not tested`
+
+**Problem**: Tokenizer currently works correctly but uses inline bottom sheet in ChatView.vue. Could be extracted for consistency with other sheets.
+
+**Tasks**:
+1. [not done | not tested] **Migrate tokenizer sheet display to dedicated component** (Optional)
+   - Refactor ChatView.vue:2633-2745 (openContextSheet) to use SheetView.vue pattern
+   - Keep computed properties in ChatView, pass as props
+   - Note: This is LOW priority — current implementation works fine
+   
+2. [not done | not tested] **Add separate menus for different injection types**
+   - Current: All lorebooks shown together in one view
+   - Requested: Separate views for:
+     - Vector-only lorebooks
+     - Keyword-injected lorebooks (@worldInfoBefore, @worldInfoAfter)
+     - Memory books
+   - Each view shows only entries using that injection method
+   
+3. [not done | not tested] **Fix: All menus should return to previous screen on save/cancel**
+   - Apply to: Tokenizer, Memory Books, Lorebook sheets
+   - Use navigation stack pattern (already exists for prompt preview)
+
+**Files to modify**:
+- `src/views/ChatView.vue` (tokenizer sheet extraction)
+- `src/components/sheets/LorebookSheet.vue` (injection type filters)
+- Navigation state management for all sheets
+
+### Phase 4: Lorebook Optional Keyword Search for Vectorized Entries
+
+Status: `not done | not tested`
+
+**Problem**: When vector search is enabled for a lorebook entry, keyword search also runs (dual-channel), but user cannot optionally disable it.
+
+**Requested Behavior**: When vector search is enabled, add a checkbox "Also use keyword search" (enabled by default). This makes dual-channel optional instead of hardcoded.
+
+**Tasks**:
+1. [not done | not tested] **Add `useKeywordSearch` flag to entry schema**
+   - Default: `true` (preserve current dual-channel behavior)
+   - Only applies when `vectorSearch: true`
+   - When `false`: entry excluded from keyword scan, vector-only
+   
+2. [not done | not tested] **Update worker to respect flag**
+   - generationWorker.js:167 — Filter entries with `vectorSearch && !useKeywordSearch`
+   - Keep current behavior for entries with `vectorSearch && useKeywordSearch`
+   
+3. [not done | not tested] **Add UI checkbox in LorebookSheet**
+   - Show only when `vectorSearch: true`
+   - Label: "Also use keyword matching (dual-channel)"
+   - Default: checked
+
+**Files to modify**:
+- `src/core/states/lorebookState.js` (schema, default value)
+- `src/workers/generationWorker.js` (keyword scan filter)
+- `src/components/sheets/LorebookSheet.vue` (UI checkbox)
+
+### Execution Order
+
+1. **Phase 1** (Vector/Lorebook UX) — HIGHEST priority, misleading UI confuses users
+2. **Phase 4** (Optional keyword search) — Completes Phase 1, gives user control
+3. **Phase 2** (Memory Books UI) — Technical debt, improves maintainability
+4. **Phase 3** (Tokenizer) — LOWEST priority, optional polish
+
+### Testing Checklist
+
+After each phase:
+- [ ] `npm run build` passes without errors
+- [ ] Manual testing in browser (web build)
+- [ ] Verify backward compatibility (existing lorebooks/memories load correctly)
+- [ ] Check console for errors
+- [ ] Test on mobile if UI changes affect touch targets
 
 ## Sync Setup Guide — For Developers
 
