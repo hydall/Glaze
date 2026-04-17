@@ -231,14 +231,55 @@ export async function generateChatResponse({
     let vectorLoreTokens = 0;
     try {
         const vectorResults = await vectorSearchLorebooks(safeHistory || history, text, char, char?.sessionId);
+        
+        console.info('[generateChatResponse] Dual-channel lorebook merge', {
+            keywordMatches: result.loreEntries?.length || 0,
+            vectorMatches: vectorResults.length,
+            keywordEntries: result.loreEntries?.map(e => ({
+                id: e.id,
+                comment: e.comment,
+                keys: e.keys
+            })) || [],
+            vectorEntries: vectorResults.map(e => ({
+                id: e.id,
+                comment: e.comment,
+                keys: e.keys,
+                score: e.vectorScore
+            }))
+        });
+        
         if (vectorResults.length > 0 && result.loreEntries) {
             const keywordIds = new Set(result.loreEntries.map(e => e.id));
             newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
+            
+            const duplicates = vectorResults.filter(e => keywordIds.has(e.id));
+            console.info('[generateChatResponse] Dual-channel deduplication', {
+                keywordMatchedIds: Array.from(keywordIds),
+                vectorOnlyCount: newVectorEntries.length,
+                duplicatesRemoved: duplicates.length,
+                duplicateEntries: duplicates.map(e => ({
+                    id: e.id,
+                    comment: e.comment,
+                    vectorScore: e.vectorScore
+                }))
+            });
+            
             newVectorEntries.forEach(e => { e._source = 'vector'; });
             result.loreEntries.forEach(e => { if (!e._source) e._source = 'keyword'; });
             const keywordEntries = result.loreEntries.filter(e => e._source === 'keyword');
             const vectorOnly = newVectorEntries.sort((a, b) => (b.vectorScore || 0) - (a.vectorScore || 0));
             result.loreEntries = [...keywordEntries, ...vectorOnly];
+            
+            console.info('[generateChatResponse] Final lorebook order', {
+                total: result.loreEntries.length,
+                keywordFirst: keywordEntries.length,
+                vectorLast: vectorOnly.length,
+                finalOrder: result.loreEntries.map(e => ({
+                    id: e.id,
+                    comment: e.comment,
+                    source: e._source
+                }))
+            });
         }
     } catch (e) {
         console.warn('[generateChatResponse] Vector search failed:', e);
@@ -509,9 +550,39 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
         let vectorLoreTokens = 0;
         try {
             const vectorResults = await vectorSearchLorebooks(safeHistory || history, '', char, char?.sessionId);
+            
+            console.info('[calculateContext] Dual-channel lorebook merge', {
+                keywordMatches: result.loreEntries?.length || 0,
+                vectorMatches: vectorResults.length,
+                keywordEntries: result.loreEntries?.map(e => ({
+                    id: e.id,
+                    comment: e.comment,
+                    keys: e.keys
+                })) || [],
+                vectorEntries: vectorResults.map(e => ({
+                    id: e.id,
+                    comment: e.comment,
+                    keys: e.keys,
+                    score: e.vectorScore
+                }))
+            });
+            
             if (vectorResults.length > 0) {
                 const keywordIds = result.loreEntries ? new Set(result.loreEntries.map(e => e.id)) : new Set();
                 const newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
+                
+                const duplicates = vectorResults.filter(e => keywordIds.has(e.id));
+                console.info('[calculateContext] Dual-channel deduplication', {
+                    keywordMatchedIds: Array.from(keywordIds),
+                    vectorOnlyCount: newVectorEntries.length,
+                    duplicatesRemoved: duplicates.length,
+                    duplicateEntries: duplicates.map(e => ({
+                        id: e.id,
+                        comment: e.comment,
+                        vectorScore: e.vectorScore
+                    }))
+                });
+                
                 vectorLoreTokens = newVectorEntries.reduce((sum, entry) => {
                     const content = entry.content || '';
                     const tokens = estimateTokens(content);

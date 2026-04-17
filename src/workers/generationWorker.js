@@ -162,6 +162,9 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
     let allRelevantEntries = [];
     let candidates = [];
 
+    // DEBUG: Track entries excluded from keyword scan
+    let vectorSearchEntries = [];
+
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
             if (entry.enabled !== false && !entry.vectorSearch) {
@@ -175,8 +178,27 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
                     }
                 }
                 candidates.push({ ...entry, lorebookName: lb.name, lorebookId: lb.id });
+            } else if (entry.enabled !== false && entry.vectorSearch) {
+                vectorSearchEntries.push({
+                    id: entry.id,
+                    comment: entry.comment,
+                    keys: entry.keys,
+                    lorebookName: lb.name
+                });
             }
         });
+    });
+
+    console.info('[scanLorebooksPure] Keyword scan candidates', {
+        totalEntries: activeLorebooks.reduce((sum, lb) => sum + lb.entries.filter(e => e.enabled !== false).length, 0),
+        keywordCandidates: candidates.length,
+        vectorSearchEntries: vectorSearchEntries.length,
+        excludedFromKeywordScan: vectorSearchEntries.map(e => ({
+            id: e.id,
+            comment: e.comment,
+            keys: e.keys,
+            lorebook: e.lorebookName
+        }))
     });
 
     candidates.filter(e => e.constant).forEach(entry => {
@@ -305,7 +327,19 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
         }
     }
 
-    return allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+    const finalEntries = allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+    
+    console.info('[scanLorebooksPure] Keyword scan results', {
+        matched: finalEntries.length,
+        entries: finalEntries.map(e => ({
+            id: e.id,
+            comment: e.comment,
+            keys: e.keys,
+            lorebook: e.lorebookName
+        }))
+    });
+
+    return finalEntries;
 }
 
 function squashHistory(historyMsgs, squashRole) {
