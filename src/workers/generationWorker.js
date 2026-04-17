@@ -435,6 +435,14 @@ function buildBlockSourceReplacements(char, personaObj, sessionVars, notifyObj, 
 
 function buildPromptMessagesWorker(args) {
     let { char, history, summary, activePreset, mergePrompts, mergeRole, noAssistant, userPrefix, charPrefix, squashRole, personaObj, authorsNote, guidanceText, guidanceType, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
+    
+    console.info('[buildPromptMessagesWorker] Called with', {
+        historyLength: history?.length || 0,
+        lastUserMessage: history?.filter(m => m.role === 'user').slice(-1)[0]?.content?.substring(0, 100) || 'none',
+        lorebooksCount: lorebooks?.length || 0,
+        charId: char?.id
+    });
+    
     if (noAssistant) mergePrompts = true;
 
     const messages = [];
