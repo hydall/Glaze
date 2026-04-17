@@ -162,12 +162,13 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
     let allRelevantEntries = [];
     let candidates = [];
 
-    // DEBUG: Track entries excluded from keyword scan
+    // DEBUG: Track vector-enabled entries that participate in keyword scan
     let vectorSearchEntries = [];
 
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
-            if (entry.enabled !== false && !entry.vectorSearch) {
+            // DUAL-CHANNEL FIX: All entries participate in keyword scan, regardless of vectorSearch flag
+            if (entry.enabled !== false) {
                 if (char && entry.characterFilter) {
                     const { isExclude, names } = entry.characterFilter;
                     if (names && names.length > 0) {
@@ -178,27 +179,25 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
                     }
                 }
                 candidates.push({ ...entry, lorebookName: lb.name, lorebookId: lb.id });
-            } else if (entry.enabled !== false && entry.vectorSearch) {
-                vectorSearchEntries.push({
-                    id: entry.id,
-                    comment: entry.comment,
-                    keys: entry.keys,
-                    lorebookName: lb.name
-                });
+                
+                // Track entries that also have vector search enabled
+                if (entry.vectorSearch) {
+                    vectorSearchEntries.push({
+                        id: entry.id,
+                        comment: entry.comment,
+                        keys: entry.keys,
+                        lorebookName: lb.name
+                    });
+                }
             }
         });
     });
 
-    console.info('[scanLorebooksPure] Keyword scan candidates', {
+    console.info('[scanLorebooksPure] Keyword scan candidates (DUAL-CHANNEL)', {
         totalEntries: activeLorebooks.reduce((sum, lb) => sum + lb.entries.filter(e => e.enabled !== false).length, 0),
         keywordCandidates: candidates.length,
-        vectorSearchEntries: vectorSearchEntries.length,
-        excludedFromKeywordScan: vectorSearchEntries.map(e => ({
-            id: e.id,
-            comment: e.comment,
-            keys: e.keys,
-            lorebook: e.lorebookName
-        }))
+        vectorEnabledEntries: vectorSearchEntries.length,
+        dualChannelInfo: `All ${candidates.length} entries participate in keyword scan. ${vectorSearchEntries.length} of them also have vectorSearch enabled and will participate in vector search if they don't match keywords.`
     });
 
     candidates.filter(e => e.constant).forEach(entry => {
