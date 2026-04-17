@@ -237,7 +237,7 @@ function scoreDescriptorBoost(entry, queryText) {
 export const lorebookState = reactive({
     lorebooks: [],
     globalSettings: {
-        scanDepth: 1000,
+        scanDepth: 10,
         contextPercent: 100,
         budgetCap: 0,
         reserveMode: 'percent',
@@ -508,7 +508,7 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
                 }
             };
 
-            const scanDepth = entry.scanDepth ?? 1;
+            const scanDepth = entry.scanDepth ?? lorebookState.globalSettings.scanDepth ?? 10;
             const messagesToScan = history.slice(-scanDepth).map(m => m.content).join("\n");
 
             // Only scan generated text (textToScan) if recursive scan is enabled OR it's the first iteration (static scan)

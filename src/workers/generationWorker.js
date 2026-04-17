@@ -246,7 +246,7 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
                 return haystack.includes(needle);
             };
 
-            const scanDepth = entry.scanDepth ?? 1;
+            const scanDepth = entry.scanDepth ?? globalSettings.scanDepth ?? 10;
             const messagesToScan = history.slice(-scanDepth).map(m => m.content).join("\n");
 
             const scanSource = caseSensitive ?

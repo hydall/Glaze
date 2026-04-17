@@ -973,7 +973,11 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
     const sessionId = activeChatChar.sessionId || chatData.currentId;
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
     const automation = ensureMemoryAutomationState(memoryBook);
-    if (automation.isGeneratingDraft) return false;
+    
+    if (automation.isGeneratingDraft) {
+        showToast('Already generating a draft. Please wait...');
+        return false;
+    }
 
     const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
     const summary = chatData?.summaries?.[sessionId] || null;
@@ -1017,18 +1021,16 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
     const selectedIds = selected.map(msg => msg.id).filter(Boolean);
     if (!selectedIds.length) return false;
 
-    const conflictingEntry = findConflictingMemoryEntry(memoryBook, selectedIds, {
-        includeEntries: true,
-        includeDrafts: true,
-        overlapThreshold: source === 'manual_draft' ? 0.95 : 0.8
-    });
-    if (conflictingEntry) {
-        if (source === 'manual_draft') {
-            showToast(conflictingEntry.reason === 'exact'
-                ? 'A memory entry or draft already exists for this exact segment'
-                : 'A very similar memory entry or draft already covers most of this segment');
+    // Skip conflict check for manual drafts — user explicitly wants to create a draft
+    if (source !== 'manual_draft' && source !== 'manual_regenerate') {
+        const conflictingEntry = findConflictingMemoryEntry(memoryBook, selectedIds, {
+            includeEntries: true,
+            includeDrafts: true,
+            overlapThreshold: 0.8
+        });
+        if (conflictingEntry) {
+            return false;
         }
-        return false;
     }
 
     try {
@@ -1037,8 +1039,11 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
         await db.saveChat(activeChatChar.id, chatData);
 
         startMemoryDraftProgress(source === 'manual_draft' ? 'Generating selected memory draft' : 'Generating memory draft');
-        if (bottomSheetState.title === 'Memory Books') {
+        if (bottomSheetState.title === 'Memory Books' && bottomSheetState.isOpen) {
             closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        } else if (source === 'manual_draft' || source === 'manual_regenerate') {
+            // Open Memory Books sheet immediately so user sees generation progress
             setTimeout(() => openMemoryBooksSheet(), 50);
         }
         showToast('Generating memory draft...', 2000);
@@ -1076,7 +1081,9 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
         await db.saveChat(activeChatChar.id, chatData);
         stopMemoryDraftProgress();
         console.error('Failed to generate memory draft:', error);
-        showToast(`Memory draft failed: ${formatError(error)}`);
+        // Close sheet first so toast is visible, then show error
+        closeBottomSheet();
+        setTimeout(() => showToast(`Memory draft failed: ${formatError(error)}`, 5000), 100);
         return false;
     }
 }
@@ -5329,6 +5336,14 @@ watch(() => memoryDraftState.value.elapsedMs, (newElapsed) => {
     const timerEl = document.getElementById('memory-draft-timer');
     if (timerEl) {
         timerEl.textContent = formatElapsedSeconds(newElapsed);
+    }
+});
+
+// Watch memoryDraftState.active to show/hide draft generation progress card
+watch(() => memoryDraftState.value.active, (isActive) => {
+    // If Memory Books sheet is currently open, refresh it to show/hide draftProgressCard
+    if (bottomSheetState.title === 'Memory Books' && bottomSheetState.isOpen) {
+        openMemoryBooksSheet();
     }
 });
 

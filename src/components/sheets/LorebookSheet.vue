@@ -185,11 +185,13 @@ function resetAllEntriesToGlobal() {
         const didChange = entry.caseSensitive !== null
             || entry.matchWholeWords !== null
             || entry.useGroupScoring !== null
-            || entry.position !== 'matchGlobal';
+            || entry.position !== 'matchGlobal'
+            || entry.scanDepth !== null;
         entry.caseSensitive = null;
         entry.matchWholeWords = null;
         entry.useGroupScoring = null;
         entry.position = 'matchGlobal';
+        entry.scanDepth = null;
         if (didChange) changedCount += 1;
     });
     showToast(changedCount > 0

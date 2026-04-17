@@ -985,20 +985,31 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
     }
 
     let result = "";
-
+    
+    let requestError = null;
+    
     await executeRequest({
         apiUrl,
         apiKey,
         requestBody: {
             model,
             messages: [{ role: 'user', content: finalPrompt }],
-            temperature: temp
+            temperature: temp,
+            stream: false
         },
+        stream: false,
         controller,
         callbacks: {
-            onComplete: (text) => { result = text; }
+            onUpdate: (chunk, reasoningChunk, effectiveText) => {
+                if (effectiveText) result = effectiveText;
+                else if (chunk) result += chunk;
+            },
+            onComplete: (text) => { if (text) result = text; },
+            onError: (err) => { requestError = err; }
         }
     });
+    
+    if (requestError) throw requestError;
 
     return result;
 }
