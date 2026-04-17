@@ -61,3 +61,9 @@ export function setDialogGrouping(value) {
     dialogGrouping.value = value;
     localStorage.setItem('gz_dialog_grouping', value);
 }
+
+export const chatPaddingLR = ref(parseInt(localStorage.getItem('gz_chat_padding_lr') || '0', 10));
+export function setChatPaddingLR(value) {
+    chatPaddingLR.value = value;
+    localStorage.setItem('gz_chat_padding_lr', value);
+}

@@ -214,7 +214,7 @@ const openSortTypeSelector = () => {
         items: [
             {
                 label: translations[currentLang.value]?.sort_name || 'Name',
-                icon: sortType.value === 'name' ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+                isActive: sortType.value === 'name',
                 onClick: () => {
                     sortType.value = 'name';
                     closeBottomSheet();
@@ -222,7 +222,7 @@ const openSortTypeSelector = () => {
             },
             {
                 label: translations[currentLang.value]?.sort_date || 'Date added',
-                icon: sortType.value === 'date' ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+                isActive: sortType.value === 'date',
                 onClick: () => {
                     sortType.value = 'date';
                     closeBottomSheet();
@@ -515,7 +515,7 @@ defineExpose({ onAddCharacter });
       </div>
       <div class="preset-selector" @click="openSortTypeSelector">
         <span>{{ sortType === 'name' ? (translations[currentLang.value]?.sort_name || 'Name') : (translations[currentLang.value]?.sort_date || 'Date added') }}</span>
-        <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
+        <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;" class="selector-chevron"><path d="M7 10l5 5 5-5z"/></svg>
       </div>
     </div>
 
@@ -633,8 +633,9 @@ defineExpose({ onAddCharacter });
   backdrop-filter: blur(var(--element-blur, 12px));
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
   border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
-  transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
+  transition: transform 0.1s ease, background-color 0.2s, border-color 0.2s, opacity 0.2s;
   overflow: hidden;
+  user-select: none;
 }
 
 .preset-selector:active {
@@ -642,11 +643,24 @@ defineExpose({ onAddCharacter });
   opacity: 0.8;
 }
 
-.preset-selector svg {
-    width: 20px;
-    height: 20px;
-    fill: currentColor;
+.preset-selector.dropdown-open {
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.25);
+  border-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.5);
 }
+
+.preset-selector.dropdown-open .selector-chevron {
+  transform: rotate(180deg);
+}
+
+.selector-chevron {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Styles */
+
 
 /* Favorites Section */
 .favorites-section {

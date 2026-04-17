@@ -279,6 +279,13 @@ body.app-loaded {
     border-radius: 3px;
 }
 
+::-webkit-resizer {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    background-clip: content-box;
+    border: 3px solid transparent;
+}
+
 /* App Loader */
 .app-loader-container {
     position: fixed;

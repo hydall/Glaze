@@ -168,3 +168,108 @@ export async function onKeyboardHide(callback) {
     }
     return { remove: () => { } };
 }
+
+export function attachKeyboardFocusHandler(contentRef, callbacks = {}) {
+    const isTextFieldFocused = ref(false);
+    const isLocalKeyboardOpen = ref(false);
+
+    function updateFocusState() {
+        const active = document.activeElement;
+        if (!active) {
+            isTextFieldFocused.value = false;
+            return;
+        }
+
+        const isInside = contentRef.value?.contains(active) || active?.closest('.sheet-view-content');
+
+        if (isInside) {
+            const tagName = active.tagName;
+            let isTextEntry = false;
+
+            if (tagName === 'TEXTAREA') {
+                isTextEntry = true;
+            } else if (tagName === 'INPUT') {
+                const textTypes = ['text', 'password', 'email', 'number', 'tel', 'url', 'search', 'date', 'datetime-local', 'month', 'time', 'week'];
+                isTextEntry = textTypes.includes(active.type.toLowerCase());
+            } else if (active.isContentEditable) {
+                isTextEntry = true;
+            }
+
+            isTextFieldFocused.value = isTextEntry;
+
+            if (isTextEntry && Capacitor.isNativePlatform()) {
+                showKeyboard();
+            }
+        } else {
+            isTextFieldFocused.value = false;
+        }
+
+        if (!Capacitor.isNativePlatform()) {
+            isLocalKeyboardOpen.value = isTextFieldFocused.value;
+        }
+    }
+
+    let kbListeners = [];
+
+    function onFocusIn() {
+        updateFocusState();
+        if (isLocalKeyboardOpen.value && callbacks.onKeyboardOpen) {
+            callbacks.onKeyboardOpen();
+        }
+    }
+
+    function onFocusOut() {
+        setTimeout(updateFocusState, 50);
+    }
+
+    async function mount() {
+        document.addEventListener('focusin', onFocusIn);
+        document.addEventListener('focusout', onFocusOut);
+
+        if (Capacitor.isNativePlatform()) {
+            kbListeners.push(await onKeyboardShow((info) => {
+                updateFocusState();
+                if (isTextFieldFocused.value) {
+                    if (callbacks.onKeyboardOpen) callbacks.onKeyboardOpen();
+                    if (info && info.keyboardHeight) {
+                        applyKeyboardOverlap(info.keyboardHeight);
+                    }
+                    isLocalKeyboardOpen.value = true;
+                    if (callbacks.onKeyboardExpanded) callbacks.onKeyboardExpanded(info);
+                }
+            }));
+            kbListeners.push(await onKeyboardHide(() => {
+                isLocalKeyboardOpen.value = false;
+                isTextFieldFocused.value = false;
+                if (callbacks.onKeyboardRestored) callbacks.onKeyboardRestored();
+            }));
+        }
+    }
+
+    function unmount() {
+        document.removeEventListener('focusin', onFocusIn);
+        document.removeEventListener('focusout', onFocusOut);
+        kbListeners.forEach(l => l.remove());
+    }
+
+    function hideLocalKeyboard() {
+        if (isLocalKeyboardOpen.value) {
+            isLocalKeyboardOpen.value = false;
+            const active = document.activeElement;
+            if (active && contentRef.value?.contains(active)) {
+                active.blur();
+            }
+            if (Capacitor.isNativePlatform()) {
+                hideKeyboard();
+            }
+        }
+    }
+
+    return {
+        isLocalKeyboardOpen,
+        isTextFieldFocused,
+        mount,
+        unmount,
+        hideLocalKeyboard
+    };
+}

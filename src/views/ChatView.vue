@@ -19,7 +19,7 @@ import { formatText, cleanText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/personaState.js';
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
-import { currentLang } from '@/core/config/APPSettings.js';
+import { currentLang, chatPaddingLR } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { generateChatResponse, calculateContext } from '@/core/services/generationService.js';
 import { executeRequest } from '@/core/services/llmApi.js';
@@ -56,6 +56,13 @@ const isAndroid = Capacitor.getPlatform() === 'android';
 const chatViewRoot = ref(null);
 const messagesContainer = ref(null);
 const chatInputContainer = ref(null);
+
+const chatRootStyle = computed(() => {
+    return {
+        '--chat-padding-lr': (chatPaddingLR.value > 0) ? `${chatPaddingLR.value}px` : '0px'
+    };
+});
+
 const chatInputRef = ref(null);
 const inputValue = ref('');
 const isImpersonating = ref(false);
@@ -814,6 +821,9 @@ async function openChat(char, onBack, force = false) {
 
     isOpeningChat = true;
     isLoading.value = true;
+    // Reset stale cutoff state from previous chat immediately
+    cutoffIndex.value = -1;
+    contextBreakdown.value = null;
 
     try {
     // Attempt to migrate legacy stats locally
@@ -2884,6 +2894,7 @@ defineExpose({
     openChat,
     restoreHeader,
     openLorebookEntry,
+    startImpersonation,
     openPersonas: () => { chatInputRef.value?.openPersonas(); },
     initChat: () => {},
     // Desktop right-panel magic handlers
@@ -2898,6 +2909,7 @@ defineExpose({
     openGlossarySheet,
     openAuthorsNoteSheet: () => presetView.value?.openAuthorsNoteSheet(),
     openSummarySheet: () => presetView.value?.openSummarySheet(),
+    openContextSheet: () => openContextSheet(),
 });
 
 const onGenerationEnded = (e) => {
@@ -3139,7 +3151,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div id="view-chat" ref="chatViewRoot" :class="{ 'android-resize-fix': isAndroid }">
+    <div id="view-chat" ref="chatViewRoot" :class="{ 'android-resize-fix': isAndroid }" :style="chatRootStyle">
         <div v-if="isLoading" class="chat-loading-overlay">
             <div class="app-loader-spinner"></div>
         </div>
