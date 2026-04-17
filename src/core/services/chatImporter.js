@@ -55,7 +55,29 @@ async function importGlazeChatPackage(json, characterId, userPersona) {
     }
     if (json.memoryBook) {
         if (!chatData.memoryBooks) chatData.memoryBooks = {};
-        chatData.memoryBooks[sessionId] = JSON.parse(JSON.stringify(json.memoryBook));
+        const importedBook = JSON.parse(JSON.stringify(json.memoryBook));
+        // Clear transient state from imported memory book — drafts and automation
+        // should not carry over; user must manually scan and generate after import
+        importedBook.pendingDrafts = [];
+        if (importedBook.automation) {
+            importedBook.automation.pendingTrigger = null;
+            importedBook.automation.isGeneratingDraft = false;
+            importedBook.automation.plannedSegments = [];
+        }
+        // Reset generation settings that may be invalid on another device
+        if (importedBook.settings) {
+            const validPresets = ['detailed_beats', 'concise_narrative', 'structured_markdown', 'minimal_factual'];
+            const preset = importedBook.settings.promptPreset;
+            const isCustom = Array.isArray(importedBook.settings.customPrompts) &&
+                importedBook.settings.customPrompts.some(p => p.id === preset);
+            if (preset && !validPresets.includes(preset) && !isCustom) {
+                importedBook.settings.promptPreset = 'detailed_beats';
+            }
+            // Clear model override — imported model may not be available
+            delete importedBook.settings.generationModel;
+            importedBook.settings.generationUseCurrentModelOverride = false;
+        }
+        chatData.memoryBooks[sessionId] = importedBook;
     }
 
     await db.saveChat(characterId, chatData);

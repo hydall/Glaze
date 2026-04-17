@@ -595,18 +595,28 @@ const memoryDraftState = ref({
     label: ''
 });
 let memoryDraftTimer = null;
+let memoryDraftAbortController = null;
 
 function stopMemoryDraftProgress() {
     if (memoryDraftTimer) {
         clearInterval(memoryDraftTimer);
         memoryDraftTimer = null;
     }
+    memoryDraftAbortController = null;
     memoryDraftState.value = {
         active: false,
         startedAt: 0,
         elapsedMs: 0,
         label: ''
     };
+}
+
+function cancelMemoryDraft() {
+    if (memoryDraftAbortController) {
+        memoryDraftAbortController.abort();
+    }
+    stopMemoryDraftProgress();
+    showToast('Memory draft generation cancelled');
 }
 
 function startMemoryDraftProgress(label = 'Generating memory draft') {
@@ -653,6 +663,16 @@ const currentSearchIndex = ref(-1);
 // --- Selection State ---
 const selectedMessages = ref(new Set());
 const isSelectionMode = computed(() => selectedMessages.value.size > 0);
+
+const selectionIncludesLast = computed(() => {
+    if (selectedMessages.value.size === 0 || !currentMessages.value.length) return false;
+    // All selected messages must be consecutive from the end
+    const msgs = currentMessages.value;
+    for (let i = msgs.length - 1; i >= msgs.length - selectedMessages.value.size; i--) {
+        if (i < 0 || !msgs[i] || !selectedMessages.value.has(msgs[i].id)) return false;
+    }
+    return true;
+});
 
 const builtInMemoryPrompts = [
     {
@@ -1047,7 +1067,8 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
             setTimeout(() => openMemoryBooksSheet(), 50);
         }
         showToast('Generating memory draft...', 2000);
-        const draftText = await generateMemoryDraft({ history, prompt: finalPrompt, apiConfigOverride });
+        memoryDraftAbortController = new AbortController();
+        const draftText = await generateMemoryDraft({ history, prompt: finalPrompt, controller: memoryDraftAbortController, apiConfigOverride });
         const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, activeChatChar?.name || 'Character']);
 
         if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
@@ -1200,6 +1221,9 @@ async function runBatchDraftGeneration(chatData, sessionId, memoryBook, segments
     let failed = 0;
     
     for (let i = 0; i < toGenerate.length; i++) {
+        // Check if cancelled
+        if (memoryDraftAbortController?.signal?.aborted) break;
+        
         const segmentIds = toGenerate[i];
         const messages = currentMessages.value.filter(m => m && segmentIds.includes(m.id));
         if (!messages.length) continue;
@@ -1456,7 +1480,7 @@ async function openMemoryGenerationSettings() {
         endpoint: settings.generationEndpoint || '',
         apiKey: settings.generationApiKey || '',
         temperature: settings.generationTemperature,
-        promptPreset: settings.promptPreset || 'detailed_beats',
+        promptPreset: getMemoryPromptOptions(settings).some(p => p.key === settings.promptPreset) ? settings.promptPreset : 'detailed_beats',
         autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
             ? Number(settings.autoCreateInterval)
             : 12,
@@ -1612,7 +1636,8 @@ async function openMemoryGenerationSettings() {
         });
 
         content.querySelector('#memory-prompt-preview-btn')?.addEventListener('click', () => {
-            const selected = getMemoryPromptOptions(settings).find(item => item.key === settings.promptPreset);
+            const options = getMemoryPromptOptions(settings);
+            const selected = options.find(item => item.key === settings.promptPreset) || options[0];
             closeBottomSheet();
             setTimeout(() => openMemoryPromptPreview(selected, { onClose: openMemoryGenerationSettings }), 50);
         });
@@ -1877,7 +1902,10 @@ async function openMemoryBooksSheet() {
                     <strong>${(memoryDraftState.value.label || 'Generating memory draft').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong>
                     <span id="memory-draft-timer">${formatElapsedSeconds(memoryDraftState.value.elapsedMs)}</span>
                 </div>
-                <div class="context-sheet-note">The timer will update automatically while generation is in progress.</div>
+                <div class="memory-generation-status-row" style="margin-top: 6px;">
+                    <div class="context-sheet-note" style="margin: 0;">Timer updates automatically.</div>
+                    <button type="button" class="context-sheet-btn context-sheet-btn-destructive" id="memory-draft-cancel" style="padding: 4px 12px; font-size: 12px;">Stop</button>
+                </div>
             </div>
         `
         : '';
@@ -2158,6 +2186,11 @@ async function openMemoryBooksSheet() {
         }
     });
     content.querySelector('#memory-sheet-close')?.addEventListener('click', () => closeBottomSheet());
+    content.querySelector('#memory-draft-cancel')?.addEventListener('click', () => {
+        cancelMemoryDraft();
+        closeBottomSheet();
+        setTimeout(() => openMemoryBooksSheet(), 50);
+    });
     
     // Scan Chat: mark all uncovered messages as PENDING segments
     content.querySelector('#memory-scan-chat')?.addEventListener('click', async () => {
@@ -2222,33 +2255,46 @@ async function openMemoryBooksSheet() {
             return;
         }
         
-        const maxOptions = Math.min(segments.length, 10);
-        const items = [];
-        for (let i = 1; i <= maxOptions; i++) {
-            items.push({
-                label: `${i} draft${i > 1 ? 's' : ''}`,
-                description: i === segments.length ? '(all remaining)' : '',
-                action: async () => {
+        const totalSegments = segments.length;
+        const quickItems = [];
+        const quickPicks = [1, 3, 5];
+        for (const n of quickPicks) {
+            if (n > totalSegments) break;
+            quickItems.push({
+                label: `${n} draft${n > 1 ? 's' : ''}`,
+                onClick: async () => {
                     closeBottomSheet();
-                    await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, i);
+                    await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, n);
                 }
             });
         }
-        if (segments.length > 10) {
-            items.push({
-                label: `All ${segments.length} drafts`,
-                description: '(may take a while)',
-                action: async () => {
+        if (!quickItems.some(it => it.label.includes(String(totalSegments)))) {
+            quickItems.push({
+                label: `All ${totalSegments}`,
+                onClick: async () => {
                     closeBottomSheet();
-                    await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, segments.length);
+                    await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, totalSegments);
                 }
             });
         }
         
         closeBottomSheet();
         showBottomSheet({
-            title: `Generate Drafts (${segments.length} available)`,
-            items
+            title: `Generate Drafts (${totalSegments} available)`,
+            items: quickItems,
+            input: {
+                placeholder: `Enter number (1-${totalSegments})`,
+                confirmLabel: 'Generate',
+                onConfirm: async (val) => {
+                    const num = parseInt(val, 10);
+                    if (isNaN(num) || num < 1 || num > totalSegments) {
+                        showToast(`Enter a number between 1 and ${totalSegments}`);
+                        return;
+                    }
+                    closeBottomSheet();
+                    await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, num);
+                }
+            }
         });
     });
     
@@ -2333,10 +2379,7 @@ async function deleteSelectedMessages() {
     if (selectedMessages.value.size === 0) return;
 
     const lastMsg = currentMessages.value[currentMessages.value.length - 1];
-    if (!lastMsg || !selectedMessages.value.has(lastMsg.id)) {
-        showToast('Deleting from the middle of chat is not allowed. Only the last message(s) can be removed.', 'error');
-        return;
-    }
+    if (!lastMsg || !selectedMessages.value.has(lastMsg.id)) return;
 
     const newMsgs = currentMessages.value.filter(msg => msg && !selectedMessages.value.has(msg.id));
     const count = currentMessages.value.length - newMsgs.length;
@@ -4713,8 +4756,8 @@ function openMessageActions(msg, index) {
         }
     });
 
-    // 6. Delete
-    items.push({
+    // 6. Delete (only allow deleting the last message)
+    if (index === currentMessages.value.length - 1) items.push({
         label: t('action_delete_msg'),
         icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
         iconColor: '#ff4444',
@@ -5236,10 +5279,18 @@ async function openSessionsSheet(char) {
                                     closeBottomSheet();
                                     triggerChatImport(char.id, null, async (result) => {
                                         await loadChats();
+                                        // Mark imported session as fully processed so auto-draft doesn't trigger
                                         if (result?.sessionId) {
-                                            const createdDrafts = await bootstrapImportedMemoryDrafts(char.id, result.sessionId);
-                                            if (createdDrafts > 0) {
-                                                showToast(`Created ${createdDrafts} imported memory draft${createdDrafts === 1 ? '' : 's'}`);
+                                            const importedData = await getChatData(char.id);
+                                            if (importedData?.sessions?.[result.sessionId]) {
+                                                const mb = ensureSessionMemoryBook(importedData, result.sessionId);
+                                                const auto = ensureMemoryAutomationState(mb);
+                                                const stableCount = getStableVisibleMessages(importedData.sessions[result.sessionId])
+                                                    .filter(m => m.role === 'user' || m.role === 'char').length;
+                                                auto.lastProcessedMessageCount = stableCount;
+                                                auto.pendingTrigger = null;
+                                                mb.updatedAt = Date.now();
+                                                await db.saveChat(char.id, importedData);
                                             }
                                         }
                                         const charObj = { ...char, sessionId: result?.sessionId || char.sessionId };
@@ -5718,6 +5769,7 @@ onUnmounted(() => {
                 :is-search-mode="isSearchMode"
                 :is-selection-mode="isSelectionMode"
                 :selected-count="selectedMessages.size"
+                :can-delete-selected="selectionIncludesLast"
                 :search-match-current="currentSearchIndex + 1"
                 :search-match-total="searchResults.length"
                 :active-char="activeChar"
@@ -6112,6 +6164,11 @@ onUnmounted(() => {
 .context-sheet-btn-secondary {
     color: var(--text-black);
     background: rgba(255, 255, 255, 0.08);
+}
+
+.context-sheet-btn-destructive {
+    color: #fff;
+    background: #ff4444;
 }
 
 .memory-batch-actions {
