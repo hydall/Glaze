@@ -58,7 +58,7 @@ function escapeRegex(string) {
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
 }
 
-const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\\u201C\\u201D\\u2018\\u2019\\u00AB\\u00BB(){}\\[\\]—–]';
+const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\\u201C\\u201D\\u2018\\u2019\\u00AB\\u00BB(){}\\[\\]—–*]';
 
 function sanitizeRegexFlags(flags) {
     const valid = new Set(['g', 'i', 'm', 's', 'u', 'y']);
@@ -164,7 +164,8 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
 
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
-            if (entry.enabled !== false && !entry.vectorSearch) {
+            // DUAL-CHANNEL: All entries participate in keyword scan, regardless of vectorSearch flag
+            if (entry.enabled !== false) {
                 if (char && entry.characterFilter) {
                     const { isExclude, names } = entry.characterFilter;
                     if (names && names.length > 0) {
@@ -175,6 +176,10 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
                     }
                 }
                 candidates.push({ ...entry, lorebookName: lb.name, lorebookId: lb.id });
+            }
+        });
+    });
+                }
             }
         });
     });
@@ -393,7 +398,13 @@ function buildPromptMessagesWorker(args) {
 
     let loreByPosition = { worldInfoBefore: [], worldInfoAfter: [], lorebooksMacro: [] };
     if (lorebooks) {
-        const loreEntries = scanLorebooksPure(history || [], char, "", chatId, lorebooks, globalSettings, activations);
+        // DUAL-CHANNEL FIX: Extract current user message for keyword scanning
+        const lastUserMessage = history && history.length > 0 
+            ? history.filter(m => m.role === 'user').slice(-1)[0]
+            : null;
+        const textToScan = lastUserMessage?.content || "";
+        
+        const loreEntries = scanLorebooksPure(history || [], char, textToScan, chatId, lorebooks, globalSettings, activations);
         allLoreEntries = loreEntries;
 
         loreEntries.forEach(entry => {
