@@ -970,13 +970,14 @@ defineExpose({ open, openEntry, close, openLorebook });
                                 title: t('label_match_whole_words'),
                                 options: [
                                     { value: 'null', label: t('match_global') },
-                                    { value: 'true', label: t('on') },
+                                    { value: 'true', label: t('match_whole_words_st') },
+                                    { value: 'glaze', label: t('match_whole_words_glaze') },
                                     { value: 'false', label: t('off') }
                                 ],
-                                currentValue: typeof activeEntry.matchWholeWords !== 'boolean' ? 'null' : activeEntry.matchWholeWords.toString(),
-                                onSelect: (v) => activeEntry.matchWholeWords = v === 'null' ? null : (v === 'true')
+                                currentValue: activeEntry.matchWholeWords === null || activeEntry.matchWholeWords === undefined ? 'null' : (activeEntry.matchWholeWords === 'glaze' ? 'glaze' : activeEntry.matchWholeWords.toString()),
+                                onSelect: (v) => activeEntry.matchWholeWords = v === 'null' ? null : (v === 'glaze' ? 'glaze' : (v === 'true'))
                             })">
-                                <span>{{ typeof activeEntry.matchWholeWords !== 'boolean' ? t('match_global') : (activeEntry.matchWholeWords ? t('on') : t('off')) }}</span>
+                                <span>{{ activeEntry.matchWholeWords === null || activeEntry.matchWholeWords === undefined ? t('match_global') : (activeEntry.matchWholeWords === 'glaze' ? t('match_whole_words_glaze') : (activeEntry.matchWholeWords ? t('match_whole_words_st') : t('off'))) }}</span>
                                 <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                             </div>
                         </div>

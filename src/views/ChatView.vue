@@ -1204,7 +1204,7 @@ function openMemoryTextPreview(entry, kind = 'Memory') {
         </div>
         <div class="memory-entry-fulltext">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
         <div class="context-sheet-actions">
-            ${!isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-regenerate">Regenerate</button>` : ''}
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-regenerate">Regenerate</button>
             ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-edit">Edit</button>` : ''}
             ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-reindex">Reindex</button>` : ''}
             ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary memory-preview-delete" id="memory-preview-delete">Delete</button>` : ''}
