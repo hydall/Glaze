@@ -593,37 +593,47 @@ Active branch: `fast-fixes`
 ### ⏳ PENDING (ordered by complexity)
 
 8. **Fix: lorebook injections shown for user but not assistant messages**
-   - Status: `not done | not tested`
-   - Complexity: easy
-   - Issue: Injection badges only appear on user messages, missing on assistant replies
-   - Investigation needed: Check `ChatMessage.vue` lorebook display, `loreEntries` storage per message
-   - Fix likely: Remove role-based filter in message rendering
+    - Status: `done | not tested`
+    - Complexity: easy
+    - Issue: Injection badges only appear on user messages, missing on assistant replies
+    - Root cause: `onPromptReady` in `ChatView.vue` redirected `triggeredLorebooks`/`triggeredMemories`/`contextRefs` to `msgIndex - 1` (user message) only
+    - Fix: Assign refs to both assistant message at `msgIndex` AND preceding user message at `msgIndex - 1`
+    - Branch: `feat/fast-fixes-batch3`
 
 9. **Add i18n keys for new features**
-   - Status: `partially done` (need new keys)
-   - Complexity: easy
-   - Missing: `desc_vector_search_replaces_keys` already added; check remaining gaps
+    - Status: `done | not tested`
+    - Complexity: easy
+    - Added 12 missing keys + 2 asymmetric fixes to both `en/index.json` and `ru/index.json`
+    - New keys: `api_create_preset_desc`, `api_presets`, `avatar`, `desc_show_reasoning`, `error_generation`, `imggen_notification_body`, `imggen_notification_title`, `label_custom_model`, `label_model`, `label_show_reasoning`, `no_models_found`, `no_prompt`
+    - Symmetry fixes: `top_p` → en, `regex_slash_commands` → ru
+    - Branch: `feat/fast-fixes-batch3`
 
 10. **Fix: streaming quote formatting breaks mid-quote**
-    - Status: `not done | not tested`
+    - Status: `done | not tested`
     - Complexity: medium
     - Issue: Blue quote styling doesn't apply to streaming text when opening quote arrives without closing quote
     - Root cause: `textFormatter.js` regex matches complete quote pairs only
-    - Fix options:
-      - Option A: Stateful quote tracking across delta updates (store open quote state)
-      - Option B: Client-side quote balancer that closes unclosed quotes for display
-      - Option C: Move quote coloring to CSS `::before`/`::after` pseudo-elements with dynamic insertion
+    - Fix: Added 6 regex patterns after the paired-quote matcher to handle unclosed `"`, `"`, `«` at end of text during streaming
+    - Branch: `feat/fast-fixes-batch3`
 
 11. **Fix: messages stuck in "generating" state**
-    - Status: `not done | not tested`
+    - Status: `done | not tested`
     - Complexity: medium-hard
-    - Issue: Message stays with typing indicator after generation should complete
-    - Symptoms: timer stops, "generating" label persists, no new text arrives
-    - Investigation areas:
-      - Streaming parser error handling in `generateChatResponse`
-      - `isTyping` flag cleanup on error/cancel
-      - `generatingStates` cleanup on app background/foreground
-      - Web stream reader `finally` blocks
+    - Issue: Message stays with typing indicator after generation should complete (both streaming and non-streaming)
+    - Root causes found:
+      - Non-streaming mode: Invalid API responses (missing `data.choices[0]`) caused crashes without calling `onComplete`
+      - `onComplete`/`onError` handlers could fail with exceptions, leaving `isTyping=true`
+      - `onUnmounted` cleared timers but did NOT abort controllers or delete `generatingStates`, allowing background responses to update unmounted components
+      - No defensive checks in non-streaming JSON parsing
+    - Fixes applied:
+      - Added defensive validation before accessing `data.choices[0].message` in both Native and Web non-streaming paths (`llmApi.js:95-99, 276-280`)
+      - Wrapped `onComplete` handler in try/catch with `ensureCleanup()` fallback to guarantee `isTyping` cleared even on handler exceptions (`ChatView.vue:3734-3951`)
+      - Wrapped `onError` handler in try/catch with `ensureTypingCleared()` fallback (`ChatView.vue:3542-3638`)
+      - Added controller abort, timer cleanup, and localStorage flag removal in `onUnmounted` for ALL `generatingStates` (`ChatView.vue:5122-5159`)
+    - Files modified:
+      - `src/core/services/llmApi.js` (defensive checks for invalid API responses)
+      - `src/views/ChatView.vue` (robust error handling + unmount cleanup)
+    - Branch: `feat/fast-fixes-batch3`
 
 12. **Research: SillyTavern vector search implementation**
     - Status: `not done`

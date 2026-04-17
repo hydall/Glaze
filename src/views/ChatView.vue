@@ -3544,53 +3544,83 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         if (!state || state.genId !== genId) return;
         if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
 
-        // Handle Context Limit gracefully (Bottom Sheet already shown by llmApi)
-        if (e.message === "Context limit exceeded") {
-            restoreState(false); // Treat as abort/cancel (removes typing indicator)
+        // CRITICAL: Ensure isTyping is ALWAYS cleared, even if DB operations fail
+        const ensureTypingCleared = async () => {
+            const idx = currentMessages.value.findIndex(m => m.id === msgId);
+            if (idx !== -1) {
+                currentMessages.value[idx].isTyping = false;
+            }
+            // Also clear in DB to prevent phantom typing on reload
+            try {
+                const data = await getChatData(char.id);
+                if (data && data.sessions[sessionId]) {
+                    const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
+                    if (dbIdx !== -1) {
+                        data.sessions[sessionId][dbIdx].isTyping = false;
+                        await db.saveChat(char.id, data);
+                    }
+                }
+            } catch (dbErr) {
+                console.error('[onError] Failed to clear isTyping in DB:', dbErr);
+            }
+        };
+
+        try {
+            // Handle Context Limit gracefully (Bottom Sheet already shown by llmApi)
+            if (e.message === "Context limit exceeded") {
+                await restoreState(false); // Treat as abort/cancel (removes typing indicator)
+                delete generatingStates[char.id];
+                if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
+                window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
+                return;
+            }
+
+            await restoreState(true);
+            delete generatingStates[char.id];
+            if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
+
+            sendMessageNotification(
+                `Error — ${char.name}`,
+                e.message || 'Generation failed',
+                char.avatar, char.id, sessionId, msgId
+            );
+
+            const idx = currentMessages.value.findIndex(m => m.id === msgId);
+            if (idx !== -1) {
+                // User is still viewing this chat
+                const msg = currentMessages.value[idx];
+                msg.text = formatError(e, rawStreamText);
+                msg.isError = true;
+                if (msg.swipes && msg.swipes.length > 0) {
+                    msg.swipes[msg.swipeId || 0] = msg.text;
+                }
+                updateSessionMessage(char, idx, msg);
+            } else {
+                // User navigated away — write error directly to DB
+                const data = await getChatData(char.id);
+                if (data && data.sessions[sessionId]) {
+                    const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
+                    if (dbIdx !== -1) {
+                        const msg = data.sessions[sessionId][dbIdx];
+                        msg.text = formatError(e, rawStreamText);
+                        msg.isError = true;
+                        msg.isTyping = false;
+                        if (msg.swipes && msg.swipes.length > 0) {
+                            msg.swipes[msg.swipeId || 0] = msg.text;
+                        }
+                        await db.saveChat(char.id, data);
+                    }
+                }
+            }
+            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
+        } catch (handlerErr) {
+            console.error('[onError] Error handler failed:', handlerErr);
+            // Fallback: ensure typing is cleared even if main handler fails
+            await ensureTypingCleared();
             delete generatingStates[char.id];
             if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
             window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
-            return;
         }
-
-        restoreState(true);
-        delete generatingStates[char.id];
-        if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-
-        sendMessageNotification(
-            `Error — ${char.name}`,
-            e.message || 'Generation failed',
-            char.avatar, char.id, sessionId, msgId
-        );
-
-        const idx = currentMessages.value.findIndex(m => m.id === msgId);
-        if (idx !== -1) {
-            // User is still viewing this chat
-            const msg = currentMessages.value[idx];
-            msg.text = formatError(e, rawStreamText);
-            msg.isError = true;
-            if (msg.swipes && msg.swipes.length > 0) {
-                msg.swipes[msg.swipeId || 0] = msg.text;
-            }
-            updateSessionMessage(char, idx, msg);
-        } else {
-            // User navigated away — write error directly to DB
-            const data = await getChatData(char.id);
-            if (data && data.sessions[sessionId]) {
-                const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
-                if (dbIdx !== -1) {
-                    const msg = data.sessions[sessionId][dbIdx];
-                    msg.text = formatError(e, rawStreamText);
-                    msg.isError = true;
-                    msg.isTyping = false;
-                    if (msg.swipes && msg.swipes.length > 0) {
-                        msg.swipes[msg.swipeId || 0] = msg.text;
-                    }
-                    await db.saveChat(char.id, data);
-                }
-            }
-        }
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
     };
 
     // Prepare history for LLM
@@ -3651,67 +3681,83 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         controller,
         callbacks: {
             onPromptReady: async ({ loreEntries, memoryEntries }) => {
-                let targetIndex = msgIndex;
-                // Place lorebooks on the user message that triggered this generation, if it exists
-                if (msgIndex > 0 && currentMessages.value[msgIndex - 1]?.role === 'user') {
-                    targetIndex = msgIndex - 1;
-                }
-                if (targetIndex !== -1 && currentMessages.value[targetIndex]) {
-                    const m = currentMessages.value[targetIndex];
-                    const triggeredLorebooks = loreEntries.map(e => ({
-                        id: e.id,
-                        // Lorebook entry display name: ST-compatible field is `comment`
-                        name: e.comment || e.name || e.keys?.[0] || 'Entry',
-                        content: e.content,
-                        lorebookName: e.lorebookName,
-                        lorebookId: e.lorebookId
-                    }));
-                    const triggeredMemories = (memoryEntries || []).map(entry => ({
-                        id: entry.id,
-                        name: entry.title || 'Memory',
-                        content: entry.content || '',
-                        messageIds: Array.isArray(entry.messageIds) ? entry.messageIds : []
-                    }));
-                    m.triggeredLorebooks = triggeredLorebooks;
-                    m.triggeredMemories = triggeredMemories;
-                    m.contextRefs = [
-                        ...triggeredLorebooks.map(entry => ({
+                const triggeredLorebooks = loreEntries.map(e => ({
+                    id: e.id,
+                    name: e.comment || e.name || e.keys?.[0] || 'Entry',
+                    content: e.content,
+                    lorebookName: e.lorebookName,
+                    lorebookId: e.lorebookId
+                }));
+                const triggeredMemories = (memoryEntries || []).map(entry => ({
+                    id: entry.id,
+                    name: entry.title || 'Memory',
+                    content: entry.content || '',
+                    messageIds: Array.isArray(entry.messageIds) ? entry.messageIds : []
+                }));
+                const contextRefs = [
+                    ...triggeredLorebooks.map(entry => ({
                         id: entry.id,
                         type: 'lorebook',
                         label: entry.name,
                         sourceId: entry.lorebookId || null,
                         sourceName: entry.lorebookName || null
-                        })),
-                        ...triggeredMemories.map(entry => ({
-                            id: entry.id,
-                            type: 'memory',
-                            label: entry.name,
-                            sourceId: sessionId,
-                            sourceName: 'Memory Book'
-                        }))
-                    ];
-                    const data = await getChatData(char.id);
-                    if (data) {
-                        data.sessions[sessionId] = currentMessages.value;
-                        await db.saveChat(char.id, data);
-                    }
+                    })),
+                    ...triggeredMemories.map(entry => ({
+                        id: entry.id,
+                        type: 'memory',
+                        label: entry.name,
+                        sourceId: sessionId,
+                        sourceName: 'Memory Book'
+                    }))
+                ];
+
+                const assignRefs = (m) => {
+                    m.triggeredLorebooks = triggeredLorebooks;
+                    m.triggeredMemories = triggeredMemories;
+                    m.contextRefs = contextRefs;
+                };
+
+                if (msgIndex !== -1 && currentMessages.value[msgIndex]) {
+                    assignRefs(currentMessages.value[msgIndex]);
+                }
+                if (msgIndex > 0 && currentMessages.value[msgIndex - 1]?.role === 'user') {
+                    assignRefs(currentMessages.value[msgIndex - 1]);
+                }
+
+                const data = await getChatData(char.id);
+                if (data) {
+                    data.sessions[sessionId] = currentMessages.value;
+                    await db.saveChat(char.id, data);
                 }
             },
             onUpdate,
             onComplete: async (response, finalReasoning, meta) => {
-        const currentState = generatingStates[char.id];
-        if (currentState && currentState.timerId) clearInterval(currentState.timerId);
-        if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
-        localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
-
-        if (!currentState || currentState.genId !== genId) return;
-        
-        // Guard against race with abort
-        if (controller.signal.aborted) {
+        // CRITICAL: Ensure cleanup happens even if handler fails
+        const ensureCleanup = () => {
+            const currentState = generatingStates[char.id];
+            if (currentState && currentState.timerId) clearInterval(currentState.timerId);
+            if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
+            localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
             delete generatingStates[char.id];
             if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-            return;
-        }
+        };
+
+        try {
+            const currentState = generatingStates[char.id];
+            if (currentState && currentState.timerId) clearInterval(currentState.timerId);
+            if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
+            localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
+
+            if (!currentState || currentState.genId !== genId) {
+                ensureCleanup();
+                return;
+            }
+            
+            // Guard against race with abort
+            if (controller.signal.aborted) {
+                ensureCleanup();
+                return;
+            }
 
         let wasVisible = false;
         let displayIndex = -1;
@@ -3879,6 +3925,29 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
                 }
             }
+        }
+        } catch (completeErr) {
+            console.error('[onComplete] Completion handler failed:', completeErr);
+            // Ensure cleanup and isTyping cleared even if handler fails
+            ensureCleanup();
+            // Clear isTyping in both reactive state and DB
+            const idx = currentMessages.value.findIndex(m => m.id === msgId);
+            if (idx !== -1) {
+                currentMessages.value[idx].isTyping = false;
+            }
+            try {
+                const data = await getChatData(char.id);
+                if (data && data.sessions[sessionId]) {
+                    const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
+                    if (dbIdx !== -1) {
+                        data.sessions[sessionId][dbIdx].isTyping = false;
+                        await db.saveChat(char.id, data);
+                    }
+                }
+            } catch (dbErr) {
+                console.error('[onComplete] Failed to clear isTyping in DB:', dbErr);
+            }
+            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
         }
             },
             onError
@@ -5119,16 +5188,30 @@ onBeforeUnmount(() => {
 onUnmounted(() => {
     setScrollLock(false);
     stopMemoryDraftProgress();
-    // Cleanup UI timers for ALL generating states, not just activeChatChar
-    // This prevents leaked intervals and closures referencing unmounted reactive state
+    // Cleanup UI timers AND abort active generations for ALL generating states
+    // This prevents leaked intervals, closures referencing unmounted reactive state, and stuck isTyping flags
     for (const charId of Object.keys(generatingStates)) {
         const state = generatingStates[charId];
+        // Abort controller to stop ongoing API requests
+        if (state.controller) {
+            try {
+                state.controller.abort();
+            } catch (e) {
+                console.warn('[onUnmounted] Failed to abort controller:', e);
+            }
+        }
+        // Clear UI timer
         if (state.timerId) {
             clearInterval(state.timerId);
             state.timerId = null;
         }
         // Disconnect UI updater to prevent updates to unmounted component
         state.onUIUpdate = null;
+        // Clean localStorage flag
+        const sessionId = activeChatChar?.sessionId;
+        if (sessionId) {
+            localStorage.removeItem(`gz_generating_${charId}_${sessionId}`);
+        }
     }
     window.removeEventListener('character-updated', onCharacterUpdated);
     document.removeEventListener('visibilitychange', onVisibilityChange);

@@ -1,5 +1,5 @@
 const DB_NAME = 'SillyCradleDB';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 const STORE_KEYVALUE = 'keyvalue';
 const STORE_CHARACTERS = 'characters';
 const STORE_PERSONAS = 'personas';
@@ -221,6 +221,30 @@ export const db = {
 
                 if (!db.objectStoreNames.contains(STORE_EMBEDDINGS)) {
                     db.createObjectStore(STORE_EMBEDDINGS, { keyPath: 'id' });
+                }
+
+                // Migration v8: Convert legacy single-vector embeddings to multi-vector format
+                if (e.oldVersion < 8 && db.objectStoreNames.contains(STORE_EMBEDDINGS)) {
+                    console.log('[DB] Migrating to version 8: multi-vector embeddings');
+                    const embStore = transaction.objectStore(STORE_EMBEDDINGS);
+                    const getAllReq = embStore.getAll();
+                    getAllReq.onsuccess = () => {
+                        const allEmbeddings = getAllReq.result || [];
+                        let migrated = 0;
+                        allEmbeddings.forEach(emb => {
+                            if (emb.vector && !emb.vectors) {
+                                // Convert legacy single vector to multi-vector format
+                                emb.vectors = [{ 
+                                    text: '(legacy full content)', 
+                                    vector: emb.vector 
+                                }];
+                                emb.vector = null;  // Mark as migrated
+                                embStore.put(emb);
+                                migrated++;
+                            }
+                        });
+                        console.log(`[DB] Migrated ${migrated} embeddings to multi-vector format`);
+                    };
                 }
             };
             request.onsuccess = (e) => resolve(e.target.result);

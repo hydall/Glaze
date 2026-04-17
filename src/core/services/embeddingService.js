@@ -118,25 +118,24 @@ export async function getEmbeddings(texts) {
 
     for (let i = 0; i < allChunked.length; i++) {
         const chunks = allChunked[i];
-
-        if (chunks.length === 1) {
-            const vectors = await callEmbeddingAPI(url, headers, {
-                model: config.model,
-                input: chunks
-            });
-            results.push(vectors[0]);
-        } else {
-            const vectors = await callEmbeddingAPI(url, headers, {
-                model: config.model,
-                input: chunks
-            });
-            results.push(averageVectors(vectors));
-        }
+        const vectors = await callEmbeddingAPI(url, headers, {
+            model: config.model,
+            input: chunks
+        });
+        
+        // NEW: Return array of {text, vector} instead of averaging
+        results.push(
+            chunks.map((chunkText, idx) => ({
+                text: chunkText,
+                vector: vectors[idx]
+            }))
+        );
     }
 
     console.info('[embeddingService] embeddings received', {
         count: results.length,
-        dimensions: results.slice(0, 3).map(v => Array.isArray(v) ? v.length : 0)
+        totalChunks: results.reduce((sum, chunks) => sum + chunks.length, 0),
+        chunksPerEntry: results.map(chunks => chunks.length)
     });
 
     return results;
@@ -145,11 +144,16 @@ export async function getEmbeddings(texts) {
 export async function testEmbeddingConnection() {
     const testText = 'Hello, this is a test.';
     const result = await getEmbedding(testText);
+    // result is now [{text, vector}] array
     if (!result || !Array.isArray(result) || result.length === 0) {
-        throw new Error('Embedding returned empty vector');
+        throw new Error('Embedding returned empty result');
+    }
+    const firstChunk = result[0];
+    if (!firstChunk || !firstChunk.vector || !Array.isArray(firstChunk.vector)) {
+        throw new Error('Embedding returned invalid vector');
     }
     return {
-        dimension: result.length,
+        dimension: firstChunk.vector.length,
         success: true
     };
 }

@@ -2,7 +2,7 @@ import { reactive, watch } from 'vue';
 import { db } from '@/utils/db.js';
 import { getEmbeddings } from '@/core/services/embeddingService.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
-import { findTopK } from '@/utils/vectorMath.js';
+import { findTopK, findTopKMulti, cosineSimilarity } from '@/utils/vectorMath.js';
 
 function escapeRegex(string) {
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -92,12 +92,13 @@ function extractRetrievalHints(entry) {
     return uniqueStrings(hints, 32);
 }
 
-function buildEmbeddingRecord(entry, lorebookId, vector, textHash) {
+function buildEmbeddingRecord(entry, lorebookId, vectorsData, textHash) {
     return {
         id: entry.id,
         sourceType: 'lorebook_entry',
         sourceId: lorebookId,
-        vector,
+        vectors: vectorsData,  // NEW: array of {text, vector} chunks
+        vector: null,  // Legacy field set to null for new records
         textHash,
         retrievalHints: extractRetrievalHints(entry),
         updatedAt: Date.now()
@@ -109,7 +110,8 @@ function buildEmbeddingErrorRecord(entry, lorebookId, textHash, error) {
         id: entry.id,
         sourceType: 'lorebook_entry',
         sourceId: lorebookId,
-        vector: null,
+        vectors: null,  // NEW: null for error records
+        vector: null,  // Legacy field
         textHash,
         retrievalHints: extractRetrievalHints(entry),
         error,
@@ -417,7 +419,7 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
     let candidates = [];
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
-            if (entry.enabled !== false && !entry.vectorSearch) {
+            if (entry.enabled !== false) {
                 if (char && entry.characterFilter) {
                     const { isExclude, names } = entry.characterFilter;
                     if (names && names.length > 0) {
@@ -765,14 +767,23 @@ export async function indexLorebookEntry(entry, lorebookId) {
     const existing = await db.getEmbedding(entry.id);
     if (existing && existing.textHash === textHash) return;
 
-    const vectors = await getEmbeddings([text]);
-    if (!vectors || !vectors[0]) {
+    const vectorsData = await getEmbeddings([text]);
+    console.log('[indexLorebookEntry] embedding result', {
+        entryId: entry.id,
+        entryName: entry.comment || entry.keys?.[0],
+        textLength: text.length,
+        vectorsData,
+        hasVectorsData: !!vectorsData,
+        firstChunk: vectorsData?.[0]?.[0]
+    });
+    
+    if (!vectorsData || !vectorsData[0] || vectorsData[0].length === 0) {
         const error = getIndexingErrorDetails('empty_embedding', 'Embedding API returned no vector');
         await saveEmbeddingError(entry, lorebookId, textHash, error);
         throw new Error(error.message);
     }
 
-    await db.saveEmbedding(buildEmbeddingRecord(entry, lorebookId, vectors[0], textHash));
+    await db.saveEmbedding(buildEmbeddingRecord(entry, lorebookId, vectorsData[0], textHash));
 }
 
 export async function indexLorebookEntries(lorebookId, onProgress, options = {}) {
@@ -821,14 +832,38 @@ export async function indexLorebookEntries(lorebookId, onProgress, options = {})
         }
 
         const existing = await db.getEmbedding(entry.id);
-        if (existing && existing.textHash === textHash) {
+        // Skip if already indexed with same text AND already using multi-vector format
+        const isLegacyFormat = existing && existing.vector && !existing.vectors;
+        if (existing && existing.textHash === textHash && !isLegacyFormat) {
+            console.log('[indexLorebookEntries] skipping (already indexed)', {
+                entryId: entry.id,
+                comment: entry.comment?.substring(0, 50),
+                hasVectors: !!existing.vectors,
+                hasVector: !!existing.vector
+            });
             skipped++;
             if (onProgress) onProgress(i + 1, processedEntries.length);
             continue;
         }
+        
+        // Force reindex legacy format entries
+        if (isLegacyFormat) {
+            console.log('[indexLorebookEntries] reindexing legacy entry', {
+                entryId: entry.id,
+                comment: entry.comment?.substring(0, 50)
+            });
+        }
 
         try {
             const vectors = await getEmbeddings([text]);
+            console.log('[indexLorebookEntry] embedding result', {
+                entryId: entry.id,
+                entryName: entry.comment?.substring(0, 50),
+                textLength: text.length,
+                vectorsData: vectors?.[0],
+                hasVectorsData: !!vectors?.[0],
+                firstChunk: vectors?.[0]?.[0]
+            });
             if (vectors && vectors[0]) {
                 await db.saveEmbedding(buildEmbeddingRecord(entry, lorebookId, vectors[0], textHash));
                 indexed++;
@@ -925,11 +960,34 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
     const embeddingMap = new Map(allEmbeddings.map(e => [e.id, e]));
 
     const candidates = [];
+    const missingEmbeddings = [];
     for (const entry of vectorEntries) {
         const emb = embeddingMap.get(entry.id);
-        if (emb && emb.vector) {
-            candidates.push({ ...entry, vector: emb.vector, retrievalHints: emb.retrievalHints || [] });
+        // NEW: Support both multi-vector (vectors) and legacy (vector)
+        if (emb && (emb.vectors || emb.vector)) {
+            const candidate = { ...entry, retrievalHints: emb.retrievalHints || [] };
+            if (emb.vectors) {
+                candidate.vectors = emb.vectors;  // Multi-vector
+            } else if (emb.vector) {
+                candidate.vector = emb.vector;  // Legacy single vector
+            }
+            candidates.push(candidate);
+        } else {
+            missingEmbeddings.push({
+                id: entry.id,
+                comment: entry.comment,
+                hasEmb: !!emb,
+                hasVectors: emb?.vectors ? true : false,
+                hasVector: emb?.vector ? true : false
+            });
         }
+    }
+    
+    if (missingEmbeddings.length > 0) {
+        console.warn('[vectorSearchLorebooks] entries missing embeddings', {
+            count: missingEmbeddings.length,
+            entries: missingEmbeddings
+        });
     }
 
     if (candidates.length === 0) {
@@ -986,19 +1044,84 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
     try {
         const hybridQueryText = focusedQueryText || fallbackQueryText;
 
+        function stripOOC(text) {
+            return text.replace(/\[OOC:\s*/gi, '').replace(/\(OOC:\s*/gi, '').replace(/\s*\]\s*/g, ' ').replace(/\s*\)\s*/g, ' ').trim();
+        }
+
         const runSearch = async (text, label) => {
             if (!text || !text.trim()) return [];
+            const cleanText = stripOOC(text);
             console.info('[vectorSearchLorebooks] embedding query', {
                 label,
-                queryLength: text.length
+                queryLength: cleanText.length,
+                queryPreview: cleanText.substring(0, 200),
+                originalPreview: text.substring(0, 200)
             });
-            const queryVectors = await getEmbeddings([text]);
-            if (!queryVectors || !queryVectors[0]) {
+            const queryVectorsData = await getEmbeddings([cleanText]);
+            if (!queryVectorsData || !queryVectorsData[0] || !queryVectorsData[0][0]?.vector) {
                 console.info('[vectorSearchLorebooks] skipped: embedding API returned no query vector', { label });
                 return [];
             }
 
-            const vectorResults = findTopK(queryVectors[0], candidates, candidates.length, 0);
+            const queryChunks = queryVectorsData[0];
+            console.info('[vectorSearchLorebooks] query chunks', {
+                label,
+                chunksCount: queryChunks.length,
+                chunks: queryChunks.map(c => ({
+                    textPreview: c.text?.substring(0, 80),
+                    vectorLength: c.vector?.length
+                }))
+            });
+
+            // Use all query chunks for MaxSim (query-chunk x candidate-chunk)
+            const vectorResults = findTopKMulti(queryChunks, candidates, candidates.length, 0);
+            
+            // Debug Asei specifically
+            const aseiResult = vectorResults.find(r => r.comment?.includes('Asei'));
+            if (aseiResult) {
+                const queryChunksForDebug = queryChunks || [];
+                console.warn('[DEBUG] Asei vector details', {
+                    id: aseiResult.id,
+                    comment: aseiResult.comment,
+                    score: aseiResult.score,
+                    bestQueryChunk: aseiResult._bestQueryChunk,
+                    bestCandidateChunk: aseiResult._bestCandidateChunk,
+                    hasVectors: !!aseiResult.vectors,
+                    chunksCount: aseiResult.vectors?.length,
+                    queryChunksCount: queryChunksForDebug.length,
+                    bestQueryText: queryChunksForDebug[aseiResult._bestQueryChunk]?.text?.substring(0, 120),
+                    bestCandidateText: aseiResult.vectors?.[aseiResult._bestCandidateChunk]?.text?.substring(0, 120),
+                    allChunkScores: (() => {
+                        const scores = [];
+                        if (!aseiResult.vectors) return 'no vectors';
+                        for (let qi = 0; qi < queryChunksForDebug.length; qi++) {
+                            const qVec = queryChunksForDebug[qi]?.vector;
+                            if (!qVec) continue;
+                            for (let ci = 0; ci < aseiResult.vectors.length; ci++) {
+                                const cVec = aseiResult.vectors[ci]?.vector;
+                                if (!cVec) continue;
+                                const s = cosineSimilarity(qVec, cVec);
+                                scores.push({ qi, ci, score: s.toFixed(4), queryPreview: queryChunksForDebug[qi]?.text?.substring(0, 50), candidatePreview: aseiResult.vectors[ci]?.text?.substring(0, 50) });
+                            }
+                        }
+                        return scores.sort((a, b) => b.score - a.score);
+                    })()
+                });
+            }
+            
+            console.info('[vectorSearchLorebooks] raw similarity scores', {
+                label,
+                totalResults: vectorResults.length,
+                top15: vectorResults.slice(0, 15).map(r => ({
+                    id: r.id,
+                    comment: r.comment,
+                    rawScore: r.score.toFixed(4),
+                    hasVectors: !!r.vectors,
+                    hasVector: !!r.vector,
+                    chunksCount: r.vectors?.length || 1
+                }))
+            });
+            
             return vectorResults.map(result => {
                 const hybridBoost = scoreHybridBoost(result, hybridQueryText);
                 const descriptorBoost = scoreDescriptorBoost(result, hybridQueryText);
@@ -1029,7 +1152,7 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
 
         const results = Array.from(combined.values())
             .sort((a, b) => b.score - a.score)
-            .filter(result => result.score >= (config.threshold || 0.6))
+            .filter(result => result.score >= (config.threshold || 0.55))
             .slice(0, config.topK || 5);
 
         console.info('[vectorSearchLorebooks] results ready', {

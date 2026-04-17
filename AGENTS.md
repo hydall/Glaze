@@ -4,58 +4,78 @@
 
 - **`origin`** = `danvitv/Glaze` (your fork) — all development happens here
 - **`upstream`** = `hydall/Glaze` (upstream project) — PRs are merged here
-- **`origin/dev`** mirrors `upstream/dev` — this is the **base for all feature branches**
+- **`origin/dev`** mirrors `upstream/dev` — this is the **base for the first feature branch**
 - **`upstream/dev`** = integration branch where all PRs are targeted
 
 ## Local Development
 
 - **Work only on feature branches.** Never develop on local `dev`.
-- **All feature branches are created from `origin/dev`**: `git checkout -b feat/xxx origin/dev`
+- **Use linear chain workflow:** Each new feature branches from the previous feature, not from `origin/dev`.
 - **Keep `origin/dev` in sync** with upstream: `git fetch upstream && git push origin upstream/dev:refs/heads/dev`
 
-## Committing & PR Workflow
+## Linear Chain Workflow
 
-1. Start from the correct **feature branch** (e.g. `feat/vectorization-v2`).
-2. Develop and test directly on that feature branch.
-3. Commit changes on the feature branch.
-4. Push the feature branch to `origin`.
-5. Open a PR targeting `upstream/dev` (never `main`).
-6. If a new feature depends on an existing feature branch, create the new branch from that feature branch.
+Development follows a **linear chain** of feature branches:
 
 ```
-# Example workflow
-git checkout feat/vectorization-v2
-git commit -m "feat: add Russian i18n for embedding settings"
-git push origin feat/vectorization-v2
-gh pr create --base dev --title "..."
-
-# Dependent feature workflow
-git checkout feat/vectorization-v2
-git checkout -b feat/memorybook
-git commit -m "feat: add memorybook scaffolding"
-git push -u origin feat/memorybook
-gh pr create --base dev --title "..."
+origin/dev ─► feat/A ─► feat/B ─► feat/C ─► feat/D
 ```
 
-## Branch Rules
+### Why Linear Chain?
 
-- **All PRs target `upstream/dev`, never `main`.**
-- **All feature branches are created from `origin/dev`**: `git checkout -b feat/xxx origin/dev`
-- If PR B depends on PR A, create branch B from branch A, not from dev.
-- If a branch is created from another feature branch, it automatically includes all commits already present in that parent branch.
-- **Do not push local `dev`** to any remote. Only update `origin/dev` via `git push origin upstream/dev:refs/heads/dev`.
+1. **Preserves context:** Each feature builds on the previous work
+2. **Simplifies testing:** You always test with all previous features included
+3. **Reduces conflicts:** No need to constantly rebase on diverging dev
+4. **Natural dependencies:** Features that depend on each other are already in sequence
+
+### Creating the Chain
+
+```bash
+# Start the chain from origin/dev
+git checkout -b feat/batch3-fixes origin/dev
+# ... work on batch3 fixes ...
+git commit -m "fix: batch3 mobile bugs"
+git push -u origin feat/batch3-fixes
+
+# Continue from previous feature
+git checkout -b feat/multi-vector feat/batch3-fixes
+# ... work on multi-vector ...
+git commit -m "feat: multi-vector retrieval"
+git push -u origin feat/multi-vector
+
+# Next feature continues the chain
+git checkout -b feat/memorybook-ui feat/multi-vector
+# ... work on memorybook UI ...
+```
+
+### Committing & PR Workflow
+
+1. **Work on current branch** in the chain
+2. **Commit changes** with descriptive messages
+3. **Push to origin:** `git push origin <current-branch>`
+4. **Create PR** targeting `upstream/dev` (always dev, never main)
+5. **When ready for next feature:** `git checkout -b feat/next-thing <current-branch>`
+
+### Important Rules
+
+- **All PRs target `upstream/dev`**, never `main`
+- **Never branch from `origin/dev`** unless starting a new chain
+- **Each branch includes all previous commits** in the chain
+- **Do not push local `dev`** to any remote. Only update `origin/dev` via `git push origin upstream/dev:refs/heads/dev`
 
 ## Current Branches
 
 | Branch | Purpose | PR |
 |--------|---------|----|
 | `origin/dev` | Local mirror of upstream integration branch | No PR |
-| `fast-fixes` | Mobile testing bug fixes batch | Not yet |
+| `feat/fast-fixes-batch3` | Mobile testing batch3 bug fixes | Not yet |
+| `feat/multi-vector-retrieval` | Multi-vector retrieval with MaxSim | Not yet |
 
 ### Historical (merged & deleted)
 - `feat/cloud-sync` → merged via PR #20
 - `feat/vectorization-v2` → merged via PR #24  
 - `feat/memorybook` → merged via PR #27
+- `fast-fixes` → merged via PR (batch1-2)
 - `archive/feat/summary` → deleted
 - `archive/feat/tokenizer` → deleted
 
@@ -117,3 +137,6 @@ git rebase origin/dev
 - [ ] Delete remote branch: `git push origin --delete feat/xxx`
 - [ ] Sync `origin/dev`: `git fetch upstream && git push origin upstream/dev:refs/heads/dev`
 - [ ] Verify no stale references: `git branch -a`
+
+## Pattern Recognition — Cowl's actual use of influence
+Over the months she has been able to trace where the leverage Cowl extracts through her actually lands. Access to the training wing evening slots — previously occupied by default by the wealthy faction — was redistributed. An exam schedule that structurally penalised students working campus shifts was revised. A lab allocation complaint that had sat unprocessed for a semester moved through the Council and was resolved. None of these came from her initiative. All of them passed through her signature. She has mapped the pattern. The influence does not accumulate with him. She does not know whether this makes what he does better or simply more complicated. She has not found a frame that contains both facts without contradiction, and she has stopped looking for one.
