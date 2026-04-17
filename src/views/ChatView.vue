@@ -2222,8 +2222,9 @@ const contextBreakdownItems = computed(() => {
         { key: 'summary', label: 'Summary Base', value: breakdown.summaryBase ?? breakdown.summary ?? 0 },
         { key: 'memory', label: 'Memory', value: breakdown.memory || 0 },
         { key: 'summaryCombined', label: 'Summary Total', value: breakdown.summary || 0 },
-        { key: 'lorebook', label: 'Lorebook Used', value: breakdown.lorebook || 0 },
+        { key: 'lorebook', label: 'Keyword Lorebook', value: breakdown.lorebook || 0 },
         { key: 'vectorLore', label: 'Vector Lorebook', value: breakdown.vectorLore || 0 },
+        { key: 'lorebookTotal', label: 'Lorebook Total', value: (breakdown.lorebook || 0) + (breakdown.vectorLore || 0) },
         { key: 'lorebookReserve', label: 'Lorebook Reserve', value: breakdown.lorebookReserve || 0 },
         { key: 'history', label: 'History', value: breakdown.history || 0 }
     ];
@@ -2235,7 +2236,7 @@ const contextLegendItems = computed(() => [
     { key: 'authorsNote', label: 'Author\'s Note', className: 'segment-authors-note' },
     { key: 'summary', label: 'Summary', className: 'segment-summary' },
     { key: 'memory', label: 'Memory', className: 'segment-memory' },
-    { key: 'lorebook', label: 'Lorebook Used', className: 'segment-lorebook' },
+    { key: 'lorebook', label: 'Keyword Lorebook', className: 'segment-lorebook' },
     { key: 'vectorLore', label: 'Vector Lorebook', className: 'segment-vector-lore' },
     { key: 'history', label: 'History', className: 'segment-history' },
     { key: 'lorebookReserve', label: 'Lorebook Reserve', className: 'segment-lorebook-reserve' }

@@ -280,8 +280,8 @@ export async function generateChatResponse({
                     content,
                     blockName: `Lorebook: ${entry.comment || entry.keys?.[0] || 'Entry'}`,
                     isLorebook: true,
-                    sources: tokens > 0 ? [{ source: 'lorebook', tokens }] : [],
-                    _allSources: tokens > 0 ? [{ source: 'lorebook', tokens }] : []
+                    sources: tokens > 0 ? [{ source: 'vectorLore', tokens }] : [],
+                    _allSources: tokens > 0 ? [{ source: 'vectorLore', tokens }] : []
                 };
             })
             .filter(msg => msg.content && msg.content.trim().length > 0);
@@ -345,16 +345,19 @@ export async function generateChatResponse({
             ? {
                 ...result.contextBreakdown,
                 memory: memoryInjection.tokens || 0,
-                vectorLore: vectorLoreTokens,
+                vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
                 summaryBase: result.contextBreakdown.summary || 0,
                 summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                lorebook: (result.contextBreakdown.lorebook || 0) + vectorLoreTokens,
+                // Keep lorebook and vectorLore separate for UI display
+                // lorebook = keyword-matched entries only (from generationWorker)
+                // vectorLore = vector-retrieved entries only (from this service)
                 fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
                 fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
                 totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
                 remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0) - vectorLoreTokens)
             }
             : null;
+
         callbacks.onPromptReady({
             loreEntries: result.loreEntries,
             memoryEntries: memoryInjection.entries,
@@ -492,6 +495,23 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             safeContext: safeContextLimit
         });
 
+        // Calculate vector lorebook tokens for accurate breakdown display
+        let vectorLoreTokens = 0;
+        try {
+            const vectorResults = await vectorSearchLorebooks(safeHistory || history, '', char, char?.sessionId);
+            if (vectorResults.length > 0) {
+                const keywordIds = result.loreEntries ? new Set(result.loreEntries.map(e => e.id)) : new Set();
+                const newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
+                vectorLoreTokens = newVectorEntries.reduce((sum, entry) => {
+                    const content = entry.content || '';
+                    const tokens = estimateTokens(content);
+                    return sum + tokens;
+                }, 0);
+            }
+        } catch (e) {
+            console.warn('[calculateContext] Vector search failed:', e);
+        }
+
         const resolvedCutoff = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
             ? result.cutoffOriginalIndex
             : result.cutoffIndex;
@@ -500,12 +520,13 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             ? {
                 ...result.contextBreakdown,
                 memory: memoryInjection.tokens || 0,
+                vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
                 summaryBase: result.contextBreakdown.summary || 0,
                 summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
-                fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
-                totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
-                remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
+                fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
+                fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
+                totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
+                remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0) - vectorLoreTokens)
             }
             : null;
 
