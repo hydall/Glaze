@@ -162,6 +162,9 @@ function saveApiSetting(key, value) {
         localStorage.setItem('gz_api_endpoint_normalized', normalized);
     }
     localStorage.setItem(key, value);
+    if (key === 'api-context' || key === 'api-max-tokens') {
+        window.dispatchEvent(new CustomEvent('api-context-settings-changed'));
+    }
     
     // Update current preset
     if (activeApiPreset.value) {

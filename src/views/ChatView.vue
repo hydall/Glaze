@@ -2812,6 +2812,8 @@ async function openChat(char, onBack, force = false) {
 
     isOpeningChat = true;
     isLoading.value = true;
+    cutoffIndex.value = -1;
+    contextBreakdown.value = null;
 
     try {
     // Attempt to migrate legacy stats locally
@@ -5153,6 +5155,7 @@ onMounted(() => {
     window.addEventListener('header-chat-search-toggle', onChatSearchToggle);
     window.addEventListener('regex-scripts-changed', onRegexChanged);
     window.addEventListener('header-chat-search', onChatSearch);
+    window.addEventListener('api-context-settings-changed', updateContextCutoff);
 });
 
 watch(() => currentMessages.value.length, () => {
@@ -5270,6 +5273,7 @@ onUnmounted(() => {
     window.removeEventListener('header-chat-search-toggle', onChatSearchToggle);
     window.removeEventListener('regex-scripts-changed', onRegexChanged);
     window.removeEventListener('header-chat-search', onChatSearch);
+    window.removeEventListener('api-context-settings-changed', updateContextCutoff);
     if (cutoffRerunTimer) {
         clearTimeout(cutoffRerunTimer);
         cutoffRerunTimer = null;

@@ -791,9 +791,9 @@ self.onmessage = async function (e) {
             const { messages, loreEntries, notifyObj } = buildPromptMessagesWorker(payload);
 
             const { apiConfig } = payload;
-            const maxTokens = apiConfig.maxTokens;
-            const contextSize = apiConfig.contextSize;
-            const safeContext = contextSize - maxTokens;
+            const maxTokens = apiConfig.maxTokens || 8000;
+            const contextSize = apiConfig.contextSize || 32000;
+            const safeContext = Math.max(1000, contextSize - maxTokens);
 
             const staticMessages = messages.filter(m => !m.isHistory);
             const historyMessages = messages.filter(m => m.isHistory);
