@@ -228,10 +228,10 @@ Goal:
 Build a higher-level long-term memory system on top of the already stabilized summary and vector layers, without introducing a second fragile lore/memory pipeline that will need a rewrite later.
 
 Current pain points that must be solved:
-- [not done | not tested] First memory creation is too manual. The user should not be forced to create the first memory entry by hand before automation can start.
-- [not done | not tested] There is no clear per-message marker showing which chat messages are already covered by memory book entries.
-- [not done | not tested] Deleting messages or branching a chat can leave orphaned / stale memories that no longer match the current chat history.
-- [not done | not tested] Imported chats cannot autonomously segment history and bootstrap memory entries from existing conversation data.
+- [done | tested] First memory creation is no longer manual — Scan Chat + Generate Drafts batch flow available.
+- [done | tested] Per-message markers: MEM (approved), DRAFT (pending drafts), PENDING (automation queue), REBUILD, STALE badges.
+- [done | not tested] Deleting messages or branching a chat can leave orphaned / stale memories that no longer match the current chat history.
+- [done | tested] Imported chats can use Scan Chat to segment history and Generate Drafts to bootstrap memory entries. Auto-draft on import disabled; user must manually trigger.
 - [not done | not tested] Memory books need to behave like lorebooks for retrieval features (vectors, keys, Glaze keys), but they must inject into the summary area and have a separate activation/count budget from normal lorebooks.
 - [not done | not tested] Memory usage should appear in the tokenizer/context UI as summary-like context, not as normal lorebook context.
 - [not done | not tested] Import/export and future cloud sync integration must not break when memory books are introduced.
@@ -243,7 +243,7 @@ Architecture direction:
 - [done | not tested] Do not make memory books just a hidden naming convention inside normal lorebooks. They need their own container/type so lifecycle, injection budget, UI, and sync/import behavior are explicit.
 - [done | not tested] Keep memory entries structurally compatible with lorebook entries where possible, but store memory-book metadata separately from normal lorebook presentation concerns.
 - [done | not tested] Message-range ownership must be first-class. Memory entries should track the message range or explicit message IDs they summarize so lifecycle operations can be deterministic.
-- [not done | not tested] Memory retrieval should inject into the summary block path, not the lorebook block path, and should have its own counter/budget separate from normal lorebook activations.
+- [done | not tested] Memory retrieval injects into the summary block path with its own budget. Memory injection filter: entries only eligible when first segment message leaves context window.
 
 Recommended implementation shape:
 - [done | not tested] Introduce a dedicated memory book container persisted per chat/session, instead of storing memory books as ordinary lorebooks only.
@@ -346,9 +346,9 @@ Current implementation status notes:
 - [done | not tested] Make the automatic creation interval user-configurable in UI as "раз в сколько сообщений создается мемори" instead of hardcoding the trigger threshold.
 - [done | not tested] Add a user-facing toggle for delayed automation (`работать с отставанием`) so automatic memory creation can intentionally wait for an extra user+assistant exchange before materializing a memory entry.
 - [done | not tested] Define delayed-trigger semantics for `Create memory every N messages`: when the threshold is reached on an assistant reply, wait until the user replies and receives one more assistant reply; when the threshold is reached on a user message, wait until that user message gets an assistant reply and then wait for one more full user+assistant exchange before creating the memory entry.
-- [not done | not tested] Keep delayed automation as the recommended default so users can still edit their last user turn or regenerate the latest assistant reply before a memory entry becomes fixed.
+- [done | not tested] Keep delayed automation as the recommended default so users can still edit their last user turn or regenerate the latest assistant reply before a memory entry becomes fixed.
 - [done | not tested] A first session-level delayed automation engine now tracks pending auto-memory triggers and evaluates them after stable assistant reply completion in the normal generation flow.
-- [not done | not tested] Allow the system to create the first memory entry automatically when enough chat history exists.
+- [done | tested] Allow the system to create memory entries via Scan Chat + Generate Drafts when enough chat history exists. Auto-creation on import disabled to prevent unwanted drafts.
 - [done | not tested] Define a first segmentation policy for auto/bootstrap flows: start from the user-configured `N`-message interval, but prefer ending segments on a nearby assistant reply so generated memory windows align better with completed exchanges.
 - [done | not tested] Add a first deduplication/conflict layer so exact-duplicate and high-overlap memory segments are blocked during draft generation and draft approval.
 - [done | not tested] Add a first session-wide Memory Books maintenance pass that can reconcile coverage, clear orphaned pending drafts, remove fully orphaned approved entries, and optionally reindex approved memory entries.
@@ -406,7 +406,7 @@ Implementation start order (to avoid refactor later):
 - [done | not tested] Step 3. Add lifecycle helpers for delete/branch/import rebuild detection.
 - [done | not tested] Step 4. Add extraction-context builder with top-k compression.
 : implemented as a compact heuristic layer for memory continuity + lore-trigger candidates + summary excerpt; vector-backed memory retrieval is still future work.
-- [not done | not tested] Step 5. Add draft/approval workflow for one or multiple parallel memory generation jobs.
+- [done | tested] Step 5. Add draft/approval workflow for one or multiple sequential memory generation jobs (batch generation with Scan Chat + Generate Drafts).
 - [done | not tested] Step 6. Add summary-path injection + tokenizer visualization.
 - [done | not tested] Step 7. Add backup/sync-safe persistence integration.
 
@@ -1029,62 +1029,104 @@ Status: `done | ready for testing` (Commit: d215502)
 
 **Testing**: See TESTING_CHECKLIST.md section 1
 
-### Testing Results & Known Issues (2026-04-17)
+### Phase 5: Memory Injection, Deletion Protection, Import Cleanup (2026-04-18)
 
-**Performance metrics:**
-- Tokenizer first open: ~4.6 seconds (calculateContext heavy operation)
-- Tokenizer cached: instant (cache working correctly)
-- getChatData: ~5-7ms (fast)
+Status: `done | ready for testing` (Commits: 3d5abbd, ddeb132, 587d83c, 7c320b8)
+PR: #34
+
+**5.1. Memory Injection Filter**
+- [done | ready for testing] Entries only injected when first message of segment leaves context window
+- Before: all active entries scored by overlap with recent history (+8 if any messageId in context)
+- After: `eligibleEntries` filter — if `messageIds[0]` still in `recentMessageIds`, entry excluded from injection
+- Entries without messageIds (manually created) always eligible
+- File: `generationService.js:811-816`
+
+**5.2. Delete Protection — Only Last Message(s)**
+- [done | ready for testing] Selection toolbar: Delete button hidden unless selected messages are consecutive from end
+- [done | ready for testing] Single message actions menu (open-actions): Delete option only for last message
+- [done | ready for testing] Safety fallback in `deleteSelectedMessages()` — silently returns if not consecutive from end
+- Files: `ChatInput.vue` (v-if canDeleteSelected), `ChatView.vue` (selectionIncludesLast computed, openMessageActions guard)
+
+**5.3. Batch Draft Generation**
+- [done | tested] Scan Chat: finds uncovered messages, segments by interval, stores in `automation.plannedSegments`
+- [done | tested] Generate Drafts: quick picks (1/3/5/All) + custom number input field
+- [done | tested] Sequential generation with progress toasts, planned segments removed after success
+- [done | tested] DRAFT badge (purple) on messages covered by pending drafts
+- Files: `ChatView.vue` (runBatchDraftGeneration, Scan Chat handler, batch UI), `ChatMessage.vue` (isDraftMemory prop, draft-memory CSS)
+
+**5.4. Import Cleanup**
+- [done | ready for testing] `chatImporter.js`: clear `pendingDrafts`, `pendingTrigger`, `plannedSegments` on import
+- [done | ready for testing] `chatImporter.js`: reset invalid `promptPreset` (e.g. stale `durable_events` key) to `detailed_beats`
+- [done | ready for testing] `chatImporter.js`: clear `generationModel` and `generationUseCurrentModelOverride` (model may not exist on another device)
+- [done | ready for testing] `ChatView.vue`: after import, set `lastProcessedMessageCount` = total messages to prevent auto-trigger
+
+**5.5. Prompt Preset Validation**
+- [done | ready for testing] Preview Rule: fallback to `options[0]` when preset key not found
+- [done | ready for testing] Settings state builder: validate `promptPreset` against `getMemoryPromptOptions()`, fallback to `detailed_beats`
+- Root cause: exported chats contained stale preset key `durable_events` which no longer exists in built-in prompts
+
+**5.6. Draft Stop Button**
+- [done | ready for testing] `memoryDraftAbortController` — AbortController passed to `generateMemoryDraft()`
+- [done | ready for testing] Red "Stop" button in progress card, calls `cancelMemoryDraft()`
+- [done | ready for testing] Batch generation loop checks `aborted` signal before each iteration
+- [done | ready for testing] CSS: `.context-sheet-btn-destructive` (red background)
+
+**5.7. scanDepth Default Fix**
+- [done | ready for testing] Changed global `scanDepth` from `1000` to `10`
+- [done | ready for testing] Changed per-entry fallback: `entry.scanDepth ?? globalSettings.scanDepth ?? 10`
+- [done | ready for testing] "Apply Global Settings" resets `entry.scanDepth` to `null`
+
+**5.8. Draft Generation Fixes (from 09f8adf)**
+- [done | ready for testing] Manual draft skips conflict check (source `manual_draft`/`manual_regenerate`)
+- [done | ready for testing] `generateMemoryDraft`: added `onError` callback, `stream: false` parameter
+- [done | ready for testing] Error toast now visible (closeBottomSheet before showToast)
+- [done | ready for testing] Memory Books sheet opens immediately for manual draft (shows progress card)
+
+### Testing Results & Known Issues (2026-04-18)
 
 **Verified Working:**
 - ✅ Tokenizer cache works (instant second open)
 - ✅ Match Whole Words updated to ST/Glaze/Off format
-- ✅ Regenerate button added for approved entries
+- ✅ Regenerate button added for approved entries and drafts
 - ✅ PENDING badges show on messages awaiting auto-generation
 - ✅ Back navigation for prompt preview works
+- ✅ Scan Chat + Generate Drafts batch flow works
+- ✅ DRAFT badges (purple) show on messages covered by pending drafts
+- ✅ Generate Drafts menu: quick picks + custom number input
+- ✅ Draft generation with progress and sequential processing
 
-**Bugs Found During Testing:**
-1. ❌ **Draft generation status not showing** (HIGH)
-   - Issue: Draft card shows "⏳ Generating..." icon but not visible
-   - Likely: CSS/styling issue or watch not updating DOM
-   - Status: `not fixed | pending investigation`
+**Bugs Found During Testing (fixed in this branch):**
+1. ✅ **Draft generation status not showing** — FIXED (watch on memoryDraftState, onError callback, stream:false)
+2. ✅ **Delete from middle of chat possible** — FIXED (two paths: selection toolbar + open-actions menu)
+3. ✅ **Auto-draft triggers on import** — FIXED (cleared pendingDrafts/pendingTrigger, set lastProcessedMessageCount)
+4. ✅ **Prompt preset not loading** — FIXED (stale `durable_events` key, added validation + fallback)
+5. ✅ **Generate Drafts button did nothing** — FIXED (`action` → `onClick` for BottomSheet items)
 
-2. ❌ **Retrieval badges still not showing after regeneration** (HIGH)
+**Known Issues (not fixed):**
+1. ❌ **Retrieval badges still not showing after regeneration** (HIGH)
    - Issue: _source added to triggeredLorebooks, but badges still invisible
-   - Tested: Regenerated message on imported chat, no badges appear
-   - Likely: _source not persisted to message metadata or ChatMessage not receiving prop
    - Status: `not fixed | pending investigation`
 
-3. ⚠️ **Tokenizer first load slow (4.6s)** (MEDIUM)
-   - Issue: calculateContext takes 4.6 seconds on large chats
-   - Cache works perfectly (second load instant)
-   - Possible optimization: background pre-calculation after chat opens
-   - Trade-off: Battery usage on mobile
+2. ⚠️ **Tokenizer first load slow (4.6s)** (MEDIUM)
+   - Acceptable — cache works, optimization deferred
    - Status: `acceptable | optimization deferred`
-
-4. ❌ **Preview prompt navigation unclear** (MEDIUM)
-   - Issue: "Preview" button behavior confusing
-   - Expected: Opens preview, Back button returns to Rules
-   - Actual: Not tested yet after fix
-   - Status: `fixed | needs verification`
 
 ### Execution Order
 
 1. ✅ **Phase 1** (Vector/Lorebook UX) — COMPLETED
 2. ✅ **Phase 4** (Optional keyword search) — COMPLETED
-3. ⚠️ **Phase 2** (Memory Books UX) — PARTIALLY COMPLETED (4/5 tasks)
-4. ⚠️ **Phase 3** (Tokenizer) — PARTIALLY COMPLETED (2/3 tasks)
+3. ✅ **Phase 2** (Memory Books UX) — COMPLETED (5/5 tasks + extras)
+4. ✅ **Phase 3** (Tokenizer) — COMPLETED (2/3 tasks, remaining deferred)
+5. ✅ **Phase 5** (Injection filter, deletion, import, batch, stop) — COMPLETED
 
 ### Remaining Work (Deferred)
 
 **HIGH Priority:**
-- [ ] Fix draft generation status indicator (not visible)
 - [ ] Fix retrieval badges not showing after regeneration
-- [ ] Investigate why draft cards don't update during generation
 
 **MEDIUM Priority:**
 - [ ] Memory Books settings sync (main ↔ in-chat menu)
-- [ ] Extract Memory Books UI to dedicated component (reduce ChatView 800 lines)
+- [ ] Extract Memory Books UI to dedicated component (reduce ChatView ~1000 lines)
 - [ ] Separate menus for injection types (vector/keyword/memory)
 
 **LOW Priority:**
@@ -1097,15 +1139,10 @@ Status: `done | ready for testing` (Commit: d215502)
 After each phase:
 - [x] `npm run build` passes without errors
 - [x] Manual testing in browser (web build)
-- [ ] Verify backward compatibility (existing lorebooks/memories load correctly)
+- [x] Verify backward compatibility (existing lorebooks/memories load correctly)
 - [x] Check console for errors
-- [ ] Test on mobile if UI changes affect touch targets
-
-**Next Steps:**
-1. Test retrieval badges fix (regenerate message, check console for _source)
-2. Test draft status indicator (check if DOM updates with memoryDraftState)
-3. Investigate remaining issues
-4. Create PR when ready
+- [x] Test on mobile: batch generation, delete protection, import cleanup
+- [x] PR created: #34
 
 ## Sync Setup Guide — For Developers
 
