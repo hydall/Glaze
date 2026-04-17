@@ -672,7 +672,7 @@ Active branch: `fast-fixes`
       - **Encryption is now optional**: Sync works without encryption key. Data stored as plain `.json` instead of `.enc`. If key exists — encrypts as before.
       - **Redirect URI fix**: Both Dropbox and Google Drive adapters now use configurable redirect URIs via env vars (`VITE_DROPBOX_REDIRECT_NATIVE`, `VITE_DROPBOX_REDIRECT_WEB`, `VITE_GDRIVE_REDIRECT_NATIVE`, `VITE_GDRIVE_REDIRECT_WEB`). Web defaults to `window.location.origin` instead of hardcoded `localhost:5173`.
       - **Electron OAuth**: Added Electron-specific OAuth flow for Dropbox (loopback server pattern, same as gdrive already had).
-      - **Error 400 root cause**: `redirect_uri` must exactly match what's registered in the OAuth console (Dropbox App Console / Google Cloud Console). Hardcoded `localhost:5173` only works in dev.
+      - **Error 400 root cause**: `redirect_uri` must exactly match what's registered in the OAuth console (Dropbox App Console / Google Cloud Console). Hardcoded `localhost:5173` only works in dev. Fixed: now uses `window.location.origin` as default.
       - **Backward compatibility**: `readCloudEntityByEntry` tries both `.enc` and `.json` extensions. `decryptEntity` auto-detects encrypted vs plain payload.
       - **SyncSheet UI**: Push/Pull/Auto-sync available without encryption. Encryption shown as optional section. `doWipe` no longer forces new key generation.
     - Files modified:
@@ -698,6 +698,130 @@ Active branch: `fast-fixes`
       - Sync endpoint configuration guide (PC/Linux/iOS/Android)
       - Error 400/402 troubleshooting runbook
       - OAuth/app token setup instructions per platform
+
+14. **Fix: Tokenizer lorebook display and reserve visualization**
+    - Status: `done | tested`
+    - Complexity: medium
+    - Branch: `bug-fixes`
+    - Issue: Lorebook tokens not counted or displayed incorrectly in tokenizer breakdown
+    - Root causes:
+      - Vector lorebooks marked as `source: 'lorebook'` instead of `source: 'vectorLore'`
+      - Worker didn't recognize `vectorLore` as valid source (not in `sourceKeys` array)
+      - `calculateContext()` didn't run vector search, so tokenizer showed 0 for vector lorebooks
+      - Lorebooks displayed in main bar instead of inside reserve zone
+    - Fixes applied:
+      - Changed vector lorebook source from `'lorebook'` to `'vectorLore'` in `generationService.js`
+      - Added `'vectorLore'` to `sourceKeys` array in `generationWorker.js`
+      - Added `vectorLore` field to breakdown structure in worker
+      - Updated `fixedBase` calculation to include `vectorLore`
+      - Added vector search to `calculateContext()` for accurate tokenizer display
+      - Modified UI to show lorebooks **inside** reserve zone, not in main bar
+      - Created nested reserve visualization: reserve contains keyword + vector lorebooks + unused space
+      - Updated labels: "Keyword Lorebook", "Vector Lorebook", "Lorebook Total"
+      - Added `.chat-context-reserve-container` CSS for nested segment display
+    - Files modified:
+      - `src/workers/generationWorker.js` — add vectorLore to sourceKeys, breakdown, fixedBase calculation
+      - `src/core/services/generationService.js` — change source to vectorLore, add vector search to calculateContext
+      - `src/views/ChatView.vue` — nested reserve visualization, updated labels, CSS changes
+    - Additional fixes (second commit):
+      - Fixed `remaining` calculation: changed from `safeContext - totalUsed` to `contextSize - totalUsed`
+      - Excluded lorebook/vectorLore from `fixedBase` (they're inside reserve, not in base)
+      - Now `fixedBase = character + preset + summary + authorsNote` (without lorebooks)
+      - Result: `remaining` now shows correct value relative to full context (80000)
+    - Testing:
+      - Tokenizer now correctly shows keyword lorebook (0 tokens) + vector lorebook (~8657 tokens)
+      - Visual bar: lorebooks display inside green reserve zone on the right
+      - Reserve shows: [Vector Lorebook (purple)] [Unused Reserve (green)]
+      - Main bar shows: Character, Preset, Summary, Memory, History (no lorebooks)
+      - Remaining calculation: 80000 - totalUsed (instead of 72000 - totalUsed)
+    - Commits: `f33a9d3`, `915dbf3`
+    - PR: pending
+
+15. **Image Generation Improvements — Info Blocks & Dynamic Character State**
+    - Status: `not started`
+    - Complexity: hard
+    - Branch: `img-gen-improve` (from `dev`)
+    - Goal: Implement comprehensive image generation system with dynamic character state tracking, dual API endpoints, and quick generation workflow
+    
+    **Phase 1: Info Blocks — Dynamic State Tracking**
+    - Problem: User persona describes "favorite outfit: tweed", but user wrote "wearing hoodie today" 20 messages ago. Current system uses static persona, not dynamic session state.
+    - Proposed Solution: **Info Blocks** — dedicated structured data blocks that track current session state
+    - Info Block Structure:
+      - `current_outfit_user`: What {{user}} is wearing right now
+      - `current_outfit_char`: What {{char}} is wearing
+      - `current_location`: Current scene location  
+      - `time_of_day`: Morning/afternoon/evening/night
+      - `lighting`: Scene lighting conditions
+      - `weather`: If outdoors
+      - `current_pose`: Action/position of characters
+    - Implementation:
+      - Create new Memory Book type: `info_blocks` (high priority, always included)
+      - Auto-extract from chat: Pattern matching for outfit/location/time changes (keywords: "wearing", "dressed in", "changed into", "now in")
+      - Manual edit: UI for quick state updates (floating button or context menu)
+      - Image gen integration: Use info_blocks as primary source, persona as fallback
+    - Alternative Approaches Considered:
+      - Parsing last N messages: Too slow, unreliable with complex descriptions
+      - Static Memory Books: Requires manual updates, not automatic
+    
+    **Phase 2: Dual API Setup (SFW/NSFW)**
+    - Support two separate image generation endpoints:
+      - SFW endpoint: Standard generation (OpenAI/Gemini/Naistera)
+      - NSFW endpoint: Uncensored generation (NovelAI/Naistera specialized)
+    - Settings:
+      - Two sets of credentials: `sfw_endpoint`, `sfw_key`, `nsfw_endpoint`, `nsfw_key`
+      - Default toggle: Auto-detect content type or manual selection
+      - Style presets per endpoint
+    - Use case: Different models for different content types without switching settings manually
+    
+    **Phase 3: Quick Image Generation Button**
+    - Location: Bottom-left button group in ChatInput (4th button or replace existing image-gen)
+    - Workflow:
+      1. Long-press or context menu: Choose SFW/NSFW/Settings
+      2. Click: Quick menu with options:
+         - "Generate scene" (uses current info_blocks + last 3 messages)
+         - "Generate portrait - {{char}}" (character focus)
+         - "Generate portrait - {{user}}" (user focus)
+         - "Custom prompt..." (manual override)
+      3. Auto-prompt building from:
+         - Info blocks (primary)
+         - Current macros: {{char}}, {{user}}, {{scenario}}, {{persona}}
+         - Last 3-5 chat messages for context
+      4. Direct generation without waiting for model response
+      5. Insert as new message or inline in chat
+    
+    **Phase 4: Multi-Character Support**
+    - Problem: Character cards can define multiple characters (main + NPCs)
+    - Solution: Parse character definitions from card and lorebooks
+    - Auto-detect speaking characters from recent messages
+    - Generate composite prompts with all present characters
+    - Per-character outfit tracking in info_blocks
+    
+    **Pre-Generation Preview (Optional Enhancement)**
+    - Show detected state before generation:
+      - Detected: "You in hoodie and jeans, {{char}} in dress, location: cafe, evening"
+      - Editable fields for quick correction
+      - Generate button
+    - Benefits: User can fix misdetected state before wasting API call
+    
+    **Technical Notes:**
+    - Prerequisite for reliable automated image generation
+    - Without accurate state tracking, generated images mismatch actual scene
+    - Info blocks solve the "static vs dynamic" state problem
+    - Dual API enables content-appropriate generation without manual switching
+    
+    **Files to Modify (Future):**
+    - `src/core/services/imageGenService.js` — dual API support, auto-prompt builder
+    - `src/components/sheets/ImageGenSheet.vue` — dual endpoint settings UI
+    - `src/components/chat/ChatInput.vue` — quick gen button
+    - `src/core/services/infoBlockService.js` — new service for state tracking
+    - `src/core/services/characterExtractor.js` — multi-char parsing
+    - `src/components/sheets/InfoBlockEditor.vue` — manual state editor
+    
+    **Deferred for Later:**
+    - Advanced pattern matching for outfit changes
+    - Automatic pose detection from action verbs
+    - Scene mood extraction from dialogue tone
+    - Background/location detail enrichment from lorebooks
 
 ### Branch Strategy (updated)
 - Current: `feat/sync-infrastructure-fixes` (from `feat/multi-vector-retrieval`)

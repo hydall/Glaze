@@ -2193,22 +2193,35 @@ const contextSegments = computed(() => {
     if (breakdown.memory > 0) {
         used.push({ key: 'memory', value: breakdown.memory, percent: toPercent(breakdown.memory), className: 'segment-memory' });
     }
-    if (breakdown.lorebook > 0) {
-        used.push({ key: 'lorebook', value: breakdown.lorebook, percent: toPercent(breakdown.lorebook), className: 'segment-lorebook' });
-    }
-    if (breakdown.vectorLore > 0) {
-        used.push({ key: 'vectorLore', value: breakdown.vectorLore, percent: toPercent(breakdown.vectorLore), className: 'segment-vector-lore' });
-    }
+    // Don't add lorebook/vectorLore to used - they go inside reserve
     if (breakdown.history > 0) {
         used.push({ key: 'history', value: breakdown.history, percent: toPercent(breakdown.history), className: 'segment-history' });
     }
 
-    return {
-        used,
-        reserve: breakdown.lorebookReserve > 0
-            ? { key: 'lorebookReserve', value: breakdown.lorebookReserve, percent: toPercent(breakdown.lorebookReserve), className: 'segment-lorebook-reserve' }
-            : null
-    };
+    // Build reserve with lorebooks inside
+    let reserve = null;
+    if (breakdown.lorebookReserve > 0) {
+        const reserveUsed = [];
+        if (breakdown.lorebook > 0) {
+            reserveUsed.push({ key: 'lorebook', value: breakdown.lorebook, percent: toPercent(breakdown.lorebook), className: 'segment-lorebook' });
+        }
+        if (breakdown.vectorLore > 0) {
+            reserveUsed.push({ key: 'vectorLore', value: breakdown.vectorLore, percent: toPercent(breakdown.vectorLore), className: 'segment-vector-lore' });
+        }
+        const totalLoreUsed = (breakdown.lorebook || 0) + (breakdown.vectorLore || 0);
+        const reserveRemaining = breakdown.lorebookReserve - totalLoreUsed;
+        
+        reserve = {
+            key: 'lorebookReserve',
+            value: breakdown.lorebookReserve,
+            percent: toPercent(breakdown.lorebookReserve),
+            className: 'segment-lorebook-reserve',
+            used: reserveUsed,
+            remaining: reserveRemaining > 0 ? reserveRemaining : 0
+        };
+    }
+
+    return { used, reserve };
 });
 
 const contextBreakdownItems = computed(() => {
@@ -2222,8 +2235,9 @@ const contextBreakdownItems = computed(() => {
         { key: 'summary', label: 'Summary Base', value: breakdown.summaryBase ?? breakdown.summary ?? 0 },
         { key: 'memory', label: 'Memory', value: breakdown.memory || 0 },
         { key: 'summaryCombined', label: 'Summary Total', value: breakdown.summary || 0 },
-        { key: 'lorebook', label: 'Lorebook Used', value: breakdown.lorebook || 0 },
+        { key: 'lorebook', label: 'Keyword Lorebook', value: breakdown.lorebook || 0 },
         { key: 'vectorLore', label: 'Vector Lorebook', value: breakdown.vectorLore || 0 },
+        { key: 'lorebookTotal', label: 'Lorebook Total', value: (breakdown.lorebook || 0) + (breakdown.vectorLore || 0) },
         { key: 'lorebookReserve', label: 'Lorebook Reserve', value: breakdown.lorebookReserve || 0 },
         { key: 'history', label: 'History', value: breakdown.history || 0 }
     ];
@@ -2235,7 +2249,7 @@ const contextLegendItems = computed(() => [
     { key: 'authorsNote', label: 'Author\'s Note', className: 'segment-authors-note' },
     { key: 'summary', label: 'Summary', className: 'segment-summary' },
     { key: 'memory', label: 'Memory', className: 'segment-memory' },
-    { key: 'lorebook', label: 'Lorebook Used', className: 'segment-lorebook' },
+    { key: 'lorebook', label: 'Keyword Lorebook', className: 'segment-lorebook' },
     { key: 'vectorLore', label: 'Vector Lorebook', className: 'segment-vector-lore' },
     { key: 'history', label: 'History', className: 'segment-history' },
     { key: 'lorebookReserve', label: 'Lorebook Reserve', className: 'segment-lorebook-reserve' }
@@ -2617,7 +2631,8 @@ function confirmHideTopMessages() {
 }
 
 async function openContextSheet() {
-    if (!contextBreakdown.value && activeChatChar) {
+    // Always recalculate to ensure vector lorebooks are included
+    if (activeChatChar) {
         await updateContextCutoff();
     }
 
@@ -2648,7 +2663,17 @@ async function openContextSheet() {
     `).join('');
 
     const reserveHtml = contextSegments.value.reserve
-        ? `<div class="chat-context-reserve ${contextSegments.value.reserve.className}" style="width:${contextSegments.value.reserve.percent}%"></div>`
+        ? (() => {
+            const reserve = contextSegments.value.reserve;
+            const innerSegments = reserve.used?.map(seg => 
+                `<div class="chat-context-segment ${seg.className}" style="width:${(seg.value / reserve.value * 100).toFixed(2)}%"></div>`
+            ).join('') || '';
+            const remainingPercent = reserve.remaining > 0 ? ((reserve.remaining / reserve.value) * 100).toFixed(2) : 0;
+            const remainingHtml = reserve.remaining > 0 
+                ? `<div class="chat-context-segment ${reserve.className}" style="width:${remainingPercent}%"></div>`
+                : '';
+            return `<div class="chat-context-reserve-container" style="width:${reserve.percent}%">${innerSegments}${remainingHtml}</div>`;
+        })()
         : '';
 
     const legendHtml = contextLegendItems.value.map(segment => `
@@ -5498,12 +5523,17 @@ onUnmounted(() => {
     flex: 0 0 auto;
 }
 
-.chat-context-reserve {
+.chat-context-reserve-container {
     position: absolute;
     top: 0;
     right: 0;
     height: 100%;
+    display: flex;
     box-shadow: inset 2px 0 0 rgba(0, 0, 0, 0.35);
+}
+
+.chat-context-reserve {
+    height: 100%;
 }
 
 .chat-context-segment {

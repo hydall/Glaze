@@ -280,8 +280,8 @@ export async function generateChatResponse({
                     content,
                     blockName: `Lorebook: ${entry.comment || entry.keys?.[0] || 'Entry'}`,
                     isLorebook: true,
-                    sources: tokens > 0 ? [{ source: 'lorebook', tokens }] : [],
-                    _allSources: tokens > 0 ? [{ source: 'lorebook', tokens }] : []
+                    sources: tokens > 0 ? [{ source: 'vectorLore', tokens }] : [],
+                    _allSources: tokens > 0 ? [{ source: 'vectorLore', tokens }] : []
                 };
             })
             .filter(msg => msg.content && msg.content.trim().length > 0);
@@ -342,19 +342,32 @@ export async function generateChatResponse({
 
     if (callbacks.onPromptReady) {
         const contextBreakdown = result.contextBreakdown
-            ? {
-                ...result.contextBreakdown,
-                memory: memoryInjection.tokens || 0,
-                vectorLore: vectorLoreTokens,
-                summaryBase: result.contextBreakdown.summary || 0,
-                summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                lorebook: (result.contextBreakdown.lorebook || 0) + vectorLoreTokens,
-                fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
-                fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
-                totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
-                remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0) - vectorLoreTokens)
-            }
+            ? (() => {
+                const totalLoreTokens = (result.contextBreakdown.lorebook || 0) + vectorLoreTokens;
+                const reserveTokens = result.contextBreakdown.lorebookReserve || 0;
+                
+                // All lorebooks (keyword + vector) must fit within the reserve
+                // Reserve remains unchanged, lorebooks are displayed within it
+                const effectiveReserve = reserveTokens - totalLoreTokens;
+                
+                return {
+                    ...result.contextBreakdown,
+                    memory: memoryInjection.tokens || 0,
+                    vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
+                    summaryBase: result.contextBreakdown.summary || 0,
+                    summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
+                    // Keep lorebook and vectorLore separate for UI display
+                    // lorebook = keyword-matched entries only (from generationWorker)
+                    // vectorLore = vector-retrieved entries only (from this service)
+                    // lorebookReserve stays the same - lorebooks are shown within it
+                    fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
+                    fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
+                    totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
+                    remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
+                };
+            })()
             : null;
+
         callbacks.onPromptReady({
             loreEntries: result.loreEntries,
             memoryEntries: memoryInjection.entries,
@@ -492,21 +505,49 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             safeContext: safeContextLimit
         });
 
+        // Calculate vector lorebook tokens for accurate breakdown display
+        let vectorLoreTokens = 0;
+        try {
+            const vectorResults = await vectorSearchLorebooks(safeHistory || history, '', char, char?.sessionId);
+            if (vectorResults.length > 0) {
+                const keywordIds = result.loreEntries ? new Set(result.loreEntries.map(e => e.id)) : new Set();
+                const newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
+                vectorLoreTokens = newVectorEntries.reduce((sum, entry) => {
+                    const content = entry.content || '';
+                    const tokens = estimateTokens(content);
+                    return sum + tokens;
+                }, 0);
+            }
+        } catch (e) {
+            console.warn('[calculateContext] Vector search failed:', e);
+        }
+
         const resolvedCutoff = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
             ? result.cutoffOriginalIndex
             : result.cutoffIndex;
 
         const contextBreakdown = result.contextBreakdown
-            ? {
-                ...result.contextBreakdown,
-                memory: memoryInjection.tokens || 0,
-                summaryBase: result.contextBreakdown.summary || 0,
-                summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
-                fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
-                totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
-                remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
-            }
+            ? (() => {
+                const totalLoreTokens = (result.contextBreakdown.lorebook || 0) + vectorLoreTokens;
+                const reserveTokens = result.contextBreakdown.lorebookReserve || 0;
+                
+                // All lorebooks (keyword + vector) must fit within the reserve
+                // Reserve remains unchanged, lorebooks are displayed within it
+                const effectiveReserve = reserveTokens - totalLoreTokens;
+                
+                return {
+                    ...result.contextBreakdown,
+                    memory: memoryInjection.tokens || 0,
+                    vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
+                    summaryBase: result.contextBreakdown.summary || 0,
+                    summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
+                    // All lorebooks must fit within reserve - don't add to fixedBase
+                    fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
+                    fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
+                    totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
+                    remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
+                };
+            })()
             : null;
 
         return {
