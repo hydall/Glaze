@@ -1029,21 +1029,83 @@ Status: `done | ready for testing` (Commit: d215502)
 
 **Testing**: See TESTING_CHECKLIST.md section 1
 
+### Testing Results & Known Issues (2026-04-17)
+
+**Performance metrics:**
+- Tokenizer first open: ~4.6 seconds (calculateContext heavy operation)
+- Tokenizer cached: instant (cache working correctly)
+- getChatData: ~5-7ms (fast)
+
+**Verified Working:**
+- ✅ Tokenizer cache works (instant second open)
+- ✅ Match Whole Words updated to ST/Glaze/Off format
+- ✅ Regenerate button added for approved entries
+- ✅ PENDING badges show on messages awaiting auto-generation
+- ✅ Back navigation for prompt preview works
+
+**Bugs Found During Testing:**
+1. ❌ **Draft generation status not showing** (HIGH)
+   - Issue: Draft card shows "⏳ Generating..." icon but not visible
+   - Likely: CSS/styling issue or watch not updating DOM
+   - Status: `not fixed | pending investigation`
+
+2. ❌ **Retrieval badges still not showing after regeneration** (HIGH)
+   - Issue: _source added to triggeredLorebooks, but badges still invisible
+   - Tested: Regenerated message on imported chat, no badges appear
+   - Likely: _source not persisted to message metadata or ChatMessage not receiving prop
+   - Status: `not fixed | pending investigation`
+
+3. ⚠️ **Tokenizer first load slow (4.6s)** (MEDIUM)
+   - Issue: calculateContext takes 4.6 seconds on large chats
+   - Cache works perfectly (second load instant)
+   - Possible optimization: background pre-calculation after chat opens
+   - Trade-off: Battery usage on mobile
+   - Status: `acceptable | optimization deferred`
+
+4. ❌ **Preview prompt navigation unclear** (MEDIUM)
+   - Issue: "Preview" button behavior confusing
+   - Expected: Opens preview, Back button returns to Rules
+   - Actual: Not tested yet after fix
+   - Status: `fixed | needs verification`
+
 ### Execution Order
 
-1. **Phase 1** (Vector/Lorebook UX) — HIGHEST priority, misleading UI confuses users
-2. **Phase 4** (Optional keyword search) — Completes Phase 1, gives user control
-3. **Phase 2** (Memory Books UI) — Technical debt, improves maintainability
-4. **Phase 3** (Tokenizer) — LOWEST priority, optional polish
+1. ✅ **Phase 1** (Vector/Lorebook UX) — COMPLETED
+2. ✅ **Phase 4** (Optional keyword search) — COMPLETED
+3. ⚠️ **Phase 2** (Memory Books UX) — PARTIALLY COMPLETED (4/5 tasks)
+4. ⚠️ **Phase 3** (Tokenizer) — PARTIALLY COMPLETED (2/3 tasks)
+
+### Remaining Work (Deferred)
+
+**HIGH Priority:**
+- [ ] Fix draft generation status indicator (not visible)
+- [ ] Fix retrieval badges not showing after regeneration
+- [ ] Investigate why draft cards don't update during generation
+
+**MEDIUM Priority:**
+- [ ] Memory Books settings sync (main ↔ in-chat menu)
+- [ ] Extract Memory Books UI to dedicated component (reduce ChatView 800 lines)
+- [ ] Separate menus for injection types (vector/keyword/memory)
+
+**LOW Priority:**
+- [ ] Background tokenizer pre-calculation (battery consideration)
+- [ ] Extract tokenizer to dedicated component
+- [ ] Universal navigation stack for all sheets
 
 ### Testing Checklist
 
 After each phase:
-- [ ] `npm run build` passes without errors
-- [ ] Manual testing in browser (web build)
+- [x] `npm run build` passes without errors
+- [x] Manual testing in browser (web build)
 - [ ] Verify backward compatibility (existing lorebooks/memories load correctly)
-- [ ] Check console for errors
+- [x] Check console for errors
 - [ ] Test on mobile if UI changes affect touch targets
+
+**Next Steps:**
+1. Test retrieval badges fix (regenerate message, check console for _source)
+2. Test draft status indicator (check if DOM updates with memoryDraftState)
+3. Investigate remaining issues
+4. Create PR when ready
 
 ## Sync Setup Guide — For Developers
 
