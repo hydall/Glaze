@@ -58,7 +58,7 @@ function escapeRegex(string) {
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
 }
 
-const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\\u201C\\u201D\\u2018\\u2019\\u00AB\\u00BB(){}\\[\\]—–]';
+const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\\u201C\\u201D\\u2018\\u2019\\u00AB\\u00BB(){}\\[\\]—–*]';
 
 function sanitizeRegexFlags(flags) {
     const valid = new Set(['g', 'i', 'm', 's', 'u', 'y']);
