@@ -637,6 +637,7 @@ let isCalculatingCutoff = false;
 let pendingCutoffRecalc = false;
 let isOpeningChat = false;
 let cutoffRerunTimer = null;
+let cutoffDebounceTimer = null;
 const pendingGuidance = ref(null); // { text, type }
 
 let ignoreScrollAdjustment = false;
@@ -2089,7 +2090,7 @@ async function deleteSelectedMessages() {
         reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
         chatData.sessions[sessionId] = currentMessages.value;
         await db.saveChat(activeChatChar.id, chatData);
-        updateContextCutoff();
+        debouncedUpdateContextCutoff();
     }
     
     clearSelection();
@@ -2109,7 +2110,7 @@ async function toggleHideSelectedMessages() {
         const sessionId = activeChatChar.sessionId || chatData.currentId;
         chatData.sessions[sessionId] = currentMessages.value;
         await db.saveChat(activeChatChar.id, chatData);
-        updateContextCutoff();
+        debouncedUpdateContextCutoff();
     }
     
     clearSelection();
@@ -2501,6 +2502,13 @@ async function updateContextCutoff() {
     }
 }
 
+function debouncedUpdateContextCutoff(delay = 300) {
+    if (cutoffDebounceTimer) clearTimeout(cutoffDebounceTimer);
+    cutoffDebounceTimer = setTimeout(() => {
+        updateContextCutoff();
+    }, delay);
+}
+
 async function updateSessionMessage(char, msgIndex, newMsgData) {
     let data = await getChatData(char.id);
     if (data && data.sessions[data.currentId]) {
@@ -2633,7 +2641,15 @@ function confirmHideTopMessages() {
 async function openContextSheet() {
     // Always recalculate to ensure vector lorebooks are included
     if (activeChatChar) {
-        await updateContextCutoff();
+        // Wait for calculation to complete, with timeout fallback
+        const calculatePromise = updateContextCutoff();
+        const timeoutPromise = new Promise(resolve => setTimeout(resolve, 5000)); // 5 second timeout
+        await Promise.race([calculatePromise, timeoutPromise]);
+        
+        // If still calculating after timeout, wait a bit more
+        if (isCalculatingCutoff) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
     }
 
     const breakdown = contextBreakdown.value;
@@ -2642,7 +2658,7 @@ async function openContextSheet() {
             title: 'Context',
             bigInfo: {
                 icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M11 17h2v-6h-2v6zm0-8h2V7h-2v2zm1-7C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>',
-                description: 'Context breakdown is not ready yet. Try again in a moment.',
+                description: 'Context calculation is taking longer than expected. Please check that your API settings are configured correctly and try again.',
                 buttonText: 'Close',
                 onButtonClick: () => closeBottomSheet()
             }
