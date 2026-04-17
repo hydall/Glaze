@@ -484,7 +484,13 @@ function buildPromptMessagesWorker(args) {
 
     let loreByPosition = { worldInfoBefore: [], worldInfoAfter: [], lorebooksMacro: [] };
     if (lorebooks) {
-        const loreEntries = scanLorebooksPure(history || [], char, "", chatId, lorebooks, globalSettings, activations);
+        // DUAL-CHANNEL FIX: Extract current user message for keyword scanning
+        const lastUserMessage = history && history.length > 0 
+            ? history.filter(m => m.role === 'user').slice(-1)[0]
+            : null;
+        const textToScan = lastUserMessage?.content || "";
+        
+        const loreEntries = scanLorebooksPure(history || [], char, textToScan, chatId, lorebooks, globalSettings, activations);
         allLoreEntries = loreEntries;
 
         loreEntries.forEach(entry => {
