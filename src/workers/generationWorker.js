@@ -866,6 +866,15 @@ function buildPromptMessagesWorker(args) {
         return m.content && m.content.trim().length > 0;
     });
 
+    console.info('[buildPromptMessagesWorker] Returning loreEntries', {
+        count: allLoreEntries.length,
+        entries: allLoreEntries.map(e => ({
+            id: e.id,
+            comment: e.comment,
+            keys: e.keys
+        }))
+    });
+
     return { messages: filteredMessages, loreEntries: allLoreEntries, notifyObj };
 }
 
@@ -875,6 +884,15 @@ self.onmessage = async function (e) {
     if (type === 'calculateContext' || type === 'generateChatResponse') {
         try {
             const { messages, loreEntries, notifyObj } = buildPromptMessagesWorker(payload);
+            
+            console.info('[generationWorker] After buildPromptMessagesWorker', {
+                type,
+                loreEntriesCount: loreEntries?.length || 0,
+                loreEntriesPreview: loreEntries?.slice(0, 3).map(e => ({
+                    id: e.id,
+                    comment: e.comment
+                })) || []
+            });
 
             const { apiConfig } = payload;
             const maxTokens = apiConfig.maxTokens;
