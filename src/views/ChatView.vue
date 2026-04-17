@@ -1148,6 +1148,7 @@ async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages,
     automation.lastProcessedMessageCount = stableCount;
     memoryBook.updatedAt = Date.now();
     await db.saveChat(activeChatChar.id, chatData);
+    updatePendingMemoryMessageIds();
     return created;
 }
 
@@ -2456,16 +2457,27 @@ const searchMatchState = computed(() => {
     };
 });
 
-const pendingMemoryMessageIds = computed(() => {
-    if (!activeChatChar) return new Set();
-    const chatData = chatDataCache.get(activeChatChar.id);
-    if (!chatData) return new Set();
+const pendingMemoryMessageIds = ref(new Set());
+
+async function updatePendingMemoryMessageIds() {
+    if (!activeChatChar) {
+        pendingMemoryMessageIds.value = new Set();
+        return;
+    }
+    const chatData = await getChatData(activeChatChar.id);
+    if (!chatData) {
+        pendingMemoryMessageIds.value = new Set();
+        return;
+    }
     const sessionId = activeChatChar.sessionId || chatData.currentId;
     const memoryBook = chatData.memoryBooks?.[sessionId];
-    if (!memoryBook?.automation?.pendingTrigger) return new Set();
+    if (!memoryBook?.automation?.pendingTrigger) {
+        pendingMemoryMessageIds.value = new Set();
+        return;
+    }
     const messageIds = memoryBook.automation.pendingTrigger.messageIds || [];
-    return new Set(messageIds.filter(Boolean));
-});
+    pendingMemoryMessageIds.value = new Set(messageIds.filter(Boolean));
+}
 
 const onChatSearchToggle = (e) => {
     isSearchMode.value = e.detail;
@@ -3258,6 +3270,8 @@ async function openChat(char, onBack, force = false) {
             pendingCutoffRecalc = false;
             updateContextCutoff();
         }
+        // Update pending memory indicators
+        updatePendingMemoryMessageIds();
     }
 }
 

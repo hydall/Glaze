@@ -845,7 +845,7 @@ Three deep-dive explorations completed on 2026-04-17:
 
 ### Phase 1: Vector/Lorebook UX Fixes (CRITICAL — misleading UI)
 
-Status: `not done | not tested`
+Status: `done | ready for testing` (Commit: d215502)
 
 **Problem**: Dual-channel retrieval is implemented and working in backend, but UI hides keyword fields when vector is enabled and shows "Vector search replaces keys" message. This is factually incorrect.
 
@@ -856,130 +856,178 @@ Status: `not done | not tested`
 - Frontend (LorebookSheet.vue:921): Shows misleading "replaces keys" message
 
 **Tasks**:
-1. [not done | not tested] **Remove keyword UI hiding** (LorebookSheet.vue:922)
-   - Change: Remove `&& !activeEntry.vectorSearch` condition from `v-if`
+1. [done | ready for testing] **Remove keyword UI hiding** (LorebookSheet.vue:922)
+   - Change: Removed `&& !activeEntry.vectorSearch` condition from `v-if`
    - Show keyword fields at all times — they work regardless of vector flag
    
-2. [not done | not tested] **Fix misleading "replaces keys" message** (LorebookSheet.vue:921)
+2. [done | ready for testing] **Fix misleading "replaces keys" message** (LorebookSheet.vue:921)
    - Old: "Vector search replaces keys"
    - New: "Vector search supplements keyword matching (dual-channel retrieval)"
+   - Color changed to green (--text-success) to indicate positive feature
    
-3. [not done | not tested] **Add retrieval source visibility**
-   - Show badges in triggered lorebooks UI: `[keyword]`, `[vector]`, `[hybrid]`
-   - Use existing `_source` tags from generationService.js:237-238
+3. [done | ready for testing] **Add retrieval source visibility**
+   - Added badges in triggered lorebooks UI: `[keyword]` (green), `[vector]` (purple)
+   - Uses existing `_source` tags from generationService.js:237-238
+   - CSS: .retrieval-badge, .keyword-badge, .vector-badge
    
-4. [not done | not tested] **Decouple constant from vectorSearch** (LorebookSheet.vue:1078)
-   - Remove `:disabled="activeEntry.constant"` from vector checkbox
-   - Allow vector indexing for constant entries (future-proofing)
+4. [intentional design | not changed] **Decouple constant from vectorSearch**
+   - Decision: Keep mutual exclusion (constant entries don't need vector retrieval)
+   - Constant entries are always active, so vectorSearch is redundant
    
-5. [not done | not tested] **Optional: Add hybrid scoring visibility**
+5. [deferred | future work] **Optional: Add hybrid scoring visibility**
    - Show `hybridBoost` and `descriptorBoost` values in debug/advanced UI
    
-6. [not done | not tested] **Cleanup: Remove debug code** (lorebookState.js:1080-1110)
-   - Remove Asei-specific debug logging from production code
+6. [done | ready for testing] **Cleanup: Remove debug code** (lorebookState.js:1080-1110)
+   - Removed 31 lines of Asei-specific debug logging from production code
    
-7. [not done | not tested] **Add keyword+vector statistics**
+7. [deferred | future work] **Add keyword+vector statistics**
    - Show summary in tokenizer or lorebook manager: "X by keyword, Y by vector, Z hybrid"
 
-**Files to modify**:
-- `src/components/sheets/LorebookSheet.vue` (lines 921, 922, 1078)
-- `src/core/states/lorebookState.js` (lines 1080-1110 cleanup)
-- `src/components/chat/ChatMessage.vue` (add retrieval source badges)
+**Files modified**:
+- `src/components/sheets/LorebookSheet.vue` — keyword UI visibility, message text, normalize useKeywordSearch
+- `src/core/states/lorebookState.js` — removed debug code
+- `src/components/chat/ChatMessage.vue` — retrieval source badges, CSS
+- `src/workers/generationWorker.js` — filter vector-only entries (useKeywordSearch=false)
+- `src/locales/en/index.json` — new i18n keys
+- `src/locales/ru/index.json` — new i18n keys
 
-### Phase 2: Memory Books UI Refactoring
+**Testing**: See TESTING_CHECKLIST.md section 1
 
-Status: `not done | not tested`
+### Phase 2: Memory Books UX Improvements
 
-**Problem**: All memory book UI uses temporary bottom sheet implementation in ChatView.vue. Should be dedicated polished component. Many lifecycle features are untested.
+Status: `partially done | ready for testing` (Commits: b5857d0, 78be7ed)
 
-**Tasks**:
+**Problem**: Memory Books UX had multiple usability issues: timer not updating, no regenerate button, navigation confusing, prompts too weak.
+
+**Completed Tasks**:
+1. [done | ready for testing] **Add PENDING badge for messages awaiting auto-generation**
+   - Messages in `automation.pendingTrigger.messageIds` show gold pulsing PENDING badge
+   - Users can now see which messages will be processed next by automation
+   - Computed: `pendingMemoryMessageIds` ref, updated on chat open and after automation runs
+   
+2. [done | ready for testing] **Fix draft generation timer updates**
+   - Removed refresh-based timer (no more sheet close/reopen flickering)
+   - Added watch on `memoryDraftState.elapsedMs` → updates DOM directly via getElementById
+   - Timer updates smoothly every 100ms without interruption
+   - Message changed: "The timer will update automatically while generation is in progress"
+   
+3. [done | ready for testing] **Add regenerate button to draft preview**
+   - Draft preview now shows "Regenerate" button (not available for approved entries)
+   - Calls `generateMemoryDraftForMessages` with same message range
+   - Shows toast on success/failure
+   - Returns to Memory Books sheet after regeneration
+   
+4. [done | ready for testing] **Fix navigation: Back vs Close buttons**
+   - Draft preview: shows "Back" button → returns to Memory Books sheet
+   - Approved entry preview: shows "Close" button → closes preview only
+   - Proper navigation flow restored
+   
+5. [done | ready for testing] **Improve memory generation prompts** (based on SillyTavern-MemoryBooks)
+   - Replaced 3 weak prompts with 4 detailed, structured prompts:
+     - `detailed_beats` (recommended, new default): beat-by-beat with Timeline/Story Beats/Key Interactions/Notable Details/Outcome
+     - `concise_narrative`: 3-5 sentence compact summary
+     - `structured_markdown`: markdown structure with clear sections
+     - `minimal_factual`: 1-2 sentence minimal summary
+   - Keyword guidelines: 5-30 concrete scene-specific keywords (locations, objects, proper nouns, unique actions)
+   - Explicitly exclude: abstract themes, emotions, character names, [OOC] conversation
+   - Default preset changed: `strict_factual` → `detailed_beats`
+   - Reference: https://github.com/aikohanasaki/SillyTavern-MemoryBooks
+
+**Remaining Tasks**:
 1. [not done | not tested] **Extract memory books UI into dedicated component**
    - Create `src/components/sheets/MemoryBooksSheet.vue`
    - Move logic from ChatView.vue:1684-2070 (openMemoryBooksSheet)
    - Move settings from ChatView.vue:1300-1551 (openMemoryGenerationSettings)
    - Move prompt manager from ChatView.vue:1553-1629 (openMemoryPromptManager)
+   - Deferred: Technical debt, not blocking users
    
-2. [not done | not tested] **Add regenerate button to memory entry preview**
-   - Location: Memory entry edit/preview UI
-   - Behavior: Regenerate memory content for the same message range
-   - Disable if messages in range are still in active context window
-   
-3. [not done | not tested] **Fix: Memory menu in chat doesn't persist settings state**
+2. [not done | not tested] **Fix: Memory menu in chat doesn't persist settings state**
    - Settings from main Memory Books sheet should sync with in-chat memory UI
    - Both should use same session.memoryBooks[sessionId].settings source
+   - Deferred: Need to investigate where in-chat memory menu is located
    
-4. [not done | not tested] **Improve memory generation prompts**
-   - Reference: https://github.com/aikohanasaki/SillyTavern-MemoryBooks
-   - Current prompts write too little information
-   - Need more detailed, context-aware extraction
-   
-5. [not done | not tested] **Add comprehensive testing for memory lifecycle**
+3. [not done | not tested] **Add comprehensive testing for memory lifecycle**
    - Test: Message deletion → memory reconciliation (ChatView.vue:2072-2096)
    - Test: Memory automation triggers (ChatView.vue:1022-1092)
    - Test: Vector search toggle for memories
    - Test: Draft generation and approval flow
 
-**Files to modify**:
-- NEW: `src/components/sheets/MemoryBooksSheet.vue`
-- `src/views/ChatView.vue` (extract logic, reduce from 5000+ lines)
-- Memory generation prompt presets (ChatView.vue:655-702)
+**Files modified**:
+- `src/views/ChatView.vue` — PENDING badge, timer watch, regenerate handler, navigation fix, improved prompts
+- `src/components/chat/ChatMessage.vue` — PENDING badge prop, styling with pulse animation
+- `src/utils/db.js` — default promptPreset changed to detailed_beats
 
-### Phase 3: Tokenizer Improvements (Optional)
+**Testing**: See TESTING_CHECKLIST.md sections 3-6
 
-Status: `not done | not tested`
+### Phase 3: Tokenizer Performance & Loading
 
-**Problem**: Tokenizer currently works correctly but uses inline bottom sheet in ChatView.vue. Could be extracted for consistency with other sheets.
+Status: `done | ready for testing` (Commit: b5857d0)
 
-**Tasks**:
+**Problem**: Tokenizer shows "Context breakdown is not ready yet" on first open and takes long time to open repeatedly.
+
+**Completed Tasks**:
+1. [done | ready for testing] **Fix "not ready yet" error on first open**
+   - Added timeout-based wait in `openContextSheet()`: Promise.race with 5s timeout + 1s buffer
+   - Improved error message: "Context calculation is taking longer than expected. Please check that your API settings are configured correctly"
+   - No more confusing "not ready yet" on normal usage
+   
+2. [done | ready for testing] **Optimize tokenizer recalculation performance**
+   - Added `debouncedUpdateContextCutoff()` helper with 300ms delay
+   - Applied debounce to non-critical calls: delete messages, hide messages
+   - Reduced redundant recalculations during rapid operations
+   - Tokenizer now opens faster on repeated access
+
+**Remaining Tasks (Deferred)**:
 1. [not done | not tested] **Migrate tokenizer sheet display to dedicated component** (Optional)
    - Refactor ChatView.vue:2633-2745 (openContextSheet) to use SheetView.vue pattern
-   - Keep computed properties in ChatView, pass as props
    - Note: This is LOW priority — current implementation works fine
    
 2. [not done | not tested] **Add separate menus for different injection types**
    - Current: All lorebooks shown together in one view
-   - Requested: Separate views for:
-     - Vector-only lorebooks
-     - Keyword-injected lorebooks (@worldInfoBefore, @worldInfoAfter)
-     - Memory books
-   - Each view shows only entries using that injection method
+   - Requested: Separate views for vector-only, keyword-injected, memory books
    
 3. [not done | not tested] **Fix: All menus should return to previous screen on save/cancel**
    - Apply to: Tokenizer, Memory Books, Lorebook sheets
    - Use navigation stack pattern (already exists for prompt preview)
 
-**Files to modify**:
-- `src/views/ChatView.vue` (tokenizer sheet extraction)
-- `src/components/sheets/LorebookSheet.vue` (injection type filters)
-- Navigation state management for all sheets
+**Files modified**:
+- `src/views/ChatView.vue` — timeout handling, debounce timer, debouncedUpdateContextCutoff()
+
+**Testing**: See TESTING_CHECKLIST.md section 2
 
 ### Phase 4: Lorebook Optional Keyword Search for Vectorized Entries
 
-Status: `not done | not tested`
+Status: `done | ready for testing` (Commit: d215502)
 
 **Problem**: When vector search is enabled for a lorebook entry, keyword search also runs (dual-channel), but user cannot optionally disable it.
 
-**Requested Behavior**: When vector search is enabled, add a checkbox "Also use keyword search" (enabled by default). This makes dual-channel optional instead of hardcoded.
+**Solution**: Added `useKeywordSearch` flag with UI checkbox. Makes dual-channel optional instead of hardcoded.
 
 **Tasks**:
-1. [not done | not tested] **Add `useKeywordSearch` flag to entry schema**
-   - Default: `true` (preserve current dual-channel behavior)
+1. [done | ready for testing] **Add `useKeywordSearch` flag to entry schema**
+   - Default: `true` (preserves current dual-channel behavior for backward compatibility)
    - Only applies when `vectorSearch: true`
-   - When `false`: entry excluded from keyword scan, vector-only
+   - When `false`: entry excluded from keyword scan, vector-only retrieval
+   - Normalized on `selectEntry()` for existing entries (defaults to true)
    
-2. [not done | not tested] **Update worker to respect flag**
-   - generationWorker.js:167 — Filter entries with `vectorSearch && !useKeywordSearch`
-   - Keep current behavior for entries with `vectorSearch && useKeywordSearch`
+2. [done | ready for testing] **Update worker to respect flag**
+   - generationWorker.js:167-169 — Filter entries with `vectorSearch && useKeywordSearch === false`
+   - Comment updated: "DUAL-CHANNEL: All entries participate in keyword scan, unless vectorSearch is enabled AND useKeywordSearch is explicitly disabled"
+   - Keeps current behavior for entries with `vectorSearch && useKeywordSearch`
    
-3. [not done | not tested] **Add UI checkbox in LorebookSheet**
-   - Show only when `vectorSearch: true`
-   - Label: "Also use keyword matching (dual-channel)"
+3. [done | ready for testing] **Add UI checkbox in LorebookSheet**
+   - Shows only when `vectorSearch: true` and `!constant`
+   - Label: "Also use keyword matching"
+   - Description: "Enable dual-channel retrieval: both vector similarity and keyword matching (recommended)"
    - Default: checked
+   - i18n: `label_use_keyword_search`, `desc_use_keyword_search`
 
-**Files to modify**:
-- `src/core/states/lorebookState.js` (schema, default value)
-- `src/workers/generationWorker.js` (keyword scan filter)
-- `src/components/sheets/LorebookSheet.vue` (UI checkbox)
+**Files modified**:
+- `src/components/sheets/LorebookSheet.vue` — UI checkbox, normalize useKeywordSearch on selectEntry, schema default
+- `src/workers/generationWorker.js` — keyword scan filter for vector-only entries
+- `src/locales/en/index.json`, `src/locales/ru/index.json` — i18n keys
+
+**Testing**: See TESTING_CHECKLIST.md section 1
 
 ### Execution Order
 
