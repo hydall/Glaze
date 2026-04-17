@@ -193,11 +193,32 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
         });
     });
 
+    // DEBUG: Check if Alison entry has keys
+    const alisonCandidate = candidates.find(c => 
+        c.comment && (c.comment.toLowerCase().includes('alison') || c.comment.toLowerCase().includes('алисон'))
+    );
+    if (alisonCandidate) {
+        console.warn('[scanLorebooksPure] DEBUG Alison entry found in candidates', {
+            id: alisonCandidate.id,
+            comment: alisonCandidate.comment,
+            keys: alisonCandidate.keys,
+            hasKeys: !!alisonCandidate.keys,
+            keysLength: alisonCandidate.keys?.length,
+            vectorSearch: alisonCandidate.vectorSearch
+        });
+    }
+
     console.info('[scanLorebooksPure] Keyword scan candidates (DUAL-CHANNEL)', {
         totalEntries: activeLorebooks.reduce((sum, lb) => sum + lb.entries.filter(e => e.enabled !== false).length, 0),
         keywordCandidates: candidates.length,
         vectorEnabledEntries: vectorSearchEntries.length,
-        dualChannelInfo: `All ${candidates.length} entries participate in keyword scan. ${vectorSearchEntries.length} of them also have vectorSearch enabled and will participate in vector search if they don't match keywords.`
+        dualChannelInfo: `All ${candidates.length} entries participate in keyword scan. ${vectorSearchEntries.length} of them also have vectorSearch enabled and will participate in vector search if they don't match keywords.`,
+        firstFewCandidates: candidates.slice(0, 3).map(c => ({
+            id: c.id,
+            comment: c.comment,
+            keys: c.keys,
+            vectorSearch: c.vectorSearch
+        }))
     });
 
     candidates.filter(e => e.constant).forEach(entry => {
