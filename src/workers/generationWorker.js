@@ -271,6 +271,28 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
             const scanSource = caseSensitive ?
                 (messagesToScan + textToScan) :
                 (messagesToScan.toLowerCase() + textToScan.toLowerCase());
+            
+            // DEBUG: Log scan source for entries with specific keywords
+            const debugKeywords = ['alison', 'алисон', 'asei', 'асей'];
+            const hasDebugKeyword = primaryKeys.some(key => 
+                debugKeywords.some(dk => String(key || '').toLowerCase().includes(dk))
+            );
+            if (hasDebugKeyword) {
+                console.warn('[scanLorebooksPure] DEBUG keyword scan for entry', {
+                    entryId: entry.id,
+                    comment: entry.comment,
+                    primaryKeys,
+                    secondaryKeys,
+                    caseSensitive,
+                    wholeWords,
+                    scanDepth,
+                    historyMessagesCount: history.length,
+                    messagesToScanLength: messagesToScan.length,
+                    textToScanLength: textToScan.length,
+                    scanSourcePreview: scanSource.substring(0, 500),
+                    scanSourceLength: scanSource.length
+                });
+            }
 
             let isStickyActive = false;
             let isOnCooldown = false;
@@ -293,6 +315,21 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
             if (isOnCooldown) continue;
 
             const matchedPrimary = isStickyActive || primaryKeys.some(key => checkMatch(key, scanSource));
+            
+            // DEBUG: Log match result for entries with debug keywords
+            if (hasDebugKeyword) {
+                const primaryMatchResults = primaryKeys.map(key => ({
+                    key,
+                    matched: checkMatch(key, scanSource)
+                }));
+                console.warn('[scanLorebooksPure] DEBUG match results', {
+                    entryId: entry.id,
+                    comment: entry.comment,
+                    isStickyActive,
+                    matchedPrimary,
+                    primaryMatchResults
+                });
+            }
 
             if (matchedPrimary) {
                 let secondaryMatches = true;
