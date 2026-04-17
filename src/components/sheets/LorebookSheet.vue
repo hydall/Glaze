@@ -923,7 +923,7 @@ defineExpose({ open, openEntry, close, openLorebook });
                 <div class="editor-scroll">
                     <div class="menu-group first-group">
                         <div class="section-header">{{ t('section_activation_logic') }} <HelpTip term="lorebook-keys"/></div>
-                        <div v-if="activeEntry.vectorSearch" class="settings-desc" style="padding:8px 0;color:var(--text-success);">{{ t('desc_vector_search_supplements_keys') }}</div>
+                        <div v-if="activeEntry.vectorSearch" class="settings-desc" style="padding:8px 0;color:#34c759;">{{ t('desc_vector_search_supplements_keys') }}</div>
                         <div v-if="!activeEntry.constant">
                         <div class="settings-item">
                                 <label>{{ t('label_primary_keys') }} <span class="hint">{{ t('hint_comma_separated') }}</span></label>

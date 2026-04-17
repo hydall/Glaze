@@ -638,6 +638,7 @@ let pendingCutoffRecalc = false;
 let isOpeningChat = false;
 let cutoffRerunTimer = null;
 let cutoffDebounceTimer = null;
+let contextCutoffCache = null; // { charId, sessionId, messageCount, hash, result }
 const pendingGuidance = ref(null); // { text, type }
 
 let ignoreScrollAdjustment = false;
@@ -882,6 +883,7 @@ function parseMemoryDraftResponse(rawText, fallbackKeys = []) {
 function openMemoryPromptPreview(item, options = {}) {
     if (!item) return;
     const { onClose } = options;
+    const hasOnClose = typeof onClose === 'function';
     const content = document.createElement('div');
     content.className = 'context-sheet';
     content.innerHTML = `
@@ -891,12 +893,12 @@ function openMemoryPromptPreview(item, options = {}) {
         </div>
         <div class="memory-entry-fulltext">${(item.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
         <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-preview-close">Close</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-preview-close">${hasOnClose ? 'Back' : 'Close'}</button>
         </div>
     `;
     content.querySelector('#memory-prompt-preview-close')?.addEventListener('click', () => {
         closeBottomSheet();
-        if (typeof onClose === 'function') {
+        if (hasOnClose) {
             setTimeout(() => onClose(), 50);
         }
     });
@@ -1859,7 +1861,10 @@ async function openMemoryBooksSheet() {
         : '<div class="context-sheet-note">No memory entries in this session yet.</div>';
     const draftCards = pendingDrafts.length
         ? pendingDrafts.map(entry => {
-            const preview = (entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180);
+            const isGenerating = !entry.content && memoryDraftState.value.active;
+            const preview = entry.content 
+                ? (entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180)
+                : (isGenerating ? '<span style="color:#ffd700;">⏳ Generating...</span>' : '<span style="color:var(--text-gray);">No content yet</span>');
             const keysMeta = Array.isArray(entry.keys) && entry.keys.length
                 ? ` • ${entry.keys.slice(0, 3).map(key => String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')).join(', ')}`
                 : '';
@@ -1870,15 +1875,15 @@ async function openMemoryBooksSheet() {
                     <div class="memory-entry-head">
                         <div>
                             <div class="memory-entry-title">${(entry.title || 'Untitled draft').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-                            <div class="memory-entry-meta">pending approval${retrievalMeta}${keysMeta}</div>
+                            <div class="memory-entry-meta">${isGenerating ? 'generating' : 'pending approval'}${retrievalMeta}${keysMeta}</div>
                         </div>
                         <div class="memory-draft-actions">
                             ${badges}
-                            <button type="button" class="memory-entry-approve" data-draft-approve="${entry.id}">Approve</button>
+                            <button type="button" class="memory-entry-approve" data-draft-approve="${entry.id}" ${isGenerating ? 'disabled' : ''}>Approve</button>
                             <button type="button" class="memory-entry-delete" data-draft-delete="${entry.id}">Delete</button>
                         </div>
                     </div>
-                    <div class="memory-entry-preview">${preview || 'No content yet'}</div>
+                    <div class="memory-entry-preview">${preview}</div>
                 </div>
             `;
         }).join('')
@@ -2554,20 +2559,37 @@ async function updateContextCutoff() {
         return;
     }
 
-    isCalculatingCutoff = true;
-    
     const currentCharId = activeChatChar.id;
-    const history = currentMessages.value
-        .filter(m => m && !m.isTyping && !m.isHidden)
+    const visibleMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
+    const messageCount = visibleMessages.length;
+    
+    console.time('[updateContextCutoff] getChatData');
+    const cutoffChatData = await getChatData(activeChatChar.id);
+    console.timeEnd('[updateContextCutoff] getChatData');
+    const sessionId = cutoffChatData.currentId;
+    
+    // Create simple cache key from charId, sessionId, message count
+    const cacheKey = `${currentCharId}_${sessionId}_${messageCount}`;
+    
+    // Check cache - if nothing changed, reuse previous result
+    if (contextCutoffCache && contextCutoffCache.hash === cacheKey) {
+        cutoffIndex.value = contextCutoffCache.result?.cutoffIndex ?? 0;
+        contextBreakdown.value = contextCutoffCache.result?.contextBreakdown || null;
+        console.log('[updateContextCutoff] using cache');
+        return;
+    }
+
+    isCalculatingCutoff = true;
+    console.time('[updateContextCutoff] total');
+    
+    const history = visibleMessages
         .map((m, i) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text || "", originalIndex: i }));
-        
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = chatData.currentId;
-    const summary = chatData.summaries?.[sessionId];
+    
+    const summary = cutoffChatData.summaries?.[sessionId];
     
     let authorsNote = null;
-    if (chatData.authorsNotes && chatData.authorsNotes[sessionId]) {
-        const storedAn = chatData.authorsNotes[sessionId];
+    if (cutoffChatData.authorsNotes && cutoffChatData.authorsNotes[sessionId]) {
+        const storedAn = cutoffChatData.authorsNotes[sessionId];
         let anContent = typeof storedAn === 'string' ? storedAn : storedAn.content;
         
         const effectivePreset = getEffectivePreset(activeChatChar.id, sessionId ? `${activeChatChar.id}_${sessionId}` : null);
@@ -2584,17 +2606,28 @@ async function updateContextCutoff() {
     }
 
     try {
+        console.time('[updateContextCutoff] calculateContext');
         const result = await calculateContext({
             char: activeChatChar,
             history,
             authorsNote,
             summary
         });
+        console.timeEnd('[updateContextCutoff] calculateContext');
         
         if (activeChatChar && activeChatChar.id === currentCharId) {
             cutoffIndex.value = result?.cutoffIndex ?? 0;
             contextBreakdown.value = result?.contextBreakdown || null;
+            // Cache result to avoid recalculation when nothing changed
+            contextCutoffCache = {
+                hash: cacheKey,
+                charId: currentCharId,
+                sessionId,
+                messageCount,
+                result
+            };
         }
+        console.timeEnd('[updateContextCutoff] total');
     } finally {
         isCalculatingCutoff = false;
         if (pendingCutoffRecalc) {
@@ -2612,6 +2645,10 @@ function debouncedUpdateContextCutoff(delay = 300) {
     cutoffDebounceTimer = setTimeout(() => {
         updateContextCutoff();
     }, delay);
+}
+
+function invalidateContextCache() {
+    contextCutoffCache = null;
 }
 
 async function updateSessionMessage(char, msgIndex, newMsgData) {
@@ -3836,7 +3873,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     name: e.comment || e.name || e.keys?.[0] || 'Entry',
                     content: e.content,
                     lorebookName: e.lorebookName,
-                    lorebookId: e.lorebookId
+                    lorebookId: e.lorebookId,
+                    _source: e._source || 'keyword' // 'keyword' or 'vector'
                 }));
                 const triggeredMemories = (memoryEntries || []).map(entry => ({
                     id: entry.id,
