@@ -162,12 +162,9 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
     let allRelevantEntries = [];
     let candidates = [];
 
-    // DEBUG: Track vector-enabled entries that participate in keyword scan
-    let vectorSearchEntries = [];
-
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
-            // DUAL-CHANNEL FIX: All entries participate in keyword scan, regardless of vectorSearch flag
+            // DUAL-CHANNEL: All entries participate in keyword scan, regardless of vectorSearch flag
             if (entry.enabled !== false) {
                 if (char && entry.characterFilter) {
                     const { isExclude, names } = entry.characterFilter;
@@ -179,46 +176,12 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
                     }
                 }
                 candidates.push({ ...entry, lorebookName: lb.name, lorebookId: lb.id });
-                
-                // Track entries that also have vector search enabled
-                if (entry.vectorSearch) {
-                    vectorSearchEntries.push({
-                        id: entry.id,
-                        comment: entry.comment,
-                        keys: entry.keys,
-                        lorebookName: lb.name
-                    });
-                }
             }
         });
     });
-
-    // DEBUG: Check if Alison entry has keys
-    const alisonCandidate = candidates.find(c => 
-        c.comment && (c.comment.toLowerCase().includes('alison') || c.comment.toLowerCase().includes('алисон'))
-    );
-    if (alisonCandidate) {
-        console.warn('[scanLorebooksPure] DEBUG Alison entry found in candidates', {
-            id: alisonCandidate.id,
-            comment: alisonCandidate.comment,
-            keys: alisonCandidate.keys,
-            hasKeys: !!alisonCandidate.keys,
-            keysLength: alisonCandidate.keys?.length,
-            vectorSearch: alisonCandidate.vectorSearch
+                }
+            }
         });
-    }
-
-    console.info('[scanLorebooksPure] Keyword scan candidates (DUAL-CHANNEL)', {
-        totalEntries: activeLorebooks.reduce((sum, lb) => sum + lb.entries.filter(e => e.enabled !== false).length, 0),
-        keywordCandidates: candidates.length,
-        vectorEnabledEntries: vectorSearchEntries.length,
-        dualChannelInfo: `All ${candidates.length} entries participate in keyword scan. ${vectorSearchEntries.length} of them also have vectorSearch enabled and will participate in vector search if they don't match keywords.`,
-        firstFewCandidates: candidates.slice(0, 3).map(c => ({
-            id: c.id,
-            comment: c.comment,
-            keys: c.keys,
-            vectorSearch: c.vectorSearch
-        }))
     });
 
     candidates.filter(e => e.constant).forEach(entry => {
@@ -292,28 +255,6 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
             const scanSource = caseSensitive ?
                 (messagesToScan + textToScan) :
                 (messagesToScan.toLowerCase() + textToScan.toLowerCase());
-            
-            // DEBUG: Log scan source for entries with specific keywords
-            const debugKeywords = ['alison', 'алисон', 'asei', 'асей'];
-            const hasDebugKeyword = primaryKeys.some(key => 
-                debugKeywords.some(dk => String(key || '').toLowerCase().includes(dk))
-            );
-            if (hasDebugKeyword) {
-                console.warn('[scanLorebooksPure] DEBUG keyword scan for entry', {
-                    entryId: entry.id,
-                    comment: entry.comment,
-                    primaryKeys,
-                    secondaryKeys,
-                    caseSensitive,
-                    wholeWords,
-                    scanDepth,
-                    historyMessagesCount: history.length,
-                    messagesToScanLength: messagesToScan.length,
-                    textToScanLength: textToScan.length,
-                    scanSourcePreview: scanSource.substring(0, 500),
-                    scanSourceLength: scanSource.length
-                });
-            }
 
             let isStickyActive = false;
             let isOnCooldown = false;
@@ -336,21 +277,6 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
             if (isOnCooldown) continue;
 
             const matchedPrimary = isStickyActive || primaryKeys.some(key => checkMatch(key, scanSource));
-            
-            // DEBUG: Log match result for entries with debug keywords
-            if (hasDebugKeyword) {
-                const primaryMatchResults = primaryKeys.map(key => ({
-                    key,
-                    matched: checkMatch(key, scanSource)
-                }));
-                console.warn('[scanLorebooksPure] DEBUG match results', {
-                    entryId: entry.id,
-                    comment: entry.comment,
-                    isStickyActive,
-                    matchedPrimary,
-                    primaryMatchResults
-                });
-            }
 
             if (matchedPrimary) {
                 let secondaryMatches = true;
@@ -384,19 +310,7 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
         }
     }
 
-    const finalEntries = allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
-    
-    console.info('[scanLorebooksPure] Keyword scan results', {
-        matched: finalEntries.length,
-        entries: finalEntries.map(e => ({
-            id: e.id,
-            comment: e.comment,
-            keys: e.keys,
-            lorebook: e.lorebookName
-        }))
-    });
-
-    return finalEntries;
+    return allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
 }
 
 function squashHistory(historyMsgs, squashRole) {
@@ -435,14 +349,6 @@ function buildBlockSourceReplacements(char, personaObj, sessionVars, notifyObj, 
 
 function buildPromptMessagesWorker(args) {
     let { char, history, summary, activePreset, mergePrompts, mergeRole, noAssistant, userPrefix, charPrefix, squashRole, personaObj, authorsNote, guidanceText, guidanceType, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
-    
-    console.info('[buildPromptMessagesWorker] Called with', {
-        historyLength: history?.length || 0,
-        lastUserMessage: history?.filter(m => m.role === 'user').slice(-1)[0]?.content?.substring(0, 100) || 'none',
-        lorebooksCount: lorebooks?.length || 0,
-        charId: char?.id
-    });
-    
     if (noAssistant) mergePrompts = true;
 
     const messages = [];
@@ -874,15 +780,6 @@ function buildPromptMessagesWorker(args) {
         return m.content && m.content.trim().length > 0;
     });
 
-    console.info('[buildPromptMessagesWorker] Returning loreEntries', {
-        count: allLoreEntries.length,
-        entries: allLoreEntries.map(e => ({
-            id: e.id,
-            comment: e.comment,
-            keys: e.keys
-        }))
-    });
-
     return { messages: filteredMessages, loreEntries: allLoreEntries, notifyObj };
 }
 
@@ -892,15 +789,6 @@ self.onmessage = async function (e) {
     if (type === 'calculateContext' || type === 'generateChatResponse') {
         try {
             const { messages, loreEntries, notifyObj } = buildPromptMessagesWorker(payload);
-            
-            console.info('[generationWorker] After buildPromptMessagesWorker', {
-                type,
-                loreEntriesCount: loreEntries?.length || 0,
-                loreEntriesPreview: loreEntries?.slice(0, 3).map(e => ({
-                    id: e.id,
-                    comment: e.comment
-                })) || []
-            });
 
             const { apiConfig } = payload;
             const maxTokens = apiConfig.maxTokens;
