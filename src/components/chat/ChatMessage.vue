@@ -26,7 +26,8 @@ const props = defineProps({
     isSelectionMode: { type: Boolean, default: false },
     isSelected: { type: Boolean, default: false },
     regexRevision: { type: Number, default: 0 },
-    isPendingMemory: { type: Boolean, default: false }
+    isPendingMemory: { type: Boolean, default: false },
+    isDraftMemory: { type: Boolean, default: false }
 });
 
 const emit = defineEmits([
@@ -570,16 +571,21 @@ const tokenCount = computed(() => {
 
 const memoryBadge = computed(() => {
     const coverage = props.message.memoryCoverage;
-    // Check pending memory first (highest priority visual indicator)
-    if (props.isPendingMemory) {
-        return { label: 'PENDING', className: 'pending' };
+    // Check coverage states in priority order
+    if (!coverage || typeof coverage !== 'object') {
+        // No coverage object — check draft/pending states
+        if (props.isPendingMemory) return { label: 'PENDING', className: 'pending' };
+        if (props.isDraftMemory) return { label: 'DRAFT', className: 'draft-memory' };
+        return null;
     }
-    if (!coverage || typeof coverage !== 'object') return null;
     if (coverage.needsRebuild) return { label: 'REBUILD', className: 'needs-rebuild' };
     if (coverage.stale) return { label: 'STALE', className: 'stale' };
     if (Array.isArray(coverage.entryIds) && coverage.entryIds.length > 0) {
         return { label: 'MEM', className: 'covered' };
     }
+    // No approved entries — check draft/pending
+    if (props.isPendingMemory) return { label: 'PENDING', className: 'pending' };
+    if (props.isDraftMemory) return { label: 'DRAFT', className: 'draft-memory' };
     return null;
 });
 
@@ -1123,6 +1129,12 @@ onUnmounted(() => {
 @keyframes pending-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }
+}
+
+.msg-memory-badge.draft-memory {
+    color: #c79cff;
+    background: rgba(199, 156, 255, 0.12);
+    border-color: rgba(199, 156, 255, 0.35);
 }
 
 .msg-memory-badge.needs-rebuild {
