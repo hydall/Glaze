@@ -179,10 +179,6 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
             }
         });
     });
-                }
-            }
-        });
-    });
 
     candidates.filter(e => e.constant).forEach(entry => {
         if (!allRelevantEntries.some(e => e.id === entry.id)) {
@@ -399,11 +395,11 @@ function buildPromptMessagesWorker(args) {
     let loreByPosition = { worldInfoBefore: [], worldInfoAfter: [], lorebooksMacro: [] };
     if (lorebooks) {
         // DUAL-CHANNEL FIX: Extract current user message for keyword scanning
-        const lastUserMessage = history && history.length > 0 
+        const lastUserMessage = history && history.length > 0
             ? history.filter(m => m.role === 'user').slice(-1)[0]
             : null;
         const textToScan = lastUserMessage?.content || "";
-        
+
         const loreEntries = scanLorebooksPure(history || [], char, textToScan, chatId, lorebooks, globalSettings, activations);
         allLoreEntries = loreEntries;
 
