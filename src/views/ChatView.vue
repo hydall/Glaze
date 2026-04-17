@@ -2167,8 +2167,13 @@ async function openMemoryBooksSheet() {
 
 async function deleteSelectedMessages() {
     if (selectedMessages.value.size === 0) return;
-    
-    // Filter messages
+
+    const lastMsg = currentMessages.value[currentMessages.value.length - 1];
+    if (!lastMsg || !selectedMessages.value.has(lastMsg.id)) {
+        showToast('Deleting from the middle of chat is not allowed. Only the last message(s) can be removed.', 'error');
+        return;
+    }
+
     const newMsgs = currentMessages.value.filter(msg => msg && !selectedMessages.value.has(msg.id));
     const count = currentMessages.value.length - newMsgs.length;
     currentMessages.value = newMsgs;
