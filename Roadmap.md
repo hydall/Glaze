@@ -723,11 +723,18 @@ Active branch: `fast-fixes`
       - `src/workers/generationWorker.js` — add vectorLore to sourceKeys, breakdown, fixedBase calculation
       - `src/core/services/generationService.js` — change source to vectorLore, add vector search to calculateContext
       - `src/views/ChatView.vue` — nested reserve visualization, updated labels, CSS changes
+    - Additional fixes (second commit):
+      - Fixed `remaining` calculation: changed from `safeContext - totalUsed` to `contextSize - totalUsed`
+      - Excluded lorebook/vectorLore from `fixedBase` (they're inside reserve, not in base)
+      - Now `fixedBase = character + preset + summary + authorsNote` (without lorebooks)
+      - Result: `remaining` now shows correct value relative to full context (80000)
     - Testing:
       - Tokenizer now correctly shows keyword lorebook (0 tokens) + vector lorebook (~8657 tokens)
       - Visual bar: lorebooks display inside green reserve zone on the right
       - Reserve shows: [Vector Lorebook (purple)] [Unused Reserve (green)]
       - Main bar shows: Character, Preset, Summary, Memory, History (no lorebooks)
+      - Remaining calculation: 80000 - totalUsed (instead of 72000 - totalUsed)
+    - Commits: `f33a9d3`, `915dbf3`
     - PR: pending
 
 15. **Image Generation Improvements — Info Blocks & Dynamic Character State**
