@@ -342,20 +342,30 @@ export async function generateChatResponse({
 
     if (callbacks.onPromptReady) {
         const contextBreakdown = result.contextBreakdown
-            ? {
-                ...result.contextBreakdown,
-                memory: memoryInjection.tokens || 0,
-                vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
-                summaryBase: result.contextBreakdown.summary || 0,
-                summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                // Keep lorebook and vectorLore separate for UI display
-                // lorebook = keyword-matched entries only (from generationWorker)
-                // vectorLore = vector-retrieved entries only (from this service)
-                fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
-                fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
-                totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
-                remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0) - vectorLoreTokens)
-            }
+            ? (() => {
+                const totalLoreTokens = (result.contextBreakdown.lorebook || 0) + vectorLoreTokens;
+                const reserveTokens = result.contextBreakdown.lorebookReserve || 0;
+                
+                // All lorebooks (keyword + vector) must fit within the reserve
+                // Reserve remains unchanged, lorebooks are displayed within it
+                const effectiveReserve = reserveTokens - totalLoreTokens;
+                
+                return {
+                    ...result.contextBreakdown,
+                    memory: memoryInjection.tokens || 0,
+                    vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
+                    summaryBase: result.contextBreakdown.summary || 0,
+                    summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
+                    // Keep lorebook and vectorLore separate for UI display
+                    // lorebook = keyword-matched entries only (from generationWorker)
+                    // vectorLore = vector-retrieved entries only (from this service)
+                    // lorebookReserve stays the same - lorebooks are shown within it
+                    fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
+                    fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
+                    totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
+                    remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
+                };
+            })()
             : null;
 
         callbacks.onPromptReady({
@@ -517,17 +527,27 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             : result.cutoffIndex;
 
         const contextBreakdown = result.contextBreakdown
-            ? {
-                ...result.contextBreakdown,
-                memory: memoryInjection.tokens || 0,
-                vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
-                summaryBase: result.contextBreakdown.summary || 0,
-                summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
-                fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
-                totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0) + vectorLoreTokens,
-                remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0) - vectorLoreTokens)
-            }
+            ? (() => {
+                const totalLoreTokens = (result.contextBreakdown.lorebook || 0) + vectorLoreTokens;
+                const reserveTokens = result.contextBreakdown.lorebookReserve || 0;
+                
+                // All lorebooks (keyword + vector) must fit within the reserve
+                // Reserve remains unchanged, lorebooks are displayed within it
+                const effectiveReserve = reserveTokens - totalLoreTokens;
+                
+                return {
+                    ...result.contextBreakdown,
+                    memory: memoryInjection.tokens || 0,
+                    vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
+                    summaryBase: result.contextBreakdown.summary || 0,
+                    summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
+                    // All lorebooks must fit within reserve - don't add to fixedBase
+                    fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
+                    fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
+                    totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
+                    remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
+                };
+            })()
             : null;
 
         return {

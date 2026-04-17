@@ -827,7 +827,8 @@ self.onmessage = async function (e) {
                 historyMessagesHiddenByContext: 0
             };
 
-            breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.summary + breakdown.authorsNote + breakdown.lorebook + breakdown.vectorLore;
+            // Lorebook and vectorLore are inside reserve, not in fixedBase
+            breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.summary + breakdown.authorsNote;
             breakdown.fixedTotal = breakdown.fixedBase + breakdown.lorebookReserve;
 
             let availableForHistory = safeContext - breakdown.fixedTotal;
@@ -873,7 +874,7 @@ self.onmessage = async function (e) {
             }
 
             breakdown.totalUsed = breakdown.fixedBase + breakdown.lorebookReserve + breakdown.history;
-            breakdown.remaining = Math.max(0, safeContext - breakdown.totalUsed);
+            breakdown.remaining = Math.max(0, contextSize - breakdown.totalUsed);
 
             self.postMessage({
                 id,
