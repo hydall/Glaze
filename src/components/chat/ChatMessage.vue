@@ -25,7 +25,8 @@ const props = defineProps({
     activeSearchMatchIndex: { type: Number, default: -1 },
     isSelectionMode: { type: Boolean, default: false },
     isSelected: { type: Boolean, default: false },
-    regexRevision: { type: Number, default: 0 }
+    regexRevision: { type: Number, default: 0 },
+    isPendingMemory: { type: Boolean, default: false }
 });
 
 const emit = defineEmits([
@@ -569,6 +570,10 @@ const tokenCount = computed(() => {
 
 const memoryBadge = computed(() => {
     const coverage = props.message.memoryCoverage;
+    // Check pending memory first (highest priority visual indicator)
+    if (props.isPendingMemory) {
+        return { label: 'PENDING', className: 'pending' };
+    }
     if (!coverage || typeof coverage !== 'object') return null;
     if (coverage.needsRebuild) return { label: 'REBUILD', className: 'needs-rebuild' };
     if (coverage.stale) return { label: 'STALE', className: 'stale' };
@@ -1106,6 +1111,18 @@ onUnmounted(() => {
     color: #1ec8ff;
     background: rgba(30, 200, 255, 0.12);
     border-color: rgba(30, 200, 255, 0.35);
+}
+
+.msg-memory-badge.pending {
+    color: #ffd700;
+    background: rgba(255, 215, 0, 0.12);
+    border-color: rgba(255, 215, 0, 0.4);
+    animation: pending-pulse 2s ease-in-out infinite;
+}
+
+@keyframes pending-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
 }
 
 .msg-memory-badge.needs-rebuild {

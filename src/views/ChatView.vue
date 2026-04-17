@@ -45,7 +45,7 @@ function ensureSessionMemoryBook(chatData, sessionId) {
                 generationEndpoint: '',
                 generationApiKey: '',
                 generationTemperature: null,
-                promptPreset: 'strict_factual',
+                promptPreset: 'detailed_beats',
                 customPrompts: []
             },
             updatedAt: 0
@@ -655,47 +655,106 @@ const isSelectionMode = computed(() => selectedMessages.value.size > 0);
 
 const builtInMemoryPrompts = [
     {
-        key: 'strict_factual',
-        label: 'Strict factual',
+        key: 'detailed_beats',
+        label: 'Detailed beats (recommended)',
         prompt: [
-            'Create exactly one concise long-term memory entry from the following roleplay segment.',
+            'Analyze the following roleplay segment and create a comprehensive memory entry.',
             'Preserve the original language of the source segment. Do not translate it.',
-            'Use only facts that are explicitly supported by the segment.',
-            'Do not infer completed outcomes, approvals, registrations, or decisions unless clearly stated.',
-            'Keep concrete names exactly as used in the segment.',
+            'Exclude all [OOC] (out-of-character) conversation — it is not useful for memory.',
+            '',
+            'Create a detailed beat-by-beat summary in narrative prose. Include:',
+            '- Timeline: Date/time context if mentioned',
+            '- Story Beats: All important plot events, decisions, and developments in order',
+            '- Key Interactions: Significant character exchanges, dialogue highlights, and relationship developments',
+            '- Notable Details: Important objects, settings, revelations, memorable quotes',
+            '- Outcome: Results, resolutions, emotional states, and consequences for future continuity',
+            '',
+            'Capture all nuance without repeating verbatim. Use concrete nouns (e.g., "rice cooker" not "appliance").',
+            'Write in past tense, third person. Focus on cause → intention → reaction → consequence.',
+            '',
+            'For keywords: generate 15-30 concrete, scene-specific retrieval tags:',
+            '- Use proper nouns (locations: "Chinatown", "Ritz-Carlton bar")',
+            '- Use specific objects ("CPAP machine", "chocolate chip cookies")',
+            '- Use distinctive actions ("cookie baking", "piano apology")',
+            '- Use unique phrases from the scene ("pack for forever", specific nicknames)',
+            '- DO NOT use abstract themes ("intimacy", "trust", "vulnerability")',
+            '- DO NOT use character names ({{char}}, {{user}})',
+            '- DO NOT combine multiple concepts into one keyword',
+            '',
             'Return plain text in this exact format:',
-            'Memory: <one concise memory entry>',
-            'Keys: <comma-separated retrieval keys, or empty if vector retrieval should dominate>',
+            'Memory: <detailed beat-by-beat summary following the structure above>',
+            'Keys: <15-30 comma-separated concrete keywords as specified>',
             '',
             '{{history}}'
         ].join('\n')
     },
     {
-        key: 'durable_events',
-        label: 'Durable events',
+        key: 'concise_narrative',
+        label: 'Concise narrative',
         prompt: [
-            'Extract one durable memory from the following roleplay segment.',
-            'Keep the source language exactly as written.',
-            'Focus on lasting developments, obligations, status changes, accepted items, revealed facts, or relationship changes.',
-            'Do not speculate beyond the text.',
+            'Analyze the following roleplay segment and create a concise memory entry.',
+            'Preserve the original language. Do not translate. Exclude all [OOC] conversation.',
+            '',
+            'Write a compact 3-5 sentence narrative summary in past tense, third person.',
+            'Focus on:',
+            '- What happened (main events and decisions)',
+            '- Key character interactions or developments',
+            '- Important outcome or state change',
+            '',
+            'For keywords: provide 10-20 concrete, scene-specific keywords:',
+            '- Locations, objects, proper nouns, unique actions',
+            '- NOT abstract themes, emotions, or character names',
+            '',
             'Return plain text in this exact format:',
-            'Memory: <one compact memory entry>',
-            'Keys: <comma-separated retrieval keys, or empty if not needed>',
+            'Memory: <3-5 sentence concise narrative summary>',
+            'Keys: <10-20 comma-separated concrete keywords>',
             '',
             '{{history}}'
         ].join('\n')
     },
     {
-        key: 'relationship_focus',
-        label: 'Relationship focus',
+        key: 'structured_markdown',
+        label: 'Structured (markdown)',
         prompt: [
-            'Create one memory entry focused on relationship-relevant developments from the following roleplay segment.',
-            'Preserve the original language and exact names from the segment.',
-            'Only include information directly supported by the text.',
-            'If no durable relationship-relevant development exists, summarize the most durable factual development instead.',
+            'Analyze the following roleplay segment and create a structured memory entry.',
+            'Preserve the original language. Exclude all [OOC] conversation.',
+            '',
+            'Use this markdown structure (skip sections if not applicable):',
+            '**Timeline**: Day/time this scene covers',
+            '**Story Beats**: Important plot events and developments',
+            '**Key Interactions**: Significant character exchanges and relationship shifts',
+            '**Notable Details**: Important objects, settings, revelations, quotes',
+            '**Outcome**: Results, emotional states, consequences',
+            '',
+            'Write in past tense, third person. Be comprehensive but avoid verbatim repetition.',
+            '',
+            'For keywords: generate 15-25 concrete scene-specific tags:',
+            '- Proper nouns, locations, specific objects, unique actions',
+            '- NOT abstract concepts, emotions, or character names',
+            '',
             'Return plain text in this exact format:',
-            'Memory: <one concise memory entry>',
-            'Keys: <comma-separated retrieval keys, or empty if not needed>',
+            'Memory: <structured markdown summary following the template above>',
+            'Keys: <15-25 comma-separated concrete keywords>',
+            '',
+            '{{history}}'
+        ].join('\n')
+    },
+    {
+        key: 'minimal_factual',
+        label: 'Minimal (1-2 sentences)',
+        prompt: [
+            'Create a minimal memory entry from the following roleplay segment.',
+            'Preserve the original language. Exclude [OOC] conversation.',
+            '',
+            'Write 1-2 sentences capturing only the most important factual development.',
+            'Focus on durable outcomes: status changes, revealed facts, decisions, or relationship shifts.',
+            '',
+            'For keywords: provide 5-10 most relevant concrete keywords (locations, objects, proper nouns).',
+            'Do not use abstract themes or character names.',
+            '',
+            'Return plain text in this exact format:',
+            'Memory: <1-2 sentence factual summary>',
+            'Keys: <5-10 comma-separated concrete keywords>',
             '',
             '{{history}}'
         ].join('\n')
@@ -1144,10 +1203,11 @@ function openMemoryTextPreview(entry, kind = 'Memory') {
         </div>
         <div class="memory-entry-fulltext">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
         <div class="context-sheet-actions">
+            ${!isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-regenerate">Regenerate</button>` : ''}
             ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-edit">Edit</button>` : ''}
             ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-reindex">Reindex</button>` : ''}
             ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary memory-preview-delete" id="memory-preview-delete">Delete</button>` : ''}
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-preview-close">Close</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-preview-close">${isApprovedEntry ? 'Close' : 'Back'}</button>
         </div>
     `;
     content.querySelector('#memory-preview-edit')?.addEventListener('click', () => {
@@ -1196,7 +1256,37 @@ function openMemoryTextPreview(entry, kind = 'Memory') {
         closeBottomSheet();
         setTimeout(() => openMemoryBooksSheet(), 50);
     });
-    content.querySelector('#memory-preview-close')?.addEventListener('click', () => closeBottomSheet());
+    content.querySelector('#memory-preview-regenerate')?.addEventListener('click', async () => {
+        if (!activeChatChar || !entry.messageIds || !entry.messageIds.length) {
+            showToast('Cannot regenerate: no message range');
+            return;
+        }
+        const chatData = await getChatData(activeChatChar.id);
+        const sessionId = activeChatChar.sessionId || chatData.currentId;
+        const messages = chatData.sessions[sessionId] || [];
+        const selectedMessages = messages.filter(msg => entry.messageIds.includes(msg.id));
+        if (!selectedMessages.length) {
+            showToast('Cannot regenerate: messages not found');
+            return;
+        }
+        closeBottomSheet();
+        // Regenerate draft
+        try {
+            await generateMemoryDraftForMessages(selectedMessages, { source: 'manual_regenerate' });
+            showToast('Draft regenerated');
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        } catch (error) {
+            console.error('Failed to regenerate draft:', error);
+            showToast(`Regeneration failed: ${formatError(error)}`);
+        }
+    });
+    content.querySelector('#memory-preview-close')?.addEventListener('click', () => {
+        closeBottomSheet();
+        if (!isApprovedEntry) {
+            // For drafts, return to Memory Books sheet
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        }
+    });
     showBottomSheet({ title: kind, content, isSolid: true });
 }
 
@@ -1314,7 +1404,7 @@ async function openMemoryGenerationSettings() {
         endpoint: settings.generationEndpoint || '',
         apiKey: settings.generationApiKey || '',
         temperature: settings.generationTemperature,
-        promptPreset: settings.promptPreset || 'strict_factual',
+        promptPreset: settings.promptPreset || 'detailed_beats',
         autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
             ? Number(settings.autoCreateInterval)
             : 12,
@@ -1534,7 +1624,7 @@ async function openMemoryGenerationSettings() {
             const maxInjectedValue = Number(content.querySelector('#memory-max-injected-input')?.value || state.maxInjectedEntries || 3);
             settings.maxInjectedEntries = Math.max(1, Math.min(20, Number.isFinite(maxInjectedValue) ? Math.round(maxInjectedValue) : 3));
             settings.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
-            settings.promptPreset = settings.promptPreset || state.promptPreset || 'strict_factual';
+            settings.promptPreset = settings.promptPreset || state.promptPreset || 'detailed_beats';
             memoryBook.updatedAt = Date.now();
             await db.saveChat(activeChatChar.id, chatData);
             closeBottomSheet();
@@ -1609,7 +1699,7 @@ async function openMemoryPromptManager() {
         btn.addEventListener('click', async () => {
             const promptId = btn.getAttribute('data-prompt-delete');
             settings.customPrompts = settings.customPrompts.filter(item => item.id !== promptId);
-            if (settings.promptPreset === promptId) settings.promptPreset = 'strict_factual';
+            if (settings.promptPreset === promptId) settings.promptPreset = 'detailed_beats';
             memoryBook.updatedAt = Date.now();
             await db.saveChat(activeChatChar.id, chatData);
             closeBottomSheet();
@@ -1733,9 +1823,9 @@ async function openMemoryBooksSheet() {
             <div class="memory-generation-status-card">
                 <div class="memory-generation-status-row">
                     <strong>${(memoryDraftState.value.label || 'Generating memory draft').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong>
-                    <span>${formatElapsedSeconds(memoryDraftState.value.elapsedMs)}</span>
+                    <span id="memory-draft-timer">${formatElapsedSeconds(memoryDraftState.value.elapsedMs)}</span>
                 </div>
-                <div class="context-sheet-note">The draft is still being created. You can keep this sheet open and watch the timer update.</div>
+                <div class="context-sheet-note">The timer will update automatically while generation is in progress.</div>
             </div>
         `
         : '';
@@ -2059,15 +2149,7 @@ async function openMemoryBooksSheet() {
     });
 
     showBottomSheet({ title: 'Memory Books', content, isSolid: true });
-
-    if (memoryDraftState.value.active) {
-        refreshTimer = setTimeout(() => {
-            if (bottomSheetState.title === 'Memory Books' && memoryDraftState.value.active) {
-                closeBottomSheet();
-                setTimeout(() => openMemoryBooksSheet(), 30);
-            }
-        }, 300);
-    }
+    // Timer updates are now handled by watch on memoryDraftState.elapsedMs
 }
 
 async function deleteSelectedMessages() {
@@ -2372,6 +2454,17 @@ const searchMatchState = computed(() => {
         msgIdx: activeMatch.msgIdx,
         occurrenceIdx: occurrenceIdx
     };
+});
+
+const pendingMemoryMessageIds = computed(() => {
+    if (!activeChatChar) return new Set();
+    const chatData = chatDataCache.get(activeChatChar.id);
+    if (!chatData) return new Set();
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = chatData.memoryBooks?.[sessionId];
+    if (!memoryBook?.automation?.pendingTrigger) return new Set();
+    const messageIds = memoryBook.automation.pendingTrigger.messageIds || [];
+    return new Set(messageIds.filter(Boolean));
 });
 
 const onChatSearchToggle = (e) => {
@@ -5178,6 +5271,15 @@ watch(() => currentMessages.value.length, () => {
     updateContextCutoff();
 });
 
+// Watch memory draft state and update timer in DOM if Memory Books sheet is open
+watch(() => memoryDraftState.value.elapsedMs, (newElapsed) => {
+    if (!memoryDraftState.value.active) return;
+    const timerEl = document.getElementById('memory-draft-timer');
+    if (timerEl) {
+        timerEl.textContent = formatElapsedSeconds(newElapsed);
+    }
+});
+
 watch(activeChar, async (newVal) => {
     if (!newVal) return;
     
@@ -5334,6 +5436,7 @@ onUnmounted(() => {
                     :active-search-match-index="searchMatchState.msgIdx === vItem.item.originalIndex ? searchMatchState.occurrenceIdx : -1"
                     :is-selection-mode="isSelectionMode"
                     :is-selected="selectedMessages.has(vItem.item.data.id)"
+                    :is-pending-memory="pendingMemoryMessageIds.has(vItem.item.data.id)"
                     @swipe="(dir) => changeSwipe(vItem.item.originalIndex, dir, true)"
                     @change-greeting="(dir) => changeGreeting(vItem.item.originalIndex, dir, true)"
                     @regenerate="(mode, guidanceText) => regenerateMessage(vItem.item.originalIndex, mode, guidanceText)"
