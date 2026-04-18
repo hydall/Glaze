@@ -1,7 +1,7 @@
 {
   "name": "glaze",
   "private": true,
-  "version": "0.5.1-alpha",
+  "version": "0.6.0-alpha-preview",
   "license": "AGPL-3.0-only",
   "author": "hydall <hydallatglaze@gmail.com>",
   "type": "module",
