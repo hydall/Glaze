@@ -189,10 +189,8 @@ function updateFocusState() {
         isTextFieldFocusedInSheet.value = false;
     }
 
-    // On non-native (web), drive keyboard state from focus since there are no native keyboard events
-    if (!Capacitor.isNativePlatform()) {
-        isLocalKeyboardOpen.value = isTextFieldFocusedInSheet.value;
-    }
+    // On non-native (web), never set keyboard-open state — browser handles layout natively
+    // isLocalKeyboardOpen is only managed by native keyboard events on mobile
 }
 
 let kbListeners = [];

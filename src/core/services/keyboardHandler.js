@@ -12,6 +12,13 @@ export function initKeyboard() {
     isNativeKeyboard.value = Capacitor.isNativePlatform();
     isKeyboardOpen.value = document.body.classList.contains('keyboard-open');
 
+    if (!Capacitor.isNativePlatform()) {
+        // On web/desktop, keyboard overlap should always be 0
+        // Keep --keyboard-height intact (used for MagicDrawer sizing), only zero out --keyboard-overlap
+        document.documentElement.style.setProperty('--keyboard-overlap', '0px');
+        return; // Exit early, no need to set up native keyboard listeners
+    }
+
     const savedKbHeight = localStorage.getItem('gz_keyboard_height');
     const kbH = savedKbHeight ? `${savedKbHeight}px` : '300px';
     document.documentElement.style.setProperty('--keyboard-height', kbH);
@@ -22,9 +29,6 @@ export function initKeyboard() {
     Keyboard.setScroll({ isDisabled: true }).catch(e => console.warn('Keyboard setScroll error', e));
 
     if (Capacitor.getPlatform() === 'android') {
-
-
-        // adjustNothing in AndroidManifest means the OS never pans or resizes the WebView.
         // The viewport is always stable, so --keyboard-overlap always equals --keyboard-height.
         Keyboard.addListener('keyboardWillShow', (info) => {
             isKeyboardOpen.value = true;
@@ -149,9 +153,17 @@ export async function hideKeyboard() {
 }
 
 export function applyKeyboardOverlap(height) {
+    // Only apply keyboard overlap on native platforms
+    if (!Capacitor.isNativePlatform()) {
+        return;
+    }
+    
     if (height !== undefined) {
         document.documentElement.style.setProperty('--keyboard-height', `${height}px`);
         document.documentElement.style.setProperty('--keyboard-overlap', `${height}px`);
+    } else {
+        const savedKbHeight = localStorage.getItem('gz_keyboard_height') || 300;
+        document.documentElement.style.setProperty('--keyboard-overlap', `${savedKbHeight}px`);
     }
 }
 

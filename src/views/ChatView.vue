@@ -2016,14 +2016,12 @@ async function updateContextCutoff() {
     }
 
     try {
-        console.time('[updateContextCutoff] calculateContext');
         const result = await calculateContext({
             char: activeChatChar,
             history,
             authorsNote,
             summary
         });
-        console.timeEnd('[updateContextCutoff] calculateContext');
         
         if (activeChatChar && activeChatChar.id === currentCharId) {
             cutoffIndex.value = result?.cutoffIndex ?? 0;
@@ -2037,8 +2035,8 @@ async function updateContextCutoff() {
                 result
             };
         }
-        console.timeEnd('[updateContextCutoff] total');
     } finally {
+        console.timeEnd('[updateContextCutoff] total');
         isCalculatingCutoff = false;
         if (pendingCutoffRecalc) {
             pendingCutoffRecalc = false;
