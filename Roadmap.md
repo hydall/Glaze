@@ -1134,6 +1134,54 @@ PR: #34
 - [ ] Extract tokenizer to dedicated component
 - [ ] Universal navigation stack for all sheets
 
+### Phase 6: Component Extraction Refactoring (2026-04-18)
+
+**Goal:** Reduce ChatView.vue complexity by extracting large UI sections into dedicated SheetView-based components.
+
+**Status:** `in progress`
+
+**Branch:** `feat/component-extraction` (from `origin/dev` at `1434aa3`)
+
+**Motivation:**
+- ChatView.vue is ~7000 lines, making it difficult to maintain and navigate
+- Tokenizer, Memory Books, and Vectorization UIs are implemented as inline HTML in `showBottomSheet` calls
+- Moving to dedicated Vue components improves:
+  - Code organization and reusability
+  - Type safety and IDE support
+  - Testing capabilities
+  - Maintainability
+
+**Tasks:**
+
+1. **Extract Tokenizer to TokenizerSheet.vue**
+   - Status: `in progress`
+   - Create `src/components/sheets/TokenizerSheet.vue` using SheetView
+   - Props: breakdown, historyHidePreview, contextSegments, contextLegendItems, contextBreakdownItems, shouldRecommendHide, historyUsagePercent, isCalculating
+   - Emits: close, hide-messages, open-settings
+   - Replace `openContextSheet()` in ChatView with `tokenizerSheetRef.open()`
+   - Files modified:
+     - [x] `src/components/sheets/TokenizerSheet.vue` (created)
+     - [ ] `src/views/ChatView.vue` (integrate component, remove inline HTML)
+
+2. **Extract Memory Books to MemoryBooksSheet.vue**
+   - Status: `not started`
+   - Create dedicated component for memory book management UI
+   - Extract `openMemoryBooksSheet()` logic (~300 lines)
+   - Reduce ChatView by ~1000 lines
+
+3. **Extract Vectorization UI to VectorizationSheet.vue**
+   - Status: `not started`
+   - Create dedicated component for lorebook vectorization UI
+   - Extract embedding status, reindex, and vector search settings
+
+**Files to create:**
+- `src/components/sheets/TokenizerSheet.vue`
+- `src/components/sheets/MemoryBooksSheet.vue`
+- `src/components/sheets/VectorizationSheet.vue`
+
+**Files to modify:**
+- `src/views/ChatView.vue` — replace inline HTML with component refs, reduce ~1500-2000 lines total
+
 ### Testing Checklist
 
 After each phase:

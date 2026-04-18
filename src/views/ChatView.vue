@@ -413,6 +413,7 @@ import RegexSheet from '@/components/sheets/RegexSheet.vue';
 import StatsSheet from '@/components/sheets/StatsSheet.vue';
 import ImageGenSheet from '@/components/sheets/ImageGenSheet.vue';
 import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
+import TokenizerSheet from '@/components/sheets/TokenizerSheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
 import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml } from '@/core/services/imageGenService.js';
 import { showToast } from '@/core/states/toastState.js';
@@ -582,6 +583,7 @@ const imageGenSheet = ref(null);
 const openImageGenSheet = () => imageGenSheet.value?.open();
 const glossarySheet = ref(null);
 const openGlossarySheet = () => glossarySheet.value?.open();
+const tokenizerSheet = ref(null);
 const presetView = ref(null);
 const charCardSheet = ref(null);
 const lorebookSheet = ref(null);
@@ -3026,112 +3028,16 @@ async function openContextSheet() {
         }
     }
 
-    const breakdown = contextBreakdown.value;
-    if (!breakdown) {
-        showBottomSheet({
-            title: 'Context',
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M11 17h2v-6h-2v6zm0-8h2V7h-2v2zm1-7C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>',
-                description: 'Context calculation is taking longer than expected. Please check that your API settings are configured correctly and try again.',
-                buttonText: 'Close',
-                onButtonClick: () => closeBottomSheet()
-            }
-        });
-        return;
-    }
+    // Open the new TokenizerSheet component
+    tokenizerSheet.value?.open();
+}
 
-    const used = breakdown.totalUsed || 0;
-    const safeContext = breakdown.safeContext || 0;
-    const remaining = Math.max(0, breakdown.remaining || 0);
-    const preview = historyHidePreview.value;
-    const content = document.createElement('div');
-    content.className = 'context-sheet';
+function handleHideTopMessages() {
+    confirmHideTopMessages();
+}
 
-    const usedWidth = Math.max(0, 100 - (contextSegments.value.reserve?.percent || 0));
-    const segmentHtml = contextSegments.value.used.map(segment => `
-        <div class="chat-context-segment ${segment.className}" style="width:${segment.percent}%"></div>
-    `).join('');
-
-    const reserveHtml = contextSegments.value.reserve
-        ? (() => {
-            const reserve = contextSegments.value.reserve;
-            const innerSegments = reserve.used?.map(seg => 
-                `<div class="chat-context-segment ${seg.className}" style="width:${(seg.value / reserve.value * 100).toFixed(2)}%"></div>`
-            ).join('') || '';
-            const remainingPercent = reserve.remaining > 0 ? ((reserve.remaining / reserve.value) * 100).toFixed(2) : 0;
-            const remainingHtml = reserve.remaining > 0 
-                ? `<div class="chat-context-segment ${reserve.className}" style="width:${remainingPercent}%"></div>`
-                : '';
-            return `<div class="chat-context-reserve-container" style="width:${reserve.percent}%">${innerSegments}${remainingHtml}</div>`;
-        })()
-        : '';
-
-    const legendHtml = contextLegendItems.value.map(segment => `
-        <div class="context-legend-item">
-            <span class="context-legend-swatch ${segment.className}"></span>
-            <span>${segment.label}</span>
-        </div>
-    `).join('');
-
-    const breakdownHtml = contextBreakdownItems.value.map(item => `
-        <div class="context-breakdown-row">
-            <span>${item.label}</span>
-            <strong>${item.value}</strong>
-        </div>
-    `).join('');
-
-    const recommendationHtml = shouldRecommendHide.value ? `
-        <div class="context-recommendation">
-            <div class="context-recommendation-title">History is near its limit</div>
-            <div class="context-recommendation-text">Hide about ${preview.count} top message${preview.count === 1 ? '' : 's'} to free about ${preview.tokens} tokens.</div>
-        </div>
-    ` : '';
-
-    const hideButtonLabel = preview.count
-        ? `Hide top ${preview.count}`
-        : 'Hide top messages';
-
-    content.innerHTML = `
-        <div class="context-sheet-summary">
-            <div class="context-sheet-kpi">
-                <strong>${used}</strong>
-                <span>used / ${breakdown.contextSize || safeContext}</span>
-            </div>
-            <div class="context-sheet-kpi">
-                <strong>${remaining}</strong>
-                <span>remaining</span>
-            </div>
-            <div class="context-sheet-kpi">
-                <strong>${historyUsagePercent.value}%</strong>
-                <span>history fill</span>
-            </div>
-        </div>
-        <div class="chat-context-bar context-sheet-bar">
-            <div class="chat-context-used" style="width:${usedWidth}%">${segmentHtml}</div>
-            ${reserveHtml}
-        </div>
-        <div class="context-legend">${legendHtml}</div>
-        <div class="context-breakdown">${breakdownHtml}</div>
-        ${recommendationHtml}
-        <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="context-hide-btn">${hideButtonLabel}</button>
-            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="context-settings-btn">Settings</button>
-        </div>
-    `;
-
-    content.querySelector('#context-settings-btn')?.addEventListener('click', () => {
-        openHistoryContextSettings();
-    });
-
-    content.querySelector('#context-hide-btn')?.addEventListener('click', () => {
-        confirmHideTopMessages();
-    });
-
-    showBottomSheet({
-        title: 'Context',
-        content,
-        isSolid: true
-    });
+function handleOpenHistorySettings() {
+    openHistoryContextSettings();
 }
 
 async function setupHeader(char = activeChatChar) {
@@ -5811,6 +5717,19 @@ onUnmounted(() => {
         <StatsSheet ref="statsSheet" />
         <ImageGenSheet ref="imageGenSheet" />
         <GlossarySheet ref="glossarySheet" />
+        <TokenizerSheet
+            ref="tokenizerSheet"
+            :breakdown="contextBreakdown"
+            :history-hide-preview="historyHidePreview"
+            :context-segments="contextSegments"
+            :context-legend-items="contextLegendItems"
+            :context-breakdown-items="contextBreakdownItems"
+            :should-recommend-hide="shouldRecommendHide"
+            :history-usage-percent="historyUsagePercent"
+            :is-calculating="isCalculatingCutoff"
+            @hide-messages="handleHideTopMessages"
+            @open-settings="handleOpenHistorySettings"
+        />
     </div>
 </template>
 
