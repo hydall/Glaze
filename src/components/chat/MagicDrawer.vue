@@ -20,7 +20,9 @@ const personasSheet = ref(null);
 
 const props = defineProps({
     visible: { type: Boolean, default: false },
-    activeChar: { type: Object, default: null }
+    activeChar: { type: Object, default: null },
+    sidebarMode: { type: Boolean, default: false },
+    iconOnly: { type: Boolean, default: false }
 });
 
 const emit = defineEmits([
@@ -434,9 +436,9 @@ defineExpose({
 </script>
 
 <template>
-    <Transition name="drawer">
-        <div v-if="visible" class="magic-drawer" @click.stop>
-            <div class="drawer-header">
+    <Transition :name="sidebarMode ? '' : 'drawer'">
+        <div v-if="visible" class="magic-drawer" :class="{ 'magic-drawer-sidebar': sidebarMode, 'icon-only': iconOnly }" @click.stop>
+            <div class="drawer-header" v-show="!iconOnly">
                 <div class="drawer-title">{{ t('sheet_title_magic_drawer') || 'Magic Drawer' }}</div>
                 <div class="edit-toggle" @click="toggleEdit">
                     <svg v-if="!isEditing" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
@@ -464,7 +466,7 @@ defineExpose({
                             <div class="card-icon">
                                 <svg viewBox="0 0 24 24"><path :d="item.icon"/></svg>
                             </div>
-                            <div class="card-info">
+                            <div class="card-info" v-show="!iconOnly">
                                 <span class="item-label">{{ t(item.i18n) }}</span>
                                 <span class="item-status" v-if="item.id === 'lorebooks'"><span>{{ lorebookEntryCount }} {{ pluralize(lorebookEntryCount, 'count_entries') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'notes'"><span>{{ notesTokens }} {{ pluralize(notesTokens, 'count_tokens') }}</span></span>
@@ -491,7 +493,7 @@ defineExpose({
                             <div class="card-icon add-icon">
                                 <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
                             </div>
-                            <div class="card-info">
+                            <div class="card-info" v-show="!iconOnly">
                                 <span class="item-label">{{ t('btn_add') }}</span>
                             </div>
                         </div>
@@ -569,6 +571,26 @@ defineExpose({
     z-index: -1;
 }
 
+.magic-drawer-sidebar .drawer-header {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    height: var(--header-height, 56px);
+    display: flex;
+    align-items: center;
+    padding: 0 16px !important;
+    z-index: 10 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    mask-image: none !important;
+    -webkit-mask-image: none !important;
+}
+
+.magic-drawer-sidebar.icon-only .drawer-header {
+    display: none !important;
+}
+
 .drawer-header > * {
     pointer-events: auto;
     opacity: 1 !important;
@@ -585,7 +607,6 @@ defineExpose({
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    scrollbar-gutter: stable;
     scroll-padding-top: 60px;
     padding: 60px 10px calc(20px + var(--sab)) 10px;
     display: grid;
@@ -594,8 +615,52 @@ defineExpose({
     align-content: start;
 }
 
+.magic-drawer-sidebar .drawer-content {
+    display: flex;
+    flex-direction: column;
+    padding: 0 !important;
+    scroll-padding-top: 0;
+    gap: 0 !important;
+}
+
+.magic-drawer-sidebar .magic-item {
+    background-color: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 14px 16px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    margin: 0 !important;
+}
+
+.magic-drawer-sidebar .magic-item:hover {
+    background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+.magic-drawer-sidebar .magic-item:active {
+    transform: none !important;
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.magic-drawer-sidebar .magic-item-content {
+    gap: 12px;
+}
+
+.magic-drawer-sidebar.icon-only .magic-item {
+    justify-content: flex-start !important;
+}
+
+.magic-drawer-sidebar.icon-only .magic-item-content {
+    justify-content: flex-start !important;
+}
+
 .drawer-content::-webkit-scrollbar-track {
     margin-top: 60px;
+}
+
+.magic-drawer-sidebar .drawer-content::-webkit-scrollbar-track {
+    margin-top: 0;
 }
 
 .drawer-enter-active,

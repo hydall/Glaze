@@ -1,18 +1,45 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 
-defineProps({
+const props = defineProps({
   currentView: String
 });
 
-defineEmits(['update:currentView']);
+const emit = defineEmits(['update:currentView']);
 
 const tabbarRef = ref(null);
 let resizeObserver = null;
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
+
+const navItems = computed(() => [
+    {
+        id: 'view-dialogs',
+        label: t('tab_dialogs'),
+        icon: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z',
+        match: (view) => view === 'view-dialogs'
+    },
+    {
+        id: 'view-characters',
+        label: t('tab_characters'),
+        icon: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
+        match: (view) => view === 'view-characters'
+    },
+    {
+        id: 'view-tools',
+        label: t('tab_tools') || 'Tools',
+        icon: 'm21.71 20.29l-1.42 1.42a1 1 0 0 1-1.41 0L7 9.85A3.81 3.81 0 0 1 6 10a4 4 0 0 1-3.78-5.3l2.54 2.54l.53-.53l1.42-1.42l.53-.53L4.7 2.22A4 4 0 0 1 10 6a3.81 3.81 0 0 1-.15 1l11.86 11.88a1 1 0 0 1 0 1.41M2.29 18.88a1 1 0 0 0 0 1.41l1.42 1.42a1 1 0 0 0 1.41 0l5.47-5.46l-2.83-2.83M20 2l-4 2v2l-2.17 2.17l2 2L18 8h2l2-4Z',
+        match: (view) => ['view-tools', 'view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas'].includes(view)
+    },
+    {
+        id: 'view-menu',
+        label: t('tab_more'),
+        icon: 'M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z',
+        match: (view) => ['view-menu', 'view-settings', 'view-theme-settings', 'view-glossary'].includes(view)
+    }
+]);
 
 const updateTabBarHeight = () => {
   if (tabbarRef.value) {
@@ -41,33 +68,17 @@ onUnmounted(() => {
 
 <template>
   <nav class="tabbar" ref="tabbarRef">
-      <div class="tab-btn" :class="{ active: currentView === 'view-dialogs' }" @click="$emit('update:currentView', 'view-dialogs')">
+      <div 
+          v-for="item in navItems" 
+          :key="item.id"
+          class="tab-btn" 
+          :class="{ active: item.match(currentView) }" 
+          @click="$emit('update:currentView', item.id)"
+      >
           <svg class="tab-icon" viewBox="0 0 24 24">
-              <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+              <path :d="item.icon" />
           </svg>
-          <span class="tab-label">{{ t('tab_dialogs') }}</span>
-      </div>
-      
-      <div class="tab-btn" :class="{ active: currentView === 'view-characters' }" @click="$emit('update:currentView', 'view-characters')">
-          <svg class="tab-icon" viewBox="0 0 24 24">
-              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-          </svg>
-          <span class="tab-label">{{ t('tab_characters') }}</span>
-      </div>
-
-
-      <div class="tab-btn" :class="{ active: ['view-tools', 'view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas'].includes(currentView) }" @click="$emit('update:currentView', 'view-tools')">
-          <svg class="tab-icon" viewBox="0 0 24 24">
-              <path d="m21.71 20.29l-1.42 1.42a1 1 0 0 1-1.41 0L7 9.85A3.81 3.81 0 0 1 6 10a4 4 0 0 1-3.78-5.3l2.54 2.54l.53-.53l1.42-1.42l.53-.53L4.7 2.22A4 4 0 0 1 10 6a3.81 3.81 0 0 1-.15 1l11.86 11.88a1 1 0 0 1 0 1.41M2.29 18.88a1 1 0 0 0 0 1.41l1.42 1.42a1 1 0 0 0 1.41 0l5.47-5.46l-2.83-2.83M20 2l-4 2v2l-2.17 2.17l2 2L18 8h2l2-4Z" fill="currentColor"/>
-          </svg>
-          <span class="tab-label">{{ t('tab_tools') || 'Tools' }}</span>
-      </div>
-
-      <div class="tab-btn" :class="{ active: ['view-menu', 'view-settings', 'view-theme-settings', 'view-glossary'].includes(currentView) }" @click="$emit('update:currentView', 'view-menu')">
-          <svg class="tab-icon" viewBox="0 0 24 24">
-              <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-          </svg>
-          <span class="tab-label">{{ t('tab_more') }}</span>
+          <span class="tab-label">{{ item.label }}</span>
       </div>
   </nav>
 </template>

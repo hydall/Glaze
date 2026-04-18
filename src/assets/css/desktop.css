@@ -1,0 +1,454 @@
+/* ===== DESKTOP LAYOUT ===== */
+/* Applied when .desktop-mode class is set on .app-layout */
+
+/* App body wrapper: always fills remaining space after header */
+.app-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Desktop: grid layout — header and app-body share the same cell so
+   content fills the full viewport and the header/input overlay on top */
+.desktop-mode {
+    display: grid !important;
+    grid-template-rows: 1fr;
+    grid-template-columns: auto 1fr auto;
+}
+
+.desktop-mode .app-body {
+    display: contents;
+}
+
+.desktop-mode .desktop-sidebar-left {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.desktop-mode #main-container {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+.desktop-mode .desktop-sidebar-right {
+    grid-column: 3;
+    grid-row: 1;
+}
+
+/* Desktop main gets flex growth */
+.desktop-mode .app-body>#main-container {
+    flex: 1;
+    min-width: 0;
+}
+
+/* ---- Desktop overrides (requires .desktop-mode on .app-layout) ---- */
+
+/* Header: grid item that overlays the app-body — always on top, never fixed */
+.desktop-mode .header-container {
+    position: relative !important;
+    grid-row: 1;
+    grid-column: 2;
+    align-self: start;
+    z-index: 100;
+    width: 100%;
+    pointer-events: auto;
+}
+
+/* Header: no floating card look on desktop — full-width, flush */
+.desktop-mode .app-header {
+    margin: 0 !important;
+    border-radius: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-top: none !important;
+}
+
+/* Chat mode: header must stay in flow (not fixed) and never hide on scroll */
+.desktop-mode .app-header.fixed-header {
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    z-index: auto !important;
+    margin: 0 !important;
+}
+
+.desktop-mode .app-header.scroll-hidden {
+    transform: none !important;
+}
+
+/* Footer: hidden — BottomNav lives in the left sidebar */
+.desktop-mode .footer-container {
+    display: none !important;
+}
+
+/* Views: offset below header (same formula as mobile, --header-height now set to actual height) */
+.desktop-mode .sub-view {
+    padding-top: calc(var(--header-height, 56px) + 10px) !important;
+    padding-bottom: 16px !important;
+}
+
+/* #main-container: in-flow flex child */
+.desktop-mode #main-container {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    width: auto !important;
+    height: 100% !important;
+}
+
+/* ChatView: relative, fills its column */
+.desktop-mode #view-chat {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 1 !important;
+}
+
+/* Chat container: small top pad — messages scroll behind the header */
+.desktop-mode .chat-container {
+    padding-top: 8px !important;
+    padding-left: var(--chat-padding-lr, 0px) !important;
+    padding-right: var(--chat-padding-lr, 0px) !important;
+}
+
+/* Hide mobile-only magic button and its bottom drawer */
+.desktop-mode #btn-magic {
+    display: none !important;
+}
+
+.desktop-mode .chat-input-container .magic-drawer {
+    display: none !important;
+}
+
+/* Status gradients: not needed on desktop */
+.desktop-mode .chat-status-gradient,
+.desktop-mode .chat-status-gradient-bottom {
+    display: none;
+}
+
+/* ---- Left sidebar ---- */
+.desktop-sidebar-left {
+    position: relative;
+    width: 280px;
+    min-width: 200px;
+    max-width: 600px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: hidden;
+    overflow-x: hidden;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+    background-color: rgba(var(--ui-bg-rgb), 0.4);
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+    padding-top: 0px;
+}
+
+/* Characters button (Discord-style, above dialog list) */
+.desktop-chars-btn {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    margin: 12px 12px 8px 12px;
+    cursor: pointer;
+    color: var(--text-color, #ffffff);
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    transition: color 0.2s, background-color 0.2s, transform 0.1s;
+    user-select: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.desktop-chars-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.desktop-chars-btn:active {
+    transform: scale(0.98);
+}
+
+.desktop-chars-btn.active {
+    color: var(--vk-blue);
+    background-color: rgba(var(--vk-blue-rgb), 0.12);
+    border-color: rgba(var(--vk-blue-rgb), 0.3);
+}
+
+.desktop-chars-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+    flex-shrink: 0;
+}
+
+/* DialogList wrapper fills remaining space */
+.desktop-dialogs-wrapper {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.desktop-dialogs-wrapper>* {
+    flex: 1;
+    min-height: 0;
+}
+
+.desktop-sidebar-left .view {
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+}
+
+/* More button at the bottom of the sidebar */
+.desktop-sidebar-nav {
+    flex-shrink: 0;
+}
+
+.desktop-more-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+    color: var(--inactive-tab);
+    font-size: 13px;
+    font-weight: 600;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    transition: color 0.2s, background-color 0.2s;
+    user-select: none;
+}
+
+.desktop-more-btn:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.desktop-more-btn.active {
+    color: var(--vk-blue);
+}
+
+.desktop-more-btn svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+    flex-shrink: 0;
+}
+
+/* ---- Floating menu overlay ---- */
+.desktop-float-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 400;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+
+.desktop-float-panel {
+    position: relative;
+    width: 620px;
+    max-width: 92vw;
+    height: 82vh;
+    max-height: 92vh;
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--ui-bg, #1e1e1e);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+.desktop-float-panel>.view {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-top: 16px !important;
+    padding-bottom: 16px !important;
+}
+
+.desktop-float-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 10;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-color, #fff);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+
+.desktop-float-close:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.desktop-float-close svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+}
+
+/* ---- Right sidebar ---- */
+.desktop-sidebar-right {
+    position: relative;
+    width: 300px;
+    min-width: 200px;
+    max-width: 800px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: hidden;
+    overflow-x: hidden;
+    height: 100%;
+    border-left: 1px solid rgba(255, 255, 255, 0.07);
+    background-color: rgba(var(--ui-bg-rgb), 0.4);
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+}
+
+.desktop-sidebar-right>* {
+    direction: ltr;
+    /* Restore LTR for children */
+}
+
+/* ---- Sidebar Drag Handles ---- */
+.sidebar-drag-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    z-index: 500;
+    background-color: transparent;
+    transition: background-color 0.2s, opacity 0.2s;
+    opacity: 0;
+}
+
+.sidebar-drag-handle:hover,
+.sidebar-drag-handle:active {
+    background-color: rgba(255, 255, 255, 0.2);
+    opacity: 1;
+}
+
+.left-handle {
+    right: -4px;
+}
+
+.right-handle {
+    left: -4px;
+}
+
+#desktop-sidebar-content {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+/* ---- MagicDrawer sidebar mode ---- */
+.magic-drawer-sidebar {
+    position: relative !important;
+    bottom: auto !important;
+    left: auto !important;
+    right: auto !important;
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background-color: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    z-index: 1 !important;
+}
+
+/* When acting as Left Icon Strip */
+.desktop-sidebar-right .magic-drawer-sidebar.icon-only {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 60px !important;
+    height: 100% !important;
+    padding-top: var(--header-height, 56px) !important;
+    z-index: 12000 !important;
+    /* Defeat the 11000 z-index from SheetView */
+    border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+    background: transparent !important;
+    pointer-events: none !important;
+    /* Let clicks pass through the padded top area */
+}
+
+.desktop-sidebar-right .magic-drawer-sidebar.icon-only .drawer-content {
+    pointer-events: auto !important;
+    /* Re-enable clicks for the icon list */
+}
+
+/* Ensure padding for content when icon strip is visible */
+.desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar .sheet-view-body,
+.desktop-sidebar-right.has-sheet .bottom-sheet-content.is-sidebar .sheet-scroll-container,
+.desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar .sc-sheet-tabs {
+    padding-left: 60px !important;
+}
+
+.desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar .sheet-view-body {
+    padding-top: 56px !important;
+    scroll-padding-top: 56px !important;
+}
+
+/* Keep header full width */
+.desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar .sheet-header-area {
+    padding-left: 0 !important;
+    z-index: 30 !important;
+}
+
+.desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar .sc-header-title,
+.desktop-sidebar-right.has-sheet .bottom-sheet-content.is-sidebar .sc-header-title {
+    margin-left: 16px;
+}
+
+.desktop-sidebar-right.has-sheet .bottom-sheet-content.is-sidebar .sheet-header {
+    padding-left: 0 !important;
+    position: relative !important;
+    z-index: 30 !important;
+}
+
+/* Character List Sort controls alignment for desktop */
+.desktop-mode .sort-controls {
+    justify-content: flex-start !important;
+}
+
+.desktop-mode .sort-controls .preset-selector {
+    order: 1 !important;
+}
+
+.desktop-mode .sort-controls .sort-dir-btn {
+    order: 2 !important;
+}

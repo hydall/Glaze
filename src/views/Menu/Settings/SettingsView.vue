@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { updateLanguage, translations } from '@/utils/i18n.js';
-import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips, dialogGrouping, setDialogGrouping, enterToSubmit, setEnterToSubmit } from '@/core/config/APPSettings.js';
+import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips, dialogGrouping, setDialogGrouping, enterToSubmit, setEnterToSubmit, chatPaddingLR, setChatPaddingLR } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { themeState, setChatLayout } from '@/core/states/themeState.js';
@@ -73,6 +73,14 @@ const toggleDialogGrouped = () => {
     dialogGrouped.value = !dialogGrouped.value;
     setDialogGrouping(dialogGrouped.value);
     window.dispatchEvent(new CustomEvent('settings-changed'));
+};
+
+const chatPadLR = ref(chatPaddingLR.value);
+const isDesktop = ref(typeof window !== 'undefined' && window.innerWidth >= 768);
+
+const updateChatPadding = (e) => {
+    chatPadLR.value = parseInt(e.target.value, 10) || 0;
+    setChatPaddingLR(chatPadLR.value);
 };
 
 /*
@@ -215,6 +223,15 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
                 </div>
 
                 <div class="section-header">{{ t('menu_interface_settings') || 'Interface Settings' }}</div>
+                <!-- Chat Padding (Desktop) -->
+                <div v-if="isDesktop" style="padding: 12px 16px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                        <label style="font-size: 16px;">{{ t('menu_chat_padding') || 'Chat Padding (Desktop)' }}</label>
+                        <span style="font-size: 14px; color: var(--text-gray);">{{ chatPadLR }}px</span>
+                    </div>
+                    <div class="settings-desc" style="margin-bottom: 12px; font-size: 13px; color: var(--text-gray);">{{ t('desc_chat_padding') || 'Adjust left and right padding for chat messages on PC' }}</div>
+                    <input type="range" min="0" max="600" step="10" :value="chatPadLR" @input="updateChatPadding" style="width: 100%;">
+                </div>
                 <!-- Dialog Grouping -->
                 <div class="settings-item-checkbox" @click="toggleDialogGrouped">
                     <div class="settings-text-col">

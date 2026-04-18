@@ -17,7 +17,8 @@ const props = defineProps({
     sessionItems: Array, // [{ title, count, time, preview, isActive, onClick, onDelete }]
     cardItems: Array, // [{ label, sublabel, icon, onClick }]
     input: Object, // { placeholder, value, confirmLabel, onConfirm }
-    isSolid: Boolean
+    isSolid: Boolean,
+    sidebarMode: { type: Boolean, default: false }
 });
 
 const emit = defineEmits(['close']);
@@ -190,18 +191,23 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div class="modal-overlay" :class="{ visible: visible }">
-        <div class="modal-backdrop" @click="locked ? undefined : close()"></div>
+    <div :class="{ 'modal-overlay': !sidebarMode, 'visible': !sidebarMode && visible, 'bottom-sheet-sidebar-wrapper': sidebarMode }">
+        <div v-if="!sidebarMode" class="modal-backdrop" @click="locked ? undefined : close()"></div>
         <div class="bottom-sheet-content" @click.stop 
-             :style="{ transform: isDragging ? `translateY(${currentDragY}px)` : '' }"
-             :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid }">
-            <div class="sheet-handle-bar"
+             :style="!sidebarMode && isDragging ? { transform: `translateY(${currentDragY}px)` } : ''"
+             :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid, 'is-sidebar': sidebarMode }">
+            
+            <div v-if="!sidebarMode" class="sheet-handle-bar"
                  @touchstart="onHandleTouchStart"
                  @touchmove.prevent="onHandleTouchMove"
                  @touchend="onHandleTouchEnd"
             ></div>
+
             <div class="sheet-header" v-if="title || headerAction">
                 <div class="sheet-title">
+                    <div v-if="sidebarMode" class="sheet-back-btn" @click="close">
+                        <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                    </div>
                     {{ title }}
                     <HelpTip v-if="helpTip" :term="helpTip" />
                 </div>
@@ -216,7 +222,7 @@ onBeforeUnmount(() => {
                 <!-- Vue Slot Content -->
                 <slot></slot>
 
-                <!-- Big Info Sheet (Moved out of else-if chain to allow combination) -->
+                <!-- Big Info Sheet -->
                 <div v-if="bigInfo" class="sheet-big-info">
                     <div class="big-info-icon" v-html="bigInfo.icon"></div>
                     <div class="big-info-desc">{{ bigInfo.description }}</div>
@@ -692,6 +698,52 @@ onBeforeUnmount(() => {
     background-image: none !important;
 }
 
+.bottom-sheet-content.is-sidebar {
+    height: 100% !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding-bottom: 20px !important;
+    background-image: none !important;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container {
+    max-height: none !important;
+    flex: 1;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-header {
+    padding: 16px 16px 16px;
+}
+
+.sheet-back-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 8px;
+    border-radius: 50%;
+    cursor: pointer;
+    color: var(--text-gray);
+    transition: background 0.2s;
+}
+
+.sheet-back-btn:active {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.sheet-back-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
 .bottom-sheet-content.keyboard-open {
     padding-bottom: calc(var(--keyboard-overlap, 0px) + 10px + var(--sab, 0px));
     max-height: 95vh;
@@ -902,5 +954,61 @@ onBeforeUnmount(() => {
     background: rgba(0, 0, 0, 0.4);
     border-radius: 50%;
     backdrop-filter: blur(4px);
+}
+
+/* Sidebar Mode Styles */
+.bottom-sheet-content.is-sidebar {
+    height: 100% !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+    background-color: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    position: relative !important;
+    padding-top: calc(var(--header-height, 56px) + 8px);
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container {
+    max-height: none !important;
+    flex: 1;
+    min-height: 0;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-header {
+    background: transparent !important;
+    padding-top: 0 !important;
+}
+
+.sheet-back-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin-right: 8px;
+    cursor: pointer;
+    border-radius: 50%;
+    transition: background 0.2s;
+}
+
+.sheet-back-btn:active {
+    background: rgba(var(--text-color-rgb, 255, 255, 255), 0.1);
+}
+
+.sheet-back-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+.bottom-sheet-sidebar-wrapper {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
 }
 </style>

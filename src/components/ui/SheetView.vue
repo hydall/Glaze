@@ -1,8 +1,12 @@
 <!-- src/components/ui/SheetView.vue -->
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
-import { Capacitor } from '@capacitor/core';
-import { isKeyboardOpen as globalKeyboardOpen, hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
+import { sidebarState, setSidebarOccupied } from '@/core/states/sidebarState.js';
+import { bottomSheetState, closeBottomSheet } from '@/core/states/bottomSheetState.js';
+import { useSheetGestures } from '@/composables/ui/useSheetGestures.js';
+import { attachKeyboardFocusHandler } from '@/core/services/keyboardHandler.js';
+
+let _sheetIdCounter = 0;
 
 const props = defineProps({
     fitContent: { type: Boolean, default: false },
@@ -15,133 +19,100 @@ const props = defineProps({
     viewMode: { type: Boolean, default: false },
 });
 
+const isDesktop = ref(window.innerWidth >= 768);
+const checkDesktop = () => { isDesktop.value = window.innerWidth >= 768; };
+const isSidebarMode = computed(() => {
+    if (!isDesktop.value || !isVisible.value || props.viewMode) return false;
+    return !!document.getElementById('desktop-sidebar-content');
+});
+
 const emit = defineEmits(['close', 'back', 'update:expanded', 'update:activeTab', 'tab-click']);
 
 const isVisible = ref(false);
-const isExpanded = ref(false);
-const isDragging = ref(false);
-const startY = ref(0);
-const currentDragY = ref(0);
-const wasExpandedBeforeKeyboard = ref(false);
+const instanceId = ref(`sv_${++_sheetIdCounter}`);
 
-const sheetStyle = computed(() => {
-    if (!isVisible.value) {
-        if (props.fitContent) {
-            return { 
-                transform: 'translate3d(0, 100%, 0)',
-                height: 'auto',
-                paddingBottom: '0px',
-                '--sheet-translate': '0px'
-            };
+watch(isVisible, (val) => {
+    if (isDesktop.value) {
+        if (val) {
+            setSidebarOccupied(true, instanceId.value);
+        } else if (sidebarState.activeSheetId === instanceId.value) {
+            setSidebarOccupied(false);
         }
-        return { 
-            transform: 'translate3d(0, 100vh, 0)',
-            height: '100vh',
-            paddingBottom: isExpanded.value ? '0vh' : '15vh',
-            '--sheet-translate': isExpanded.value ? '0vh' : '15vh'
-        };
     }
-    
-    if (props.fitContent) {
-        const t = isDragging.value ? currentDragY.value : 0;
-        return { 
-            transform: `translate3d(0, ${t}px, 0)`,
-            height: 'auto',
-            paddingBottom: '0px',
-            '--sheet-translate': `${t}px`
-        };
+});
+
+watch(() => sidebarState.activeSheetId, (newId) => {
+    if (isVisible.value && isDesktop.value && newId && newId !== instanceId.value) {
+        close();
     }
+});
 
-    const baseTranslateVh = isExpanded.value ? 0 : 15;
-    const dragDeltaVh = (currentDragY.value / window.innerHeight) * 100;
-    const targetTranslateVh = baseTranslateVh + dragDeltaVh;
+watch(() => bottomSheetState.visible, (val) => {
+    if (val && isVisible.value && isDesktop.value) {
+        close();
+    }
+});
 
-    if (isDragging.value && targetTranslateVh < 0) {
-        // Stretching: height grows, translateY stays 0 so bottom stays at 100%
-        return {
-            height: `calc(100vh + ${Math.abs(targetTranslateVh)}vh)`,
-            transform: 'translate3d(0, 0, 0)',
-            paddingBottom: '0px',
-            '--sheet-translate': '0vh'
-        };
-    } else {
-        // Normal movement
-        const t = isDragging.value ? targetTranslateVh : baseTranslateVh;
-        return {
-            height: '100vh',
-            transform: `translate3d(0, ${t}vh, 0)`,
-            paddingBottom: `${t}vh`,
-            '--sheet-translate': `${t}vh`
-        };
+const isExpanded = ref(false);
+const wasExpandedBeforeKeyboard = ref(false);
+const sheetViewContentRef = ref(null);
+
+const { 
+    isDragging, 
+    sheetStyle, 
+    toggle, 
+    onHandleTouchStart, 
+    onHandleTouchMove, 
+    onHandleTouchEnd 
+} = useSheetGestures({
+    isVisible,
+    isExpanded,
+    isSidebarMode,
+    fitContent: computed(() => props.fitContent),
+    emit,
+    close: () => {
+        close();
+    }
+});
+
+const { 
+    isLocalKeyboardOpen, 
+    mount: mountKeyboard, 
+    unmount: unmountKeyboard, 
+    hideLocalKeyboard 
+} = attachKeyboardFocusHandler(sheetViewContentRef, {
+    onKeyboardOpen: () => { window.scrollTo(0, 0); },
+    onKeyboardExpanded: (info) => {
+        if (!isVisible.value) return;
+        if (!isExpanded.value && !props.fitContent) {
+            wasExpandedBeforeKeyboard.value = false;
+            isExpanded.value = true;
+            emit('update:expanded', true);
+        } else {
+            wasExpandedBeforeKeyboard.value = true;
+        }
+    },
+    onKeyboardRestored: () => {
+        if (!wasExpandedBeforeKeyboard.value && !props.fitContent) {
+            isExpanded.value = false;
+            emit('update:expanded', false);
+        }
     }
 });
 
 function open() {
     if (props.viewMode) return;
+    if (isDesktop.value && bottomSheetState.visible) {
+        closeBottomSheet();
+    }
     isVisible.value = true;
     isExpanded.value = false;
 }
 
 function close() {
-    // Hide keyboard and blur active element before closing
-    if (isLocalKeyboardOpen.value) {
-        isLocalKeyboardOpen.value = false;
-        const active = document.activeElement;
-        if (active && sheetViewContentRef.value?.contains(active)) {
-            active.blur();
-        }
-        if (Capacitor.isNativePlatform()) {
-            hideKeyboard();
-        }
-    }
+    hideLocalKeyboard();
     isVisible.value = false;
     emit('close');
-}
-
-function toggle() {
-    if (props.fitContent) {
-        close();
-        return;
-    }
-    isExpanded.value = !isExpanded.value;
-    emit('update:expanded', isExpanded.value);
-}
-
-function onHandleTouchStart(e) {
-    // Don't start dragging if the user tapped a button in the header
-    if (e.target.closest('.header-btn') || e.target.closest('.clickable-no-drag') || e.target.closest('.sub-tab-btn')) return;
-    isDragging.value = true;
-    startY.value = e.touches[0].clientY;
-}
-
-function onHandleTouchMove(e) {
-    if (!isDragging.value) return;
-    const delta = e.touches[0].clientY - startY.value;
-    
-    // When expanded or fitContent, only allow dragging down (with resistance upward)
-    if ((isExpanded.value || props.fitContent) && delta < 0) {
-        currentDragY.value = delta * 0.2;
-    } else {
-        currentDragY.value = delta;
-    }
-}
-
-function onHandleTouchEnd() {
-    if (!isDragging.value) return;
-    isDragging.value = false;
-    
-    if (currentDragY.value > 80) { // Swipe down
-        if (isExpanded.value) {
-            isExpanded.value = false;
-            emit('update:expanded', false);
-        } else {
-            close();
-        }
-    } else if (currentDragY.value < -40 && !isExpanded.value && !props.fitContent) { // Swipe up
-        isExpanded.value = true;
-        emit('update:expanded', true);
-    }
-    currentDragY.value = 0;
 }
 
 function onHwBack(e) {
@@ -153,100 +124,18 @@ function onHwBack(e) {
 
 defineExpose({ open, close, isVisible, isExpanded });
 
-const sheetViewContentRef = ref(null);
-const isLocalKeyboardOpen = ref(false);
-const isTextFieldFocusedInSheet = ref(false);
-
-function updateFocusState() {
-    const active = document.activeElement;
-    if (!active) {
-        isTextFieldFocusedInSheet.value = false;
-        return;
-    }
-    
-    const isInside = sheetViewContentRef.value?.contains(active) || active?.closest('.sheet-view-content');
-
-    if (isInside) {
-        const tagName = active.tagName;
-        let isTextEntry = false;
-        
-        if (tagName === 'TEXTAREA') {
-            isTextEntry = true;
-        } else if (tagName === 'INPUT') {
-            const textTypes = ['text', 'password', 'email', 'number', 'tel', 'url', 'search', 'date', 'datetime-local', 'month', 'time', 'week'];
-            isTextEntry = textTypes.includes(active.type.toLowerCase());
-        } else if (active.isContentEditable) {
-            isTextEntry = true;
-        }
-
-        isTextFieldFocusedInSheet.value = isTextEntry;
-
-        // Force keyboard on Android if needed
-        if (isTextEntry && Capacitor.isNativePlatform()) {
-            showKeyboard();
-        }
-    } else {
-        isTextFieldFocusedInSheet.value = false;
-    }
-
-    // On non-native (web), never set keyboard-open state — browser handles layout natively
-    // isLocalKeyboardOpen is only managed by native keyboard events on mobile
-}
-
-let kbListeners = [];
-
-function onSheetFocusIn() {
-    updateFocusState();
-    if (isLocalKeyboardOpen.value) {
-        window.scrollTo(0, 0);
-    }
-}
-
-function expandForKeyboard() {
-    if (!isExpanded.value && !props.fitContent) {
-        wasExpandedBeforeKeyboard.value = false;
-        isExpanded.value = true;
-        emit('update:expanded', true);
-    } else {
-        wasExpandedBeforeKeyboard.value = true;
-    }
-}
-
-function restoreAfterKeyboard() {
-    if (!wasExpandedBeforeKeyboard.value && !props.fitContent) {
-        isExpanded.value = false;
-        emit('update:expanded', false);
-    }
-}
 
 onMounted(async () => {
-    document.addEventListener('focusin', onSheetFocusIn);
-    document.addEventListener('focusout', () => { setTimeout(updateFocusState, 50); });
-
-    if (Capacitor.isNativePlatform()) {
-        kbListeners.push(await onKeyboardShow((info) => { 
-            updateFocusState();
-            // Only react if a text field inside THIS sheet is focused
-            if (isTextFieldFocusedInSheet.value && isVisible.value) {
-                window.scrollTo(0, 0);
-                if (info && info.keyboardHeight) {
-                    applyKeyboardOverlap(info.keyboardHeight);
-                }
-                isLocalKeyboardOpen.value = true;
-                expandForKeyboard();
-            }
-        }));
-        kbListeners.push(await onKeyboardHide(() => { 
-            isLocalKeyboardOpen.value = false;
-            isTextFieldFocusedInSheet.value = false;
-            restoreAfterKeyboard();
-        }));
-    }
+    window.addEventListener('resize', checkDesktop);
+    await mountKeyboard();
 });
 
 onBeforeUnmount(() => {
-    document.removeEventListener('focusin', onSheetFocusIn);
-    kbListeners.forEach(l => l.remove());
+    window.removeEventListener('resize', checkDesktop);
+    unmountKeyboard();
+    if (isVisible.value && isDesktop.value) {
+        setSidebarOccupied(false);
+    }
 });
 </script>
 
@@ -256,24 +145,25 @@ onBeforeUnmount(() => {
         <slot></slot>
     </div>
 
-    <Teleport v-else to="body">
-        <div class="sheet-view-overlay" :class="{ visible: isVisible }" :style="{ zIndex: zIndex }" @click.self="close" @hw-back="onHwBack">
+    <Teleport v-else :to="isSidebarMode ? '#desktop-sidebar-content' : 'body'">
+        <div class="sheet-view-overlay" :class="{ visible: isVisible, 'is-sidebar': isSidebarMode }" :style="{ zIndex: zIndex }" @click.self="close" @hw-back="onHwBack">
             <div ref="sheetViewContentRef"
                  class="sheet-view-content" 
-                 :class="{ 'expanded': isExpanded, 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen || globalKeyboardOpen, 'fit-content': fitContent }"
+                 :class="{ 'expanded': isExpanded, 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-sidebar': isSidebarMode, 'fit-content': fitContent }"
                  :style="sheetStyle">
                 
                 <div class="sheet-header-area"
-                     @touchstart="onHandleTouchStart"
-                     @touchmove.prevent="onHandleTouchMove"
-                     @touchend="onHandleTouchEnd"
+                     :class="{ 'no-drag': isSidebarMode }"
+                     @touchstart="isSidebarMode ? undefined : onHandleTouchStart"
+                     @touchmove.prevent="isSidebarMode ? undefined : onHandleTouchMove"
+                     @touchend="isSidebarMode ? undefined : onHandleTouchEnd"
                 >
-                    <div class="sheet-handle-bar" @click.stop="toggle"></div>
+                    <div v-if="!isSidebarMode" class="sheet-handle-bar" @click.stop="toggle"></div>
                     
-                    <div class="sc-sheet-header-wrapper" v-if="title || showBack || actions?.length || tabs?.length || $slots['header-right'] || $slots['header-title'] || $slots['header-bottom']">
-                        <div class="sc-sheet-header" v-if="title || showBack || actions?.length || $slots['header-right'] || $slots['header-title']">
+                    <div class="sc-sheet-header-wrapper" v-if="title || showBack || isSidebarMode || actions?.length || tabs?.length || $slots['header-right'] || $slots['header-title'] || $slots['header-bottom']">
+                        <div class="sc-sheet-header" v-if="title || showBack || isSidebarMode || actions?.length || $slots['header-right'] || $slots['header-title']">
                             <div class="sc-header-left">
-                                <div v-if="showBack" class="sc-header-btn back-btn" @click="$emit('back')">
+                                <div v-if="showBack || isSidebarMode" class="sc-header-btn back-btn" @click="isSidebarMode ? close() : $emit('back')">
                                     <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
                                 </div>
                                 <div class="sc-header-title" v-if="title">{{ title }}</div>
@@ -345,6 +235,18 @@ onBeforeUnmount(() => {
 .sheet-view-overlay.visible {
     opacity: 1;
     pointer-events: auto;
+}
+
+.sheet-view-overlay.is-sidebar {
+    position: static;
+    background: transparent;
+    pointer-events: auto;
+    opacity: 1;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
 }
 
 .sheet-view-content {
@@ -428,6 +330,8 @@ onBeforeUnmount(() => {
     pointer-events: auto;
 }
 
+
+
 .sheet-handle-bar {
     width: 100%;
     height: 24px;
@@ -461,6 +365,22 @@ onBeforeUnmount(() => {
     scroll-padding-top: 80px;
     padding-bottom: var(--sab, 0px);
 }
+
+
+.sheet-view-content.is-sidebar {
+    height: 100% !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background-image: none !important;
+    padding-top: 8px !important;
+}
+
 
 .sheet-view-content:has(.sc-sheet-tabs) .sheet-view-body,
 .sheet-view-content:has(.sc-sheet-header-bottom) .sheet-view-body {

@@ -5,6 +5,7 @@ import BottomNavigation from '@/components/layout/BottomNavigation.vue';
 import DialogList from '@/views/DialogList.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
 import FabButton from '@/components/ui/FabButton.vue';
+import DesktopDropdown from '@/components/ui/DesktopDropdown.vue';
 
 const CharacterList = defineAsyncComponent(() => import('@/views/CharacterList.vue'));
 const MenuView = defineAsyncComponent(() => import('@/views/Menu/MenuView.vue'));
@@ -21,6 +22,9 @@ const FullScreenEditor = defineAsyncComponent(() => import('@/components/editors
 // const HoloCardViewer = defineAsyncComponent(() => import('@/components/media/HoloCardViewer.vue'));
 const ImageViewer = defineAsyncComponent(() => import('@/components/media/ImageViewer.vue'));
 import AppToast from '@/components/ui/AppToast.vue';
+import MagicDrawer from '@/components/chat/MagicDrawer.vue';
+import DesktopLeftSidebar from '@/components/layout/DesktopLeftSidebar.vue';
+import DesktopRightSidebar from '@/components/layout/DesktopRightSidebar.vue';
 
 const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/ConnectionsSheet.vue'));
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
@@ -49,15 +53,19 @@ import { logger } from './utils/logger.js';
 import { generateMissingThumbnails } from '@/utils/characterIO.js';
 import { initLorebookState } from '@/core/states/lorebookState.js';
 import { initPresetState } from '@/core/states/presetState.js';
+import { sidebarState } from '@/core/states/sidebarState.js';
 import { initSyncState, syncProvider } from '@/core/states/syncState.js';
 import { fullPull, checkSyncReadiness } from '@/core/services/syncService.js';
 import { startTracking } from '@/core/services/timeTracker.js';
+
+
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
 // Initialize error handling
 
 // --- Navigation state ---
-const currentView = ref('view-dialogs');
+const isDesktop = ref(typeof window !== 'undefined' && window.innerWidth >= 768);
+const currentView = ref(isDesktop.value ? 'view-characters' : 'view-dialogs');
 const headerRef = ref(null); // Reference to the AppHeader component
 const headerContainer = ref(null);
 const footerContainer = ref(null);
@@ -75,6 +83,25 @@ const presetViewRef = ref(null);
 const apiViewRef = ref(null);
 
 const isHeaderEditorMode = ref(false);
+
+const checkDesktop = () => { 
+    const isDesk = typeof window !== 'undefined' && window.innerWidth >= 768;
+    if (isDesk !== isDesktop.value) {
+        if (isDesk && currentView.value === 'view-dialogs') {
+            currentView.value = 'view-characters';
+        }
+        isDesktop.value = isDesk;
+    }
+};
+
+const menuViews = ['view-menu', 'view-settings', 'view-theme-settings', 'view-glossary'];
+const isDesktopFloating = computed(() => isDesktop.value && menuViews.includes(currentView.value));
+const desktopPreMenuView = ref(isDesktop.value ? 'view-characters' : 'view-dialogs');
+
+const effectiveMainView = computed(() => {
+    if (isDesktopFloating.value) return desktopPreMenuView.value;
+    return currentView.value;
+});
 
 const waitForComponent = (refVar, callback) => {
     if (refVar.value) {
@@ -435,7 +462,7 @@ const personaEditorConfig = [
 
 // --- FAB Logic ---
 const fabConfig = computed(() => {
-    if (currentView.value === 'view-dialogs') {
+    if (currentView.value === 'view-dialogs' && !isDesktop.value) {
         return {
             text: translations[currentLang.value]?.btn_new_chat || 'New Chat',
             action: () => dialogListRef.value?.openNewChatPicker()
@@ -462,9 +489,12 @@ const showLogo = computed(() => {
 
 const updateLayoutMetrics = () => {
     if (headerContainer.value) {
-        document.documentElement.style.setProperty('--header-height', `${headerContainer.value.offsetHeight}px`);
+        const h = headerContainer.value.offsetHeight;
+        document.documentElement.style.setProperty('--header-height', `${h}px`);
     }
-    if (footerContainer.value) {
+    if (isDesktop.value) {
+        document.documentElement.style.setProperty('--footer-height', '0px');
+    } else if (footerContainer.value) {
         document.documentElement.style.setProperty('--footer-height', `${footerContainer.value.offsetHeight}px`);
     }
 };
@@ -689,6 +719,9 @@ onMounted(async () => {
     // Asynchronously generate missing thumbnails without blocking UI
     generateMissingThumbnails();
 
+    checkDesktop();
+    window.addEventListener('resize', checkDesktop);
+
     setTimeout(() => {
         document.body.classList.remove('preload');
         document.body.classList.add('app-loaded');
@@ -726,15 +759,26 @@ onBeforeUnmount(() => {
     window.removeEventListener('header-reset', onHeaderReset);
     window.removeEventListener('sync-data-refreshed', onSyncDataRefreshed);
     kbListeners.forEach(l => l.remove());
+    window.removeEventListener('resize', checkDesktop);
 });
 
 watch(currentView, () => {
     isHeaderEditorMode.value = false;
 });
+
+watch(isDesktop, () => {
+    requestAnimationFrame(updateLayoutMetrics);
+});
+
+watch(currentView, (newVal, oldVal) => {
+    if (isDesktop.value && oldVal && !menuViews.includes(oldVal) && menuViews.includes(newVal)) {
+        desktopPreMenuView.value = oldVal;
+    }
+});
 </script>
 
 <template>
-  <div class="app-layout" :style="mainStyle">
+  <div class="app-layout" :class="{ 'desktop-mode': isDesktop }" :style="mainStyle">
     <!-- Onboarding Overlay -->
     <Transition name="fade">
         <OnboardingView v-if="isOnboarding" @finish="finishOnboarding" />
@@ -742,9 +786,9 @@ watch(currentView, () => {
 
     <!-- Header Component -->
     <div class="header-container" ref="headerContainer" :style="{ zIndex: headerZIndex }">
-        <AppHeader 
-            ref="headerRef" 
-            :current-view="currentView" 
+        <AppHeader
+            ref="headerRef"
+            :current-view="effectiveMainView"
             :categories="categories"
             :editing-index="headerEditingIndex"
             @action-save="handleHeaderSave"
@@ -753,111 +797,164 @@ watch(currentView, () => {
         />
     </div>
 
-    <!-- Main Content Area -->
-    <main id="main-container" v-if="isDataLoaded" :style="{ zIndex: mainZIndex }" :class="{ 'keyboard-open': isKeyboardOpen && currentView !== 'view-chat', 'chat-view-main': currentView === 'view-chat' }">
-      
+    <!-- App Body: flex row on desktop (sidebars + main) -->
+    <div class="app-body">
+
+      <!-- Desktop Left Sidebar: always-visible chat list + nav -->
+      <DesktopLeftSidebar 
+          v-if="isDesktop"
+          :current-view="currentView"
+          :active-categories="activeCategories"
+          :is-desktop-floating="isDesktopFloating"
+          @update:currentView="currentView = $event"
+          @openChat="openChatWrapper"
+      />
+
+      <!-- Main Content Area -->
+      <main id="main-container" v-if="isDataLoaded" :style="{ zIndex: mainZIndex }" :class="{ 'keyboard-open': isKeyboardOpen && effectiveMainView !== 'view-chat', 'chat-view-main': effectiveMainView === 'view-chat' }">
+
+        <Transition name="fade">
+            <!-- VIEW 1: DIALOGS -->
+            <div id="view-dialogs" class="view active-view" v-if="effectiveMainView === 'view-dialogs' && !isDesktop">
+                <DialogList
+                    ref="dialogListRef"
+                    :active-category="activeCategories['view-dialogs']"
+                    @open-chat="openChatWrapper"
+                />
+            </div>
+
+            <!-- VIEW 2: CHARACTERS -->
+            <div id="view-characters" class="view active-view" v-else-if="effectiveMainView === 'view-characters'">
+                <CharacterList
+                    ref="characterListRef"
+                    :active-category="activeCategories['view-characters']"
+                    @open-chat="openChatWrapper"
+                />
+            </div>
+
+            <!-- VIEW 3: MENU -->
+            <MenuView
+                class="view active-view view-gray-bg"
+                v-else-if="effectiveMainView === 'view-menu' && !isDesktopFloating"
+            />
+
+            <!-- VIEW: GLOSSARY -->
+            <GlossaryView
+                class="view active-view view-gray-bg"
+                v-else-if="effectiveMainView === 'view-glossary' && !isDesktopFloating"
+                :view-mode="true"
+            />
+
+            <!-- VIEW: THEME SETTINGS -->
+            <ThemeSettingsView
+                class="view active-view view-gray-bg"
+                v-else-if="effectiveMainView === 'view-theme-settings' && !isDesktopFloating"
+            />
+
+            <!-- VIEW: SETTINGS -->
+            <SettingsView
+                class="view active-view view-gray-bg"
+                v-else-if="effectiveMainView === 'view-settings' && !isDesktopFloating"
+            />
+
+            <!-- VIEW: TOOLS HUB -->
+            <ToolsView
+                class="view active-view view-gray-bg"
+                v-else-if="effectiveMainView === 'view-tools'"
+            />
+
+            <!-- VIEW: API (fullscreen) -->
+            <ApiView
+                class="view active-view view-gray-bg"
+                v-else-if="effectiveMainView === 'view-api'"
+                :view-mode="true"
+            />
+
+            <!-- VIEW: PRESETS (fullscreen) -->
+            <PresetView
+                class="view active-view view-gray-bg"
+                v-else-if="effectiveMainView === 'view-presets'"
+                :view-mode="true"
+            />
+
+            <!-- VIEW: LOREBOOK (fullscreen) -->
+            <LorebookSheet
+                class="view active-view view-gray-bg"
+                v-else-if="effectiveMainView === 'view-lorebook'"
+                :view-mode="true"
+            />
+
+            <!-- VIEW: REGEX (fullscreen) -->
+            <RegexSheet
+                class="view active-view view-gray-bg"
+                v-else-if="effectiveMainView === 'view-regex'"
+                :view-mode="true"
+            />
+
+            <!-- VIEW: PERSONAS (fullscreen) -->
+            <PersonasView
+                class="view active-view view-gray-bg"
+                v-else-if="effectiveMainView === 'view-personas'"
+                :view-mode="true"
+            />
+
+            <!-- VIEW 5: CHAT -->
+            <ChatView class="view active-view" v-else-if="effectiveMainView === 'view-chat'" ref="chatViewRef" />
+
+            <!-- VIEW 6: CHARACTER / PERSONA EDITOR -->
+            <Editor
+                class="view active-view"
+                v-else-if="effectiveMainView === 'view-character-edit' || effectiveMainView === 'view-persona-edit'"
+                :model-value="effectiveMainView === 'view-character-edit' ? (editingCharacter || {}) : (editingPersona || {})"
+                :config="effectiveMainView === 'view-character-edit' ? characterEditorConfig : personaEditorConfig"
+                :show-avatar="true"
+                @update:modelValue="(val) => effectiveMainView === 'view-character-edit' ? editingCharacter = val : editingPersona = val"
+                @save="handleEditorAutoSave"
+                @close="closeEditor"
+                @open-fs="openFsEditor"
+            />
+        </Transition>
+      </main>
+
+      <!-- Desktop: Floating menu overlay -->
       <Transition name="fade">
-          <!-- VIEW 1: DIALOGS -->
-          <div id="view-dialogs" class="view active-view" v-if="currentView === 'view-dialogs'">
-              <DialogList 
-                  ref="dialogListRef"
-                  :active-category="activeCategories['view-dialogs']"
-                  @open-chat="openChatWrapper"
-              />
+          <div v-if="isDesktopFloating" class="desktop-float-overlay" @click.self="currentView = desktopPreMenuView">
+              <div class="desktop-float-panel">
+                  <button class="desktop-float-close" @click="currentView = desktopPreMenuView">
+                      <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                  </button>
+                  <MenuView v-if="currentView === 'view-menu'" class="view-gray-bg" />
+                  <GlossaryView v-else-if="currentView === 'view-glossary'" class="view-gray-bg" :view-mode="true" />
+                  <ThemeSettingsView v-else-if="currentView === 'view-theme-settings'" class="view-gray-bg" />
+                  <SettingsView v-else-if="currentView === 'view-settings'" class="view-gray-bg" />
+              </div>
           </div>
 
-          <!-- VIEW 2: CHARACTERS -->
-          <div id="view-characters" class="view active-view" v-else-if="currentView === 'view-characters'">
-              <CharacterList 
-                  ref="characterListRef"
-                  :active-category="activeCategories['view-characters']"
-                  @open-chat="openChatWrapper"
-              />
-          </div>
-
-          <!-- VIEW 3: MENU -->
-          <MenuView
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-menu'"
-          />
-
-          <!-- VIEW: GLOSSARY -->
-          <GlossaryView
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-glossary'"
-              :view-mode="true"
-          />
-
-          <!-- VIEW: THEME SETTINGS -->
-          <ThemeSettingsView 
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-theme-settings'"
-          />
-
-          <!-- VIEW: SETTINGS -->
-          <SettingsView 
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-settings'"
-          />
-
-          <!-- VIEW: TOOLS HUB -->
-          <ToolsView
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-tools'"
-          />
-
-          <!-- VIEW: API (fullscreen) -->
-          <ApiView
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-api'"
-              :view-mode="true"
-          />
-
-          <!-- VIEW: PRESETS (fullscreen) -->
-          <PresetView
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-presets'"
-              :view-mode="true"
-          />
-
-          <!-- VIEW: LOREBOOK (fullscreen) -->
-          <LorebookSheet
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-lorebook'"
-              :view-mode="true"
-          />
-
-          <!-- VIEW: REGEX (fullscreen) -->
-          <RegexSheet
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-regex'"
-              :view-mode="true"
-          />
-
-          <!-- VIEW: PERSONAS (fullscreen) -->
-          <PersonasView
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-personas'"
-              :view-mode="true"
-          />
-
-          <!-- VIEW 5: CHAT -->
-          <ChatView class="view active-view" v-else-if="currentView === 'view-chat'" ref="chatViewRef" />
-
-          <!-- VIEW 6: CHARACTER / PERSONA EDITOR -->
-          <Editor 
-              class="view active-view"
-              v-else-if="currentView === 'view-character-edit' || currentView === 'view-persona-edit'"
-              :model-value="currentView === 'view-character-edit' ? (editingCharacter || {}) : (editingPersona || {})"
-              :config="currentView === 'view-character-edit' ? characterEditorConfig : personaEditorConfig"
-              :show-avatar="true"
-              @update:modelValue="(val) => currentView === 'view-character-edit' ? editingCharacter = val : editingPersona = val"
-              @save="handleEditorAutoSave"
-              @close="closeEditor"
-              @open-fs="openFsEditor"
-          />
       </Transition>
-    </main>
+
+      <!-- Desktop Right Sidebar: MagicDrawer panel (chat view only) -->
+      <DesktopRightSidebar
+          v-if="isDesktop && effectiveMainView === 'view-chat'"
+          :bottom-sheet-state="bottomSheetState"
+          :sidebar-state="sidebarState"
+          :active-chat-char-obj="activeChatCharObj"
+          @closeBottomSheet="closeBottomSheet"
+          @magic-notes="chatViewRef?.openAuthorsNoteSheet()"
+          @magic-context="chatViewRef?.openContextSheet()"
+          @magic-summary="chatViewRef?.openSummarySheet()"
+          @magic-sessions="chatViewRef?.openSessionsSheet()"
+          @magic-stats="chatViewRef?.openChatStatsSheet()"
+          @magic-impersonate="chatViewRef?.startImpersonation()"
+          @magic-char-card="chatViewRef?.openCharCard()"
+          @magic-api="chatViewRef?.openApiView()"
+          @magic-presets="chatViewRef?.openPresetView()"
+          @magic-lorebooks="chatViewRef?.openLorebookSheet()"
+          @magic-regex="chatViewRef?.openRegexSheet()"
+          @magic-image-gen="chatViewRef?.openImageGenSheet()"
+          @magic-glossary="chatViewRef?.openGlossarySheet()"
+      />
+
+    </div>
 
     <!-- Floating Action Button -->
     <Transition name="fab">
@@ -868,8 +965,8 @@ watch(currentView, () => {
         </FabButton>
     </Transition>
 
-    <!-- Bottom Navigation Bar -->
-    <div class="footer-container" ref="footerContainer">
+    <!-- Bottom Navigation Bar (mobile only — desktop uses left sidebar) -->
+    <div v-if="!isDesktop" class="footer-container" ref="footerContainer">
         <BottomNavigation v-model:currentView="currentView" />
     </div>
 
@@ -888,6 +985,9 @@ watch(currentView, () => {
         :input="bottomSheetState.input"
         @close="closeBottomSheet"
     />
+
+    <!-- Global Desktop Dropdown (replaces bottom sheets for simple selects on PC) -->
+    <DesktopDropdown />
 
     <!-- Holo Cards Viewer -->
     <!-- <HoloCardViewer /> -->
