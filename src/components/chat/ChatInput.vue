@@ -541,6 +541,7 @@ defineExpose({
 
                         <div class="send-btn-wrapper">
                             <div class="chat-action-btn" @click="handleSend">
+                                <span class="btn-text-pc">{{ currentAction === 'stop' ? (t('btn_stop') || 'Stop') : (currentAction === 'send' ? (t('btn_send') || 'Send') : (t('btn_impersonate') || 'Impersonate')) }}</span>
                                 <div class="btn-icon-wrapper">
                                     <Transition name="btn-icon-fade">
                                         <svg v-if="currentAction === 'stop'" key="stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
@@ -1053,6 +1054,33 @@ defineExpose({
 }
 
 .guidance-editable { color: var(--text-black); }
+
+.btn-text-pc {
+    display: none;
+    font-size: 15px;
+    font-weight: normal;
+    margin-left: 14px;
+    margin-right: 6px;
+    white-space: nowrap;
+}
+
+@media (min-width: 600px) {
+    .btn-text-pc {
+        display: block;
+    }
+    
+    .chat-action-btn {
+        width: auto !important;
+        padding-right: 14px !important;
+        border-radius: 20px !important;
+        background-color: rgba(var(--vk-blue-rgb), 0.5) !important;
+        backdrop-filter: blur(var(--element-blur, 12px)) !important;
+        -webkit-backdrop-filter: blur(var(--element-blur, 12px)) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        color: #fff !important;
+        transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+}
 
 .chat-action-btn:active {
     transform: scale(0.95);
