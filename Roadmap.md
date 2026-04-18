@@ -1277,9 +1277,58 @@ PR: #34
 - Improved maintainability and reusability
 - Reduced ChatView complexity by ~12%
 
-**Next Steps (Optional):**
-- Phase 8: Context/Tokenizer composable extraction (low priority)
-- Phase 9: Context service extraction (low priority)
+### Phase 8-9: Context Service + Navigation (2026-04-18)
+
+**Goal:** Extract context/tokenizer utilities to service and fix sheet navigation.
+
+**Status:** `done`
+
+**Branch:** `feat/component-extraction` (continues from Phase 7)
+
+**Tasks:**
+
+1. **Create Context Service**
+   - Status: `done | tested`
+   - File: `src/core/services/contextService.js` (~120 lines)
+   - Extracted functions:
+     - Validation: clampHistoryFillThreshold, clampHistoryHidePercent
+     - Settings: loadHistoryContextSettings, persistHistoryContextSettings
+     - Calculations: shouldRecommendHide, calculateHistoryUsagePercent, calculateMessagesToHide
+   - Build: passes ✓
+   - Commit: `412c6ab`
+
+2. **Fix Sheet Navigation**
+   - Status: `done | tested`
+   - Problem: Sheets were closing completely instead of returning to MagicDrawer
+   - Solution:
+     - Added `showBack` prop to TokenizerSheet and MemoryBooksSheet
+     - Emit `back` event instead of `close` for actions
+     - Added `openMagicDrawer()` to ChatInput exposed methods
+     - Created `handleSheetBack()` in ChatView to orchestrate navigation
+   - Flow: MagicDrawer → Sheet → Action → back to MagicDrawer ✓
+   - Build: passes ✓
+   - Commit: `412c6ab`
+
+3. **Update ChatView**
+   - Status: `done | tested`
+   - Replaced local context functions with contextService imports
+   - Simplified history settings initialization
+   - Added @back handlers for sheets
+   - Size: 6010 → 5995 lines (-15 lines)
+   - Build: passes ✓
+   - Commit: `412c6ab`
+
+**Summary:**
+- ✅ contextService.js (120 lines) — DONE
+- ✅ Sheet navigation fixed — DONE
+- ✅ ChatView updated — DONE
+- ✅ ChatView reduced by 15 lines (6010 → 5995 lines)
+
+**Impact:**
+- Context utilities isolated in service
+- Proper navigation UX: sheets return to drawer instead of closing
+- Better user experience with back button
+- Cleaner separation of concerns
 
 ### Testing Checklist
 
