@@ -1470,6 +1470,9 @@ async function handleMemoryScanChat() {
 async function handleMemoryBatchGenerate() {
     if (!activeChatChar || !currentMemoryBookData.value) return;
     
+    // Close Memory Books sheet first to avoid z-index issues with bottomSheet
+    memoryBooksSheet.value?.close();
+    
     const chatData = await getChatData(activeChatChar.id);
     const sessionId = activeChatChar.sessionId || chatData.currentId;
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
@@ -1500,6 +1503,7 @@ async function handleMemoryBatchGenerate() {
     
     if (!segments.length) {
         showToast('No uncovered segments to generate');
+        memoryBooksSheet.value?.open();
         return;
     }
     
@@ -1525,6 +1529,15 @@ async function handleMemoryBatchGenerate() {
             }
         });
     }
+    
+    // Add Cancel button to return to Memory Books
+    quickItems.push({
+        label: 'Cancel',
+        onClick: () => {
+            closeBottomSheet();
+            setTimeout(() => memoryBooksSheet.value?.open(), 50);
+        }
+    });
     
     showBottomSheet({
         title: `Generate Drafts (${totalSegments} available)`,
@@ -2155,7 +2168,11 @@ function confirmHideTopMessages() {
             },
             {
                 label: 'Cancel',
-                onClick: () => closeBottomSheet()
+                onClick: () => {
+                    closeBottomSheet();
+                    // Return to Tokenizer sheet
+                    setTimeout(() => tokenizerSheet.value?.open(), 50);
+                }
             }
         ]
     });
