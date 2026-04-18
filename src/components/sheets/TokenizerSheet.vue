@@ -82,10 +82,14 @@ function open() {
   sheet.value?.open();
 }
 
-function close() {
-  // Don't call sheet.value?.close() here - it creates infinite recursion!
-  // This function is called when SheetView emits 'close', so SheetView is already closing
+// Called by SheetView @close event (user swiped down or tapped overlay)
+function onSheetClose() {
   emit('close');
+}
+
+// Called programmatically from parent via ref (tokenizerSheet.value.close())
+function close() {
+  sheet.value?.close();
 }
 
 function handleBack() {
@@ -111,7 +115,7 @@ defineExpose({ open, close });
     title="Context"
     :show-back="true"
     :fit-content="false"
-    @close="close"
+    @close="onSheetClose"
     @back="handleBack"
   >
     <!-- Loading/Error State -->
