@@ -1457,7 +1457,9 @@ async function openMemoryPromptEditor(existing = null) {
 async function openMemoryBooksSheet() {
     if (!activeChatChar) return;
     await loadCurrentMemoryBook(activeChatChar);
-    memoryBooksSheet.value?.open();
+    nextTick(() => {
+        memoryBooksSheet.value?.open();
+    });
 }
 
 // Memory Books Sheet event handlers (wrappers for composable handlers)
@@ -1965,6 +1967,8 @@ async function loadChats() {
 
 async function updateContextCutoff() {
     if (!activeChatChar || !currentMessages.value) return;
+
+    console.time('[updateContextCutoff] total');
 
     if (isOpeningChat) {
         pendingCutoffRecalc = true;
@@ -4489,6 +4493,7 @@ defineExpose({
     openPresetView,
     openApiView,
     openLorebookSheet,
+    openMemoryBooksSheet,
     openRegexSheet,
     openChatStatsSheet: () => openChatStatsSheet(),
     openCharCard,

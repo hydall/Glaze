@@ -953,6 +953,7 @@ watch(currentView, (newVal, oldVal) => {
           @magic-api="chatViewRef?.openApiView()"
           @magic-presets="chatViewRef?.openPresetView()"
           @magic-lorebooks="chatViewRef?.openLorebookSheet()"
+          @magic-memory-books="chatViewRef?.openMemoryBooksSheet()"
           @magic-regex="chatViewRef?.openRegexSheet()"
           @magic-image-gen="chatViewRef?.openImageGenSheet()"
           @magic-glossary="chatViewRef?.openGlossarySheet()"

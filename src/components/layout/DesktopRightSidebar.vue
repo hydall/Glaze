@@ -22,6 +22,7 @@ const emit = defineEmits([
     'magic-api',
     'magic-presets',
     'magic-lorebooks',
+    'magic-memory-books',
     'magic-regex',
     'magic-image-gen',
     'magic-glossary'
@@ -52,6 +53,7 @@ const hasSheet = computed(() => props.bottomSheetState.visible || props.sidebarS
           @magic-api="emit('magic-api')"
           @magic-presets="emit('magic-presets')"
           @magic-lorebooks="emit('magic-lorebooks')"
+          @magic-memory-books="emit('magic-memory-books')"
           @magic-regex="emit('magic-regex')"
           @magic-image-gen="emit('magic-image-gen')"
           @magic-glossary="emit('magic-glossary')"
