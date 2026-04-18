@@ -58,10 +58,12 @@ watch(() => props.visible, (newVal) => {
 watch(() => props.input, (newVal) => {
     if (newVal) {
         inputValue.value = newVal.value || '';
-        isLocalKeyboardOpen.value = true;
         
-        // Pre-emptively set overlap if it's 0 to avoid delay in sheet raising
-        applyKeyboardOverlap();
+        if (Capacitor.isNativePlatform()) {
+            isLocalKeyboardOpen.value = true;
+            // Pre-emptively set overlap if it's 0 to avoid delay in sheet raising
+            applyKeyboardOverlap();
+        }
 
         nextTick(() => {
             if (inputRef.value) {
@@ -138,17 +140,13 @@ function checkFocus() {
             isTextEntry = true;
         }
 
-        if (isTextEntry) {
+        // Only apply keyboard logic on native mobile platforms
+        if (isTextEntry && Capacitor.isNativePlatform()) {
             isLocalKeyboardOpen.value = true;
-            
-            // Ensure overlap is set so the sheet can actually rise
             applyKeyboardOverlap();
-
-            // Force keyboard on Android if needed
-            if (Capacitor.isNativePlatform()) {
-                showKeyboard();
-            }
+            showKeyboard();
         } else {
+            // On desktop or non-text fields: never treat as keyboard open
             isLocalKeyboardOpen.value = false;
         }
     } else {

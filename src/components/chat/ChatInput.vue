@@ -35,6 +35,7 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 const chatInput = ref(null);
 const isComposing = ref(false);
 const isMagicMenuVisible = ref(false);
+
 const magicDrawerRef = ref(null);
 const isKeyboardOpen = ref(document.body.classList.contains('keyboard-open'));
 const isSwitchingToDrawer = ref(false);
@@ -345,7 +346,13 @@ const closeMagicMenu = (e) => {
     if (e && e.target && e.target.closest && e.target.closest('.modal-overlay')) {
         return;
     }
-    isMagicMenuVisible.value = false; 
+    // Do not close if clicking on the magic button or input wrapper
+    if (e && e.target && e.target.closest) {
+        if (e.target.closest('#btn-magic')) return;
+        if (e.target.closest('.chat-input-wrapper')) return;
+        if (e.target.closest('.magic-drawer')) return;
+    }
+    isMagicMenuVisible.value = false;
 };
 
 const openFullScreenEditor = async () => {
@@ -368,8 +375,8 @@ onMounted(async () => {
         attachRipple(inputWrapper.value);
     }
     
-    // On mount: if the visual viewport is significantly smaller than the screen, the keyboard is open
-    if (window.visualViewport && window.visualViewport.height < window.innerHeight * 0.75) {
+    // On mount: if the visual viewport is significantly smaller than the screen, the keyboard is open (mobile only)
+    if (Capacitor.isNativePlatform() && window.visualViewport && window.visualViewport.height < window.innerHeight * 0.75) {
         isKeyboardOpen.value = true;
         isMagicMenuVisible.value = false;
     }
@@ -400,10 +407,14 @@ onBeforeUnmount(() => {
 
 defineExpose({
     openPersonas: () => {
+        console.log('[openPersonas] called');
         isMagicMenuVisible.value = true;
         nextTick(() => {
             magicDrawerRef.value?.openPersonas();
         });
+    },
+    openMagicDrawer: () => {
+        isMagicMenuVisible.value = true;
     }
 });
 </script>

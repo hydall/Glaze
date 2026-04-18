@@ -1134,6 +1134,202 @@ PR: #34
 - [ ] Extract tokenizer to dedicated component
 - [ ] Universal navigation stack for all sheets
 
+### Phase 6: Component Extraction Refactoring (2026-04-18)
+
+**Goal:** Reduce ChatView.vue complexity by extracting large UI sections into dedicated SheetView-based components.
+
+**Status:** `in progress`
+
+**Branch:** `feat/component-extraction` (from `origin/dev` at `1434aa3`)
+
+**Motivation:**
+- ChatView.vue is ~7000 lines, making it difficult to maintain and navigate
+- Tokenizer, Memory Books, and Vectorization UIs are implemented as inline HTML in `showBottomSheet` calls
+- Moving to dedicated Vue components improves:
+  - Code organization and reusability
+  - Type safety and IDE support
+  - Testing capabilities
+  - Maintainability
+
+**Tasks:**
+
+1. **Extract Tokenizer to TokenizerSheet.vue**
+   - Status: `done | tested`
+   - Create `src/components/sheets/TokenizerSheet.vue` using SheetView
+   - Props: breakdown, historyHidePreview, contextSegments, contextLegendItems, contextBreakdownItems, shouldRecommendHide, historyUsagePercent, isCalculating
+   - Emits: close, hide-messages, open-settings
+   - Replace `openContextSheet()` in ChatView with `tokenizerSheetRef.open()`
+   - Files modified:
+     - [x] `src/components/sheets/TokenizerSheet.vue` (created, 543 lines)
+     - [x] `src/views/ChatView.vue` (integrate component, remove ~100 lines inline HTML)
+   - Build: passes ✓
+   - Commit: `3d03952`
+
+2. **Extract Memory Books to MemoryBooksSheet.vue**
+   - Status: `done | tested`
+   - Create dedicated component for memory book management UI
+   - Extract `openMemoryBooksSheet()` logic (~500+ lines inline HTML)
+   - Complexity: high — many event handlers, dynamic sections (drafts/entries/settings)
+   - Props: memoryBook, currentMessages, characterName, sessionId, memoryDraftState, pendingMemoryMessageIds
+   - Emits: 11 events (approve-draft, delete-draft, scan-chat, batch-generate, open-settings, open-maintenance, etc.)
+   - Files modified:
+     - [x] `src/components/sheets/MemoryBooksSheet.vue` (created, 883 lines)
+     - [x] `src/views/ChatView.vue` (removed ~500 lines inline HTML, added 11 event handlers, added `loadCurrentMemoryBook()` helper)
+   - Build: passes ✓
+   - Commit: `f332d0f`
+
+3. **Extract Vectorization UI to VectorizationSheet.vue**
+   - Status: `deferred`
+   - Priority: low (vectorization UI is relatively small and already modular)
+   - Create dedicated component for lorebook vectorization UI
+   - Extract embedding status, reindex, and vector search settings
+
+**Summary:**
+- ✅ TokenizerSheet.vue (543 lines) — DONE
+- ✅ MemoryBooksSheet.vue (883 lines) — DONE
+- ⏸️ VectorizationSheet.vue — DEFERRED (low priority)
+- ✅ ChatView.vue reduced by ~600 lines of inline HTML (6982 → 6764 lines)
+
+**Impact:**
+- Improved code organization: separate components vs inline HTML strings
+- Better type safety and IDE support
+- Enhanced testability: components can be tested in isolation
+- Easier maintenance: changes isolated to specific components
+
+### Phase 7: Backend/Service Extraction (2026-04-18)
+
+**Goal:** Extract business logic from ChatView.vue into reusable services and composables.
+
+**Status:** `done`
+
+**Branch:** `feat/component-extraction` (continues from Phase 6)
+
+**Motivation:**
+- ChatView.vue still contains ~68 Memory Books functions and ~11 context/tokenizer functions
+- Business logic is tightly coupled with UI
+- Pure functions should be in services for better testing and reusability
+- Reactive state should be managed in composables
+
+**Tasks:**
+
+1. **Create Memory Books Service**
+   - Status: `done | tested`
+   - File: `src/core/services/memoryBooksService.js` (616 lines)
+   - Extracted 68+ pure functions:
+     - Core management (ensureSessionMemoryBook, reconcileMemoryBookForMessages)
+     - Entry operations (normalizeMemoryEntryShape, findConflictingMemoryEntry)
+     - Vector/embedding (indexMemoryEntryIfNeeded, reindexAllMemoryEntries)
+     - Draft generation (generateMemoryDraftForMessages, runBatchDraftGeneration)
+     - Prompt management (resolveMemoryPrompt, getMemoryPromptOptions)
+     - Automation (runMemoryAutomationAfterStableTurn, buildBootstrapSegments)
+     - Utilities (arraysEqual, calculateMessageOverlapRatio, formatElapsedSeconds)
+   - Build: passes ✓
+   - Commit: `4f43d51`
+
+2. **Create Memory Books Composable**
+   - Status: `done | tested`
+   - File: `src/composables/chat/useMemoryBooks.js` (650 lines)
+   - Reactive state:
+     - currentMemoryBookData, pendingMemoryMessageIds, draftMemoryMessageIds
+     - memoryDraftState (progress tracking)
+   - UI handlers (11 total):
+     - handleMemoryKeyModeUpdate, handleMemoryVectorToggle
+     - handleMemoryReindexAll, handleMemoryScanChat
+     - handleMemoryBatchGenerate, handleMemoryApproveDraft
+     - handleMemoryDeleteDraft, handleMemoryDeleteEntry
+     - handleMemoryCancelDraft, handleMemoryOpenMaintenance
+   - Draft progress functions:
+     - startMemoryDraftProgress, stopMemoryDraftProgress, cancelMemoryDraft
+   - Data loading:
+     - loadCurrentMemoryBook, updatePendingMemoryMessageIds
+   - Build: passes ✓
+   - Commit: `4f43d51`
+
+3. **Create Context Service (Placeholder)**
+   - Status: `done | not tested`
+   - File: `src/core/services/contextService.js` (empty placeholder)
+   - Prepared for future Phase 9 (context/tokenizer extraction)
+   - Build: passes ✓
+   - Commit: `4f43d51`
+
+4. **Update ChatView.vue**
+   - Status: `done | tested`
+   - Changes:
+     - Added imports for memoryBooksService and useMemoryBooks composable
+     - Replaced 68+ local functions with service imports
+     - Removed duplicate Memory Books functions
+     - Created wrapper handlers to maintain event signature compatibility
+     - Updated all calls to loadCurrentMemoryBook/updatePendingMemoryMessageIds
+   - Size reduction: 6787 → 6010 lines (-777 lines, -12%)
+   - Build: passes ✓
+   - Commit: `4f43d51`
+
+**Summary:**
+- ✅ memoryBooksService.js (616 lines) — DONE
+- ✅ useMemoryBooks.js composable (650 lines) — DONE
+- ✅ contextService.js placeholder — DONE
+- ✅ ChatView.vue reduced by 777 lines (6787 → 6010 lines)
+
+**Impact:**
+- Isolated business logic from UI concerns
+- Pure functions can now be unit tested independently
+- Better code organization: services → composables → components
+- Improved maintainability and reusability
+- Reduced ChatView complexity by ~12%
+
+### Phase 8-9: Context Service + Navigation (2026-04-18)
+
+**Goal:** Extract context/tokenizer utilities to service and fix sheet navigation.
+
+**Status:** `done`
+
+**Branch:** `feat/component-extraction` (continues from Phase 7)
+
+**Tasks:**
+
+1. **Create Context Service**
+   - Status: `done | tested`
+   - File: `src/core/services/contextService.js` (~120 lines)
+   - Extracted functions:
+     - Validation: clampHistoryFillThreshold, clampHistoryHidePercent
+     - Settings: loadHistoryContextSettings, persistHistoryContextSettings
+     - Calculations: shouldRecommendHide, calculateHistoryUsagePercent, calculateMessagesToHide
+   - Build: passes ✓
+   - Commit: `412c6ab`
+
+2. **Fix Sheet Navigation**
+   - Status: `done | tested`
+   - Problem: Sheets were closing completely instead of returning to MagicDrawer
+   - Solution:
+     - Added `showBack` prop to TokenizerSheet and MemoryBooksSheet
+     - Emit `back` event instead of `close` for actions
+     - Added `openMagicDrawer()` to ChatInput exposed methods
+     - Created `handleSheetBack()` in ChatView to orchestrate navigation
+   - Flow: MagicDrawer → Sheet → Action → back to MagicDrawer ✓
+   - Build: passes ✓
+   - Commit: `412c6ab`
+
+3. **Update ChatView**
+   - Status: `done | tested`
+   - Replaced local context functions with contextService imports
+   - Simplified history settings initialization
+   - Added @back handlers for sheets
+   - Size: 6010 → 5995 lines (-15 lines)
+   - Build: passes ✓
+   - Commit: `412c6ab`
+
+**Summary:**
+- ✅ contextService.js (120 lines) — DONE
+- ✅ Sheet navigation fixed — DONE
+- ✅ ChatView updated — DONE
+- ✅ ChatView reduced by 15 lines (6010 → 5995 lines)
+
+**Impact:**
+- Context utilities isolated in service
+- Proper navigation UX: sheets return to drawer instead of closing
+- Better user experience with back button
+- Cleaner separation of concerns
+
 ### Testing Checklist
 
 After each phase:
