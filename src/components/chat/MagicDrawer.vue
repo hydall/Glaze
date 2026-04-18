@@ -69,9 +69,12 @@ const allAvailableItems = [
     { id: 'glossary', i18n: 'menu_glossary', fallback: 'Glossary', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z', event: 'magic-glossary' }
 ];
 
+const itemsKey = computed(() => props.sidebarMode ? 'magic_drawer_items_desktop' : 'magic_drawer_items');
+const deletedItemsKey = computed(() => props.sidebarMode ? 'magic_drawer_deleted_items_desktop' : 'magic_drawer_deleted_items');
+
 const loadDeletedItems = () => {
     try {
-        const stored = localStorage.getItem('magic_drawer_deleted_items');
+        const stored = localStorage.getItem(deletedItemsKey.value);
         return stored ? JSON.parse(stored) : [];
     } catch (e) {
         return [];
@@ -81,13 +84,13 @@ const loadDeletedItems = () => {
 const deletedItems = ref(loadDeletedItems());
 
 watch(deletedItems, (newVal) => {
-    localStorage.setItem('magic_drawer_deleted_items', JSON.stringify(newVal));
+    localStorage.setItem(deletedItemsKey.value, JSON.stringify(newVal));
 }, { deep: true });
 
 const loadItems = () => {
     const deleted = loadDeletedItems();
     try {
-        const stored = localStorage.getItem('magic_drawer_items');
+        const stored = localStorage.getItem(itemsKey.value);
         if (stored) {
             const parsed = JSON.parse(stored);
             // Filter out items that are no longer available (e.g. impersonate moved to ChatInput)
@@ -114,7 +117,7 @@ const displayItems = computed(() => {
         const canonical = allAvailableItems.find(a => a.id === item.id);
         return { ...item, ...(canonical || {}), originalIndex: index };
     });
-    if (isEditing.value && canAdd.value) {
+    if ((isEditing.value || (props.sidebarMode && !props.iconOnly)) && canAdd.value) {
         list.push({ isAddBtn: true, id: 'add-btn' });
     }
     return list;
@@ -125,8 +128,13 @@ const canAdd = computed(() => {
 });
 
 watch(items, (newVal) => {
-    localStorage.setItem('magic_drawer_items', JSON.stringify(newVal));
+    localStorage.setItem(itemsKey.value, JSON.stringify(newVal));
 }, { deep: true });
+
+watch(() => props.sidebarMode, () => {
+    deletedItems.value = loadDeletedItems();
+    items.value = loadItems();
+});
 
 watch(() => props.visible, (val) => {
     if (val) {
@@ -140,7 +148,7 @@ watch(() => props.visible, (val) => {
 });
 
 const handleAction = (item) => {
-    if (isEditing.value) return;
+    if (isEditing.value && !props.sidebarMode) return;
     if (item.id === 'personas') {
         personasSheet.value?.open();
     } else if (item.id === 'image-gen') {
@@ -187,7 +195,7 @@ const addItem = () => {
 
 // Drag and Drop Logic
 const onDragStart = (e, index) => {
-    if (!isEditing.value) return;
+    if (!isEditing.value && !props.sidebarMode) return;
     dragSrcIndex.value = index;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.dropEffect = 'move';
@@ -440,7 +448,7 @@ defineExpose({
         <div v-if="visible" class="magic-drawer" :class="{ 'magic-drawer-sidebar': sidebarMode, 'icon-only': iconOnly }" @click.stop>
             <div class="drawer-header" v-show="!iconOnly">
                 <div class="drawer-title">{{ t('sheet_title_magic_drawer') || 'Magic Drawer' }}</div>
-                <div class="edit-toggle" @click="toggleEdit">
+                <div class="edit-toggle" @click="toggleEdit" v-if="!sidebarMode">
                     <svg v-if="!isEditing" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
                     <svg v-else viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
                     <span>{{ isEditing ? t('btn_save') : t('action_edit') }}</span>
@@ -453,7 +461,7 @@ defineExpose({
                             class="magic-item" 
                             :data-index="item.originalIndex"
                             :class="{ 'editing': isEditing, 'dragging': item.originalIndex === dragSrcIndex }"
-                            :draggable="isEditing"
+                            :draggable="isEditing || sidebarMode"
                             @click="handleAction(item)"
                             @dragstart="onDragStart($event, item.originalIndex)"
                             @dragenter.prevent="onDragEnter($event, item.originalIndex)"
@@ -483,7 +491,7 @@ defineExpose({
                             </div>
                         </div>
                         
-                        <div v-if="isEditing" class="delete-btn" @click.stop="removeItem(item.originalIndex)">
+                        <div v-if="isEditing || (sidebarMode && !iconOnly)" class="delete-btn" @click.stop="removeItem(item.originalIndex)">
                             <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                         </div>
                     </div>
@@ -834,6 +842,17 @@ defineExpose({
     width: 14px;
     height: 14px;
     fill: currentColor;
+}
+
+.magic-drawer-sidebar .delete-btn {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.magic-drawer-sidebar .magic-item:hover .delete-btn {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 

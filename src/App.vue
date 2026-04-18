@@ -932,9 +932,9 @@ watch(currentView, (newVal, oldVal) => {
 
       </Transition>
 
-      <!-- Desktop Right Sidebar: MagicDrawer panel (chat view only) -->
+      <!-- Desktop Right Sidebar: MagicDrawer panel -->
       <DesktopRightSidebar
-          v-if="isDesktop && effectiveMainView === 'view-chat'"
+          v-if="isDesktop"
           :bottom-sheet-state="bottomSheetState"
           :sidebar-state="sidebarState"
           :active-chat-char-obj="activeChatCharObj"
