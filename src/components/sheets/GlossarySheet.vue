@@ -162,10 +162,10 @@ function handleGlBack() {
     }
 }
 
-// Sync header title when navigating inside viewMode (watches sheetTitle to catch chip-to-chip article nav)
-watch(sheetTitle, () => {
+// Sync header title when navigating inside viewMode (watches sheetTitle and view to catch chip-to-chip article nav)
+watch([sheetTitle, view], () => {
     if (!props.viewMode) return;
-    window.dispatchEvent(new CustomEvent('gl-header-update', { detail: { title: sheetTitle.value } }));
+    window.dispatchEvent(new CustomEvent('gl-header-update', { detail: { title: sheetTitle.value, canGoBack: view.value !== 'categories' } }));
 });
 
 onMounted(() => {
@@ -173,7 +173,7 @@ onMounted(() => {
     window.addEventListener('gl-back', handleGlBack);
     if (props.viewMode) {
         window.dispatchEvent(new CustomEvent('gl-header-update', {
-            detail: { title: sheetTitle.value }
+            detail: { title: sheetTitle.value, canGoBack: view.value !== 'categories' }
         }));
     }
 });

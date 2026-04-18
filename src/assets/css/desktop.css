@@ -117,6 +117,11 @@
     padding-right: var(--chat-padding-lr, 0px) !important;
 }
 
+.desktop-mode .chat-input-wrapper {
+    padding-left: var(--chat-padding-lr, 0px) !important;
+    padding-right: var(--chat-padding-lr, 0px) !important;
+}
+
 /* Hide mobile-only magic button and its bottom drawer */
 .desktop-mode #btn-magic {
     display: none !important;
@@ -244,6 +249,94 @@
     flex-shrink: 0;
 }
 
+/* ---- Glossary corner popup ---- */
+.desktop-glossary-popup {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    width: 380px;
+    max-width: calc(100vw - 40px);
+    height: 60vh;
+    max-height: 80vh;
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--ui-bg, #1e1e1e);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+    z-index: 400;
+}
+
+.desktop-glossary-popup-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 8px 8px 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    cursor: move;
+    user-select: none;
+}
+
+.desktop-glossary-popup-back,
+.desktop-glossary-popup-close {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--text-color, #fff);
+    cursor: pointer;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: background-color 0.15s;
+}
+
+.desktop-glossary-popup-back:hover,
+.desktop-glossary-popup-close:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.desktop-glossary-popup-back svg,
+.desktop-glossary-popup-close svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+.desktop-glossary-popup-title {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-color, #fff);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 4px;
+}
+
+.desktop-glossary-popup>.view {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-top: 0 !important;
+    padding-bottom: 16px !important;
+}
+
+.glossary-popup-enter-active,
+.glossary-popup-leave-active {
+    transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.glossary-popup-enter-from,
+.glossary-popup-leave-to {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+}
+
 /* ---- Floating menu overlay ---- */
 .desktop-float-overlay {
     position: fixed;
@@ -368,8 +461,8 @@
     height: 100%;
 }
 
-/* Non-chat sidebar: #desktop-sidebar-content overlays ToolsView background */
-.desktop-sidebar-right.tools-mode #desktop-sidebar-content {
+/* Sidebar content overlays the sidebar in both chat and tools mode */
+.desktop-sidebar-right #desktop-sidebar-content {
     position: absolute;
     inset: 0;
     z-index: 2;
@@ -377,7 +470,7 @@
     pointer-events: none;
 }
 
-.desktop-sidebar-right.tools-mode #desktop-sidebar-content.occupied {
+.desktop-sidebar-right #desktop-sidebar-content.occupied {
     pointer-events: auto;
 }
 

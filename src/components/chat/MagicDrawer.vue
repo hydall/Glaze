@@ -113,7 +113,9 @@ const loadItems = () => {
 const items = ref(loadItems());
 
 const displayItems = computed(() => {
-    const list = items.value.map((item, index) => {
+    const list = items.value
+        .filter(item => !(props.sidebarMode && item.id === 'glossary'))
+        .map((item, index) => {
         const canonical = allAvailableItems.find(a => a.id === item.id);
         return { ...item, ...(canonical || {}), originalIndex: index };
     });

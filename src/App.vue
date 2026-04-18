@@ -94,8 +94,73 @@ const checkDesktop = () => {
     }
 };
 
-const menuViews = ['view-menu', 'view-settings', 'view-theme-settings', 'view-glossary'];
+const menuViews = ['view-menu', 'view-settings', 'view-theme-settings'];
 const isDesktopFloating = computed(() => isDesktop.value && menuViews.includes(currentView.value));
+
+const isGlossaryWindowOpen = ref(false);
+const isDesktopGlossary = computed(() => isDesktop.value && isGlossaryWindowOpen.value);
+const glossaryPopupTitle = ref('');
+const glossaryCanGoBack = ref(false);
+
+function onGlossaryHeaderUpdate(e) {
+    if (e.detail?.title !== undefined) glossaryPopupTitle.value = e.detail.title;
+    if (e.detail?.canGoBack !== undefined) glossaryCanGoBack.value = e.detail.canGoBack;
+}
+function onGlossaryBack() {
+    window.dispatchEvent(new CustomEvent('gl-back'));
+}
+
+const glossaryPos = reactive({ x: 0, y: 0 });
+const glossaryStyle = computed(() => {
+    if (glossaryPos.x === 0 && glossaryPos.y === 0) return {};
+    return {
+        top: `${glossaryPos.y}px`,
+        left: `${glossaryPos.x}px`,
+        bottom: 'auto',
+        right: 'auto',
+        transform: 'none',
+        margin: 0
+    };
+});
+
+let isDraggingGlossary = false;
+let glossaryDragStartX = 0, glossaryDragStartY = 0;
+let glossaryInitialX = 0, glossaryInitialY = 0;
+
+function startGlossaryDrag(e) {
+    if (e.target.closest('button')) return;
+    isDraggingGlossary = true;
+    glossaryDragStartX = e.clientX;
+    glossaryDragStartY = e.clientY;
+    
+    const popup = document.querySelector('.desktop-glossary-popup');
+    if (!popup) return;
+    const rect = popup.getBoundingClientRect();
+    if (glossaryPos.x === 0 && glossaryPos.y === 0) {
+        glossaryPos.x = rect.left;
+        glossaryPos.y = rect.top;
+    }
+    glossaryInitialX = glossaryPos.x;
+    glossaryInitialY = glossaryPos.y;
+    
+    window.addEventListener('mousemove', onGlossaryDrag);
+    window.addEventListener('mouseup', stopGlossaryDrag);
+}
+
+function onGlossaryDrag(e) {
+    if (!isDraggingGlossary) return;
+    const dx = e.clientX - glossaryDragStartX;
+    const dy = e.clientY - glossaryDragStartY;
+    glossaryPos.x = Math.max(0, Math.min(window.innerWidth - 100, glossaryInitialX + dx));
+    glossaryPos.y = Math.max(0, Math.min(window.innerHeight - 50, glossaryInitialY + dy));
+}
+
+function stopGlossaryDrag() {
+    isDraggingGlossary = false;
+    window.removeEventListener('mousemove', onGlossaryDrag);
+    window.removeEventListener('mouseup', stopGlossaryDrag);
+}
+
 const desktopPreMenuView = ref(isDesktop.value ? 'view-characters' : 'view-dialogs');
 
 const effectiveMainView = computed(() => {
@@ -704,6 +769,17 @@ onMounted(async () => {
     window.addEventListener('header-reset', onHeaderReset);
     window.addEventListener('sync-data-refreshed', onSyncDataRefreshed);
 
+    window.addEventListener('open-glossary', (e) => {
+        if (isDesktop.value) {
+            isGlossaryWindowOpen.value = true;
+        }
+    });
+    window.addEventListener('toggle-glossary', () => {
+        if (isDesktop.value) {
+            isGlossaryWindowOpen.value = !isGlossaryWindowOpen.value;
+        }
+    });
+
     // Initialize ResizeObserver for layout metrics
     layoutObserver = new ResizeObserver(() => {
         requestAnimationFrame(updateLayoutMetrics);
@@ -721,6 +797,7 @@ onMounted(async () => {
 
     checkDesktop();
     window.addEventListener('resize', checkDesktop);
+    window.addEventListener('gl-header-update', onGlossaryHeaderUpdate);
 
     setTimeout(() => {
         document.body.classList.remove('preload');
@@ -758,6 +835,8 @@ onBeforeUnmount(() => {
     window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.removeEventListener('header-reset', onHeaderReset);
     window.removeEventListener('sync-data-refreshed', onSyncDataRefreshed);
+    window.removeEventListener('gl-header-update', onGlossaryHeaderUpdate);
+    stopGlossaryDrag();
     kbListeners.forEach(l => l.remove());
     window.removeEventListener('resize', checkDesktop);
 });
@@ -810,6 +889,7 @@ watch(currentView, (newVal, oldVal) => {
           :current-view="currentView"
           :active-categories="activeCategories"
           :is-desktop-floating="isDesktopFloating"
+          :is-glossary-open="isGlossaryWindowOpen"
           @update:currentView="currentView = $event"
           @openChat="openChatWrapper"
       />
@@ -928,12 +1008,28 @@ watch(currentView, (newVal, oldVal) => {
                       <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                   </button>
                   <MenuView v-if="currentView === 'view-menu'" class="view-gray-bg" />
-                  <GlossaryView v-else-if="currentView === 'view-glossary'" class="view-gray-bg" :view-mode="true" />
+                  <!-- glossary has its own corner popup, not shown here -->
                   <ThemeSettingsView v-else-if="currentView === 'view-theme-settings'" class="view-gray-bg" />
                   <SettingsView v-else-if="currentView === 'view-settings'" class="view-gray-bg" />
               </div>
           </div>
 
+      </Transition>
+
+      <!-- Desktop: Glossary corner popup -->
+      <Transition name="glossary-popup">
+          <div v-if="isDesktopGlossary" class="desktop-glossary-popup" :style="glossaryStyle">
+              <div class="desktop-glossary-popup-header" @mousedown="startGlossaryDrag">
+                  <button v-if="glossaryCanGoBack" class="desktop-glossary-popup-back" @click="onGlossaryBack">
+                      <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                  </button>
+                  <span class="desktop-glossary-popup-title" :class="{ 'pl-3': !glossaryCanGoBack }">{{ glossaryPopupTitle }}</span>
+                  <button class="desktop-glossary-popup-close" @click="isGlossaryWindowOpen = false">
+                      <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                  </button>
+              </div>
+              <GlossaryView class="view view-gray-bg" :view-mode="true" />
+          </div>
       </Transition>
 
       <!-- Desktop Right Sidebar: MagicDrawer panel -->
@@ -957,7 +1053,7 @@ watch(currentView, (newVal, oldVal) => {
           @magic-memory-books="chatViewRef?.openMemoryBooksSheet()"
           @magic-regex="chatViewRef?.openRegexSheet()"
           @magic-image-gen="chatViewRef?.openImageGenSheet()"
-          @magic-glossary="chatViewRef?.openGlossarySheet()"
+          @magic-glossary="isGlossaryWindowOpen = true"
       />
 
       <!-- Floating Action Button: Positioned relative to grid on Desktop -->
