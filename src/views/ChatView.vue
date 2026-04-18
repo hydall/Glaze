@@ -220,7 +220,6 @@ const {
     handleMemoryVectorToggle: handleMemoryVectorToggle_composable,
     handleMemoryReindexAll: handleMemoryReindexAll_composable,
     handleMemoryScanChat: handleMemoryScanChat_composable,
-    handleMemoryBatchGenerate: handleMemoryBatchGenerate_composable,
     handleMemoryApproveDraft: handleMemoryApproveDraft_composable,
     handleMemoryDeleteDraft: handleMemoryDeleteDraft_composable,
     handleMemoryDeleteEntry: handleMemoryDeleteEntry_composable,
@@ -956,10 +955,8 @@ function openMemoryTextPreview(entry, kind = 'Memory') {
     });
     content.querySelector('#memory-preview-close')?.addEventListener('click', () => {
         closeBottomSheet();
-        if (!isApprovedEntry) {
-            // For drafts, return to Memory Books sheet
-            setTimeout(() => openMemoryBooksSheet(), 50);
-        }
+        // Always return to Memory Books sheet
+        setTimeout(() => openMemoryBooksSheet(), 50);
     });
     showBottomSheet({ title: kind, content, isSolid: true });
 }
@@ -1471,7 +1468,81 @@ async function handleMemoryScanChat() {
 }
 
 async function handleMemoryBatchGenerate() {
-    await handleMemoryBatchGenerate_composable(activeChatChar, currentMessages.value, runBatchDraftGeneration);
+    if (!activeChatChar || !currentMemoryBookData.value) return;
+    
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    
+    const entries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
+    const pendingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [];
+    const planned = memoryBook.automation?.plannedSegments || [];
+    
+    const coveredIds = new Set();
+    for (const entry of entries) {
+        if (Array.isArray(entry.messageIds)) entry.messageIds.forEach(id => coveredIds.add(id));
+    }
+    for (const draft of pendingDrafts) {
+        if (Array.isArray(draft.messageIds)) draft.messageIds.forEach(id => coveredIds.add(id));
+    }
+    
+    // If no planned segments, build them on the fly
+    let segments = planned;
+    if (!segments.length) {
+        const stableMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden && !m.isError && (m.role === 'user' || m.role === 'char'));
+        const uncovered = stableMessages.filter(m => m.id && !coveredIds.has(m.id));
+        const interval = normalizeAutoCreateInterval(memoryBook);
+        segments = [];
+        for (let i = 0; i < uncovered.length; i += interval) {
+            segments.push(uncovered.slice(i, i + interval).map(m => m.id));
+        }
+    }
+    
+    if (!segments.length) {
+        showToast('No uncovered segments to generate');
+        return;
+    }
+    
+    const totalSegments = segments.length;
+    const quickItems = [];
+    const quickPicks = [1, 3, 5];
+    for (const n of quickPicks) {
+        if (n > totalSegments) break;
+        quickItems.push({
+            label: `${n} draft${n > 1 ? 's' : ''}`,
+            onClick: async () => {
+                closeBottomSheet();
+                await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, n);
+            }
+        });
+    }
+    if (!quickItems.some(it => it.label.includes(String(totalSegments)))) {
+        quickItems.push({
+            label: `All ${totalSegments}`,
+            onClick: async () => {
+                closeBottomSheet();
+                await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, totalSegments);
+            }
+        });
+    }
+    
+    showBottomSheet({
+        title: `Generate Drafts (${totalSegments} available)`,
+        items: quickItems,
+        input: {
+            placeholder: `Enter number (1-${totalSegments})`,
+            confirmLabel: 'Generate',
+            onConfirm: async (val) => {
+                const num = parseInt(val, 10);
+                if (isNaN(num) || num < 1 || num > totalSegments) {
+                    showToast(`Enter a number between 1 and ${totalSegments}`);
+                    return;
+                }
+                closeBottomSheet();
+                await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, num);
+            }
+        }
+    });
 }
 
 async function handleMemoryApproveDraft(draftId) {
@@ -2110,6 +2181,8 @@ async function openContextSheet() {
 
 function handleHideTopMessages() {
     confirmHideTopMessages();
+    // After hiding messages, go back to MagicDrawer
+    setTimeout(() => handleSheetBack(), 100);
 }
 
 function handleOpenHistorySettings() {
