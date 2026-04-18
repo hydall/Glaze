@@ -1180,6 +1180,13 @@ function goBackFromEditor() {
     }
 }
 
+function handleBackNavigation(e) {
+    if (isEditingBlock.value || editingPresetId.value) {
+        e.preventDefault();
+        goBackFromEditor();
+    }
+}
+
 function stashActiveBlock() {
     if (activeEditBlock.value) {
         activeEditBlock.value.isStashed = true;
@@ -1991,7 +1998,9 @@ const onFsEditorClosed = () => {
 
 onMounted(async () => {
     initRipple();
+    await initPresetState();
     await loadPresets();
+    window.addEventListener('app-back-navigation', handleBackNavigation);
     if (currentPreset.value) {
         localStorage.setItem('gz_api_request_reasoning', currentPreset.value.reasoningEnabled);
     }
@@ -2033,10 +2042,13 @@ function confirmDeleteStashedBlock(blockId) {
 
 onBeforeUnmount(() => {
     window.removeEventListener('fs-editor-closed', onFsEditorClosed);
+    window.removeEventListener('app-back-navigation', handleBackNavigation);
 });
 </script>
 
 <template>
+    <div class="preset-view-root">
+
     <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack || viewMode" :actions="headerState.actions" :z-index="11500" :view-mode="viewMode" @back="goBackFromEditor" @close="onSheetClose">
         <div class="gen-sheet-body" ref="genSheetBodyRef">
             <Transition :name="navDirection === 'forward' ? 'ps-fwd' : 'ps-back'" mode="out-in" @before-leave="onTransitionBeforeLeave" @before-enter="onTransitionBeforeEnter">
@@ -2288,7 +2300,7 @@ onBeforeUnmount(() => {
             </div>
 
         <!-- Block Editor View -->
-        <div v-else-if="isEditingBlock" class="block-editor-view" key="block-editor" data-scroll-key="block-editor" style="background: var(--app-bg); min-height: 100%;">
+        <div v-else-if="isEditingBlock" class="block-editor-view" key="block-editor" data-scroll-key="block-editor" style="min-height: 100%;">
             <div class="block-editor-scroll">
                 <Editor v-model="editorProxy" :config="editorConfig" @open-fs="(data) => emit('open-fs', data)">
                     <template #footer>
@@ -2326,6 +2338,7 @@ onBeforeUnmount(() => {
         accept="image/*" 
         @change="onImageSelected"
     >
+    </div>
 </template>
 
 <style scoped>
@@ -3396,6 +3409,7 @@ onBeforeUnmount(() => {
 /* ═══ Preset Selector List ═══ */
 .preset-selector-list {
     padding: 0 16px 20px;
+    padding-bottom: calc(var(--footer-height, 0px) + var(--keyboard-overlap, 0px) + 20px);
 }
 
 .ps-list {

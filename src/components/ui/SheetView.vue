@@ -254,7 +254,7 @@ onBeforeUnmount(() => {
 
 <template>
     <!-- ── View mode: inline content, no overlay/drag ── -->
-    <div v-if="viewMode" class="sheet-view-inline">
+    <div v-if="viewMode" class="sheet-view-inline" v-bind="$attrs">
         <slot></slot>
     </div>
 

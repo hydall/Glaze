@@ -318,6 +318,10 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 
 // Event Handlers
 const handleBack = () => {
+    const backNavEvent = new CustomEvent('app-back-navigation', { cancelable: true });
+    window.dispatchEvent(backNavEvent);
+    if (backNavEvent.defaultPrevented) return;
+
     if (state.onBack) state.onBack();
 };
 

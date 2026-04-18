@@ -509,6 +509,10 @@ function close() {
 
 defineExpose({ open, close });
 
+const handleBackNavigation = () => {
+    handleBack();
+};
+
 onMounted(async () => {
     initRipple();
     loadApiSettings();
@@ -519,15 +523,18 @@ onMounted(async () => {
     checkConnection();
     updateLanguage();
     headerState.title = t('tab_api') || 'API';
+    window.addEventListener('app-back-navigation', handleBackNavigation);
 });
 
 onBeforeUnmount(() => {
     flushApiDebounce();
     if (blacklistCountdownTimer) clearInterval(blacklistCountdownTimer);
+    window.removeEventListener('app-back-navigation', handleBackNavigation);
 });
 </script>
 
 <template>
+    <div class="api-view-root">
     <SheetView ref="sheet" :title="headerState.title" :view-mode="viewMode" @back="handleBack">
         <div class="gen-sheet-body">
                 <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
@@ -707,7 +714,7 @@ onBeforeUnmount(() => {
                 </div>
         </div>
     </SheetView>
-
+    </div>
 </template>
 
 <style scoped>
@@ -756,7 +763,10 @@ onBeforeUnmount(() => {
     font-size: 17px;
 }
 
-.gen-sheet-body { position: relative; }
+.gen-sheet-body { 
+    position: relative; 
+    padding-bottom: calc(var(--footer-height, 0px) + var(--keyboard-overlap, 0px) + 20px);
+}
 
 .clickable-selector {
     display: flex;

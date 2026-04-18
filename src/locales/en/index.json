@@ -88,6 +88,7 @@
     "menu_about": "About Glaze",
     "subtab_api": "API",
     "tab_api": "API",
+    "tab_presets": "Presets",
     "subtab_preset": "Preset",
     "section_connection": "Connection",
     "section_gen_params": "Generation Parameters",

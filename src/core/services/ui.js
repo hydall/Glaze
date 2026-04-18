@@ -420,6 +420,11 @@ export function initViewportFix() {
 export function initBackButton() {
     let lastBackPress = 0;
     const handleBackButton = async () => {
+        // --- Hierarchical Back Navigation Dispatch ---
+        const backNavEvent = new CustomEvent('app-back-navigation', { cancelable: true });
+        window.dispatchEvent(backNavEvent);
+        if (backNavEvent.defaultPrevented) return;
+
         // 0. If keyboard is open — dismiss it
         if (isKeyboardOpen.value) {
             await hideKeyboard();

@@ -471,10 +471,12 @@ onMounted(async () => {
     loadPickerData();
     await updateVectorReindexNotice();
     window.addEventListener('sync-data-refreshed', handleSyncDataRefreshed);
+    window.addEventListener('app-back-navigation', handleBackNavigation);
 });
 
 onUnmounted(() => {
     window.removeEventListener('sync-data-refreshed', handleSyncDataRefreshed);
+    window.removeEventListener('app-back-navigation', handleBackNavigation);
 });
 
 // --- Navigation ---
@@ -531,6 +533,13 @@ function goBack() {
         window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
     } else {
         close();
+    }
+}
+
+function handleBackNavigation(e) {
+    if (currentView.value !== 'list') {
+        e.preventDefault();
+        goBack();
     }
 }
 
@@ -682,6 +691,7 @@ defineExpose({ open, openEntry, close, openLorebook });
 </script>
 
 <template>
+    <div class="lorebook-view-root">
     <SheetView ref="sheet" :z-index="11000" :title="sheetTitle" :show-back="showBackBtn || viewMode" :actions="sheetActions" :view-mode="viewMode" @back="goBack" @close="flushLorebookSave">
         <template #header-title>
             <div v-if="currentView === 'list'" class="clickable-no-drag" style="display:flex; align-items:center;">
@@ -1156,6 +1166,7 @@ defineExpose({ open, openEntry, close, openLorebook });
             </div>
         </div>
     </SheetView>
+    </div>
 </template>
 
 <style scoped>
@@ -1279,7 +1290,7 @@ defineExpose({ open, openEntry, close, openLorebook });
     display: flex;
     flex-direction: column;
     padding: 12px;
-    padding-bottom: 80px;
+    padding-bottom: calc(var(--footer-height, 0px) + var(--keyboard-overlap, 0px) + 20px);
     gap: 8px;
 }
 

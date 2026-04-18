@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { allPersonas, activePersona, setActivePersona, loadPersonas, personaConnections } from '@/core/states/personaState.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -20,6 +20,10 @@ function handleBack() {
         sheet.value?.close();
     }
 }
+
+const handleBackNavigation = () => {
+    handleBack();
+};
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
@@ -71,10 +75,16 @@ defineExpose({ open, close });
 
 onMounted(() => {
     loadPersonas();
+    window.addEventListener('app-back-navigation', handleBackNavigation);
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('app-back-navigation', handleBackNavigation);
 });
 </script>
 
 <template>
+    <div class="personas-view-root">
     <SheetView ref="sheet" :fit-content="false" :title="t('tab_personas') || 'Personas'" :view-mode="viewMode" @back="handleBack" :actions="[{ icon: '<svg viewBox=\'0 0 24 24\'><path d=\'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z\'/></svg>', onClick: () => openEditor(-1) }]">
         <template #header-title>
             <HelpTip term="persona" />
@@ -111,6 +121,7 @@ onMounted(() => {
             </div>
         </div>
     </SheetView>
+    </div>
 </template>
 
 <style scoped>
@@ -118,6 +129,7 @@ onMounted(() => {
 
 .view-content {
     padding: 16px;
+    padding-bottom: calc(var(--footer-height, 0px) + var(--keyboard-overlap, 0px) + 20px);
     box-sizing: border-box;
 }
 

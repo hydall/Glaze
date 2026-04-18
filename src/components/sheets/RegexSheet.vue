@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -106,6 +106,13 @@ function goBack() {
         window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
     } else {
         close();
+    }
+}
+
+function handleBackNavigation(e) {
+    if (currentView.value !== 'list') {
+        e.preventDefault();
+        goBack();
     }
 }
 
@@ -398,10 +405,19 @@ function openPresetSheet() {
     }
 }
 
+onMounted(() => {
+    window.addEventListener('app-back-navigation', handleBackNavigation);
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('app-back-navigation', handleBackNavigation);
+});
+
 defineExpose({ open, close });
 </script>
 
 <template>
+    <div class="regex-view-root">
     <SheetView ref="sheet" :title="sheetTitle" :show-back="showBackBtn || viewMode" :actions="sheetActions" :z-index="zIndex" :view-mode="viewMode" @back="goBack" @close="handleSheetClose">
         <template #header-title>
             <HelpTip term="regex" />
@@ -544,6 +560,7 @@ defineExpose({ open, close });
             </div>
         </div>
     </SheetView>
+    </div>
 </template>
 
 <style scoped>
@@ -554,8 +571,8 @@ defineExpose({ open, close });
 .header-btn svg { width: 24px; height: 24px; fill: currentColor; }
 .header-toggle { display: flex; align-items: center; justify-content: center; }
 .sheet-body { flex: 1; overflow-y: auto; background: transparent; display: flex; flex-direction: column; }
-.list-view { width: 100%; padding-bottom: 40px; }
-.edit-view { width: 100%; padding-bottom: 40px; padding-top: 16px; }
+.list-view { width: 100%; padding-bottom: calc(var(--footer-height, 0px) + var(--keyboard-overlap, 0px) + 20px); }
+.edit-view { width: 100%; padding-bottom: calc(var(--footer-height, 0px) + var(--keyboard-overlap, 0px) + 20px); padding-top: 16px; }
 .list-section { margin-top: 12px; margin-bottom: 8px; }
 .section-title { padding: 0 16px 4px; font-weight: 600; font-size: 13px; color: var(--text-gray); text-transform: uppercase; }
 .empty-state { padding: 40px; text-align: center; color: var(--text-gray); }

@@ -243,7 +243,7 @@ function getSelectedLabel(field) {
 </script>
 
 <template>
-    <div class="view active-view editor-container">
+    <div class="editor-container">
         <div class="editor-content">
             <!-- Avatar Section (Redesigned as a window/card) -->
             <div class="menu-group avatar-card" v-if="showAvatar" @click="triggerAvatarUpload">
