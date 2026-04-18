@@ -1503,11 +1503,11 @@ async function handleMemoryBatchGenerate() {
         return;
     }
     
-    // Close Memory Books sheet BEFORE showing bottomSheet to avoid z-index issues
+    // Close Memory Books sheet FIRST
     memoryBooksSheet.value?.close();
     
-    // Wait for sheet to close completely
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Wait for sheet close animation to complete (300ms transition)
+    await new Promise(resolve => setTimeout(resolve, 350));
     
     const totalSegments = segments.length;
     const quickItems = [];
