@@ -411,6 +411,7 @@ import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
 import LorebookSheet from '@/components/sheets/LorebookSheet.vue';
 import RegexSheet from '@/components/sheets/RegexSheet.vue';
 import StatsSheet from '@/components/sheets/StatsSheet.vue';
+import TokenizerSheet from '@/components/sheets/TokenizerSheet.vue';
 import ImageGenSheet from '@/components/sheets/ImageGenSheet.vue';
 import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
@@ -578,6 +579,7 @@ let inputResizeObserver = null;
 const cutoffIndex = ref(-1);
 const apiView = ref(null);
 const statsSheet = ref(null);
+const tokenizerSheet = ref(null);
 const imageGenSheet = ref(null);
 const openImageGenSheet = () => imageGenSheet.value?.open();
 const glossarySheet = ref(null);
@@ -2913,45 +2915,8 @@ async function saveCurrentMessages() {
     await db.saveChat(activeChatChar.id, data);
 }
 
-function openHistoryContextSettings() {
-    const content = document.createElement('div');
-    content.className = 'context-sheet';
-    content.innerHTML = `
-        <div class="settings-item">
-            <label>History fill threshold (%)</label>
-            <input id="history-fill-threshold" type="number" min="1" max="100" value="${historyFillThreshold.value}">
-        </div>
-        <div class="settings-item">
-            <label>Hide top messages (%)</label>
-            <input id="history-hide-percent" type="number" min="1" max="95" value="${historyHidePercent.value}">
-        </div>
-        <div class="context-sheet-note">Hide top messages recommendation appears when visible history reaches the configured threshold.</div>
-        <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="history-context-back">Back</button>
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="history-context-save">Save</button>
-        </div>
-    `;
-
-    const fillInput = content.querySelector('#history-fill-threshold');
-    const hideInput = content.querySelector('#history-hide-percent');
-    const saveBtn = content.querySelector('#history-context-save');
-    const backBtn = content.querySelector('#history-context-back');
-
-    backBtn.addEventListener('click', () => {
-        closeBottomSheet();
-        setTimeout(() => openContextSheet(), 250);
-    });
-    saveBtn.addEventListener('click', () => {
-        persistHistoryContextSettings(fillInput?.value, hideInput?.value);
-        closeBottomSheet();
-        setTimeout(() => openContextSheet(), 250);
-    });
-
-    showBottomSheet({
-        title: 'History Context Settings',
-        content,
-        isSolid: true
-    });
+function handleSaveContextSettings({ fillThreshold, hidePercent }) {
+    persistHistoryContextSettings(fillThreshold, hidePercent);
 }
 
 async function hideTopMessagesNow() {
@@ -3009,19 +2974,16 @@ function confirmHideTopMessages() {
 async function openContextSheet() {
     // Always recalculate to ensure vector lorebooks are included
     if (activeChatChar) {
-        // Wait for calculation to complete, with timeout fallback
         const calculatePromise = updateContextCutoff();
-        const timeoutPromise = new Promise(resolve => setTimeout(resolve, 5000)); // 5 second timeout
+        const timeoutPromise = new Promise(resolve => setTimeout(resolve, 5000));
         await Promise.race([calculatePromise, timeoutPromise]);
-        
-        // If still calculating after timeout, wait a bit more
+
         if (isCalculatingCutoff) {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
 
-    const breakdown = contextBreakdown.value;
-    if (!breakdown) {
+    if (!contextBreakdown.value) {
         showBottomSheet({
             title: 'Context',
             bigInfo: {
@@ -3034,98 +2996,7 @@ async function openContextSheet() {
         return;
     }
 
-    const used = breakdown.totalUsed || 0;
-    const safeContext = breakdown.safeContext || 0;
-    const remaining = Math.max(0, breakdown.remaining || 0);
-    const preview = historyHidePreview.value;
-    const content = document.createElement('div');
-    content.className = 'context-sheet';
-
-    const usedWidth = Math.max(0, 100 - (contextSegments.value.reserve?.percent || 0));
-    const segmentHtml = contextSegments.value.used.map(segment => `
-        <div class="chat-context-segment ${segment.className}" style="width:${segment.percent}%"></div>
-    `).join('');
-
-    const reserveHtml = contextSegments.value.reserve
-        ? (() => {
-            const reserve = contextSegments.value.reserve;
-            const innerSegments = reserve.used?.map(seg => 
-                `<div class="chat-context-segment ${seg.className}" style="width:${(seg.value / reserve.value * 100).toFixed(2)}%"></div>`
-            ).join('') || '';
-            const remainingPercent = reserve.remaining > 0 ? ((reserve.remaining / reserve.value) * 100).toFixed(2) : 0;
-            const remainingHtml = reserve.remaining > 0 
-                ? `<div class="chat-context-segment ${reserve.className}" style="width:${remainingPercent}%"></div>`
-                : '';
-            return `<div class="chat-context-reserve-container" style="width:${reserve.percent}%">${innerSegments}${remainingHtml}</div>`;
-        })()
-        : '';
-
-    const legendHtml = contextLegendItems.value.map(segment => `
-        <div class="context-legend-item">
-            <span class="context-legend-swatch ${segment.className}"></span>
-            <span>${segment.label}</span>
-        </div>
-    `).join('');
-
-    const breakdownHtml = contextBreakdownItems.value.map(item => `
-        <div class="context-breakdown-row">
-            <span>${item.label}</span>
-            <strong>${item.value}</strong>
-        </div>
-    `).join('');
-
-    const recommendationHtml = shouldRecommendHide.value ? `
-        <div class="context-recommendation">
-            <div class="context-recommendation-title">History is near its limit</div>
-            <div class="context-recommendation-text">Hide about ${preview.count} top message${preview.count === 1 ? '' : 's'} to free about ${preview.tokens} tokens.</div>
-        </div>
-    ` : '';
-
-    const hideButtonLabel = preview.count
-        ? `Hide top ${preview.count}`
-        : 'Hide top messages';
-
-    content.innerHTML = `
-        <div class="context-sheet-summary">
-            <div class="context-sheet-kpi">
-                <strong>${used}</strong>
-                <span>used / ${breakdown.contextSize || safeContext}</span>
-            </div>
-            <div class="context-sheet-kpi">
-                <strong>${remaining}</strong>
-                <span>remaining</span>
-            </div>
-            <div class="context-sheet-kpi">
-                <strong>${historyUsagePercent.value}%</strong>
-                <span>history fill</span>
-            </div>
-        </div>
-        <div class="chat-context-bar context-sheet-bar">
-            <div class="chat-context-used" style="width:${usedWidth}%">${segmentHtml}</div>
-            ${reserveHtml}
-        </div>
-        <div class="context-legend">${legendHtml}</div>
-        <div class="context-breakdown">${breakdownHtml}</div>
-        ${recommendationHtml}
-        <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="context-hide-btn">${hideButtonLabel}</button>
-            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="context-settings-btn">Settings</button>
-        </div>
-    `;
-
-    content.querySelector('#context-settings-btn')?.addEventListener('click', () => {
-        openHistoryContextSettings();
-    });
-
-    content.querySelector('#context-hide-btn')?.addEventListener('click', () => {
-        confirmHideTopMessages();
-    });
-
-    showBottomSheet({
-        title: 'Context',
-        content,
-        isSolid: true
-    });
+    tokenizerSheet.value?.open();
 }
 
 async function setupHeader(char = activeChatChar) {
@@ -5803,6 +5674,20 @@ onUnmounted(() => {
         <LorebookSheet ref="lorebookSheet" />
         <RegexSheet ref="regexSheet" :active-chat-char="activeChar" />
         <StatsSheet ref="statsSheet" />
+        <TokenizerSheet
+            ref="tokenizerSheet"
+            :context-breakdown="contextBreakdown"
+            :context-segments="contextSegments"
+            :context-breakdown-items="contextBreakdownItems"
+            :context-legend-items="contextLegendItems"
+            :history-usage-percent="historyUsagePercent"
+            :history-hide-preview="historyHidePreview"
+            :should-recommend-hide="shouldRecommendHide"
+            :history-fill-threshold="historyFillThreshold"
+            :history-hide-percent="historyHidePercent"
+            @hide-messages="confirmHideTopMessages"
+            @save-settings="handleSaveContextSettings"
+        />
         <ImageGenSheet ref="imageGenSheet" />
         <GlossarySheet ref="glossarySheet" />
     </div>
@@ -5925,176 +5810,10 @@ onUnmounted(() => {
     flex-shrink: 0;
 }
 
-.chat-context-bar {
-    position: relative;
-    display: flex;
-    width: 100%;
-    height: 10px;
-    overflow: hidden;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.06);
-}
-
-.chat-context-used {
-    display: flex;
-    height: 100%;
-    min-width: 0;
-    flex: 0 0 auto;
-}
-
-.chat-context-reserve-container {
-    position: absolute;
-    top: 0;
-    right: 0;
-    height: 100%;
-    display: flex;
-    box-shadow: inset 2px 0 0 rgba(0, 0, 0, 0.35);
-}
-
-.chat-context-reserve {
-    height: 100%;
-}
-
-.chat-context-segment {
-    height: 100%;
-}
-
-.segment-fixed {
-    background: #8f8f95;
-}
-
-.segment-character {
-    background: #4f8cff;
-}
-
-.segment-history {
-    background: #d8b84a;
-}
-
-.segment-summary {
-    background: #1ec8ff;
-}
-
-.segment-memory {
-    background: #7ee787;
-}
-
-.segment-authors-note {
-    background: #7a6cff;
-}
-
-.segment-lorebook {
-    background: #ff8c42;
-}
-
-.segment-vector-lore {
-    background: #b06cf7;
-}
-
-.segment-lorebook-reserve {
-    background: #43b56f;
-}
-
 .context-sheet {
     padding: 0 16px 16px;
 }
 
-.context-sheet-summary {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-    margin-bottom: 14px;
-}
-
-.context-sheet-kpi {
-    padding: 12px;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(var(--element-blur, 20px));
-    text-align: center;
-    color: var(--text-black);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.context-sheet-kpi strong {
-    display: block;
-    font-size: 18px;
-    line-height: 1.2;
-    color: var(--text-black);
-}
-
-.context-sheet-kpi span {
-    display: block;
-    margin-top: 4px;
-    font-size: 12px;
-    color: var(--text-gray);
-}
-
-.context-sheet-bar {
-    margin-bottom: 14px;
-}
-
-.context-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    margin-bottom: 14px;
-}
-
-.context-legend-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--text-gray);
-}
-
-.context-legend-swatch {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    flex-shrink: 0;
-}
-
-.context-breakdown {
-    display: grid;
-    gap: 8px;
-}
-
-.context-breakdown-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.context-breakdown-row span {
-    color: var(--text-gray);
-}
-
-.context-breakdown-row strong {
-    font-weight: 600;
-    color: var(--text-black);
-}
-
-.context-recommendation {
-    margin-top: 14px;
-    padding: 12px;
-    border-radius: 14px;
-    background: rgba(216, 184, 74, 0.14);
-    border: 1px solid rgba(216, 184, 74, 0.35);
-}
-
-.context-recommendation-title {
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-
-.context-recommendation-text,
 .context-sheet-note {
     font-size: 13px;
     color: var(--text-gray);
@@ -6349,14 +6068,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 480px) {
-    .context-sheet-summary {
-        grid-template-columns: 1fr;
-    }
-
-    .context-sheet-actions {
-        flex-direction: column;
-    }
-
     .memory-status-summary {
         grid-template-columns: 1fr 1fr;
     }
