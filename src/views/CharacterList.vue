@@ -605,6 +605,14 @@ defineExpose({ onAddCharacter, loadCharacters });
   flex-shrink: 0;
 }
 
+@media (hover: hover) {
+  .sort-dir-btn:hover {
+    background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.25);
+    border-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.4);
+    transform: translateY(-1px);
+  }
+}
+
 .sort-dir-btn:active {
   transform: scale(0.95);
   opacity: 0.8;
@@ -639,6 +647,14 @@ defineExpose({ onAddCharacter, loadCharacters });
   transition: transform 0.1s ease, background-color 0.2s, border-color 0.2s, opacity 0.2s;
   overflow: hidden;
   user-select: none;
+}
+
+@media (hover: hover) {
+  .preset-selector:hover {
+    background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.25);
+    border-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.4);
+    transform: translateY(-1px);
+  }
 }
 
 .preset-selector:active {
@@ -720,6 +736,21 @@ defineExpose({ onAddCharacter, loadCharacters });
   transform: scale(0.92);
 }
 
+@media (hover: hover) {
+  .favorite-item:hover {
+    transform: translateY(-2px);
+  }
+  
+  .favorite-item:hover .favorite-avatar {
+    transform: scale(1.05);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+  }
+  
+  .favorite-item:hover .favorite-name {
+    color: var(--vk-blue);
+  }
+}
+
 .favorite-avatar-wrapper {
   position: relative;
   width: 56px;
@@ -738,6 +769,7 @@ defineExpose({ onAddCharacter, loadCharacters });
   justify-content: center;
   position: relative;
   z-index: 2;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
 }
 
 .favorite-avatar img {
@@ -767,6 +799,7 @@ defineExpose({ onAddCharacter, loadCharacters });
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color 0.2s ease;
 }
 
 /* TransitionGroup Animations */
@@ -801,13 +834,39 @@ defineExpose({ onAddCharacter, loadCharacters });
   aspect-ratio: 2 / 3;
   background-color: var(--bg-color-light, #2a2a2a);
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, border-color 0.3s ease;
   cursor: pointer;
   border: 1px solid rgba(255,255,255,0.05);
 }
 
 .character-card:active {
   transform: scale(0.96);
+}
+
+@media (hover: hover) {
+  .character-card:hover {
+    transform: translateY(-4px) scale(1.01);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.3);
+  }
+
+  .character-card.favorite:hover {
+    box-shadow: 0 12px 24px rgba(var(--vk-blue-rgb, 81, 129, 184), 0.25);
+    border-color: rgba(var(--vk-blue-rgb, 81, 129, 184), 0.8);
+  }
+
+  .character-card:hover .card-edit-btn {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+    opacity: 1;
+    transform: scale(1.1);
+  }
+
+  .character-card:hover .card-image {
+    transform: scale(1.05);
+  }
+  
+  .character-card:hover .card-token-badge {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+  }
 }
 
 .character-card.favorite {
@@ -827,6 +886,7 @@ defineExpose({ onAddCharacter, loadCharacters });
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.5s ease;
 }
 
 .card-placeholder {
@@ -930,7 +990,8 @@ defineExpose({ onAddCharacter, loadCharacters });
   border-radius: 50%;
   background: rgba(0,0,0,0.5);
   backdrop-filter: blur(4px);
-  transition: background 0.2s;
+  transition: background 0.2s, opacity 0.2s, transform 0.2s, box-shadow 0.2s;
+  opacity: 0.8;
 }
 
 .card-edit-btn:active {
@@ -958,6 +1019,7 @@ defineExpose({ onAddCharacter, loadCharacters });
   padding: 4px 8px;
   border-radius: 12px;
   pointer-events: none;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .card-token-badge svg {
