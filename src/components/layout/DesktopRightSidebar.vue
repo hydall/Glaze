@@ -1,13 +1,22 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch, defineAsyncComponent } from 'vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
 import MagicDrawer from '@/components/chat/MagicDrawer.vue';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
+import { sidebarState } from '@/core/states/sidebarState.js';
+
+const PresetView = defineAsyncComponent(() => import('@/views/PresetView.vue'));
+const ApiView = defineAsyncComponent(() => import('@/views/ApiView.vue'));
+const PersonasView = defineAsyncComponent(() => import('@/views/PersonasView.vue'));
+const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
+const RegexSheet = defineAsyncComponent(() => import('@/components/sheets/RegexSheet.vue'));
+const ToolsView = defineAsyncComponent(() => import('@/views/ToolsView.vue'));
 
 const props = defineProps({
     bottomSheetState: Object,
     sidebarState: Object,
-    activeChatCharObj: Object
+    activeChatCharObj: Object,
+    currentView: { type: String, default: '' }
 });
 
 const emit = defineEmits([
@@ -30,44 +39,136 @@ const emit = defineEmits([
 
 const { width: rightSidebarWidth, startResize: startRightResize } = useSidebarResizer('gz_right_sidebar_width', 300, 'right', 200, 800);
 
+const isChat = computed(() => props.currentView === 'view-chat');
 const hasSheet = computed(() => props.bottomSheetState.visible || props.sidebarState.isOccupied);
+
+// Active tool tracking
+const activeTool = ref(null);
+const activeToolRef = ref(null);
+
+const toolComponentMap = {
+    'view-presets': PresetView,
+    'view-api': ApiView,
+    'view-personas': PersonasView,
+    'view-lorebook': LorebookSheet,
+    'view-regex': RegexSheet,
+};
+
+const activeToolComponent = computed(() =>
+    activeTool.value ? toolComponentMap[activeTool.value] : null
+);
+
+// When the tool component mounts and ref becomes available, open it
+watch(activeToolRef, (ref) => {
+    if (ref && activeTool.value) {
+        ref.open();
+    }
+});
+
+// When the sheet closes (back button inside tool), clear activeTool
+watch(() => sidebarState.isOccupied, (occupied) => {
+    if (!occupied) activeTool.value = null;
+});
+
+// Clear activeTool when entering chat
+watch(isChat, (val) => {
+    if (val) activeTool.value = null;
+});
+
+function openTool(viewId) {
+    if (!toolComponentMap[viewId]) return;
+    if (activeTool.value === viewId) {
+        // Toggle off
+        activeTool.value = null;
+        return;
+    }
+    activeTool.value = viewId;
+    // ref.open() will be called by the watch above when component mounts
+}
+
+
 </script>
 
 <template>
-  <div class="desktop-sidebar-right" id="desktop-sidebar-container" :class="{ 'has-sheet': hasSheet }" :style="{ width: rightSidebarWidth + 'px', minWidth: rightSidebarWidth + 'px', maxWidth: rightSidebarWidth + 'px' }">
+  <div
+      class="desktop-sidebar-right"
+      id="desktop-sidebar-container"
+      :class="{
+          'has-sheet': hasSheet,
+          'tools-mode': !isChat,
+          'is-chat': isChat
+      }"
+      :style="{ width: rightSidebarWidth + 'px', minWidth: rightSidebarWidth + 'px', maxWidth: rightSidebarWidth + 'px' }"
+  >
       <div class="sidebar-drag-handle right-handle" @mousedown="startRightResize"></div>
-      
-      <MagicDrawer
-          :visible="true"
-          :sidebar-mode="true"
-          :icon-only="hasSheet"
-          :class="{ 'left-icon-strip': hasSheet }"
-          :active-char="activeChatCharObj"
-          @magic-notes="emit('magic-notes')"
-          @magic-context="emit('magic-context')"
-          @magic-summary="emit('magic-summary')"
-          @magic-sessions="emit('magic-sessions')"
-          @magic-stats="emit('magic-stats')"
-          @magic-impersonate="emit('magic-impersonate')"
-          @magic-char-card="emit('magic-char-card')"
-          @magic-api="emit('magic-api')"
-          @magic-presets="emit('magic-presets')"
-          @magic-lorebooks="emit('magic-lorebooks')"
-          @magic-memory-books="emit('magic-memory-books')"
-          @magic-regex="emit('magic-regex')"
-          @magic-image-gen="emit('magic-image-gen')"
-          @magic-glossary="emit('magic-glossary')"
-          @request-preview="() => {}"
-          @close="() => {}"
-      />
 
-      <div id="desktop-sidebar-content" v-show="hasSheet">
-          <BottomSheet
-              v-if="bottomSheetState.visible"
-              v-bind="bottomSheetState"
+      <!-- ── Chat mode: MagicDrawer icon strip + BottomSheet ── -->
+      <template v-if="isChat">
+          <MagicDrawer
+              :visible="true"
               :sidebar-mode="true"
-              @close="emit('closeBottomSheet')"
+              :icon-only="hasSheet"
+              :class="{ 'left-icon-strip': hasSheet }"
+              :active-char="activeChatCharObj"
+              @magic-notes="emit('magic-notes')"
+              @magic-context="emit('magic-context')"
+              @magic-summary="emit('magic-summary')"
+              @magic-sessions="emit('magic-sessions')"
+              @magic-stats="emit('magic-stats')"
+              @magic-impersonate="emit('magic-impersonate')"
+              @magic-char-card="emit('magic-char-card')"
+              @magic-api="emit('magic-api')"
+              @magic-presets="emit('magic-presets')"
+              @magic-lorebooks="emit('magic-lorebooks')"
+              @magic-memory-books="emit('magic-memory-books')"
+              @magic-regex="emit('magic-regex')"
+              @magic-image-gen="emit('magic-image-gen')"
+              @magic-glossary="emit('magic-glossary')"
+              @request-preview="() => {}"
+              @close="() => {}"
           />
-      </div>
+
+          <div id="desktop-sidebar-content" v-show="hasSheet">
+              <BottomSheet
+                  v-if="bottomSheetState.visible"
+                  v-bind="bottomSheetState"
+                  :sidebar-mode="true"
+                  @close="emit('closeBottomSheet')"
+              />
+          </div>
+      </template>
+
+      <!-- ── Non-chat mode: Tools icon strip + ToolsView + tool sheets ── -->
+      <template v-else>
+          <!-- ToolsView background -->
+          <div class="tools-view-bg">
+              <ToolsView :sidebar-mode="true" @tool-select="openTool" />
+          </div>
+
+          <!-- Sheet container: tool components teleport SheetView here -->
+          <div id="desktop-sidebar-content" :class="{ occupied: sidebarState.isOccupied }"></div>
+
+          <!-- Active tool component (one at a time, mounts when tool is selected) -->
+          <component
+              :is="activeToolComponent"
+              v-if="activeToolComponent"
+              ref="activeToolRef"
+          />
+      </template>
   </div>
 </template>
+
+<style scoped>
+.tools-view-bg {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-left: 0;
+    position: relative;
+    z-index: 1;
+}
+
+.tools-view-bg :deep(.view) {
+    padding-bottom: 8px !important;
+}
+</style>

@@ -583,7 +583,7 @@ defineExpose({
     position: relative !important;
     top: auto !important;
     left: auto !important;
-    height: var(--header-height, 56px);
+    height: 56px;
     display: flex;
     align-items: center;
     padding: 0 16px !important;

@@ -942,6 +942,7 @@ watch(currentView, (newVal, oldVal) => {
           :bottom-sheet-state="bottomSheetState"
           :sidebar-state="sidebarState"
           :active-chat-char-obj="activeChatCharObj"
+          :current-view="currentView"
           @closeBottomSheet="closeBottomSheet"
           @magic-notes="chatViewRef?.openAuthorsNoteSheet()"
           @magic-context="chatViewRef?.openContextSheet()"
@@ -959,16 +960,17 @@ watch(currentView, (newVal, oldVal) => {
           @magic-glossary="chatViewRef?.openGlossarySheet()"
       />
 
+      <!-- Floating Action Button: Positioned relative to grid on Desktop -->
+      <Transition name="fab">
+          <div v-if="fabConfig" class="desktop-fab-container">
+            <FabButton :text="fabConfig.text" @click="fabConfig.action">
+                <template #icon>
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                </template>
+            </FabButton>
+          </div>
+      </Transition>
     </div>
-
-    <!-- Floating Action Button -->
-    <Transition name="fab">
-        <FabButton v-if="fabConfig" :text="fabConfig.text" @click="fabConfig.action">
-            <template #icon>
-                <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-            </template>
-        </FabButton>
-    </Transition>
 
     <!-- Bottom Navigation Bar (mobile only — desktop uses left sidebar) -->
     <div v-if="!isDesktop" class="footer-container" ref="footerContainer">
@@ -1025,6 +1027,21 @@ watch(currentView, (newVal, oldVal) => {
 </template>
 
 <style>
+.desktop-mode .desktop-fab-container {
+    grid-column: 2;
+    grid-row: 1;
+    position: relative;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.desktop-mode .desktop-fab-container .fab-add {
+    position: absolute !important;
+    bottom: 24px;
+    right: 24px;
+    pointer-events: auto;
+}
+
 .header-container {
     position: absolute;
     top: 0;

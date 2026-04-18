@@ -968,7 +968,7 @@ onBeforeUnmount(() => {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     position: relative !important;
-    padding-top: calc(var(--header-height, 56px) + 8px);
+    padding-top: calc(56px + 8px);
 }
 
 .bottom-sheet-content.is-sidebar .sheet-scroll-container {

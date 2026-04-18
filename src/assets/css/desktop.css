@@ -368,6 +368,19 @@
     height: 100%;
 }
 
+/* Non-chat sidebar: #desktop-sidebar-content overlays ToolsView background */
+.desktop-sidebar-right.tools-mode #desktop-sidebar-content {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    flex: none;
+    pointer-events: none;
+}
+
+.desktop-sidebar-right.tools-mode #desktop-sidebar-content.occupied {
+    pointer-events: auto;
+}
+
 /* ---- MagicDrawer sidebar mode ---- */
 .magic-drawer-sidebar {
     position: relative !important;
@@ -397,7 +410,7 @@
     bottom: 0 !important;
     width: 60px !important;
     height: 100% !important;
-    padding-top: var(--header-height, 56px) !important;
+    padding-top: 56px !important;
     z-index: 12000 !important;
     /* Defeat the 11000 z-index from SheetView */
     border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
@@ -411,10 +424,10 @@
     /* Re-enable clicks for the icon list */
 }
 
-/* Ensure padding for content when icon strip is visible */
-.desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar .sheet-view-body,
-.desktop-sidebar-right.has-sheet .bottom-sheet-content.is-sidebar .sheet-scroll-container,
-.desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar .sc-sheet-tabs {
+/* Ensure padding for content when icon strip is visible (Chat Mode Only) */
+.desktop-sidebar-right.is-chat.has-sheet .sheet-view-content.is-sidebar .sheet-view-body,
+.desktop-sidebar-right.is-chat.has-sheet .bottom-sheet-content.is-sidebar .sheet-scroll-container,
+.desktop-sidebar-right.is-chat.has-sheet .sheet-view-content.is-sidebar .sc-sheet-tabs {
     padding-left: 60px !important;
 }
 

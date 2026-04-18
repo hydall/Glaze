@@ -8,6 +8,11 @@ import { presetState, DEFAULT_PRESETS } from '@/core/states/presetState.js';
 import { lorebookState } from '@/core/states/lorebookState.js';
 import { activePersona } from '@/core/states/personaState.js';
 
+const props = defineProps({
+    sidebarMode: { type: Boolean, default: false }
+});
+const emit = defineEmits(['tool-select']);
+
 const apiStatus = ref('idle');
 const activeApiPreset = ref(null);
 const regexCount = ref(0);
@@ -77,7 +82,11 @@ async function checkConnection() {
 }
 
 const openView = (viewId) => {
-    window.dispatchEvent(new CustomEvent('navigate-to', { detail: viewId }));
+    if (props.sidebarMode) {
+        emit('tool-select', viewId);
+    } else {
+        window.dispatchEvent(new CustomEvent('navigate-to', { detail: viewId }));
+    }
 };
 
 const getPresetIcon = (endpoint) => {
@@ -138,291 +147,373 @@ const tools = computed(() => [
 </script>
 
 <template>
-    <div id="view-tools" class="view active-view">
-        <div 
-            v-for="tool in tools"
-            :key="tool.id"
-            class="menu-group"
-            style="margin-bottom: 12px;"
-        >
+    <div id="view-tools" class="view active-view dashboard-view">
+        <div class="tools-header">
+            {{ t('tab_tools') || 'Tools' }}
+        </div>
+        
+        <div class="dashboard-content">
+            <!-- Hero Cards (Personas & Presets) -->
+            <div class="dashboard-hero-section">
             <div
-                class="menu-item tool-card"
-                :class="{ 'has-bg': tool.backgroundImage, 'is-large': tool.isLarge, 'is-persona': tool.id === 'view-personas' }"
-                :style="tool.backgroundImage ? `background-image: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.7)), url(${tool.backgroundImage}); background-size: cover; background-position: center; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; overflow: hidden;` : ''"
+                v-for="tool in tools.filter(t => t.isLarge)"
+                :key="tool.id"
+                class="dashboard-hero-card"
+                :class="{ 'is-persona': tool.id === 'view-personas', 'has-bg': tool.backgroundImage }"
                 @click="openView(tool.id)"
             >
-                <!-- Custom Persona Avatar Block -->
+                <!-- HERO: Persona -->
                 <template v-if="tool.id === 'view-personas'">
-                    <div class="avatar-wrapper persona-avatar-box">
-                        <div class="avatar-header-overlay">{{ tool.label }}</div>
-                        <img v-if="tool.image" :src="tool.image" class="avatar-img">
-                        <div v-else class="avatar-placeholder">
+                    <div class="hero-avatar-bg">
+                        <img v-if="tool.image" :src="tool.image" class="avatar-layer">
+                        <div v-else class="avatar-placeholder-layer">
                             {{ (tool.sublabel || "?")[0].toUpperCase() }}
                         </div>
-                        
-                        <div class="persona-details-overlay">
-                            <div class="persona-name-row">
-                                <span class="persona-name">{{ tool.sublabel }}</span>
-                                <span v-if="tool.tokens" class="tool-tokens persona-tokens">{{ tool.tokens }}t</span>
+                    </div>
+                    <div class="hero-overlay">
+                        <div class="hero-label">{{ tool.label }}</div>
+                        <div class="hero-info">
+                            <div class="hero-title-row">
+                                <span class="hero-title">{{ tool.sublabel }}</span>
+                                <span v-if="tool.tokens" class="hero-badge">{{ tool.tokens }}t</span>
                             </div>
-                            <div class="tool-desc persona-desc" v-if="tool.desc">{{ tool.desc }}</div>
+                            <div class="hero-desc" v-if="tool.desc">{{ tool.desc }}</div>
                         </div>
                     </div>
                 </template>
 
-                <!-- Default Tool Card Layout -->
-                <template v-else>
-                    <div class="tool-icon-wrapper" :style="tool.backgroundImage ? 'background: rgba(255,255,255,0.1);' : ''">
-                        <img v-if="tool.image" :src="tool.image" class="tool-image"/>
-                        <span v-else-if="tool.imageIcon" class="tool-image-icon">
-                            <img :src="tool.imageIcon" style="width:100%;height:100%;object-fit:contain;border-radius:4px;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
-                            <svg style="display:none;" class="menu-icon" viewBox="0 0 24 24"><path :d="tool.icon"/></svg>
-                        </span>
-                        <svg v-else class="menu-icon" viewBox="0 0 24 24" :style="tool.backgroundImage ? 'fill: #fff;' : ''">
-                            <path :d="tool.icon"/>
-                        </svg>
-                        
-                        <div v-if="tool.status" :class="['status-dot', tool.status]"></div>
+                <!-- HERO: With Custom Background (Preset) -->
+                <template v-else-if="tool.backgroundImage">
+                    <div class="hero-avatar-bg">
+                        <div class="avatar-layer" :style="`background-image: url(${tool.backgroundImage}); background-size: cover; background-position: center;`"></div>
                     </div>
-                    
-                    <div class="tool-info">
-                        <div class="tool-title" :style="tool.backgroundImage ? 'color: #fff;' : ''">
-                            {{ tool.label }}
-                            <span v-if="tool.tokens !== undefined" class="tool-tokens" :style="tool.backgroundImage ? 'background: rgba(255,255,255,0.2); color: #fff;' : ''">{{ tool.tokens }}t</span>
+                    <div class="hero-overlay">
+                        <div class="hero-header">
+                            <div class="hero-icon-box" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);">
+                                <svg class="hero-icon" viewBox="0 0 24 24"><path :d="tool.icon"/></svg>
+                            </div>
+                            <div class="hero-label">{{ tool.label }}</div>
                         </div>
-                        <div class="tool-sublabel" v-if="tool.sublabel" :style="tool.backgroundImage ? 'color: #90caf9;' : ''">{{ tool.sublabel }}</div>
-                        <div class="tool-desc" v-if="tool.desc" :style="tool.backgroundImage ? 'color: rgba(255,255,255,0.7);' : ''">{{ tool.desc }}</div>
+                        <div class="hero-info">
+                            <div class="hero-title-row">
+                                <span class="hero-title">{{ tool.sublabel }}</span>
+                                <span v-if="tool.tokens !== undefined" class="hero-badge">{{ tool.tokens }}t</span>
+                            </div>
+                            <div class="hero-desc" v-if="tool.desc">{{ tool.desc }}</div>
+                        </div>
                     </div>
-                    
-                    <svg class="menu-arrow" viewBox="0 0 24 24" :style="tool.backgroundImage ? 'stroke: #fff; opacity: 0.8;' : ''">
-                        <path d="M9 18l6-6-6-6"/>
-                    </svg>
                 </template>
+
+                <!-- HERO: Default Solid/Gradient -->
+                <template v-else>
+                    <div class="hero-overlay default-hero">
+                        <div class="hero-header">
+                            <div class="hero-icon-box">
+                                <svg class="hero-icon" viewBox="0 0 24 24"><path :d="tool.icon"/></svg>
+                            </div>
+                            <div class="hero-label">{{ tool.label }}</div>
+                        </div>
+                        <div class="hero-info">
+                            <div class="hero-title-row">
+                                <span class="hero-title">{{ tool.sublabel }}</span>
+                                <span v-if="tool.tokens !== undefined" class="hero-badge">{{ tool.tokens }}t</span>
+                            </div>
+                            <div class="hero-desc" v-if="tool.desc">{{ tool.desc }}</div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Grid Cards (API, Lorebook, Regex) -->
+        <div class="dashboard-grid">
+            <div
+                v-for="tool in tools.filter(t => !t.isLarge)"
+                :key="tool.id"
+                class="dashboard-tile"
+                @click="openView(tool.id)"
+            >
+                <div class="tile-icon-wrapper">
+                    <img v-if="tool.image" :src="tool.image" class="tile-image"/>
+                    <span v-else-if="tool.imageIcon" class="tile-image-icon">
+                        <img :src="tool.imageIcon" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+                        <svg style="display:none;" class="tile-icon" viewBox="0 0 24 24"><path :d="tool.icon"/></svg>
+                    </span>
+                    <svg v-else class="tile-icon" viewBox="0 0 24 24"><path :d="tool.icon"/></svg>
+                    <div v-if="tool.status" :class="['status-dot', tool.status]"></div>
+                </div>
+                
+                <div class="tile-content">
+                    <div class="tile-label">{{ tool.label }}</div>
+                    <div class="tile-sublabel" v-if="tool.sublabel">{{ tool.sublabel }}</div>
+                </div>
+            </div>
             </div>
         </div>
     </div>
 </template>
 
 <style scoped>
-.tool-card {
-    align-items: center;
-    padding: 12px 16px;
-    height: auto;
-    min-height: 56px;
+.dashboard-view {
+    padding: 0 !important;
+    display: flex;
+    flex-direction: column;
+    background: transparent;
 }
 
-.tool-card.is-large {
-    min-height: 100px;
-    padding: 20px 16px;
-}
-
-.tool-card.is-persona {
-    padding: 0;
-    border: none;
-    background: transparent !important;
-    overflow: hidden;
-    border-radius: 20px;
-}
-
-/* Avatar Block Styles from GenericEditor */
-.avatar-wrapper {
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    position: relative;
-    cursor: pointer;
-    background-color: var(--bg-gray, #222);
-    border-radius: 20px;
-    overflow: hidden;
-}
-
-.avatar-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.avatar-placeholder {
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(135deg, #66ccff 0%, #7996ce 100%);
+.tools-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: 56px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    color: white;
-    font-weight: bold;
-    font-size: 6em;
+    padding: 0 16px;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-color, #fff);
+    background: transparent;
 }
 
-.avatar-header-overlay {
+.tools-header::before {
+    content: '';
     position: absolute;
     top: 0;
     left: 0;
-    width: 100%;
-    padding: 14px 16px 30px 16px;
-    font-size: 14px;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.9);
-    letter-spacing: 0.5px;
-    z-index: 2;
-    background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
-    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    right: 0;
+    bottom: -12px; /* Extend mask slightly below text to match SheetView */
+    background: linear-gradient(to bottom, 
+        rgba(var(--ui-bg-rgb, 18, 18, 18), 0.85) 0%, 
+        rgba(var(--ui-bg-rgb, 18, 18, 18), 0) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 40%, 
+        transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 40%, 
+        transparent 100%
+    );
+    z-index: -1;
     pointer-events: none;
 }
 
-/* Persona Details Overlay */
-.persona-details-overlay {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    padding: 30px 16px 16px 16px;
-    background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 60%, transparent 100%);
+.dashboard-content {
+    padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    pointer-events: none;
+    gap: 16px;
 }
 
-.persona-name-row {
+/* Hero Section */
+.dashboard-hero-section {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    gap: 16px;
 }
 
-.persona-name {
-    font-size: 18px;
-    font-weight: 600;
-    color: #fff;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
-}
-
-.persona-tokens {
-    background: rgba(255, 255, 255, 0.2) !important;
-    color: #fff !important;
-}
-
-.persona-desc {
-    color: rgba(255, 255, 255, 0.8) !important;
-    white-space: normal !important;
-    display: -webkit-box !important;
-    -webkit-line-clamp: 2 !important;
-    -webkit-box-orient: vertical !important;
-    font-size: 13px !important;
-    line-height: 1.4 !important;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-}
-
-.tool-card.is-large .tool-desc {
-    white-space: normal;
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    margin-top: 6px;
-    line-height: 1.4;
-}
-
-.tool-icon-wrapper {
+.dashboard-hero-card {
     position: relative;
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    flex-shrink: 0;
-    margin-right: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-root, #121212);
-}
-
-.tool-image {
     width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 8px;
-}
-
-.tool-image-icon {
-    width: 20px;
-    height: 20px;
+    border-radius: 20px;
+    overflow: hidden;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s, border-color 0.2s;
+    min-height: 140px;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
 }
 
-.menu-icon {
-    width: 20px;
-    height: 20px;
-    fill: var(--text-gray);
+.dashboard-hero-card.is-persona {
+    aspect-ratio: 1 / 1;
 }
 
-.status-dot {
+.dashboard-hero-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.dashboard-hero-card:active {
+    transform: translateY(1px);
+}
+
+.hero-avatar-bg {
     position: absolute;
-    bottom: -2px;
-    right: -2px;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: 2px solid var(--bg-item);
-    background: #ff3b30;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 1;
 }
-.status-dot.connected { background: #34c759; }
-.status-dot.connecting { background: #ff9500; }
-.status-dot.idle { background: var(--text-gray); }
 
-.tool-info {
+.avatar-layer {
+    width: 100%; height: 100%;
+    object-fit: cover;
+}
+
+.avatar-placeholder-layer {
+    width: 100%; height: 100%;
+    background: linear-gradient(135deg, #66ccff 0%, #7996ce 100%);
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.8);
+    font-weight: 800; font-size: 6em;
+}
+
+.hero-overlay {
+    position: relative;
+    z-index: 2;
     flex: 1;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    min-width: 0;
+    justify-content: space-between;
+    padding: 20px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.8) 100%);
 }
 
-.tool-title {
-    font-size: 15px;
-    font-weight: 500;
+.hero-overlay.default-hero {
+    background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%);
+}
+
+.hero-label {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+
+.hero-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
 }
 
-.tool-tokens {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-gray);
-    background: rgba(128, 128, 128, 0.15);
-    padding: 2px 6px;
+.hero-icon-box {
+    width: 36px; height: 36px;
+    background: rgba(255, 255, 255, 0.1);
     border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(10px);
 }
 
-.tool-sublabel {
-    font-size: 13px;
-    color: var(--vk-blue, #528bcc);
-    margin-top: 2px;
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+.hero-icon {
+    width: 20px; height: 20px;
+    fill: #fff;
 }
 
-.tool-desc {
-    font-size: 12px;
-    color: var(--text-gray);
-    margin-top: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+.hero-info {
+    margin-top: 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
-.menu-arrow {
-    width: 18px;
-    height: 18px;
-    stroke: var(--text-gray);
-    stroke-width: 2;
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    opacity: 0.5;
+.hero-title-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+
+.hero-title {
+    font-size: 20px; font-weight: 600; color: #fff;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.hero-badge {
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(4px);
+    color: #fff;
+    font-size: 12px; font-weight: 600;
+    padding: 4px 8px; border-radius: 12px;
     flex-shrink: 0;
+}
+
+.hero-desc {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px; line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+/* Grid Layout */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-auto-rows: 1fr;
+    gap: 12px;
+}
+
+.dashboard-tile {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 16px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 16px;
+    transition: background 0.2s, transform 0.2s, border-color 0.2s;
+}
+
+.dashboard-tile:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px);
+}
+
+.dashboard-tile:active {
+    transform: translateY(0);
+}
+
+.tile-icon-wrapper {
+    position: relative;
+    width: 42px; height: 42px;
+    background: var(--bg-root, #121212);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+}
+
+.tile-icon {
+    width: 22px; height: 22px;
+    fill: var(--text-gray);
+}
+
+.tile-image-icon {
+    width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+}
+
+.tile-image-icon img {
+    width: 100%; height: 100%; border-radius: 4px; object-fit: contain;
+}
+
+.status-dot {
+    position: absolute; bottom: -2px; right: -2px;
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid var(--bg-item); background: #ff3b30;
+    box-shadow: 0 0 8px rgba(255, 59, 48, 0.6);
+}
+
+.status-dot.connected { background: #34c759; box-shadow: 0 0 8px rgba(52, 199, 89, 0.6); }
+.status-dot.connecting { background: #ff9500; box-shadow: 0 0 8px rgba(255, 149, 0, 0.6); }
+.status-dot.idle { background: var(--text-gray); box-shadow: none; }
+
+.tile-content {
+    display: flex; flex-direction: column; gap: 4px;
+}
+
+.tile-label {
+    font-size: 14px; font-weight: 600; color: var(--text-color, #fff);
+}
+
+.tile-sublabel {
+    font-size: 12px; color: var(--vk-blue, #528bcc); font-weight: 500;
+    white-space: normal;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 </style>
