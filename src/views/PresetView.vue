@@ -36,7 +36,8 @@ const sheet = ref(null);
 const props = defineProps({
     activeChatChar: { type: Object, default: null },
     chatHistory: { type: Array, default: () => [] },
-    isGenerating: { type: Boolean, default: false }
+    isGenerating: { type: Boolean, default: false },
+    viewMode: { type: Boolean, default: false }
 });
 
 const effectivePersona = computed(() => getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId));
@@ -1169,9 +1170,13 @@ function updateHeaderState() {
 function goBackFromEditor() {
     if (isEditingBlock.value) {
         closeBlockEditor();
-    } else {
+    } else if (editingPresetId.value) {
         editingPresetId.value = null;
         updateHeaderState();
+    } else if (props.viewMode) {
+        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
+    } else {
+        close();
     }
 }
 
@@ -2032,7 +2037,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack" :actions="headerState.actions" :z-index="11500" @back="goBackFromEditor" @close="onSheetClose">
+    <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack || viewMode" :actions="headerState.actions" :z-index="11500" :view-mode="viewMode" @back="goBackFromEditor" @close="onSheetClose">
         <div class="gen-sheet-body" ref="genSheetBodyRef">
             <Transition :name="navDirection === 'forward' ? 'ps-fwd' : 'ps-back'" mode="out-in" @before-leave="onTransitionBeforeLeave" @before-enter="onTransitionBeforeEnter">
         <!-- ═══ SELECTOR LIST VIEW ═══ -->

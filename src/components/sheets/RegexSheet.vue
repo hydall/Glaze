@@ -13,7 +13,8 @@ import HelpTip from '@/components/ui/HelpTip.vue';
 const props = defineProps({
     activeChatChar: { type: Object, default: null },
     insidePreset: { type: Boolean, default: false },
-    zIndex: { type: Number, default: 11000 }
+    zIndex: { type: Number, default: 11000 },
+    viewMode: { type: Boolean, default: false }
 });
 
 const sheet = ref(null);
@@ -101,6 +102,8 @@ function goBack() {
         saveScripts();
         activeScript.value = null;
         isPresetScript.value = false;
+    } else if (props.viewMode) {
+        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
     } else {
         close();
     }
@@ -399,7 +402,7 @@ defineExpose({ open, close });
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="sheetTitle" :show-back="showBackBtn" :actions="sheetActions" :z-index="zIndex" @back="goBack" @close="handleSheetClose">
+    <SheetView ref="sheet" :title="sheetTitle" :show-back="showBackBtn || viewMode" :actions="sheetActions" :z-index="zIndex" :view-mode="viewMode" @back="goBack" @close="handleSheetClose">
         <template #header-title>
             <HelpTip term="regex" />
         </template>

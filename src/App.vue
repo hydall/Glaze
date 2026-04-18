@@ -30,6 +30,9 @@ const SyncSheet = defineAsyncComponent(() => import('@/components/sheets/SyncShe
 const ConflictSheet = defineAsyncComponent(() => import('@/components/sheets/ConflictSheet.vue'));
 const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/GlossarySheet.vue'));
 const DragDropOverlay = defineAsyncComponent(() => import('@/components/ui/DragDropOverlay.vue'));
+const ToolsView = defineAsyncComponent(() => import('@/views/ToolsView.vue'));
+const PersonasView = defineAsyncComponent(() => import('@/views/PersonasView.vue'));
+const RegexSheet = defineAsyncComponent(() => import('@/components/sheets/RegexSheet.vue'));
 import { Capacitor } from '@capacitor/core';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { initSettings } from '@/core/config/APISettings.js';
@@ -453,7 +456,8 @@ const headerEditingIndex = computed(() => {
 });
 
 const showLogo = computed(() => {
-    return !['view-chat', 'view-character-edit', 'view-persona-edit', 'view-theme-settings', 'view-settings'].includes(currentView.value) && !isHeaderEditorMode.value;
+    return !['view-chat', 'view-character-edit', 'view-persona-edit', 'view-theme-settings', 'view-settings',
+             'view-tools', 'view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas'].includes(currentView.value) && !isHeaderEditorMode.value;
 });
 
 const updateLayoutMetrics = () => {
@@ -794,6 +798,47 @@ watch(currentView, () => {
           <SettingsView 
               class="view active-view view-gray-bg"
               v-else-if="currentView === 'view-settings'"
+          />
+
+          <!-- VIEW: TOOLS HUB -->
+          <ToolsView
+              class="view active-view view-gray-bg"
+              v-else-if="currentView === 'view-tools'"
+          />
+
+          <!-- VIEW: API (fullscreen) -->
+          <ApiView
+              class="view active-view view-gray-bg"
+              v-else-if="currentView === 'view-api'"
+              :view-mode="true"
+          />
+
+          <!-- VIEW: PRESETS (fullscreen) -->
+          <PresetView
+              class="view active-view view-gray-bg"
+              v-else-if="currentView === 'view-presets'"
+              :view-mode="true"
+          />
+
+          <!-- VIEW: LOREBOOK (fullscreen) -->
+          <LorebookSheet
+              class="view active-view view-gray-bg"
+              v-else-if="currentView === 'view-lorebook'"
+              :view-mode="true"
+          />
+
+          <!-- VIEW: REGEX (fullscreen) -->
+          <RegexSheet
+              class="view active-view view-gray-bg"
+              v-else-if="currentView === 'view-regex'"
+              :view-mode="true"
+          />
+
+          <!-- VIEW: PERSONAS (fullscreen) -->
+          <PersonasView
+              class="view active-view view-gray-bg"
+              v-else-if="currentView === 'view-personas'"
+              :view-mode="true"
           />
 
           <!-- VIEW 5: CHAT -->

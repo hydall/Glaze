@@ -12,6 +12,10 @@ import { showToast } from '@/core/states/toastState.js';
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
+const props = defineProps({
+    viewMode: { type: Boolean, default: false }
+});
+
 const currentView = ref('list'); // list, entries, edit_entry
 const activeLorebook = ref(null);
 const activeEntry = ref(null);
@@ -523,6 +527,8 @@ function goBack() {
     } else if (currentView.value === 'entries') {
         currentView.value = 'list';
         activeLorebook.value = null;
+    } else if (props.viewMode) {
+        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
     } else {
         close();
     }
@@ -676,7 +682,7 @@ defineExpose({ open, openEntry, close, openLorebook });
 </script>
 
 <template>
-    <SheetView ref="sheet" :z-index="11000" :title="sheetTitle" :show-back="showBackBtn" :actions="sheetActions" @back="goBack" @close="flushLorebookSave">
+    <SheetView ref="sheet" :z-index="11000" :title="sheetTitle" :show-back="showBackBtn || viewMode" :actions="sheetActions" :view-mode="viewMode" @back="goBack" @close="flushLorebookSave">
         <template #header-title>
             <div v-if="currentView === 'list'" class="clickable-no-drag" style="display:flex; align-items:center;">
                 <HelpTip term="lorebook" />

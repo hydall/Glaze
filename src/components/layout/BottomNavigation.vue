@@ -56,6 +56,13 @@ onUnmounted(() => {
       </div>
 
 
+      <div class="tab-btn" :class="{ active: ['view-tools', 'view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas'].includes(currentView) }" @click="$emit('update:currentView', 'view-tools')">
+          <svg class="tab-icon" viewBox="0 0 24 24">
+              <path d="m21.71 20.29l-1.42 1.42a1 1 0 0 1-1.41 0L7 9.85A3.81 3.81 0 0 1 6 10a4 4 0 0 1-3.78-5.3l2.54 2.54l.53-.53l1.42-1.42l.53-.53L4.7 2.22A4 4 0 0 1 10 6a3.81 3.81 0 0 1-.15 1l11.86 11.88a1 1 0 0 1 0 1.41M2.29 18.88a1 1 0 0 0 0 1.41l1.42 1.42a1 1 0 0 0 1.41 0l5.47-5.46l-2.83-2.83M20 2l-4 2v2l-2.17 2.17l2 2L18 8h2l2-4Z" fill="currentColor"/>
+          </svg>
+          <span class="tab-label">{{ t('tab_tools') || 'Tools' }}</span>
+      </div>
+
       <div class="tab-btn" :class="{ active: ['view-menu', 'view-settings', 'view-theme-settings', 'view-glossary'].includes(currentView) }" @click="$emit('update:currentView', 'view-menu')">
           <svg class="tab-icon" viewBox="0 0 24 24">
               <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>

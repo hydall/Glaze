@@ -206,6 +206,14 @@ function setupSettingsHeader(title) {
     toggleTabbar(true);
 }
 
+function setupSubmenuHeader(title, targetView) {
+    clearHeader('default');
+    state.title = title;
+    state.showBack = true;
+    state.onBack = () => window.dispatchEvent(new CustomEvent('navigate-to', { detail: targetView }));
+    toggleTabbar(true);
+}
+
 function updateHeader() {
     const viewId = props.currentView;
     if (viewId === 'view-chat') return; // Chat module handles its own header
@@ -218,7 +226,13 @@ function updateHeader() {
         'view-menu': 'tab_more',
         'view-character-edit': 'header_editor',
         'view-theme-settings': 'header_theme_settings',
-        'view-settings': 'section_settings'
+        'view-settings': 'section_settings',
+        'view-tools': 'tab_tools',
+        'view-api': 'tab_api',
+        'view-presets': 'tab_presets',
+        'view-lorebook': 'menu_lorebooks',
+        'view-regex': 'menu_regex',
+        'view-personas': 'tab_personas'
     };
     
     const key = titleKeys[viewId];
@@ -235,6 +249,10 @@ function updateHeader() {
         setupThemeSettingsHeader(title);
     } else if (viewId === 'view-settings') {
         setupSettingsHeader(title);
+    } else if (viewId === 'view-tools') {
+        setupDefaultHeader(title, false);
+    } else if (['view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas'].includes(viewId)) {
+        setupSubmenuHeader(title, 'view-tools');
     } else if (viewId === 'view-character-edit') {
         const isNew = props.editingIndex === -1;
         const tr = translations[currentLang.value] || {};

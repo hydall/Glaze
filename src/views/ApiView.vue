@@ -1,5 +1,17 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+
+const props = defineProps({
+    viewMode: { type: Boolean, default: false }
+});
+
+function handleBack() {
+    if (props.viewMode) {
+        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
+    } else {
+        sheet.value?.close();
+    }
+}
 import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getBlacklistedProvider } from '@/core/config/APISettings.js';
 import { getEmbeddingConfig, saveEmbeddingSetting, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { testEmbeddingConnection } from '@/core/services/embeddingService.js';
@@ -516,7 +528,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="headerState.title">
+    <SheetView ref="sheet" :title="headerState.title" :view-mode="viewMode" @back="handleBack">
         <div class="gen-sheet-body">
                 <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
                     <div class="preset-selector" @click="openApiPresetSelector">
