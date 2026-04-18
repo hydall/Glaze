@@ -4916,7 +4916,7 @@ onUnmounted(() => {
             :memory-book="currentMemoryBookData"
             :current-messages="currentMessages"
             :character-name="activeChatChar?.name || 'Character'"
-            :session-id="activeChatChar?.sessionId || ''"
+            :session-id="String(activeChatChar?.sessionId || '')"
             :memory-draft-state="memoryDraftState"
             :pending-memory-message-ids="pendingMemoryMessageIds"
             @close="() => {}"

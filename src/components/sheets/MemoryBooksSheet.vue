@@ -20,7 +20,7 @@ const props = defineProps({
     default: ''
   },
   sessionId: {
-    type: String,
+    type: [String, Number],
     default: ''
   },
   memoryDraftState: {
