@@ -6,7 +6,7 @@ import { formatText } from '@/utils/textFormatter.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { translations, pluralize } from '@/utils/i18n.js';
 import { currentLang, dialogGrouping } from '@/core/config/APPSettings.js';
-import { attachLongPress } from '@/core/services/ui.js';
+import { attachLongPress, attachHoverGlow } from '@/core/services/ui.js';
 import { getChatData, createNewSession, deleteSession, renameSession } from '@/utils/sessions.js';
 import { importSillyTavernChat, exportSillyTavernChat, exportGlazeChat, pickChatFile } from '@/core/services/chatImporter.js';
 import { allPersonas, loadPersonas } from '@/core/states/personaState.js';
@@ -159,6 +159,14 @@ const vLongPress = {
     mounted: (el, binding) => {
         const check = attachLongPress(el, binding.value);
         el._checkLongPress = check;
+    }
+};
+
+const vHoverGlow = {
+    mounted: (el) => {
+        if (window.innerWidth >= 600) {
+            attachHoverGlow(el);
+        }
     }
 };
 
@@ -504,9 +512,8 @@ onUnmounted(() => {
 <template>
   <div class="view-content-wrapper">
       <div class="list-container">
-          <!-- Flat list mode -->
           <template v-if="!dialogGrouping">
-              <div v-for="chat in filteredChats" :key="chat.id + '_' + chat.sessionId" class="list-item" :class="{ unread: unread[chat.id] && chat.isCurrent }" v-long-press="() => openActions(chat)" @click="handleItemClick($event, chat)" @contextmenu.prevent="openActions(chat)">
+              <div v-for="chat in filteredChats" :key="chat.id + '_' + chat.sessionId" class="list-item" :class="{ unread: unread[chat.id] && chat.isCurrent }" v-long-press="() => openActions(chat)" v-hover-glow @click="handleItemClick($event, chat)" @contextmenu.prevent="openActions(chat)">
                 <div class="avatar">
                     <img v-if="chat.thumbnail || chat.avatar" :src="getAvatarUrl(chat.thumbnail || chat.avatar)" :alt="chat.name" loading="lazy">
                     <div v-else class="avatar-placeholder" :style="{ backgroundColor: chat.color || '#66ccff' }">{{ chat.name && chat.name[0] ? chat.name[0].toUpperCase() : '?' }}</div>
@@ -530,7 +537,7 @@ onUnmounted(() => {
           <template v-else>
               <div v-for="group in groupedChats" :key="'g_' + group.latest.id" class="group-block">
                 <!-- Character group header -->
-                <div class="list-item group-header" :class="{ unread: unread[group.latest.id] && !expandedGroups.has(group.latest.id) }" v-long-press="() => openActions(group.latest, 'header')" @click="handleHeaderClick($event, group.latest.id)" @contextmenu.prevent="openActions(group.latest, 'header')">
+                <div class="list-item group-header" :class="{ unread: unread[group.latest.id] && !expandedGroups.has(group.latest.id) }" v-long-press="() => openActions(group.latest, 'header')" v-hover-glow @click="handleHeaderClick($event, group.latest.id)" @contextmenu.prevent="openActions(group.latest, 'header')">
                     <div class="avatar">
                         <img v-if="group.latest.thumbnail || group.latest.avatar" :src="getAvatarUrl(group.latest.thumbnail || group.latest.avatar)" :alt="group.latest.name" loading="lazy">
                         <div v-else class="avatar-placeholder" :style="{ backgroundColor: group.latest.color || '#66ccff' }">{{ group.latest.name && group.latest.name[0] ? group.latest.name[0].toUpperCase() : '?' }}</div>
