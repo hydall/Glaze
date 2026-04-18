@@ -205,6 +205,9 @@ const lorebookSheet = ref(null);
 const regexSheet = ref(null);
 const activeChar = ref(null);
 const regexRevision = ref(0);
+// Memory draft abort controller (used by runBatchDraftGeneration and generateMemoryDraftForMessages)
+let memoryDraftAbortController = null;
+
 // Initialize Memory Books composable
 const {
     currentMemoryBookData,
