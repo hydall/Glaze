@@ -55,7 +55,7 @@ import { formatText, cleanText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/personaState.js';
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
-import { currentLang, chatPaddingLR } from '@/core/config/APPSettings.js';
+import { currentLang, chatPaddingLR, setChatPaddingLR } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { generateChatResponse, calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
 import { executeRequest } from '@/core/services/llmApi.js';
@@ -68,6 +68,7 @@ import { createNewSession as dbCreateSession, deleteSession as dbDeleteSession, 
 import { lorebookState, getActiveLorebooksForContext } from '@/core/states/lorebookState.js';
 import { presetState, getEffectivePreset, getEffectivePresetId } from '@/core/states/presetState.js';
 import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
+import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
 import { sendMessageNotification, clearMessageNotifications, startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
 import { addNotification } from '@/core/states/notificationsState.js';
 import { formatError } from '@/utils/errors.js';
@@ -186,6 +187,18 @@ const chatRootStyle = computed(() => {
     return {
         '--chat-padding-lr': (chatPaddingLR.value > 0) ? `${chatPaddingLR.value}px` : '0px'
     };
+});
+
+const { width: leftPaddingRef, startResize: startLeftPaddingResize } = useSidebarResizer('gz_chat_padding_lr', chatPaddingLR.value, 'left', 0, 800);
+const { width: rightPaddingRef, startResize: startRightPaddingResize } = useSidebarResizer('gz_chat_padding_lr', chatPaddingLR.value, 'right', 0, 800);
+
+watch(leftPaddingRef, (val) => {
+    setChatPaddingLR(val);
+    if (rightPaddingRef.value !== val) rightPaddingRef.value = val;
+});
+watch(rightPaddingRef, (val) => {
+    setChatPaddingLR(val);
+    if (leftPaddingRef.value !== val) leftPaddingRef.value = val;
 });
 
 const chatInputRef = ref(null);
@@ -4782,6 +4795,9 @@ onUnmounted(() => {
         <div v-if="isLoading" class="chat-loading-overlay">
             <div class="app-loader-spinner"></div>
         </div>
+
+        <div class="sidebar-drag-handle" v-if="!isAndroid" :style="{ left: 'calc(' + chatPaddingLR + 'px - 4px)' }" @mousedown="startLeftPaddingResize" style="position: absolute; z-index: 10;"></div>
+        <div class="sidebar-drag-handle" v-if="!isAndroid" :style="{ right: 'calc(' + chatPaddingLR + 'px - 4px)' }" @mousedown="startRightPaddingResize" style="position: absolute; z-index: 10;"></div>
 
         <div class="chat-container" id="chat-messages" ref="messagesContainer" :class="{ 'is-scrolling': isScrolling, 'visually-hidden': isLoading }" :style="isAndroid ? { marginBottom: keyboardOverlap + 'px' } : {}">
             <!-- paddingTop - spacer for virtual list scroll offset -->
