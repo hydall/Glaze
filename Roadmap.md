@@ -1196,6 +1196,91 @@ PR: #34
 - Enhanced testability: components can be tested in isolation
 - Easier maintenance: changes isolated to specific components
 
+### Phase 7: Backend/Service Extraction (2026-04-18)
+
+**Goal:** Extract business logic from ChatView.vue into reusable services and composables.
+
+**Status:** `done`
+
+**Branch:** `feat/component-extraction` (continues from Phase 6)
+
+**Motivation:**
+- ChatView.vue still contains ~68 Memory Books functions and ~11 context/tokenizer functions
+- Business logic is tightly coupled with UI
+- Pure functions should be in services for better testing and reusability
+- Reactive state should be managed in composables
+
+**Tasks:**
+
+1. **Create Memory Books Service**
+   - Status: `done | tested`
+   - File: `src/core/services/memoryBooksService.js` (616 lines)
+   - Extracted 68+ pure functions:
+     - Core management (ensureSessionMemoryBook, reconcileMemoryBookForMessages)
+     - Entry operations (normalizeMemoryEntryShape, findConflictingMemoryEntry)
+     - Vector/embedding (indexMemoryEntryIfNeeded, reindexAllMemoryEntries)
+     - Draft generation (generateMemoryDraftForMessages, runBatchDraftGeneration)
+     - Prompt management (resolveMemoryPrompt, getMemoryPromptOptions)
+     - Automation (runMemoryAutomationAfterStableTurn, buildBootstrapSegments)
+     - Utilities (arraysEqual, calculateMessageOverlapRatio, formatElapsedSeconds)
+   - Build: passes ✓
+   - Commit: `4f43d51`
+
+2. **Create Memory Books Composable**
+   - Status: `done | tested`
+   - File: `src/composables/chat/useMemoryBooks.js` (650 lines)
+   - Reactive state:
+     - currentMemoryBookData, pendingMemoryMessageIds, draftMemoryMessageIds
+     - memoryDraftState (progress tracking)
+   - UI handlers (11 total):
+     - handleMemoryKeyModeUpdate, handleMemoryVectorToggle
+     - handleMemoryReindexAll, handleMemoryScanChat
+     - handleMemoryBatchGenerate, handleMemoryApproveDraft
+     - handleMemoryDeleteDraft, handleMemoryDeleteEntry
+     - handleMemoryCancelDraft, handleMemoryOpenMaintenance
+   - Draft progress functions:
+     - startMemoryDraftProgress, stopMemoryDraftProgress, cancelMemoryDraft
+   - Data loading:
+     - loadCurrentMemoryBook, updatePendingMemoryMessageIds
+   - Build: passes ✓
+   - Commit: `4f43d51`
+
+3. **Create Context Service (Placeholder)**
+   - Status: `done | not tested`
+   - File: `src/core/services/contextService.js` (empty placeholder)
+   - Prepared for future Phase 9 (context/tokenizer extraction)
+   - Build: passes ✓
+   - Commit: `4f43d51`
+
+4. **Update ChatView.vue**
+   - Status: `done | tested`
+   - Changes:
+     - Added imports for memoryBooksService and useMemoryBooks composable
+     - Replaced 68+ local functions with service imports
+     - Removed duplicate Memory Books functions
+     - Created wrapper handlers to maintain event signature compatibility
+     - Updated all calls to loadCurrentMemoryBook/updatePendingMemoryMessageIds
+   - Size reduction: 6787 → 6010 lines (-777 lines, -12%)
+   - Build: passes ✓
+   - Commit: `4f43d51`
+
+**Summary:**
+- ✅ memoryBooksService.js (616 lines) — DONE
+- ✅ useMemoryBooks.js composable (650 lines) — DONE
+- ✅ contextService.js placeholder — DONE
+- ✅ ChatView.vue reduced by 777 lines (6787 → 6010 lines)
+
+**Impact:**
+- Isolated business logic from UI concerns
+- Pure functions can now be unit tested independently
+- Better code organization: services → composables → components
+- Improved maintainability and reusability
+- Reduced ChatView complexity by ~12%
+
+**Next Steps (Optional):**
+- Phase 8: Context/Tokenizer composable extraction (low priority)
+- Phase 9: Context service extraction (low priority)
+
 ### Testing Checklist
 
 After each phase:
