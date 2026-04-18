@@ -1470,9 +1470,6 @@ async function handleMemoryScanChat() {
 async function handleMemoryBatchGenerate() {
     if (!activeChatChar || !currentMemoryBookData.value) return;
     
-    // Close Memory Books sheet first to avoid z-index issues with bottomSheet
-    memoryBooksSheet.value?.close();
-    
     const chatData = await getChatData(activeChatChar.id);
     const sessionId = activeChatChar.sessionId || chatData.currentId;
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
@@ -1503,9 +1500,14 @@ async function handleMemoryBatchGenerate() {
     
     if (!segments.length) {
         showToast('No uncovered segments to generate');
-        memoryBooksSheet.value?.open();
         return;
     }
+    
+    // Close Memory Books sheet BEFORE showing bottomSheet to avoid z-index issues
+    memoryBooksSheet.value?.close();
+    
+    // Wait for sheet to close completely
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     const totalSegments = segments.length;
     const quickItems = [];
