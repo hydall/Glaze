@@ -35,6 +35,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'close',
+  'back',
   'open-settings',
   'open-maintenance',
   'open-preview',
@@ -151,14 +152,20 @@ function close() {
   emit('close');
 }
 
+function handleBack() {
+  emit('back');
+}
+
 function handleOpenSettings() {
   emit('open-settings');
-  close();
+  // Don't close, just go back to magic drawer
+  handleBack();
 }
 
 function handleOpenMaintenance() {
   emit('open-maintenance');
-  close();
+  // Don't close, just go back to magic drawer
+  handleBack();
 }
 
 function handleReindexAll() {
@@ -215,8 +222,10 @@ defineExpose({ open, close });
   <SheetView
     ref="sheet"
     title="Memory Books"
+    :show-back="true"
     :fit-content="false"
     @close="close"
+    @back="handleBack"
   >
     <div class="memory-books-content">
       <!-- Session Overview -->

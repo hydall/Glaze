@@ -404,6 +404,9 @@ defineExpose({
         nextTick(() => {
             magicDrawerRef.value?.openPersonas();
         });
+    },
+    openMagicDrawer: () => {
+        isMagicMenuVisible.value = true;
     }
 });
 </script>

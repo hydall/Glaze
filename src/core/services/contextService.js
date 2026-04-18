@@ -1,59 +1,85 @@
 /**
  * Context Service
  * 
- * Business logic for context/tokenizer management and history operations.
- * Pure functions without Vue reactivity dependencies.
+ * Pure business logic for context/tokenizer management.
+ * No Vue dependencies, no reactive state - just pure functions.
+ * 
+ * This service handles:
+ * - History fill threshold clamping and validation
+ * - History hide percent clamping and validation
+ * - Context settings persistence helpers
  */
 
 // ============================================================================
-// HISTORY CONTEXT SETTINGS
+// CONSTANTS
 // ============================================================================
 
+export const HISTORY_FILL_THRESHOLD_KEY = 'gz_history_fill_threshold';
+export const HISTORY_HIDE_PERCENT_KEY = 'gz_history_hide_percent';
+export const DEFAULT_FILL_THRESHOLD = 85;
+export const DEFAULT_HIDE_PERCENT = 30;
+
+// ============================================================================
+// VALIDATION & CLAMPING
+// ============================================================================
+
+/**
+ * Clamp history fill threshold to valid range (1-100)
+ * @param {number|string} value - Value to clamp
+ * @returns {number} Clamped value (default: 85)
+ */
 export function clampHistoryFillThreshold(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return 70;
-    return Math.max(50, Math.min(95, Math.round(num)));
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) return DEFAULT_FILL_THRESHOLD;
+    return Math.max(1, Math.min(100, parsed));
 }
 
+/**
+ * Clamp history hide percent to valid range (1-95)
+ * @param {number|string} value - Value to clamp
+ * @returns {number} Clamped value (default: 30)
+ */
 export function clampHistoryHidePercent(value) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return 25;
-    return Math.max(10, Math.min(50, Math.round(num)));
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) return DEFAULT_HIDE_PERCENT;
+    return Math.max(1, Math.min(95, parsed));
 }
 
-export function persistHistoryContextSettings(fillThreshold, hidePercent) {
-    const settings = {
-        historyFillThreshold: clampHistoryFillThreshold(fillThreshold),
-        historyHidePercent: clampHistoryHidePercent(hidePercent)
-    };
-    
-    try {
-        localStorage.setItem('glaze_history_context_settings', JSON.stringify(settings));
-    } catch (error) {
-        console.warn('Failed to persist history context settings:', error);
-    }
-    
-    return settings;
-}
+// ============================================================================
+// SETTINGS HELPERS
+// ============================================================================
 
+/**
+ * Load history context settings from localStorage
+ * @returns {{fillThreshold: number, hidePercent: number}}
+ */
 export function loadHistoryContextSettings() {
-    try {
-        const stored = localStorage.getItem('glaze_history_context_settings');
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            return {
-                historyFillThreshold: clampHistoryFillThreshold(parsed.historyFillThreshold),
-                historyHidePercent: clampHistoryHidePercent(parsed.historyHidePercent)
-            };
-        }
-    } catch (error) {
-        console.warn('Failed to load history context settings:', error);
-    }
-    
-    // Defaults
     return {
-        historyFillThreshold: 70,
-        historyHidePercent: 25
+        fillThreshold: clampHistoryFillThreshold(
+            localStorage.getItem(HISTORY_FILL_THRESHOLD_KEY) || DEFAULT_FILL_THRESHOLD
+        ),
+        hidePercent: clampHistoryHidePercent(
+            localStorage.getItem(HISTORY_HIDE_PERCENT_KEY) || DEFAULT_HIDE_PERCENT
+        )
+    };
+}
+
+/**
+ * Persist history context settings to localStorage
+ * @param {number} fillThreshold - Fill threshold (will be clamped)
+ * @param {number} hidePercent - Hide percent (will be clamped)
+ * @returns {{fillThreshold: number, hidePercent: number}} Clamped values
+ */
+export function persistHistoryContextSettings(fillThreshold, hidePercent) {
+    const clampedFillThreshold = clampHistoryFillThreshold(fillThreshold);
+    const clampedHidePercent = clampHistoryHidePercent(hidePercent);
+    
+    localStorage.setItem(HISTORY_FILL_THRESHOLD_KEY, String(clampedFillThreshold));
+    localStorage.setItem(HISTORY_HIDE_PERCENT_KEY, String(clampedHidePercent));
+    
+    return {
+        fillThreshold: clampedFillThreshold,
+        hidePercent: clampedHidePercent
     };
 }
 
@@ -62,205 +88,33 @@ export function loadHistoryContextSettings() {
 // ============================================================================
 
 /**
- * Calculate how many messages to hide based on current history usage
- * @param {number} historyTokens - current history token count
- * @param {number} historyLimit - max history tokens allowed
- * @param {number} hidePercent - percentage to free (10-50)
- * @param {Array} messages - array of messages
- * @returns {{ count: number, tokens: number }} - messages to hide and tokens to free
+ * Calculate if hide recommendation should be shown
+ * @param {number} historyUsagePercent - Current history usage percent
+ * @param {number} fillThreshold - Fill threshold percent
+ * @returns {boolean} True if should recommend hide
  */
-export function calculateHideRecommendation(historyTokens, historyLimit, hidePercent, messages) {
-    if (!messages || !messages.length || historyTokens <= 0 || historyLimit <= 0) {
-        return { count: 0, tokens: 0 };
-    }
-    
-    const targetToFree = Math.ceil((historyTokens * hidePercent) / 100);
-    
-    // Estimate average tokens per message
-    const avgTokensPerMessage = historyTokens / messages.length;
-    
-    // Estimate how many messages to hide
-    const estimatedCount = Math.max(1, Math.ceil(targetToFree / avgTokensPerMessage));
-    
-    return {
-        count: estimatedCount,
-        tokens: targetToFree
-    };
+export function shouldRecommendHide(historyUsagePercent, fillThreshold) {
+    return historyUsagePercent >= fillThreshold;
 }
 
 /**
  * Calculate history usage percentage
- * @param {number} historyTokens - current history token usage
- * @param {number} historyLimit - max history limit
- * @returns {number} - percentage (0-100)
+ * @param {number} historyTokens - Tokens used by history
+ * @param {number} totalContextBudget - Total context budget
+ * @returns {number} Usage percent (0-100)
  */
-export function calculateHistoryUsagePercent(historyTokens, historyLimit) {
-    if (historyLimit <= 0) return 0;
-    return Math.min(100, Math.round((historyTokens / historyLimit) * 100));
+export function calculateHistoryUsagePercent(historyTokens, totalContextBudget) {
+    if (!totalContextBudget || totalContextBudget <= 0) return 0;
+    return Math.round((historyTokens / totalContextBudget) * 100);
 }
 
 /**
- * Check if hide recommendation should be shown
- * @param {number} usagePercent - current usage percentage
- * @param {number} fillThreshold - threshold to trigger recommendation
- * @returns {boolean}
+ * Calculate how many messages to hide based on percent
+ * @param {number} totalMessages - Total visible messages
+ * @param {number} hidePercent - Percent to hide (1-95)
+ * @returns {number} Number of messages to hide
  */
-export function shouldRecommendHide(usagePercent, fillThreshold) {
-    return usagePercent >= fillThreshold;
+export function calculateMessagesToHide(totalMessages, hidePercent) {
+    const clampedPercent = clampHistoryHidePercent(hidePercent);
+    return Math.max(1, Math.floor(totalMessages * (clampedPercent / 100)));
 }
-
-// ============================================================================
-// CONTEXT SEGMENT UTILITIES
-// ============================================================================
-
-/**
- * Build context segments for visualization
- * @param {Object} breakdown - context breakdown from worker
- * @returns {Object} - segments for UI rendering
- */
-export function buildContextSegments(breakdown) {
-    if (!breakdown || !breakdown.contextSize) {
-        return {
-            used: [],
-            reserve: null
-        };
-    }
-
-    const { contextSize, totalUsed, reserve } = breakdown;
-    const safeContext = contextSize - (reserve?.value || 0);
-    
-    const segments = {
-        used: [],
-        reserve: null
-    };
-
-    // Build used segments (excluding reserve)
-    const sources = [
-        { key: 'character', className: 'chat-context-character', label: 'Character' },
-        { key: 'preset', className: 'chat-context-preset', label: 'Preset' },
-        { key: 'summary', className: 'chat-context-summary', label: 'Summary' },
-        { key: 'memory', className: 'chat-context-memory', label: 'Memory' },
-        { key: 'authorsNote', className: 'chat-context-authors-note', label: "Author's Note" },
-        { key: 'history', className: 'chat-context-history', label: 'History' }
-    ];
-
-    for (const source of sources) {
-        const value = breakdown[source.key] || 0;
-        if (value > 0) {
-            segments.used.push({
-                key: source.key,
-                className: source.className,
-                label: source.label,
-                value,
-                percent: ((value / contextSize) * 100).toFixed(2)
-            });
-        }
-    }
-
-    // Build reserve segment if present
-    if (reserve && reserve.value > 0) {
-        const reserveUsed = [];
-        
-        // Keyword lorebook
-        if (breakdown.lorebook > 0) {
-            reserveUsed.push({
-                key: 'lorebook',
-                className: 'chat-context-lorebook',
-                label: 'Keyword Lorebook',
-                value: breakdown.lorebook
-            });
-        }
-        
-        // Vector lorebook
-        if (breakdown.vectorLore > 0) {
-            reserveUsed.push({
-                key: 'vectorLore',
-                className: 'chat-context-vector-lore',
-                label: 'Vector Lorebook',
-                value: breakdown.vectorLore
-            });
-        }
-
-        segments.reserve = {
-            className: 'chat-context-reserve',
-            label: 'Reserve',
-            value: reserve.value,
-            percent: ((reserve.value / contextSize) * 100).toFixed(2),
-            used: reserveUsed,
-            remaining: reserve.remaining || 0
-        };
-    }
-
-    return segments;
-}
-
-/**
- * Build context breakdown items for display
- * @param {Object} breakdown - context breakdown from worker
- * @returns {Array} - breakdown items
- */
-export function buildContextBreakdownItems(breakdown) {
-    if (!breakdown) return [];
-
-    const items = [
-        { label: 'Character', value: breakdown.character || 0 },
-        { label: 'Preset', value: breakdown.preset || 0 },
-        { label: 'Summary', value: breakdown.summary || 0 },
-        { label: 'Memory', value: breakdown.memory || 0 },
-        { label: "Author's Note", value: breakdown.authorsNote || 0 },
-        { label: 'History', value: breakdown.history || 0 }
-    ];
-
-    if (breakdown.lorebook > 0 || breakdown.vectorLore > 0) {
-        items.push({ label: 'Lorebook Total', value: (breakdown.lorebook || 0) + (breakdown.vectorLore || 0) });
-        if (breakdown.lorebook > 0) {
-            items.push({ label: '  └ Keyword', value: breakdown.lorebook });
-        }
-        if (breakdown.vectorLore > 0) {
-            items.push({ label: '  └ Vector', value: breakdown.vectorLore });
-        }
-    }
-
-    return items.filter(item => item.value > 0);
-}
-
-/**
- * Build context legend items for visualization
- * @param {Object} breakdown - context breakdown from worker
- * @returns {Array} - legend items
- */
-export function buildContextLegendItems(breakdown) {
-    if (!breakdown) return [];
-
-    const items = [
-        { className: 'chat-context-character', label: 'Character' },
-        { className: 'chat-context-preset', label: 'Preset' },
-        { className: 'chat-context-summary', label: 'Summary' },
-        { className: 'chat-context-memory', label: 'Memory' },
-        { className: 'chat-context-authors-note', label: "Author's Note" },
-        { className: 'chat-context-history', label: 'History' }
-    ];
-
-    if (breakdown.lorebook > 0 || breakdown.vectorLore > 0) {
-        items.push({ className: 'chat-context-reserve', label: 'Reserve' });
-    }
-
-    return items;
-}
-
-// ============================================================================
-// EXPORTS
-// ============================================================================
-
-export default {
-    clampHistoryFillThreshold,
-    clampHistoryHidePercent,
-    persistHistoryContextSettings,
-    loadHistoryContextSettings,
-    calculateHideRecommendation,
-    calculateHistoryUsagePercent,
-    shouldRecommendHide,
-    buildContextSegments,
-    buildContextBreakdownItems,
-    buildContextLegendItems
-};

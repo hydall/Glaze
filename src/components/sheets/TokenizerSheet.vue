@@ -39,7 +39,7 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['close', 'hide-messages', 'open-settings']);
+const emit = defineEmits(['close', 'back', 'hide-messages', 'open-settings']);
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -87,9 +87,14 @@ function close() {
   emit('close');
 }
 
+function handleBack() {
+  emit('back');
+}
+
 function handleHideMessages() {
   emit('hide-messages');
-  close();
+  // Don't close, just go back to magic drawer
+  handleBack();
 }
 
 function handleOpenSettings() {
@@ -103,8 +108,10 @@ defineExpose({ open, close });
   <SheetView
     ref="sheet"
     title="Context"
+    :show-back="true"
     :fit-content="false"
     @close="close"
+    @back="handleBack"
   >
     <!-- Loading/Error State -->
     <div v-if="isCalculating || !breakdown" class="tokenizer-loading">

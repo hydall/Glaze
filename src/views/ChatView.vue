@@ -237,10 +237,10 @@ const {
 
 const onRegexChanged = () => { regexRevision.value++; };
 const contextBreakdown = ref(null);
-const HISTORY_FILL_THRESHOLD_KEY = 'gz_history_fill_threshold';
-const HISTORY_HIDE_PERCENT_KEY = 'gz_history_hide_percent';
-const historyFillThreshold = ref(parseInt(localStorage.getItem(HISTORY_FILL_THRESHOLD_KEY) || '85', 10));
-const historyHidePercent = ref(parseInt(localStorage.getItem(HISTORY_HIDE_PERCENT_KEY) || '30', 10));
+// Import context settings from service
+const { fillThreshold: initialFillThreshold, hidePercent: initialHidePercent } = contextService.loadHistoryContextSettings();
+const historyFillThreshold = ref(initialFillThreshold);
+const historyHidePercent = ref(initialHidePercent);
 let isCalculatingCutoff = false;
 let pendingCutoffRecalc = false;
 let isOpeningChat = false;
@@ -1979,23 +1979,13 @@ async function updateSessionMessage(char, msgIndex, newMsgData) {
     }
 }
 
-function clampHistoryFillThreshold(value) {
-    const parsed = parseInt(value, 10);
-    if (Number.isNaN(parsed)) return 85;
-    return Math.max(1, Math.min(100, parsed));
-}
-
-function clampHistoryHidePercent(value) {
-    const parsed = parseInt(value, 10);
-    if (Number.isNaN(parsed)) return 30;
-    return Math.max(1, Math.min(95, parsed));
-}
+// Use context service functions
+const { clampHistoryFillThreshold, clampHistoryHidePercent } = contextService;
 
 function persistHistoryContextSettings(fillThreshold, hidePercent) {
-    historyFillThreshold.value = clampHistoryFillThreshold(fillThreshold);
-    historyHidePercent.value = clampHistoryHidePercent(hidePercent);
-    localStorage.setItem(HISTORY_FILL_THRESHOLD_KEY, String(historyFillThreshold.value));
-    localStorage.setItem(HISTORY_HIDE_PERCENT_KEY, String(historyHidePercent.value));
+    const clamped = contextService.persistHistoryContextSettings(fillThreshold, hidePercent);
+    historyFillThreshold.value = clamped.fillThreshold;
+    historyHidePercent.value = clamped.hidePercent;
 }
 
 async function saveCurrentMessages() {
@@ -2124,6 +2114,13 @@ function handleHideTopMessages() {
 
 function handleOpenHistorySettings() {
     openHistoryContextSettings();
+}
+
+function handleSheetBack() {
+    // Close current sheet and open MagicDrawer
+    tokenizerSheet.value?.close();
+    memoryBooksSheet.value?.close();
+    chatInputRef.value?.openMagicDrawer();
 }
 
 async function setupHeader(char = activeChatChar) {
@@ -4815,6 +4812,7 @@ onUnmounted(() => {
             :is-calculating="isCalculatingCutoff"
             @hide-messages="handleHideTopMessages"
             @open-settings="handleOpenHistorySettings"
+            @back="handleSheetBack"
         />
         <MemoryBooksSheet
             v-if="currentMemoryBookData"
@@ -4838,6 +4836,7 @@ onUnmounted(() => {
             @delete-draft="handleMemoryDeleteDraft"
             @delete-entry="handleMemoryDeleteEntry"
             @cancel-draft="handleMemoryCancelDraft"
+            @back="handleSheetBack"
         />
     </div>
 </template>
