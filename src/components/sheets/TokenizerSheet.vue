@@ -1,36 +1,74 @@
-<!-- src/components/sheets/TokenizerSheet.vue -->
 <script setup>
 import { ref, computed } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
+import { translations } from '@/utils/i18n.js';
+import { currentLang } from '@/core/config/APPSettings.js';
 
 const props = defineProps({
-    contextBreakdown: { type: Object, default: null },
-    contextSegments: { type: Object, default: () => ({ used: [], reserve: null }) },
-    contextBreakdownItems: { type: Array, default: () => [] },
-    contextLegendItems: { type: Array, default: () => [] },
-    historyUsagePercent: { type: Number, default: 0 },
-    historyHidePreview: { type: Object, default: () => ({ count: 0, tokens: 0 }) },
-    shouldRecommendHide: { type: Boolean, default: false },
-    historyFillThreshold: { type: Number, default: 85 },
-    historyHidePercent: { type: Number, default: 30 },
+  breakdown: { type: Object, default: null },
+  historyHidePreview: { type: Object, default: () => ({ count: 0, tokens: 0 }) },
+  contextSegments: { type: Object, default: () => ({ used: [], reserve: null }) },
+  contextLegendItems: { type: Array, default: () => [] },
+  contextBreakdownItems: { type: Array, default: () => [] },
+  shouldRecommendHide: { type: Boolean, default: false },
+  historyUsagePercent: { type: Number, default: 0 },
+  historyFillThreshold: { type: Number, default: 85 },
+  historyHidePercent: { type: Number, default: 30 },
+  isCalculating: { type: Boolean, default: false }
 });
 
-const emit = defineEmits(['hide-messages', 'save-settings']);
+const emit = defineEmits(['close', 'back', 'hide-messages', 'save-settings']);
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const sheet = ref(null);
 const showSettings = ref(false);
 const localFillThreshold = ref(85);
 const localHidePercent = ref(30);
 
+const used = computed(() => props.breakdown?.totalUsed || 0);
+const safeContext = computed(() => props.breakdown?.safeContext || 0);
+const remaining = computed(() => Math.max(0, props.breakdown?.remaining || 0));
+const contextSize = computed(() => props.breakdown?.contextSize || safeContext.value);
+
 const usedWidth = computed(() => Math.max(0, 100 - (props.contextSegments.reserve?.percent || 0)));
-const hideButtonLabel = computed(() =>
-    props.historyHidePreview.count ? `Hide top ${props.historyHidePreview.count}` : 'Hide top messages'
-);
+
+const hideButtonLabel = computed(() => {
+  const count = props.historyHidePreview.count;
+  return count ? `Hide top ${count}` : 'Hide top messages';
+});
+
 const sheetTitle = computed(() => showSettings.value ? 'Context Settings' : 'Context');
+
+const reserveSegments = computed(() => {
+  if (!props.contextSegments.reserve) return null;
+  const reserve = props.contextSegments.reserve;
+  const innerSegments = reserve.used?.map(seg => ({
+    className: seg.className,
+    widthPercent: (seg.value / reserve.value * 100).toFixed(2)
+  })) || [];
+  const remainingPercent = reserve.remaining > 0 
+    ? ((reserve.remaining / reserve.value) * 100).toFixed(2) 
+    : 0;
+  return {
+    widthPercent: reserve.percent,
+    innerSegments,
+    remainingPercent,
+    remainingClassName: reserve.className,
+    hasRemaining: reserve.remaining > 0
+  };
+});
 
 function open() {
     showSettings.value = false;
     sheet.value?.open();
+}
+
+function onSheetClose() {
+    emit('close');
+}
+
+function handleBack() {
+    emit('back');
 }
 
 function close() {
@@ -52,286 +90,399 @@ defineExpose({ open, close });
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="sheetTitle" :show-back="showSettings" @back="showSettings = false">
-        <div class="ctx-body">
-            <!-- Main view -->
-            <template v-if="!showSettings">
-                <div class="ctx-summary">
-                    <div class="ctx-kpi">
-                        <strong>{{ contextBreakdown?.totalUsed || 0 }}</strong>
-                        <span>used / {{ contextBreakdown?.contextSize || contextBreakdown?.safeContext || 0 }}</span>
-                    </div>
-                    <div class="ctx-kpi">
-                        <strong>{{ Math.max(0, contextBreakdown?.remaining || 0) }}</strong>
-                        <span>remaining</span>
-                    </div>
-                    <div class="ctx-kpi">
-                        <strong>{{ historyUsagePercent }}%</strong>
-                        <span>history fill</span>
-                    </div>
-                </div>
+  <SheetView
+    ref="sheet"
+    :title="sheetTitle"
+    :show-back="showSettings"
+    :fit-content="false"
+    @close="onSheetClose"
+    @back="showSettings ? (showSettings = false) : handleBack()"
+  >
+    <!-- Loading/Error State -->
+    <div v-if="isCalculating || !breakdown" class="tokenizer-loading">
+      <div class="tokenizer-loading-icon">
+        <svg viewBox="0 0 24 24"><path d="M11 17h2v-6h-2v6zm0-8h2V7h-2v2zm1-7C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>
+      </div>
+      <p class="tokenizer-loading-text">
+        Context calculation is taking longer than expected. Please check that your API settings are configured correctly and try again.
+      </p>
+    </div>
 
-                <div class="ctx-bar">
-                    <div class="ctx-bar-used" :style="{ width: usedWidth + '%' }">
-                        <div v-for="segment in contextSegments.used" :key="segment.className"
-                             class="ctx-segment" :class="segment.className"
-                             :style="{ width: segment.percent + '%' }"></div>
-                    </div>
-                    <div v-if="contextSegments.reserve" class="ctx-reserve-container"
-                         :style="{ width: contextSegments.reserve.percent + '%' }">
-                        <div v-for="seg in (contextSegments.reserve.used || [])" :key="seg.className"
-                             class="ctx-segment" :class="seg.className"
-                             :style="{ width: ((seg.value / contextSegments.reserve.value) * 100).toFixed(2) + '%' }"></div>
-                        <div v-if="contextSegments.reserve.remaining > 0"
-                             class="ctx-segment" :class="contextSegments.reserve.className"
-                             :style="{ width: ((contextSegments.reserve.remaining / contextSegments.reserve.value) * 100).toFixed(2) + '%' }"></div>
-                    </div>
-                </div>
-
-                <div class="ctx-legend">
-                    <div v-for="seg in contextLegendItems" :key="seg.key" class="ctx-legend-item">
-                        <span class="ctx-legend-swatch" :class="seg.className"></span>
-                        <span>{{ seg.label }}</span>
-                    </div>
-                </div>
-
-                <div class="ctx-breakdown">
-                    <div v-for="item in contextBreakdownItems" :key="item.key" class="ctx-breakdown-row">
-                        <span>{{ item.label }}</span>
-                        <strong>{{ item.value }}</strong>
-                    </div>
-                </div>
-
-                <div v-if="shouldRecommendHide" class="ctx-recommendation">
-                    <div class="ctx-rec-title">History is near its limit</div>
-                    <div class="ctx-note">Hide about {{ historyHidePreview.count }} top message{{ historyHidePreview.count === 1 ? '' : 's' }} to free about {{ historyHidePreview.tokens }} tokens.</div>
-                </div>
-
-                <div class="ctx-actions">
-                    <button type="button" class="ctx-btn ctx-btn-primary" @click="$emit('hide-messages')">{{ hideButtonLabel }}</button>
-                    <button type="button" class="ctx-btn ctx-btn-secondary" @click="openSettings">Settings</button>
-                </div>
-            </template>
-
-            <!-- Settings sub-view -->
-            <template v-else>
-                <div class="ctx-settings-item">
-                    <label>History fill threshold (%)</label>
-                    <input type="number" min="1" max="100" v-model.number="localFillThreshold">
-                </div>
-                <div class="ctx-settings-item">
-                    <label>Hide top messages (%)</label>
-                    <input type="number" min="1" max="95" v-model.number="localHidePercent">
-                </div>
-                <p class="ctx-note">Hide top messages recommendation appears when visible history reaches the configured threshold.</p>
-                <div class="ctx-actions">
-                    <button type="button" class="ctx-btn ctx-btn-secondary" @click="showSettings = false">Back</button>
-                    <button type="button" class="ctx-btn ctx-btn-primary" @click="saveSettings">Save</button>
-                </div>
-            </template>
+    <!-- Main Content -->
+    <div v-else class="tokenizer-content">
+      <template v-if="!showSettings">
+        <!-- Summary KPIs -->
+        <div class="tokenizer-summary">
+          <div class="tokenizer-kpi">
+            <strong>{{ used }}</strong>
+            <span>used / {{ contextSize }}</span>
+          </div>
+          <div class="tokenizer-kpi">
+            <strong>{{ remaining }}</strong>
+            <span>remaining</span>
+          </div>
+          <div class="tokenizer-kpi">
+            <strong>{{ historyUsagePercent }}%</strong>
+            <span>history fill</span>
+          </div>
         </div>
-    </SheetView>
+
+        <!-- Context Bar -->
+        <div class="tokenizer-bar-container">
+          <div class="tokenizer-bar">
+            <!-- Used segments -->
+            <div class="tokenizer-bar-used" :style="{ width: `${usedWidth}%` }">
+              <div
+                v-for="(segment, idx) in contextSegments.used"
+                :key="idx"
+                class="tokenizer-segment"
+                :class="segment.className"
+                :style="{ width: `${segment.percent}%` }"
+              />
+            </div>
+
+            <!-- Reserve container with nested segments -->
+            <div
+              v-if="reserveSegments"
+              class="tokenizer-reserve-container"
+              :style="{ width: `${reserveSegments.widthPercent}%` }"
+            >
+              <div
+                v-for="(seg, idx) in reserveSegments.innerSegments"
+                :key="idx"
+                class="tokenizer-segment"
+                :class="seg.className"
+                :style="{ width: `${seg.widthPercent}%` }"
+              />
+              <div
+                v-if="reserveSegments.hasRemaining"
+                class="tokenizer-segment"
+                :class="reserveSegments.remainingClassName"
+                :style="{ width: `${reserveSegments.remainingPercent}%` }"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="tokenizer-legend">
+          <div
+            v-for="(item, idx) in contextLegendItems"
+            :key="idx"
+            class="tokenizer-legend-item"
+          >
+            <span class="tokenizer-legend-swatch" :class="item.className" />
+            <span>{{ item.label }}</span>
+          </div>
+        </div>
+
+        <!-- Breakdown -->
+        <div class="tokenizer-breakdown">
+          <div
+            v-for="(item, idx) in contextBreakdownItems"
+            :key="idx"
+            class="tokenizer-breakdown-row"
+          >
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </div>
+        </div>
+
+        <!-- Recommendation -->
+        <div v-if="shouldRecommendHide" class="tokenizer-recommendation">
+          <div class="tokenizer-recommendation-title">History is near its limit</div>
+          <div class="tokenizer-recommendation-text">
+            Hide about {{ historyHidePreview.count }} top message{{ historyHidePreview.count === 1 ? '' : 's' }} to free about {{ historyHidePreview.tokens }} tokens.
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="tokenizer-actions">
+          <button
+            type="button"
+            class="tokenizer-btn tokenizer-btn-primary"
+            @click="$emit('hide-messages')"
+          >
+            {{ hideButtonLabel }}
+          </button>
+          <button
+            type="button"
+            class="tokenizer-btn tokenizer-btn-secondary"
+            @click="openSettings"
+          >
+            Settings
+          </button>
+        </div>
+      </template>
+
+      <!-- Settings sub-view -->
+      <template v-else>
+        <div class="tokenizer-settings-item">
+          <label>History fill threshold (%)</label>
+          <input type="number" min="1" max="100" v-model.number="localFillThreshold">
+        </div>
+        <div class="tokenizer-settings-item">
+          <label>Hide top messages (%)</label>
+          <input type="number" min="1" max="95" v-model.number="localHidePercent">
+        </div>
+        <p class="tokenizer-recommendation-text">Hide top messages recommendation appears when visible history reaches the configured threshold.</p>
+        <div class="tokenizer-actions">
+          <button type="button" class="tokenizer-btn tokenizer-btn-secondary" @click="showSettings = false">Back</button>
+          <button type="button" class="tokenizer-btn tokenizer-btn-primary" @click="saveSettings">Save</button>
+        </div>
+      </template>
+    </div>
+  </SheetView>
 </template>
 
 <style scoped>
-.ctx-body {
-    padding: 0 16px 16px;
+/* Loading State */
+.tokenizer-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
 }
 
-.ctx-summary {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-    margin-bottom: 14px;
+.tokenizer-loading-icon {
+  width: 64px;
+  height: 64px;
+  color: var(--warning-color, #ffb84d);
+  margin-bottom: 16px;
 }
 
-.ctx-kpi {
-    padding: 12px;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(var(--element-blur, 20px));
-    text-align: center;
-    color: var(--text-black);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+.tokenizer-loading-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
 }
 
-.ctx-kpi strong {
-    display: block;
-    font-size: 18px;
-    line-height: 1.2;
-    color: var(--text-black);
+.tokenizer-loading-text {
+  color: var(--text-gray);
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 400px;
 }
 
-.ctx-kpi span {
-    display: block;
-    margin-top: 4px;
-    font-size: 12px;
-    color: var(--text-gray);
+/* Main Content */
+.tokenizer-content {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 20px;
 }
 
-.ctx-bar {
-    position: relative;
-    display: flex;
-    width: 100%;
-    height: 10px;
-    overflow: hidden;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.06);
-    margin-bottom: 14px;
+/* Summary KPIs */
+.tokenizer-summary {
+  display: flex;
+  gap: 16px;
+  justify-content: space-around;
+  padding: 16px;
+  background: rgba(var(--ui-bg-rgb), 0.5);
+  border-radius: 12px;
 }
 
-.ctx-bar-used {
-    display: flex;
-    height: 100%;
-    min-width: 0;
-    flex: 0 0 auto;
+.tokenizer-kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 
-.ctx-reserve-container {
-    position: absolute;
-    top: 0;
-    right: 0;
-    height: 100%;
-    display: flex;
-    box-shadow: inset 2px 0 0 rgba(0, 0, 0, 0.35);
+.tokenizer-kpi strong {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-black);
+  line-height: 1;
 }
 
-.ctx-segment {
-    height: 100%;
+.tokenizer-kpi span {
+  font-size: 12px;
+  color: var(--text-gray);
+  text-align: center;
 }
 
-.segment-fixed { background: #8f8f95; }
-.segment-character { background: #4f8cff; }
-.segment-history { background: #d8b84a; }
-.segment-summary { background: #1ec8ff; }
-.segment-memory { background: #7ee787; }
-.segment-authors-note { background: #7a6cff; }
-.segment-lorebook { background: #ff8c42; }
-.segment-vector-lore { background: #b06cf7; }
-.segment-lorebook-reserve { background: #43b56f; }
-
-.ctx-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    margin-bottom: 14px;
+/* Context Bar */
+.tokenizer-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.ctx-legend-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--text-gray);
+.tokenizer-bar {
+  height: 32px;
+  display: flex;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(var(--ui-bg-rgb), 0.3);
 }
 
-.ctx-legend-swatch {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    flex-shrink: 0;
+.tokenizer-bar-used {
+  display: flex;
+  height: 100%;
 }
 
-.ctx-breakdown {
-    display: grid;
-    gap: 8px;
+.tokenizer-segment {
+  height: 100%;
+  transition: width 0.3s ease;
 }
 
-.ctx-breakdown-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+.tokenizer-reserve-container {
+  display: flex;
+  height: 100%;
+}
+
+/* Segment colors - match ChatView.vue */
+.tokenizer-segment.chat-context-character { background-color: #ff6b6b; }
+.tokenizer-segment.chat-context-preset { background-color: #4ecdc4; }
+.tokenizer-segment.chat-context-summary { background-color: #95e1d3; }
+.tokenizer-segment.chat-context-memory { background-color: #a8e6cf; }
+.tokenizer-segment.chat-context-authors-note { background-color: #ffd93d; }
+.tokenizer-segment.chat-context-history { background-color: #6c5ce7; }
+.tokenizer-segment.chat-context-reserve { background-color: #a8dadc; }
+.tokenizer-segment.chat-context-lorebook { background-color: #f4a261; }
+.tokenizer-segment.chat-context-vector-lore { background-color: #e76f51; }
+
+/* Legend */
+.tokenizer-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(var(--ui-bg-rgb), 0.3);
+  border-radius: 8px;
+}
+
+.tokenizer-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-gray);
+}
+
+.tokenizer-legend-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+/* Breakdown */
+.tokenizer-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tokenizer-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(var(--ui-bg-rgb), 0.3);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.tokenizer-breakdown-row span {
+  color: var(--text-gray);
+}
+
+.tokenizer-breakdown-row strong {
+  color: var(--text-black);
+  font-weight: 600;
+}
+
+/* Recommendation */
+.tokenizer-recommendation {
+  padding: 16px;
+  background: rgba(255, 184, 77, 0.1);
+  border: 1px solid rgba(255, 184, 77, 0.3);
+  border-radius: 12px;
+}
+
+.tokenizer-recommendation-title {
+  font-weight: 600;
+  color: var(--warning-color, #ffb84d);
+  margin-bottom: 4px;
+}
+
+.tokenizer-recommendation-text {
+  font-size: 14px;
+  color: var(--text-gray);
+}
+
+/* Actions & Settings */
+.tokenizer-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.tokenizer-btn {
+  flex: 1;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.tokenizer-btn-primary {
+  background: var(--accent-color, var(--vk-blue));
+  color: white;
+}
+
+.tokenizer-btn-primary:active {
+  opacity: 0.8;
+}
+
+.tokenizer-btn-secondary {
+  background: rgba(var(--ui-bg-rgb), 0.5);
+  color: var(--text-black);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tokenizer-btn-secondary:active {
+  opacity: 0.7;
+}
+
+.tokenizer-settings-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.tokenizer-settings-item label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-black);
+}
+
+.tokenizer-settings-item input {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(var(--ui-bg-rgb), 0.3);
+  color: var(--text-black);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+
+@media (max-width: 600px) {
+  .tokenizer-summary {
     gap: 12px;
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-}
+  }
 
-.ctx-breakdown-row span {
-    color: var(--text-gray);
-}
-
-.ctx-breakdown-row strong {
-    font-weight: 600;
-    color: var(--text-black);
-}
-
-.ctx-recommendation {
-    margin-top: 14px;
-    padding: 12px;
-    border-radius: 14px;
-    background: rgba(216, 184, 74, 0.14);
-    border: 1px solid rgba(216, 184, 74, 0.35);
-}
-
-.ctx-rec-title {
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-
-.ctx-note {
-    font-size: 13px;
-    color: var(--text-gray);
-    line-height: 1.45;
-    margin: 0;
-}
-
-.ctx-actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 16px;
-}
-
-.ctx-btn {
-    flex: 1;
-    min-height: 42px;
-    border: none;
-    border-radius: 12px;
-    padding: 0 14px;
-    font-size: 14px;
-    font-weight: 600;
-    font-family: inherit;
-    cursor: pointer;
-}
-
-.ctx-btn-primary {
-    color: #fff;
-    background: var(--vk-blue);
-}
-
-.ctx-btn-secondary {
-    color: var(--text-black);
-    background: rgba(255, 255, 255, 0.08);
-}
-
-.ctx-settings-item {
-    display: flex;
+  .tokenizer-actions {
     flex-direction: column;
-    gap: 6px;
-    margin-bottom: 14px;
-}
-
-.ctx-settings-item label {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-black);
-}
-
-.ctx-settings-item input {
-    padding: 10px 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-black);
-    font-size: 14px;
-    font-family: inherit;
-    outline: none;
-}
-
-@media (max-width: 480px) {
-    .ctx-summary {
-        grid-template-columns: 1fr;
-    }
+  }
 }
 </style>

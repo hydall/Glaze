@@ -2135,7 +2135,10 @@ function confirmHideTopMessages() {
                 onClick: () => {
                     closeBottomSheet();
                     // Return to Tokenizer sheet
-                    setTimeout(() => tokenizerSheet.value?.open(), 50);
+                    setTimeout(() => {
+                        isCalculatingCutoff = false; // ensure loader doesn't stick
+                        tokenizerSheet.value?.open();
+                    }, 50);
                 }
             }
         ]
@@ -2172,6 +2175,7 @@ async function openContextSheet() {
 
 function handleSheetBack() {
     // Close current sheet and open MagicDrawer
+    tokenizerSheet.value?.close();
     memoryBooksSheet.value?.close();
     chatInputRef.value?.openMagicDrawer();
 }
@@ -4853,7 +4857,7 @@ onUnmounted(() => {
         <StatsSheet ref="statsSheet" />
         <TokenizerSheet
             ref="tokenizerSheet"
-            :context-breakdown="contextBreakdown"
+            :breakdown="contextBreakdown"
             :context-segments="contextSegments"
             :context-breakdown-items="contextBreakdownItems"
             :context-legend-items="contextLegendItems"
@@ -4862,8 +4866,10 @@ onUnmounted(() => {
             :should-recommend-hide="shouldRecommendHide"
             :history-fill-threshold="historyFillThreshold"
             :history-hide-percent="historyHidePercent"
+            :is-calculating="isCalculatingCutoff"
             @hide-messages="confirmHideTopMessages"
             @save-settings="handleSaveContextSettings"
+            @back="handleSheetBack"
         />
         <ImageGenSheet ref="imageGenSheet" />
         <GlossarySheet ref="glossarySheet" />
