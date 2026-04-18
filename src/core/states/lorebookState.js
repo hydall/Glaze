@@ -282,10 +282,21 @@ export async function initLorebookState(force = false) {
                     if (data.settings.reserveValue === undefined) {
                         const legacyBudget = Number(data.settings.budgetCap || 0);
                         const legacyPercent = Number(data.settings.contextPercent || 0);
-                        data.settings.reserveValue = legacyBudget > 0 ? legacyBudget : Math.max(legacyPercent, 10);
+                        // contextPercent >= 100 meant "no hard cap on lorebooks", not "reserve 100%".
+                        // Treat it as the default 10% reserve to avoid consuming all available context.
+                        const effectivePercent = legacyPercent >= 100 ? 10 : Math.max(legacyPercent, 10);
+                        data.settings.reserveValue = legacyBudget > 0 ? legacyBudget : effectivePercent;
                         if (legacyBudget <= 0 && legacyPercent > 0) {
                             data.settings.reserveMode = 'percent';
                         }
+                    }
+                    // Retroactive fix: users already migrated from contextPercent=100 got reserveValue=100,
+                    // which consumes the entire safeContext leaving nothing for chat history.
+                    if (data.settings.reserveValue >= 100 &&
+                        data.settings.reserveMode === 'percent' &&
+                        (!data.settings.budgetCap || Number(data.settings.budgetCap) === 0) &&
+                        Number(data.settings.contextPercent || 0) >= 100) {
+                        data.settings.reserveValue = 10;
                     }
                     if (!data.settings.injectionPosition) {
                         data.settings.injectionPosition = 'worldInfoBefore';

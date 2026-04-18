@@ -2791,66 +2791,61 @@ async function updateContextCutoff() {
         return;
     }
 
+    // Set guard BEFORE any await to prevent concurrent executions from bypassing it
+    isCalculatingCutoff = true;
+
     const currentCharId = activeChatChar.id;
     const visibleMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
     const messageCount = visibleMessages.length;
-    
-    console.time('[updateContextCutoff] getChatData');
-    const cutoffChatData = await getChatData(activeChatChar.id);
-    console.timeEnd('[updateContextCutoff] getChatData');
-    const sessionId = cutoffChatData.currentId;
-    
-    // Create simple cache key from charId, sessionId, message count
-    const cacheKey = `${currentCharId}_${sessionId}_${messageCount}`;
-    
-    // Check cache - if nothing changed, reuse previous result
-    if (contextCutoffCache && contextCutoffCache.hash === cacheKey) {
-        cutoffIndex.value = contextCutoffCache.result?.cutoffIndex ?? 0;
-        contextBreakdown.value = contextCutoffCache.result?.contextBreakdown || null;
-        console.log('[updateContextCutoff] using cache');
-        return;
-    }
-
-    isCalculatingCutoff = true;
-    console.time('[updateContextCutoff] total');
-    
-    const history = visibleMessages
-        .map((m, i) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text || "", originalIndex: i }));
-    
-    const summary = cutoffChatData.summaries?.[sessionId];
-    
-    let authorsNote = null;
-    if (cutoffChatData.authorsNotes && cutoffChatData.authorsNotes[sessionId]) {
-        const storedAn = cutoffChatData.authorsNotes[sessionId];
-        let anContent = typeof storedAn === 'string' ? storedAn : storedAn.content;
-        
-        const effectivePreset = getEffectivePreset(activeChatChar.id, sessionId ? `${activeChatChar.id}_${sessionId}` : null);
-        const anBlock = effectivePreset?.blocks?.find(b => b.id === 'authors_note');
-        if (anBlock && anBlock.enabled && anContent) {
-            authorsNote = {
-                content: anContent,
-                role: anBlock.role || 'system',
-                enabled: true,
-                depth: anBlock.depth !== undefined ? anBlock.depth : 0,
-                insertion_mode: anBlock.insertion_mode || 'relative'
-            };
-        }
-    }
 
     try {
-        console.time('[updateContextCutoff] calculateContext');
+        const cutoffChatData = await getChatData(activeChatChar.id);
+        const sessionId = cutoffChatData.currentId;
+
+        // Cache key includes context settings so changes to context size bust the cache
+        const contextSize = localStorage.getItem('api-context') || '32000';
+        const maxTokens = localStorage.getItem('api-max-tokens') || '8000';
+        const cacheKey = `${currentCharId}_${sessionId}_${messageCount}_${contextSize}_${maxTokens}`;
+
+        if (contextCutoffCache && contextCutoffCache.hash === cacheKey) {
+            cutoffIndex.value = contextCutoffCache.result?.cutoffIndex ?? 0;
+            contextBreakdown.value = contextCutoffCache.result?.contextBreakdown || null;
+            return;
+        }
+
+        const history = visibleMessages
+            .map((m, i) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text || "", originalIndex: i }));
+
+        const summary = cutoffChatData.summaries?.[sessionId];
+
+        let authorsNote = null;
+        if (cutoffChatData.authorsNotes && cutoffChatData.authorsNotes[sessionId]) {
+            const storedAn = cutoffChatData.authorsNotes[sessionId];
+            let anContent = typeof storedAn === 'string' ? storedAn : storedAn.content;
+
+            const effectivePreset = getEffectivePreset(activeChatChar.id, sessionId ? `${activeChatChar.id}_${sessionId}` : null);
+            const anBlock = effectivePreset?.blocks?.find(b => b.id === 'authors_note');
+            if (anBlock && anBlock.enabled && anContent) {
+                authorsNote = {
+                    content: anContent,
+                    role: anBlock.role || 'system',
+                    enabled: true,
+                    depth: anBlock.depth !== undefined ? anBlock.depth : 0,
+                    insertion_mode: anBlock.insertion_mode || 'relative'
+                };
+            }
+        }
+
         const result = await calculateContext({
             char: activeChatChar,
             history,
             authorsNote,
             summary
         });
-        console.timeEnd('[updateContextCutoff] calculateContext');
-        
+
         if (activeChatChar && activeChatChar.id === currentCharId) {
             cutoffIndex.value = result?.cutoffIndex ?? 0;
             contextBreakdown.value = result?.contextBreakdown || null;
-            // Cache result to avoid recalculation when nothing changed
             contextCutoffCache = {
                 hash: cacheKey,
                 charId: currentCharId,
@@ -2859,7 +2854,6 @@ async function updateContextCutoff() {
                 result
             };
         }
-        console.timeEnd('[updateContextCutoff] total');
     } finally {
         isCalculatingCutoff = false;
         if (pendingCutoffRecalc) {
