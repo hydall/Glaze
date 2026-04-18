@@ -1468,10 +1468,8 @@ async function handleMemoryScanChat() {
 }
 
 async function handleMemoryBatchGenerate() {
-    console.log('[DEBUG] handleMemoryBatchGenerate called');
     if (!activeChatChar || !currentMemoryBookData.value) return;
     
-    console.log('[DEBUG] Fetching chat data...');
     const chatData = await getChatData(activeChatChar.id);
     const sessionId = activeChatChar.sessionId || chatData.currentId;
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
@@ -1508,7 +1506,6 @@ async function handleMemoryBatchGenerate() {
     // Don't close Memory Books sheet - bottomSheet will appear on top (z-index 12000 > 11000)
     // After generation completes, runBatchDraftGeneration will call openMemoryBooksSheet() to refresh
     
-    console.log('[DEBUG] Showing bottomSheet picker...');
     const totalSegments = segments.length;
     const quickItems = [];
     const quickPicks = [1, 3, 5];
@@ -1541,7 +1538,6 @@ async function handleMemoryBatchGenerate() {
         }
     });
     
-    console.log('[DEBUG] showBottomSheet called with', quickItems.length, 'items');
     showBottomSheet({
         title: `Generate Drafts (${totalSegments} available)`,
         items: quickItems,
@@ -1575,6 +1571,10 @@ async function handleMemoryDeleteEntry(entryId) {
 
 function handleMemoryOpenMaintenance() {
     handleMemoryOpenMaintenance_composable(activeChatChar, memoryBooksSheet);
+}
+
+function handleMemoryCancelDraft() {
+    cancelMemoryDraft();
 }
 
 function handleMemoryPreview({ entry, kind }) {

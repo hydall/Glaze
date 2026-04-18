@@ -83,7 +83,8 @@ function open() {
 }
 
 function close() {
-  sheet.value?.close();
+  // Don't call sheet.value?.close() here - it creates infinite recursion!
+  // This function is called when SheetView emits 'close', so SheetView is already closing
   emit('close');
 }
 
