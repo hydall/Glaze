@@ -237,7 +237,7 @@ function scoreDescriptorBoost(entry, queryText) {
 export const lorebookState = reactive({
     lorebooks: [],
     globalSettings: {
-        scanDepth: 1000,
+        scanDepth: 10,
         contextPercent: 100,
         budgetCap: 0,
         reserveMode: 'percent',
@@ -508,7 +508,7 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
                 }
             };
 
-            const scanDepth = entry.scanDepth ?? 1;
+            const scanDepth = entry.scanDepth ?? lorebookState.globalSettings.scanDepth ?? 10;
             const messagesToScan = history.slice(-scanDepth).map(m => m.content).join("\n");
 
             // Only scan generated text (textToScan) if recursive scan is enabled OR it's the first iteration (static scan)
@@ -1075,39 +1075,6 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
 
             // Use all query chunks for MaxSim (query-chunk x candidate-chunk)
             const vectorResults = findTopKMulti(queryChunks, candidates, candidates.length, 0);
-            
-            // Debug Asei specifically
-            const aseiResult = vectorResults.find(r => r.comment?.includes('Asei'));
-            if (aseiResult) {
-                const queryChunksForDebug = queryChunks || [];
-                console.warn('[DEBUG] Asei vector details', {
-                    id: aseiResult.id,
-                    comment: aseiResult.comment,
-                    score: aseiResult.score,
-                    bestQueryChunk: aseiResult._bestQueryChunk,
-                    bestCandidateChunk: aseiResult._bestCandidateChunk,
-                    hasVectors: !!aseiResult.vectors,
-                    chunksCount: aseiResult.vectors?.length,
-                    queryChunksCount: queryChunksForDebug.length,
-                    bestQueryText: queryChunksForDebug[aseiResult._bestQueryChunk]?.text?.substring(0, 120),
-                    bestCandidateText: aseiResult.vectors?.[aseiResult._bestCandidateChunk]?.text?.substring(0, 120),
-                    allChunkScores: (() => {
-                        const scores = [];
-                        if (!aseiResult.vectors) return 'no vectors';
-                        for (let qi = 0; qi < queryChunksForDebug.length; qi++) {
-                            const qVec = queryChunksForDebug[qi]?.vector;
-                            if (!qVec) continue;
-                            for (let ci = 0; ci < aseiResult.vectors.length; ci++) {
-                                const cVec = aseiResult.vectors[ci]?.vector;
-                                if (!cVec) continue;
-                                const s = cosineSimilarity(qVec, cVec);
-                                scores.push({ qi, ci, score: s.toFixed(4), queryPreview: queryChunksForDebug[qi]?.text?.substring(0, 50), candidatePreview: aseiResult.vectors[ci]?.text?.substring(0, 50) });
-                            }
-                        }
-                        return scores.sort((a, b) => b.score - a.score);
-                    })()
-                });
-            }
             
             console.info('[vectorSearchLorebooks] raw similarity scores', {
                 label,

@@ -808,11 +808,18 @@ async function buildMemoryInjection({ char, history, summary, safeContext }) {
 
     const vectorResults = await vectorSearchMemoryEntries(activeEntries, history, currentText).catch(() => []);
     const vectorScores = new Map(vectorResults.map(item => [item.id, item.vectorScore || item.score || 0]));
-    const scoredEntries = activeEntries.map((entry, index) => {
+    const eligibleEntries = activeEntries.filter(entry => {
+        const messageIds = normalizeMessageIdList(entry);
+        if (!messageIds.length) return true;
+        const firstMsgId = messageIds[0];
+        return !recentMessageIds.has(firstMsgId);
+    });
+
+    const scoredEntries = eligibleEntries.map((entry, index) => {
         const haystack = `${entry.title || ''}\n${entry.content || ''}`.toLowerCase();
         const messageIds = normalizeMessageIdList(entry);
         let score = 0;
-        if (messageIds.some(id => recentMessageIds.has(id))) score += 8;
+        if (messageIds.some(id => !recentMessageIds.has(id))) score += 8;
         if (keywordMatchedIds.has(entry.id)) score += 6;
         if (vectorScores.has(entry.id)) score += Math.max(0, (vectorScores.get(entry.id) || 0) * 5);
         (Array.isArray(entry.contextRefs) ? entry.contextRefs : []).forEach(ref => {
@@ -822,7 +829,7 @@ async function buildMemoryInjection({ char, history, summary, safeContext }) {
         uniqueWords.forEach(word => {
             if (haystack.includes(word)) score += 1;
         });
-        score += Math.min(3, index / Math.max(activeEntries.length, 1));
+        score += Math.min(3, index / Math.max(eligibleEntries.length, 1));
         return { entry, score };
     });
 
@@ -985,20 +992,31 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
     }
 
     let result = "";
-
+    
+    let requestError = null;
+    
     await executeRequest({
         apiUrl,
         apiKey,
         requestBody: {
             model,
             messages: [{ role: 'user', content: finalPrompt }],
-            temperature: temp
+            temperature: temp,
+            stream: false
         },
+        stream: false,
         controller,
         callbacks: {
-            onComplete: (text) => { result = text; }
+            onUpdate: (chunk, reasoningChunk, effectiveText) => {
+                if (effectiveText) result = effectiveText;
+                else if (chunk) result += chunk;
+            },
+            onComplete: (text) => { if (text) result = text; },
+            onError: (err) => { requestError = err; }
         }
     });
+    
+    if (requestError) throw requestError;
 
     return result;
 }

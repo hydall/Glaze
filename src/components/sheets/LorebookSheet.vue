@@ -42,7 +42,8 @@ function handleCreateEntry() {
         caseSensitive: null,
         matchWholeWords: null,
         useGroupScoring: null,
-        vectorSearch: false
+        vectorSearch: false,
+        useKeywordSearch: true
     };
     activeLorebook.value.entries.push(newEntry);
     selectEntry(newEntry, activeLorebook.value.entries.length - 1);
@@ -50,6 +51,10 @@ function handleCreateEntry() {
 }
 
 function selectEntry(entry, index) {
+    // Normalize useKeywordSearch for existing entries (default true for backward compatibility)
+    if (entry.useKeywordSearch === undefined) {
+        entry.useKeywordSearch = true;
+    }
     activeEntry.value = entry;
     activeEntryIndex.value = index;
     currentView.value = 'edit_entry';
@@ -180,11 +185,13 @@ function resetAllEntriesToGlobal() {
         const didChange = entry.caseSensitive !== null
             || entry.matchWholeWords !== null
             || entry.useGroupScoring !== null
-            || entry.position !== 'matchGlobal';
+            || entry.position !== 'matchGlobal'
+            || entry.scanDepth !== null;
         entry.caseSensitive = null;
         entry.matchWholeWords = null;
         entry.useGroupScoring = null;
         entry.position = 'matchGlobal';
+        entry.scanDepth = null;
         if (didChange) changedCount += 1;
     });
     showToast(changedCount > 0
@@ -918,8 +925,8 @@ defineExpose({ open, openEntry, close, openLorebook });
                 <div class="editor-scroll">
                     <div class="menu-group first-group">
                         <div class="section-header">{{ t('section_activation_logic') }} <HelpTip term="lorebook-keys"/></div>
-                        <div v-if="activeEntry.vectorSearch" class="settings-desc" style="padding:8px 0;color:var(--text-gray);">{{ t('desc_vector_search_replaces_keys') }}</div>
-                        <div v-if="!activeEntry.vectorSearch && !activeEntry.constant">
+                        <div v-if="activeEntry.vectorSearch" class="settings-desc" style="padding:8px 0;color:#34c759;">{{ t('desc_vector_search_supplements_keys') }}</div>
+                        <div v-if="!activeEntry.constant">
                         <div class="settings-item">
                                 <label>{{ t('label_primary_keys') }} <span class="hint">{{ t('hint_comma_separated') }}</span></label>
                                 <input type="text" :value="activeEntry.keys.join(', ')" @input="updateEntryKeys($event.target.value)" :placeholder="t('placeholder_keys')">
@@ -965,13 +972,14 @@ defineExpose({ open, openEntry, close, openLorebook });
                                 title: t('label_match_whole_words'),
                                 options: [
                                     { value: 'null', label: t('match_global') },
-                                    { value: 'true', label: t('on') },
+                                    { value: 'true', label: t('match_whole_words_st') },
+                                    { value: 'glaze', label: t('match_whole_words_glaze') },
                                     { value: 'false', label: t('off') }
                                 ],
-                                currentValue: typeof activeEntry.matchWholeWords !== 'boolean' ? 'null' : activeEntry.matchWholeWords.toString(),
-                                onSelect: (v) => activeEntry.matchWholeWords = v === 'null' ? null : (v === 'true')
+                                currentValue: activeEntry.matchWholeWords === null || activeEntry.matchWholeWords === undefined ? 'null' : (activeEntry.matchWholeWords === 'glaze' ? 'glaze' : activeEntry.matchWholeWords.toString()),
+                                onSelect: (v) => activeEntry.matchWholeWords = v === 'null' ? null : (v === 'glaze' ? 'glaze' : (v === 'true'))
                             })">
-                                <span>{{ typeof activeEntry.matchWholeWords !== 'boolean' ? t('match_global') : (activeEntry.matchWholeWords ? t('on') : t('off')) }}</span>
+                                <span>{{ activeEntry.matchWholeWords === null || activeEntry.matchWholeWords === undefined ? t('match_global') : (activeEntry.matchWholeWords === 'glaze' ? t('match_whole_words_glaze') : (activeEntry.matchWholeWords ? t('match_whole_words_st') : t('off'))) }}</span>
                                 <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                             </div>
                         </div>
@@ -1076,6 +1084,13 @@ defineExpose({ open, openEntry, close, openLorebook });
                                 <div class="settings-desc">{{ activeEntry.constant ? t('desc_vector_disabled_for_constant') : t('desc_vector_search_entry') }}</div>
                             </div>
                             <input type="checkbox" v-model="activeEntry.vectorSearch" class="vk-switch" :disabled="activeEntry.constant">
+                        </div>
+                        <div v-if="activeEntry.vectorSearch && !activeEntry.constant" class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('label_use_keyword_search') }}</label>
+                                <div class="settings-desc">{{ t('desc_use_keyword_search') }}</div>
+                            </div>
+                            <input type="checkbox" v-model="activeEntry.useKeywordSearch" class="vk-switch">
                         </div>
                         <div v-if="activeEntry.vectorSearch && !activeEntry.constant" class="settings-item">
                             <button class="vk-btn-action" style="width:100%;" @click="handleIndexEntry" :disabled="indexingEntry">

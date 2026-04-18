@@ -25,7 +25,9 @@ const props = defineProps({
     activeSearchMatchIndex: { type: Number, default: -1 },
     isSelectionMode: { type: Boolean, default: false },
     isSelected: { type: Boolean, default: false },
-    regexRevision: { type: Number, default: 0 }
+    regexRevision: { type: Number, default: 0 },
+    isPendingMemory: { type: Boolean, default: false },
+    isDraftMemory: { type: Boolean, default: false }
 });
 
 const emit = defineEmits([
@@ -569,12 +571,21 @@ const tokenCount = computed(() => {
 
 const memoryBadge = computed(() => {
     const coverage = props.message.memoryCoverage;
-    if (!coverage || typeof coverage !== 'object') return null;
+    // Check coverage states in priority order
+    if (!coverage || typeof coverage !== 'object') {
+        // No coverage object — check draft/pending states
+        if (props.isPendingMemory) return { label: 'PENDING', className: 'pending' };
+        if (props.isDraftMemory) return { label: 'DRAFT', className: 'draft-memory' };
+        return null;
+    }
     if (coverage.needsRebuild) return { label: 'REBUILD', className: 'needs-rebuild' };
     if (coverage.stale) return { label: 'STALE', className: 'stale' };
     if (Array.isArray(coverage.entryIds) && coverage.entryIds.length > 0) {
         return { label: 'MEM', className: 'covered' };
     }
+    // No approved entries — check draft/pending
+    if (props.isPendingMemory) return { label: 'PENDING', className: 'pending' };
+    if (props.isDraftMemory) return { label: 'DRAFT', className: 'draft-memory' };
     return null;
 });
 
@@ -901,7 +912,11 @@ onUnmounted(() => {
                         <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
                     </div>
                     <div class="item-info">
-                        <div class="item-label">{{ lb.name }}</div>
+                        <div class="item-label">
+                            {{ lb.name }}
+                            <span v-if="lb._source === 'keyword'" class="retrieval-badge keyword-badge">keyword</span>
+                            <span v-else-if="lb._source === 'vector'" class="retrieval-badge vector-badge">vector</span>
+                        </div>
                         <div class="item-sublabel">{{ lb.lorebookName }}</div>
                     </div>
                 </div>
@@ -1104,6 +1119,24 @@ onUnmounted(() => {
     border-color: rgba(30, 200, 255, 0.35);
 }
 
+.msg-memory-badge.pending {
+    color: #ffd700;
+    background: rgba(255, 215, 0, 0.12);
+    border-color: rgba(255, 215, 0, 0.4);
+    animation: pending-pulse 2s ease-in-out infinite;
+}
+
+@keyframes pending-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.msg-memory-badge.draft-memory {
+    color: #c79cff;
+    background: rgba(199, 156, 255, 0.12);
+    border-color: rgba(199, 156, 255, 0.35);
+}
+
 .msg-memory-badge.needs-rebuild {
     color: #ffb347;
     background: rgba(255, 179, 71, 0.12);
@@ -1197,6 +1230,31 @@ onUnmounted(() => {
     font-size: 14px;
     font-weight: 500;
     color: var(--text-black);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.retrieval-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.keyword-badge {
+    background: rgba(52, 199, 89, 0.15);
+    color: #34c759;
+    border: 1px solid rgba(52, 199, 89, 0.3);
+}
+
+.vector-badge {
+    background: rgba(191, 90, 242, 0.15);
+    color: #bf5af2;
+    border: 1px solid rgba(191, 90, 242, 0.3);
 }
 
 .item-sublabel {

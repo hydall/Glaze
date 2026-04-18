@@ -45,7 +45,7 @@ function ensureSessionMemoryBook(chatData, sessionId) {
                 generationEndpoint: '',
                 generationApiKey: '',
                 generationTemperature: null,
-                promptPreset: 'strict_factual',
+                promptPreset: 'detailed_beats',
                 customPrompts: []
             },
             updatedAt: 0
@@ -595,18 +595,28 @@ const memoryDraftState = ref({
     label: ''
 });
 let memoryDraftTimer = null;
+let memoryDraftAbortController = null;
 
 function stopMemoryDraftProgress() {
     if (memoryDraftTimer) {
         clearInterval(memoryDraftTimer);
         memoryDraftTimer = null;
     }
+    memoryDraftAbortController = null;
     memoryDraftState.value = {
         active: false,
         startedAt: 0,
         elapsedMs: 0,
         label: ''
     };
+}
+
+function cancelMemoryDraft() {
+    if (memoryDraftAbortController) {
+        memoryDraftAbortController.abort();
+    }
+    stopMemoryDraftProgress();
+    showToast('Memory draft generation cancelled');
 }
 
 function startMemoryDraftProgress(label = 'Generating memory draft') {
@@ -637,6 +647,8 @@ let isCalculatingCutoff = false;
 let pendingCutoffRecalc = false;
 let isOpeningChat = false;
 let cutoffRerunTimer = null;
+let cutoffDebounceTimer = null;
+let contextCutoffCache = null; // { charId, sessionId, messageCount, hash, result }
 const pendingGuidance = ref(null); // { text, type }
 
 let ignoreScrollAdjustment = false;
@@ -652,49 +664,118 @@ const currentSearchIndex = ref(-1);
 const selectedMessages = ref(new Set());
 const isSelectionMode = computed(() => selectedMessages.value.size > 0);
 
+const selectionIncludesLast = computed(() => {
+    if (selectedMessages.value.size === 0 || !currentMessages.value.length) return false;
+    // All selected messages must be consecutive from the end
+    const msgs = currentMessages.value;
+    for (let i = msgs.length - 1; i >= msgs.length - selectedMessages.value.size; i--) {
+        if (i < 0 || !msgs[i] || !selectedMessages.value.has(msgs[i].id)) return false;
+    }
+    return true;
+});
+
 const builtInMemoryPrompts = [
     {
-        key: 'strict_factual',
-        label: 'Strict factual',
+        key: 'detailed_beats',
+        label: 'Detailed beats (recommended)',
         prompt: [
-            'Create exactly one concise long-term memory entry from the following roleplay segment.',
+            'Analyze the following roleplay segment and create a comprehensive memory entry.',
             'Preserve the original language of the source segment. Do not translate it.',
-            'Use only facts that are explicitly supported by the segment.',
-            'Do not infer completed outcomes, approvals, registrations, or decisions unless clearly stated.',
-            'Keep concrete names exactly as used in the segment.',
+            'Exclude all [OOC] (out-of-character) conversation — it is not useful for memory.',
+            '',
+            'Create a detailed beat-by-beat summary in narrative prose. Include:',
+            '- Timeline: Date/time context if mentioned',
+            '- Story Beats: All important plot events, decisions, and developments in order',
+            '- Key Interactions: Significant character exchanges, dialogue highlights, and relationship developments',
+            '- Notable Details: Important objects, settings, revelations, memorable quotes',
+            '- Outcome: Results, resolutions, emotional states, and consequences for future continuity',
+            '',
+            'Capture all nuance without repeating verbatim. Use concrete nouns (e.g., "rice cooker" not "appliance").',
+            'Write in past tense, third person. Focus on cause → intention → reaction → consequence.',
+            '',
+            'For keywords: generate 15-30 concrete, scene-specific retrieval tags:',
+            '- Use proper nouns (locations: "Chinatown", "Ritz-Carlton bar")',
+            '- Use specific objects ("CPAP machine", "chocolate chip cookies")',
+            '- Use distinctive actions ("cookie baking", "piano apology")',
+            '- Use unique phrases from the scene ("pack for forever", specific nicknames)',
+            '- DO NOT use abstract themes ("intimacy", "trust", "vulnerability")',
+            '- DO NOT use character names ({{char}}, {{user}})',
+            '- DO NOT combine multiple concepts into one keyword',
+            '',
             'Return plain text in this exact format:',
-            'Memory: <one concise memory entry>',
-            'Keys: <comma-separated retrieval keys, or empty if vector retrieval should dominate>',
+            'Memory: <detailed beat-by-beat summary following the structure above>',
+            'Keys: <15-30 comma-separated concrete keywords as specified>',
             '',
             '{{history}}'
         ].join('\n')
     },
     {
-        key: 'durable_events',
-        label: 'Durable events',
+        key: 'concise_narrative',
+        label: 'Concise narrative',
         prompt: [
-            'Extract one durable memory from the following roleplay segment.',
-            'Keep the source language exactly as written.',
-            'Focus on lasting developments, obligations, status changes, accepted items, revealed facts, or relationship changes.',
-            'Do not speculate beyond the text.',
+            'Analyze the following roleplay segment and create a concise memory entry.',
+            'Preserve the original language. Do not translate. Exclude all [OOC] conversation.',
+            '',
+            'Write a compact 3-5 sentence narrative summary in past tense, third person.',
+            'Focus on:',
+            '- What happened (main events and decisions)',
+            '- Key character interactions or developments',
+            '- Important outcome or state change',
+            '',
+            'For keywords: provide 10-20 concrete, scene-specific keywords:',
+            '- Locations, objects, proper nouns, unique actions',
+            '- NOT abstract themes, emotions, or character names',
+            '',
             'Return plain text in this exact format:',
-            'Memory: <one compact memory entry>',
-            'Keys: <comma-separated retrieval keys, or empty if not needed>',
+            'Memory: <3-5 sentence concise narrative summary>',
+            'Keys: <10-20 comma-separated concrete keywords>',
             '',
             '{{history}}'
         ].join('\n')
     },
     {
-        key: 'relationship_focus',
-        label: 'Relationship focus',
+        key: 'structured_markdown',
+        label: 'Structured (markdown)',
         prompt: [
-            'Create one memory entry focused on relationship-relevant developments from the following roleplay segment.',
-            'Preserve the original language and exact names from the segment.',
-            'Only include information directly supported by the text.',
-            'If no durable relationship-relevant development exists, summarize the most durable factual development instead.',
+            'Analyze the following roleplay segment and create a structured memory entry.',
+            'Preserve the original language. Exclude all [OOC] conversation.',
+            '',
+            'Use this markdown structure (skip sections if not applicable):',
+            '**Timeline**: Day/time this scene covers',
+            '**Story Beats**: Important plot events and developments',
+            '**Key Interactions**: Significant character exchanges and relationship shifts',
+            '**Notable Details**: Important objects, settings, revelations, quotes',
+            '**Outcome**: Results, emotional states, consequences',
+            '',
+            'Write in past tense, third person. Be comprehensive but avoid verbatim repetition.',
+            '',
+            'For keywords: generate 15-25 concrete scene-specific tags:',
+            '- Proper nouns, locations, specific objects, unique actions',
+            '- NOT abstract concepts, emotions, or character names',
+            '',
             'Return plain text in this exact format:',
-            'Memory: <one concise memory entry>',
-            'Keys: <comma-separated retrieval keys, or empty if not needed>',
+            'Memory: <structured markdown summary following the template above>',
+            'Keys: <15-25 comma-separated concrete keywords>',
+            '',
+            '{{history}}'
+        ].join('\n')
+    },
+    {
+        key: 'minimal_factual',
+        label: 'Minimal (1-2 sentences)',
+        prompt: [
+            'Create a minimal memory entry from the following roleplay segment.',
+            'Preserve the original language. Exclude [OOC] conversation.',
+            '',
+            'Write 1-2 sentences capturing only the most important factual development.',
+            'Focus on durable outcomes: status changes, revealed facts, decisions, or relationship shifts.',
+            '',
+            'For keywords: provide 5-10 most relevant concrete keywords (locations, objects, proper nouns).',
+            'Do not use abstract themes or character names.',
+            '',
+            'Return plain text in this exact format:',
+            'Memory: <1-2 sentence factual summary>',
+            'Keys: <5-10 comma-separated concrete keywords>',
             '',
             '{{history}}'
         ].join('\n')
@@ -822,6 +903,7 @@ function parseMemoryDraftResponse(rawText, fallbackKeys = []) {
 function openMemoryPromptPreview(item, options = {}) {
     if (!item) return;
     const { onClose } = options;
+    const hasOnClose = typeof onClose === 'function';
     const content = document.createElement('div');
     content.className = 'context-sheet';
     content.innerHTML = `
@@ -831,12 +913,12 @@ function openMemoryPromptPreview(item, options = {}) {
         </div>
         <div class="memory-entry-fulltext">${(item.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
         <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-preview-close">Close</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-preview-close">${hasOnClose ? 'Back' : 'Close'}</button>
         </div>
     `;
     content.querySelector('#memory-prompt-preview-close')?.addEventListener('click', () => {
         closeBottomSheet();
-        if (typeof onClose === 'function') {
+        if (hasOnClose) {
             setTimeout(() => onClose(), 50);
         }
     });
@@ -911,7 +993,11 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
     const sessionId = activeChatChar.sessionId || chatData.currentId;
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
     const automation = ensureMemoryAutomationState(memoryBook);
-    if (automation.isGeneratingDraft) return false;
+    
+    if (automation.isGeneratingDraft) {
+        showToast('Already generating a draft. Please wait...');
+        return false;
+    }
 
     const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
     const summary = chatData?.summaries?.[sessionId] || null;
@@ -955,18 +1041,16 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
     const selectedIds = selected.map(msg => msg.id).filter(Boolean);
     if (!selectedIds.length) return false;
 
-    const conflictingEntry = findConflictingMemoryEntry(memoryBook, selectedIds, {
-        includeEntries: true,
-        includeDrafts: true,
-        overlapThreshold: source === 'manual_draft' ? 0.95 : 0.8
-    });
-    if (conflictingEntry) {
-        if (source === 'manual_draft') {
-            showToast(conflictingEntry.reason === 'exact'
-                ? 'A memory entry or draft already exists for this exact segment'
-                : 'A very similar memory entry or draft already covers most of this segment');
+    // Skip conflict check for manual drafts — user explicitly wants to create a draft
+    if (source !== 'manual_draft' && source !== 'manual_regenerate') {
+        const conflictingEntry = findConflictingMemoryEntry(memoryBook, selectedIds, {
+            includeEntries: true,
+            includeDrafts: true,
+            overlapThreshold: 0.8
+        });
+        if (conflictingEntry) {
+            return false;
         }
-        return false;
     }
 
     try {
@@ -975,12 +1059,16 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
         await db.saveChat(activeChatChar.id, chatData);
 
         startMemoryDraftProgress(source === 'manual_draft' ? 'Generating selected memory draft' : 'Generating memory draft');
-        if (bottomSheetState.title === 'Memory Books') {
+        if (bottomSheetState.title === 'Memory Books' && bottomSheetState.isOpen) {
             closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        } else if (source === 'manual_draft' || source === 'manual_regenerate') {
+            // Open Memory Books sheet immediately so user sees generation progress
             setTimeout(() => openMemoryBooksSheet(), 50);
         }
         showToast('Generating memory draft...', 2000);
-        const draftText = await generateMemoryDraft({ history, prompt: finalPrompt, apiConfigOverride });
+        memoryDraftAbortController = new AbortController();
+        const draftText = await generateMemoryDraft({ history, prompt: finalPrompt, controller: memoryDraftAbortController, apiConfigOverride });
         const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, activeChatChar?.name || 'Character']);
 
         if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
@@ -1005,6 +1093,7 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
         automation.isGeneratingDraft = false;
         await db.saveChat(activeChatChar.id, chatData);
         stopMemoryDraftProgress();
+        updatePendingMemoryMessageIds();
         showToast('Memory draft created');
         if (openSheet) openMemoryBooksSheet();
         return true;
@@ -1014,7 +1103,9 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
         await db.saveChat(activeChatChar.id, chatData);
         stopMemoryDraftProgress();
         console.error('Failed to generate memory draft:', error);
-        showToast(`Memory draft failed: ${formatError(error)}`);
+        // Close sheet first so toast is visible, then show error
+        closeBottomSheet();
+        setTimeout(() => showToast(`Memory draft failed: ${formatError(error)}`, 5000), 100);
         return false;
     }
 }
@@ -1088,6 +1179,7 @@ async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages,
     automation.lastProcessedMessageCount = stableCount;
     memoryBook.updatedAt = Date.now();
     await db.saveChat(activeChatChar.id, chatData);
+    updatePendingMemoryMessageIds();
     return created;
 }
 
@@ -1123,6 +1215,50 @@ async function bootstrapImportedMemoryDrafts(charId, sessionId) {
     return createdCount;
 }
 
+async function runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, count) {
+    const toGenerate = segments.slice(0, count);
+    let generated = 0;
+    let failed = 0;
+    
+    for (let i = 0; i < toGenerate.length; i++) {
+        // Check if cancelled
+        if (memoryDraftAbortController?.signal?.aborted) break;
+        
+        const segmentIds = toGenerate[i];
+        const messages = currentMessages.value.filter(m => m && segmentIds.includes(m.id));
+        if (!messages.length) continue;
+        
+        showToast(`Generating draft ${i + 1} of ${toGenerate.length}...`, 3000);
+        
+        const success = await generateMemoryDraftForMessages(messages, { 
+            openSheet: false, 
+            source: 'manual_draft' 
+        });
+        
+        if (success) {
+            generated++;
+            // Remove generated segment from planned list
+            if (memoryBook.automation?.plannedSegments) {
+                memoryBook.automation.plannedSegments = memoryBook.automation.plannedSegments.filter(
+                    seg => JSON.stringify(seg) !== JSON.stringify(segmentIds)
+                );
+            }
+        } else {
+            failed++;
+        }
+    }
+    
+    // Refresh data
+    updatePendingMemoryMessageIds();
+    
+    const msg = failed > 0 
+        ? `Batch complete: ${generated} generated, ${failed} failed`
+        : `Batch complete: ${generated} draft${generated > 1 ? 's' : ''} generated`;
+    showToast(msg, 3000);
+    
+    setTimeout(() => openMemoryBooksSheet(), 100);
+}
+
 function openMemoryTextPreview(entry, kind = 'Memory') {
     if (!entry) return;
     const keys = Array.isArray(entry.keys) && entry.keys.length
@@ -1143,10 +1279,11 @@ function openMemoryTextPreview(entry, kind = 'Memory') {
         </div>
         <div class="memory-entry-fulltext">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
         <div class="context-sheet-actions">
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-regenerate">Regenerate</button>
             ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-edit">Edit</button>` : ''}
             ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-reindex">Reindex</button>` : ''}
             ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary memory-preview-delete" id="memory-preview-delete">Delete</button>` : ''}
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-preview-close">Close</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-preview-close">${isApprovedEntry ? 'Close' : 'Back'}</button>
         </div>
     `;
     content.querySelector('#memory-preview-edit')?.addEventListener('click', () => {
@@ -1195,7 +1332,37 @@ function openMemoryTextPreview(entry, kind = 'Memory') {
         closeBottomSheet();
         setTimeout(() => openMemoryBooksSheet(), 50);
     });
-    content.querySelector('#memory-preview-close')?.addEventListener('click', () => closeBottomSheet());
+    content.querySelector('#memory-preview-regenerate')?.addEventListener('click', async () => {
+        if (!activeChatChar || !entry.messageIds || !entry.messageIds.length) {
+            showToast('Cannot regenerate: no message range');
+            return;
+        }
+        const chatData = await getChatData(activeChatChar.id);
+        const sessionId = activeChatChar.sessionId || chatData.currentId;
+        const messages = chatData.sessions[sessionId] || [];
+        const selectedMessages = messages.filter(msg => entry.messageIds.includes(msg.id));
+        if (!selectedMessages.length) {
+            showToast('Cannot regenerate: messages not found');
+            return;
+        }
+        closeBottomSheet();
+        // Regenerate draft
+        try {
+            await generateMemoryDraftForMessages(selectedMessages, { source: 'manual_regenerate' });
+            showToast('Draft regenerated');
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        } catch (error) {
+            console.error('Failed to regenerate draft:', error);
+            showToast(`Regeneration failed: ${formatError(error)}`);
+        }
+    });
+    content.querySelector('#memory-preview-close')?.addEventListener('click', () => {
+        closeBottomSheet();
+        if (!isApprovedEntry) {
+            // For drafts, return to Memory Books sheet
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        }
+    });
     showBottomSheet({ title: kind, content, isSolid: true });
 }
 
@@ -1313,7 +1480,7 @@ async function openMemoryGenerationSettings() {
         endpoint: settings.generationEndpoint || '',
         apiKey: settings.generationApiKey || '',
         temperature: settings.generationTemperature,
-        promptPreset: settings.promptPreset || 'strict_factual',
+        promptPreset: getMemoryPromptOptions(settings).some(p => p.key === settings.promptPreset) ? settings.promptPreset : 'detailed_beats',
         autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
             ? Number(settings.autoCreateInterval)
             : 12,
@@ -1469,7 +1636,8 @@ async function openMemoryGenerationSettings() {
         });
 
         content.querySelector('#memory-prompt-preview-btn')?.addEventListener('click', () => {
-            const selected = getMemoryPromptOptions(settings).find(item => item.key === settings.promptPreset);
+            const options = getMemoryPromptOptions(settings);
+            const selected = options.find(item => item.key === settings.promptPreset) || options[0];
             closeBottomSheet();
             setTimeout(() => openMemoryPromptPreview(selected, { onClose: openMemoryGenerationSettings }), 50);
         });
@@ -1533,7 +1701,7 @@ async function openMemoryGenerationSettings() {
             const maxInjectedValue = Number(content.querySelector('#memory-max-injected-input')?.value || state.maxInjectedEntries || 3);
             settings.maxInjectedEntries = Math.max(1, Math.min(20, Number.isFinite(maxInjectedValue) ? Math.round(maxInjectedValue) : 3));
             settings.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
-            settings.promptPreset = settings.promptPreset || state.promptPreset || 'strict_factual';
+            settings.promptPreset = settings.promptPreset || state.promptPreset || 'detailed_beats';
             memoryBook.updatedAt = Date.now();
             await db.saveChat(activeChatChar.id, chatData);
             closeBottomSheet();
@@ -1608,7 +1776,7 @@ async function openMemoryPromptManager() {
         btn.addEventListener('click', async () => {
             const promptId = btn.getAttribute('data-prompt-delete');
             settings.customPrompts = settings.customPrompts.filter(item => item.id !== promptId);
-            if (settings.promptPreset === promptId) settings.promptPreset = 'strict_factual';
+            if (settings.promptPreset === promptId) settings.promptPreset = 'detailed_beats';
             memoryBook.updatedAt = Date.now();
             await db.saveChat(activeChatChar.id, chatData);
             closeBottomSheet();
@@ -1732,9 +1900,12 @@ async function openMemoryBooksSheet() {
             <div class="memory-generation-status-card">
                 <div class="memory-generation-status-row">
                     <strong>${(memoryDraftState.value.label || 'Generating memory draft').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong>
-                    <span>${formatElapsedSeconds(memoryDraftState.value.elapsedMs)}</span>
+                    <span id="memory-draft-timer">${formatElapsedSeconds(memoryDraftState.value.elapsedMs)}</span>
                 </div>
-                <div class="context-sheet-note">The draft is still being created. You can keep this sheet open and watch the timer update.</div>
+                <div class="memory-generation-status-row" style="margin-top: 6px;">
+                    <div class="context-sheet-note" style="margin: 0;">Timer updates automatically.</div>
+                    <button type="button" class="context-sheet-btn context-sheet-btn-destructive" id="memory-draft-cancel" style="padding: 4px 12px; font-size: 12px;">Stop</button>
+                </div>
             </div>
         `
         : '';
@@ -1767,7 +1938,10 @@ async function openMemoryBooksSheet() {
         : '<div class="context-sheet-note">No memory entries in this session yet.</div>';
     const draftCards = pendingDrafts.length
         ? pendingDrafts.map(entry => {
-            const preview = (entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180);
+            const isGenerating = !entry.content && memoryDraftState.value.active;
+            const preview = entry.content 
+                ? (entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180)
+                : (isGenerating ? '<span style="color:#ffd700;">⏳ Generating...</span>' : '<span style="color:var(--text-gray);">No content yet</span>');
             const keysMeta = Array.isArray(entry.keys) && entry.keys.length
                 ? ` • ${entry.keys.slice(0, 3).map(key => String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')).join(', ')}`
                 : '';
@@ -1778,15 +1952,15 @@ async function openMemoryBooksSheet() {
                     <div class="memory-entry-head">
                         <div>
                             <div class="memory-entry-title">${(entry.title || 'Untitled draft').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-                            <div class="memory-entry-meta">pending approval${retrievalMeta}${keysMeta}</div>
+                            <div class="memory-entry-meta">${isGenerating ? 'generating' : 'pending approval'}${retrievalMeta}${keysMeta}</div>
                         </div>
                         <div class="memory-draft-actions">
                             ${badges}
-                            <button type="button" class="memory-entry-approve" data-draft-approve="${entry.id}">Approve</button>
+                            <button type="button" class="memory-entry-approve" data-draft-approve="${entry.id}" ${isGenerating ? 'disabled' : ''}>Approve</button>
                             <button type="button" class="memory-entry-delete" data-draft-delete="${entry.id}">Delete</button>
                         </div>
                     </div>
-                    <div class="memory-entry-preview">${preview || 'No content yet'}</div>
+                    <div class="memory-entry-preview">${preview}</div>
                 </div>
             `;
         }).join('')
@@ -1849,6 +2023,34 @@ async function openMemoryBooksSheet() {
             <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-sheet-reindex" ${vectorEnabled ? '' : 'disabled'}>Reindex All</button>
             <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-sheet-close">Close</button>
         </div>
+        ${(() => {
+            const coveredIds = new Set();
+            for (const entry of entries) {
+                if (Array.isArray(entry.messageIds)) entry.messageIds.forEach(id => coveredIds.add(id));
+            }
+            for (const draft of pendingDrafts) {
+                if (Array.isArray(draft.messageIds)) draft.messageIds.forEach(id => coveredIds.add(id));
+            }
+            const stableMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden && !m.isError && (m.role === 'user' || m.role === 'char'));
+            const uncoveredCount = stableMessages.filter(m => m.id && !coveredIds.has(m.id)).length;
+            const interval = normalizeAutoCreateInterval(memoryBook);
+            const segmentsNeeded = Math.ceil(uncoveredCount / interval);
+            return uncoveredCount > 0 ? `
+                <div class="memory-batch-actions">
+                    <div class="memory-batch-info">
+                        <strong>${uncoveredCount}</strong> uncovered messages (${segmentsNeeded} segments of ${interval})
+                    </div>
+                    <div class="context-sheet-actions">
+                        <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-scan-chat">
+                            Scan Chat
+                        </button>
+                        <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-batch-generate" ${memoryDraftState.value.active ? 'disabled' : ''}>
+                            Generate Drafts
+                        </button>
+                    </div>
+                </div>
+            ` : '';
+        })()}
         ${draftProgressCard}
         ${draftSection}
         ${entrySection}
@@ -1984,6 +2186,118 @@ async function openMemoryBooksSheet() {
         }
     });
     content.querySelector('#memory-sheet-close')?.addEventListener('click', () => closeBottomSheet());
+    content.querySelector('#memory-draft-cancel')?.addEventListener('click', () => {
+        cancelMemoryDraft();
+        closeBottomSheet();
+        setTimeout(() => openMemoryBooksSheet(), 50);
+    });
+    
+    // Scan Chat: mark all uncovered messages as PENDING segments
+    content.querySelector('#memory-scan-chat')?.addEventListener('click', async () => {
+        const coveredIds = new Set();
+        for (const entry of entries) {
+            if (Array.isArray(entry.messageIds)) entry.messageIds.forEach(id => coveredIds.add(id));
+        }
+        for (const draft of pendingDrafts) {
+            if (Array.isArray(draft.messageIds)) draft.messageIds.forEach(id => coveredIds.add(id));
+        }
+        const stableMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden && !m.isError && (m.role === 'user' || m.role === 'char'));
+        const uncovered = stableMessages.filter(m => m.id && !coveredIds.has(m.id));
+        if (!uncovered.length) {
+            showToast('All messages are already covered');
+            return;
+        }
+        const interval = normalizeAutoCreateInterval(memoryBook);
+        const segments = [];
+        for (let i = 0; i < uncovered.length; i += interval) {
+            segments.push(uncovered.slice(i, i + interval));
+        }
+        // Store planned segments in automation state
+        if (!memoryBook.automation) memoryBook.automation = {};
+        memoryBook.automation.plannedSegments = segments.map(seg => seg.map(m => m.id));
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        
+        // Mark all uncovered as pending
+        const allUncoveredIds = new Set(uncovered.map(m => m.id));
+        pendingMemoryMessageIds.value = allUncoveredIds;
+        
+        showToast(`Scanned: ${segments.length} segments planned (${uncovered.length} messages)`);
+        closeBottomSheet();
+        setTimeout(() => openMemoryBooksSheet(), 50);
+    });
+    
+    // Generate Drafts: show batch count selector then generate
+    content.querySelector('#memory-batch-generate')?.addEventListener('click', () => {
+        const planned = memoryBook.automation?.plannedSegments || [];
+        const coveredIds = new Set();
+        for (const entry of entries) {
+            if (Array.isArray(entry.messageIds)) entry.messageIds.forEach(id => coveredIds.add(id));
+        }
+        for (const draft of pendingDrafts) {
+            if (Array.isArray(draft.messageIds)) draft.messageIds.forEach(id => coveredIds.add(id));
+        }
+        
+        // If no planned segments, build them on the fly
+        let segments = planned;
+        if (!segments.length) {
+            const stableMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden && !m.isError && (m.role === 'user' || m.role === 'char'));
+            const uncovered = stableMessages.filter(m => m.id && !coveredIds.has(m.id));
+            const interval = normalizeAutoCreateInterval(memoryBook);
+            segments = [];
+            for (let i = 0; i < uncovered.length; i += interval) {
+                segments.push(uncovered.slice(i, i + interval).map(m => m.id));
+            }
+        }
+        
+        if (!segments.length) {
+            showToast('No uncovered segments to generate');
+            return;
+        }
+        
+        const totalSegments = segments.length;
+        const quickItems = [];
+        const quickPicks = [1, 3, 5];
+        for (const n of quickPicks) {
+            if (n > totalSegments) break;
+            quickItems.push({
+                label: `${n} draft${n > 1 ? 's' : ''}`,
+                onClick: async () => {
+                    closeBottomSheet();
+                    await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, n);
+                }
+            });
+        }
+        if (!quickItems.some(it => it.label.includes(String(totalSegments)))) {
+            quickItems.push({
+                label: `All ${totalSegments}`,
+                onClick: async () => {
+                    closeBottomSheet();
+                    await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, totalSegments);
+                }
+            });
+        }
+        
+        closeBottomSheet();
+        showBottomSheet({
+            title: `Generate Drafts (${totalSegments} available)`,
+            items: quickItems,
+            input: {
+                placeholder: `Enter number (1-${totalSegments})`,
+                confirmLabel: 'Generate',
+                onConfirm: async (val) => {
+                    const num = parseInt(val, 10);
+                    if (isNaN(num) || num < 1 || num > totalSegments) {
+                        showToast(`Enter a number between 1 and ${totalSegments}`);
+                        return;
+                    }
+                    closeBottomSheet();
+                    await runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, num);
+                }
+            }
+        });
+    });
+    
     content.querySelectorAll('[data-entry-id]').forEach(card => {
         card.addEventListener('click', (event) => {
             if (event.target.closest('button')) return;
@@ -2058,21 +2372,15 @@ async function openMemoryBooksSheet() {
     });
 
     showBottomSheet({ title: 'Memory Books', content, isSolid: true });
-
-    if (memoryDraftState.value.active) {
-        refreshTimer = setTimeout(() => {
-            if (bottomSheetState.title === 'Memory Books' && memoryDraftState.value.active) {
-                closeBottomSheet();
-                setTimeout(() => openMemoryBooksSheet(), 30);
-            }
-        }, 300);
-    }
+    // Timer updates are now handled by watch on memoryDraftState.elapsedMs
 }
 
 async function deleteSelectedMessages() {
     if (selectedMessages.value.size === 0) return;
-    
-    // Filter messages
+
+    const lastMsg = currentMessages.value[currentMessages.value.length - 1];
+    if (!lastMsg || !selectedMessages.value.has(lastMsg.id)) return;
+
     const newMsgs = currentMessages.value.filter(msg => msg && !selectedMessages.value.has(msg.id));
     const count = currentMessages.value.length - newMsgs.length;
     currentMessages.value = newMsgs;
@@ -2089,7 +2397,7 @@ async function deleteSelectedMessages() {
         reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
         chatData.sessions[sessionId] = currentMessages.value;
         await db.saveChat(activeChatChar.id, chatData);
-        updateContextCutoff();
+        debouncedUpdateContextCutoff();
     }
     
     clearSelection();
@@ -2109,7 +2417,7 @@ async function toggleHideSelectedMessages() {
         const sessionId = activeChatChar.sessionId || chatData.currentId;
         chatData.sessions[sessionId] = currentMessages.value;
         await db.saveChat(activeChatChar.id, chatData);
-        updateContextCutoff();
+        debouncedUpdateContextCutoff();
     }
     
     clearSelection();
@@ -2373,6 +2681,41 @@ const searchMatchState = computed(() => {
     };
 });
 
+const pendingMemoryMessageIds = ref(new Set());
+const draftMemoryMessageIds = ref(new Set());
+
+async function updatePendingMemoryMessageIds() {
+    if (!activeChatChar) {
+        pendingMemoryMessageIds.value = new Set();
+        draftMemoryMessageIds.value = new Set();
+        return;
+    }
+    const chatData = await getChatData(activeChatChar.id);
+    if (!chatData) {
+        pendingMemoryMessageIds.value = new Set();
+        draftMemoryMessageIds.value = new Set();
+        return;
+    }
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = chatData.memoryBooks?.[sessionId];
+    
+    // Pending trigger (automation queued but not yet generated)
+    const pendingIds = memoryBook?.automation?.pendingTrigger?.messageIds || [];
+    pendingMemoryMessageIds.value = new Set(pendingIds.filter(Boolean));
+    
+    // Draft coverage (drafts generated, awaiting approval)
+    const drafts = Array.isArray(memoryBook?.pendingDrafts) ? memoryBook.pendingDrafts : [];
+    const draftIds = new Set();
+    for (const draft of drafts) {
+        if (Array.isArray(draft.messageIds)) {
+            for (const id of draft.messageIds) {
+                if (id) draftIds.add(id);
+            }
+        }
+    }
+    draftMemoryMessageIds.value = draftIds;
+}
+
 const onChatSearchToggle = (e) => {
     isSearchMode.value = e.detail;
     if (!isSearchMode.value) {
@@ -2448,20 +2791,37 @@ async function updateContextCutoff() {
         return;
     }
 
-    isCalculatingCutoff = true;
-    
     const currentCharId = activeChatChar.id;
-    const history = currentMessages.value
-        .filter(m => m && !m.isTyping && !m.isHidden)
+    const visibleMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
+    const messageCount = visibleMessages.length;
+    
+    console.time('[updateContextCutoff] getChatData');
+    const cutoffChatData = await getChatData(activeChatChar.id);
+    console.timeEnd('[updateContextCutoff] getChatData');
+    const sessionId = cutoffChatData.currentId;
+    
+    // Create simple cache key from charId, sessionId, message count
+    const cacheKey = `${currentCharId}_${sessionId}_${messageCount}`;
+    
+    // Check cache - if nothing changed, reuse previous result
+    if (contextCutoffCache && contextCutoffCache.hash === cacheKey) {
+        cutoffIndex.value = contextCutoffCache.result?.cutoffIndex ?? 0;
+        contextBreakdown.value = contextCutoffCache.result?.contextBreakdown || null;
+        console.log('[updateContextCutoff] using cache');
+        return;
+    }
+
+    isCalculatingCutoff = true;
+    console.time('[updateContextCutoff] total');
+    
+    const history = visibleMessages
         .map((m, i) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text || "", originalIndex: i }));
-        
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = chatData.currentId;
-    const summary = chatData.summaries?.[sessionId];
+    
+    const summary = cutoffChatData.summaries?.[sessionId];
     
     let authorsNote = null;
-    if (chatData.authorsNotes && chatData.authorsNotes[sessionId]) {
-        const storedAn = chatData.authorsNotes[sessionId];
+    if (cutoffChatData.authorsNotes && cutoffChatData.authorsNotes[sessionId]) {
+        const storedAn = cutoffChatData.authorsNotes[sessionId];
         let anContent = typeof storedAn === 'string' ? storedAn : storedAn.content;
         
         const effectivePreset = getEffectivePreset(activeChatChar.id, sessionId ? `${activeChatChar.id}_${sessionId}` : null);
@@ -2478,17 +2838,28 @@ async function updateContextCutoff() {
     }
 
     try {
+        console.time('[updateContextCutoff] calculateContext');
         const result = await calculateContext({
             char: activeChatChar,
             history,
             authorsNote,
             summary
         });
+        console.timeEnd('[updateContextCutoff] calculateContext');
         
         if (activeChatChar && activeChatChar.id === currentCharId) {
             cutoffIndex.value = result?.cutoffIndex ?? 0;
             contextBreakdown.value = result?.contextBreakdown || null;
+            // Cache result to avoid recalculation when nothing changed
+            contextCutoffCache = {
+                hash: cacheKey,
+                charId: currentCharId,
+                sessionId,
+                messageCount,
+                result
+            };
         }
+        console.timeEnd('[updateContextCutoff] total');
     } finally {
         isCalculatingCutoff = false;
         if (pendingCutoffRecalc) {
@@ -2499,6 +2870,17 @@ async function updateContextCutoff() {
             }, 0);
         }
     }
+}
+
+function debouncedUpdateContextCutoff(delay = 300) {
+    if (cutoffDebounceTimer) clearTimeout(cutoffDebounceTimer);
+    cutoffDebounceTimer = setTimeout(() => {
+        updateContextCutoff();
+    }, delay);
+}
+
+function invalidateContextCache() {
+    contextCutoffCache = null;
 }
 
 async function updateSessionMessage(char, msgIndex, newMsgData) {
@@ -2633,7 +3015,15 @@ function confirmHideTopMessages() {
 async function openContextSheet() {
     // Always recalculate to ensure vector lorebooks are included
     if (activeChatChar) {
-        await updateContextCutoff();
+        // Wait for calculation to complete, with timeout fallback
+        const calculatePromise = updateContextCutoff();
+        const timeoutPromise = new Promise(resolve => setTimeout(resolve, 5000)); // 5 second timeout
+        await Promise.race([calculatePromise, timeoutPromise]);
+        
+        // If still calculating after timeout, wait a bit more
+        if (isCalculatingCutoff) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
     }
 
     const breakdown = contextBreakdown.value;
@@ -2642,7 +3032,7 @@ async function openContextSheet() {
             title: 'Context',
             bigInfo: {
                 icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M11 17h2v-6h-2v6zm0-8h2V7h-2v2zm1-7C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>',
-                description: 'Context breakdown is not ready yet. Try again in a moment.',
+                description: 'Context calculation is taking longer than expected. Please check that your API settings are configured correctly and try again.',
                 buttonText: 'Close',
                 onButtonClick: () => closeBottomSheet()
             }
@@ -3149,6 +3539,8 @@ async function openChat(char, onBack, force = false) {
             pendingCutoffRecalc = false;
             updateContextCutoff();
         }
+        // Update pending memory indicators
+        updatePendingMemoryMessageIds();
     }
 }
 
@@ -3713,7 +4105,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     name: e.comment || e.name || e.keys?.[0] || 'Entry',
                     content: e.content,
                     lorebookName: e.lorebookName,
-                    lorebookId: e.lorebookId
+                    lorebookId: e.lorebookId,
+                    _source: e._source || 'keyword' // 'keyword' or 'vector'
                 }));
                 const triggeredMemories = (memoryEntries || []).map(entry => ({
                     id: entry.id,
@@ -4363,8 +4756,8 @@ function openMessageActions(msg, index) {
         }
     });
 
-    // 6. Delete
-    items.push({
+    // 6. Delete (only allow deleting the last message)
+    if (index === currentMessages.value.length - 1) items.push({
         label: t('action_delete_msg'),
         icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
         iconColor: '#ff4444',
@@ -4886,10 +5279,18 @@ async function openSessionsSheet(char) {
                                     closeBottomSheet();
                                     triggerChatImport(char.id, null, async (result) => {
                                         await loadChats();
+                                        // Mark imported session as fully processed so auto-draft doesn't trigger
                                         if (result?.sessionId) {
-                                            const createdDrafts = await bootstrapImportedMemoryDrafts(char.id, result.sessionId);
-                                            if (createdDrafts > 0) {
-                                                showToast(`Created ${createdDrafts} imported memory draft${createdDrafts === 1 ? '' : 's'}`);
+                                            const importedData = await getChatData(char.id);
+                                            if (importedData?.sessions?.[result.sessionId]) {
+                                                const mb = ensureSessionMemoryBook(importedData, result.sessionId);
+                                                const auto = ensureMemoryAutomationState(mb);
+                                                const stableCount = getStableVisibleMessages(importedData.sessions[result.sessionId])
+                                                    .filter(m => m.role === 'user' || m.role === 'char').length;
+                                                auto.lastProcessedMessageCount = stableCount;
+                                                auto.pendingTrigger = null;
+                                                mb.updatedAt = Date.now();
+                                                await db.saveChat(char.id, importedData);
                                             }
                                         }
                                         const charObj = { ...char, sessionId: result?.sessionId || char.sessionId };
@@ -5162,6 +5563,23 @@ watch(() => currentMessages.value.length, () => {
     updateContextCutoff();
 });
 
+// Watch memory draft state and update timer in DOM if Memory Books sheet is open
+watch(() => memoryDraftState.value.elapsedMs, (newElapsed) => {
+    if (!memoryDraftState.value.active) return;
+    const timerEl = document.getElementById('memory-draft-timer');
+    if (timerEl) {
+        timerEl.textContent = formatElapsedSeconds(newElapsed);
+    }
+});
+
+// Watch memoryDraftState.active to show/hide draft generation progress card
+watch(() => memoryDraftState.value.active, (isActive) => {
+    // If Memory Books sheet is currently open, refresh it to show/hide draftProgressCard
+    if (bottomSheetState.title === 'Memory Books' && bottomSheetState.isOpen) {
+        openMemoryBooksSheet();
+    }
+});
+
 watch(activeChar, async (newVal) => {
     if (!newVal) return;
     
@@ -5318,6 +5736,8 @@ onUnmounted(() => {
                     :active-search-match-index="searchMatchState.msgIdx === vItem.item.originalIndex ? searchMatchState.occurrenceIdx : -1"
                     :is-selection-mode="isSelectionMode"
                     :is-selected="selectedMessages.has(vItem.item.data.id)"
+                    :is-pending-memory="pendingMemoryMessageIds.has(vItem.item.data.id)"
+                    :is-draft-memory="draftMemoryMessageIds.has(vItem.item.data.id)"
                     @swipe="(dir) => changeSwipe(vItem.item.originalIndex, dir, true)"
                     @change-greeting="(dir) => changeGreeting(vItem.item.originalIndex, dir, true)"
                     @regenerate="(mode, guidanceText) => regenerateMessage(vItem.item.originalIndex, mode, guidanceText)"
@@ -5349,6 +5769,7 @@ onUnmounted(() => {
                 :is-search-mode="isSearchMode"
                 :is-selection-mode="isSelectionMode"
                 :selected-count="selectedMessages.size"
+                :can-delete-selected="selectionIncludesLast"
                 :search-match-current="currentSearchIndex + 1"
                 :search-match-total="searchResults.length"
                 :active-char="activeChar"
@@ -5743,6 +6164,29 @@ onUnmounted(() => {
 .context-sheet-btn-secondary {
     color: var(--text-black);
     background: rgba(255, 255, 255, 0.08);
+}
+
+.context-sheet-btn-destructive {
+    color: #fff;
+    background: #ff4444;
+}
+
+.memory-batch-actions {
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(199, 156, 255, 0.08);
+    border: 1px solid rgba(199, 156, 255, 0.25);
+}
+
+.memory-batch-info {
+    color: var(--text-black);
+    font-size: 13px;
+    margin-bottom: 10px;
+}
+
+.memory-batch-info strong {
+    color: #c79cff;
 }
 
 .memory-generation-status-card {

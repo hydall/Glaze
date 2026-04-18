@@ -228,10 +228,10 @@ Goal:
 Build a higher-level long-term memory system on top of the already stabilized summary and vector layers, without introducing a second fragile lore/memory pipeline that will need a rewrite later.
 
 Current pain points that must be solved:
-- [not done | not tested] First memory creation is too manual. The user should not be forced to create the first memory entry by hand before automation can start.
-- [not done | not tested] There is no clear per-message marker showing which chat messages are already covered by memory book entries.
-- [not done | not tested] Deleting messages or branching a chat can leave orphaned / stale memories that no longer match the current chat history.
-- [not done | not tested] Imported chats cannot autonomously segment history and bootstrap memory entries from existing conversation data.
+- [done | tested] First memory creation is no longer manual — Scan Chat + Generate Drafts batch flow available.
+- [done | tested] Per-message markers: MEM (approved), DRAFT (pending drafts), PENDING (automation queue), REBUILD, STALE badges.
+- [done | not tested] Deleting messages or branching a chat can leave orphaned / stale memories that no longer match the current chat history.
+- [done | tested] Imported chats can use Scan Chat to segment history and Generate Drafts to bootstrap memory entries. Auto-draft on import disabled; user must manually trigger.
 - [not done | not tested] Memory books need to behave like lorebooks for retrieval features (vectors, keys, Glaze keys), but they must inject into the summary area and have a separate activation/count budget from normal lorebooks.
 - [not done | not tested] Memory usage should appear in the tokenizer/context UI as summary-like context, not as normal lorebook context.
 - [not done | not tested] Import/export and future cloud sync integration must not break when memory books are introduced.
@@ -243,7 +243,7 @@ Architecture direction:
 - [done | not tested] Do not make memory books just a hidden naming convention inside normal lorebooks. They need their own container/type so lifecycle, injection budget, UI, and sync/import behavior are explicit.
 - [done | not tested] Keep memory entries structurally compatible with lorebook entries where possible, but store memory-book metadata separately from normal lorebook presentation concerns.
 - [done | not tested] Message-range ownership must be first-class. Memory entries should track the message range or explicit message IDs they summarize so lifecycle operations can be deterministic.
-- [not done | not tested] Memory retrieval should inject into the summary block path, not the lorebook block path, and should have its own counter/budget separate from normal lorebook activations.
+- [done | not tested] Memory retrieval injects into the summary block path with its own budget. Memory injection filter: entries only eligible when first segment message leaves context window.
 
 Recommended implementation shape:
 - [done | not tested] Introduce a dedicated memory book container persisted per chat/session, instead of storing memory books as ordinary lorebooks only.
@@ -346,9 +346,9 @@ Current implementation status notes:
 - [done | not tested] Make the automatic creation interval user-configurable in UI as "раз в сколько сообщений создается мемори" instead of hardcoding the trigger threshold.
 - [done | not tested] Add a user-facing toggle for delayed automation (`работать с отставанием`) so automatic memory creation can intentionally wait for an extra user+assistant exchange before materializing a memory entry.
 - [done | not tested] Define delayed-trigger semantics for `Create memory every N messages`: when the threshold is reached on an assistant reply, wait until the user replies and receives one more assistant reply; when the threshold is reached on a user message, wait until that user message gets an assistant reply and then wait for one more full user+assistant exchange before creating the memory entry.
-- [not done | not tested] Keep delayed automation as the recommended default so users can still edit their last user turn or regenerate the latest assistant reply before a memory entry becomes fixed.
+- [done | not tested] Keep delayed automation as the recommended default so users can still edit their last user turn or regenerate the latest assistant reply before a memory entry becomes fixed.
 - [done | not tested] A first session-level delayed automation engine now tracks pending auto-memory triggers and evaluates them after stable assistant reply completion in the normal generation flow.
-- [not done | not tested] Allow the system to create the first memory entry automatically when enough chat history exists.
+- [done | tested] Allow the system to create memory entries via Scan Chat + Generate Drafts when enough chat history exists. Auto-creation on import disabled to prevent unwanted drafts.
 - [done | not tested] Define a first segmentation policy for auto/bootstrap flows: start from the user-configured `N`-message interval, but prefer ending segments on a nearby assistant reply so generated memory windows align better with completed exchanges.
 - [done | not tested] Add a first deduplication/conflict layer so exact-duplicate and high-overlap memory segments are blocked during draft generation and draft approval.
 - [done | not tested] Add a first session-wide Memory Books maintenance pass that can reconcile coverage, clear orphaned pending drafts, remove fully orphaned approved entries, and optionally reindex approved memory entries.
@@ -406,7 +406,7 @@ Implementation start order (to avoid refactor later):
 - [done | not tested] Step 3. Add lifecycle helpers for delete/branch/import rebuild detection.
 - [done | not tested] Step 4. Add extraction-context builder with top-k compression.
 : implemented as a compact heuristic layer for memory continuity + lore-trigger candidates + summary excerpt; vector-backed memory retrieval is still future work.
-- [not done | not tested] Step 5. Add draft/approval workflow for one or multiple parallel memory generation jobs.
+- [done | tested] Step 5. Add draft/approval workflow for one or multiple sequential memory generation jobs (batch generation with Scan Chat + Generate Drafts).
 - [done | not tested] Step 6. Add summary-path injection + tokenizer visualization.
 - [done | not tested] Step 7. Add backup/sync-safe persistence integration.
 
@@ -824,11 +824,325 @@ Active branch: `fast-fixes`
     - Background/location detail enrichment from lorebooks
 
 ### Branch Strategy (updated)
-- Current: `feat/sync-infrastructure-fixes` (from `feat/multi-vector-retrieval`)
-- Previous: `feat/multi-vector-retrieval` (PR #30, open)
-- Policy: **Linear chain workflow** — each feature branches from previous feature, not from origin/dev
+- Current: `feat/refactor-tokenizer-memorybooks` (from `origin/dev` at 210efa4)
+- Previous: Merged branches deleted (bug-fixes, feat/dual-lorebook-debug)
+- Policy: **Linear chain workflow** — each feature branches from previous feature OR origin/dev for new chains
 - Never create branches from dev that contain multiple unmerged features
 - All PRs target `upstream/dev`, never `main`
+
+## Refactoring Phase — Tokenizer, Memory Books, Vectors/Lorebooks (Active)
+
+Branch: `feat/refactor-tokenizer-memorybooks`
+Status: In progress
+Goal: Clean up technical debt, fix UX issues, improve user-facing workflows
+
+### Analysis Summary
+
+Three deep-dive explorations completed on 2026-04-17:
+1. **Tokenizer**: Currently working correctly, recently fixed. No critical issues found. Uses SheetView bottom sheet pattern. Architecture is clean.
+2. **Memory Books**: Functionally complete but uses temporary bottom sheet UI. Many features marked `done | not tested`. Needs polished dedicated component.
+3. **Vectors/Lorebooks**: Backend dual-channel (vector+keyword) works correctly, but UI presents it as mutually exclusive. Creates user confusion.
+
+### Phase 1: Vector/Lorebook UX Fixes (CRITICAL — misleading UI)
+
+Status: `done | ready for testing` (Commit: d215502)
+
+**Problem**: Dual-channel retrieval is implemented and working in backend, but UI hides keyword fields when vector is enabled and shows "Vector search replaces keys" message. This is factually incorrect.
+
+**Root Cause Analysis**:
+- Backend (generationWorker.js:167): ALL entries participate in keyword scan regardless of `vectorSearch` flag
+- Backend (generationService.js:230-242): Vector results are merged with keyword results, deduplicated, keyword matches prioritized
+- Frontend (LorebookSheet.vue:922): Hides keyword UI when `vectorSearch: true`
+- Frontend (LorebookSheet.vue:921): Shows misleading "replaces keys" message
+
+**Tasks**:
+1. [done | ready for testing] **Remove keyword UI hiding** (LorebookSheet.vue:922)
+   - Change: Removed `&& !activeEntry.vectorSearch` condition from `v-if`
+   - Show keyword fields at all times — they work regardless of vector flag
+   
+2. [done | ready for testing] **Fix misleading "replaces keys" message** (LorebookSheet.vue:921)
+   - Old: "Vector search replaces keys"
+   - New: "Vector search supplements keyword matching (dual-channel retrieval)"
+   - Color changed to green (--text-success) to indicate positive feature
+   
+3. [done | ready for testing] **Add retrieval source visibility**
+   - Added badges in triggered lorebooks UI: `[keyword]` (green), `[vector]` (purple)
+   - Uses existing `_source` tags from generationService.js:237-238
+   - CSS: .retrieval-badge, .keyword-badge, .vector-badge
+   
+4. [intentional design | not changed] **Decouple constant from vectorSearch**
+   - Decision: Keep mutual exclusion (constant entries don't need vector retrieval)
+   - Constant entries are always active, so vectorSearch is redundant
+   
+5. [deferred | future work] **Optional: Add hybrid scoring visibility**
+   - Show `hybridBoost` and `descriptorBoost` values in debug/advanced UI
+   
+6. [done | ready for testing] **Cleanup: Remove debug code** (lorebookState.js:1080-1110)
+   - Removed 31 lines of Asei-specific debug logging from production code
+   
+7. [deferred | future work] **Add keyword+vector statistics**
+   - Show summary in tokenizer or lorebook manager: "X by keyword, Y by vector, Z hybrid"
+
+**Files modified**:
+- `src/components/sheets/LorebookSheet.vue` — keyword UI visibility, message text, normalize useKeywordSearch
+- `src/core/states/lorebookState.js` — removed debug code
+- `src/components/chat/ChatMessage.vue` — retrieval source badges, CSS
+- `src/workers/generationWorker.js` — filter vector-only entries (useKeywordSearch=false)
+- `src/locales/en/index.json` — new i18n keys
+- `src/locales/ru/index.json` — new i18n keys
+
+**Testing**: See TESTING_CHECKLIST.md section 1
+
+### Phase 2: Memory Books UX Improvements
+
+Status: `partially done | ready for testing` (Commits: b5857d0, 78be7ed)
+
+**Problem**: Memory Books UX had multiple usability issues: timer not updating, no regenerate button, navigation confusing, prompts too weak.
+
+**Completed Tasks**:
+1. [done | ready for testing] **Add PENDING badge for messages awaiting auto-generation**
+   - Messages in `automation.pendingTrigger.messageIds` show gold pulsing PENDING badge
+   - Users can now see which messages will be processed next by automation
+   - Computed: `pendingMemoryMessageIds` ref, updated on chat open and after automation runs
+   
+2. [done | ready for testing] **Fix draft generation timer updates**
+   - Removed refresh-based timer (no more sheet close/reopen flickering)
+   - Added watch on `memoryDraftState.elapsedMs` → updates DOM directly via getElementById
+   - Timer updates smoothly every 100ms without interruption
+   - Message changed: "The timer will update automatically while generation is in progress"
+   
+3. [done | ready for testing] **Add regenerate button to draft preview**
+   - Draft preview now shows "Regenerate" button (not available for approved entries)
+   - Calls `generateMemoryDraftForMessages` with same message range
+   - Shows toast on success/failure
+   - Returns to Memory Books sheet after regeneration
+   
+4. [done | ready for testing] **Fix navigation: Back vs Close buttons**
+   - Draft preview: shows "Back" button → returns to Memory Books sheet
+   - Approved entry preview: shows "Close" button → closes preview only
+   - Proper navigation flow restored
+   
+5. [done | ready for testing] **Improve memory generation prompts** (based on SillyTavern-MemoryBooks)
+   - Replaced 3 weak prompts with 4 detailed, structured prompts:
+     - `detailed_beats` (recommended, new default): beat-by-beat with Timeline/Story Beats/Key Interactions/Notable Details/Outcome
+     - `concise_narrative`: 3-5 sentence compact summary
+     - `structured_markdown`: markdown structure with clear sections
+     - `minimal_factual`: 1-2 sentence minimal summary
+   - Keyword guidelines: 5-30 concrete scene-specific keywords (locations, objects, proper nouns, unique actions)
+   - Explicitly exclude: abstract themes, emotions, character names, [OOC] conversation
+   - Default preset changed: `strict_factual` → `detailed_beats`
+   - Reference: https://github.com/aikohanasaki/SillyTavern-MemoryBooks
+
+**Remaining Tasks**:
+1. [not done | not tested] **Extract memory books UI into dedicated component**
+   - Create `src/components/sheets/MemoryBooksSheet.vue`
+   - Move logic from ChatView.vue:1684-2070 (openMemoryBooksSheet)
+   - Move settings from ChatView.vue:1300-1551 (openMemoryGenerationSettings)
+   - Move prompt manager from ChatView.vue:1553-1629 (openMemoryPromptManager)
+   - Deferred: Technical debt, not blocking users
+   
+2. [not done | not tested] **Fix: Memory menu in chat doesn't persist settings state**
+   - Settings from main Memory Books sheet should sync with in-chat memory UI
+   - Both should use same session.memoryBooks[sessionId].settings source
+   - Deferred: Need to investigate where in-chat memory menu is located
+   
+3. [not done | not tested] **Add comprehensive testing for memory lifecycle**
+   - Test: Message deletion → memory reconciliation (ChatView.vue:2072-2096)
+   - Test: Memory automation triggers (ChatView.vue:1022-1092)
+   - Test: Vector search toggle for memories
+   - Test: Draft generation and approval flow
+
+**Files modified**:
+- `src/views/ChatView.vue` — PENDING badge, timer watch, regenerate handler, navigation fix, improved prompts
+- `src/components/chat/ChatMessage.vue` — PENDING badge prop, styling with pulse animation
+- `src/utils/db.js` — default promptPreset changed to detailed_beats
+
+**Testing**: See TESTING_CHECKLIST.md sections 3-6
+
+### Phase 3: Tokenizer Performance & Loading
+
+Status: `done | ready for testing` (Commit: b5857d0)
+
+**Problem**: Tokenizer shows "Context breakdown is not ready yet" on first open and takes long time to open repeatedly.
+
+**Completed Tasks**:
+1. [done | ready for testing] **Fix "not ready yet" error on first open**
+   - Added timeout-based wait in `openContextSheet()`: Promise.race with 5s timeout + 1s buffer
+   - Improved error message: "Context calculation is taking longer than expected. Please check that your API settings are configured correctly"
+   - No more confusing "not ready yet" on normal usage
+   
+2. [done | ready for testing] **Optimize tokenizer recalculation performance**
+   - Added `debouncedUpdateContextCutoff()` helper with 300ms delay
+   - Applied debounce to non-critical calls: delete messages, hide messages
+   - Reduced redundant recalculations during rapid operations
+   - Tokenizer now opens faster on repeated access
+
+**Remaining Tasks (Deferred)**:
+1. [not done | not tested] **Migrate tokenizer sheet display to dedicated component** (Optional)
+   - Refactor ChatView.vue:2633-2745 (openContextSheet) to use SheetView.vue pattern
+   - Note: This is LOW priority — current implementation works fine
+   
+2. [not done | not tested] **Add separate menus for different injection types**
+   - Current: All lorebooks shown together in one view
+   - Requested: Separate views for vector-only, keyword-injected, memory books
+   
+3. [not done | not tested] **Fix: All menus should return to previous screen on save/cancel**
+   - Apply to: Tokenizer, Memory Books, Lorebook sheets
+   - Use navigation stack pattern (already exists for prompt preview)
+
+**Files modified**:
+- `src/views/ChatView.vue` — timeout handling, debounce timer, debouncedUpdateContextCutoff()
+
+**Testing**: See TESTING_CHECKLIST.md section 2
+
+### Phase 4: Lorebook Optional Keyword Search for Vectorized Entries
+
+Status: `done | ready for testing` (Commit: d215502)
+
+**Problem**: When vector search is enabled for a lorebook entry, keyword search also runs (dual-channel), but user cannot optionally disable it.
+
+**Solution**: Added `useKeywordSearch` flag with UI checkbox. Makes dual-channel optional instead of hardcoded.
+
+**Tasks**:
+1. [done | ready for testing] **Add `useKeywordSearch` flag to entry schema**
+   - Default: `true` (preserves current dual-channel behavior for backward compatibility)
+   - Only applies when `vectorSearch: true`
+   - When `false`: entry excluded from keyword scan, vector-only retrieval
+   - Normalized on `selectEntry()` for existing entries (defaults to true)
+   
+2. [done | ready for testing] **Update worker to respect flag**
+   - generationWorker.js:167-169 — Filter entries with `vectorSearch && useKeywordSearch === false`
+   - Comment updated: "DUAL-CHANNEL: All entries participate in keyword scan, unless vectorSearch is enabled AND useKeywordSearch is explicitly disabled"
+   - Keeps current behavior for entries with `vectorSearch && useKeywordSearch`
+   
+3. [done | ready for testing] **Add UI checkbox in LorebookSheet**
+   - Shows only when `vectorSearch: true` and `!constant`
+   - Label: "Also use keyword matching"
+   - Description: "Enable dual-channel retrieval: both vector similarity and keyword matching (recommended)"
+   - Default: checked
+   - i18n: `label_use_keyword_search`, `desc_use_keyword_search`
+
+**Files modified**:
+- `src/components/sheets/LorebookSheet.vue` — UI checkbox, normalize useKeywordSearch on selectEntry, schema default
+- `src/workers/generationWorker.js` — keyword scan filter for vector-only entries
+- `src/locales/en/index.json`, `src/locales/ru/index.json` — i18n keys
+
+**Testing**: See TESTING_CHECKLIST.md section 1
+
+### Phase 5: Memory Injection, Deletion Protection, Import Cleanup (2026-04-18)
+
+Status: `done | ready for testing` (Commits: 3d5abbd, ddeb132, 587d83c, 7c320b8)
+PR: #34
+
+**5.1. Memory Injection Filter**
+- [done | ready for testing] Entries only injected when first message of segment leaves context window
+- Before: all active entries scored by overlap with recent history (+8 if any messageId in context)
+- After: `eligibleEntries` filter — if `messageIds[0]` still in `recentMessageIds`, entry excluded from injection
+- Entries without messageIds (manually created) always eligible
+- File: `generationService.js:811-816`
+
+**5.2. Delete Protection — Only Last Message(s)**
+- [done | ready for testing] Selection toolbar: Delete button hidden unless selected messages are consecutive from end
+- [done | ready for testing] Single message actions menu (open-actions): Delete option only for last message
+- [done | ready for testing] Safety fallback in `deleteSelectedMessages()` — silently returns if not consecutive from end
+- Files: `ChatInput.vue` (v-if canDeleteSelected), `ChatView.vue` (selectionIncludesLast computed, openMessageActions guard)
+
+**5.3. Batch Draft Generation**
+- [done | tested] Scan Chat: finds uncovered messages, segments by interval, stores in `automation.plannedSegments`
+- [done | tested] Generate Drafts: quick picks (1/3/5/All) + custom number input field
+- [done | tested] Sequential generation with progress toasts, planned segments removed after success
+- [done | tested] DRAFT badge (purple) on messages covered by pending drafts
+- Files: `ChatView.vue` (runBatchDraftGeneration, Scan Chat handler, batch UI), `ChatMessage.vue` (isDraftMemory prop, draft-memory CSS)
+
+**5.4. Import Cleanup**
+- [done | ready for testing] `chatImporter.js`: clear `pendingDrafts`, `pendingTrigger`, `plannedSegments` on import
+- [done | ready for testing] `chatImporter.js`: reset invalid `promptPreset` (e.g. stale `durable_events` key) to `detailed_beats`
+- [done | ready for testing] `chatImporter.js`: clear `generationModel` and `generationUseCurrentModelOverride` (model may not exist on another device)
+- [done | ready for testing] `ChatView.vue`: after import, set `lastProcessedMessageCount` = total messages to prevent auto-trigger
+
+**5.5. Prompt Preset Validation**
+- [done | ready for testing] Preview Rule: fallback to `options[0]` when preset key not found
+- [done | ready for testing] Settings state builder: validate `promptPreset` against `getMemoryPromptOptions()`, fallback to `detailed_beats`
+- Root cause: exported chats contained stale preset key `durable_events` which no longer exists in built-in prompts
+
+**5.6. Draft Stop Button**
+- [done | ready for testing] `memoryDraftAbortController` — AbortController passed to `generateMemoryDraft()`
+- [done | ready for testing] Red "Stop" button in progress card, calls `cancelMemoryDraft()`
+- [done | ready for testing] Batch generation loop checks `aborted` signal before each iteration
+- [done | ready for testing] CSS: `.context-sheet-btn-destructive` (red background)
+
+**5.7. scanDepth Default Fix**
+- [done | ready for testing] Changed global `scanDepth` from `1000` to `10`
+- [done | ready for testing] Changed per-entry fallback: `entry.scanDepth ?? globalSettings.scanDepth ?? 10`
+- [done | ready for testing] "Apply Global Settings" resets `entry.scanDepth` to `null`
+
+**5.8. Draft Generation Fixes (from 09f8adf)**
+- [done | ready for testing] Manual draft skips conflict check (source `manual_draft`/`manual_regenerate`)
+- [done | ready for testing] `generateMemoryDraft`: added `onError` callback, `stream: false` parameter
+- [done | ready for testing] Error toast now visible (closeBottomSheet before showToast)
+- [done | ready for testing] Memory Books sheet opens immediately for manual draft (shows progress card)
+
+### Testing Results & Known Issues (2026-04-18)
+
+**Verified Working:**
+- ✅ Tokenizer cache works (instant second open)
+- ✅ Match Whole Words updated to ST/Glaze/Off format
+- ✅ Regenerate button added for approved entries and drafts
+- ✅ PENDING badges show on messages awaiting auto-generation
+- ✅ Back navigation for prompt preview works
+- ✅ Scan Chat + Generate Drafts batch flow works
+- ✅ DRAFT badges (purple) show on messages covered by pending drafts
+- ✅ Generate Drafts menu: quick picks + custom number input
+- ✅ Draft generation with progress and sequential processing
+
+**Bugs Found During Testing (fixed in this branch):**
+1. ✅ **Draft generation status not showing** — FIXED (watch on memoryDraftState, onError callback, stream:false)
+2. ✅ **Delete from middle of chat possible** — FIXED (two paths: selection toolbar + open-actions menu)
+3. ✅ **Auto-draft triggers on import** — FIXED (cleared pendingDrafts/pendingTrigger, set lastProcessedMessageCount)
+4. ✅ **Prompt preset not loading** — FIXED (stale `durable_events` key, added validation + fallback)
+5. ✅ **Generate Drafts button did nothing** — FIXED (`action` → `onClick` for BottomSheet items)
+
+**Known Issues (not fixed):**
+1. ❌ **Retrieval badges still not showing after regeneration** (HIGH)
+   - Issue: _source added to triggeredLorebooks, but badges still invisible
+   - Status: `not fixed | pending investigation`
+
+2. ⚠️ **Tokenizer first load slow (4.6s)** (MEDIUM)
+   - Acceptable — cache works, optimization deferred
+   - Status: `acceptable | optimization deferred`
+
+### Execution Order
+
+1. ✅ **Phase 1** (Vector/Lorebook UX) — COMPLETED
+2. ✅ **Phase 4** (Optional keyword search) — COMPLETED
+3. ✅ **Phase 2** (Memory Books UX) — COMPLETED (5/5 tasks + extras)
+4. ✅ **Phase 3** (Tokenizer) — COMPLETED (2/3 tasks, remaining deferred)
+5. ✅ **Phase 5** (Injection filter, deletion, import, batch, stop) — COMPLETED
+
+### Remaining Work (Deferred)
+
+**HIGH Priority:**
+- [ ] Fix retrieval badges not showing after regeneration
+
+**MEDIUM Priority:**
+- [ ] Memory Books settings sync (main ↔ in-chat menu)
+- [ ] Extract Memory Books UI to dedicated component (reduce ChatView ~1000 lines)
+- [ ] Separate menus for injection types (vector/keyword/memory)
+
+**LOW Priority:**
+- [ ] Background tokenizer pre-calculation (battery consideration)
+- [ ] Extract tokenizer to dedicated component
+- [ ] Universal navigation stack for all sheets
+
+### Testing Checklist
+
+After each phase:
+- [x] `npm run build` passes without errors
+- [x] Manual testing in browser (web build)
+- [x] Verify backward compatibility (existing lorebooks/memories load correctly)
+- [x] Check console for errors
+- [x] Test on mobile: batch generation, delete protection, import cleanup
+- [x] PR created: #34
 
 ## Sync Setup Guide — For Developers
 
