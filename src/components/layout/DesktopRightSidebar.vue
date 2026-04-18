@@ -65,9 +65,19 @@ watch(activeToolRef, (ref) => {
     }
 });
 
+let closeTimeout = null;
+
 // When the sheet closes (back button inside tool), clear activeTool
 watch(() => sidebarState.isOccupied, (occupied) => {
-    if (!occupied) activeTool.value = null;
+    if (closeTimeout) {
+        clearTimeout(closeTimeout);
+        closeTimeout = null;
+    }
+    if (!occupied) {
+        closeTimeout = setTimeout(() => {
+            activeTool.value = null;
+        }, 300);
+    }
 });
 
 // Clear activeTool when entering chat
@@ -79,7 +89,11 @@ function openTool(viewId) {
     if (!toolComponentMap[viewId]) return;
     if (activeTool.value === viewId) {
         // Toggle off
-        activeTool.value = null;
+        if (activeToolRef.value && typeof activeToolRef.value.close === 'function') {
+            activeToolRef.value.close();
+        } else {
+            activeTool.value = null;
+        }
         return;
     }
     activeTool.value = viewId;
@@ -125,17 +139,15 @@ function openTool(viewId) {
               @magic-image-gen="emit('magic-image-gen')"
               @magic-glossary="emit('magic-glossary')"
               @request-preview="() => {}"
-              @close="() => {}"
+               @close="() => {}"
           />
 
-          <div id="desktop-sidebar-content" v-show="hasSheet">
-              <BottomSheet
-                  v-if="bottomSheetState.visible"
-                  v-bind="bottomSheetState"
-                  :sidebar-mode="true"
-                  @close="emit('closeBottomSheet')"
-              />
-          </div>
+          <BottomSheet
+               v-if="bottomSheetState.visible"
+               v-bind="bottomSheetState"
+               :sidebar-mode="true"
+               @close="emit('closeBottomSheet')"
+          />
       </template>
 
       <!-- ── Non-chat mode: Tools icon strip + ToolsView + tool sheets ── -->
@@ -145,16 +157,15 @@ function openTool(viewId) {
               <ToolsView :sidebar-mode="true" @tool-select="openTool" />
           </div>
 
-          <!-- Sheet container: tool components teleport SheetView here -->
-          <div id="desktop-sidebar-content" :class="{ occupied: sidebarState.isOccupied }"></div>
-
-          <!-- Active tool component (one at a time, mounts when tool is selected) -->
           <component
               :is="activeToolComponent"
               v-if="activeToolComponent"
               ref="activeToolRef"
           />
       </template>
+
+      <!-- Unified Sidebar Content container (Teleport target) -->
+      <div id="desktop-sidebar-content" :class="{ occupied: sidebarState.isOccupied }"></div>
   </div>
 </template>
 
@@ -166,6 +177,15 @@ function openTool(viewId) {
     padding-left: 0;
     position: relative;
     z-index: 1;
+    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.has-sheet .tools-view-bg {
+    opacity: 0;
+    transform: translateX(-30px);
+    pointer-events: none;
 }
 
 .tools-view-bg :deep(.view) {

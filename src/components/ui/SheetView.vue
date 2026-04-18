@@ -21,9 +21,9 @@ const props = defineProps({
 
 const isDesktop = ref(window.innerWidth >= 768);
 const checkDesktop = () => { isDesktop.value = window.innerWidth >= 768; };
+const sidebarExists = ref(false);
 const isSidebarMode = computed(() => {
-    if (!isDesktop.value || !isVisible.value || props.viewMode) return false;
-    return !!document.getElementById('desktop-sidebar-content');
+    return isDesktop.value && !props.viewMode && sidebarExists.value;
 });
 
 const emit = defineEmits(['close', 'back', 'update:expanded', 'update:activeTab', 'tab-click']);
@@ -102,11 +102,19 @@ const {
 
 function open() {
     if (props.viewMode) return;
+    sidebarExists.value = !!document.getElementById('desktop-sidebar-content');
     if (isDesktop.value && bottomSheetState.visible) {
         closeBottomSheet();
     }
-    isVisible.value = true;
-    isExpanded.value = false;
+    
+    // Double requestAnimationFrame ensures that the browser has enough time
+    // to paint the initial state before transition classes are applied
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            isVisible.value = true;
+            isExpanded.value = false;
+        });
+    });
 }
 
 function close() {
@@ -126,6 +134,7 @@ defineExpose({ open, close, isVisible, isExpanded });
 
 
 onMounted(async () => {
+    sidebarExists.value = !!document.getElementById('desktop-sidebar-content');
     window.addEventListener('resize', checkDesktop);
     await mountKeyboard();
 });
@@ -142,6 +151,7 @@ onBeforeUnmount(() => {
 <template>
     <!-- ── View mode: inline content, no overlay/drag ── -->
     <div v-if="viewMode" class="sheet-view-inline" v-bind="$attrs">
+        <slot name="header-bottom"></slot>
         <slot></slot>
     </div>
 
@@ -238,11 +248,10 @@ onBeforeUnmount(() => {
 }
 
 .sheet-view-overlay.is-sidebar {
-    position: static;
+    position: absolute;
+    inset: 0;
     background: transparent;
-    pointer-events: auto;
-    opacity: 1;
-    flex: 1;
+    flex: none;
     min-height: 0;
     width: 100%;
     flex-direction: column;
@@ -373,12 +382,16 @@ onBeforeUnmount(() => {
     border-radius: 0 !important;
     border: none !important;
     box-shadow: none !important;
-    transform: none !important;
+    transform: translateX(100%) !important;
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     background-image: none !important;
     padding-top: 8px !important;
+}
+
+.sheet-view-overlay.visible .sheet-view-content.is-sidebar {
+    transform: translateX(0) !important;
 }
 
 
