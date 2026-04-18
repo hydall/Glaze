@@ -1166,24 +1166,35 @@ PR: #34
    - Commit: `3d03952`
 
 2. **Extract Memory Books to MemoryBooksSheet.vue**
-   - Status: `in progress`
+   - Status: `done | tested`
    - Create dedicated component for memory book management UI
-   - Extract `openMemoryBooksSheet()` logic (~500+ lines)
+   - Extract `openMemoryBooksSheet()` logic (~500+ lines inline HTML)
    - Complexity: high — many event handlers, dynamic sections (drafts/entries/settings)
-   - Reduce ChatView by ~500-1000 lines
+   - Props: memoryBook, currentMessages, characterName, sessionId, memoryDraftState, pendingMemoryMessageIds
+   - Emits: 11 events (approve-draft, delete-draft, scan-chat, batch-generate, open-settings, open-maintenance, etc.)
+   - Files modified:
+     - [x] `src/components/sheets/MemoryBooksSheet.vue` (created, 883 lines)
+     - [x] `src/views/ChatView.vue` (removed ~500 lines inline HTML, added 11 event handlers, added `loadCurrentMemoryBook()` helper)
+   - Build: passes ✓
+   - Commit: `f332d0f`
 
 3. **Extract Vectorization UI to VectorizationSheet.vue**
-   - Status: `not started`
+   - Status: `deferred`
+   - Priority: low (vectorization UI is relatively small and already modular)
    - Create dedicated component for lorebook vectorization UI
    - Extract embedding status, reindex, and vector search settings
 
-**Files to create:**
-- `src/components/sheets/TokenizerSheet.vue`
-- `src/components/sheets/MemoryBooksSheet.vue`
-- `src/components/sheets/VectorizationSheet.vue`
+**Summary:**
+- ✅ TokenizerSheet.vue (543 lines) — DONE
+- ✅ MemoryBooksSheet.vue (883 lines) — DONE
+- ⏸️ VectorizationSheet.vue — DEFERRED (low priority)
+- ✅ ChatView.vue reduced by ~600 lines of inline HTML (6982 → 6764 lines)
 
-**Files to modify:**
-- `src/views/ChatView.vue` — replace inline HTML with component refs, reduce ~1500-2000 lines total
+**Impact:**
+- Improved code organization: separate components vs inline HTML strings
+- Better type safety and IDE support
+- Enhanced testability: components can be tested in isolation
+- Easier maintenance: changes isolated to specific components
 
 ### Testing Checklist
 
