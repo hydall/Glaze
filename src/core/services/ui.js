@@ -136,6 +136,24 @@ export function attachRipple(el) {
     });
 }
 
+export function attachHoverGlow(el) {
+    if (el.dataset.glowInit) return;
+    el.dataset.glowInit = 'true';
+    el.classList.add('has-hover-glow');
+
+    const onMove = (e) => {
+        const rect = el.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        el.style.setProperty('--glow-x', `${x}px`);
+        el.style.setProperty('--glow-y', `${y}px`);
+    };
+
+    el.addEventListener('mousemove', onMove);
+    el.addEventListener('mouseenter', () => el.classList.add('hover-glow-active'));
+    el.addEventListener('mouseleave', () => el.classList.remove('hover-glow-active'));
+}
+
 let _rippleDelegationAdded = false;
 
 export function initRipple() {
@@ -155,6 +173,23 @@ export function initRipple() {
                 filter: blur(10px);
                 animation: ripple-glow 0.8s ease-out forwards;
                 z-index: -1;
+            }
+            .hover-glow-active {
+                position: relative;
+                overflow: hidden;
+            }
+            .has-hover-glow::before {
+                content: "";
+                position: absolute;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: radial-gradient(circle at var(--glow-x) var(--glow-y), rgba(var(--vk-blue-rgb), 0.15) 0%, transparent 70%);
+                pointer-events: none;
+                z-index: -1;
+                opacity: 0;
+                transition: opacity 0.4s ease;
+            }
+            .hover-glow-active::before {
+                opacity: 1;
             }
         `;
         document.head.appendChild(style);
