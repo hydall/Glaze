@@ -1503,8 +1503,8 @@ async function handleMemoryBatchGenerate() {
         return;
     }
     
-    // Don't close Memory Books sheet - bottomSheet will appear on top (z-index 12000 > 11000)
-    // After generation completes, runBatchDraftGeneration will call openMemoryBooksSheet() to refresh
+    // Close Memory Books sheet before showing bottomSheet picker
+    memoryBooksSheet.value?.close();
     
     const totalSegments = segments.length;
     const quickItems = [];
