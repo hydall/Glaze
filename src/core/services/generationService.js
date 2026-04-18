@@ -7,9 +7,13 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { executeRequest } from '@/core/services/llmApi.js';
 import { sendMessageNotification } from '@/core/services/notificationService.js';
 import { presetState, initPresetState, getEffectivePreset } from '@/core/states/presetState.js';
-import { lorebookState, scanLorebooks, initLorebookState } from '@/core/states/lorebookState.js';
+import { lorebookState, scanLorebooks, initLorebookState, vectorSearchLorebooks } from '@/core/states/lorebookState.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { applyRegexes } from '@/core/services/regexService.js';
+import { db } from '@/utils/db.js';
+import { getEmbeddings } from '@/core/services/embeddingService.js';
+import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
+import { findTopK } from '@/utils/vectorMath.js';
 import { logger } from '../../utils/logger.js';
 
 let lastPrompt = null;
@@ -172,13 +176,13 @@ export async function generateChatResponse({
     try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
 
     let result;
+    let safeHistory = history;
     try {
         const safeContextLimit = contextSize - maxTokens > 0 ? contextSize - maxTokens : 8000;
         const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
         const memoryLimitFactor = isIOS ? 15 : 5;
         const maxHistoryRetention = Math.max(100, Math.ceil(safeContextLimit / memoryLimitFactor));
 
-        let safeHistory = history;
         if (history && history.length > maxHistoryRetention) {
             safeHistory = history.slice(-maxHistoryRetention);
         }
@@ -223,16 +227,103 @@ export async function generateChatResponse({
         localStorage.setItem(varsKey, JSON.stringify(result.sessionVars));
     }
 
-    if (callbacks.onPromptReady) {
-        callbacks.onPromptReady({
-            loreEntries: result.loreEntries,
-            contextBreakdown: result.contextBreakdown || null
+    let newVectorEntries = [];
+    let vectorLoreTokens = 0;
+    try {
+        const vectorResults = await vectorSearchLorebooks(safeHistory || history, text, char, char?.sessionId);
+        if (vectorResults.length > 0 && result.loreEntries) {
+            const keywordIds = new Set(result.loreEntries.map(e => e.id));
+            newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
+            newVectorEntries.forEach(e => { e._source = 'vector'; });
+            result.loreEntries.forEach(e => { if (!e._source) e._source = 'keyword'; });
+            const keywordEntries = result.loreEntries.filter(e => e._source === 'keyword');
+            const vectorOnly = newVectorEntries.sort((a, b) => (b.vectorScore || 0) - (a.vectorScore || 0));
+            result.loreEntries = [...keywordEntries, ...vectorOnly];
+        }
+    } catch (e) {
+        console.warn('[generateChatResponse] Vector search failed:', e);
+        showBottomSheet({
+            title: t('title_error') || 'Error',
+            bigInfo: {
+                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff9500"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
+                description: t('msg_vector_generation_failed') || 'The embedding model did not respond during generation, so vector lorebook retrieval could not complete.',
+                buttonText: t('btn_ok') || 'OK',
+                onButtonClick: () => closeBottomSheet()
+            }
+        });
+        if (onError) onError(e);
+        return;
+    }
+
+    const safeContext = contextSize - maxTokens;
+    const memoryInjection = await buildMemoryInjection({
+        char,
+        history: safeHistory || history,
+        summary,
+        safeContext
+    });
+    let messages = result.messages;
+
+    if (memoryInjection.messages.length > 0) {
+        messages = injectMemoryMessages(messages, memoryInjection, {
+            injectionTarget: memoryInjection.injectionTarget
         });
     }
 
-    let messages = result.messages;
+    if (newVectorEntries.length > 0) {
+        const vectorLoreMessages = newVectorEntries
+            .map(entry => {
+                const content = entry.content || '';
+                const tokens = estimateTokens(content);
+                return {
+                    role: 'system',
+                    content,
+                    blockName: `Lorebook: ${entry.comment || entry.keys?.[0] || 'Entry'}`,
+                    isLorebook: true,
+                    sources: tokens > 0 ? [{ source: 'vectorLore', tokens }] : [],
+                    _allSources: tokens > 0 ? [{ source: 'vectorLore', tokens }] : []
+                };
+            })
+            .filter(msg => msg.content && msg.content.trim().length > 0);
 
-    const safeContext = contextSize - maxTokens;
+        vectorLoreTokens = vectorLoreMessages.reduce((sum, m) => sum + (m._allSources?.[0]?.tokens || 0), 0);
+
+        if (vectorLoreMessages.length > 0) {
+            messages = injectVectorLoreMessages(messages, vectorLoreMessages);
+
+            // Re-apply history trimming after late vector lore injection so we don't blow the effective context.
+            const staticMessages = messages.filter(m => !m.isHistory);
+            const historyMessages = messages.filter(m => m.isHistory);
+            let staticTokens = 0;
+            for (const msg of staticMessages) {
+                staticTokens += estimateTokens(msg.content || '');
+            }
+
+            if (staticTokens >= safeContext) {
+                messages = staticMessages;
+            } else {
+                let remainingHistoryBudget = safeContext - staticTokens;
+                let includedHistoryCount = 0;
+                let currentHistoryTokens = 0;
+
+                for (let i = historyMessages.length - 1; i >= 0; i--) {
+                    const tokens = estimateTokens(historyMessages[i].content || '');
+                    if (currentHistoryTokens + tokens <= remainingHistoryBudget) {
+                        currentHistoryTokens += tokens;
+                        includedHistoryCount++;
+                    } else {
+                        break;
+                    }
+                }
+
+                const keptHistoryMessages = historyMessages.slice(historyMessages.length - includedHistoryCount);
+                messages = [
+                    ...staticMessages,
+                    ...keptHistoryMessages
+                ];
+            }
+        }
+    }
 
     if (result.staticTokens >= safeContext) {
         showBottomSheet({
@@ -247,6 +338,41 @@ export async function generateChatResponse({
         });
         if (onError) onError(new Error("Context limit exceeded"));
         return;
+    }
+
+    if (callbacks.onPromptReady) {
+        const contextBreakdown = result.contextBreakdown
+            ? (() => {
+                const totalLoreTokens = (result.contextBreakdown.lorebook || 0) + vectorLoreTokens;
+                const reserveTokens = result.contextBreakdown.lorebookReserve || 0;
+                
+                // All lorebooks (keyword + vector) must fit within the reserve
+                // Reserve remains unchanged, lorebooks are displayed within it
+                const effectiveReserve = reserveTokens - totalLoreTokens;
+                
+                return {
+                    ...result.contextBreakdown,
+                    memory: memoryInjection.tokens || 0,
+                    vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
+                    summaryBase: result.contextBreakdown.summary || 0,
+                    summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
+                    // Keep lorebook and vectorLore separate for UI display
+                    // lorebook = keyword-matched entries only (from generationWorker)
+                    // vectorLore = vector-retrieved entries only (from this service)
+                    // lorebookReserve stays the same - lorebooks are shown within it
+                    fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
+                    fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
+                    totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
+                    remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
+                };
+            })()
+            : null;
+
+        callbacks.onPromptReady({
+            loreEntries: result.loreEntries,
+            memoryEntries: memoryInjection.entries,
+            contextBreakdown
+        });
     }
 
     const requestBody = {
@@ -372,14 +498,61 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
         }));
 
         const result = await processPromptAsync(payload);
+        const memoryInjection = await buildMemoryInjection({
+            char,
+            history: safeHistory,
+            summary,
+            safeContext: safeContextLimit
+        });
+
+        // Calculate vector lorebook tokens for accurate breakdown display
+        let vectorLoreTokens = 0;
+        try {
+            const vectorResults = await vectorSearchLorebooks(safeHistory || history, '', char, char?.sessionId);
+            if (vectorResults.length > 0) {
+                const keywordIds = result.loreEntries ? new Set(result.loreEntries.map(e => e.id)) : new Set();
+                const newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
+                vectorLoreTokens = newVectorEntries.reduce((sum, entry) => {
+                    const content = entry.content || '';
+                    const tokens = estimateTokens(content);
+                    return sum + tokens;
+                }, 0);
+            }
+        } catch (e) {
+            console.warn('[calculateContext] Vector search failed:', e);
+        }
 
         const resolvedCutoff = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
             ? result.cutoffOriginalIndex
             : result.cutoffIndex;
 
+        const contextBreakdown = result.contextBreakdown
+            ? (() => {
+                const totalLoreTokens = (result.contextBreakdown.lorebook || 0) + vectorLoreTokens;
+                const reserveTokens = result.contextBreakdown.lorebookReserve || 0;
+                
+                // All lorebooks (keyword + vector) must fit within the reserve
+                // Reserve remains unchanged, lorebooks are displayed within it
+                const effectiveReserve = reserveTokens - totalLoreTokens;
+                
+                return {
+                    ...result.contextBreakdown,
+                    memory: memoryInjection.tokens || 0,
+                    vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
+                    summaryBase: result.contextBreakdown.summary || 0,
+                    summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
+                    // All lorebooks must fit within reserve - don't add to fixedBase
+                    fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
+                    fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
+                    totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
+                    remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
+                };
+            })()
+            : null;
+
         return {
             cutoffIndex: resolvedCutoff,
-            contextBreakdown: result.contextBreakdown || null
+            contextBreakdown
         };
     } catch (e) {
         console.error("Calculate context worker error", e);
@@ -424,6 +597,426 @@ export async function generateSummary({ history, prompt, controller, apiConfigOv
             onComplete: (text) => { result = text; }
         }
     });
+
+    return result;
+}
+
+function normalizeMessageIdList(entry) {
+    if (!entry || typeof entry !== 'object') return [];
+    if (Array.isArray(entry.messageIds)) return [...new Set(entry.messageIds.filter(Boolean))];
+    const ids = [];
+    if (entry.messageRange?.startMessageId) ids.push(entry.messageRange.startMessageId);
+    if (entry.messageRange?.endMessageId && entry.messageRange.endMessageId !== entry.messageRange.startMessageId) ids.push(entry.messageRange.endMessageId);
+    return [...new Set(ids.filter(Boolean))];
+}
+
+function buildSummaryExcerpt(summary) {
+    if (!summary) return '';
+    if (typeof summary === 'string') return summary.trim().slice(0, 800);
+    if (typeof summary === 'object') {
+        if (typeof summary.content === 'string') return summary.content.trim().slice(0, 800);
+        return ['timeline', 'characterArcs', 'conflictsThreads', 'notHappenedYet', 'notes']
+            .map(key => summary[key])
+            .filter(value => typeof value === 'string' && value.trim())
+            .join('\n\n')
+            .slice(0, 800);
+    }
+    return '';
+}
+
+function escapeRegex(string) {
+    return String(string || '').replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
+}
+
+const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\u201C\u201D\u2018\u2019\u00AB\u00BB(){}\\[\\]—–]';
+
+function tryCreateRegex(pattern, flags = 'g') {
+    try {
+        return new RegExp(pattern, flags);
+    } catch {
+        return null;
+    }
+}
+
+function normalizeHybridText(text = '') {
+    return String(text || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s-]+/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function uniqueStrings(values = [], limit = 32) {
+    const seen = new Set();
+    const result = [];
+    for (const value of values) {
+        const raw = String(value || '').trim();
+        const normalized = normalizeHybridText(raw);
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        result.push(raw);
+        if (result.length >= limit) break;
+    }
+    return result;
+}
+
+function extractMemoryRetrievalHints(entry) {
+    const hints = [];
+    if (entry?.title) hints.push(String(entry.title));
+    if (Array.isArray(entry?.keys)) hints.push(...entry.keys.map(v => String(v)));
+    if (Array.isArray(entry?.glazeKeys)) hints.push(...entry.glazeKeys.map(v => String(v)));
+    const content = String(entry?.content || '');
+    if (content) {
+        const lines = content.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 8);
+        hints.push(...lines);
+    }
+    return uniqueStrings(hints, 32);
+}
+
+function checkKeyMatch(key, text, { glaze = false, caseSensitive = false } = {}) {
+    if (!key || !text) return false;
+    const sourceText = String(text || '');
+    const sourceKey = String(key || '');
+    const flags = caseSensitive ? '' : 'i';
+    if (glaze) {
+        const escaped = escapeRegex(sourceKey);
+        const regex = tryCreateRegex(`(?:^|${GLAZE_BOUNDARIES})${escaped}(?:$|${GLAZE_BOUNDARIES})`, flags);
+        return regex ? regex.test(sourceText) : false;
+    }
+    const regex = tryCreateRegex(`\\b${escapeRegex(sourceKey)}\\b`, flags);
+    if (regex && regex.test(sourceText)) return true;
+    const haystack = caseSensitive ? sourceText : sourceText.toLowerCase();
+    const needle = caseSensitive ? sourceKey : sourceKey.toLowerCase();
+    return haystack.includes(needle);
+}
+
+async function vectorSearchMemoryEntries(entries, history = [], currentText = '') {
+    const config = getEmbeddingConfig();
+    if (!config.enabled || !isEmbeddingConfigured()) return [];
+    const vectorEntries = entries.filter(entry => entry?.vectorSearch);
+    if (!vectorEntries.length) return [];
+
+    const allEmbeddings = await db.getEmbeddingsBySource('memory_entry');
+    const embeddingMap = new Map(allEmbeddings.map(e => [e.id, e]));
+    const candidates = vectorEntries
+        .map(entry => {
+            const emb = embeddingMap.get(entry.id);
+            // NEW: Support both multi-vector (vectors) and legacy (vector)
+            if (emb && (emb.vectors || emb.vector)) {
+                const candidate = { ...entry, retrievalHints: emb.retrievalHints || [] };
+                if (emb.vectors) {
+                    candidate.vectors = emb.vectors;  // Multi-vector
+                } else if (emb.vector) {
+                    candidate.vector = emb.vector;  // Legacy single vector
+                }
+                return candidate;
+            }
+            return null;
+        })
+        .filter(Boolean);
+    if (!candidates.length) return [];
+
+    const recentHistory = history.slice(-(config.scanDepth || 5));
+    const focusedQueryParts = recentHistory.filter(m => m.role === 'user').map(m => m.content).filter(Boolean);
+    if (currentText && currentText.trim()) focusedQueryParts.push(currentText.trim());
+    const queryText = focusedQueryParts.join('\n').trim();
+    if (!queryText) return [];
+
+    const queryVectorsData = await getEmbeddings([queryText]);
+    if (!queryVectorsData || !queryVectorsData[0] || !queryVectorsData[0][0]?.vector) return [];
+
+    // Extract the actual vector from the first chunk
+    const queryVector = queryVectorsData[0][0].vector;
+    return findTopK(queryVector, candidates, candidates.length, 0)
+        .filter(result => result.score >= (config.threshold || 0.6))
+        .slice(0, config.topK || 5)
+        .map(result => ({ ...result, vectorScore: result.score, vector: undefined }));
+}
+
+async function ensureMemoryEntryEmbedding(entry, charId, sessionId) {
+    if (!entry?.id || !entry.vectorSearch || !isEmbeddingConfigured()) return;
+    const config = getEmbeddingConfig();
+    if (!config.enabled) return;
+    const text = (config.target === 'keys'
+        ? [...(entry.keys || []), ...(entry.glazeKeys || [])].join(', ')
+        : String(entry.content || '')).trim();
+    if (!text) return;
+    const existing = await db.getEmbedding(entry.id);
+    const retrievalHints = extractMemoryRetrievalHints(entry);
+    const textHash = JSON.stringify({ text, retrievalHints });
+    if (existing && existing.textHash === textHash) return;
+    const vectorsData = await getEmbeddings([text]);
+    if (!vectorsData || !vectorsData[0]) return;
+    await db.saveEmbedding({
+        id: entry.id,
+        sourceType: 'memory_entry',
+        sourceId: `memorybook_${charId}_${sessionId}`,
+        vectors: vectorsData[0],  // NEW: array of {text, vector} chunks
+        vector: null,  // Legacy field set to null
+        textHash,
+        retrievalHints,
+        updatedAt: Date.now()
+    });
+}
+
+export async function indexMemoryEntryForSession(entry, charId, sessionId) {
+    await ensureMemoryEntryEmbedding(entry, charId, sessionId);
+}
+
+export async function deleteMemoryEntryIndex(entryId) {
+    if (!entryId) return;
+    await db.deleteEmbedding(entryId);
+}
+
+async function buildMemoryInjection({ char, history, summary, safeContext }) {
+    const charId = char?.id;
+    const sessionId = char?.sessionId;
+    if (!charId || !sessionId) return { messages: [], entries: [], tokens: 0, injectionTarget: 'summary_block', macroContent: '' };
+
+    const chatData = await db.getChat(charId);
+    const memoryBook = chatData?.memoryBooks?.[sessionId];
+    const settings = memoryBook?.settings || {};
+    const activeEntries = (Array.isArray(memoryBook?.entries) ? memoryBook.entries : [])
+        .filter(entry => entry && (entry.status || 'active') === 'active' && (entry.content || '').trim());
+
+    if (!settings.enabled || !activeEntries.length) return { messages: [], entries: [], tokens: 0, injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block', macroContent: '' };
+
+    const recentHistory = Array.isArray(history) ? history.slice(-12) : [];
+    const historyText = recentHistory.map(item => item?.content || item?.text || '').filter(Boolean).join('\n').toLowerCase();
+    const recentMessageIds = new Set(recentHistory.map(item => item?.messageId).filter(Boolean));
+    const recentLabels = new Set();
+    recentHistory.forEach(item => {
+        (Array.isArray(item?.contextRefs) ? item.contextRefs : []).forEach(ref => {
+            if (ref?.label) recentLabels.add(String(ref.label).toLowerCase());
+        });
+    });
+
+    const uniqueWords = [...new Set(historyText.match(/[\p{L}\p{N}_-]{4,}/gu) || [])].slice(0, 40);
+    const currentText = recentHistory[recentHistory.length - 1]?.content || '';
+    const keywordMatchedIds = new Set();
+    const scanText = `${recentHistory.map(item => item?.content || '').join('\n')}\n${currentText}`;
+    const keyMatchMode = ['plain', 'glaze', 'both'].includes(settings.keyMatchMode) ? settings.keyMatchMode : 'plain';
+
+    activeEntries.forEach(entry => {
+        const directKeys = Array.isArray(entry.keys) ? entry.keys : [];
+        const plainMatch = keyMatchMode !== 'glaze' && directKeys.some(key => checkKeyMatch(key, scanText));
+        const glazeMatch = keyMatchMode !== 'plain' && directKeys.some(key => checkKeyMatch(key, scanText, { glaze: true }));
+        if (plainMatch || glazeMatch) {
+            keywordMatchedIds.add(entry.id);
+        }
+    });
+
+    const vectorResults = await vectorSearchMemoryEntries(activeEntries, history, currentText).catch(() => []);
+    const vectorScores = new Map(vectorResults.map(item => [item.id, item.vectorScore || item.score || 0]));
+    const eligibleEntries = activeEntries.filter(entry => {
+        const messageIds = normalizeMessageIdList(entry);
+        if (!messageIds.length) return true;
+        const firstMsgId = messageIds[0];
+        return !recentMessageIds.has(firstMsgId);
+    });
+
+    const scoredEntries = eligibleEntries.map((entry, index) => {
+        const haystack = `${entry.title || ''}\n${entry.content || ''}`.toLowerCase();
+        const messageIds = normalizeMessageIdList(entry);
+        let score = 0;
+        if (messageIds.some(id => !recentMessageIds.has(id))) score += 8;
+        if (keywordMatchedIds.has(entry.id)) score += 6;
+        if (vectorScores.has(entry.id)) score += Math.max(0, (vectorScores.get(entry.id) || 0) * 5);
+        (Array.isArray(entry.contextRefs) ? entry.contextRefs : []).forEach(ref => {
+            const label = String(ref?.label || '').toLowerCase();
+            if (label && recentLabels.has(label)) score += 3;
+        });
+        uniqueWords.forEach(word => {
+            if (haystack.includes(word)) score += 1;
+        });
+        score += Math.min(3, index / Math.max(eligibleEntries.length, 1));
+        return { entry, score };
+    });
+
+    const topEntries = scoredEntries
+        .filter(item => item.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, Math.max(1, Math.min(5, settings.maxInjectedEntries || 3)))
+        .map(item => item.entry);
+
+    if (!topEntries.length) return { messages: [], entries: [], tokens: 0, injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block', macroContent: '' };
+
+    const summaryExcerpt = buildSummaryExcerpt(summary);
+    const macroContent = topEntries
+        .map(entry => (entry.content || '').trim())
+        .filter(Boolean)
+        .join('\n\n');
+    const content = [
+        summaryExcerpt ? `Summary excerpt:\n${summaryExcerpt}` : '',
+        'Memory context:',
+        ...topEntries.map(entry => `- ${(entry.title || 'Memory').trim()}: ${(entry.content || '').trim()}`)
+    ].filter(Boolean).join('\n\n');
+    const tokens = estimateTokens(content);
+    if (!content || tokens <= 0 || tokens >= Math.max(256, Math.floor(safeContext * 0.35))) {
+        return { messages: [], entries: [], tokens: 0, injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block', macroContent: '' };
+    }
+
+    return {
+        messages: [{
+            role: 'system',
+            content,
+            blockName: 'Memory Book',
+            isMemory: true,
+            sources: [{ source: 'memory', tokens }],
+            _allSources: [{ source: 'memory', tokens }]
+        }],
+        entries: topEntries,
+        tokens,
+        injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block',
+        macroContent
+    };
+}
+
+function findSummaryInsertIndex(messages) {
+    return messages.findIndex(msg => Array.isArray(msg?.sources) && msg.sources.some(source => source?.source === 'summary'));
+}
+
+function injectMemoryIntoSummaryMacro(messages, memoryInjection) {
+    if (!memoryInjection?.macroContent) return messages;
+
+    const summaryIndex = findSummaryInsertIndex(messages);
+    if (summaryIndex === -1) return null;
+
+    const summaryMessage = messages[summaryIndex];
+    const existingContent = String(summaryMessage?.content || '').trim();
+    const appendedContent = existingContent
+        ? `${existingContent}\n\n${memoryInjection.macroContent}`
+        : memoryInjection.macroContent;
+
+    const nextSources = Array.isArray(summaryMessage?.sources) ? [...summaryMessage.sources] : [];
+    const memorySource = nextSources.find(source => source?.source === 'memory');
+    if (memorySource) memorySource.tokens += memoryInjection.tokens || 0;
+    else if ((memoryInjection.tokens || 0) > 0) nextSources.push({ source: 'memory', tokens: memoryInjection.tokens || 0 });
+
+    const nextAllSources = Array.isArray(summaryMessage?._allSources) ? [...summaryMessage._allSources] : [];
+    if ((memoryInjection.tokens || 0) > 0) nextAllSources.push({ source: 'memory', tokens: memoryInjection.tokens || 0 });
+
+    return [
+        ...messages.slice(0, summaryIndex),
+        {
+            ...summaryMessage,
+            content: appendedContent,
+            sources: nextSources,
+            _allSources: nextAllSources
+        },
+        ...messages.slice(summaryIndex + 1)
+    ];
+}
+
+function injectMemoryMessages(messages, memoryInjection, settings = {}) {
+    if (!memoryInjection?.messages?.length) return messages;
+
+    const injectionTarget = settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
+    if (injectionTarget === 'summary_macro') {
+        const macroInjected = injectMemoryIntoSummaryMacro(messages, memoryInjection);
+        if (macroInjected) {
+            return macroInjected;
+        }
+    }
+
+    const firstHistoryIndex = messages.findIndex(m => m.isHistory);
+    if (firstHistoryIndex === -1) {
+        return [...messages, ...memoryInjection.messages];
+    }
+    return [
+        ...messages.slice(0, firstHistoryIndex),
+        ...memoryInjection.messages,
+        ...messages.slice(firstHistoryIndex)
+    ];
+}
+
+function injectVectorLoreMessages(messages, loreEntries) {
+    if (!Array.isArray(loreEntries) || !loreEntries.length) return messages;
+
+    const combinedContent = loreEntries.map(msg => msg.content || '').filter(Boolean).join('\n\n');
+    if (!combinedContent) return messages;
+
+    const sourceMap = new Map();
+    for (const item of loreEntries.flatMap(msg => msg._allSources || msg.sources || [])) {
+        if (!item?.source) continue;
+        sourceMap.set(item.source, (sourceMap.get(item.source) || 0) + (item.tokens || 0));
+    }
+    const combinedSources = [...sourceMap.entries()].map(([source, tokens]) => ({ source, tokens }));
+    const combinedMessage = {
+        role: 'system',
+        content: combinedContent,
+        blockName: 'Vector Lorebook',
+        isLorebook: true,
+        sources: combinedSources,
+        _allSources: combinedSources
+    };
+
+    const firstHistoryIndex = messages.findIndex(m => m.isHistory);
+    if (firstHistoryIndex === -1) {
+        return [...messages, combinedMessage];
+    }
+    return [
+        ...messages.slice(0, firstHistoryIndex),
+        combinedMessage,
+        ...messages.slice(firstHistoryIndex)
+    ];
+}
+
+export async function generateMemoryDraft({ history, prompt, controller, apiConfigOverride = null }) {
+    const effectiveConfig = {
+        ...getEffectiveApiConfig(),
+        ...(apiConfigOverride || {})
+    };
+    const { apiKey, apiUrl, model, temp } = effectiveConfig;
+
+    if (!apiUrl || !model) {
+        throw new Error("API Not Configured");
+    }
+
+    const defaultPrompt = [
+        'Create exactly one concise long-term memory entry from the following roleplay segment.',
+        'Preserve the original language of the source segment. Do not translate it.',
+        'Use only facts that are explicitly supported by the segment.',
+        'Do not infer completed outcomes, registrations, approvals, or decisions unless the text clearly states them.',
+        'Focus on durable facts, developments, or relationship changes that should persist beyond immediate context.',
+        'Do not copy the dialogue verbatim.',
+        'Return only the memory entry text with no preface, label, or explanation.',
+        '',
+        '{{history}}'
+    ].join('\n');
+    const template = prompt || defaultPrompt;
+
+    let finalPrompt = template.replace('{{history}}', history);
+    if (!template.includes('{{history}}')) {
+        finalPrompt = `${template}\n\n${history}`;
+    }
+
+    let result = "";
+    
+    let requestError = null;
+    
+    await executeRequest({
+        apiUrl,
+        apiKey,
+        requestBody: {
+            model,
+            messages: [{ role: 'user', content: finalPrompt }],
+            temperature: temp,
+            stream: false
+        },
+        stream: false,
+        controller,
+        callbacks: {
+            onUpdate: (chunk, reasoningChunk, effectiveText) => {
+                if (effectiveText) result = effectiveText;
+                else if (chunk) result += chunk;
+            },
+            onComplete: (text) => { if (text) result = text; },
+            onError: (err) => { requestError = err; }
+        }
+    });
+    
+    if (requestError) throw requestError;
 
     return result;
 }

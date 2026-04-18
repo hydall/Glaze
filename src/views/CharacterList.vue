@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { triggerCharacterImport, extractCharacterBook } from '@/utils/characterIO.js';
 import { exportCharacterAsV2Json, exportCharacterAsV2Png } from '@/utils/characterIO.js';
 import { triggerChatImport } from '@/core/services/chatImporter.js';
-import { db } from '@/utils/db.js';
+import { db, markSyncDeletedEntry } from '@/utils/db.js';
 import { createNewSession as dbCreateSession, deleteSession as dbDeleteSession } from '@/utils/sessions.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -182,6 +182,7 @@ const openActions = (char) => {
                                 onClick: async () => {
                                     if (char.id) {
                                         await db.deleteCharacter(char.id);
+                                        await markSyncDeletedEntry('character', char.id);
                                         await loadCharacters();
                                     }
                                     closeBottomSheet();
@@ -290,6 +291,7 @@ onMounted(() => {
   loadCharacters();
   window.addEventListener('header-search', (e) => searchQuery.value = e.detail);
   window.addEventListener('character-updated', loadCharacters);
+  window.addEventListener('sync-data-refreshed', loadCharacters);
 });
 
 // Custom Directive for Long Press
@@ -469,9 +471,10 @@ const handleCharClick = (e, char) => {
 
 onUnmounted(() => {
   window.removeEventListener('character-updated', loadCharacters);
+  window.removeEventListener('sync-data-refreshed', loadCharacters);
 });
 
-defineExpose({ onAddCharacter });
+defineExpose({ onAddCharacter, loadCharacters });
 </script>
 
 <template>

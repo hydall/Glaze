@@ -44,6 +44,7 @@
     "@capacitor/toast": "^8.0.0",
     "@capawesome-team/capacitor-android-foreground-service": "^8.0.0",
     "@capawesome/capacitor-background-task": "^8.0.0",
+    "@scure/bip39": "^2.0.1",
     "jszip": "^3.10.1",
     "vue": "^3.5.26",
     "vue-i18n": "^11.2.8"

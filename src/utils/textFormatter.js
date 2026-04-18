@@ -96,11 +96,32 @@ export function formatText(text, isUser = false, options = {}) {
 
     // 5. Quotes -> Blue
     // Regex matches all block placeholders, Quotes preceded by = (to skip), OR Quotes (to color)
-    const quoteRegex = /(__[A-Z_]+_\d+__)|(=[ \t]*"(?:[^"]|\\")*?")|("((?:[^"]|\\")*?)"|“((?:[^”])*?)”|«((?:[^»])*?)»)/g;
+    const quoteRegex = /(__[A-Z_]+_\d+__)|(=[ \t]*"(?:[^"]|\\")*?")|("((?:[^"]|\\")*?)"|"((?:[^"]|\\")*?)"|«((?:[^»])*?)»)/g;
     html = html.replace(quoteRegex, (match, placeholder, skipQuote) => {
-        if (placeholder) return placeholder; // Return placeholder unchanged
-        if (skipQuote) return skipQuote; // Return quotes preceded by = unchanged
+        if (placeholder) return placeholder;
+        if (skipQuote) return skipQuote;
         return `<span class="chat-quote">${match}</span>`;
+    });
+
+    // Unclosed quotes during streaming: opening quote with no closing quote
+    // Matches " or « or \u201C at end of text (streaming delta) without a matching closer
+    html = html.replace(/([ \t])("(?:[^"\\]|\\.)*?)$/gm, (fullMatch, prefix, unclosed) => {
+        return `${prefix}<span class="chat-quote">${unclosed}</span>`;
+    });
+    html = html.replace(/^(("(?:[^"\\]|\\.)*?))$/gm, (fullMatch, unclosed) => {
+        return `<span class="chat-quote">${unclosed}</span>`;
+    });
+    html = html.replace(/([ \t])(\u201C(?:[^\u201D])*?)$/gm, (fullMatch, prefix, unclosed) => {
+        return `${prefix}<span class="chat-quote">${unclosed}</span>`;
+    });
+    html = html.replace(/^(\u201C(?:[^\u201D])*?)$/gm, (fullMatch, unclosed) => {
+        return `<span class="chat-quote">${unclosed}</span>`;
+    });
+    html = html.replace(/([ \t])(\u00AB(?:[^\u00BB])*?)$/gm, (fullMatch, prefix, unclosed) => {
+        return `${prefix}<span class="chat-quote">${unclosed}</span>`;
+    });
+    html = html.replace(/^(\u00AB(?:[^\u00BB])*?)$/gm, (fullMatch, unclosed) => {
+        return `<span class="chat-quote">${unclosed}</span>`;
     });
 
     // 4. Markdown Parsing (in order of precedence)

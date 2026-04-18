@@ -43,6 +43,7 @@ export function normalizeEndpoint(url) {
 
 export function getApiConfig() {
     const mt = parseInt(localStorage.getItem('api-max-tokens'));
+    const ctx = parseInt(localStorage.getItem('api-context'));
     return {
         apiKey: localStorage.getItem('api-key') || '',
         apiUrl: localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint') || '',
@@ -52,6 +53,7 @@ export function getApiConfig() {
         temp: parseFloat(localStorage.getItem('gz_api_temp')) || 0.7,
         topP: parseFloat(localStorage.getItem('gz_api_topp')) || 0.9,
         maxTokens: isNaN(mt) ? 8000 : mt,
+        contextSize: isNaN(ctx) ? 32000 : ctx,
         autoHideImages: localStorage.getItem('gz_api_auto_hide_images') === 'true',
         autoHideImagesN: parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10),
         reasoningEffort: localStorage.getItem('gz_api_reasoning_effort') || 'medium'

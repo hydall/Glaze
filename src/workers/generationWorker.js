@@ -58,7 +58,7 @@ function escapeRegex(string) {
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
 }
 
-const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\\u201C\\u201D\\u2018\\u2019\\u00AB\\u00BB(){}\\[\\]—–]';
+const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\\u201C\\u201D\\u2018\\u2019\\u00AB\\u00BB(){}\\[\\]—–*]';
 
 function sanitizeRegexFlags(flags) {
     const valid = new Set(['g', 'i', 'm', 's', 'u', 'y']);
@@ -164,7 +164,9 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
 
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
-            if (entry.enabled !== false) {
+            // DUAL-CHANNEL: All entries participate in keyword scan, unless vectorSearch is enabled AND useKeywordSearch is explicitly disabled
+            const isVectorOnly = entry.vectorSearch && entry.useKeywordSearch === false;
+            if (entry.enabled !== false && !isVectorOnly) {
                 if (char && entry.characterFilter) {
                     const { isExclude, names } = entry.characterFilter;
                     if (names && names.length > 0) {
@@ -244,7 +246,7 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
                 return haystack.includes(needle);
             };
 
-            const scanDepth = entry.scanDepth ?? 1;
+            const scanDepth = entry.scanDepth ?? globalSettings.scanDepth ?? 10;
             const messagesToScan = history.slice(-scanDepth).map(m => m.content).join("\n");
 
             const scanSource = caseSensitive ?
@@ -380,13 +382,32 @@ function buildPromptMessagesWorker(args) {
         }
     };
 
-    let loreByPosition = { 0: [], 1: [], 2: [], 3: [], 4: [] };
+    const combineSources = (sourceItems = []) => {
+        const combined = [];
+        for (const s of sourceItems) {
+            if (!s || !s.source) continue;
+            const existing = combined.find(x => x.source === s.source);
+            if (existing) existing.tokens += s.tokens || 0;
+            else combined.push({ source: s.source, tokens: s.tokens || 0 });
+        }
+        return combined;
+    };
+
+    let loreByPosition = { worldInfoBefore: [], worldInfoAfter: [], lorebooksMacro: [] };
     if (lorebooks) {
-        const loreEntries = scanLorebooksPure(history || [], char, "", chatId, lorebooks, globalSettings, activations);
+        // DUAL-CHANNEL FIX: Extract current user message for keyword scanning
+        const lastUserMessage = history && history.length > 0
+            ? history.filter(m => m.role === 'user').slice(-1)[0]
+            : null;
+        const textToScan = lastUserMessage?.content || "";
+
+        const loreEntries = scanLorebooksPure(history || [], char, textToScan, chatId, lorebooks, globalSettings, activations);
         allLoreEntries = loreEntries;
 
         loreEntries.forEach(entry => {
-            const pos = entry.position ?? 0;
+            const pos = entry.position === 'matchGlobal'
+                ? (globalSettings?.injectionPosition || 'worldInfoBefore')
+                : (entry.position || 'worldInfoBefore');
             const content = replaceMacros(entry.content || "", char, personaObj, sessionVars, notifyObj);
             const tokens = estimateTokens(content);
             const msg = {
@@ -398,11 +419,9 @@ function buildPromptMessagesWorker(args) {
                 _allSources: tokens > 0 ? [{ source: 'lorebook', tokens }] : []
             };
             if (loreByPosition[pos]) loreByPosition[pos].push(msg);
-            else loreByPosition[0].push(msg);
+            else loreByPosition.worldInfoBefore.push(msg);
         });
     }
-
-    const hasLorebookMacro = activePreset?.blocks?.some(b => b.enabled !== false && !b.isStashed && b.content?.includes('{{lorebooks}}'));
 
     const getLorebookContent = () => {
         return allLoreEntries
@@ -412,22 +431,32 @@ function buildPromptMessagesWorker(args) {
     };
 
     const injectLore = (pos) => {
-        if (hasLorebookMacro) return;
         if (loreByPosition[pos] && loreByPosition[pos].length > 0) {
-            loreByPosition[pos].forEach(msg => {
-                if (mergePrompts) {
+            if (mergePrompts) {
+                loreByPosition[pos].forEach(msg => {
                     mergeContentBuffer.push(msg.content);
                     if (msg._allSources) mergeSourcesBuffer.push(...msg._allSources);
-                } else {
-                    flushMergeBuffer();
-                    messages.push(msg);
+                });
+            } else {
+                flushMergeBuffer();
+                const combinedContent = loreByPosition[pos].map(msg => msg.content).filter(Boolean).join('\n\n');
+                const combinedSources = combineSources(loreByPosition[pos].flatMap(msg => msg._allSources || msg.sources || []));
+                if (combinedContent) {
+                    messages.push({
+                        role: 'system',
+                        content: combinedContent,
+                        blockName: pos === 'worldInfoAfter' ? 'Lorebook After' : 'Lorebook Before',
+                        isLorebook: true,
+                        sources: combinedSources,
+                        _allSources: combinedSources
+                    });
                 }
-            });
+            }
             loreByPosition[pos] = [];
         }
     };
 
-    if (!hasLorebookMacro) injectLore(4);
+    injectLore('worldInfoBefore');
 
     let summaryRawContent = null;
     let summaryText = null;
@@ -597,7 +626,7 @@ function buildPromptMessagesWorker(args) {
         relativeBlocks.forEach(block => {
             if (block.id === 'chat_history') {
                 if (mergePrompts) flushMergeBuffer();
-                if (!hasLorebookMacro) Object.keys(loreByPosition).forEach(pos => injectLore(pos));
+                injectLore('worldInfoAfter');
 
                 let historyMsgs = [];
                 if (history) {
@@ -655,13 +684,11 @@ function buildPromptMessagesWorker(args) {
                 return;
             }
 
-            if (block.id === 'char_card') injectLore(0);
-            if (block.id === 'example_messages') injectLore(2);
+            if (block.id === 'char_card') injectLore('worldInfoBefore');
 
             const resolved = resolveBlockContent(block);
             if (!resolved) {
-                if (block.id === 'char_card') injectLore(1);
-                if (block.id === 'example_messages') injectLore(3);
+                if (block.id === 'char_card') injectLore('worldInfoAfter');
                 return;
             }
 
@@ -692,6 +719,13 @@ function buildPromptMessagesWorker(args) {
                     sources = [];
                 }
 
+                if (content.includes('{{lorebooks}}')) {
+                    content = content.split('{{lorebooks}}').join(
+                        loreByPosition.lorebooksMacro.map(item => item.content).filter(Boolean).join('\n\n')
+                    );
+                    loreByPosition.lorebooksMacro = [];
+                }
+
                 const msg = {
                     role: role,
                     content: content,
@@ -703,8 +737,7 @@ function buildPromptMessagesWorker(args) {
                 messages.push(msg);
             }
 
-            if (block.id === 'char_card') injectLore(1);
-            if (block.id === 'example_messages') injectLore(3);
+            if (block.id === 'char_card') injectLore('worldInfoAfter');
         });
         if (mergePrompts) flushMergeBuffer();
     } else {
@@ -755,15 +788,15 @@ self.onmessage = async function (e) {
             const { messages, loreEntries, notifyObj } = buildPromptMessagesWorker(payload);
 
             const { apiConfig } = payload;
-            const maxTokens = apiConfig.maxTokens;
-            const contextSize = apiConfig.contextSize;
-            const safeContext = contextSize - maxTokens;
+            const maxTokens = apiConfig.maxTokens || 8000;
+            const contextSize = apiConfig.contextSize || 32000;
+            const safeContext = Math.max(1000, contextSize - maxTokens);
 
             const staticMessages = messages.filter(m => !m.isHistory);
             const historyMessages = messages.filter(m => m.isHistory);
             const loreReserveTokens = getLorebookReserve(payload.globalSettings, safeContext);
 
-            const sourceKeys = ['character', 'preset', 'summary', 'authorsNote', 'lorebook', 'history'];
+            const sourceKeys = ['character', 'preset', 'summary', 'authorsNote', 'lorebook', 'vectorLore', 'history'];
             const sourceTotals = {};
             for (const k of sourceKeys) sourceTotals[k] = 0;
 
@@ -789,6 +822,7 @@ self.onmessage = async function (e) {
                 summary: sourceTotals.summary,
                 authorsNote: sourceTotals.authorsNote,
                 lorebook: sourceTotals.lorebook,
+                vectorLore: sourceTotals.vectorLore,
                 lorebookReserve: loreReserveTokens,
                 history: 0,
                 fixedBase: 0,
@@ -801,7 +835,8 @@ self.onmessage = async function (e) {
                 historyMessagesHiddenByContext: 0
             };
 
-            breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.summary + breakdown.authorsNote + breakdown.lorebook;
+            // Lorebook and vectorLore are inside reserve, not in fixedBase
+            breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.summary + breakdown.authorsNote;
             breakdown.fixedTotal = breakdown.fixedBase + breakdown.lorebookReserve;
 
             let availableForHistory = safeContext - breakdown.fixedTotal;
@@ -847,7 +882,7 @@ self.onmessage = async function (e) {
             }
 
             breakdown.totalUsed = breakdown.fixedBase + breakdown.lorebookReserve + breakdown.history;
-            breakdown.remaining = Math.max(0, safeContext - breakdown.totalUsed);
+            breakdown.remaining = Math.max(0, contextSize - breakdown.totalUsed);
 
             self.postMessage({
                 id,

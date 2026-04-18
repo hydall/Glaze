@@ -1,7 +1,13 @@
 # Glaze
 
 Mobile-first LLM frontend for AI roleplay. SillyTavern alternative as a native mobile app.
-**Stack:** Vue 3.5 + Vite 7 + Capacitor 8 (iOS/Android). **Language:** JavaScript only. **Status:** Active alpha (v0.4.0). **License:** AGPL-3.0.
+**Stack:** Vue 3.5 + Vite 7 + Capacitor 8 (iOS/Android). **Language:** JavaScript only. **Status:** Active alpha (v0.5.1). **License:** AGPL-3.0.
+
+## Git Workflow
+
+- **All PRs target `upstream/dev`, never `main`.**
+- `main` is the stable release branch. `dev` is the integration branch.
+- When creating a PR with `gh pr create`, always use `--base dev`.
 
 ## Commands
 
@@ -162,3 +168,4 @@ function queueDbOp(op) {
 - Import heavy dependencies without lazy loading
 - Use WebSocket for LLM streaming (SSE only)
 - Break SillyTavern V2 format compatibility for character cards
+- **Read, display, or output contents of `.env` file** — it contains secrets. NEVER use Read tool on `.env`. If you need to check if a key is set, check if the file exists or check the build output instead.

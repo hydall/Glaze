@@ -7,7 +7,7 @@ import { db } from '@/utils/db.js';
 
 
 const DB_NAME = 'SillyCradleDB';
-const DB_VERSION = 5;
+const DB_VERSION = 7;
 const STORE_KEYVALUE = 'keyvalue';
 const STORE_CHARACTERS = 'characters';
 const STORE_PERSONAS = 'personas';
@@ -22,7 +22,7 @@ export async function exportFullBackupAsync() {
 
         const workerCode = `
             const DB_NAME = 'SillyCradleDB';
-            const DB_VERSION = 5;
+            const DB_VERSION = 7;
             const STORE_KEYVALUE = 'keyvalue';
             const STORE_CHARACTERS = 'characters';
             const STORE_PERSONAS = 'personas';
@@ -107,7 +107,7 @@ export async function importFullBackupAsync(jsonString) {
     return new Promise((resolve, reject) => {
         const workerCode = `
             const DB_NAME = 'SillyCradleDB';
-            const DB_VERSION = 5;
+            const DB_VERSION = 7;
             const STORE_KEYVALUE = 'keyvalue';
             const STORE_CHARACTERS = 'characters';
             const STORE_PERSONAS = 'personas';

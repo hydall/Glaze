@@ -1,11 +1,131 @@
 const DB_NAME = 'SillyCradleDB';
-const DB_VERSION = 5;
+const DB_VERSION = 8;
 const STORE_KEYVALUE = 'keyvalue';
 const STORE_CHARACTERS = 'characters';
 const STORE_PERSONAS = 'personas';
+const STORE_EMBEDDINGS = 'embeddings';
+const SYNC_DELETIONS_KEY = 'gz_sync_deleted_entries';
 
 function toPlain(data) {
     return JSON.parse(JSON.stringify(data));
+}
+
+function ensureMessageMetadata(message) {
+    if (!message || typeof message !== 'object') return message;
+    if (!message.id) {
+        message.id = `legacy_${message.timestamp || Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    }
+    if (!Array.isArray(message.contextRefs)) {
+        message.contextRefs = [];
+    }
+    if (!message.memoryCoverage || typeof message.memoryCoverage !== 'object') {
+        message.memoryCoverage = {
+            entryIds: [],
+            needsRebuild: false,
+            stale: false
+        };
+    } else {
+        if (!Array.isArray(message.memoryCoverage.entryIds)) {
+            message.memoryCoverage.entryIds = [];
+        }
+        if (typeof message.memoryCoverage.needsRebuild !== 'boolean') {
+            message.memoryCoverage.needsRebuild = false;
+        }
+        if (typeof message.memoryCoverage.stale !== 'boolean') {
+            message.memoryCoverage.stale = false;
+        }
+    }
+    return message;
+}
+
+function ensureMemoryBookSessionData(chatData) {
+    if (!chatData || typeof chatData !== 'object') return chatData;
+    if (!chatData.memoryBooks || typeof chatData.memoryBooks !== 'object') {
+        chatData.memoryBooks = {};
+    }
+    return chatData;
+}
+
+function ensureMemoryEntry(entry) {
+    if (!entry || typeof entry !== 'object') return entry;
+    if (!Array.isArray(entry.keys)) entry.keys = [];
+    if (!Array.isArray(entry.glazeKeys)) entry.glazeKeys = [];
+    if (typeof entry.vectorSearch !== 'boolean') entry.vectorSearch = false;
+    return entry;
+}
+
+function normalizeChatData(chatData) {
+    if (!chatData || typeof chatData !== 'object') {
+        return { currentId: 1, sessions: { 1: [] }, memoryBooks: {} };
+    }
+
+    if (!chatData.sessions || typeof chatData.sessions !== 'object') {
+        chatData.sessions = { 1: [] };
+    }
+
+    for (const [sessionId, messages] of Object.entries(chatData.sessions)) {
+        const safeMessages = Array.isArray(messages) ? messages.filter(Boolean) : [];
+        safeMessages.forEach(ensureMessageMetadata);
+        chatData.sessions[sessionId] = safeMessages;
+    }
+
+    ensureMemoryBookSessionData(chatData);
+
+    for (const sessionId of Object.keys(chatData.sessions)) {
+        if (!chatData.memoryBooks[sessionId] || typeof chatData.memoryBooks[sessionId] !== 'object') {
+                chatData.memoryBooks[sessionId] = {
+                    id: `memorybook_${sessionId}`,
+                    entries: [],
+                    pendingDrafts: [],
+                    settings: {
+                    enabled: true,
+                    maxInjectedEntries: 3,
+                    batchSize: 1,
+                        parallelJobs: 1,
+                        vectorSearchEnabled: false,
+                        keyMatchMode: 'plain',
+                        generationSource: 'current',
+                        generationModel: '',
+                        generationUseCurrentModelOverride: false,
+                        generationEndpoint: '',
+                        generationApiKey: '',
+                        generationTemperature: null,
+                        promptPreset: 'detailed_beats',
+                        customPrompts: []
+                    },
+                    updatedAt: 0
+                };
+        } else {
+            const memoryBook = chatData.memoryBooks[sessionId];
+            if (!memoryBook.id) memoryBook.id = `memorybook_${sessionId}`;
+            if (!Array.isArray(memoryBook.entries)) memoryBook.entries = [];
+            if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
+            memoryBook.entries.forEach(ensureMemoryEntry);
+            memoryBook.pendingDrafts.forEach(ensureMemoryEntry);
+            if (!memoryBook.settings || typeof memoryBook.settings !== 'object') {
+                memoryBook.settings = {};
+            }
+            if (typeof memoryBook.settings.enabled !== 'boolean') memoryBook.settings.enabled = true;
+            if (!Number.isFinite(memoryBook.settings.maxInjectedEntries)) memoryBook.settings.maxInjectedEntries = 3;
+            if (!Number.isFinite(memoryBook.settings.batchSize)) memoryBook.settings.batchSize = 1;
+            if (!Number.isFinite(memoryBook.settings.parallelJobs)) memoryBook.settings.parallelJobs = 1;
+            if (typeof memoryBook.settings.vectorSearchEnabled !== 'boolean') memoryBook.settings.vectorSearchEnabled = false;
+            if (!['plain', 'glaze', 'both'].includes(memoryBook.settings.keyMatchMode)) memoryBook.settings.keyMatchMode = 'plain';
+            if (!memoryBook.settings.generationSource) memoryBook.settings.generationSource = 'current';
+            if (typeof memoryBook.settings.generationModel !== 'string') memoryBook.settings.generationModel = '';
+            if (typeof memoryBook.settings.generationUseCurrentModelOverride !== 'boolean') memoryBook.settings.generationUseCurrentModelOverride = false;
+            if (typeof memoryBook.settings.generationEndpoint !== 'string') memoryBook.settings.generationEndpoint = '';
+            if (typeof memoryBook.settings.generationApiKey !== 'string') memoryBook.settings.generationApiKey = '';
+            if (!(memoryBook.settings.generationTemperature === null || Number.isFinite(memoryBook.settings.generationTemperature))) {
+                memoryBook.settings.generationTemperature = null;
+            }
+            if (typeof memoryBook.settings.promptPreset !== 'string') memoryBook.settings.promptPreset = 'detailed_beats';
+            if (!Array.isArray(memoryBook.settings.customPrompts)) memoryBook.settings.customPrompts = [];
+            if (!Number.isFinite(memoryBook.updatedAt)) memoryBook.updatedAt = 0;
+        }
+    }
+
+    return chatData;
 }
 
 // Global write queue — serializes all IndexedDB writes to prevent race conditions
@@ -97,6 +217,34 @@ export const db = {
                             items.forEach(item => newStore.add(item));
                         };
                     }
+                }
+
+                if (!db.objectStoreNames.contains(STORE_EMBEDDINGS)) {
+                    db.createObjectStore(STORE_EMBEDDINGS, { keyPath: 'id' });
+                }
+
+                // Migration v8: Convert legacy single-vector embeddings to multi-vector format
+                if (e.oldVersion < 8 && db.objectStoreNames.contains(STORE_EMBEDDINGS)) {
+                    console.log('[DB] Migrating to version 8: multi-vector embeddings');
+                    const embStore = transaction.objectStore(STORE_EMBEDDINGS);
+                    const getAllReq = embStore.getAll();
+                    getAllReq.onsuccess = () => {
+                        const allEmbeddings = getAllReq.result || [];
+                        let migrated = 0;
+                        allEmbeddings.forEach(emb => {
+                            if (emb.vector && !emb.vectors) {
+                                // Convert legacy single vector to multi-vector format
+                                emb.vectors = [{ 
+                                    text: '(legacy full content)', 
+                                    vector: emb.vector 
+                                }];
+                                emb.vector = null;  // Mark as migrated
+                                embStore.put(emb);
+                                migrated++;
+                            }
+                        });
+                        console.log(`[DB] Migrated ${migrated} embeddings to multi-vector format`);
+                    };
                 }
             };
             request.onsuccess = (e) => resolve(e.target.result);
@@ -192,6 +340,9 @@ export const db = {
         if (!character.id) {
             character.id = Date.now().toString(36) + Math.random().toString(36).substr(2);
         }
+        if (!character.updatedAt) {
+            character.updatedAt = Date.now();
+        }
         await db.put(STORE_CHARACTERS, character);
     },
     deleteCharacter: async (id) => {
@@ -204,6 +355,9 @@ export const db = {
         if (!persona.id) {
             persona.id = Date.now().toString(36) + Math.random().toString(36).substr(2);
         }
+        if (!persona.updatedAt) {
+            persona.updatedAt = Date.now();
+        }
         await db.put(STORE_PERSONAS, persona);
     },
     deletePersona: async (index) => {
@@ -211,6 +365,50 @@ export const db = {
         if (personas[index]) {
             await db.delete(STORE_PERSONAS, personas[index].id);
         }
+    },
+    // Embedding specific logic
+    getEmbedding: async (id) => {
+        const database = await db.open();
+        return new Promise((resolve, reject) => {
+            const tx = database.transaction(STORE_EMBEDDINGS, 'readonly');
+            const store = tx.objectStore(STORE_EMBEDDINGS);
+            const req = store.get(id);
+            req.onsuccess = () => {
+                resolve(req.result);
+                database.close();
+            };
+            req.onerror = () => {
+                reject(req.error);
+                database.close();
+            };
+        });
+    },
+    getAllEmbeddings: async () => {
+        return db.getAll(STORE_EMBEDDINGS);
+    },
+    getEmbeddingsBySource: async (sourceType) => {
+        const all = await db.getAll(STORE_EMBEDDINGS);
+        return all.filter(e => e.sourceType === sourceType);
+    },
+    saveEmbedding: async (embeddingRecord) => {
+        await db.put(STORE_EMBEDDINGS, embeddingRecord);
+    },
+    deleteEmbedding: async (id) => {
+        await db.delete(STORE_EMBEDDINGS, id);
+    },
+    deleteEmbeddingsBySource: async (sourceType) => {
+        const all = await db.getAll(STORE_EMBEDDINGS);
+        const toDelete = all.filter(e => e.sourceType === sourceType);
+        const database = await db.open();
+        return new Promise((resolve, reject) => {
+            const tx = database.transaction(STORE_EMBEDDINGS, 'readwrite');
+            const store = tx.objectStore(STORE_EMBEDDINGS);
+            for (const item of toDelete) {
+                store.delete(item.id);
+            }
+            tx.oncomplete = () => { database.close(); resolve(); };
+            tx.onerror = () => { database.close(); reject(tx.error); };
+        });
     },
     // Chat specific logic
     getChats: async () => {
@@ -288,9 +486,7 @@ export const db = {
         if (!data) {
             data = { currentId: 1, sessions: { 1: [] } };
         }
-        if (!data.sessions) {
-            data.sessions = { 1: [] };
-        }
+        data = normalizeChatData(data);
         if (!data.currentId) {
             const ids = Object.keys(data.sessions).map(Number);
             data.currentId = ids.length > 0 ? Math.max(...ids) : 1;
@@ -298,16 +494,26 @@ export const db = {
         return data;
     },
     saveChat: async (charId, chatData) => {
-        await db.set(`gz_chat_${charId}`, chatData);
+        await db.set(`gz_chat_${charId}`, normalizeChatData(chatData));
     },
     createSession: async (charId) => {
-        let data = await db.getChat(charId);
-
+        let data = await db.get(`gz_chat_${charId}`);
         if (!data) {
-            data = { currentId: 1, sessions: { 1: [] } };
+            const legacyChats = await db.get('gz_chats');
+            if (legacyChats && legacyChats[charId]) {
+                data = await db.getChat(charId);
+            } else {
+                data = { currentId: 1, sessions: { 1: [] } };
+                await db.saveChat(charId, data);
+                return 1;
+            }
         }
         if (!data.sessions) {
             data.sessions = { 1: [] };
+        }
+        if (!data.currentId) {
+            const ids = Object.keys(data.sessions).map(Number);
+            data.currentId = ids.length > 0 ? Math.max(...ids) : 1;
         }
 
         const ids = Object.keys(data.sessions).map(Number);
@@ -337,6 +543,48 @@ export const db = {
         await db.saveChat(charId, data);
     }
 };
+
+// ---------------------------------------------------------------------------
+// Sync helpers — bulk read/write for cloud sync operations
+// ---------------------------------------------------------------------------
+
+export async function getAllSyncableData() {
+    const characters = await db.getAll(STORE_CHARACTERS);
+    const personas = await db.getAll(STORE_PERSONAS);
+    const chats = await db.getChats();
+    const lorebooks = await db.get('gz_lorebooks');
+    const apiPresets = await db.get('gz_api_connection_presets');
+    const themePresets = await db.get('gz_theme_presets');
+
+    const localStorageData = {};
+    const syncKeys = [
+        'silly_cradle_presets',
+        'silly_cradle_current_preset_id',
+        'gz_preset_connections',
+        'regex_scripts',
+        'gz_active_persona_id',
+        'gz_persona_connections'
+    ];
+    for (const key of syncKeys) {
+        const val = localStorage.getItem(key);
+        if (val !== null) localStorageData[key] = val;
+    }
+
+    return {
+        characters,
+        personas,
+        chats,
+        lorebooks: lorebooks || null,
+        apiPresets: apiPresets || null,
+        themePresets: themePresets || null,
+        localStorage: localStorageData
+    };
+}
+
+export function touchUpdatedAt(entity) {
+    entity.updatedAt = Date.now();
+    return entity;
+}
 
 // ---------------------------------------------------------------------------
 // One-time migration: sc_ -> gz_ for both IndexedDB keyvalue store and localStorage
@@ -402,4 +650,31 @@ export async function migrateScToGz() {
 
     localStorage.setItem('gz_migration_done', '1');
     console.log('[migrateScToGz] Migration from sc_ to gz_ complete.');
+}
+
+export async function getSyncDeletedEntries() {
+    return (await db.get(SYNC_DELETIONS_KEY)) || {};
+}
+
+export async function setSyncDeletedEntries(entries) {
+    await db.set(SYNC_DELETIONS_KEY, entries || {});
+}
+
+export async function markSyncDeletedEntry(type, id) {
+    if (!type || !id) return;
+    const entries = await getSyncDeletedEntries();
+    entries[`${type}:${id}`] = {
+        type,
+        id,
+        deleted: true,
+        updatedAt: Date.now()
+    };
+    await setSyncDeletedEntries(entries);
+}
+
+export async function clearSyncDeletedEntry(type, id) {
+    if (!type || !id) return;
+    const entries = await getSyncDeletedEntries();
+    delete entries[`${type}:${id}`];
+    await setSyncDeletedEntries(entries);
 }

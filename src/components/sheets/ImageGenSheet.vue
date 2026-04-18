@@ -16,6 +16,9 @@ const models = ref([]);
 const isFetchingModels = ref(false);
 const fetchError = ref('');
 
+// Computed properties
+const naisteraModelSupportsReferences = computed(() => settings.value.naisteraModel !== 'novelai');
+
 // Connection status
 const apiStatus = ref('idle'); // idle | connecting | connected | failed
 const errorMessage = ref('');
@@ -164,7 +167,7 @@ const openResolutionSelector = () => {
 };
 
 const openNaisteraModelSelector = () => {
-    const options = ['grok', 'nano banana'];
+    const options = ['grok', 'nano banana', 'novelai'];
     showBottomSheet({
         title: t('imggen_model') || 'Model',
         items: options.map(v => ({
@@ -380,8 +383,8 @@ defineExpose({ open });
                     </div>
                 </div>
 
-                <!-- Naistera references -->
-                <template v-if="showNaisteraOptions">
+                <!-- Naistera references (not supported by NovelAI model) -->
+                <template v-if="showNaisteraOptions && naisteraModelSupportsReferences">
                     <div class="menu-group">
                         <div class="section-header">{{ t('imggen_refs') || 'Reference Images' }}</div>
 

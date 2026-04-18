@@ -17,9 +17,13 @@ export const presetState = reactive({
     initialized: false
 });
 
-export async function initPresetState() {
-    if (presetState.initialized) return;
+export async function initPresetState(force = false) {
+    if (presetState.initialized && !force) return;
     logger.debug('[presetState] Initializing...');
+
+    presetState.presets = JSON.parse(JSON.stringify(DEFAULT_PRESETS));
+    presetState.connections = { character: {}, chat: {} };
+    presetState.globalPresetId = 'default_shino';
 
     let didBackfillCreatedAt = false;
 

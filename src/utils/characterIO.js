@@ -152,7 +152,11 @@ export async function extractCharacterBook(charData) {
     if (!cb || (!cb.entries && !cb.name)) return null;
 
     const lbName = cb.name || `${charData.name || 'Character'} Lorebook`;
-    const lorebook = await importSTLorebook({ ...cb, name: lbName }, lbName);
+    const lorebook = await importSTLorebook(
+        { ...cb, name: lbName },
+        lbName,
+        { enabled: false, activationScope: 'character', activationTargetId: charData.id }
+    );
 
     delete charData.character_book;
 
