@@ -397,6 +397,21 @@ const resolveBlockContent = (block) => {
     return block.content || '';
 };
 
+const isChatSpecific = (block) => {
+    const id = normalizeBlockId(block.id);
+    return ['chat_history', 'guided_generation', 'authors_note', 'summary', 'char_card', 'scenario', 'char_personality', 'char_persona', 'example_dialogue', 'first_message'].includes(id);
+};
+
+const shouldShowTokens = (block) => {
+    const id = normalizeBlockId(block.id);
+    // World Info tokens are technically zero in PresetView as they are injected separately, 
+    // but we hide them at all times as per user request to avoid clutter.
+    if (['worldInfoBefore', 'worldInfoAfter', 'wi_before', 'wi_after'].includes(id)) return false;
+    // For chat-specific blocks, only show tokens if a chat is actually attached.
+    if (isChatSpecific(block)) return !!props.activeChatChar;
+    return true;
+};
+
 const extendedReplaceMacros = (text) => {
     if (!text) return '';
     let res = replaceMacros(text, props.activeChatChar, effectivePersona.value);
@@ -2183,7 +2198,7 @@ onBeforeUnmount(() => {
                                     <span v-if="hasMacro(block, 'setvar')" class="macro-badge setvar">set</span>
                                     <span v-if="hasMacro(block, 'getvar')" class="macro-badge getvar">get</span>
                                 </div>
-                                <div class="block-tokens" :title="t('label_tokens') || 'Tokens'">
+                                <div v-if="shouldShowTokens(block)" class="block-tokens" :title="t('label_tokens') || 'Tokens'">
                                     {{ getBlockTokens(block) }}
                                 </div>
                             </div>
