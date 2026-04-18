@@ -26,6 +26,13 @@ export function setDisableSwipeRegeneration(value) {
     localStorage.setItem('gz_disable_swipe_regeneration', value);
 }
 
+export const forceMobileLayout = ref(localStorage.getItem('gz_force_mobile_layout') === 'true');
+
+export function setForceMobileLayout(value) {
+    forceMobileLayout.value = value;
+    localStorage.setItem('gz_force_mobile_layout', value);
+}
+
 export const hideMessageId = ref(localStorage.getItem('gz_hide_msg_id') === 'true');
 export function setHideMessageId(value) {
     hideMessageId.value = value;

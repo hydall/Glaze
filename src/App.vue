@@ -42,7 +42,7 @@ import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/
 import { initSettings } from '@/core/config/APISettings.js';
 import { initTheme, themeState } from '@/core/states/themeState.js';
 import { updateLanguage } from '@/utils/i18n.js';
-import { currentLang, imageViewerMode } from '@/core/config/APPSettings.js';
+import { currentLang, imageViewerMode, forceMobileLayout } from '@/core/config/APPSettings.js';
 import { initRipple, initThemeToggle, initHeaderDropdown, initBackButton, initViewportFix } from '@/core/services/ui.js';
 import { bottomSheetState, closeBottomSheet, showBottomSheet } from '@/core/states/bottomSheetState.js';
 import { db, migrateScToGz, markSyncDeletedEntry } from '@/utils/db.js';
@@ -64,7 +64,7 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 // Initialize error handling
 
 // --- Navigation state ---
-const isDesktop = ref(typeof window !== 'undefined' && window.innerWidth >= 768);
+const isDesktop = ref(typeof window !== 'undefined' && window.innerWidth >= 768 && !forceMobileLayout.value);
 const currentView = ref(isDesktop.value ? 'view-characters' : 'view-dialogs');
 const headerRef = ref(null); // Reference to the AppHeader component
 const headerContainer = ref(null);
@@ -85,7 +85,7 @@ const apiViewRef = ref(null);
 const isHeaderEditorMode = ref(false);
 
 const checkDesktop = () => { 
-    const isDesk = typeof window !== 'undefined' && window.innerWidth >= 768;
+    const isDesk = typeof window !== 'undefined' && window.innerWidth >= 768 && !forceMobileLayout.value;
     if (isDesk !== isDesktop.value) {
         if (isDesk && currentView.value === 'view-dialogs') {
             currentView.value = 'view-characters';
@@ -768,6 +768,10 @@ watch(currentView, () => {
 
 watch(isDesktop, () => {
     requestAnimationFrame(updateLayoutMetrics);
+});
+
+watch(forceMobileLayout, () => {
+    checkDesktop();
 });
 
 watch(currentView, (newVal, oldVal) => {

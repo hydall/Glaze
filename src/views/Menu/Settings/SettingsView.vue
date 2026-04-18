@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { updateLanguage, translations } from '@/utils/i18n.js';
-import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips, dialogGrouping, setDialogGrouping, enterToSubmit, setEnterToSubmit, chatPaddingLR, setChatPaddingLR } from '@/core/config/APPSettings.js';
+import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips, dialogGrouping, setDialogGrouping, enterToSubmit, setEnterToSubmit, chatPaddingLR, setChatPaddingLR, forceMobileLayout, setForceMobileLayout } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { themeState, setChatLayout } from '@/core/states/themeState.js';
@@ -33,6 +33,14 @@ const enterSubmitMode = ref(enterToSubmit.value);
 const toggleEnterToSubmit = () => {
     enterSubmitMode.value = !enterSubmitMode.value;
     setEnterToSubmit(enterSubmitMode.value);
+    window.dispatchEvent(new CustomEvent('settings-changed'));
+};
+
+const forceMobile = ref(forceMobileLayout.value);
+
+const toggleForceMobile = () => {
+    forceMobile.value = !forceMobile.value;
+    setForceMobileLayout(forceMobile.value);
     window.dispatchEvent(new CustomEvent('settings-changed'));
 };
 const hideHTips = ref(hideHelpTips.value);
@@ -213,6 +221,15 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
 
         <div v-else-if="currentScreen === 'interface'" key="interface">
             <div class="menu-group">
+                <!-- Force Mobile Layout -->
+                <div class="settings-item-checkbox" @click="toggleForceMobile" style="cursor: pointer; padding: 12px 16px;">
+                    <div class="settings-text-col">
+                        <label style="cursor: pointer; margin-bottom: 2px;">{{ t('menu_force_mobile') || 'Force Mobile Layout' }}</label>
+                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_force_mobile') || 'Overrides the desktop responsive layout and forces the mobile UI' }}</div>
+                    </div>
+                    <input type="checkbox" class="vk-switch" :checked="forceMobile" style="pointer-events: none;">
+                </div>
+                
                 <!-- Enter to Send -->
                 <div class="settings-item-checkbox" @click="toggleEnterToSubmit" style="cursor: pointer; padding: 12px 16px;">
                     <div class="settings-text-col">
