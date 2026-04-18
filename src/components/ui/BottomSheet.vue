@@ -68,7 +68,7 @@ watch(() => props.input, (newVal) => {
 
         nextTick(() => {
             if (inputRef.value) {
-                inputRef.value.focus();
+                inputRef.value.focus({ preventScroll: true });
                 if (Capacitor.isNativePlatform()) {
                     showKeyboard();
                 }
