@@ -7,7 +7,7 @@ import bmcLogo from '@/assets/logos/bmc-logo.svg';
 import boostyLogo from '@/assets/logos/boosty.svg';
 
 const visible = ref(false);
-const version = `${__APP_VERSION__}\nCaramel Apple`;
+const version = `${__APP_VERSION__}`;
 
 const open = () => {
     visible.value = true;

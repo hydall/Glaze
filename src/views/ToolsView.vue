@@ -24,7 +24,20 @@ const lorebooksEntriesCount = computed(() => lorebookState.lorebooks?.reduce((su
 const countPresetTokens = computed(() => {
     const p = currentGlobalPreset.value;
     if (!p) return 0;
-    const str = [p.systemPrompt || '', p.postHistoryInstructions || '', p.jailbreakPrompt || '', p.jailbreakCharPrompt || ''].join(' ');
+    
+    // Sum contents of all enabled blocks
+    const blocksContent = (p.blocks || [])
+        .filter(b => b.enabled && b.content)
+        .map(b => b.content)
+        .join(' ');
+    
+    const str = [
+        blocksContent,
+        p.impersonationPrompt || '',
+        p.reasoningStart || '',
+        p.reasoningEnd || ''
+    ].join(' ');
+
     // Approx 4 chars per token roughly
     return Math.max(0, Math.floor(str.length / 4));
 });
