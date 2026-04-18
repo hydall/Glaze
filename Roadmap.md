@@ -1154,20 +1154,23 @@ PR: #34
 **Tasks:**
 
 1. **Extract Tokenizer to TokenizerSheet.vue**
-   - Status: `in progress`
+   - Status: `done | tested`
    - Create `src/components/sheets/TokenizerSheet.vue` using SheetView
    - Props: breakdown, historyHidePreview, contextSegments, contextLegendItems, contextBreakdownItems, shouldRecommendHide, historyUsagePercent, isCalculating
    - Emits: close, hide-messages, open-settings
    - Replace `openContextSheet()` in ChatView with `tokenizerSheetRef.open()`
    - Files modified:
-     - [x] `src/components/sheets/TokenizerSheet.vue` (created)
-     - [ ] `src/views/ChatView.vue` (integrate component, remove inline HTML)
+     - [x] `src/components/sheets/TokenizerSheet.vue` (created, 543 lines)
+     - [x] `src/views/ChatView.vue` (integrate component, remove ~100 lines inline HTML)
+   - Build: passes ✓
+   - Commit: `3d03952`
 
 2. **Extract Memory Books to MemoryBooksSheet.vue**
-   - Status: `not started`
+   - Status: `in progress`
    - Create dedicated component for memory book management UI
-   - Extract `openMemoryBooksSheet()` logic (~300 lines)
-   - Reduce ChatView by ~1000 lines
+   - Extract `openMemoryBooksSheet()` logic (~500+ lines)
+   - Complexity: high — many event handlers, dynamic sections (drafts/entries/settings)
+   - Reduce ChatView by ~500-1000 lines
 
 3. **Extract Vectorization UI to VectorizationSheet.vue**
    - Status: `not started`
