@@ -63,6 +63,7 @@ const embeddingSettings = reactive({
 
 const embeddingStatus = ref('idle');
 const embeddingDimension = ref(null);
+const embeddingError = ref('');
 
 function loadEmbeddingSettings() {
     const config = getEmbeddingConfig();
@@ -89,6 +90,7 @@ async function testEmbedding() {
         embeddingStatus.value = 'connected';
     } catch (e) {
         console.warn('Embedding test failed:', e);
+        embeddingError.value = e?.message || String(e);
         embeddingStatus.value = 'failed';
     }
 }
@@ -675,7 +677,7 @@ onBeforeUnmount(() => {
                                 {{ embeddingStatus === 'connecting' ? (t('btn_testing') || 'Testing...') : (t('btn_test_connection') || 'Test Connection') }}
                             </button>
                             <div v-if="embeddingStatus === 'connected'" class="settings-desc" style="margin-top:8px; color: #34c759;">{{ t('embedding_connected') || 'Connected' }} (dim: {{ embeddingDimension }})</div>
-                            <div v-if="embeddingStatus === 'failed'" class="settings-desc" style="margin-top:8px; color: #ff3b30;">{{ t('embedding_failed') || 'Connection failed' }}</div>
+                            <div v-if="embeddingStatus === 'failed'" class="settings-desc" style="margin-top:8px; color: #ff3b30;">{{ embeddingError || t('embedding_failed') || 'Connection failed' }}</div>
                         </div>
                     </template>
                 </div>
