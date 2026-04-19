@@ -491,18 +491,28 @@ function buildMemoryDraftSummaryExcerpt(summary) {
 function parseMemoryDraftResponse(rawText, fallbackKeys = []) {
     const text = String(rawText || '').trim();
     const lines = text.split(/\r?\n/);
-    let memory = '';
+    const memoryLines = [];
     let keysLine = '';
+    let inMemoryBlock = false;
 
     for (const line of lines) {
-        if (!memory && /^memory\s*:/i.test(line)) {
-            memory = line.replace(/^memory\s*:/i, '').trim();
+        if (/^memory\s*:/i.test(line)) {
+            inMemoryBlock = true;
+            const firstLine = line.replace(/^memory\s*:/i, '').trim();
+            if (firstLine) memoryLines.push(firstLine);
             continue;
         }
-        if (!keysLine && /^keys\s*:/i.test(line)) {
+        if (/^keys\s*:/i.test(line)) {
             keysLine = line.replace(/^keys\s*:/i, '').trim();
+            inMemoryBlock = false;
+            continue;
+        }
+        if (inMemoryBlock) {
+            memoryLines.push(line);
         }
     }
+
+    let memory = memoryLines.join('\n').trim();
 
     if (!memory) {
         const nonMeta = lines.filter(line => !/^keys\s*:/i.test(line)).join('\n').trim();
@@ -628,6 +638,10 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
     }
 
     const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
+    const settings = memoryBook.settings || {};
+    const generationMaxTokens = Number.isFinite(Number(settings.generationMaxTokens)) && Number(settings.generationMaxTokens) > 0
+        ? Math.round(Number(settings.generationMaxTokens))
+        : null;
     const summary = chatData?.summaries?.[sessionId] || null;
     const playerName = selected.find(msg => msg?.role === 'user')?.persona?.name || activePersona.value?.name || 'User';
     const history = selected
@@ -635,7 +649,6 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
         .filter(Boolean)
         .join('\n');
 
-    const settings = memoryBook.settings || {};
     const continuity = buildMemoryContinuityContext(memoryBook, selected);
     const loreContext = buildMemoryDraftLoreContext(selected);
     const summaryExcerpt = buildMemoryDraftSummaryExcerpt(summary);
@@ -644,7 +657,8 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
             apiUrl: settings.generationEndpoint,
             apiKey: settings.generationApiKey,
             model: settings.generationModel,
-            temp: settings.generationTemperature ?? undefined
+            temp: settings.generationTemperature ?? undefined,
+            ...(generationMaxTokens ? { maxTokens: generationMaxTokens } : {})
         }
         : {
             ...(settings.generationUseCurrentModelOverride && settings.generationModel
@@ -652,7 +666,8 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
                 : {}),
             ...(settings.generationTemperature != null
                 ? { temp: settings.generationTemperature }
-                : {})
+                : {}),
+            ...(generationMaxTokens ? { maxTokens: generationMaxTokens } : {})
         };
     const prompt = resolveMemoryPrompt(settings)
         .replaceAll('{{user}}', playerName)
@@ -1244,6 +1259,9 @@ async function openMemoryGenerationSettings() {
         endpoint: settings.generationEndpoint || '',
         apiKey: settings.generationApiKey || '',
         temperature: settings.generationTemperature,
+        maxTokens: Number.isFinite(Number(settings.generationMaxTokens)) && Number(settings.generationMaxTokens) > 0
+            ? Math.round(Number(settings.generationMaxTokens))
+            : null,
         promptPreset: getMemoryPromptOptions(settings).some(p => p.key === settings.promptPreset) ? settings.promptPreset : 'detailed_beats',
         autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
             ? Number(settings.autoCreateInterval)
@@ -1307,6 +1325,11 @@ async function openMemoryGenerationSettings() {
             <div class="settings-item">
                 <label>Temperature Override</label>
                 <input id="memory-temperature-input" type="number" min="0" max="2" step="0.05" value="${state.temperature ?? ''}" placeholder="Use current API temperature">
+            </div>
+            <div class="settings-item">
+                <label>Output Token Limit</label>
+                <input id="memory-max-tokens-input" type="number" min="200" max="32000" step="100" value="${state.maxTokens ?? ''}" placeholder="Auto (recommended 2000-4000 for large batches)">
+                <div class="context-sheet-note">Optional max completion tokens for memory draft generation. Leave blank to use the provider default with a safety floor.</div>
             </div>
             <div class="settings-item">
                 <label>Create Memory Every N Messages</label>
@@ -1467,6 +1490,10 @@ async function openMemoryGenerationSettings() {
                 : '';
             const tempValue = content.querySelector('#memory-temperature-input')?.value?.trim();
             settings.generationTemperature = tempValue === '' ? null : Number(tempValue);
+            const maxTokensValue = content.querySelector('#memory-max-tokens-input')?.value?.trim();
+            settings.generationMaxTokens = maxTokensValue === ''
+                ? null
+                : Math.max(200, Math.min(32000, Number.isFinite(Number(maxTokensValue)) ? Math.round(Number(maxTokensValue)) : 2000));
             const autoIntervalValue = Number(content.querySelector('#memory-auto-interval-input')?.value || state.autoCreateInterval || 12);
             settings.autoCreateInterval = Math.max(1, Math.min(200, Number.isFinite(autoIntervalValue) ? Math.round(autoIntervalValue) : 12));
             const batchSizeValue = Number(content.querySelector('#memory-batch-size-input')?.value || state.batchSize || 1);

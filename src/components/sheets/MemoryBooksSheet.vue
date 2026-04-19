@@ -86,7 +86,10 @@ const generationSettingsSummary = computed(() => {
   const target = props.memoryBook.settings?.injectionTarget === 'summary_macro' ? '{{summary}}' : 'summary block';
   const maxEntries = Math.max(1, Math.min(20, Number(props.memoryBook.settings?.maxInjectedEntries || 3)));
   const batchSize = Math.max(1, Math.min(50, Number(props.memoryBook.settings?.batchSize || 1)));
-  return `${interval} msgs • batch ${batchSize} • ${delayed} • ${target} • ${maxEntries} in prompt`;
+  const outputTokens = Number.isFinite(Number(props.memoryBook.settings?.generationMaxTokens)) && Number(props.memoryBook.settings?.generationMaxTokens) > 0
+    ? `${Math.round(Number(props.memoryBook.settings.generationMaxTokens))} out`
+    : 'auto out';
+  return `${interval} msgs • batch ${batchSize} • ${outputTokens} • ${delayed} • ${target} • ${maxEntries} in prompt`;
 });
 
 const statusSummary = computed(() => {

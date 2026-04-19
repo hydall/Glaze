@@ -1008,6 +1008,17 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
     };
     const { apiKey, apiUrl, model, temp } = effectiveConfig;
 
+    // Memory drafts need enough output budget for long summaries even when the
+    // provider has a small default completion limit.
+    const explicitOverrideMaxTokens = Number(apiConfigOverride?.maxTokens);
+    const hasExplicitOverride = Number.isFinite(explicitOverrideMaxTokens) && explicitOverrideMaxTokens > 0;
+    const configuredMaxTokens = Number(effectiveConfig.maxTokens);
+    const memoryDraftMaxTokens = hasExplicitOverride
+        ? Math.max(200, Math.round(explicitOverrideMaxTokens))
+        : (Number.isFinite(configuredMaxTokens) && configuredMaxTokens > 0
+            ? Math.max(1200, Math.round(configuredMaxTokens))
+            : 2000);
+
     if (!apiUrl || !model) {
         throw new Error("API Not Configured");
     }
@@ -1041,6 +1052,7 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
             model,
             messages: [{ role: 'user', content: finalPrompt }],
             temperature: temp,
+            max_tokens: memoryDraftMaxTokens,
             stream: false
         },
         stream: false,
