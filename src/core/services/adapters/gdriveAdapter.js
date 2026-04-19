@@ -5,7 +5,14 @@ import { db } from '@/utils/db.js';
 import { GDRIVE_CLIENT_ID } from '@/core/config/syncConfig.js';
 import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
 
-const REDIRECT_URI_NATIVE = import.meta.env.VITE_GDRIVE_REDIRECT_NATIVE || 'com.hydall.glaze://oauth/gdrive';
+const getNativeRedirectUri = () => {
+    if (import.meta.env.VITE_GDRIVE_REDIRECT_NATIVE) return import.meta.env.VITE_GDRIVE_REDIRECT_NATIVE;
+    if (GDRIVE_CLIENT_ID && GDRIVE_CLIENT_ID.endsWith('.apps.googleusercontent.com')) {
+        return GDRIVE_CLIENT_ID.split('.').reverse().join('.') + ':/oauth2redirect';
+    }
+    return 'com.hydall.glaze://oauth/gdrive';
+};
+const REDIRECT_URI_NATIVE = getNativeRedirectUri();
 const REDIRECT_URI_WEB = import.meta.env.VITE_GDRIVE_REDIRECT_WEB || `${window.location.origin}/oauth/gdrive/redirect.html`;
 const API_BASE = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
@@ -185,7 +192,7 @@ export async function connect() {
                 console.error('[gdriveAdapter] OAuth callback error:', e);
             } finally {
                 listener.remove();
-                try { await Browser.close(); } catch {}
+                try { await Browser.close(); } catch { }
             }
         });
 
@@ -235,7 +242,7 @@ async function waitForElectronOAuth(challenge, usePlain, state, verifier) {
             if (resolved) return;
             resolved = true;
             cleanup();
-            try { if (win && !win.closed) win.close(); } catch {}
+            try { if (win && !win.closed) win.close(); } catch { }
 
             if (error || !code) { resolve(null); return; }
             if (returnedState !== state) {
@@ -353,7 +360,7 @@ export async function disconnect() {
             await fetch(`https://oauth2.googleapis.com/revoke?token=${tokens.access_token}`, {
                 method: 'POST'
             });
-        } catch {}
+        } catch { }
     }
     await clearTokens();
     folderIdCache = null;

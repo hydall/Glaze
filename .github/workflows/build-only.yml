@@ -27,7 +27,6 @@ jobs:
         env:
           VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
           VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_CLIENT_ID }}
-          VITE_GDRIVE_CLIENT_SECRET: ${{ secrets.VITE_GDRIVE_CLIENT_SECRET }}
         run: npx vite build
 
       - name: Capacitor Sync
@@ -129,7 +128,6 @@ jobs:
         env:
           VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
           VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_DESKTOP_CLIENT_ID }}
-          VITE_GDRIVE_CLIENT_SECRET: ${{ secrets.VITE_GDRIVE_DESKTOP_CLIENT_SECRET }}
         run: npx vite build
 
       - name: Build Electron App

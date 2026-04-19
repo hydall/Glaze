@@ -4,4 +4,5 @@
     <string name="title_activity_main">Glaze</string>
     <string name="package_name">com.hydall.glaze</string>
     <string name="custom_url_scheme">com.hydall.glaze</string>
+    <string name="gdrive_url_scheme">com.googleusercontent.apps.189370693189-oj9bnmb17ka1bd2skbe29dj2u8k0cogt</string>
 </resources>
