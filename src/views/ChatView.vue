@@ -815,11 +815,20 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
 async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages, { allowImmediate = true } = {}) {
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
     const automation = ensureMemoryAutomationState(memoryBook);
+    const autoCreateEnabled = memoryBook.settings?.autoCreateEnabled !== false;
     const stableMessages = getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char');
     const stableCount = stableMessages.length;
     const interval = normalizeAutoCreateInterval(memoryBook);
     const delayed = memoryBook.settings?.useDelayedAutomation !== false;
     const lastRole = getLastStableConversationRole(stableMessages);
+
+    if (!autoCreateEnabled) {
+        automation.pendingTrigger = null;
+        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount || 0, stableCount);
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        return false;
+    }
 
     if (!stableCount || !lastRole) {
         automation.lastProcessedMessageCount = stableCount;
@@ -1262,6 +1271,7 @@ async function openMemoryGenerationSettings() {
         maxTokens: Number.isFinite(Number(settings.generationMaxTokens)) && Number(settings.generationMaxTokens) > 0
             ? Math.round(Number(settings.generationMaxTokens))
             : null,
+        autoCreateEnabled: settings.autoCreateEnabled !== false,
         promptPreset: getMemoryPromptOptions(settings).some(p => p.key === settings.promptPreset) ? settings.promptPreset : 'detailed_beats',
         autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
             ? Number(settings.autoCreateInterval)
@@ -1330,6 +1340,13 @@ async function openMemoryGenerationSettings() {
                 <label>Output Token Limit</label>
                 <input id="memory-max-tokens-input" type="number" min="200" max="32000" step="100" value="${state.maxTokens ?? ''}" placeholder="Auto (recommended 2000-4000 for large batches)">
                 <div class="context-sheet-note">Optional max completion tokens for memory draft generation. Leave blank to use the provider default with a safety floor.</div>
+            </div>
+            <div class="settings-item-checkbox">
+                <div class="settings-text-col">
+                    <label>Auto-Create Drafts</label>
+                    <div class="settings-desc">Automatically create Memory Book drafts after enough stable messages accumulate.</div>
+                </div>
+                <input id="memory-auto-create-toggle" type="checkbox" class="vk-switch" ${state.autoCreateEnabled ? 'checked' : ''}>
             </div>
             <div class="settings-item">
                 <label>Create Memory Every N Messages</label>
@@ -1494,6 +1511,7 @@ async function openMemoryGenerationSettings() {
             settings.generationMaxTokens = maxTokensValue === ''
                 ? null
                 : Math.max(200, Math.min(32000, Number.isFinite(Number(maxTokensValue)) ? Math.round(Number(maxTokensValue)) : 2000));
+            settings.autoCreateEnabled = !!content.querySelector('#memory-auto-create-toggle')?.checked;
             const autoIntervalValue = Number(content.querySelector('#memory-auto-interval-input')?.value || state.autoCreateInterval || 12);
             settings.autoCreateInterval = Math.max(1, Math.min(200, Number.isFinite(autoIntervalValue) ? Math.round(autoIntervalValue) : 12));
             const batchSizeValue = Number(content.querySelector('#memory-batch-size-input')?.value || state.batchSize || 1);
@@ -2634,9 +2652,10 @@ async function openChat(char, onBack, force = false) {
         };
         currentMessages.value.push(firstMsg);
         if (activeChatChar) {
+            const sessionId = activeChatChar.sessionId;
             const data = await getChatData(activeChatChar.id);
-            if (data) {
-                data.sessions[data.currentId] = currentMessages.value;
+            if (data && sessionId && data.sessions?.[sessionId]) {
+                data.sessions[sessionId] = currentMessages.value;
                 await db.saveChat(activeChatChar.id, data);
             }
         }
@@ -2759,6 +2778,7 @@ function asyncSaveCurrentSessionState() {
     if (activeChatChar && messagesContainer.value) {
         // Capture activeChar synchronously since closing chat will nullify it
         const charContext = activeChatChar;
+        const sessionId = charContext.sessionId;
         const inputValueDraft = inputValue.value;
         const currentAnchor = getScrollAnchor();
         
@@ -2771,8 +2791,8 @@ function asyncSaveCurrentSessionState() {
             data.draft = inputValueDraft;
 
             // Remove edit state from messages (do not save draft of edited message)
-            if (data.sessions && data.sessions[data.currentId]) {
-                const msgs = data.sessions[data.currentId];
+            if (sessionId && data.sessions && data.sessions[sessionId]) {
+                const msgs = data.sessions[sessionId];
                 for (let i = msgs.length - 1; i >= 0; i--) {
                     const msg = msgs[i];
                     if (msg.isEditing) {
@@ -2805,11 +2825,10 @@ function asyncSaveCurrentSessionState() {
                         }
                     }
                 }
-                data.sessions[data.currentId] = msgs;
+                data.sessions[sessionId] = msgs;
             }
 
             // Persist Author's Note and Summary content back to chat data
-            const sessionId = data.currentId;
             if (charContext.authors_note !== undefined) {
                 if (!data.authorsNotes) data.authorsNotes = {};
                 data.authorsNotes[sessionId] = charContext.authors_note;
@@ -2916,8 +2935,8 @@ async function sendMessage(attachedImage = null, guidanceText = null) {
             const currentSessionId = activeChatChar.sessionId || (await getChatData(activeChatChar.id))?.currentId;
             addMessageStats(activeChatChar.id, currentSessionId, msgData.tokens, processedText.length, msgData.timestamp);
             const data = await getChatData(activeChatChar.id);
-            if (data) {
-                data.sessions[data.currentId] = currentMessages.value;
+            if (data && currentSessionId && data.sessions?.[currentSessionId]) {
+                data.sessions[currentSessionId] = currentMessages.value;
                 await db.saveChat(activeChatChar.id, data);
             }
         }
@@ -3133,8 +3152,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 } else {
                     currentMessages.value.splice(idx, 1);
                     const data = await getChatData(char.id);
-                    if (data && data.sessions[data.currentId]) {
-                        data.sessions[data.currentId] = currentMessages.value;
+                    if (data && sessionId && data.sessions[sessionId]) {
+                        data.sessions[sessionId] = currentMessages.value;
                         await db.saveChat(char.id, data);
                     }
                 }
@@ -3677,10 +3696,13 @@ function regenerateMessage(msgIndex, mode = 'normal', guidanceText = null) {
         // In Vue we just slice the array
         const deleted = currentMessages.value.splice(msgIndex);
         // Update DB
+        const charId = activeChatChar.id;
+        const sessionId = activeChatChar.sessionId;
+        const messageSnapshot = currentMessages.value;
         getChatData(activeChatChar.id).then(data => {
-            if (data) {
-                data.sessions[data.currentId] = currentMessages.value; // Save truncated
-                db.saveChat(activeChatChar.id, data);
+            if (data && sessionId && data.sessions?.[sessionId]) {
+                data.sessions[sessionId] = messageSnapshot; // Save truncated
+                db.saveChat(charId, data);
             }
         });
         
@@ -3874,10 +3896,13 @@ function openMessageActions(msg, index) {
                     } else {
                         currentMessages.value.splice(index, 1);
                         if (activeChatChar) {
+                            const charId = activeChatChar.id;
+                            const sessionId = activeChatChar.sessionId;
+                            const messageSnapshot = currentMessages.value;
                             getChatData(activeChatChar.id).then(data => {
-                                if (data) {
-                                    data.sessions[data.currentId] = currentMessages.value;
-                                    db.saveChat(activeChatChar.id, data);
+                                if (data && sessionId && data.sessions?.[sessionId]) {
+                                    data.sessions[sessionId] = messageSnapshot;
+                                    db.saveChat(charId, data);
                                 }
                             });
                         }
@@ -4016,9 +4041,12 @@ function openMessageActions(msg, index) {
                     localStorage.setItem(`gz_deleted_chat_${activeChatChar.id}_${sid}`, sDel + 1);
                 }
                 getChatData(activeChatChar.id).then(data => {
-                    if (data) {
-                        data.sessions[data.currentId] = currentMessages.value;
-                        db.saveChat(activeChatChar.id, data);
+                    const charId = activeChatChar.id;
+                    const sessionId = activeChatChar.sessionId;
+                    const messageSnapshot = currentMessages.value;
+                    if (data && sessionId && data.sessions?.[sessionId]) {
+                        data.sessions[sessionId] = messageSnapshot;
+                        db.saveChat(charId, data);
                     }
                 });
             }
@@ -4632,10 +4660,13 @@ const applyImageAutoHide = () => {
     }
 
     if (changed) {
+        const charId = activeChatChar.id;
+        const sessionId = activeChatChar.sessionId;
+        const messageSnapshot = currentMessages.value;
         getChatData(activeChatChar.id).then(data => {
-            if (data) {
-                data.sessions[data.currentId] = currentMessages.value;
-                db.saveChat(activeChatChar.id, data);
+            if (data && sessionId && data.sessions?.[sessionId]) {
+                data.sessions[sessionId] = messageSnapshot;
+                db.saveChat(charId, data);
             }
         });
     }
