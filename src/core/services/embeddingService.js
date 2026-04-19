@@ -100,7 +100,8 @@ export async function getEmbeddings(texts) {
     if (!config.endpoint) throw new Error('Embedding endpoint not configured');
     if (!config.model) throw new Error('Embedding model not configured');
 
-    const url = `${config.endpoint}/embeddings`;
+    const endpoint = config.endpoint;
+    const url = /\/embeddings\/?$/i.test(endpoint) ? endpoint : `${endpoint.replace(/\/+$/, '')}/embeddings`;
     const headers = { 'Content-Type': 'application/json' };
     if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
 

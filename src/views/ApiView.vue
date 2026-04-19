@@ -67,7 +67,7 @@ const embeddingDimension = ref(null);
 function loadEmbeddingSettings() {
     const config = getEmbeddingConfig();
     embeddingSettings.useSame = config.useSame;
-    embeddingSettings.endpoint = config.useSame ? '' : config.endpoint.replace(/\/embeddings$/, '');
+    embeddingSettings.endpoint = config.useSame ? '' : config.endpoint;
     embeddingSettings.key = config.useSame ? '' : config.apiKey;
     embeddingSettings.model = config.useSame ? '' : config.model;
     embeddingSettings.maxChunkTokens = config.maxChunkTokens;
