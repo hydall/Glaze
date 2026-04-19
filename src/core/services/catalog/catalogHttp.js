@@ -8,8 +8,8 @@ import { Capacitor, CapacitorHttp } from '@capacitor/core';
 const CORS_PROXY = 'https://corsproxy.io/?url=';
 const TIMEOUT = 20000;
 
-function proxyUrl(url) {
-    if (Capacitor.isNativePlatform()) return url;
+function proxyUrl(url, useProxy = true) {
+    if (Capacitor.isNativePlatform() || !useProxy) return url;
     return CORS_PROXY + encodeURIComponent(url);
 }
 
@@ -19,7 +19,7 @@ function proxyUrl(url) {
  * @param {Record<string, string>} headers
  * @returns {Promise<any>} Parsed JSON response data
  */
-export async function catalogGet(url, headers = {}) {
+export async function catalogGet(url, headers = {}, useProxy = true) {
     if (Capacitor.isNativePlatform()) {
         const response = await CapacitorHttp.get({
             url,
@@ -34,8 +34,8 @@ export async function catalogGet(url, headers = {}) {
         return response.data;
     }
 
-    // Web fallback via corsproxy.io
-    const res = await fetch(proxyUrl(url), { headers });
+    // Web fallback
+    const res = await fetch(proxyUrl(url, useProxy), { headers });
     if (!res.ok) {
         const text = await res.text().catch(() => '');
         throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status, data: text });
@@ -46,7 +46,7 @@ export async function catalogGet(url, headers = {}) {
 /**
  * GET request that returns raw text (for HTML scraping).
  */
-export async function catalogGetText(url, headers = {}) {
+export async function catalogGetText(url, headers = {}, useProxy = true) {
     if (Capacitor.isNativePlatform()) {
         const response = await CapacitorHttp.get({
             url,
@@ -61,7 +61,7 @@ export async function catalogGetText(url, headers = {}) {
         return response.data;
     }
 
-    const res = await fetch(proxyUrl(url), { headers });
+    const res = await fetch(proxyUrl(url, useProxy), { headers });
     if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
     return res.text();
 }
@@ -73,7 +73,7 @@ export async function catalogGetText(url, headers = {}) {
  * @param {Record<string, string>} headers
  * @returns {Promise<any>} Parsed JSON response data
  */
-export async function catalogPost(url, body, headers = {}) {
+export async function catalogPost(url, body, headers = {}, useProxy = true) {
     const allHeaders = { 'Content-Type': 'application/json', ...headers };
 
     if (Capacitor.isNativePlatform()) {
@@ -91,8 +91,8 @@ export async function catalogPost(url, body, headers = {}) {
         return response.data;
     }
 
-    // Web: corsproxy.io supports POST
-    const res = await fetch(proxyUrl(url), {
+    // Web
+    const res = await fetch(proxyUrl(url, useProxy), {
         method: 'POST',
         headers: allHeaders,
         body: JSON.stringify(body)

@@ -22,7 +22,7 @@ export const catalogTotal = ref(0);
 
 // Filters state
 export const catalogFilters = ref({
-    sort: 'newest', // newest, oldest, popular, tokens_desc, tokens_asc
+    sort: 'newest', // newest, oldest, popular, trending_week, trending_24h, tokens_desc, tokens_asc
     nsfw: true,
     tagIds: [],
     minTokens: 29,
@@ -68,21 +68,17 @@ export async function searchCatalog(reset = false) {
                 result = await datacatBrowse({ page, limit: PAGE_SIZE, filters: catalogFilters.value });
             }
         } else {
-            // JanitorAI: prefer Hampter for popular/trending sort ONLY on native (bypass CORS)
-            // On web, Hampter blocks proxies (403), so we fallback to MeiliSearch
-            const canUseHampter = Capacitor.isNativePlatform();
-
-            if (catalogFilters.value.sort === 'popular' && !query && canUseHampter) {
+            // JanitorAI: prefer Hampter for popular/trending sort (direct fetch works on Web too)
+            const sort = catalogFilters.value.sort;
+            const isPopularOrTrending = sort === 'popular' || sort === 'trending_week' || sort === 'trending_24h';
+            if (isPopularOrTrending && !query) {
                 result = await janitorHampterSearch({ query, page, filters: catalogFilters.value });
             } else {
                 try {
                     result = await janitorSearch({ query, page, filters: catalogFilters.value });
                 } catch (e) {
-                    if (canUseHampter) {
-                        result = await janitorHampterSearch({ query, page, filters: catalogFilters.value });
-                    } else {
-                        throw e;
-                    }
+                    // Fallback to Hampter on any search error (direct fetch)
+                    result = await janitorHampterSearch({ query, page, filters: catalogFilters.value });
                 }
             }
         }

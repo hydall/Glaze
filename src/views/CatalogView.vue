@@ -274,9 +274,48 @@ const onFiltersApply = () => {
     searchCatalog(true);
 };
 
+const SORT_OPTIONS_DATACAT = [
+    { value: 'newest',       label: 'Newest' },
+    { value: 'oldest',       label: 'Oldest' },
+    { value: 'popular',      label: 'Popular' },
+    { value: 'trending_week', label: 'Trending (week)' },
+    { value: 'trending_24h',  label: 'Trending 24h' },
+    { value: 'tokens_desc',  label: 'Most Tokens' },
+    { value: 'tokens_asc',   label: 'Least Tokens' },
+];
+
+const SORT_OPTIONS_JANITOR = [
+    { value: 'newest',  label: 'Newest' },
+    { value: 'oldest',  label: 'Oldest' },
+    { value: 'popular', label: 'Popular' },
+];
+
+const sortOptions = () => activeProvider.value === 'datacat' ? SORT_OPTIONS_DATACAT : SORT_OPTIONS_JANITOR;
+
+const currentSortLabel = () => {
+    const cur = catalogFilters.value?.sort || 'newest';
+    const opts = [...SORT_OPTIONS_DATACAT, ...SORT_OPTIONS_JANITOR];
+    return opts.find(o => o.value === cur)?.label || 'Newest';
+};
+
+function openSortSelector() {
+    showBottomSheet({
+        title: 'Sort By',
+        items: sortOptions().map(opt => ({
+            label: opt.label,
+            isActive: (catalogFilters.value?.sort || 'newest') === opt.value,
+            onClick: () => {
+                catalogFilters.value = { ...catalogFilters.value, sort: opt.value };
+                searchCatalog(true);
+                closeBottomSheet();
+            }
+        }))
+    });
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatTokens(n) {
+function formatNumber(n) {
     if (!n) return '';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
     return String(n);
@@ -306,10 +345,15 @@ watch(activeProvider, () => searchCatalog(true));
                 <span>{{ activeProvider === 'datacat' ? 'DataCat' : 'JanitorAI' }}</span>
                 <svg viewBox="0 0 24 24" class="selector-chevron"><path d="M7 10l5 5 5-5z"/></svg>
             </div>
-            
-            <div class="preset-selector" @click="openFilters">
-                <span>{{ t('filters') === 'filters' ? 'Filters' : t('filters') }}</span>
-                <svg viewBox="0 0 24 24" class="selector-chevron"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+
+            <div class="sort-controls">
+                <div class="filter-icon-btn" @click="openFilters">
+                    <svg viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+                </div>
+                <div class="preset-selector" @click="openSortSelector">
+                    <span>{{ currentSortLabel() }}</span>
+                    <svg viewBox="0 0 24 24" class="selector-chevron"><path d="M7 10l5 5 5-5z"/></svg>
+                </div>
             </div>
         </div>
 
@@ -344,10 +388,15 @@ watch(activeProvider, () => searchCatalog(true));
                     class="character-card"
                     @click="openPreview(item)"
                 >
-                    <!-- Token badge -->
-                    <div class="card-token-badge" v-if="item.tokens">
+                    <!-- Card Badge -->
+                    <div class="card-badge" v-if="item.tokens || (item.stats && item.stats.message > 0)">
                       <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                      <span>{{ formatTokens(item.tokens) }}</span>
+                      <span>{{ formatNumber(item.tokens) }}</span>
+                      <template v-if="item.stats && item.stats.message > 0">
+                        <span class="badge-sep">|</span>
+                        <svg viewBox="0 0 24 24" class="msg-icon"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z"/></svg>
+                        <span>{{ formatNumber(item.stats.message) }}</span>
+                      </template>
                     </div>
 
                     <!-- Avatar Image -->
@@ -412,6 +461,7 @@ watch(activeProvider, () => searchCatalog(true));
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   padding: 0px 0 12px;
   flex-shrink: 0;
 }
@@ -434,6 +484,7 @@ watch(activeProvider, () => searchCatalog(true));
   transition: transform 0.1s ease, background-color 0.2s, border-color 0.2s, opacity 0.2s;
   overflow: hidden;
   user-select: none;
+  flex-shrink: 0;
 }
 
 @media (hover: hover) {
@@ -453,6 +504,50 @@ watch(activeProvider, () => searchCatalog(true));
   width: 20px;
   height: 20px;
   fill: currentColor;
+}
+
+/* Sort controls */
+.sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
+  cursor: pointer;
+  color: var(--vk-blue, #4080ff);
+  flex-shrink: 0;
+  transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
+  user-select: none;
+}
+
+.filter-icon-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+@media (hover: hover) {
+  .filter-icon-btn:hover {
+    background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.25);
+    border-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.4);
+    transform: translateY(-1px);
+  }
+}
+
+.filter-icon-btn:active {
+  transform: scale(0.95);
+  opacity: 0.8;
 }
 
 /* Total count */
@@ -504,7 +599,7 @@ watch(activeProvider, () => searchCatalog(true));
     transform: scale(1.05);
   }
   
-  .character-card:hover .card-token-badge {
+  .character-card:hover .card-badge {
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
   }
 }
@@ -608,10 +703,10 @@ watch(activeProvider, () => searchCatalog(true));
     white-space: nowrap;
 }
 
-.card-token-badge {
+.card-badge {
   position: absolute;
   top: 8px;
-  left: 8px;
+  right: 8px;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -626,12 +721,22 @@ watch(activeProvider, () => searchCatalog(true));
   transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
-.card-token-badge svg {
+.card-badge svg {
   width: 12px;
   height: 12px;
   margin-right: 4px;
   fill: currentColor;
   opacity: 0.9;
+}
+
+.badge-sep {
+  margin: 0 6px;
+  opacity: 0.4;
+  font-weight: normal;
+}
+
+.msg-icon {
+  margin-right: 3px !important;
 }
 
 /* Import overlay */

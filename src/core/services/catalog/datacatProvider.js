@@ -4,6 +4,7 @@
  * All API calls go through catalogHttp (CapacitorHttp on native, corsproxy on web).
  */
 import { catalogGet, catalogPost } from './catalogHttp.js';
+import { janitorHampterSearch } from './janitorProvider.js';
 
 const BASE = 'https://datacat.run';
 const KEY_DEVICE = 'gz_dc_device';
@@ -97,9 +98,22 @@ const MIN_TOKENS = 889;
 
 /**
  * Browse recent public characters.
- * @param {{ page?: number, limit?: number, tagIds?: number[], nsfw?: boolean }} opts
+ *
+ * NOTE: /api/characters/recent-public does NOT support sortBy.
+ * For 'popular', 'trending_week', or 'trending_24h', use datacatFresh() directly.
+ *
+ * @param {{ page?: number, limit?: number, tagIds?: number[], nsfw?: boolean, filters?: object }} opts
  */
 export async function datacatBrowse({ page = 1, limit = 24, tagIds = [], nsfw = false, filters = {} } = {}) {
+    const activeSort = filters.sort;
+
+    // popular / trending sorts are served by JanitorAI hampter to support pagination
+    if (activeSort === 'popular' || activeSort === 'trending_week' || activeSort === 'trending_24h') {
+        const res = await janitorHampterSearch({ query: '', page, sort: activeSort, filters });
+        res.characters.forEach(c => c.source = 'datacat');
+        return res;
+    }
+
     const token = await getToken();
     const offset = (page - 1) * limit;
     const minTok = filters.minTokens ?? MIN_TOKENS;
@@ -113,11 +127,8 @@ export async function datacatBrowse({ page = 1, limit = 24, tagIds = [], nsfw = 
         minTotalTokens: String(minTok)
     });
     if (filters.maxTokens) params.set('maxTotalTokens', String(filters.maxTokens));
-
     if (filterTagIds.length) params.set('tagIds', filterTagIds.join(','));
     if (!isNsfw) params.set('nsfw', '0');
-
-    // If there's a sort like "oldest", DataCat might support sortBy=oldest, but recent-public defaults to newest.
 
     const data = await catalogGet(`${BASE}/api/characters/recent-public?${params}`, authHeaders(token));
     return {
@@ -128,18 +139,39 @@ export async function datacatBrowse({ page = 1, limit = 24, tagIds = [], nsfw = 
 
 /**
  * Get trending/fresh characters.
- * @returns {{ last24h: CatalogItem[], thisWeek: CatalogItem[] }}
+ *
+ * @param {{ sortBy?: 'score'|'fresh'|'chat_count', window?: 'all'|'last24h'|'thisWeek', limit24?: number, limitWeek?: number }} opts
+ *   sortBy='score'      → DataCat AI scoring (trending)
+ *   sortBy='chat_count' → most chatted (popular)
+ *   sortBy='fresh'      → newest within each window
+ *   window='all'        → merge both windows (default)
+ *   window='last24h'    → only last 24h characters
+ *   window='thisWeek'   → only this week characters
+ * @returns {{ characters: CatalogItem[], total: number }}
  */
-export async function datacatFresh() {
+export async function datacatFresh({ sortBy = 'score', window = 'all', limit24 = 80, limitWeek = 40 } = {}) {
     const token = await getToken();
     const data = await catalogGet(
-        `${BASE}/api/characters/fresh?summary=1&sortBy=score&limit24=20&limitWeek=20`,
+        `${BASE}/api/characters/fresh?summary=1&sortBy=${sortBy}&limit24=${limit24}&limitWeek=${limitWeek}`,
         authHeaders(token)
     );
-    return {
-        last24h: (data.windows?.last24h?.characters || []).map(normalizeListItem),
-        thisWeek: (data.windows?.thisWeek?.characters || []).map(normalizeListItem)
-    };
+
+    const last24h = (data.windows?.last24h?.characters || []).map(normalizeListItem);
+    const thisWeek = (data.windows?.thisWeek?.characters || []).map(normalizeListItem);
+
+    if (window === 'last24h') {
+        return { characters: last24h, total: last24h.length };
+    } else if (window === 'thisWeek') {
+        return { characters: thisWeek, total: thisWeek.length };
+    } else {
+        // 'all': merge both, dedupe by id, sort by the requested criterion
+        const seen = new Set();
+        const merged = [];
+        for (const c of [...thisWeek, ...last24h]) {
+            if (!seen.has(c.id)) { seen.add(c.id); merged.push(c); }
+        }
+        return { characters: merged, total: merged.length };
+    }
 }
 
 /**
@@ -252,12 +284,14 @@ function resolveAvatarUrl(url) {
 
 function normalizeListItem(c) {
     return {
-        id: c.characterId || c.character_id || c.uuid || c.id,
-        name: c.chatName || c.chat_name || c.name || 'Unknown',
+        // API returns character_id (UUID) as the primary identifier
+        id: c.character_id || c.characterId || c.uuid || c.id,
+        name: c.chat_name || c.chatName || c.name || 'Unknown',
         avatarUrl: resolveAvatarUrl(c.avatar),
         tags: (c.tags || []).map(t => (typeof t === 'string' ? stripEmoji(t) : stripEmoji(t.name))).filter(Boolean),
-        tokens: c.totalTokens || c.total_tokens || 0,
-        creator: c.creatorName || c.creator_name || '',
+        tokens: c.total_tokens || c.totalTokens || 0,
+        stats: { chat: c.chat_count || 0, message: c.message_count || 0 },
+        creator: c.creator_name || c.creatorName || '',
         nsfw: Boolean(c.is_nsfw),
         source: 'datacat'
     };

@@ -13,6 +13,12 @@ const TOKEN_KEY = 'gz_janny_token';
 // Hardcoded fallback token (changes rarely)
 const FALLBACK_TOKEN = '88a6463b66e04fb07ba87ee3db06af337f492ce511d93df6e2d2968cb2ff2b30';
 
+// ─── CORS Note ────────────────────────────────────────────────────────────────
+// MeiliSearch (search.jannyai.com) and Hampter (janitorai.com/hampter) both
+// respond with Access-Control-Allow-Origin: * — they can be called directly
+// from the browser. Using a CORS proxy would strip the Authorization header
+// and cause 401 errors. All calls below use useProxy=false.
+
 // ─── Token Management ─────────────────────────────────────────────────────────
 
 async function fetchSearchToken() {
@@ -22,17 +28,33 @@ async function fetchSearchToken() {
             'Referer': `${BASE_URL}/`
         });
 
-        // Find client-config JS file
-        const configMatch = html.match(/client-config\.[a-f0-9]+\.js/);
-        if (!configMatch) return FALLBACK_TOKEN;
+        // Try client-config JS file first
+        let configPath = null;
+        const configMatch = html.match(/client-config\.[a-zA-Z0-9_-]+\.js/);
+        if (configMatch) {
+            configPath = `/_astro/${configMatch[0]}`;
+        } else {
+            // Fallback: look for SearchPage bundle which imports client-config
+            const spMatch = html.match(/SearchPage\.[a-zA-Z0-9_-]+\.js/);
+            if (spMatch) {
+                const spJs = await catalogGetText(`${BASE_URL}/_astro/${spMatch[0]}`, {
+                    'Referer': `${BASE_URL}/`
+                });
+                const impMatch = spJs.match(/client-config\.[a-zA-Z0-9_-]+\.js/);
+                if (impMatch) configPath = `/_astro/${impMatch[0]}`;
+            }
+        }
 
-        const configJs = await catalogGetText(`${BASE_URL}/_astro/${configMatch[0]}`, {
-            'Referer': `${BASE_URL}/`
-        });
+        if (configPath) {
+            const configJs = await catalogGetText(`${BASE_URL}${configPath}`, {
+                'Referer': `${BASE_URL}/`
+            });
+            // Extract 64-char hex token
+            const tokenMatch = configJs.match(/"([a-f0-9]{64})"/);
+            if (tokenMatch) return tokenMatch[1];
+        }
 
-        // Extract 64-char hex token
-        const tokenMatch = configJs.match(/["']([0-9a-f]{64})["']/);
-        return tokenMatch ? tokenMatch[1] : FALLBACK_TOKEN;
+        return FALLBACK_TOKEN;
     } catch {
         return FALLBACK_TOKEN;
     }
@@ -54,17 +76,32 @@ function clearSearchToken() {
 // ─── Search ───────────────────────────────────────────────────────────────────
 
 const JANNY_HEADERS = (token) => ({
+    'Accept': '*/*',
     'Authorization': `Bearer ${token}`,
     'Origin': BASE_URL,
     'Referer': `${BASE_URL}/`,
-    'x-meilisearch-client': 'Meilisearch instant-meilisearch (v0.19.0)'
+    'x-meilisearch-client': 'Meilisearch instant-meilisearch (v0.19.0) ; Meilisearch JavaScript (v0.41.0)'
 });
 
 /**
  * Search JanitorAI characters via MeiliSearch.
- * @param {{ query?: string, page?: number, sort?: string }} opts
+ *
+ * CORS: search.jannyai.com returns Access-Control-Allow-Origin: *
+ * so the request goes DIRECTLY (useProxy=false). Using a proxy would
+ * strip the Authorization header and cause 401 errors.
+ *
+ * Sort values supported by MeiliSearch:
+ *   newest       → createdAtStamp:desc (default)
+ *   oldest       → createdAtStamp:asc
+ *   tokens_desc  → totalToken:desc
+ *   tokens_asc   → totalToken:asc
+ *   relevant     → no sort (MeiliSearch relevance ranking)
+ *   popular      → NOT supported here; use janitorHampterSearch instead
+ *   trending     → NOT supported here; use janitorHampterSearch instead
+ *
+ * @param {{ query?: string, page?: number, sort?: string, filters?: object }} opts
  */
-export async function janitorSearch({ query = '', page = 1, sort = 'createdAtStamp:desc', filters = {} } = {}) {
+export async function janitorSearch({ query = '', page = 1, sort = 'newest', filters = {} } = {}) {
     let token = await getSearchToken();
 
     const meiliFilters = [];
@@ -77,34 +114,35 @@ export async function janitorSearch({ query = '', page = 1, sort = 'createdAtSta
         meiliFilters.push(tagClauses.join(' AND '));
     }
 
+    const activeSort = filters.sort || sort;
     const sortMap = {
         newest: ['createdAtStamp:desc'],
         oldest: ['createdAtStamp:asc'],
         tokens_desc: ['totalToken:desc'],
         tokens_asc: ['totalToken:asc'],
-        popular: [] // Not supported inside Meilisearch, usually handled via Hampter
+        relevant: [] // empty = MeiliSearch relevance ranking
     };
-
-    let activeSort = filters.sort ? (sortMap[filters.sort] || sortMap.newest) : [sort];
-    if (activeSort.length === 0) activeSort = undefined; // e.g. for relevance or if empty
+    const sortArr = sortMap[activeSort] ?? sortMap.newest;
 
     const body = {
         queries: [{
             indexUid: 'janny-characters',
             q: query,
-            facets: ['isLowQuality', 'tagIds', 'totalToken', 'isNsfw'],
+            facets: ['isLowQuality', 'isNsfw', 'tagIds', 'totalToken'],
             attributesToCrop: ['description:300'],
             cropMarker: '...',
             filter: meiliFilters.length > 0 ? meiliFilters : undefined,
             attributesToHighlight: ['name', 'description'],
             hitsPerPage: 40,
-            page,
-            sort: activeSort
+            page
         }]
     };
+    // Only attach sort when we have a non-empty array (relevant mode omits it)
+    if (sortArr.length > 0) body.queries[0].sort = sortArr;
 
     try {
-        const data = await catalogPost(SEARCH_URL, body, JANNY_HEADERS(token));
+        // useProxy=false: ACAO:* means direct fetch works; proxy strips Authorization
+        const data = await catalogPost(SEARCH_URL, body, JANNY_HEADERS(token), false);
         const result = data.results?.[0] || {};
         return {
             characters: (result.hits || []).map(normalizeSearchHit),
@@ -116,7 +154,7 @@ export async function janitorSearch({ query = '', page = 1, sort = 'createdAtSta
             // Token expired — clear and retry with fallback
             clearSearchToken();
             token = FALLBACK_TOKEN;
-            const data = await catalogPost(SEARCH_URL, body, JANNY_HEADERS(token));
+            const data = await catalogPost(SEARCH_URL, body, JANNY_HEADERS(token), false);
             const result = data.results?.[0] || {};
             return {
                 characters: (result.hits || []).map(normalizeSearchHit),
@@ -129,23 +167,59 @@ export async function janitorSearch({ query = '', page = 1, sort = 'createdAtSta
 }
 
 /**
- * Fallback: search via Hampter API (no auth needed).
+ * Browse via Hampter API — used for 'trending' and 'popular' sort modes.
+ *
+ * CORS: janitorai.com/hampter returns Access-Control-Allow-Origin: *
+ * so the request goes DIRECTLY (useProxy=false).
+ *
+ * @param {{ query?: string, page?: number, sort?: 'trending'|'popular', filters?: object }} opts
  */
 export async function janitorHampterSearch({ query = '', page = 1, sort = 'trending', filters = {} } = {}) {
-    const sortMode = filters.sort === 'popular' ? 'popular' : 'trending';
+    let sortMode = 'trending';
+    const activeSort = filters.sort || sort;
+
+    if (activeSort === 'popular') sortMode = 'popular';
+    else if (activeSort === 'trending_week') sortMode = 'trending';
+    else if (activeSort === 'trending_24h') sortMode = 'trending24';
+    else sortMode = activeSort; // fallback to generic
+
     const params = new URLSearchParams({ sort: sortMode, page: String(page) });
     if (query) params.set('search', query);
     if (filters.nsfw === false) params.set('mode', 'sfw');
 
+    // Add tags
+    if (filters.tagIds && filters.tagIds.length > 0) {
+        const tagNames = tagIdsToNames(filters.tagIds);
+        for (const tagName of tagNames) {
+            // Janitor tags in URL are generally lowercase representation of the string
+            // e.g. "Science Fiction" -> "science-fiction", or just lowercase the name.
+            // Often it's simple lowercasing and trimming spaces/slashes depending on their format.
+            // Janitor uses the exact tag slug
+            let slug = tagName.toLowerCase().replace(/\s+/g, '').replace(/[/_]/g, '');
+            if (tagName === 'Sci-Fi') slug = 'scifi';
+            else if (tagName === 'Slice of Life') slug = 'sliceoflife';
+            else if (tagName === 'Movies/TV') slug = 'moviestv';
+            else if (tagName === 'Demi-Human') slug = 'demihuman';
+            else if (tagName === 'Non-binary') slug = 'nonbinary';
+            else if (tagName === 'Non-human') slug = 'nonhuman';
+            else if (tagName === 'Non-English') slug = 'nonenglish';
+            else if (tagName === 'Monster Girl') slug = 'monstergirl';
+            else if (tagName === 'Enemies to Lovers') slug = 'enemiestolovers';
+
+            params.append('custom_tags[]', slug);
+        }
+    }
+
+    // useProxy=false: ACAO:* means direct fetch works fine
     const data = await catalogGet(`${HAMPTER_URL}?${params}`, {
         'Origin': 'https://janitorai.com',
         'Referer': 'https://janitorai.com/'
-    });
+    }, false);
 
     const hits = Array.isArray(data) ? data : (data.characters || data.data || []);
     return {
         characters: hits.map(normalizeHampterHit),
-        total: hits.length,
+        total: data.total || hits.length,
         totalPages: 1
     };
 }
@@ -248,15 +322,20 @@ function resolveJanitorAvatar(url) {
     return `https://image.jannyai.com/${url}`;
 }
 
-// Static JanitorAI tag ID → name map
+// Static JanitorAI tag ID → name map (source: janny-api.js from SillyTavern-CharacterLibrary)
 const TAG_MAP = {
-    1: 'Male', 2: 'Female', 3: 'Non-binary', 4: 'Human', 5: 'Anime', 6: 'Fantasy',
-    7: 'Sci-Fi', 8: 'Action', 9: 'Adventure', 10: 'Romance', 11: 'Horror',
-    12: 'Comedy', 13: 'Drama', 14: 'Slice of Life', 15: 'NSFW', 16: 'OC',
-    17: 'Fictional', 18: 'Historical', 19: 'Realistic', 20: 'Games',
-    21: 'Movies', 22: 'Vampire', 23: 'Werewolf', 24: 'Elf', 25: 'Robot',
-    26: 'Animal', 27: 'Furry', 28: 'Magic', 29: 'Mythology', 30: 'Superhero',
-    50: 'Villainess', 51: 'Tsundere', 52: 'Yandere', 53: 'Kuudere', 54: 'Dandere'
+    1: 'Male', 2: 'Female', 3: 'Non-binary', 4: 'Celebrity', 5: 'OC',
+    6: 'Fictional', 7: 'Real', 8: 'Game', 9: 'Anime', 10: 'Historical',
+    11: 'Royalty', 12: 'Detective', 13: 'Hero', 14: 'Villain', 15: 'Magical',
+    16: 'Non-human', 17: 'Monster', 18: 'Monster Girl', 19: 'Alien', 20: 'Robot',
+    21: 'Politics', 22: 'Vampire', 23: 'Giant', 24: 'OpenAI', 25: 'Elf',
+    26: 'Multiple', 27: 'VTuber', 28: 'Dominant', 29: 'Submissive', 30: 'Scenario',
+    31: 'Pokemon', 32: 'Assistant', 34: 'Non-English', 36: 'Philosophy',
+    38: 'RPG', 39: 'Religion', 41: 'Books', 42: 'AnyPOV', 43: 'Angst',
+    44: 'Demi-Human', 45: 'Enemies to Lovers', 46: 'Smut', 47: 'MLM',
+    48: 'WLW', 49: 'Action', 50: 'Romance', 51: 'Horror', 52: 'Slice of Life',
+    53: 'Fantasy', 54: 'Drama', 55: 'Comedy', 56: 'Mystery', 57: 'Sci-Fi',
+    59: 'Yandere', 60: 'Furry', 61: 'Movies/TV'
 };
 
 function tagIdsToNames(tagIds) {
@@ -279,12 +358,25 @@ function normalizeSearchHit(hit) {
 }
 
 function normalizeHampterHit(hit) {
+    let rawTags = [];
+    if (Array.isArray(hit.tags)) {
+        rawTags = hit.tags.map(t => typeof t === 'string' ? t : (t.name || t.slug))
+            .map(t => String(t).replace(/[\u{1F300}-\u{1FFFF}\u{2600}-\u{27BF}\uFE0F\u200D]+/gu, '').trim())
+            .filter(Boolean);
+    } else {
+        rawTags = tagIdsToNames(hit.tagIds || []);
+    }
+
+    const chatCount = hit.stats?.chat || hit.public_chat_count || 0;
+    const msgCount = hit.stats?.message || hit.public_message_count || 0;
+
     return {
         id: hit.id,
         name: hit.name || hit.bot_name || 'Unknown',
         avatarUrl: resolveJanitorAvatar(hit.avatar || hit.image),
-        tags: tagIdsToNames(hit.tagIds || []),
-        tokens: hit.totalToken || 0,
+        tags: rawTags,
+        tokens: hit.totalToken || hit.total_tokens || 0,
+        stats: { chat: chatCount, message: msgCount },
         creator: hit.creatorUsername || hit.creator || '',
         nsfw: Boolean(hit.isNsfw),
         slug: hit.slug || hit.id,

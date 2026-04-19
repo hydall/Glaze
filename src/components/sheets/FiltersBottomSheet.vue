@@ -26,7 +26,6 @@ const ALL_TAGS = Object.entries(JANNY_TAG_MAP)
 const props = defineProps({ visible: Boolean });
 const emit = defineEmits(['update:visible', 'apply']);
 
-const sort = ref('newest');
 const nsfw = ref(true);
 const minTokens = ref(29);
 const maxTokens = ref(100000);
@@ -44,7 +43,6 @@ watch(() => props.visible, (newVal, oldVal) => {
     // When opening: copy global state to local refs
     if (newVal) {
         const f = catalogFilters.value;
-        sort.value = f.sort || 'newest';
         nsfw.value = f.nsfw !== false;
         minTokens.value = f.minTokens ?? 29;
         maxTokens.value = f.maxTokens ?? 100000;
@@ -54,7 +52,7 @@ watch(() => props.visible, (newVal, oldVal) => {
     // When closing: save local refs to global state and trigger search
     else if (oldVal === true) {
         catalogFilters.value = {
-            sort: sort.value,
+            ...catalogFilters.value,
             nsfw: nsfw.value,
             minTokens: minTokens.value,
             maxTokens: maxTokens.value,
@@ -85,26 +83,6 @@ const selectedTags = computed(() => ALL_TAGS.filter(t => selectedTagIds.value.ha
 <template>
     <BottomSheet :visible="visible" title="Filters" @close="closeSheet">
         <div class="filters-content">
-
-            <!-- Sort -->
-            <div class="filter-section">
-                <div class="filter-label">Sort By</div>
-                <div class="sort-chips">
-                    <button
-                        v-for="opt in [
-                            { value: 'newest', label: 'Newest' },
-                            { value: 'oldest', label: 'Oldest' },
-                            { value: 'popular', label: 'Popular' },
-                            { value: 'tokens_desc', label: 'Most Tokens' },
-                            { value: 'tokens_asc', label: 'Least Tokens' },
-                        ]"
-                        :key="opt.value"
-                        class="sort-chip"
-                        :class="{ active: sort === opt.value }"
-                        @click="sort = opt.value"
-                    >{{ opt.label }}</button>
-                </div>
-            </div>
 
             <!-- Tokens -->
             <div class="filter-section">
