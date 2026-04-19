@@ -238,6 +238,7 @@ async function generateImageOpenAI(prompt, options, settings) {
         else size = '1024x1024';
     }
 
+    const referenceImage = options.additionalRefs?.[0] || options.previousImages?.[0] || null;
     const fullPrompt = options.style ? `[Style: ${options.style}] ${prompt}` : prompt;
 
     const body = {
@@ -249,9 +250,10 @@ async function generateImageOpenAI(prompt, options, settings) {
         response_format: 'b64_json',
     };
 
-    // OpenAI supports a single reference image
-    if (options.previousImages?.length) {
-        body.image = options.previousImages[0];
+    // OpenAI-compatible backends commonly support a single reference image.
+    // Prefer explicit matched references over implicit previous-image context.
+    if (referenceImage) {
+        body.image = referenceImage;
     }
 
     const response = await fetchWithTimeout(url, {
@@ -293,10 +295,15 @@ async function generateImageGemini(prompt, options, settings) {
 
     const fullPrompt = options.style ? `[Style: ${options.style}] ${prompt}` : prompt;
 
+    const referenceImages = [
+        ...(options.additionalRefs || []),
+        ...(options.previousImages || []),
+    ];
+
     // Build parts: reference images first, then prompt text
     const parts = [];
-    if (options.previousImages?.length) {
-        for (const dataUrl of options.previousImages) {
+    if (referenceImages.length) {
+        for (const dataUrl of referenceImages) {
             const commaIdx = dataUrl.indexOf(',');
             if (commaIdx === -1) continue;
             const meta = dataUrl.slice(5, commaIdx);
@@ -416,11 +423,12 @@ export async function generateImage(instruction, context = {}) {
         previousImages: context.previousImages || [],
     };
 
+    const matched = getMatchedAdditionalReferences(prompt, settings.additionalReferences);
+    options.additionalRefs = matched.map(r => r.imageData).filter(Boolean);
+
     if (settings.apiType === 'naistera') {
         if (settings.naisteraSendCharAvatar && context.charAvatar) options.charAvatar = context.charAvatar;
         if (settings.naisteraSendUserAvatar && context.userAvatar) options.userAvatar = context.userAvatar;
-        const matched = getMatchedAdditionalReferences(prompt, settings.additionalReferences);
-        options.additionalRefs = matched.map(r => r.imageData).filter(Boolean);
     }
 
     if (settings.apiType === 'naistera') return generateImageNaistera(prompt, options, settings);

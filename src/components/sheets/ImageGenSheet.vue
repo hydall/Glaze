@@ -383,12 +383,12 @@ defineExpose({ open });
                     </div>
                 </div>
 
-                <!-- Naistera references (not supported by NovelAI model) -->
-                <template v-if="showNaisteraOptions && naisteraModelSupportsReferences">
+                <!-- Reference images -->
+                <template v-if="!showNaisteraOptions || naisteraModelSupportsReferences">
                     <div class="menu-group">
                         <div class="section-header">{{ t('imggen_refs') || 'Reference Images' }}</div>
 
-                        <div class="settings-item-checkbox">
+                        <div v-if="showNaisteraOptions" class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('imggen_send_char_avatar') || 'Send character avatar' }}</label>
                                 <div class="settings-desc">{{ t('imggen_send_char_avatar_desc') || 'Use character\'s avatar as visual reference' }}</div>
@@ -396,7 +396,7 @@ defineExpose({ open });
                             <input type="checkbox" v-model="settings.naisteraSendCharAvatar" class="vk-switch">
                         </div>
 
-                        <div class="settings-item-checkbox">
+                        <div v-if="showNaisteraOptions" class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('imggen_send_user_avatar') || 'Send persona avatar' }}</label>
                                 <div class="settings-desc">{{ t('imggen_send_user_avatar_desc') || 'Use active persona\'s avatar as visual reference' }}</div>
