@@ -147,8 +147,8 @@ const tools = computed(() => [
 </script>
 
 <template>
-    <div id="view-tools" class="view active-view dashboard-view">
-        <div class="tools-header">
+    <div id="view-tools" class="view active-view dashboard-view" :class="{ 'is-mobile': !sidebarMode }">
+        <div class="tools-header" v-if="sidebarMode">
             {{ t('tab_tools') || 'Tools' }}
         </div>
         
@@ -259,6 +259,11 @@ const tools = computed(() => [
     display: flex;
     flex-direction: column;
     background: transparent;
+}
+
+.dashboard-view.is-mobile .dashboard-content {
+    padding-top: calc(var(--header-height, 56px) + 16px) !important;
+    padding-bottom: calc(var(--footer-height, 56px) + var(--keyboard-overlap, 0px) + 20px) !important;
 }
 
 .tools-header {
