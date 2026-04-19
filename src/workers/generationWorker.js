@@ -148,6 +148,11 @@ function applyRegexes(text, placementFilter, ephemeralityFilter, allScripts, opt
 }
 
 function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalSettings, activations) {
+    // If vector search is enabled globally but key search is disabled, skip keyword scan
+    if (globalSettings?.vectorSearchEnabled && globalSettings?.keySearchEnabled === false) {
+        return [];
+    }
+
     const charId = char?.id;
 
     const activeLorebooks = lorebooks.filter(lb => {

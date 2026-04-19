@@ -252,7 +252,13 @@ export const lorebookState = reactive({
         caseSensitive: false,
         matchWholeWords: false,
         useGroupScoring: false,
-        alertOnOverflow: false
+        alertOnOverflow: false,
+        // Vector search global settings
+        vectorSearchEnabled: false,
+        keySearchEnabled: true,
+        vectorScanDepth: 5,
+        vectorThreshold: 0.45,
+        vectorTopK: 10
     },
     activations: {
         character: {},
@@ -923,11 +929,13 @@ export async function deleteLorebookEmbeddings(lorebookId) {
 }
 
 export async function vectorSearchLorebooks(history = [], currentText = '', char = null, chatId = null) {
-    const config = getEmbeddingConfig();
-    if (!config.enabled) {
-        console.info('[vectorSearchLorebooks] skipped: vector search disabled');
+    // Check global vector search setting
+    if (!lorebookState.globalSettings.vectorSearchEnabled) {
+        console.info('[vectorSearchLorebooks] skipped: global vector search disabled');
         return [];
     }
+
+    const config = getEmbeddingConfig();
     if (!isEmbeddingConfigured()) {
         console.info('[vectorSearchLorebooks] skipped: embedding config incomplete');
         return [];
@@ -1036,6 +1044,10 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
         return [];
     }
 
+    const globalSettings = lorebookState.globalSettings;
+    const effectiveThreshold = globalSettings.vectorThreshold || 0.45;
+    const effectiveTopK = globalSettings.vectorTopK || 10;
+
     console.info('[vectorSearchLorebooks] querying embeddings', {
         charId,
         chatId,
@@ -1048,8 +1060,9 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
         fallbackQueryLength: fallbackQueryText.length,
         hasCurrentText: !!(currentText && currentText.trim()),
         queryLength: queryText.length,
-        threshold: config.threshold || 0.6,
-        topK: config.topK || 5
+        threshold: effectiveThreshold,
+        topK: effectiveTopK,
+        usingGlobalSettings: true
     });
 
     try {
@@ -1130,8 +1143,8 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
 
         const results = Array.from(combined.values())
             .sort((a, b) => b.score - a.score)
-            .filter(result => result.score >= (config.threshold || 0.55))
-            .slice(0, config.topK || 5);
+            .filter(result => result.score >= effectiveThreshold)
+            .slice(0, effectiveTopK);
 
         console.info('[vectorSearchLorebooks] results ready', {
             matches: results.length,

@@ -823,6 +823,46 @@ defineExpose({ open, openEntry, close, openLorebook });
                                  <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                              </div>
                         </div>
+
+                        <!-- Vector Search Global Settings -->
+                        <div class="settings-item-checkbox">
+                            <label>Vector Search</label>
+                            <input type="checkbox" v-model="lorebookState.globalSettings.vectorSearchEnabled" class="vk-switch">
+                        </div>
+
+                        <template v-if="lorebookState.globalSettings.vectorSearchEnabled">
+                            <div class="settings-item-checkbox">
+                                <label>Key Search</label>
+                                <input type="checkbox" v-model="lorebookState.globalSettings.keySearchEnabled" class="vk-switch">
+                            </div>
+
+                            <div class="settings-row">
+                                <div class="settings-col">
+                                    <label>{{ lorebookState.globalSettings.keySearchEnabled ? (t('label_scan_depth_lore') || 'Scan Depth') : (t('label_vector_scan_depth') || 'Vector Scan Depth') }}</label>
+                                    <input v-if="lorebookState.globalSettings.keySearchEnabled" type="number" v-model="lorebookState.globalSettings.scanDepth" min="1" max="50">
+                                    <input v-else type="number" v-model="lorebookState.globalSettings.vectorScanDepth" min="1" max="50">
+                                </div>
+                                <div class="settings-col">
+                                    <label>{{ t('label_top_k') || 'Max Vector Results' }}</label>
+                                    <input type="number" v-model="lorebookState.globalSettings.vectorTopK" min="1" max="50">
+                                </div>
+                            </div>
+
+                            <div class="settings-item-range">
+                                <div class="range-row">
+                                    <label>{{ t('label_similarity_threshold') || 'Similarity Threshold' }}</label>
+                                    <input type="number" v-model.number="lorebookState.globalSettings.vectorThreshold" class="range-input-val" step="0.01">
+                                </div>
+                                <input type="range" v-model.number="lorebookState.globalSettings.vectorThreshold" min="0" max="1" step="0.01">
+                            </div>
+                        </template>
+
+                        <div v-if="!lorebookState.globalSettings.vectorSearchEnabled" class="settings-row">
+                            <div class="settings-col">
+                                <label>{{ t('label_scan_depth_lore') }}</label>
+                                <input type="number" v-model="lorebookState.globalSettings.scanDepth" min="1" max="50">
+                            </div>
+                        </div>
                     </div>
                 </div>
 
