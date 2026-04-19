@@ -864,5 +864,21 @@
     "label_show_reasoning": "Показать нативное мышление",
     "no_models_found": "Модели не найдены",
     "no_prompt": "Нет промпта",
-    "regex_slash_commands": "Slash-команды"
+    "regex_slash_commands": "Slash-команды",
+    "tab_catalog": "Каталог",
+    "catalog_search_placeholder": "Поиск персонажей...",
+    "catalog_total": "{count} персонажей",
+    "catalog_empty": "Персонажи не найдены",
+    "catalog_end": "Это всё",
+    "catalog_loading_char": "Загрузка персонажа...",
+    "catalog_import": "Импортировать в библиотеку",
+    "catalog_extract_via_dc": "Извлечь через DataCat",
+    "catalog_imported": "Импортировано!",
+    "catalog_imported_desc": "{name} добавлен в библиотеку.",
+    "catalog_error_load": "Не удалось загрузить персонажа",
+    "catalog_error_import": "Не удалось импортировать персонажа",
+    "catalog_error_extract": "Не удалось отправить на извлечение",
+    "catalog_extracting": "Извлечение...",
+    "catalog_extract_progress": "DataCat загружает персонажа с JanitorAI. Это может занять минуту.",
+    "btn_retry": "Повторить"
 }

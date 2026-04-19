@@ -858,5 +858,21 @@
     "label_show_reasoning": "Show Native Reasoning",
     "no_models_found": "No models found",
     "no_prompt": "No prompt",
-    "top_p": "Top P"
+    "top_p": "Top P",
+    "tab_catalog": "Catalog",
+    "catalog_search_placeholder": "Search characters...",
+    "catalog_total": "{count} characters",
+    "catalog_empty": "No characters found",
+    "catalog_end": "That's all",
+    "catalog_loading_char": "Loading character...",
+    "catalog_import": "Import to library",
+    "catalog_extract_via_dc": "Extract via DataCat",
+    "catalog_imported": "Imported!",
+    "catalog_imported_desc": "{name} has been added to your library.",
+    "catalog_error_load": "Failed to load character",
+    "catalog_error_import": "Failed to import character",
+    "catalog_error_extract": "Failed to submit for extraction",
+    "catalog_extracting": "Extracting...",
+    "catalog_extract_progress": "DataCat is fetching the character from JanitorAI. This may take a minute.",
+    "btn_retry": "Retry"
 }
