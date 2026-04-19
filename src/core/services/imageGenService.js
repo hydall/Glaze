@@ -195,6 +195,27 @@ function getNaisteraEndpoint(settings) {
     return `${base}/api/generate`;
 }
 
+function trimTrailingSlash(url) {
+    return String(url || '').trim().replace(/\/$/, '');
+}
+
+function getOpenAIImageGenerationUrl(endpoint) {
+    const normalized = trimTrailingSlash(endpoint);
+    if (!normalized) return '';
+    if (/\/v1\/images\/generations$/i.test(normalized)) return normalized;
+    if (/\/v1$/i.test(normalized)) return `${normalized}/images/generations`;
+    return `${normalized}/v1/images/generations`;
+}
+
+function getOpenAIModelsUrl(endpoint) {
+    const normalized = trimTrailingSlash(endpoint);
+    if (!normalized) return '';
+    if (/\/v1\/models$/i.test(normalized)) return normalized;
+    if (/\/v1\/images\/generations$/i.test(normalized)) return normalized.replace(/\/images\/generations$/i, '/models');
+    if (/\/v1$/i.test(normalized)) return `${normalized}/models`;
+    return `${normalized}/v1/models`;
+}
+
 function getMatchedAdditionalReferences(prompt, refs) {
     if (!refs?.length) return [];
     const lower = prompt.toLowerCase();
@@ -208,8 +229,7 @@ function getMatchedAdditionalReferences(prompt, refs) {
 // ---- API Calls ----
 
 async function generateImageOpenAI(prompt, options, settings) {
-    const endpoint = settings.endpoint.replace(/\/$/, '');
-    const url = `${endpoint}/v1/images/generations`;
+    const url = getOpenAIImageGenerationUrl(settings.endpoint);
 
     let size = settings.size;
     if (options.aspectRatio) {
@@ -415,7 +435,7 @@ export async function fetchImageModels() {
     const settings = getImageGenSettings();
     if (!settings.endpoint || !settings.apiKey) return [];
 
-    const url = `${settings.endpoint.replace(/\/$/, '')}/v1/models`;
+    const url = getOpenAIModelsUrl(settings.endpoint);
     const response = await fetchWithTimeout(url, {
         headers: { 'Authorization': `Bearer ${settings.apiKey}` },
     }, 10000);
@@ -445,7 +465,7 @@ export async function checkImageGenConnection() {
 
     if (settings.apiType === 'openai') {
         if (!settings.endpoint) throw new Error('Endpoint not configured');
-        const url = `${settings.endpoint.replace(/\/$/, '')}/v1/models`;
+        const url = getOpenAIModelsUrl(settings.endpoint);
         const response = await fetchWithTimeout(url, {
             headers: { 'Authorization': `Bearer ${settings.apiKey}` },
         }, 10000);
