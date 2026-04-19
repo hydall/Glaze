@@ -20,8 +20,9 @@ export async function fullPush() {
     try {
         const adapter = getAdapter();
         await detectEncryptionState();
-        const key = _encryptionEnabled ? await getSyncKey() : null;
-        if (_encryptionEnabled && !key) throw new Error('Failed to load sync key');
+        const encryptionEnabled = isEncryptionEnabled();
+        const key = encryptionEnabled ? await getSyncKey() : null;
+        if (encryptionEnabled && !key) throw new Error('Failed to load sync key');
 
         await adapter.ensureFolder('/Glaze');
         await adapter.ensureFolder('/Glaze/characters');

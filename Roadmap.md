@@ -674,20 +674,27 @@ Active branch: `fast-fixes`
       - **Error 400 root cause**: `redirect_uri` must exactly match what's registered in the OAuth console (Dropbox App Console / Google Cloud Console). Hardcoded `localhost:5173` only works in dev. Fixed: now uses `window.location.origin` as default.
       - **Backward compatibility**: `readCloudEntityByEntry` tries both `.enc` and `.json` extensions. `decryptEntity` auto-detects encrypted vs plain payload.
       - **SyncSheet UI**: Push/Pull/Auto-sync available without encryption. Encryption shown as optional section. `doWipe` no longer forces new key generation.
+      - **Mobile callback plumbing**: Android now declares a `VIEW`/`BROWSABLE` intent-filter for `com.hydall.glaze://...`; iOS now registers `CFBundleURLTypes` for the same scheme so Capacitor `appUrlOpen` can receive OAuth callbacks.
+      - **Provider gating**: SyncSheet only shows providers that have their required env key configured in the current build.
+      - **Google OAuth cleanup**: Google Drive uses PKCE client-side flow without `VITE_GDRIVE_CLIENT_SECRET`.
+      - **Push path fix**: `syncService.js` now reads encryption state through `isEncryptionEnabled()` instead of referencing an out-of-scope `_encryptionEnabled` variable.
     - Files modified:
       - `src/core/services/syncEngine.js` — `_encryptionEnabled` state, `ext()`, optional encrypt/decrypt, dual-extension fallback
       - `src/core/services/syncService.js` — removed mandatory `hasSyncKey` checks, uses `detectEncryptionState()`
       - `src/core/services/adapters/dropboxAdapter.js` — configurable redirect URIs, Electron OAuth, `isElectron()` helper
       - `src/core/services/adapters/gdriveAdapter.js` — configurable redirect URIs, `window.location.origin` default
       - `src/components/sheets/SyncSheet.vue` — encryption optional in UI, new states (`ready`, `has_cloud_data`)
+      - `android/app/src/main/AndroidManifest.xml` — OAuth deep link intent-filter for `com.hydall.glaze://...`
+      - `ios/App/App/Info.plist` — URL scheme registration for `com.hydall.glaze`
+      - `src/core/config/syncConfig.js` — env-driven provider availability
     - Manual verification needed:
-      - [ ] Verify Dropbox connect/disconnect works on native (Android/iOS) with correct `com.hydall.glaze://oauth/dropbox`
-      - [ ] Verify Google Drive connect/disconnect works on native
-      - [ ] Verify Push/Pull works WITHOUT encryption key (plain JSON)
-      - [ ] Verify Push/Pull works WITH encryption key (encrypted `.enc`)
-      - [ ] Verify fallback: pull from cloud with old `.enc` files when encryption is disabled
-      - [ ] Verify error 400 is fixed after setting correct redirect URI in OAuth console
-      - [ ] Verify Electron OAuth flow works on Windows/Linux desktop builds
+      - [not tested] Verify Dropbox connect/disconnect works on native (Android/iOS) with correct `com.hydall.glaze://oauth/dropbox`
+      - [not tested] Verify Google Drive connect/disconnect works on native with `com.hydall.glaze://oauth/gdrive`
+      - [not tested] Verify Push/Pull works WITHOUT encryption key (plain JSON)
+      - [not tested] Verify Push/Pull works WITH encryption key (encrypted `.enc`)
+      - [not tested] Verify fallback: pull from cloud with old `.enc` files when encryption is disabled
+      - [not tested] Verify error 400 is fixed after setting correct redirect URI in OAuth console
+      - [not tested] Verify Electron OAuth flow works on Windows/Linux desktop builds
 
 14. **Infrastructure: Sync service migration to upstream project**
     - Status: `not done`
@@ -1341,6 +1348,32 @@ After each phase:
 
 ## Sync Setup Guide — For Developers
 
+### Maintainer Goal
+
+- **Status:** done
+- **Testing:** not tested
+- After merge, the maintainer should only need to add OAuth app keys to `.env`.
+- End users still authenticate into their **own** Dropbox or Google Drive accounts. Glaze does not sync everyone into one shared maintainer-owned cloud.
+- Provider buttons are only shown when the corresponding OAuth env key is present in the build.
+
+### Shortest Setup Path
+
+1. Copy `.env.example` to `.env` if needed.
+2. Add `VITE_DROPBOX_APP_KEY=...`.
+3. Register the Dropbox redirect URIs listed below.
+4. Build and ship.
+
+That is the shortest maintainer path. Google Drive remains available, but it needs its own OAuth client configuration and is not required for cloud sync to work.
+
+### Platform Status
+
+- **Windows (Electron):** done / not tested
+- **Linux (Electron):** done / not tested
+- **Android (Capacitor):** done / not tested
+- **iPhone (Capacitor iOS):** done / not tested
+
+Meaning: the repo now contains callback plumbing for desktop loopback OAuth and mobile deep-link OAuth, but provider sign-in still needs manual verification against real Dropbox / Google OAuth apps.
+
 ### How Cloud Sync Works
 
 Glaze syncs data to cloud storage (Dropbox or Google Drive) using an incremental manifest-based approach:
@@ -1348,6 +1381,16 @@ Glaze syncs data to cloud storage (Dropbox or Google Drive) using an incremental
 2. **Push**: Compare local manifest vs cloud manifest → upload only changed entities
 3. **Pull**: Compare cloud manifest vs local manifest → download only newer entities
 4. **Conflicts**: If local is newer AND cloud is newer → surface conflict for manual resolution
+
+### Auth Model
+
+1. Maintainer configures the app-level OAuth client IDs/keys in `.env`.
+2. User taps a provider in the Sync sheet.
+3. The provider OAuth flow returns tokens for **that specific user account**.
+4. Tokens are stored locally on the device.
+5. Sync uploads into that user's own cloud storage under `/Glaze`.
+
+This means maintainer credentials only identify the Glaze OAuth app. They do not decide where user data is stored.
 
 ### Platform Setup
 
@@ -1376,8 +1419,8 @@ VITE_DROPBOX_APP_KEY=your_app_key_here
 
 **Android/iOS config:**
 - Ensure `capacitor.config.json` has `"appId": "com.hydall.glaze"` (must match redirect URI scheme)
-- For Android: `android/app/src/main/AndroidManifest.xml` must have intent-filter for `com.hydall.glaze://`
-- For iOS: `ios/App/App/AppDelegate.swift` handles URL scheme via Capacitor
+- For Android: `android/app/src/main/AndroidManifest.xml` now contains a `VIEW` / `BROWSABLE` intent-filter for `com.hydall.glaze://`
+- For iOS: `ios/App/App/Info.plist` now registers `CFBundleURLTypes` for `com.hydall.glaze`, and `ios/App/App/AppDelegate.swift` forwards the callback to Capacitor
 
 #### 2. Google Drive
 
@@ -1385,7 +1428,7 @@ VITE_DROPBOX_APP_KEY=your_app_key_here
 1. Go to https://console.cloud.google.com
 2. Create a project → Enable Google Drive API
 3. Go to "Credentials" → "Create OAuth client ID" → "Web application"
-4. Note your **Client ID** (and optionally **Client Secret**)
+4. Note your **Client ID**
 
 **Configure redirect URIs:**
 - In Google Cloud Console → Credentials → your OAuth client → "Authorized redirect URIs"
@@ -1398,11 +1441,12 @@ VITE_DROPBOX_APP_KEY=your_app_key_here
 **Environment variables (`.env`):**
 ```
 VITE_GDRIVE_CLIENT_ID=your_client_id_here
-VITE_GDRIVE_CLIENT_SECRET=your_client_secret_here
 # Optional overrides:
 # VITE_GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive
 # VITE_GDRIVE_REDIRECT_WEB=https://yourdomain.com/oauth/gdrive/redirect.html
 ```
+
+Glaze uses OAuth PKCE in the client, so `VITE_GDRIVE_CLIENT_SECRET` is intentionally not used.
 
 ### Error 400 Troubleshooting
 

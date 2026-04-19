@@ -2,9 +2,9 @@ import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
 import { db } from '@/utils/db.js';
+import { DROPBOX_APP_KEY } from '@/core/config/syncConfig.js';
 import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
 
-const DROPBOX_APP_KEY = import.meta.env.VITE_DROPBOX_APP_KEY || '';
 const REDIRECT_URI_NATIVE = import.meta.env.VITE_DROPBOX_REDIRECT_NATIVE || 'com.hydall.glaze://oauth/dropbox';
 const REDIRECT_URI_WEB = import.meta.env.VITE_DROPBOX_REDIRECT_WEB || `${window.location.origin}/oauth/dropbox/redirect.html`;
 const API_BASE = 'https://api.dropboxapi.com/2';

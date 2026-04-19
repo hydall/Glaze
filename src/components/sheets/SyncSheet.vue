@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
+import { canStartSyncAuth, hasAnySyncProviderConfigured } from '@/core/config/syncConfig.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import {
     syncProvider, syncStatus, syncLastError, lastSyncTime,
@@ -48,6 +49,10 @@ function formatSyncBreakdown(result) {
 }
 const isSyncing = ref(false);
 const isWiping = ref(false);
+
+const isDropboxAuthAvailable = computed(() => canStartSyncAuth(PROVIDERS.DROPBOX));
+const isGdriveAuthAvailable = computed(() => canStartSyncAuth(PROVIDERS.GDRIVE));
+const hasAnyProviderConfigured = computed(() => hasAnySyncProviderConfigured());
 
 const providerLabel = computed(() => {
     if (!syncProvider.value) return '';
@@ -367,17 +372,21 @@ onMounted(async () => {
                 <div class="bs-section">
                     <div class="bs-section-title">{{ t('sync_connect_provider') || 'Connect a Cloud Provider' }}</div>
                     
-                    <button class="bs-btn bs-connect-btn" @click="connectDropbox" :disabled="isConnecting">
+                    <button v-if="isDropboxAuthAvailable" class="bs-btn bs-connect-btn" @click="connectDropbox" :disabled="isConnecting || isConnectingGdrive">
                         <svg viewBox="0 0 24 24"><path d="M7.5 2L2 6l3.75 3L2 12l5.5 4 3.75-3 3.75 3 5.5-4-4.5-3L20.5 6 15 2l-3.75 3L7.5 2zm3.75 10L7.5 15l3.75 3 3.75-3-3.75-3zM7.5 16l-1.88 1.5L3 19l5.5 4 3.75-3-4.75-4zm9-4l1.88-1.5L21 8l-5.5-4-3.75 3L16.5 8l-1.88 1.5L11 12l5.5 4 3.75-3-4.75-4z"/></svg>
                         <span v-if="isConnecting">{{ t('sync_connecting') || 'Connecting...' }}</span>
                         <span v-else>Dropbox</span>
                     </button>
 
-                    <button class="bs-btn bs-gdrive-btn" @click="connectGdrive" :disabled="isConnectingGdrive" style="margin-top:8px">
+                    <button v-if="isGdriveAuthAvailable" class="bs-btn bs-gdrive-btn" @click="connectGdrive" :disabled="isConnecting || isConnectingGdrive" :style="isDropboxAuthAvailable ? 'margin-top:8px' : ''">
                         <svg viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l4.58 7.5L12.29 11 7.71 3.5zm1.14 0L19.41 3.5 12.86 15H1.72l5.13-11.5zm10.01 0L13.72 15l4.58 7.5 5.55-11.5-5-7.5z"/></svg>
                         <span v-if="isConnectingGdrive">{{ t('sync_connecting') || 'Connecting...' }}</span>
                         <span v-else>Google Drive</span>
                     </button>
+
+                    <div v-if="!hasAnyProviderConfigured" class="sync-setup-msg">
+                        {{ t('sync_no_providers_configured') || 'Cloud sync is disabled in this build. Add OAuth keys in .env to enable Dropbox or Google Drive sign-in.' }}
+                    </div>
 
                     <div class="bs-hint">
                         {{ t('sync_hint_cloud_optional') || 'Your data can be optionally encrypted before upload. Set up encryption after connecting.' }}
@@ -842,6 +851,16 @@ onMounted(async () => {
     display: flex;
     flex-direction: column;
     gap: 4px;
+}
+
+.sync-setup-msg {
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(255, 149, 0, 0.08);
+    border: 1px solid rgba(255, 149, 0, 0.18);
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.45;
 }
 
 .sync-progress-label {
