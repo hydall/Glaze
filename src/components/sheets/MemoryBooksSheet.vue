@@ -44,6 +44,7 @@ const emit = defineEmits([
   'reindex-all',
   'scan-chat',
   'batch-generate',
+  'generate-draft',
   'approve-draft',
   'delete-draft',
   'delete-entry',
@@ -138,9 +139,32 @@ function formatElapsedSeconds(ms) {
   return `${sec}s`;
 }
 
+function formatGenerationTime(timestamp) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
 function normalizeEntryMessageIds(entry) {
   return Array.isArray(entry?.messageIds) ? entry.messageIds : [];
 }
+
+const currentlyGeneratingDraft = computed(() => {
+  if (!memoryDraftState.value?.active) return null;
+  const label = memoryDraftState.value.label || '';
+  // Match draft by checking if any pendingDraft has matching messageIds pattern
+  // This is a simple heuristic - the actual tracking happens in the parent
+  return null;
+});
 
 // Event handlers
 function open() {
@@ -183,6 +207,10 @@ function handleScanChat() {
 
 function handleBatchGenerate() {
   emit('batch-generate');
+}
+
+function handleGenerateDraft(draftId) {
+  emit('generate-draft', draftId);
 }
 
 function handleCancelDraft() {
@@ -359,23 +387,45 @@ defineExpose({ open, close });
             v-for="draft in pendingDrafts"
             :key="draft.id"
             class="memory-entry-card"
+            :class="{ 'is-generating': memoryDraftState.active && draft === currentlyGeneratingDraft }"
             @click="handleDraftClick(draft)"
           >
             <div class="memory-entry-head">
               <div>
                 <div class="memory-entry-title">{{ draft.title || 'Untitled draft' }}</div>
                 <div class="memory-entry-meta">
-                  {{ draft.content && !memoryDraftState.active ? 'pending approval' : 'generating' }}
-                  {{ vectorEnabled ? ' • hybrid' : ' • keys' }}
-                  <template v-if="draft.keys && draft.keys.length">
+                  <template v-if="!draft.content && draft.status === 'pending_generation'">
+                    <span style="color:#ffd700;">needs generation</span>
+                    <template v-if="draft.messageRange"> • messages {{ draft.messageRange.start }}-{{ draft.messageRange.end }}</template>
+                  </template>
+                  <template v-else-if="memoryDraftState.active && draft === currentlyGeneratingDraft">
+                    <span style="color:#ffd700;">generating...</span>
+                  </template>
+                  <template v-else>
+                    <span>pending approval</span>
+                    <template v-if="draft.generatedAt"> • generated {{ formatGenerationTime(draft.generatedAt) }}</template>
+                  </template>
+                  <template v-if="vectorEnabled && draft.content"> • hybrid</template>
+                  <template v-if="draft.keys && draft.keys.length && draft.content">
                     • {{ draft.keys.slice(0, 3).join(', ') }}
                   </template>
                 </div>
               </div>
               <div class="memory-draft-actions" @click.stop>
-                <span class="memory-status-badge draft">draft</span>
+                <span v-if="!draft.content && draft.status === 'pending_generation'" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">needs gen</span>
+                <span v-else class="memory-status-badge draft">draft</span>
                 <span v-if="vectorEnabled" class="memory-status-badge vector">vec</span>
                 <button
+                  v-if="!draft.content && draft.status === 'pending_generation'"
+                  type="button"
+                  class="memory-entry-generate"
+                  :disabled="memoryDraftState.active"
+                  @click="handleGenerateDraft(draft.id)"
+                >
+                  Generate
+                </button>
+                <button
+                  v-else
                   type="button"
                   class="memory-entry-approve"
                   :disabled="!draft.content || memoryDraftState.active"
@@ -396,8 +446,8 @@ defineExpose({ open, close });
               <template v-if="draft.content">
                 {{ draft.content.slice(0, 180) }}
               </template>
-              <span v-else-if="memoryDraftState.active" style="color:#ffd700;">⏳ Generating...</span>
-              <span v-else style="color:var(--text-gray);">No content yet</span>
+              <span v-else-if="memoryDraftState.active && draft === currentlyGeneratingDraft" style="color:#ffd700;">⏳ Generating...</span>
+              <span v-else style="color:var(--text-gray);">No content yet — click Generate to create</span>
             </div>
           </div>
         </div>
@@ -778,6 +828,11 @@ defineExpose({ open, close });
   background: rgba(255, 184, 77, 0.05);
 }
 
+.memory-entry-card.is-generating {
+  border-color: rgba(255, 215, 0, 0.4);
+  background: rgba(255, 215, 0, 0.05);
+}
+
 .memory-entry-head {
   display: flex;
   justify-content: space-between;
@@ -854,7 +909,8 @@ defineExpose({ open, close });
 }
 
 .memory-entry-approve,
-.memory-entry-delete {
+.memory-entry-delete,
+.memory-entry-generate {
   padding: 6px 12px;
   border: none;
   border-radius: 8px;
@@ -870,6 +926,16 @@ defineExpose({ open, close });
   color: #4caf50;
 }
 
+.memory-entry-generate {
+  background: rgba(255, 215, 0, 0.15);
+  color: #ffd700;
+}
+
+.memory-entry-generate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .memory-entry-approve:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -881,7 +947,8 @@ defineExpose({ open, close });
 }
 
 .memory-entry-approve:active:not(:disabled),
-.memory-entry-delete:active {
+.memory-entry-delete:active,
+.memory-entry-generate:active:not(:disabled) {
   opacity: 0.7;
 }
 

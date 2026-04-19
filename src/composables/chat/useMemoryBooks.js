@@ -288,21 +288,21 @@ export function useMemoryBooks(deps) {
     }
 
     /**
-     * Handle memory scan chat
+     * Handle memory scan chat - creates draft placeholders without auto-generating
      * @param {Object} activeChatChar - Active character object
      * @param {Array} currentMessages - Current messages array
      * @param {Object} memoryBooksSheet - Memory books sheet ref
      */
     async function handleMemoryScanChat(activeChatChar, currentMessages, memoryBooksSheet) {
         if (!activeChatChar || !currentMemoryBookData.value) return;
-        
+
         const chatData = await getChatData(activeChatChar.id);
         const sessionId = activeChatChar.sessionId || chatData.currentId;
         const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        
+
         const entries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
         const pendingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [];
-        
+
         const coveredIds = new Set();
         for (const entry of entries) {
             if (Array.isArray(entry.messageIds)) entry.messageIds.forEach(id => coveredIds.add(id));
@@ -310,32 +310,73 @@ export function useMemoryBooks(deps) {
         for (const draft of pendingDrafts) {
             if (Array.isArray(draft.messageIds)) draft.messageIds.forEach(id => coveredIds.add(id));
         }
-        
-        const stableMessages = currentMessages.filter(m => m && !m.isTyping && !m.isHidden && !m.isError && (m.role === 'user' || m.role === 'char'));
-        const uncovered = stableMessages.filter(m => m.id && !coveredIds.has(m.id));
-        
+
+        // Scan ALL messages including hidden for memory book purposes
+        const allMessages = currentMessages.filter(m => m && !m.isTyping && !m.isError && (m.role === 'user' || m.role === 'char'));
+        const uncovered = allMessages.filter(m => m.id && !coveredIds.has(m.id));
+
         if (!uncovered.length) {
             showToast('All messages are already covered');
             return;
         }
-        
+
         const interval = normalizeAutoCreateInterval(memoryBook);
         const segments = [];
         for (let i = 0; i < uncovered.length; i += interval) {
             segments.push(uncovered.slice(i, i + interval));
         }
-        
-        // Store planned segments
+
+        // Create pending draft entries with empty content (user will generate manually)
+        if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
+
+        for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i];
+            const segmentIds = segment.map(m => m.id);
+            const firstMsg = segment[0];
+            const lastMsg = segment[segment.length - 1];
+
+            // Find message indices for display
+            const firstIdx = allMessages.findIndex(m => m.id === firstMsg.id);
+            const lastIdx = allMessages.findIndex(m => m.id === lastMsg.id);
+            const rangeDisplay = firstIdx >= 0 && lastIdx >= 0 ? `${firstIdx + 1}-${lastIdx + 1}` : `${i * interval + 1}-${Math.min((i + 1) * interval, uncovered.length)}`;
+
+            // Check if draft already exists for these messages
+            const existingDraft = memoryBook.pendingDrafts.find(d =>
+                d.messageIds && JSON.stringify(d.messageIds.sort()) === JSON.stringify(segmentIds.sort())
+            );
+            if (existingDraft) continue;
+
+            memoryBook.pendingDrafts.push({
+                id: `draft_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                title: rangeDisplay,
+                content: '',
+                keys: [],
+                glazeKeys: [],
+                vectorSearch: false,
+                messageIds: segmentIds,
+                messageRange: {
+                    start: firstIdx >= 0 ? firstIdx + 1 : i * interval + 1,
+                    end: lastIdx >= 0 ? lastIdx + 1 : Math.min((i + 1) * interval, uncovered.length)
+                },
+                status: 'pending_generation',
+                source: 'scan_chat',
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                generatedAt: null
+            });
+        }
+
+        // Clear planned segments since we now have actual draft placeholders
         if (!memoryBook.automation) memoryBook.automation = {};
-        memoryBook.automation.plannedSegments = segments.map(seg => seg.map(m => m.id));
+        memoryBook.automation.plannedSegments = [];
         memoryBook.updatedAt = Date.now();
         await db.saveChat(activeChatChar.id, chatData);
-        
+
         // Mark all uncovered as pending
         const allUncoveredIds = new Set(uncovered.map(m => m.id));
         pendingMemoryMessageIds.value = allUncoveredIds;
-        
-        showToast(`Scanned: ${segments.length} segments planned (${uncovered.length} messages)`);
+
+        showToast(`${segments.length} draft placeholders created (${uncovered.length} messages)`);
         await loadCurrentMemoryBook(activeChatChar);
         setTimeout(() => memoryBooksSheet.value?.open(), 50);
     }
@@ -378,6 +419,25 @@ export function useMemoryBooks(deps) {
         memoryBook.entries.push(approvedEntry);
         memoryBook.pendingDrafts = memoryBook.pendingDrafts.filter(entry => entry.id !== draftId);
         memoryBook.updatedAt = Date.now();
+
+        // Update memoryCoverage on messages covered by this entry
+        if (Array.isArray(approvedEntry.messageIds)) {
+            for (const msg of currentMessages) {
+                if (!msg || !msg.id) continue;
+                if (approvedEntry.messageIds.includes(msg.id)) {
+                    if (!msg.memoryCoverage || typeof msg.memoryCoverage !== 'object') {
+                        msg.memoryCoverage = { entryIds: [], needsRebuild: false, stale: false };
+                    }
+                    if (!Array.isArray(msg.memoryCoverage.entryIds)) {
+                        msg.memoryCoverage.entryIds = [];
+                    }
+                    if (!msg.memoryCoverage.entryIds.includes(approvedEntry.id)) {
+                        msg.memoryCoverage.entryIds.push(approvedEntry.id);
+                    }
+                }
+            }
+        }
+
         reconcileSessionMemoryState(chatData, sessionId, currentMessages);
         chatData.sessions[sessionId] = currentMessages;
         await db.saveChat(activeChatChar.id, chatData);
