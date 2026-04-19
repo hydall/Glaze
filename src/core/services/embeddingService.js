@@ -81,8 +81,9 @@ async function callEmbeddingAPI(url, headers, requestBody) {
         data = await res.json();
     }
 
-    if (!data.data || !Array.isArray(data.data)) {
-        throw new Error('Invalid embedding response: missing data array');
+    if (!data || !Array.isArray(data.data)) {
+        const providerMessage = data?.error?.message || data?.message || '';
+        throw new Error(providerMessage ? `Invalid embedding response: ${providerMessage}` : 'Invalid embedding response: missing data array');
     }
 
     return data.data.sort((a, b) => a.index - b.index).map(item => item.embedding);

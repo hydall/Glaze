@@ -265,11 +265,15 @@ export async function generateChatResponse({
     }
 
     const safeContext = contextSize - maxTokens;
+    const cutoffOriginalIndex = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
+        ? result.cutoffOriginalIndex
+        : (result.cutoffIndex !== undefined ? result.cutoffIndex : -1);
     const memoryInjection = await buildMemoryInjection({
         char,
         history: safeHistory || history,
         summary,
-        safeContext
+        safeContext,
+        cutoffOriginalIndex
     });
     let messages = result.messages;
 
@@ -516,11 +520,15 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
         }));
 
         const result = await processPromptAsync(payload);
+        const cutoffOriginalIndex = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
+            ? result.cutoffOriginalIndex
+            : (result.cutoffIndex !== undefined ? result.cutoffIndex : -1);
         const memoryInjection = await buildMemoryInjection({
             char,
             history: safeHistory,
             summary,
-            safeContext: safeContextLimit
+            safeContext: safeContextLimit,
+            cutoffOriginalIndex
         });
 
         // Calculate vector lorebook tokens for accurate breakdown display
@@ -786,7 +794,7 @@ export async function deleteMemoryEntryIndex(entryId) {
     await db.deleteEmbedding(entryId);
 }
 
-async function buildMemoryInjection({ char, history, summary, safeContext }) {
+async function buildMemoryInjection({ char, history, summary, safeContext, cutoffOriginalIndex = -1 }) {
     const charId = char?.id;
     const sessionId = char?.sessionId;
     if (!charId || !sessionId) return { messages: [], entries: [], tokens: 0, injectionTarget: 'summary_block', macroContent: '' };
@@ -801,7 +809,20 @@ async function buildMemoryInjection({ char, history, summary, safeContext }) {
 
     const recentHistory = Array.isArray(history) ? history.slice(-12) : [];
     const historyText = recentHistory.map(item => item?.content || item?.text || '').filter(Boolean).join('\n').toLowerCase();
-    const recentMessageIds = new Set(recentHistory.map(item => item?.messageId).filter(Boolean));
+
+    const inPromptMessageIds = new Set();
+    if (cutoffOriginalIndex >= 0 && Array.isArray(history)) {
+        for (const m of history) {
+            if ((m.chatId ?? -1) >= cutoffOriginalIndex && m.messageId) {
+                inPromptMessageIds.add(m.messageId);
+            }
+        }
+    } else {
+        recentHistory.forEach(item => {
+            if (item?.messageId) inPromptMessageIds.add(item.messageId);
+        });
+    }
+
     const recentLabels = new Set();
     recentHistory.forEach(item => {
         (Array.isArray(item?.contextRefs) ? item.contextRefs : []).forEach(ref => {
@@ -826,18 +847,18 @@ async function buildMemoryInjection({ char, history, summary, safeContext }) {
 
     const vectorResults = await vectorSearchMemoryEntries(activeEntries, history, currentText).catch(() => []);
     const vectorScores = new Map(vectorResults.map(item => [item.id, item.vectorScore || item.score || 0]));
+
     const eligibleEntries = activeEntries.filter(entry => {
         const messageIds = normalizeMessageIdList(entry);
         if (!messageIds.length) return true;
-        const firstMsgId = messageIds[0];
-        return !recentMessageIds.has(firstMsgId);
+        return !messageIds.some(id => inPromptMessageIds.has(id));
     });
 
     const scoredEntries = eligibleEntries.map((entry, index) => {
         const haystack = `${entry.title || ''}\n${entry.content || ''}`.toLowerCase();
         const messageIds = normalizeMessageIdList(entry);
         let score = 0;
-        if (messageIds.some(id => !recentMessageIds.has(id))) score += 8;
+        if (messageIds.length > 0) score += 2;
         if (keywordMatchedIds.has(entry.id)) score += 6;
         if (vectorScores.has(entry.id)) score += Math.max(0, (vectorScores.get(entry.id) || 0) * 5);
         (Array.isArray(entry.contextRefs) ? entry.contextRefs : []).forEach(ref => {

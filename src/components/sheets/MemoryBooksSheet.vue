@@ -39,12 +39,12 @@ const emit = defineEmits([
   'open-settings',
   'open-maintenance',
   'open-preview',
-  'update-key-mode',
-  'toggle-vector-search',
+  'update-search-type',
   'reindex-all',
   'scan-chat',
   'batch-generate',
   'generate-draft',
+  'delete-all-drafts',
   'approve-draft',
   'delete-draft',
   'delete-entry',
@@ -57,6 +57,13 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 // Computed properties
 const vectorEnabled = computed(() => {
   return props.memoryBook?.settings?.vectorSearchEnabled !== false;
+});
+
+const memorySearchType = computed(() => {
+  const settings = props.memoryBook?.settings || {};
+  if (settings.vectorSearchEnabled === false) return 'keys';
+  if ((settings.keyMatchMode || 'glaze') === 'both') return 'both';
+  return 'vector';
 });
 
 const entries = computed(() => {
@@ -78,7 +85,8 @@ const generationSettingsSummary = computed(() => {
   const delayed = props.memoryBook.settings?.useDelayedAutomation !== false ? 'delayed' : 'immediate';
   const target = props.memoryBook.settings?.injectionTarget === 'summary_macro' ? '{{summary}}' : 'summary block';
   const maxEntries = Math.max(1, Math.min(20, Number(props.memoryBook.settings?.maxInjectedEntries || 3)));
-  return `${interval} msgs • ${delayed} • ${target} • ${maxEntries} in prompt`;
+  const batchSize = Math.max(1, Math.min(50, Number(props.memoryBook.settings?.batchSize || 1)));
+  return `${interval} msgs • batch ${batchSize} • ${delayed} • ${target} • ${maxEntries} in prompt`;
 });
 
 const statusSummary = computed(() => {
@@ -101,7 +109,7 @@ const keyMatchMode = computed(() => {
 });
 
 const draftsNeedingGeneration = computed(() => {
-  return pendingDrafts.value.filter(d => !d.content && d.status === 'pending_generation');
+  return pendingDrafts.value.filter(d => !d.content && d.status === 'pending_generation' && !isDraftGenerating(d.id));
 });
 
 const uncoveredSegments = computed(() => {
@@ -118,12 +126,14 @@ const uncoveredSegments = computed(() => {
   );
   const uncovered = stableMessages.filter(m => m.id && !coveredIds.has(m.id));
   const interval = normalizeAutoCreateInterval(props.memoryBook);
-  const segmentsNeeded = Math.ceil(uncovered.length / interval);
+  const segmentsNeeded = Math.floor(uncovered.length / interval);
+  const remainder = uncovered.length % interval;
 
   return {
     count: uncovered.length,
     segmentsNeeded,
-    interval
+    interval,
+    remainder
   };
 });
 
@@ -162,13 +172,14 @@ function normalizeEntryMessageIds(entry) {
   return Array.isArray(entry?.messageIds) ? entry.messageIds : [];
 }
 
-const currentlyGeneratingDraft = computed(() => {
-  if (!props.memoryDraftState?.active) return null;
-  const label = props.memoryDraftState.label || '';
-  // Match draft by checking if any pendingDraft has matching messageIds pattern
-  // This is a simple heuristic - the actual tracking happens in the parent
-  return null;
-});
+function getDraftProgress(draftId) {
+  if (!draftId) return null;
+  return props.memoryDraftState?.activeDrafts?.[draftId] || null;
+}
+
+function isDraftGenerating(draftId) {
+  return !!getDraftProgress(draftId);
+}
 
 // Event handlers
 function open() {
@@ -214,20 +225,17 @@ function handleBatchGenerate() {
 }
 
 function handleGenerateDraft(draftId) {
+  console.debug('[MemoryBooksSheet] handleGenerateDraft', { draftId });
   emit('generate-draft', draftId);
 }
 
-function handleCancelDraft() {
-  emit('cancel-draft');
+function handleCancelDraft(draftId) {
+  emit('cancel-draft', draftId);
 }
 
-function handleKeyModeClick() {
-  emit('update-key-mode');
+function handleSearchTypeClick() {
+  emit('update-search-type');
   close();
-}
-
-function handleVectorToggle(event) {
-  emit('toggle-vector-search', event.target.checked);
 }
 
 function handleEntryClick(entry) {
@@ -236,6 +244,7 @@ function handleEntryClick(entry) {
 }
 
 function handleDraftClick(draft) {
+  if (!draft?.content) return;
   emit('open-preview', { entry: draft, kind: 'Memory Draft' });
   close();
 }
@@ -246,6 +255,10 @@ function handleApproveDraft(draftId) {
 
 function handleDeleteDraft(draftId) {
   emit('delete-draft', draftId);
+}
+
+function handleDeleteAllDrafts() {
+  emit('delete-all-drafts');
 }
 
 function handleDeleteEntry(entryId) {
@@ -277,29 +290,15 @@ defineExpose({ open, close });
         <div class="memory-session-overview-meta">{{ generationSettingsSummary }}</div>
       </div>
 
-      <!-- Key Match Mode (only when vector search is disabled) -->
-      <div v-if="!vectorEnabled" class="memory-settings-item">
-        <label>Key Match Mode</label>
-        <div class="memory-clickable-selector" @click="handleKeyModeClick">
-          <span>{{ keyMatchMode }}</span>
+      <div class="memory-settings-item">
+        <label>Search Type</label>
+        <div class="memory-clickable-selector" @click="handleSearchTypeClick">
+          <span>
+            {{ memorySearchType === 'both' ? 'Combined' : memorySearchType === 'vector' ? 'Vector' : 'Keys' }}
+          </span>
           <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
         </div>
-        <div class="memory-note">Keyword retrieval uses only the entry Keys field.</div>
-      </div>
-
-      <!-- Vector Search Toggle -->
-      <div class="memory-settings-item-checkbox">
-        <div class="memory-settings-text-col">
-          <label>Vector Search</label>
-          <div class="memory-settings-desc">One shared retrieval mode for all memory entries in this session.</div>
-        </div>
-        <input
-          type="checkbox"
-          class="vk-switch"
-          :checked="vectorEnabled"
-          :disabled="!shouldEnableVectorSearch"
-          @change="handleVectorToggle"
-        />
+        <div class="memory-note">Choose keyword retrieval, vector retrieval, or a combined mode for this session.</div>
       </div>
       <div v-if="!shouldEnableVectorSearch" class="memory-note">
         Embeddings are not configured, so vector search is unavailable.
@@ -348,71 +347,76 @@ defineExpose({ open, close });
 
       <!-- Batch Actions (Scan & Generate) -->
       <div v-if="draftsNeedingGeneration.length > 0 || uncoveredSegments.count > 0" class="memory-batch-actions">
-        <template v-if="draftsNeedingGeneration.length > 0">
+        <template v-if="draftsNeedingGeneration.length > 0 || memoryDraftState.active">
           <div class="memory-batch-info">
-            <strong>{{ draftsNeedingGeneration.length }}</strong> draft{{ draftsNeedingGeneration.length > 1 ? 's' : '' }} need generation
+            <template v-if="memoryDraftState.active">
+              <strong>Generating</strong>
+              <template v-if="memoryDraftState.activeCount > 1">
+                {{ memoryDraftState.activeCount }} drafts in parallel
+              </template>
+              <template v-else>
+                {{ memoryDraftState.label || 'memory draft' }}
+              </template>
+            </template>
+            <template v-else>
+              <strong>{{ draftsNeedingGeneration.length }}</strong> draft{{ draftsNeedingGeneration.length > 1 ? 's' : '' }} need generation
+            </template>
           </div>
           <div class="memory-batch-buttons">
             <button
               type="button"
               class="memory-btn memory-btn-primary"
-              :disabled="memoryDraftState.active"
-              @click="handleBatchGenerate"
+              :disabled="draftsNeedingGeneration.length === 0"
+              @click.stop.prevent="handleBatchGenerate"
+              @touchend.stop.prevent="handleBatchGenerate"
             >
-              Generate Batch
+              {{ memoryDraftState.active ? 'Generate Remaining' : 'Generate Batch' }}
             </button>
           </div>
         </template>
         <template v-else-if="uncoveredSegments.count > 0">
           <div class="memory-batch-info">
-            <strong>{{ uncoveredSegments.count }}</strong> uncovered messages ({{ uncoveredSegments.segmentsNeeded }} segments of {{ uncoveredSegments.interval }})
+            <strong>{{ uncoveredSegments.count }}</strong> uncovered messages ({{ uncoveredSegments.segmentsNeeded }} full segments of {{ uncoveredSegments.interval }})
+            <template v-if="uncoveredSegments.remainder > 0"> • {{ uncoveredSegments.remainder }} left over</template>
           </div>
           <div class="memory-batch-buttons">
-            <button type="button" class="memory-btn memory-btn-secondary" @click="handleScanChat">
+            <button type="button" class="memory-btn memory-btn-secondary" :disabled="uncoveredSegments.segmentsNeeded === 0" @click.stop.prevent="handleScanChat" @touchend.stop.prevent="handleScanChat">
               Scan Chat
             </button>
           </div>
         </template>
       </div>
 
-      <!-- Draft Generation Progress -->
-      <div v-if="memoryDraftState.active" class="memory-generation-status-card">
-        <div class="memory-generation-status-row">
-          <strong>{{ memoryDraftState.label || 'Generating memory draft' }}</strong>
-          <span>{{ formatElapsedSeconds(memoryDraftState.elapsedMs) }}</span>
-        </div>
-        <div class="memory-generation-status-row" style="margin-top: 6px;">
-          <div class="memory-note" style="margin: 0;">Timer updates automatically.</div>
-          <button type="button" class="memory-btn memory-btn-destructive memory-btn-sm" @click="handleCancelDraft">
-            Stop
-          </button>
-        </div>
-      </div>
-
       <!-- Pending Drafts Section -->
       <div v-if="pendingDrafts.length > 0" class="memory-sheet-section">
         <div class="memory-sheet-section-head">
           <label>Pending Drafts</label>
-          <span>{{ pendingDrafts.length }}</span>
+          <div class="memory-section-head-actions">
+            <button type="button" class="memory-head-btn destructive" @click.stop.prevent="handleDeleteAllDrafts">
+              Delete All Pending
+            </button>
+            <span>{{ pendingDrafts.length }}</span>
+          </div>
         </div>
         <div class="memory-entry-list">
           <div
             v-for="draft in pendingDrafts"
             :key="draft.id"
             class="memory-entry-card"
-            :class="{ 'is-generating': memoryDraftState.active && draft === currentlyGeneratingDraft }"
+            :class="{ 'is-generating': isDraftGenerating(draft.id) }"
             @click="handleDraftClick(draft)"
           >
             <div class="memory-entry-head">
               <div>
                 <div class="memory-entry-title">{{ draft.title || 'Untitled draft' }}</div>
                 <div class="memory-entry-meta">
-                  <template v-if="!draft.content && draft.status === 'pending_generation'">
+                  <template v-if="isDraftGenerating(draft.id)">
+                    <span style="color:#ffd700;">generating...</span>
+                    <template v-if="getDraftProgress(draft.id)?.elapsedMs > 0"> • {{ formatElapsedSeconds(getDraftProgress(draft.id).elapsedMs) }}</template>
+                  </template>
+                  <template v-else-if="!draft.content && draft.status === 'pending_generation'">
                     <span style="color:#ffd700;">needs generation</span>
                     <template v-if="draft.messageRange"> • messages {{ draft.messageRange.start }}-{{ draft.messageRange.end }}</template>
-                  </template>
-                  <template v-else-if="memoryDraftState.active && draft === currentlyGeneratingDraft">
-                    <span style="color:#ffd700;">generating...</span>
                   </template>
                   <template v-else>
                     <span>pending approval</span>
@@ -425,15 +429,25 @@ defineExpose({ open, close });
                 </div>
               </div>
               <div class="memory-draft-actions" @click.stop>
-                <span v-if="!draft.content && draft.status === 'pending_generation'" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">needs gen</span>
+                <span v-if="isDraftGenerating(draft.id)" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">generating</span>
+                <span v-else-if="!draft.content && draft.status === 'pending_generation'" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">needs gen</span>
                 <span v-else class="memory-status-badge draft">draft</span>
                 <span v-if="vectorEnabled" class="memory-status-badge vector">vec</span>
                 <button
-                  v-if="!draft.content && draft.status === 'pending_generation'"
+                  v-if="isDraftGenerating(draft.id)"
+                  type="button"
+                  class="memory-entry-delete"
+                  @click.stop.prevent="handleCancelDraft(draft.id)"
+                  @touchend.stop.prevent="handleCancelDraft(draft.id)"
+                >
+                  Stop
+                </button>
+                <button
+                  v-else-if="!draft.content && draft.status === 'pending_generation'"
                   type="button"
                   class="memory-entry-generate"
-                  :disabled="memoryDraftState.active"
-                  @click="handleGenerateDraft(draft.id)"
+                  @click.stop.prevent="handleGenerateDraft(draft.id)"
+                  @touchend.stop.prevent="handleGenerateDraft(draft.id)"
                 >
                   Generate
                 </button>
@@ -441,15 +455,17 @@ defineExpose({ open, close });
                   v-else
                   type="button"
                   class="memory-entry-approve"
-                  :disabled="!draft.content || memoryDraftState.active"
-                  @click="handleApproveDraft(draft.id)"
+                  :disabled="!draft.content || isDraftGenerating(draft.id)"
+                  @click.stop.prevent="handleApproveDraft(draft.id)"
+                  @touchend.stop.prevent="handleApproveDraft(draft.id)"
                 >
                   Approve
                 </button>
                 <button
                   type="button"
                   class="memory-entry-delete"
-                  @click="handleDeleteDraft(draft.id)"
+                  @click.stop.prevent="handleDeleteDraft(draft.id)"
+                  @touchend.stop.prevent="handleDeleteDraft(draft.id)"
                 >
                   Delete
                 </button>
@@ -459,7 +475,7 @@ defineExpose({ open, close });
               <template v-if="draft.content">
                 {{ draft.content.slice(0, 180) }}
               </template>
-              <span v-else-if="memoryDraftState.active && draft === currentlyGeneratingDraft" style="color:#ffd700;">⏳ Generating...</span>
+              <span v-else-if="isDraftGenerating(draft.id)" style="color:#ffd700;">Generating... {{ formatElapsedSeconds(getDraftProgress(draft.id)?.elapsedMs || 0) }}</span>
               <span v-else style="color:var(--text-gray);">No content yet — click Generate to create</span>
             </div>
           </div>
@@ -813,6 +829,28 @@ defineExpose({ open, close });
   border-radius: 12px;
 }
 
+.memory-section-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-head-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.memory-head-btn.destructive {
+  background: rgba(255, 68, 68, 0.1);
+  color: #ff4444;
+  border: 1px solid rgba(255, 68, 68, 0.3);
+}
+
 /* Entry List */
 .memory-entry-list {
   display: flex;
@@ -919,6 +957,9 @@ defineExpose({ open, close });
   display: flex;
   gap: 8px;
   align-items: center;
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
 }
 
 .memory-entry-approve,
@@ -932,6 +973,10 @@ defineExpose({ open, close });
   cursor: pointer;
   transition: all 0.2s;
   font-family: inherit;
+  position: relative;
+  z-index: 4;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 
 .memory-entry-approve {

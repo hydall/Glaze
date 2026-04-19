@@ -27,7 +27,7 @@ const props = defineProps({
 const emit = defineEmits([
     'update:modelValue', 'send', 'scroll-to-bottom', 
     'magic-regenerate', 'magic-impersonate', 'magic-notes', 'magic-context', 'magic-stats', 'magic-sessions', 'magic-summary', 'magic-api', 'magic-presets', 'magic-char-card', 'magic-lorebooks', 'magic-memory-books', 'magic-regex', 'magic-image-gen', 'magic-glossary',
-    'search-next', 'search-prev', 'delete-selected', 'hide-selected', 'cancel-selection', 'create-memory-selected', 'remove-memory-selected', 'configure-memory-selected', 'generate-memory-draft-selected'
+    'search-next', 'search-prev', 'delete-selected', 'hide-selected', 'cancel-selection', 'create-memory-selected', 'remove-memory-selected', 'generate-memory-draft-selected'
 ]);
 
 const t = (key) => translations[currentLang.value]?.[key] || key;

@@ -1791,14 +1791,14 @@ function openAuthorsNoteSheet() {
         debounceTimer = setTimeout(save, 500);
     };
 
-    content.querySelector('#an-role').addEventListener('change', save);
-    content.querySelector('#an-mode').addEventListener('change', (e) => {
+    content.querySelector('#an-role')?.addEventListener('change', save);
+    content.querySelector('#an-mode')?.addEventListener('change', (e) => {
         const depthContainer = content.querySelector('#an-depth-container');
         depthContainer.style.display = e.target.value === 'depth' ? 'block' : 'none';
         save();
     });
-    content.querySelector('#an-depth').addEventListener('input', save);
-    content.querySelector('#an-content').addEventListener('input', debouncedSave);
+    content.querySelector('#an-depth')?.addEventListener('input', save);
+    content.querySelector('#an-content')?.addEventListener('input', debouncedSave);
 
     const toggleAction = (e) => {
         data.enabled = !data.enabled;
@@ -1918,22 +1918,24 @@ function openSummarySheet() {
         debounceTimer = setTimeout(save, 500);
     };
 
-    content.querySelector('#summary-role').addEventListener('change', save);
-    content.querySelector('#summary-mode').addEventListener('change', (e) => {
-        content.querySelector('#summary-depth-container').style.display = e.target.value === 'depth' ? 'block' : 'none';
+    content.querySelector('#summary-role')?.addEventListener('change', save);
+    content.querySelector('#summary-mode')?.addEventListener('change', (e) => {
+        const depthContainer = content.querySelector('#summary-depth-container');
+        if (depthContainer) depthContainer.style.display = e.target.value === 'depth' ? 'block' : 'none';
         save();
     });
-    content.querySelector('#summary-depth').addEventListener('input', save);
-    content.querySelector('#summary-prefix').addEventListener('input', save);
-    content.querySelector('#summary-content').addEventListener('input', (e) => {
+    content.querySelector('#summary-depth')?.addEventListener('input', save);
+    content.querySelector('#summary-prefix')?.addEventListener('input', save);
+    content.querySelector('#summary-content')?.addEventListener('input', (e) => {
         updateDraftState(e.target.value);
         debouncedSave();
     });
-    content.querySelector('#summary-custom-model-enabled').addEventListener('change', (e) => {
-        content.querySelector('#summary-custom-model-row').style.display = e.target.checked ? 'block' : 'none';
+    content.querySelector('#summary-custom-model-enabled')?.addEventListener('change', (e) => {
+        const modelRow = content.querySelector('#summary-custom-model-row');
+        if (modelRow) modelRow.style.display = e.target.checked ? 'block' : 'none';
         persistSummaryModelSettings();
     });
-    content.querySelector('#summary-custom-model').addEventListener('input', persistSummaryModelSettings);
+    content.querySelector('#summary-custom-model')?.addEventListener('input', persistSummaryModelSettings);
 
     const runSummaryGeneration = async (mode) => {
         if (isGenerating) return;
@@ -1977,13 +1979,13 @@ function openSummarySheet() {
         }
     };
 
-    content.querySelector('#btn-summary-generate').addEventListener('click', () => {
+    content.querySelector('#btn-summary-generate')?.addEventListener('click', () => {
         runSummaryGeneration('generate');
     });
-    content.querySelector('#btn-summary-update').addEventListener('click', () => {
+    content.querySelector('#btn-summary-update')?.addEventListener('click', () => {
         runSummaryGeneration('update');
     });
-    content.querySelector('#btn-summary-save').addEventListener('click', () => {
+    content.querySelector('#btn-summary-save')?.addEventListener('click', () => {
         save();
         data.savedContent = content.querySelector('#summary-content').value;
         char.summary = data.savedContent;
