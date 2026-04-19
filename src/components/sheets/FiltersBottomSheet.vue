@@ -1,27 +1,18 @@
 <script setup>
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, onMounted } from 'vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
-import { catalogFilters, activeProvider } from '@/core/states/catalogState.js';
+import { catalogFilters } from '@/core/states/catalogState.js';
+import { fetchJanitorTags, janitorTags, fetchJanitorTopTags } from '@/core/services/catalog/janitorProvider.js';
 
-// JanitorAI tag map (same tags used by both JanitorAI and DataCat)
-const JANNY_TAG_MAP = {
-    1: 'Male', 2: 'Female', 3: 'Non-binary', 4: 'Celebrity', 5: 'OC',
-    6: 'Fictional', 7: 'Real', 8: 'Game', 9: 'Anime', 10: 'Historical',
-    11: 'Royalty', 12: 'Detective', 13: 'Hero', 14: 'Villain', 15: 'Magical',
-    16: 'Non-human', 17: 'Monster', 18: 'Monster Girl', 19: 'Alien', 20: 'Robot',
-    21: 'Politics', 22: 'Vampire', 23: 'Giant', 24: 'OpenAI', 25: 'Elf',
-    26: 'Multiple', 27: 'VTuber', 28: 'Dominant', 29: 'Submissive', 30: 'Scenario',
-    31: 'Pokemon', 32: 'Assistant', 34: 'Non-English', 36: 'Philosophy',
-    38: 'RPG', 39: 'Religion', 41: 'Books', 42: 'AnyPOV', 43: 'Angst',
-    44: 'Demi-Human', 45: 'Enemies to Lovers', 46: 'Smut', 47: 'MLM',
-    48: 'WLW', 49: 'Action', 50: 'Romance', 51: 'Horror', 52: 'Slice of Life',
-    53: 'Fantasy', 54: 'Drama', 55: 'Comedy', 56: 'Mystery', 57: 'Sci-Fi',
-    59: 'Yandere', 60: 'Furry', 61: 'Movies/TV'
-};
+const ALL_TAGS = computed(() => {
+    return [...janitorTags.value]
+        .map(t => ({ id: Number(t.id), name: t.name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+});
 
-const ALL_TAGS = Object.entries(JANNY_TAG_MAP)
-    .map(([id, name]) => ({ id: Number(id), name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+onMounted(() => {
+    fetchJanitorTags();
+});
 
 const props = defineProps({ visible: Boolean });
 const emit = defineEmits(['update:visible', 'apply']);
@@ -30,12 +21,45 @@ const nsfw = ref(true);
 const minTokens = ref(29);
 const maxTokens = ref(100000);
 const selectedTagIds = ref(new Set());
-
+const selectedTagNames = ref(new Set());
 const tagSearch = ref('');
+
+const customTags = ref([]);
+const isFetchingTags = ref(false);
+let searchTimeout = null;
+
+watch(tagSearch, (newVal) => {
+    clearTimeout(searchTimeout);
+    if (!newVal) {
+        customTags.value = [];
+        return;
+    }
+    searchTimeout = setTimeout(async () => {
+        isFetchingTags.value = true;
+        try {
+            customTags.value = await fetchJanitorTopTags(newVal);
+        } finally {
+            isFetchingTags.value = false;
+        }
+    }, 400);
+});
+
 const filteredTags = computed(() => {
     const q = tagSearch.value.toLowerCase();
-    if (!q) return ALL_TAGS;
-    return ALL_TAGS.filter(t => t.name.toLowerCase().includes(q));
+    
+    // Get custom tags from API search
+    const results = customTags.value.map(name => ({ name, isCustom: true }));
+    
+    // Get matching standard tags
+    const standard = q 
+        ? ALL_TAGS.value.filter(t => t.name.toLowerCase().includes(q))
+        : ALL_TAGS.value;
+
+    // Filter out standard tags that are already covered by custom names to avoid duplicates
+    const filteredStandard = standard.filter(st => !results.some(ct => ct.name.toLowerCase() === st.name.toLowerCase()));
+
+    // Custom first, then standard matching
+    return [...results, ...filteredStandard];
 });
 
 // Update global state AND trigger search ONLY when closing
@@ -47,7 +71,9 @@ watch(() => props.visible, (newVal, oldVal) => {
         minTokens.value = f.minTokens ?? 29;
         maxTokens.value = f.maxTokens ?? 100000;
         selectedTagIds.value = new Set(f.tagIds || []);
+        selectedTagNames.value = new Set(f.tagNames || []);
         tagSearch.value = '';
+        customTags.value = [];
     } 
     // When closing: save local refs to global state and trigger search
     else if (oldVal === true) {
@@ -56,33 +82,69 @@ watch(() => props.visible, (newVal, oldVal) => {
             nsfw: nsfw.value,
             minTokens: minTokens.value,
             maxTokens: maxTokens.value,
-            tagIds: [...selectedTagIds.value]
+            tagIds: [...selectedTagIds.value],
+            tagNames: [...selectedTagNames.value]
         };
         emit('apply');
     }
 });
 
-function toggleTag(id) {
-    const s = new Set(selectedTagIds.value);
-    if (s.has(id)) s.delete(id);
-    else s.add(id);
-    selectedTagIds.value = s;
+function toggleTag(tag) {
+    if (tag.id) {
+        const s = new Set(selectedTagIds.value);
+        if (s.has(tag.id)) s.delete(tag.id);
+        else s.add(tag.id);
+        selectedTagIds.value = s;
+    } else {
+        const s = new Set(selectedTagNames.value);
+        if (s.has(tag.name)) s.delete(tag.name);
+        else s.add(tag.name);
+        selectedTagNames.value = s;
+    }
+}
+
+function isTagActive(tag) {
+    if (tag.id) return selectedTagIds.value.has(tag.id);
+    return selectedTagNames.value.has(tag.name);
 }
 
 function clearTags() {
     selectedTagIds.value = new Set();
+    selectedTagNames.value = new Set();
 }
 
 function closeSheet() {
     emit('update:visible', false);
 }
 
-const selectedTags = computed(() => ALL_TAGS.filter(t => selectedTagIds.value.has(t.id)));
+const selectedTags = computed(() => {
+    const res = [];
+    // Add standard tags
+    ALL_TAGS.value.forEach(t => {
+        if (selectedTagIds.value.has(t.id)) res.push(t);
+    });
+    // Add custom tags
+    selectedTagNames.value.forEach(name => {
+        res.push({ name, isCustom: true });
+    });
+    return res;
+});
+
+const totalSelectedCount = computed(() => selectedTagIds.value.size + selectedTagNames.value.size);
 </script>
 
 <template>
     <BottomSheet :visible="visible" title="Filters" @close="closeSheet">
         <div class="filters-content">
+
+            <!-- NSFW Toggle -->
+            <div class="filter-section nsfw-row" style="margin-bottom: 5px;">
+                <div class="filter-label" style="margin: 0;">Show NSFW</div>
+                <label class="toggle-switch">
+                    <input type="checkbox" v-model="nsfw">
+                    <span class="slider"></span>
+                </label>
+            </div>
 
             <!-- Tokens -->
             <div class="filter-section">
@@ -100,30 +162,21 @@ const selectedTags = computed(() => ALL_TAGS.filter(t => selectedTagIds.value.ha
                 </div>
             </div>
 
-            <!-- NSFW Toggle -->
-            <div class="filter-section nsfw-row" style="margin-bottom: 5px;">
-                <div class="filter-label" style="margin: 0;">Show NSFW</div>
-                <label class="toggle-switch">
-                    <input type="checkbox" v-model="nsfw">
-                    <span class="slider"></span>
-                </label>
-            </div>
-
             <!-- Tag chips -->
             <div class="filter-section">
                 <div class="filter-label-row">
                     <div class="filter-label">Tags</div>
-                    <button v-if="selectedTagIds.size > 0" class="clear-tags-btn" @click="clearTags">
-                        Clear ({{ selectedTagIds.size }})
+                    <button v-if="totalSelectedCount > 0" class="clear-tags-btn" @click="clearTags">
+                        Clear ({{ totalSelectedCount }})
                     </button>
                 </div>
 
                 <!-- Selected chips preview -->
-                <div v-if="selectedTags.length" class="selected-tags-preview">
-                    <span v-for="tag in selectedTags" :key="tag.id" class="tag-chip active" @click="toggleTag(tag.id)">
+                <TransitionGroup name="tag-list" tag="div" v-if="selectedTags.length" class="selected-tags-preview">
+                    <span v-for="tag in selectedTags" :key="tag.id || tag.name" class="tag-chip active" @click="toggleTag(tag)">
                         {{ tag.name }} <span class="chip-x">✕</span>
                     </span>
-                </div>
+                </TransitionGroup>
 
                 <!-- Tag search input -->
                 <input
@@ -134,15 +187,19 @@ const selectedTags = computed(() => ALL_TAGS.filter(t => selectedTagIds.value.ha
                 />
 
                 <!-- Tags grid -->
-                <div class="tags-grid">
+                <TransitionGroup name="tag-list" tag="div" class="tags-grid">
                     <button
                         v-for="tag in filteredTags"
-                        :key="tag.id"
+                        :key="tag.id || tag.name"
                         class="tag-chip"
-                        :class="{ active: selectedTagIds.has(tag.id) }"
-                        @click="toggleTag(tag.id)"
-                    >{{ tag.name }}</button>
-                </div>
+                        :class="{ active: isTagActive(tag), 'custom-tag': tag.isCustom }"
+                        @click="toggleTag(tag)"
+                    >
+                        <span v-if="tag.isCustom" class="custom-tag-prefix">#</span>
+                        {{ tag.name }}
+                    </button>
+                </TransitionGroup>
+                <div v-if="isFetchingTags" class="fetching-tags-loader">Searching tags...</div>
             </div>
 
         </div>
@@ -313,19 +370,7 @@ input:checked + .slider:before {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    max-height: 200px;
-    overflow-y: auto;
-    overscroll-behavior: contain;
     padding: 2px 0;
-}
-
-.tags-grid::-webkit-scrollbar {
-    width: 3px;
-}
-
-.tags-grid::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.15);
-    border-radius: 3px;
 }
 
 .tag-chip {
@@ -386,5 +431,38 @@ input:checked + .slider:before {
 .apply-btn:active {
     transform: scale(0.98);
     opacity: 0.9;
+}
+
+.custom-tag {
+    border-style: dashed;
+}
+
+.custom-tag-prefix {
+    opacity: 0.5;
+    font-weight: 400;
+}
+
+.fetching-tags-loader {
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    padding: 4px 0;
+    font-style: italic;
+}
+
+/* Transitions */
+.tag-list-enter-active,
+.tag-list-leave-active {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tag-list-enter-from,
+.tag-list-leave-to {
+    opacity: 0;
+    transform: scale(0.8);
+}
+
+/* Ensure smooth moving when others are added/removed */
+.tag-list-move {
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 </style>

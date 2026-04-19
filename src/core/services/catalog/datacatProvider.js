@@ -218,8 +218,9 @@ export async function datacatGetCharacter(uuid) {
     );
 
     const raw = data.data || data;
+    const meta = data.metadata || {};
     return {
-        charData: convertToGlaze(raw),
+        charData: convertToGlaze(raw, meta),
         avatarUrl: resolveAvatarUrl(raw.avatar)
     };
 }
@@ -283,24 +284,30 @@ function resolveAvatarUrl(url) {
 }
 
 function normalizeListItem(c) {
+    const stdTags = (c.tags || []).map(t => (typeof t === 'string' ? stripEmoji(t) : stripEmoji(t.name))).filter(Boolean);
+    const tags = [c.is_nsfw ? 'NSFW' : 'SFW', ...stdTags];
+
     return {
         // API returns character_id (UUID) as the primary identifier
         id: c.character_id || c.characterId || c.uuid || c.id,
         name: c.chat_name || c.chatName || c.name || 'Unknown',
         avatarUrl: resolveAvatarUrl(c.avatar),
-        tags: (c.tags || []).map(t => (typeof t === 'string' ? stripEmoji(t) : stripEmoji(t.name))).filter(Boolean),
+        tags: [...new Set(tags)],
         tokens: c.total_tokens || c.totalTokens || 0,
         stats: { chat: c.chat_count || 0, message: c.message_count || 0 },
         creator: c.creator_name || c.creatorName || '',
+        creator_id: c.creator_id || c.creatorId || '',
         nsfw: Boolean(c.is_nsfw),
         source: 'datacat'
     };
 }
 
-function convertToGlaze(raw) {
-    const tags = (raw.tags || [])
+function convertToGlaze(raw, meta = {}) {
+    const stdTags = (raw.tags || [])
         .map(t => (typeof t === 'string' ? stripEmoji(t) : stripEmoji(t?.name)))
         .filter(Boolean);
+
+    const tags = [raw.is_nsfw ? 'NSFW' : 'SFW', ...stdTags];
 
     return {
         name: raw.name || raw.chatName || raw.chat_name || 'Unknown',
@@ -309,12 +316,13 @@ function convertToGlaze(raw) {
         scenario: raw.scenario || '',
         first_mes: raw.first_mes || raw.first_message || '',
         mes_example: raw.mes_example || '',
-        creator_notes: raw.description || raw.creator_notes || '',
+        creator_notes: meta.raw_description_html || raw.creator_notes || raw.description || '',
         system_prompt: raw.system_prompt || '',
         post_history_instructions: raw.post_history_instructions || '',
         alternate_greetings: Array.isArray(raw.alternate_greetings) ? raw.alternate_greetings : [],
-        tags,
-        creator: raw.creator || '',
+        tags: [...new Set(tags)],
+        creator: meta.janitor_creator_name || raw.creator || '',
+        creator_id: meta.janitor_creator_id || raw.creator_id || raw.creatorId || '',
         character_book: raw.character_book || null,
         extensions: { datacat: { id: raw.characterId || raw.character_id || raw.uuid || raw.id } }
     };

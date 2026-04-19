@@ -1,22 +1,18 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue';
-import { currentLang } from '@/core/config/APPSettings.js';
-import { translations } from '@/utils/i18n.js';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { t } from '@/utils/i18n.js';
+import { janitorTagMap } from '@/core/services/catalog/janitorProvider.js';
 import {
-    activeProvider, catalogResults, catalogLoading, catalogError,
+    catalogResults, catalogLoading, catalogError,
     catalogHasMore, catalogQuery, catalogTotal,
-    searchCatalog, loadMore, setProvider, importCharacter, catalogFilters
+    searchCatalog, loadMore, importCharacter, catalogFilters
 } from '@/core/states/catalogState.js';
+import { createNewSession } from '@/utils/sessions.js';
 import { datacatGetCharacter, datacatExtract, datacatExtractionStatus } from '@/core/services/catalog/datacatProvider.js';
-import { janitorFetchCharacter } from '@/core/services/catalog/janitorProvider.js';
+import { janitorFetchCharacter, janitorSearch, janitorItemToPartialCharData } from '@/core/services/catalog/janitorProvider.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import FiltersBottomSheet from '@/components/sheets/FiltersBottomSheet.vue';
-
-const t = (key, vars) => {
-    let str = translations[currentLang.value]?.[key] || key;
-    if (vars) for (const [k, v] of Object.entries(vars)) str = str.replace(`{${k}}`, v);
-    return str;
-};
+import CatalogCharacterSheet from '@/components/sheets/CatalogCharacterSheet.vue';
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
@@ -32,11 +28,13 @@ function onHeaderSearch(e) {
 // ─── Infinite Scroll ──────────────────────────────────────────────────────────
 
 const scrollEl = ref(null);
+const loadMoreSentinel = ref(null);
+let scrollObserver = null;
 
 function onScroll() {
     if (!scrollEl.value || catalogLoading.value || !catalogHasMore.value) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollEl.value;
-    if (scrollHeight - scrollTop - clientHeight < 300) {
+    if (scrollHeight - scrollTop - clientHeight < 600) {
         loadMore();
     }
 }
@@ -45,6 +43,10 @@ function onScroll() {
 
 const previewLoading = ref(false);
 const importingId = ref(null);
+const showCharSheet = ref(false);
+const previewItem = ref(null);
+const previewCharData = ref(null);
+const previewAvatarUrl = ref(null);
 
 async function openPreview(item) {
     // Show loading sheet immediately
@@ -68,9 +70,42 @@ async function openPreview(item) {
             charData = result.charData;
             avatarUrl = result.avatarUrl || avatarUrl;
         } else {
-            // JanitorAI: scrape page
-            charData = await janitorFetchCharacter(item.id, item.slug);
-            avatarUrl = item.avatarUrl;
+            // Janitor source — try direct fetch first
+            let loginRequired = false;
+            try {
+                charData = await janitorFetchCharacter(item.id, item.slug);
+            } catch (e) {
+                if (e.status === 401 || e.status === 403) {
+                    loginRequired = true;
+                } else {
+                    throw e;
+                }
+            }
+
+            if (loginRequired) {
+                // 1. Try DataCat by the same UUID (DataCat indexes janitor chars with same ID)
+                try {
+                    const result = await datacatGetCharacter(item.id);
+                    charData = result.charData;
+                    avatarUrl = result.avatarUrl || avatarUrl;
+                } catch { /* not on DataCat yet */ }
+
+                // 2. Try jannyai MeiliSearch for partial public data
+                if (!charData) {
+                    try {
+                        const jResult = await janitorSearch({ query: item.name, page: 1 });
+                        const hit = jResult.characters.find(c => c.id === item.id);
+                        if (hit) charData = janitorItemToPartialCharData(hit);
+                    } catch { /* search failed */ }
+                }
+
+                // 3. Nothing found — offer DataCat extraction
+                if (!charData) {
+                    previewLoading.value = false;
+                    startExtraction(item);
+                    return;
+                }
+            }
         }
     } catch (e) {
         showBottomSheet({ noDropdown: true,
@@ -87,41 +122,26 @@ async function openPreview(item) {
     }
 
     previewLoading.value = false;
+    closeBottomSheet();
 
-    // Build description preview (first 300 chars)
-    const desc = charData.description || charData.creator_notes || '';
-    const preview = desc.length > 300 ? desc.slice(0, 300) + '…' : desc;
-    const tagsStr = item.tags?.slice(0, 5).join(', ') || '';
-    const tokenStr = item.tokens ? `${item.tokens} tokens` : '';
-    const meta = [tagsStr, tokenStr].filter(Boolean).join(' · ');
+    previewItem.value = item;
+    previewCharData.value = charData;
+    previewAvatarUrl.value = avatarUrl;
+    showCharSheet.value = true;
+}
 
-    showBottomSheet({ noDropdown: true,
-        title: charData.name || item.name,
-        items: [
-            {
-                label: t('catalog_import'),
-                icon: `<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`,
-                onClick: () => doImport(item, charData, avatarUrl)
-            },
-            ...(item.source === 'janitor' ? [{
-                label: t('catalog_extract_via_dc'),
-                icon: `<svg viewBox="0 0 24 24"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>`,
-                onClick: () => startExtraction(item)
-            }] : []),
-            {
-                label: t('btn_cancel'),
-                icon: `<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`,
-                onClick: closeBottomSheet
-            }
-        ],
-        bigInfo: meta || preview ? {
-            icon: avatarUrl
-                ? `<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:12px" onerror="this.style.display='none'">`
-                : `<svg viewBox="0 0 24 24" style="fill:var(--vk-blue);width:100%;height:100%"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>`,
-            description: [meta, preview].filter(Boolean).join('\n\n'),
-            buttonText: null
-        } : undefined
-    });
+async function onSheetImport() {
+    const item = previewItem.value;
+    const charData = previewCharData.value;
+    const avatarUrl = previewAvatarUrl.value;
+    showCharSheet.value = false;
+    if (!item || !charData) return;
+
+    if (item.source === 'datacat') {
+        doImport(item, charData, avatarUrl);
+    } else {
+        startExtraction(item);
+    }
 }
 
 async function doImport(item, charData, avatarUrl) {
@@ -129,14 +149,18 @@ async function doImport(item, charData, avatarUrl) {
     closeBottomSheet();
 
     try {
-        await importCharacter(charData, avatarUrl);
+        const charId = await importCharacter(charData, avatarUrl);
         showBottomSheet({ noDropdown: true,
             title: t('catalog_imported'),
             bigInfo: {
                 icon: `<svg viewBox="0 0 24 24" style="fill:#4caf50;width:100%;height:100%"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`,
                 description: t('catalog_imported_desc', { name: charData.name }),
-                buttonText: t('btn_ok'),
-                onButtonClick: closeBottomSheet
+                buttonText: t('catalog_open_chat'),
+                onButtonClick: async () => {
+                    closeBottomSheet();
+                    await createNewSession(charId);
+                    window.dispatchEvent(new CustomEvent('open-chat', { detail: { charId } }));
+                }
             }
         });
     } catch (e) {
@@ -219,9 +243,22 @@ function startPolling(item) {
                 extractionItemId.value = null;
                 closeBottomSheet();
 
-                // Fetch the extracted character and open preview
-                const fakeItem = { id: done.characterId, source: 'datacat', avatarUrl: null, tags: [], tokens: 0, slug: '' };
-                await openPreview(fakeItem);
+                // Fetch extracted data and import directly — no second preview step
+                try {
+                    const result = await datacatGetCharacter(done.characterId);
+                    const fakeItem = { id: done.characterId, source: 'datacat', avatarUrl: null, tags: [], tokens: 0, slug: '' };
+                    doImport(fakeItem, result.charData, result.avatarUrl || item.avatarUrl);
+                } catch (e) {
+                    showBottomSheet({ noDropdown: true,
+                        title: t('title_error'),
+                        bigInfo: {
+                            icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
+                            description: e.message || t('catalog_error_import'),
+                            buttonText: t('btn_ok'),
+                            onButtonClick: closeBottomSheet
+                        }
+                    });
+                }
             }
         } catch {
             // Network error — keep polling
@@ -240,30 +277,6 @@ function cancelExtraction() {
 
 // ─── Controls ─────────────────────────────────────────────────────────────────
 
-const openProviderSelector = () => {
-    showBottomSheet({
-        title: t('catalog_source') === 'catalog_source' ? 'Source' : t('catalog_source'),
-        items: [
-            {
-                label: 'DataCat',
-                isActive: activeProvider.value === 'datacat',
-                onClick: () => {
-                    setProvider('datacat');
-                    closeBottomSheet();
-                }
-            },
-            {
-                label: 'JanitorAI',
-                isActive: activeProvider.value === 'janitor',
-                onClick: () => {
-                    setProvider('janitor');
-                    closeBottomSheet();
-                }
-            }
-        ]
-    });
-};
-
 const showFiltersSheet = ref(false);
 
 const openFilters = () => {
@@ -274,36 +287,49 @@ const onFiltersApply = () => {
     searchCatalog(true);
 };
 
-const SORT_OPTIONS_DATACAT = [
-    { value: 'newest',       label: 'Newest' },
-    { value: 'oldest',       label: 'Oldest' },
-    { value: 'popular',      label: 'Popular' },
-    { value: 'trending_week', label: 'Trending (week)' },
-    { value: 'trending_24h',  label: 'Trending 24h' },
-    { value: 'tokens_desc',  label: 'Most Tokens' },
-    { value: 'tokens_asc',   label: 'Least Tokens' },
+const SORT_OPTIONS = [
+    { value: 'popular',       label: 'sort_popular',      hint: 'sort_popular_hint' },
+    { value: 'trending_week', label: 'sort_trending',     hint: 'sort_trending_hint' },
+    { value: 'trending_24h',  label: 'sort_trending_24h', hint: 'sort_trending_24h_hint' },
+    { value: 'latest',        label: 'sort_latest',       hint: 'sort_latest_hint' }
 ];
-
-const SORT_OPTIONS_JANITOR = [
-    { value: 'newest',  label: 'Newest' },
-    { value: 'oldest',  label: 'Oldest' },
-    { value: 'popular', label: 'Popular' },
-];
-
-const sortOptions = () => activeProvider.value === 'datacat' ? SORT_OPTIONS_DATACAT : SORT_OPTIONS_JANITOR;
 
 const currentSortLabel = () => {
-    const cur = catalogFilters.value?.sort || 'newest';
-    const opts = [...SORT_OPTIONS_DATACAT, ...SORT_OPTIONS_JANITOR];
-    return opts.find(o => o.value === cur)?.label || 'Newest';
+    const cur = catalogFilters.value?.sort || 'latest';
+    const key = SORT_OPTIONS.find(o => o.value === cur)?.label || 'sort_latest';
+    return t(key);
 };
+
+const activeTagItems = computed(() => {
+    const res = [];
+    // Standard tags
+    (catalogFilters.value.tagIds || []).forEach(id => {
+        const label = janitorTagMap.value[id];
+        if (label) res.push({ id, label });
+    });
+    // Custom tags
+    (catalogFilters.value.tagNames || []).forEach(name => {
+        res.push({ name, label: '#' + name });
+    });
+    return res;
+});
+
+function removeTag(tag) {
+    if (tag.id) {
+        catalogFilters.value.tagIds = catalogFilters.value.tagIds.filter(tid => tid !== tag.id);
+    } else {
+        catalogFilters.value.tagNames = catalogFilters.value.tagNames.filter(tn => tn !== tag.name);
+    }
+    searchCatalog(true);
+}
 
 function openSortSelector() {
     showBottomSheet({
-        title: 'Sort By',
-        items: sortOptions().map(opt => ({
-            label: opt.label,
-            isActive: (catalogFilters.value?.sort || 'newest') === opt.value,
+        title: t('sort_by'),
+        items: SORT_OPTIONS.map(opt => ({
+            label: t(opt.label),
+            hint: t(opt.hint),
+            isActive: (catalogFilters.value?.sort || 'latest') === opt.value,
             onClick: () => {
                 catalogFilters.value = { ...catalogFilters.value, sort: opt.value };
                 searchCatalog(true);
@@ -315,8 +341,20 @@ function openSortSelector() {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function snippetText(html, max = 250) {
+    if (!html) return '';
+    // Strip images but keep other formatting tags
+    const clean = html.replace(/<img[^>]*>/gi, '');
+    if (clean.length > max + 50) {
+      // Very basic truncation that doesn't break tags perfectly but we use line-clamp anyway
+      return clean.slice(0, max) + '…';
+    }
+    return clean;
+}
+
 function formatNumber(n) {
     if (!n) return '';
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'kk';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
     return String(n);
 }
@@ -328,27 +366,47 @@ onMounted(() => {
         searchCatalog(true);
     }
     window.addEventListener('header-search', onHeaderSearch);
+    
+    scrollObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && !catalogLoading.value && catalogHasMore.value) {
+            loadMore();
+        }
+    }, { rootMargin: '600px' });
+    
+    if (loadMoreSentinel.value) {
+        scrollObserver.observe(loadMoreSentinel.value);
+    }
 });
 
 onUnmounted(() => {
     window.removeEventListener('header-search', onHeaderSearch);
+    if (scrollObserver) {
+        scrollObserver.disconnect();
+    }
 });
 
-watch(activeProvider, () => searchCatalog(true));
+
 </script>
 
 <template>
     <div class="catalog-view">
         <!-- Catalog Controls -->
         <div class="catalog-controls">
-            <div class="preset-selector" @click="openProviderSelector">
-                <span>{{ activeProvider === 'datacat' ? 'DataCat' : 'JanitorAI' }}</span>
-                <svg viewBox="0 0 24 24" class="selector-chevron"><path d="M7 10l5 5 5-5z"/></svg>
+            <div class="active-filters-container">
+                <div class="active-filters" v-if="activeTagItems.length">
+                    <div v-for="tag in activeTagItems" :key="tag.id || tag.name" class="active-tag-chip" @click="removeTag(tag)">
+                        {{ tag.label }}
+                        <svg viewBox="0 0 24 24" class="chip-remove-icon"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                    </div>
+                </div>
             </div>
 
             <div class="sort-controls">
                 <div class="filter-icon-btn" @click="openFilters">
                     <svg viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+                    <span v-if="(catalogFilters.tagIds?.length || 0) + (catalogFilters.tagNames?.length || 0) > 0" class="filter-badge">
+                        {{ (catalogFilters.tagIds?.length || 0) + (catalogFilters.tagNames?.length || 0) }}
+                    </span>
                 </div>
                 <div class="preset-selector" @click="openSortSelector">
                     <span>{{ currentSortLabel() }}</span>
@@ -358,6 +416,13 @@ watch(activeProvider, () => searchCatalog(true));
         </div>
 
         <FiltersBottomSheet v-model:visible="showFiltersSheet" @apply="onFiltersApply" />
+        <CatalogCharacterSheet
+            v-model:visible="showCharSheet"
+            :item="previewItem"
+            :charData="previewCharData"
+            :avatarUrl="previewAvatarUrl"
+            @import="onSheetImport"
+        />
 
 
 
@@ -381,25 +446,14 @@ watch(activeProvider, () => searchCatalog(true));
 
         <!-- Character Grid -->
         <div class="catalog-scroll" ref="scrollEl" @scroll.passive="onScroll">
-            <div class="character-grid" style="padding: 4px 0; padding-bottom: calc(90px + var(--sab));">
+            <div class="character-grid" style="padding: 0; padding-bottom: calc(90px + var(--sab));">
                 <div
                     v-for="item in catalogResults"
                     :key="item.source + item.id"
                     class="character-card"
                     @click="openPreview(item)"
                 >
-                    <!-- Card Badge -->
-                    <div class="card-badge" v-if="item.tokens || (item.stats && item.stats.message > 0)">
-                      <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                      <span>{{ formatNumber(item.tokens) }}</span>
-                      <template v-if="item.stats && item.stats.message > 0">
-                        <span class="badge-sep">|</span>
-                        <svg viewBox="0 0 24 24" class="msg-icon"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z"/></svg>
-                        <span>{{ formatNumber(item.stats.message) }}</span>
-                      </template>
-                    </div>
-
-                    <!-- Avatar Image -->
+                    <!-- Avatar Image and Overlay Headers -->
                     <div class="card-image-wrapper">
                         <img
                             v-if="item.avatarUrl"
@@ -411,19 +465,45 @@ watch(activeProvider, () => searchCatalog(true));
                         <div v-else class="card-placeholder" style="background-color: #66ccff;">
                             {{ item.name?.[0]?.toUpperCase() || '?' }}
                         </div>
-                        <div class="card-gradient"></div>
+                        
+                        <!-- Top Content (Message Badge) -->
+                        <div class="card-header-top">
+                            <div style="flex: 1;"></div>
+                            
+                            <!-- Card Badge (Messages only) -->
+                            <div class="card-badge" v-if="item.stats && item.stats.message > 0">
+                              <svg viewBox="0 0 24 24" class="msg-icon"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z"/></svg>
+                              <span>{{ formatNumber(item.stats.message) }}</span>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- Info -->
-                    <div class="card-info">
-                        <div class="card-header-row">
+                    <!-- Bottom Info & Tags -->
+                    <div class="card-info-bottom">
+                        <div class="card-name-col">
                             <div class="card-name">{{ item.name }}</div>
+                            <div class="card-desc" v-if="item.creator">
+                                <a 
+                                    v-if="item.creator_id" 
+                                    :href="'https://janitorai.com/profiles/' + item.creator_id" 
+                                    target="_blank" 
+                                    @click.stop
+                                    class="creator-link"
+                                >@{{ item.creator }}</a>
+                                <span v-else>@{{ item.creator }}</span>
+                            </div>
+                            <div class="card-tokens" v-if="item.tokens">{{ formatNumber(item.tokens) }} tokens</div>
                         </div>
-                        <div class="card-desc" v-if="item.creator">@{{ item.creator }}</div>
-                        
-                        <div class="card-actions" v-if="item.tags?.length">
-                            <span v-for="tag in item.tags.slice(0, 3)" :key="tag" class="card-tag">{{ tag }}</span>
+
+                        <div class="card-actions" v-if="item.tags?.length || item.nsfw !== undefined">
+                            <span v-for="tag in item.tags" :key="tag" class="card-tag" :class="{ 
+                                'card-tag-custom': tag.startsWith('#'),
+                                'nsfw-indicator': tag === 'NSFW',
+                                'sfw-indicator': tag === 'SFW'
+                            }">{{ tag }}</span>
                         </div>
+
+                        <div class="card-snippet" v-if="item.description" v-html="snippetText(item.description)"></div>
                     </div>
 
                     <!-- Import spinner overlay -->
@@ -438,6 +518,9 @@ watch(activeProvider, () => searchCatalog(true));
                 <div class="spinner"></div>
             </div>
 
+            <!-- Sentinel to trigger next page load using IntersectionObserver -->
+            <div ref="loadMoreSentinel" class="scroll-sentinel" style="height: 1px;"></div>
+
             <!-- End of results -->
             <div v-if="!catalogHasMore && catalogResults.length > 0" class="catalog-end">
                 {{ t('catalog_end') }}
@@ -451,8 +534,7 @@ watch(activeProvider, () => searchCatalog(true));
     display: flex;
     flex-direction: column;
     height: 100%;
-    overflow: hidden;
-    padding: 0 16px;
+    overflow: visible;
     box-sizing: border-box;
 }
 
@@ -462,8 +544,25 @@ watch(activeProvider, () => searchCatalog(true));
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 0px 0 12px;
+  padding: 12px 16px;
   flex-shrink: 0;
+  overflow: visible;
+}
+
+@media (min-width: 600px) {
+  .catalog-controls {
+    justify-content: flex-start;
+    gap: 20px;
+  }
+  .catalog-controls .sort-controls {
+    order: 1;
+  }
+  .catalog-controls .active-filters-container {
+    order: 2;
+  }
+  .catalog-controls .filter-icon-btn {
+    order: 2;
+  }
 }
 
 .preset-selector {
@@ -514,6 +613,7 @@ watch(activeProvider, () => searchCatalog(true));
 }
 
 .filter-icon-btn {
+  position: relative;
   width: 32px;
   height: 32px;
   display: flex;
@@ -550,11 +650,80 @@ watch(activeProvider, () => searchCatalog(true));
   opacity: 0.8;
 }
 
+.active-filters-container {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.active-filters {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  width: 100%;
+  scrollbar-width: none;
+  padding: 4px 0;
+  mask-image: linear-gradient(to right, black 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
+}
+
+.active-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.active-tag-chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background-color: var(--vk-blue, #4080ff);
+  padding: 4px 10px;
+  border-radius: 12px;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(var(--vk-blue-rgb, 64, 128, 255), 0.3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: transform 0.1s, opacity 0.2s;
+}
+
+.active-tag-chip:active {
+  transform: scale(0.92);
+  opacity: 0.8;
+}
+
+.chip-remove-icon {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  opacity: 0.8;
+}
+
+.filter-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--vk-blue, #4080ff);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
 /* Total count */
 .catalog-total {
     font-size: 11px;
     color: var(--text-secondary, rgba(255,255,255,0.45));
-    padding: 2px 2px 6px;
+    padding: 2px 16px 6px;
     flex-shrink: 0;
 }
 
@@ -563,21 +732,29 @@ watch(activeProvider, () => searchCatalog(true));
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding-bottom: 20px;
+    padding: 0 16px 20px;
 }
 
 /* Grid */
 .character-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
+}
+
+@media (min-width: 600px) {
+  .character-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }
 }
 
 .character-card {
   position: relative;
   border-radius: 16px;
   overflow: hidden;
-  aspect-ratio: 2 / 3;
+  display: flex;
+  flex-direction: column;
   background-color: var(--bg-color-light, #2a2a2a);
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, border-color 0.3s ease;
@@ -598,19 +775,27 @@ watch(activeProvider, () => searchCatalog(true));
   .character-card:hover .card-image {
     transform: scale(1.05);
   }
-  
-  .character-card:hover .card-badge {
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
-  }
 }
 
 .card-image-wrapper {
-  position: absolute;
-  top: 0;
-  left: 0;
+  position: relative;
   width: 100%;
-  height: 100%;
+  aspect-ratio: 2 / 3;
+  flex-shrink: 0;
   z-index: 0;
+  overflow: hidden;
+}
+
+.card-image-wrapper::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 50%;
+  background: linear-gradient(to top, var(--bg-color-light, #2a2a2a) 0%, rgba(0,0,0,0) 100%);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .card-image {
@@ -631,33 +816,36 @@ watch(activeProvider, () => searchCatalog(true));
   font-weight: bold;
 }
 
-.card-gradient {
+.card-header-top {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 70%;
-  background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%);
-  pointer-events: none;
-}
-
-.card-info {
-  position: absolute;
-  bottom: 0;
+  top: 0;
   left: 0;
   width: 100%;
   padding: 12px;
   box-sizing: border-box;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.card-header-row {
+  z-index: 2;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 8px;
+  pointer-events: none; /* Let clicks pass to card, except maybe badge */
+}
+
+.card-info-bottom {
+  position: relative;
+  z-index: 3;
+  padding: 6px 10px 12px;
+  margin-top: -4px;
+  background-color: var(--bg-color-light, #2a2a2a);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}  
+
+.card-name-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .card-name {
@@ -675,19 +863,55 @@ watch(activeProvider, () => searchCatalog(true));
 
 .card-desc {
   font-size: 0.8em;
-  color: rgba(255,255,255,0.8);
+  color: rgba(255,255,255,0.7);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+.creator-link {
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+@media (hover: hover) {
+    .creator-link:hover {
+        color: var(--vk-blue, #4080ff);
+        text-decoration: underline;
+    }
+}
+
+.card-snippet {
+  font-size: 0.75em;
+  color: rgba(255,255,255,0.55);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-  line-height: 1.3;
+  word-break: break-word;
+}
+
+.card-snippet :deep(p) { margin: 0; }
+.card-snippet :deep(br) { display: none; } /* Hide line breaks to save space in snippet */
+
+
+
+.card-tokens {
+  font-size: 0.8em;
+  font-weight: 600;
+  color: rgba(255,255,255,0.5);
 }
 
 .card-actions {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   margin-top: 4px;
   flex-wrap: wrap;
@@ -696,28 +920,53 @@ watch(activeProvider, () => searchCatalog(true));
 
 .card-tag {
     font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 6px;
-    background: rgba(64, 128, 255, 0.2);
+    padding: 2px 8px;
+    border-radius: 8px;
+    background: rgba(64, 128, 255, 0.15);
     color: var(--vk-blue, #4080ff);
     white-space: nowrap;
+    border: 1px solid rgba(64, 128, 255, 0.2);
+    font-weight: 600;
+}
+
+.nsfw-indicator {
+    background: rgba(255, 68, 68, 0.2) !important;
+    color: #ff4444 !important;
+    border-color: rgba(255, 68, 68, 0.3) !important;
+}
+
+.sfw-indicator {
+    background: rgba(76, 175, 80, 0.2) !important;
+    color: #4caf50 !important;
+    border-color: rgba(76, 175, 80, 0.3) !important;
+}
+
+.card-tag-custom {
+    background: rgba(0, 255, 255, 0.1) !important;
+    color: #00cccc !important;
+    border-color: rgba(0, 255, 255, 0.2) !important;
+}
+
+/* Alternate custom tag color for variety like in screenshot */
+.card-tag-custom:nth-child(3n) {
+    background: rgba(255, 0, 255, 0.1) !important;
+    color: #cc00cc !important;
+    border-color: rgba(255, 0, 255, 0.2) !important;
 }
 
 .card-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+  flex-shrink: 0;
   z-index: 10;
   display: flex;
   align-items: center;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: #fff;
   background-color: rgba(0,0,0,0.6);
   backdrop-filter: blur(4px);
-  padding: 4px 8px;
-  border-radius: 12px;
-  pointer-events: none;
+  -webkit-backdrop-filter: blur(4px);
+  padding: 4px 6px;
+  border-radius: 10px;
   transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 

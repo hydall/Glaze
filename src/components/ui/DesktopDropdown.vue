@@ -102,9 +102,8 @@ watch(
                         <div class="dd-item-info">
                             <span class="dd-item-label" :class="{ 'with-bg': item.image }">{{ item.label }}</span>
                             <span v-if="item.sublabel" class="dd-item-sublabel" :class="{ 'with-bg': item.image }">{{ item.sublabel }}</span>
+                            <span v-if="item.hint" class="dd-item-hint">{{ item.hint }}</span>
                         </div>
-
-                        <span v-if="item.hint" class="dd-item-hint">{{ item.hint }}</span>
 
                         <!-- Item Actions (Buttons on the right) -->
                         <div class="dd-item-actions" v-if="item.actions && item.actions.length">

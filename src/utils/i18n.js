@@ -12,10 +12,16 @@ export const translations = {
 
 export const i18nTrigger = ref(0);
 
-export function t(key) {
+export function t(key, vars) {
     // Read the trigger so Vue tracks this call
     const _track = i18nTrigger.value;
-    return translations[currentLang.value] ? (translations[currentLang.value][key] || key) : key;
+    let str = translations[currentLang.value] ? (translations[currentLang.value][key] || key) : key;
+    if (vars) {
+        for (const [k, v] of Object.entries(vars)) {
+            str = str.replace(`{${k}}`, v);
+        }
+    }
+    return str;
 }
 
 export function pluralize(count, key) {

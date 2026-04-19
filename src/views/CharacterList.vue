@@ -9,7 +9,7 @@ import { importCharacter } from '@/core/states/catalogState.js';
 import { datacatExtract, datacatExtractionStatus, datacatGetCharacter } from '@/core/services/catalog/datacatProvider.js';
 import { db, markSyncDeletedEntry } from '@/utils/db.js';
 import { createNewSession as dbCreateSession, deleteSession as dbDeleteSession } from '@/utils/sessions.js';
-import { translations } from '@/utils/i18n.js';
+import { translations, t, pluralize } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { attachLongPress } from '@/core/services/ui.js';
@@ -72,11 +72,11 @@ const loadCharacters = async () => {
 
 const onAddCharacter = () => {
     showBottomSheet({
-        title: translations[currentLang.value]?.sheet_title_char_options || 'Character',
+        title: t('sheet_title_char_options'),
         items: [
             {
-                label: translations[currentLang.value]?.action_create_new || 'Create New',
-                hint: translations[currentLang.value]?.hint_create_new || 'Создать нового персонажа с нуля',
+                label: t('action_create_new'),
+                hint: t('hint_create_new'),
                 icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
                 onClick: () => {
                     closeBottomSheet();
@@ -84,8 +84,8 @@ const onAddCharacter = () => {
                 }
             },
             {
-                label: translations[currentLang.value]?.action_import || 'Import from file',
-                hint: translations[currentLang.value]?.hint_import_file || 'Загрузить существующего персонажа из файла json/png',
+                label: t('action_import'),
+                hint: t('hint_import_file'),
                 icon: '<svg viewBox="0 0 24 24"><path d="M4 15h2v3h12v-3h2v3c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-3zm4.41-6.59L11 5.83V17h2V5.83l2.59 2.58L17 7l-5-5-5 5 1.41 1.41z"/></svg>',
                 onClick: () => {
                     closeBottomSheet();
@@ -107,17 +107,17 @@ const onAddCharacter = () => {
                 }
             },
             {
-                label: translations[currentLang.value]?.action_import_janitor || 'Импорт из JanitorAI',
-                hint: translations[currentLang.value]?.hint_import_janitor || 'Загрузить персонажа с janitor.ai с помощью ссылки',
+                label: t('action_import_janitor'),
+                hint: t('hint_import_janitor'),
                 icon: '<svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>',
                 onClick: () => {
                     closeBottomSheet();
                     setTimeout(() => {
                         showBottomSheet({
-                            title: translations[currentLang.value]?.action_import_janitor || 'Импорт из JanitorAI',
+                            title: t('action_import_janitor'),
                             input: {
-                                placeholder: 'https://janitorai.com/characters/...',
-                                confirmLabel: translations[currentLang.value]?.btn_ok || 'OK',
+                                placeholder: t('placeholder_janitor_url'),
+                                confirmLabel: t('btn_ok'),
                                 onConfirm: (url) => {
                                     startJanitorExtraction(url);
                                 }
@@ -136,11 +136,11 @@ const startJanitorExtraction = async (url) => {
     setTimeout(() => {
         showBottomSheet({
             noDropdown: true,
-            title: translations[currentLang.value]?.catalog_extracting || 'Extracting...',
+            title: t('catalog_extracting'),
             bigInfo: {
                 icon: `<svg viewBox="0 0 24 24" style="fill:var(--vk-blue);width:100%;height:100%"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>`,
-                description: translations[currentLang.value]?.catalog_extract_progress || 'Please wait...',
-                buttonText: translations[currentLang.value]?.btn_cancel || 'Cancel',
+                description: t('catalog_extract_progress'),
+                buttonText: t('btn_cancel'),
                 onButtonClick: () => {
                     if (pollInterval) clearInterval(pollInterval);
                     closeBottomSheet();
@@ -193,11 +193,11 @@ const startJanitorExtraction = async (url) => {
         setTimeout(() => {
             showBottomSheet({
                 noDropdown: true,
-                title: translations[currentLang.value]?.title_error || 'Error',
+                title: t('title_error'),
                 bigInfo: {
                     icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
                     description: e.message,
-                    buttonText: translations[currentLang.value]?.btn_ok || 'OK',
+                    buttonText: t('btn_ok'),
                     onButtonClick: closeBottomSheet
                 }
             });
@@ -215,8 +215,8 @@ const onEditCharacter = (char) => {
 const openActions = (char) => {
     const isFav = char.fav === true;
     const favLabel = isFav 
-        ? (translations[currentLang.value]?.action_remove_fav || 'Remove from favorites') 
-        : (translations[currentLang.value]?.action_add_fav || 'Add to favorites');
+        ? t('action_remove_fav') 
+        : t('action_add_fav');
     
     const favIcon = isFav 
         ? '<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/><line x1="4" y1="4" x2="20" y2="20" stroke="#ff4444" stroke-width="2" /></svg>'
@@ -228,16 +228,16 @@ const openActions = (char) => {
         title: char.name,
         items: [
             {
-                label: translations[currentLang.value]?.action_export_st || 'Export',
+                label: t('action_export_st'),
                 icon: '<svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>',
                 onClick: () => {
                     closeBottomSheet();
                     setTimeout(() => {
                         showBottomSheet({
-                            title: (translations[currentLang.value]?.action_export_st || 'Export') + ': ' + char.name,
+                            title: t('action_export_st') + ': ' + char.name,
                             items: [
                                 {
-                                    label: 'PNG (Character Card)',
+                                    label: t('label_export_png'),
                                     icon: '<svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c0 1.1.9 2-2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>',
                                     onClick: () => {
                                         exportCharacterAsV2Png(char);
@@ -245,7 +245,7 @@ const openActions = (char) => {
                                     }
                                 },
                                 {
-                                    label: 'JSON (SillyTavern V2)',
+                                    label: t('label_export_json'),
                                     icon: '<svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>',
                                     onClick: () => {
                                         exportCharacterAsV2Json(char);
@@ -268,17 +268,17 @@ const openActions = (char) => {
                 }
             },
             {
-                label: translations[currentLang.value]?.action_delete || 'Delete',
+                label: t('action_delete'),
                 icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
                 iconColor: '#ff4444',
                 isDestructive: true,
                 onClick: () => {
                     closeBottomSheet();
                     showBottomSheet({
-                        title: translations[currentLang.value]?.confirm_delete_character || 'Delete character?',
+                        title: t('confirm_delete_character'),
                         items: [
                             {
-                                label: translations[currentLang.value]?.btn_yes || 'Yes',
+                                label: t('btn_yes'),
                                 icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
                                 iconColor: '#ff4444',
                                 isDestructive: true,
@@ -292,7 +292,7 @@ const openActions = (char) => {
                                 }
                             },
                             {
-                                label: translations[currentLang.value]?.btn_no || 'No',
+                                label: t('btn_no'),
                                 icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
                                 onClick: () => closeBottomSheet()
                             }
@@ -314,10 +314,10 @@ const toggleSortDirection = () => {
 
 const openSortTypeSelector = () => {
     showBottomSheet({
-        title: translations[currentLang.value]?.sort_by || 'Sort',
+        title: t('sort_by'),
         items: [
             {
-                label: translations[currentLang.value]?.sort_name || 'Name',
+                label: t('sort_name'),
                 isActive: sortType.value === 'name',
                 onClick: () => {
                     sortType.value = 'name';
@@ -325,7 +325,7 @@ const openSortTypeSelector = () => {
                 }
             },
             {
-                label: translations[currentLang.value]?.sort_date || 'Date added',
+                label: t('sort_date'),
                 isActive: sortType.value === 'date',
                 onClick: () => {
                     sortType.value = 'date';
@@ -413,11 +413,11 @@ const openSessionsSheet = async (char) => {
     // If no data or no sessions, show the "no sessions" empty state
     if (!rawData || !rawData.sessions || Object.keys(rawData.sessions).length === 0) {
         showBottomSheet({
-            title: translations[currentLang.value]?.history_title || 'Sessions',
+            title: t('history_title'),
             bigInfo: {
                 icon: '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>',
-                description: translations[currentLang.value]?.no_sessions || 'No sessions',
-                buttonText: translations[currentLang.value]?.action_create_new || 'Create New',
+                description: t('no_sessions'),
+                buttonText: t('action_create_new'),
                 onButtonClick: async () => {
                     closeBottomSheet();
                     await dbCreateSession(char.id);
@@ -430,10 +430,10 @@ const openSessionsSheet = async (char) => {
                     closeBottomSheet();
                     setTimeout(() => {
                         showBottomSheet({
-                            title: translations[currentLang.value]?.history_title || 'Sessions',
+                            title: t('history_title'),
                             items: [
                                 {
-                                    label: translations[currentLang.value]?.action_create_new || 'Create New',
+                                    label: t('action_create_new'),
                                     icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
                                     onClick: async () => {
                                         closeBottomSheet();
@@ -442,7 +442,7 @@ const openSessionsSheet = async (char) => {
                                     }
                                 },
                                 {
-                                    label: translations[currentLang.value]?.action_import || 'Import from file',
+                                    label: t('action_import'),
                                     icon: '<svg viewBox="0 0 24 24"><path d="M4 15h2v3h12v-3h2v3c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-3zm4.41-6.59L11 5.83V17h2V5.83l2.59 2.58L17 7l-5-5-5 5 1.41 1.41z"/></svg>',
                                     onClick: () => {
                                         closeBottomSheet();
@@ -472,14 +472,14 @@ const openSessionsSheet = async (char) => {
     const cardItems = ids.map(sid => {
         const msgs = sessions[sid] || [];
         const lastMsg = msgs[msgs.length - 1];
-        const preview = lastMsg ? (lastMsg.text.length > 40 ? lastMsg.text.substring(0, 40) + '...' : lastMsg.text) : 'Empty session';
+        const preview = lastMsg ? (lastMsg.text.length > 40 ? lastMsg.text.substring(0, 40) + '...' : lastMsg.text) : t('empty_session');
         const dateFormatted = lastMsg ? formatDate(lastMsg.timestamp, 'short') : '';
         const isCurrent = sid === currentSessionId;
         
         return {
-            label: `Session #${sid}`,
+            label: t('session_name', { id: sid }),
             sublabel: preview,
-            badge: `${msgs.length} msgs${dateFormatted ? ' · ' + dateFormatted : ''}`,
+            badge: `${msgs.length} ${pluralize(msgs.length, 'count_messages')}${dateFormatted ? ' · ' + dateFormatted : ''}`,
             onClick: () => {
                 closeBottomSheet();
                 // We emit the char with the chosen sessionId so ChatView will load it
@@ -499,7 +499,7 @@ const openSessionsSheet = async (char) => {
     });
 
     showBottomSheet({
-        title: translations[currentLang.value]?.history_title || 'Sessions',
+        title: t('history_title'),
         cardItems: cardItems,
         headerAction: {
             icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
@@ -507,10 +507,10 @@ const openSessionsSheet = async (char) => {
                 closeBottomSheet();
                 setTimeout(() => {
                     showBottomSheet({
-                        title: translations[currentLang.value]?.history_title || 'Sessions',
+                        title: t('history_title'),
                         items: [
                             {
-                                label: translations[currentLang.value]?.action_create_new || 'Create New',
+                                label: t('action_create_new'),
                                 icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
                                 onClick: async () => {
                                     closeBottomSheet();
@@ -521,7 +521,7 @@ const openSessionsSheet = async (char) => {
                                 }
                             },
                             {
-                                label: translations[currentLang.value]?.action_import || 'Import from file',
+                                label: t('action_import'),
                                 icon: '<svg viewBox="0 0 24 24"><path d="M4 15h2v3h12v-3h2v3c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-3zm4.41-6.59L11 5.83V17h2V5.83l2.59 2.58L17 7l-5-5-5 5 1.41 1.41z"/></svg>',
                                 onClick: () => {
                                     closeBottomSheet();
@@ -540,10 +540,10 @@ const openSessionsSheet = async (char) => {
 
 const openDeleteSessionConfirm = (char, sessionId) => {
     showBottomSheet({
-        title: translations[currentLang.value]?.confirm_delete_session || 'Delete Session?',
+        title: t('confirm_delete_session'),
         items: [
             {
-                label: translations[currentLang.value]?.btn_yes || 'Yes',
+                label: t('btn_yes'),
                 icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
                 iconColor: '#ff4444',
                 isDestructive: true,
@@ -555,7 +555,7 @@ const openDeleteSessionConfirm = (char, sessionId) => {
                 }
             },
             {
-                label: translations[currentLang.value]?.btn_no || 'No',
+                label: t('btn_no'),
                 icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
                 onClick: () => {
                     closeBottomSheet();
@@ -587,11 +587,11 @@ defineExpose({ onAddCharacter, loadCharacters });
       <div class="tab-slider" :style="{ transform: `translateX(${activeTab === 'catalog' ? '100%' : '0'})` }"></div>
       <div class="top-tab" :class="{ active: activeTab === 'characters' }" @click="activeTab = 'characters'">
         <svg viewBox="0 0 24 24" class="tab-icon"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-        <span>{{ translations[currentLang.value]?.tab_my_characters || 'My Characters' }}</span>
+        <span>{{ t('tab_my_characters') }}</span>
       </div>
       <div class="top-tab" :class="{ active: activeTab === 'catalog' }" @click="activeTab = 'catalog'">
         <svg viewBox="0 0 24 24" class="tab-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-        <span>{{ translations[currentLang.value]?.tab_catalog || 'Catalog' }}</span>
+        <span>{{ t('tab_catalog') }}</span>
       </div>
     </div>
 
@@ -606,7 +606,7 @@ defineExpose({ onAddCharacter, loadCharacters });
       <div class="favorites-section">
         <div class="section-title">
           <svg viewBox="0 0 24 24" class="section-icon"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-          <span>{{ translations[currentLang.value]?.section_favorites || 'Favorites' }}</span>
+          <span>{{ t('section_favorites') }}</span>
         </div>
         <div class="favorites-scroll-container">
           <div 
@@ -638,9 +638,14 @@ defineExpose({ onAddCharacter, loadCharacters });
         <svg viewBox="0 0 24 24"><path d="M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z"/></svg>
       </div>
       <div class="preset-selector" @click="openSortTypeSelector">
-        <span>{{ sortType === 'name' ? (translations[currentLang.value]?.sort_name || 'Name') : (translations[currentLang.value]?.sort_date || 'Date added') }}</span>
+        <span>{{ sortType === 'name' ? t('sort_name') : t('sort_date') }}</span>
         <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;" class="selector-chevron"><path d="M7 10l5 5 5-5z"/></svg>
       </div>
+    </div>
+
+    <!-- Character Count -->
+    <div class="character-count" v-if="characters.length > 0">
+      {{ t('catalog_total', { count: filteredCharacters.length }) }}
     </div>
 
     <!-- Main Character List -->
@@ -683,7 +688,7 @@ defineExpose({ onAddCharacter, loadCharacters });
               <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
             </div>
           </div>
-          <div class="card-desc" v-if="char.scenario || char.description">{{ char.scenario || char.description }}</div>
+          <div class="card-desc" v-if="char.scenario || char.description" v-html="char.scenario || char.description"></div>
           
           <div class="card-actions">
             <div class="card-tag" v-if="char.version">v{{ char.version }}</div>
@@ -694,7 +699,7 @@ defineExpose({ onAddCharacter, loadCharacters });
 
     <div v-if="!isLoading && !hasVisibleCards" class="empty-state">
       <svg class="empty-state-icon" viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
-      <div class="empty-state-text">{{ translations[currentLang.value]?.no_characters || 'No characters' }}</div>
+      <div class="empty-state-text">{{ t('no_characters') }}</div>
     </div>
     </template>
   </div>
@@ -705,7 +710,6 @@ defineExpose({ onAddCharacter, loadCharacters });
 .char-catalog-embed {
   /* Match the height CatalogView expects: viewport minus header area, char tabs, and footer area */
   height: calc(100dvh - var(--header-height, 60px) - 16px - 53px - var(--footer-height, 80px) - 20px);
-  overflow: hidden;
 }
 
 .top-tabs-container {
@@ -720,6 +724,13 @@ defineExpose({ onAddCharacter, loadCharacters });
   border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
   border-radius: 100px;
   overflow: hidden;
+}
+
+@media (min-width: 600px) {
+  .top-tabs-container {
+    width: clamp(320px, 33.333%, 500px);
+    margin-right: auto;
+  }
 }
 
 .tab-slider {
@@ -765,8 +776,7 @@ defineExpose({ onAddCharacter, loadCharacters });
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  padding: 0 16px;
-  margin-bottom: 12px;
+  padding: 12px 16px;
 }
 
 .sort-dir-btn {
@@ -864,6 +874,13 @@ defineExpose({ onAddCharacter, loadCharacters });
   height: 20px;
   fill: currentColor;
   transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.character-count {
+  font-size: 11px;
+  color: var(--text-secondary, rgba(255,255,255,0.45));
+  padding: 2px 16px 6px;
+  flex-shrink: 0;
 }
 
 /* Styles */
@@ -1009,10 +1026,17 @@ defineExpose({ onAddCharacter, loadCharacters });
 
 .character-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
   padding: 0 16px;
   padding-bottom: calc(90px + var(--sab)); /* Space for bottom nav */
+}
+
+@media (min-width: 600px) {
+  .character-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }
 }
 
 .character-card {
