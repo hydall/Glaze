@@ -2,10 +2,9 @@ import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
 import { db } from '@/utils/db.js';
+import { GDRIVE_CLIENT_ID } from '@/core/config/syncConfig.js';
 import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
 
-const GDRIVE_CLIENT_ID = import.meta.env.VITE_GDRIVE_CLIENT_ID || '';
-const GDRIVE_CLIENT_SECRET = import.meta.env.VITE_GDRIVE_CLIENT_SECRET || '';
 const REDIRECT_URI_NATIVE = import.meta.env.VITE_GDRIVE_REDIRECT_NATIVE || 'com.hydall.glaze://oauth/gdrive';
 const REDIRECT_URI_WEB = import.meta.env.VITE_GDRIVE_REDIRECT_WEB || `${window.location.origin}/oauth/gdrive/redirect.html`;
 const API_BASE = 'https://www.googleapis.com/drive/v3';
@@ -65,7 +64,6 @@ async function refreshAccessToken(refreshToken) {
         refresh_token: refreshToken,
         client_id: GDRIVE_CLIENT_ID
     };
-    if (GDRIVE_CLIENT_SECRET) params.client_secret = GDRIVE_CLIENT_SECRET;
 
     const response = await fetch(TOKEN_URL, {
         method: 'POST',
@@ -321,7 +319,6 @@ async function exchangeCodeForToken(code, verifier, redirectUri) {
         client_id: GDRIVE_CLIENT_ID,
         redirect_uri: redirectUri
     };
-    if (GDRIVE_CLIENT_SECRET) params.client_secret = GDRIVE_CLIENT_SECRET;
 
     const response = await fetch(TOKEN_URL, {
         method: 'POST',

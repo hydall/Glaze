@@ -725,6 +725,7 @@
     "menu_cloud_sync": "Cloud Sync",
     "sync_connect_provider": "Connect a Cloud Provider",
     "sync_connecting": "Connecting...",
+    "sync_no_providers_configured": "Cloud sync is disabled in this build. Add OAuth keys in .env to enable Dropbox or Google Drive sign-in.",
     "sync_hint_dropbox": "Your data will be encrypted before upload. Only you can read it.",
     "sync_restore_key": "Restore from Recovery Phrase",
     "sync_enter_phrase": "Enter Recovery Phrase",
