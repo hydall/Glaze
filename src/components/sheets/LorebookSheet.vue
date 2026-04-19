@@ -867,6 +867,15 @@ defineExpose({ open, openEntry, close, openLorebook });
                                   <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                               </div>
                           </div>
+
+                          <!-- Vector Threshold -->
+                          <div v-if="lorebookState.globalSettings.searchType !== 'keys'" class="settings-item-range">
+                              <div class="range-row">
+                                  <label>{{ t('label_similarity_threshold') || 'Similarity Threshold' }}</label>
+                                  <input type="number" v-model.number="lorebookState.globalSettings.vectorThreshold" class="range-input-val" step="0.01">
+                              </div>
+                              <input type="range" v-model.number="lorebookState.globalSettings.vectorThreshold" min="0" max="1" step="0.01">
+                          </div>
                       </div>
                   </div>
 
