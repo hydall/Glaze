@@ -1,8 +1,12 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue';
+
+const CatalogView = defineAsyncComponent(() => import('@/views/CatalogView.vue'));
 import { triggerCharacterImport, extractCharacterBook } from '@/utils/characterIO.js';
 import { exportCharacterAsV2Json, exportCharacterAsV2Png } from '@/utils/characterIO.js';
 import { triggerChatImport } from '@/core/services/chatImporter.js';
+import { importCharacter } from '@/core/states/catalogState.js';
+import { datacatExtract, datacatExtractionStatus, datacatGetCharacter } from '@/core/services/catalog/datacatProvider.js';
 import { db, markSyncDeletedEntry } from '@/utils/db.js';
 import { createNewSession as dbCreateSession, deleteSession as dbDeleteSession } from '@/utils/sessions.js';
 import { translations } from '@/utils/i18n.js';
@@ -18,6 +22,8 @@ const props = defineProps({
     default: 'all'
   }
 });
+
+const activeTab = ref('characters');
 
 const emit = defineEmits(['open-chat']);
 
@@ -70,6 +76,7 @@ const onAddCharacter = () => {
         items: [
             {
                 label: translations[currentLang.value]?.action_create_new || 'Create New',
+                hint: translations[currentLang.value]?.hint_create_new || 'Создать нового персонажа с нуля',
                 icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
                 onClick: () => {
                     closeBottomSheet();
@@ -78,6 +85,7 @@ const onAddCharacter = () => {
             },
             {
                 label: translations[currentLang.value]?.action_import || 'Import from file',
+                hint: translations[currentLang.value]?.hint_import_file || 'Загрузить существующего персонажа из файла json/png',
                 icon: '<svg viewBox="0 0 24 24"><path d="M4 15h2v3h12v-3h2v3c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-3zm4.41-6.59L11 5.83V17h2V5.83l2.59 2.58L17 7l-5-5-5 5 1.41 1.41z"/></svg>',
                 onClick: () => {
                     closeBottomSheet();
@@ -97,10 +105,105 @@ const onAddCharacter = () => {
                         }
                     });
                 }
+            },
+            {
+                label: translations[currentLang.value]?.action_import_janitor || 'Импорт из JanitorAI',
+                hint: translations[currentLang.value]?.hint_import_janitor || 'Загрузить персонажа с janitor.ai с помощью ссылки',
+                icon: '<svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>',
+                onClick: () => {
+                    closeBottomSheet();
+                    setTimeout(() => {
+                        showBottomSheet({
+                            title: translations[currentLang.value]?.action_import_janitor || 'Импорт из JanitorAI',
+                            input: {
+                                placeholder: 'https://janitorai.com/characters/...',
+                                confirmLabel: translations[currentLang.value]?.btn_ok || 'OK',
+                                onConfirm: (url) => {
+                                    startJanitorExtraction(url);
+                                }
+                            }
+                        });
+                    }, 300);
+                }
             }
         ]
     });
 };
+
+let pollInterval = null;
+const startJanitorExtraction = async (url) => {
+    closeBottomSheet();
+    setTimeout(() => {
+        showBottomSheet({
+            noDropdown: true,
+            title: translations[currentLang.value]?.catalog_extracting || 'Extracting...',
+            bigInfo: {
+                icon: `<svg viewBox="0 0 24 24" style="fill:var(--vk-blue);width:100%;height:100%"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>`,
+                description: translations[currentLang.value]?.catalog_extract_progress || 'Please wait...',
+                buttonText: translations[currentLang.value]?.btn_cancel || 'Cancel',
+                onButtonClick: () => {
+                    if (pollInterval) clearInterval(pollInterval);
+                    closeBottomSheet();
+                }
+            }
+        });
+    }, 300);
+
+    try {
+        await datacatExtract(url, true);
+        let attempts = 0;
+        const MAX = 60;
+        
+        pollInterval = setInterval(async () => {
+            attempts++;
+            if (attempts > MAX) {
+                clearInterval(pollInterval);
+                closeBottomSheet();
+                return;
+            }
+            try {
+                const status = await datacatExtractionStatus();
+                // Extract UUID from the provided URL, as DataCat's history URL might not contain the slug or query parameters
+                const uuidMatch = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+                const searchStr = uuidMatch ? uuidMatch[0] : url;
+                
+                const done = status.history?.find(h => h.url?.includes(searchStr));
+                if (done && done.characterId) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    
+                    const result = await datacatGetCharacter(done.characterId);
+                    const charData = result.charData;
+                    if (!charData.id) charData.id = Date.now().toString();
+                    
+                    await importCharacter(charData, result.avatarUrl);
+                    closeBottomSheet();
+                    
+                    setTimeout(() => {
+                        const index = characters.value.findIndex(c => c.id === charData.id);
+                        if (index !== -1) {
+                            window.dispatchEvent(new CustomEvent('open-character-editor', { detail: { index } }));
+                        }
+                    }, 500);
+                }
+            } catch (e) { }
+        }, 3000);
+    } catch(e) {
+        closeBottomSheet();
+        setTimeout(() => {
+            showBottomSheet({
+                noDropdown: true,
+                title: translations[currentLang.value]?.title_error || 'Error',
+                bigInfo: {
+                    icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
+                    description: e.message,
+                    buttonText: translations[currentLang.value]?.btn_ok || 'OK',
+                    onButtonClick: closeBottomSheet
+                }
+            });
+        }, 300);
+    }
+}
 
 const onEditCharacter = (char) => {
     const index = characters.value.indexOf(char);
@@ -479,6 +582,24 @@ defineExpose({ onAddCharacter, loadCharacters });
 
 <template>
   <div class="view-content-wrapper">
+    <!-- Tab Bar -->
+    <div class="top-tabs-container">
+      <div class="tab-slider" :style="{ transform: `translateX(${activeTab === 'catalog' ? '100%' : '0'})` }"></div>
+      <div class="top-tab" :class="{ active: activeTab === 'characters' }" @click="activeTab = 'characters'">
+        <svg viewBox="0 0 24 24" class="tab-icon"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        <span>{{ translations[currentLang.value]?.tab_my_characters || 'My Characters' }}</span>
+      </div>
+      <div class="top-tab" :class="{ active: activeTab === 'catalog' }" @click="activeTab = 'catalog'">
+        <svg viewBox="0 0 24 24" class="tab-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+        <span>{{ translations[currentLang.value]?.tab_catalog || 'Catalog' }}</span>
+      </div>
+    </div>
+
+    <!-- Catalog Tab -->
+    <CatalogView v-if="activeTab === 'catalog'" class="char-catalog-embed" />
+
+    <!-- Characters Tab -->
+    <template v-else>
     <!-- Favorites List -->
     <!-- Favorites List -->
     <div class="menu-group" v-if="favorites.length > 0 && !searchQuery">
@@ -575,10 +696,70 @@ defineExpose({ onAddCharacter, loadCharacters });
       <svg class="empty-state-icon" viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
       <div class="empty-state-text">{{ translations[currentLang.value]?.no_characters || 'No characters' }}</div>
     </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
+
+.char-catalog-embed {
+  /* Match the height CatalogView expects: viewport minus header area, char tabs, and footer area */
+  height: calc(100dvh - var(--header-height, 60px) - 16px - 53px - var(--footer-height, 80px) - 20px);
+  overflow: hidden;
+}
+
+.top-tabs-container {
+  display: flex;
+  position: relative;
+  align-items: stretch;
+  padding: 0;
+  margin: 10px 16px 12px;
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.1);
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
+  border-radius: 100px;
+  overflow: hidden;
+}
+
+.tab-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 100%;
+  background-color: var(--vk-blue, #4080ff);
+  border-radius: 100px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 0;
+}
+
+.top-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vk-blue, #4080ff);
+  cursor: pointer;
+  z-index: 1;
+  transition: color 0.3s ease;
+  user-select: none;
+}
+
+.top-tab.active {
+  color: #fff;
+}
+
+.tab-icon {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
 .sort-controls {
   display: flex;
   align-items: center;
@@ -660,6 +841,13 @@ defineExpose({ onAddCharacter, loadCharacters });
 .preset-selector:active {
   transform: scale(0.95);
   opacity: 0.8;
+}
+
+.preset-selector.active {
+  background-color: var(--vk-blue, #4080ff);
+  color: #fff;
+  border-color: var(--vk-blue, #4080ff);
+  box-shadow: 0 4px 12px rgba(var(--vk-blue-rgb, 82, 139, 204), 0.4);
 }
 
 .preset-selector.dropdown-open {

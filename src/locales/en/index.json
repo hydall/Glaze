@@ -860,6 +860,7 @@
     "no_prompt": "No prompt",
     "top_p": "Top P",
     "tab_catalog": "Catalog",
+    "tab_my_characters": "My Characters",
     "catalog_search_placeholder": "Search characters...",
     "catalog_total": "{count} characters",
     "catalog_empty": "No characters found",

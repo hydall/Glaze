@@ -36,7 +36,6 @@ const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/Glos
 const DragDropOverlay = defineAsyncComponent(() => import('@/components/ui/DragDropOverlay.vue'));
 const ToolsView = defineAsyncComponent(() => import('@/views/ToolsView.vue'));
 const PersonasView = defineAsyncComponent(() => import('@/views/PersonasView.vue'));
-const CatalogView = defineAsyncComponent(() => import('@/views/CatalogView.vue'));
 const RegexSheet = defineAsyncComponent(() => import('@/components/sheets/RegexSheet.vue'));
 import { Capacitor } from '@capacitor/core';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
@@ -550,7 +549,7 @@ const headerEditingIndex = computed(() => {
 
 const showLogo = computed(() => {
     return !['view-chat', 'view-character-edit', 'view-persona-edit', 'view-theme-settings', 'view-settings',
-             'view-tools', 'view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas', 'view-catalog'].includes(currentView.value) && !isHeaderEditorMode.value;
+             'view-tools', 'view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas'].includes(currentView.value) && !isHeaderEditorMode.value;
 });
 
 const updateLayoutMetrics = () => {
@@ -916,12 +915,6 @@ watch(currentView, (newVal, oldVal) => {
                     @open-chat="openChatWrapper"
                 />
             </div>
-
-            <!-- VIEW: CATALOG -->
-            <CatalogView
-                class="view active-view view-gray-bg"
-                v-else-if="effectiveMainView === 'view-catalog'"
-            />
 
             <!-- VIEW 3: MENU -->
             <MenuView

@@ -7,6 +7,7 @@ import { db } from '@/utils/db.js';
 import { extractCharacterBook, generateThumbnail } from '@/utils/characterIO.js';
 import { datacatBrowse, datacatSearch, datacatGetCharacter, datacatEnsureSession, datacatFresh } from '@/core/services/catalog/datacatProvider.js';
 import { janitorSearch, janitorHampterSearch } from '@/core/services/catalog/janitorProvider.js';
+import { Capacitor } from '@capacitor/core';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,15 @@ export const catalogPage = ref(1);
 export const catalogHasMore = ref(true);
 export const catalogQuery = ref('');
 export const catalogTotal = ref(0);
+
+// Filters state
+export const catalogFilters = ref({
+    sort: 'newest', // newest, oldest, popular, tokens_desc, tokens_asc
+    nsfw: true,
+    tagIds: [],
+    minTokens: 29,
+    maxTokens: 100000
+});
 
 // Extraction state (JanitorAI via DataCat)
 export const extractionStatus = ref(null); // { inProgress, queuePosition, phase } | null
@@ -53,16 +63,27 @@ export async function searchCatalog(reset = false) {
         if (activeProvider.value === 'datacat') {
             await datacatEnsureSession();
             if (query) {
-                result = await datacatSearch({ query, page, limit: PAGE_SIZE });
+                result = await datacatSearch({ query, page, limit: PAGE_SIZE, filters: catalogFilters.value });
             } else {
-                result = await datacatBrowse({ page, limit: PAGE_SIZE });
+                result = await datacatBrowse({ page, limit: PAGE_SIZE, filters: catalogFilters.value });
             }
         } else {
-            // JanitorAI: try MeiliSearch, fall back to Hampter
-            try {
-                result = await janitorSearch({ query, page });
-            } catch {
-                result = await janitorHampterSearch({ query, page });
+            // JanitorAI: prefer Hampter for popular/trending sort ONLY on native (bypass CORS)
+            // On web, Hampter blocks proxies (403), so we fallback to MeiliSearch
+            const canUseHampter = Capacitor.isNativePlatform();
+
+            if (catalogFilters.value.sort === 'popular' && !query && canUseHampter) {
+                result = await janitorHampterSearch({ query, page, filters: catalogFilters.value });
+            } else {
+                try {
+                    result = await janitorSearch({ query, page, filters: catalogFilters.value });
+                } catch (e) {
+                    if (canUseHampter) {
+                        result = await janitorHampterSearch({ query, page, filters: catalogFilters.value });
+                    } else {
+                        throw e;
+                    }
+                }
             }
         }
 

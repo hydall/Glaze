@@ -1,15 +1,16 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import {
     activeProvider, catalogResults, catalogLoading, catalogError,
     catalogHasMore, catalogQuery, catalogTotal,
-    searchCatalog, loadMore, setProvider, importCharacter
+    searchCatalog, loadMore, setProvider, importCharacter, catalogFilters
 } from '@/core/states/catalogState.js';
 import { datacatGetCharacter, datacatExtract, datacatExtractionStatus } from '@/core/services/catalog/datacatProvider.js';
 import { janitorFetchCharacter } from '@/core/services/catalog/janitorProvider.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
+import FiltersBottomSheet from '@/components/sheets/FiltersBottomSheet.vue';
 
 const t = (key, vars) => {
     let str = translations[currentLang.value]?.[key] || key;
@@ -19,17 +20,13 @@ const t = (key, vars) => {
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
-const searchInput = ref(null);
 let searchDebounce = null;
 
-function onSearchInput() {
+function onHeaderSearch(e) {
+    // Only search if catalog tab is active, but since catalogQuery is global to catalogState it's safe to update
+    catalogQuery.value = e.detail;
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => searchCatalog(true), 400);
-}
-
-function clearSearch() {
-    catalogQuery.value = '';
-    searchCatalog(true);
 }
 
 // ─── Infinite Scroll ──────────────────────────────────────────────────────────
@@ -51,7 +48,7 @@ const importingId = ref(null);
 
 async function openPreview(item) {
     // Show loading sheet immediately
-    showBottomSheet({
+    showBottomSheet({ noDropdown: true,
         title: item.name,
         bigInfo: {
             icon: `<svg viewBox="0 0 24 24" style="width:100%;height:100%;fill:var(--vk-blue)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>`,
@@ -76,7 +73,7 @@ async function openPreview(item) {
             avatarUrl = item.avatarUrl;
         }
     } catch (e) {
-        showBottomSheet({
+        showBottomSheet({ noDropdown: true,
             title: t('title_error'),
             bigInfo: {
                 icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
@@ -98,7 +95,7 @@ async function openPreview(item) {
     const tokenStr = item.tokens ? `${item.tokens} tokens` : '';
     const meta = [tagsStr, tokenStr].filter(Boolean).join(' · ');
 
-    showBottomSheet({
+    showBottomSheet({ noDropdown: true,
         title: charData.name || item.name,
         items: [
             {
@@ -133,7 +130,7 @@ async function doImport(item, charData, avatarUrl) {
 
     try {
         await importCharacter(charData, avatarUrl);
-        showBottomSheet({
+        showBottomSheet({ noDropdown: true,
             title: t('catalog_imported'),
             bigInfo: {
                 icon: `<svg viewBox="0 0 24 24" style="fill:#4caf50;width:100%;height:100%"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`,
@@ -143,7 +140,7 @@ async function doImport(item, charData, avatarUrl) {
             }
         });
     } catch (e) {
-        showBottomSheet({
+        showBottomSheet({ noDropdown: true,
             title: t('title_error'),
             bigInfo: {
                 icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
@@ -169,7 +166,7 @@ async function startExtraction(item) {
     extractionItemId.value = item.id;
     extractionPhase.value = 'queued';
 
-    showBottomSheet({
+    showBottomSheet({ noDropdown: true,
         title: t('catalog_extracting'),
         bigInfo: {
             icon: `<svg viewBox="0 0 24 24" style="fill:var(--vk-blue);width:100%;height:100%"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>`,
@@ -184,7 +181,7 @@ async function startExtraction(item) {
         startPolling(item);
     } catch (e) {
         extractionItemId.value = null;
-        showBottomSheet({
+        showBottomSheet({ noDropdown: true,
             title: t('title_error'),
             bigInfo: {
                 icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
@@ -241,6 +238,42 @@ function cancelExtraction() {
     closeBottomSheet();
 }
 
+// ─── Controls ─────────────────────────────────────────────────────────────────
+
+const openProviderSelector = () => {
+    showBottomSheet({
+        title: t('catalog_source') === 'catalog_source' ? 'Source' : t('catalog_source'),
+        items: [
+            {
+                label: 'DataCat',
+                isActive: activeProvider.value === 'datacat',
+                onClick: () => {
+                    setProvider('datacat');
+                    closeBottomSheet();
+                }
+            },
+            {
+                label: 'JanitorAI',
+                isActive: activeProvider.value === 'janitor',
+                onClick: () => {
+                    setProvider('janitor');
+                    closeBottomSheet();
+                }
+            }
+        ]
+    });
+};
+
+const showFiltersSheet = ref(false);
+
+const openFilters = () => {
+    showFiltersSheet.value = true;
+};
+
+const onFiltersApply = () => {
+    searchCatalog(true);
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatTokens(n) {
@@ -255,6 +288,11 @@ onMounted(() => {
     if (catalogResults.value.length === 0) {
         searchCatalog(true);
     }
+    window.addEventListener('header-search', onHeaderSearch);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('header-search', onHeaderSearch);
 });
 
 watch(activeProvider, () => searchCatalog(true));
@@ -262,41 +300,22 @@ watch(activeProvider, () => searchCatalog(true));
 
 <template>
     <div class="catalog-view">
-        <!-- Provider Toggle -->
-        <div class="catalog-providers">
-            <button
-                class="provider-btn"
-                :class="{ active: activeProvider === 'datacat' }"
-                @click="setProvider('datacat')"
-            >
-                DataCat
-            </button>
-            <button
-                class="provider-btn"
-                :class="{ active: activeProvider === 'janitor' }"
-                @click="setProvider('janitor')"
-            >
-                JanitorAI
-            </button>
+        <!-- Catalog Controls -->
+        <div class="catalog-controls">
+            <div class="preset-selector" @click="openProviderSelector">
+                <span>{{ activeProvider === 'datacat' ? 'DataCat' : 'JanitorAI' }}</span>
+                <svg viewBox="0 0 24 24" class="selector-chevron"><path d="M7 10l5 5 5-5z"/></svg>
+            </div>
+            
+            <div class="preset-selector" @click="openFilters">
+                <span>{{ t('filters') === 'filters' ? 'Filters' : t('filters') }}</span>
+                <svg viewBox="0 0 24 24" class="selector-chevron"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+            </div>
         </div>
 
-        <!-- Search Bar -->
-        <div class="catalog-search-bar">
-            <svg class="search-icon" viewBox="0 0 24 24">
-                <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-            </svg>
-            <input
-                ref="searchInput"
-                v-model="catalogQuery"
-                class="catalog-search-input"
-                :placeholder="t('catalog_search_placeholder')"
-                @input="onSearchInput"
-                type="search"
-            />
-            <button v-if="catalogQuery" class="search-clear" @click="clearSearch">
-                <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-            </button>
-        </div>
+        <FiltersBottomSheet v-model:visible="showFiltersSheet" @apply="onFiltersApply" />
+
+
 
         <!-- Results Count -->
         <div v-if="catalogTotal > 0 && !catalogLoading" class="catalog-total">
@@ -318,34 +337,42 @@ watch(activeProvider, () => searchCatalog(true));
 
         <!-- Character Grid -->
         <div class="catalog-scroll" ref="scrollEl" @scroll.passive="onScroll">
-            <div class="catalog-grid">
+            <div class="character-grid" style="padding: 4px 0; padding-bottom: calc(90px + var(--sab));">
                 <div
                     v-for="item in catalogResults"
                     :key="item.source + item.id"
-                    class="catalog-card"
+                    class="character-card"
                     @click="openPreview(item)"
                 >
-                    <!-- Avatar -->
-                    <div class="card-avatar-wrap">
+                    <!-- Token badge -->
+                    <div class="card-token-badge" v-if="item.tokens">
+                      <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                      <span>{{ formatTokens(item.tokens) }}</span>
+                    </div>
+
+                    <!-- Avatar Image -->
+                    <div class="card-image-wrapper">
                         <img
                             v-if="item.avatarUrl"
                             :src="item.avatarUrl"
-                            class="card-avatar"
+                            class="card-image"
                             loading="lazy"
                             :alt="item.name"
                         />
-                        <div v-else class="card-avatar-placeholder">
+                        <div v-else class="card-placeholder" style="background-color: #66ccff;">
                             {{ item.name?.[0]?.toUpperCase() || '?' }}
                         </div>
-                        <!-- Token badge -->
-                        <span v-if="item.tokens" class="card-token-badge">{{ formatTokens(item.tokens) }}</span>
+                        <div class="card-gradient"></div>
                     </div>
 
                     <!-- Info -->
                     <div class="card-info">
-                        <div class="card-name">{{ item.name }}</div>
-                        <div v-if="item.creator" class="card-creator">@{{ item.creator }}</div>
-                        <div v-if="item.tags?.length" class="card-tags">
+                        <div class="card-header-row">
+                            <div class="card-name">{{ item.name }}</div>
+                        </div>
+                        <div class="card-desc" v-if="item.creator">@{{ item.creator }}</div>
+                        
+                        <div class="card-actions" v-if="item.tags?.length">
                             <span v-for="tag in item.tags.slice(0, 3)" :key="tag" class="card-tag">{{ tag }}</span>
                         </div>
                     </div>
@@ -376,86 +403,56 @@ watch(activeProvider, () => searchCatalog(true));
     flex-direction: column;
     height: 100%;
     overflow: hidden;
-    padding: 0 12px;
+    padding: 0 16px;
     box-sizing: border-box;
 }
 
-/* Provider Toggle */
-.catalog-providers {
-    display: flex;
-    gap: 8px;
-    padding: 10px 0 6px;
-    flex-shrink: 0;
+/* Controls */
+.catalog-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0px 0 12px;
+  flex-shrink: 0;
 }
 
-.provider-btn {
-    flex: 1;
-    padding: 8px 0;
-    border-radius: 12px;
-    border: 1px solid var(--border-color, rgba(255,255,255,0.1));
-    background: rgba(255,255,255,0.05);
-    color: var(--text-color, #fff);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.2s, color 0.2s;
+.preset-selector {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--vk-blue, #4080ff);
+  padding: 0 14px;
+  border-radius: 16px;
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
+  transition: transform 0.1s ease, background-color 0.2s, border-color 0.2s, opacity 0.2s;
+  overflow: hidden;
+  user-select: none;
 }
 
-.provider-btn.active {
-    background: var(--vk-blue, #4080ff);
-    border-color: var(--vk-blue, #4080ff);
-    color: #fff;
+@media (hover: hover) {
+  .preset-selector:hover {
+    background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.25);
+    border-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.4);
+    transform: translateY(-1px);
+  }
 }
 
-/* Search Bar */
-.catalog-search-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: rgba(255,255,255, var(--element-opacity, 0.08));
-    border: 1px solid var(--border-color, rgba(255,255,255,0.1));
-    border-radius: 14px;
-    padding: 0 12px;
-    margin: 6px 0;
-    flex-shrink: 0;
+.preset-selector:active {
+  transform: scale(0.95);
+  opacity: 0.8;
 }
 
-.search-icon {
-    width: 18px;
-    height: 18px;
-    fill: var(--text-secondary, rgba(255,255,255,0.5));
-    flex-shrink: 0;
-}
-
-.catalog-search-input {
-    flex: 1;
-    background: transparent;
-    border: none;
-    outline: none;
-    color: var(--text-color, #fff);
-    font-size: 14px;
-    padding: 10px 0;
-    min-width: 0;
-}
-
-.catalog-search-input::placeholder {
-    color: var(--text-secondary, rgba(255,255,255,0.4));
-}
-
-.search-clear {
-    background: none;
-    border: none;
-    padding: 4px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    color: var(--text-secondary, rgba(255,255,255,0.5));
-}
-
-.search-clear svg {
-    width: 16px;
-    height: 16px;
-    fill: currentColor;
+.preset-selector .selector-chevron {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
 }
 
 /* Total count */
@@ -475,95 +472,131 @@ watch(activeProvider, () => searchCatalog(true));
 }
 
 /* Grid */
-.catalog-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 10px;
-    padding: 4px 0;
+.character-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
 }
 
-/* Card */
-.catalog-card {
-    background: rgba(255,255,255, var(--element-opacity, 0.05));
-    border: 1px solid var(--border-color, rgba(255,255,255,0.08));
-    border-radius: 14px;
-    overflow: hidden;
-    cursor: pointer;
-    transition: transform 0.15s, border-color 0.15s;
-    position: relative;
+.character-card {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  aspect-ratio: 2 / 3;
+  background-color: var(--bg-color-light, #2a2a2a);
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.05);
 }
 
-.catalog-card:active {
-    transform: scale(0.97);
+.character-card:active {
+  transform: scale(0.96);
 }
 
-.card-avatar-wrap {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 3/4;
-    background: rgba(255,255,255,0.05);
-    overflow: hidden;
+@media (hover: hover) {
+  .character-card:hover {
+    transform: translateY(-4px) scale(1.01);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.3);
+  }
+
+  .character-card:hover .card-image {
+    transform: scale(1.05);
+  }
+  
+  .character-card:hover .card-token-badge {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+  }
 }
 
-.card-avatar {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
+.card-image-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
 }
 
-.card-avatar-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 40px;
-    font-weight: 700;
-    color: rgba(255,255,255,0.4);
-    background: rgba(255,255,255,0.04);
+.card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.5s ease;
 }
 
-.card-token-badge {
-    position: absolute;
-    bottom: 6px;
-    right: 6px;
-    background: rgba(0,0,0,0.6);
-    backdrop-filter: blur(4px);
-    color: rgba(255,255,255,0.85);
-    font-size: 10px;
-    font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 8px;
+.card-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3em;
+  color: rgba(255,255,255,0.8);
+  font-weight: bold;
+}
+
+.card-gradient {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 70%;
+  background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%);
+  pointer-events: none;
 }
 
 .card-info {
-    padding: 8px 8px 10px;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
 }
 
 .card-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-color, #fff);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    margin-bottom: 2px;
+  font-weight: 700;
+  font-size: 1.1em;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.card-creator {
-    font-size: 11px;
-    color: var(--text-secondary, rgba(255,255,255,0.45));
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    margin-bottom: 4px;
+.card-desc {
+  font-size: 0.8em;
+  color: rgba(255,255,255,0.8);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  line-height: 1.3;
 }
 
-.card-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
+.card-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .card-tag {
@@ -573,6 +606,32 @@ watch(activeProvider, () => searchCatalog(true));
     background: rgba(64, 128, 255, 0.2);
     color: var(--vk-blue, #4080ff);
     white-space: nowrap;
+}
+
+.card-token-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background-color: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  padding: 4px 8px;
+  border-radius: 12px;
+  pointer-events: none;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card-token-badge svg {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  fill: currentColor;
+  opacity: 0.9;
 }
 
 /* Import overlay */

@@ -40,7 +40,7 @@ function isDesktopEnv() {
 // ── Public API ─────────────────────────────────────────────────────────────
 export function showBottomSheet(config) {
     // On desktop, intercept "simple select" sheets and show a dropdown instead
-    if (isDesktopEnv() && isSimpleSelect(config)) {
+    if (!config.noDropdown && isDesktopEnv() && isSimpleSelect(config)) {
         const { x, y } = getLastClickPosition();
         showDesktopDropdown({
             title: config.title || '',

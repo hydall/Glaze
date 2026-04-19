@@ -191,140 +191,142 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div :class="{ 'modal-overlay': !sidebarMode, 'visible': !sidebarMode && visible, 'bottom-sheet-sidebar-wrapper': sidebarMode }">
-        <div v-if="!sidebarMode" class="modal-backdrop" @click="locked ? undefined : close()"></div>
-        <div class="bottom-sheet-content" @click.stop 
-             :style="!sidebarMode && isDragging ? { transform: `translateY(${currentDragY}px)` } : ''"
-             :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid, 'is-sidebar': sidebarMode }">
-            
-            <div v-if="!sidebarMode" class="sheet-handle-bar"
-                 @touchstart="onHandleTouchStart"
-                 @touchmove.prevent="onHandleTouchMove"
-                 @touchend="onHandleTouchEnd"
-            ></div>
-
-            <div class="sheet-header" v-if="title || headerAction">
-                <div class="sheet-title">
-                    <div v-if="sidebarMode" class="sheet-back-btn" @click="close">
-                        <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-                    </div>
-                    {{ title }}
-                    <HelpTip v-if="helpTip" :term="helpTip" />
-                </div>
-                <div class="sheet-action-btn" v-if="headerAction" @click="headerAction.onClick" v-html="headerAction.icon"></div>
-            </div>
-            
-            <div class="sheet-scroll-container">
-                <!-- Custom Content (HTML) -->
-                <div v-if="typeof content === 'string'" class="sheet-custom-content" v-html="content"></div>
-                <div v-else-if="content" class="sheet-custom-content" ref="domContent"></div>
+    <Teleport to="body">
+        <div :class="{ 'modal-overlay': !sidebarMode, 'visible': !sidebarMode && visible, 'bottom-sheet-sidebar-wrapper': sidebarMode }">
+            <div v-if="!sidebarMode" class="modal-backdrop" @click="locked ? undefined : close()"></div>
+            <div class="bottom-sheet-content" @click.stop 
+                 :style="!sidebarMode && isDragging ? { transform: `translateY(${currentDragY}px)` } : ''"
+                 :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid, 'is-sidebar': sidebarMode }">
                 
-                <!-- Vue Slot Content -->
-                <slot></slot>
+                <div v-if="!sidebarMode" class="sheet-handle-bar"
+                     @touchstart="onHandleTouchStart"
+                     @touchmove.prevent="onHandleTouchMove"
+                     @touchend="onHandleTouchEnd"
+                ></div>
 
-                <!-- Big Info Sheet -->
-                <div v-if="bigInfo" class="sheet-big-info">
-                    <div class="big-info-icon" v-html="bigInfo.icon"></div>
-                    <div class="big-info-desc">{{ bigInfo.description }}</div>
-                    <div v-if="bigInfo.glossaryChip" class="big-info-chip-line">{{ bigInfo.glossaryChip.hint }} <button class="big-info-chip" @click.stop="openGlossaryChip(bigInfo.glossaryChip.term)">{{ bigInfo.glossaryChip.label }}</button></div>
-                    <div class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">{{ bigInfo.buttonText }}</div>
-                </div>
-
-                <!-- List Items -->
-                <div v-if="items && items.length" class="sheet-list">
-                    <div v-for="(item, index) in items" :key="index" class="sheet-item" :class="{ 'centered': item.centered, 'has-hint': item.hint }" @click="item.onClick">
-                        <div class="sheet-item-icon" v-if="item.icon" v-html="item.icon" :style="{ color: item.iconColor }"></div>
-                        <div class="sheet-item-content">
-                            <span :class="{ 'text-destructive': item.isDestructive }">{{ item.label }}</span>
-                            <span v-if="item.hint" class="sheet-item-hint">{{ item.hint }}</span>
+                <div class="sheet-header" v-if="title || headerAction">
+                    <div class="sheet-title">
+                        <div v-if="sidebarMode" class="sheet-back-btn" @click="close">
+                            <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
                         </div>
-                        
-                        <!-- Item Actions (Buttons on the right) -->
-                        <div class="sheet-item-actions" v-if="item.actions && item.actions.length">
-                            <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
-                                 class="sheet-item-action-btn"
-                                 @click.stop="action.onClick"
-                                 v-html="action.icon"
-                                 :style="{ color: action.color }">
-                            </div>
-                        </div>
+                        {{ title }}
+                        <HelpTip v-if="helpTip" :term="helpTip" />
                     </div>
+                    <div class="sheet-action-btn" v-if="headerAction" @click="headerAction.onClick" v-html="headerAction.icon"></div>
                 </div>
+                
+                <div class="sheet-scroll-container">
+                    <!-- Custom Content (HTML) -->
+                    <div v-if="typeof content === 'string'" class="sheet-custom-content" v-html="content"></div>
+                    <div v-else-if="content" class="sheet-custom-content" ref="domContent"></div>
+                    
+                    <!-- Vue Slot Content -->
+                    <slot></slot>
 
-                <!-- Session Items (Custom Layout) -->
-                <div v-if="sessionItems && sessionItems.length" class="sheet-list">
-                    <div v-for="(item, index) in sessionItems" :key="index" class="sheet-item session-item" @click="item.onClick">
-                        <div class="session-content">
-                            <div class="session-title">{{ item.title }} <span class="session-count"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>{{ item.count }}</span></div>
-                            <div class="session-preview">{{ item.preview }}</div>
-                        </div>
-                        <div class="session-right">
-                            <div class="session-meta-right">
-                                <div class="session-time">{{ item.time }}</div>
-                                <div v-if="item.isActive" class="active-dot"></div>
-                            </div>
-                            <div class="session-delete-btn" @click.stop="item.onDelete"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></div>
-                        </div>
+                    <!-- Big Info Sheet -->
+                    <div v-if="bigInfo" class="sheet-big-info">
+                        <div class="big-info-icon" v-html="bigInfo.icon"></div>
+                        <div class="big-info-desc">{{ bigInfo.description }}</div>
+                        <div v-if="bigInfo.glossaryChip" class="big-info-chip-line">{{ bigInfo.glossaryChip.hint }} <button class="big-info-chip" @click.stop="openGlossaryChip(bigInfo.glossaryChip.term)">{{ bigInfo.glossaryChip.label }}</button></div>
+                        <div class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">{{ bigInfo.buttonText }}</div>
                     </div>
-                </div>
 
-                <!-- Card Items (Triggered style) -->
-                <div v-if="cardItems && cardItems.length" class="sheet-card-list">
-                    <div v-for="(item, index) in cardItems" :key="index" 
-                         class="triggered-item-card" 
-                         :class="{ 'has-bg': item.image, 'is-active': item.isActive }"
-                         :style="item.image ? { backgroundImage: `url(${item.image})` } : {}"
-                         @click="item.onClick">
-                        <div class="card-overlay" v-if="item.image"></div>
-                        <div v-if="item.isFeatured" class="featured-badge">
-                            {{ t('label_featured_preset') || 'FEATURED PRESET' }}
-                        </div>
-                        <div class="item-icon" v-if="item.icon">
-                            <div v-if="item.icon.startsWith('<')" v-html="item.icon"></div>
-                            <svg v-else viewBox="0 0 24 24"><path :d="item.icon"/></svg>
-                        </div>
-                        <div class="item-info">
-                            <div class="item-label-row">
-                                <div class="item-label" :class="{ 'with-bg': item.image }">{{ item.label }}</div>
-                                <div v-if="item.badge" class="item-badge" :class="{ 'with-bg': item.image }">
-                                    <svg viewBox="0 0 24 24" class="badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                                    {{ item.badge }}
+                    <!-- List Items -->
+                    <div v-if="items && items.length" class="sheet-list">
+                        <div v-for="(item, index) in items" :key="index" class="sheet-item" :class="{ 'centered': item.centered, 'has-hint': item.hint }" @click="item.onClick">
+                            <div class="sheet-item-icon" v-if="item.icon" v-html="item.icon" :style="{ color: item.iconColor }"></div>
+                            <div class="sheet-item-content">
+                                <span :class="{ 'text-destructive': item.isDestructive }">{{ item.label }}</span>
+                                <span v-if="item.hint" class="sheet-item-hint">{{ item.hint }}</span>
+                            </div>
+                            
+                            <!-- Item Actions (Buttons on the right) -->
+                            <div class="sheet-item-actions" v-if="item.actions && item.actions.length">
+                                <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
+                                     class="sheet-item-action-btn"
+                                     @click.stop="action.onClick"
+                                     v-html="action.icon"
+                                     :style="{ color: action.color }">
                                 </div>
                             </div>
-                            <div v-if="item.sublabel" class="item-sublabel" :class="{ 'with-bg': item.image }">{{ item.sublabel }}</div>
                         </div>
-                        
-                        <!-- Item Actions (Buttons on the right) -->
-                        <div class="sheet-item-actions" :class="{ 'card-actions-right': item.actions && item.actions.length }" v-if="item.actions && item.actions.length">
-                            <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
-                                 class="sheet-item-action-btn card-action-btn"
-                                 :class="{ 'with-bg': item.image }"
-                                 @click.stop="action.onClick"
-                                 v-html="action.icon"
-                                 :style="{ color: action.color }">
+                    </div>
+
+                    <!-- Session Items (Custom Layout) -->
+                    <div v-if="sessionItems && sessionItems.length" class="sheet-list">
+                        <div v-for="(item, index) in sessionItems" :key="index" class="sheet-item session-item" @click="item.onClick">
+                            <div class="session-content">
+                                <div class="session-title">{{ item.title }} <span class="session-count"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>{{ item.count }}</span></div>
+                                <div class="session-preview">{{ item.preview }}</div>
+                            </div>
+                            <div class="session-right">
+                                <div class="session-meta-right">
+                                    <div class="session-time">{{ item.time }}</div>
+                                    <div v-if="item.isActive" class="active-dot"></div>
+                                </div>
+                                <div class="session-delete-btn" @click.stop="item.onDelete"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Input Sheet -->
-                <div v-if="input" class="sheet-input-container">
-                    <div class="settings-item">
-                        <input 
-                            ref="inputRef"
-                            type="text" 
-                            v-model="inputValue" 
-                            :placeholder="input.placeholder"
-                            @keydown.enter="onInputConfirm"
-                        >
+                    <!-- Card Items (Triggered style) -->
+                    <div v-if="cardItems && cardItems.length" class="sheet-card-list">
+                        <div v-for="(item, index) in cardItems" :key="index" 
+                             class="triggered-item-card" 
+                             :class="{ 'has-bg': item.image, 'is-active': item.isActive }"
+                             :style="item.image ? { backgroundImage: `url(${item.image})` } : {}"
+                             @click="item.onClick">
+                            <div class="card-overlay" v-if="item.image"></div>
+                            <div v-if="item.isFeatured" class="featured-badge">
+                                {{ t('label_featured_preset') || 'FEATURED PRESET' }}
+                            </div>
+                            <div class="item-icon" v-if="item.icon">
+                                <div v-if="item.icon.startsWith('<')" v-html="item.icon"></div>
+                                <svg v-else viewBox="0 0 24 24"><path :d="item.icon"/></svg>
+                            </div>
+                            <div class="item-info">
+                                <div class="item-label-row">
+                                    <div class="item-label" :class="{ 'with-bg': item.image }">{{ item.label }}</div>
+                                    <div v-if="item.badge" class="item-badge" :class="{ 'with-bg': item.image }">
+                                        <svg viewBox="0 0 24 24" class="badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                                        {{ item.badge }}
+                                    </div>
+                                </div>
+                                <div v-if="item.sublabel" class="item-sublabel" :class="{ 'with-bg': item.image }">{{ item.sublabel }}</div>
+                            </div>
+                            
+                            <!-- Item Actions (Buttons on the right) -->
+                            <div class="sheet-item-actions" :class="{ 'card-actions-right': item.actions && item.actions.length }" v-if="item.actions && item.actions.length">
+                                <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
+                                     class="sheet-item-action-btn card-action-btn"
+                                     :class="{ 'with-bg': item.image }"
+                                     @click.stop="action.onClick"
+                                     v-html="action.icon"
+                                     :style="{ color: action.color }">
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="settings-padding" style="padding-top: 0;">
-                        <div class="btn-save" style="margin-top: 10px;" @click="onInputConfirm">{{ input.confirmLabel || 'Save' }}</div>
+
+                    <!-- Input Sheet -->
+                    <div v-if="input" class="sheet-input-container">
+                        <div class="settings-item">
+                            <input 
+                                ref="inputRef"
+                                type="text" 
+                                v-model="inputValue" 
+                                :placeholder="input.placeholder"
+                                @keydown.enter="onInputConfirm"
+                            >
+                        </div>
+                        <div class="settings-padding" style="padding-top: 0;">
+                            <div class="btn-save" style="margin-top: 10px;" @click="onInputConfirm">{{ input.confirmLabel || 'Save' }}</div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
+    </Teleport>
 </template>
 
 <style scoped>

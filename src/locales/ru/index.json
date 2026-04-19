@@ -866,6 +866,7 @@
     "no_prompt": "Нет промпта",
     "regex_slash_commands": "Slash-команды",
     "tab_catalog": "Каталог",
+    "tab_my_characters": "Мои персонажи",
     "catalog_search_placeholder": "Поиск персонажей...",
     "catalog_total": "{count} персонажей",
     "catalog_empty": "Персонажи не найдены",

@@ -99,17 +99,25 @@ const MIN_TOKENS = 889;
  * Browse recent public characters.
  * @param {{ page?: number, limit?: number, tagIds?: number[], nsfw?: boolean }} opts
  */
-export async function datacatBrowse({ page = 1, limit = 24, tagIds = [], nsfw = false } = {}) {
+export async function datacatBrowse({ page = 1, limit = 24, tagIds = [], nsfw = false, filters = {} } = {}) {
     const token = await getToken();
     const offset = (page - 1) * limit;
+    const minTok = filters.minTokens ?? MIN_TOKENS;
+    const isNsfw = filters.nsfw !== undefined ? filters.nsfw : nsfw;
+    const filterTagIds = filters.tagIds?.length ? filters.tagIds : tagIds;
+
     const params = new URLSearchParams({
         limit: String(limit),
         offset: String(offset),
         summary: '1',
-        minTotalTokens: String(MIN_TOKENS)
+        minTotalTokens: String(minTok)
     });
-    if (tagIds.length) params.set('tagIds', tagIds.join(','));
-    if (!nsfw) params.set('nsfw', '0');
+    if (filters.maxTokens) params.set('maxTotalTokens', String(filters.maxTokens));
+
+    if (filterTagIds.length) params.set('tagIds', filterTagIds.join(','));
+    if (!isNsfw) params.set('nsfw', '0');
+
+    // If there's a sort like "oldest", DataCat might support sortBy=oldest, but recent-public defaults to newest.
 
     const data = await catalogGet(`${BASE}/api/characters/recent-public?${params}`, authHeaders(token));
     return {
@@ -137,15 +145,22 @@ export async function datacatFresh() {
 /**
  * Search characters by query.
  */
-export async function datacatSearch({ query, page = 1, limit = 24 } = {}) {
+export async function datacatSearch({ query, page = 1, limit = 24, filters = {} } = {}) {
     const token = await getToken();
     const offset = (page - 1) * limit;
+    const minTok = filters.minTokens ?? MIN_TOKENS;
+    const isNsfw = filters.nsfw !== undefined ? filters.nsfw : false;
+    const filterTagIds = filters.tagIds || [];
+
     const params = new URLSearchParams({
         limit: String(limit),
         offset: String(offset),
         summary: '1',
-        minTotalTokens: String(MIN_TOKENS)
+        minTotalTokens: String(minTok)
     });
+    if (filters.maxTokens) params.set('maxTotalTokens', String(filters.maxTokens));
+    if (!isNsfw) params.set('nsfw', '0');
+    if (filterTagIds.length) params.set('tagIds', filterTagIds.join(','));
     if (query) params.set('search', query);
 
     const data = await catalogGet(`${BASE}/api/characters/recent-public?${params}`, authHeaders(token));
@@ -173,7 +188,7 @@ export async function datacatGetCharacter(uuid) {
     const raw = data.data || data;
     return {
         charData: convertToGlaze(raw),
-        avatarUrl: raw.avatar || null
+        avatarUrl: resolveAvatarUrl(raw.avatar)
     };
 }
 
@@ -211,7 +226,8 @@ export async function datacatExtract(janitorUrl, publicFeed = true) {
  */
 export async function datacatExtractionStatus() {
     const token = await getToken();
-    const data = await catalogGet(`${BASE}/api/extraction/status`, authHeaders(token));
+    const ts = Date.now();
+    const data = await catalogGet(`${BASE}/api/extraction/status?t=${ts}`, authHeaders(token));
     return {
         inProgress: data.inProgress || null,
         queue: data.queue || [],
@@ -226,14 +242,22 @@ function stripEmoji(str) {
     return str.replace(/[\u{1F300}-\u{1FFFF}\u{2600}-\u{27BF}\uFE0F\u200D\s]+/gu, '').trim();
 }
 
+const IMAGE_BASE = 'https://ella.janitorai.com/bot-avatars/';
+
+function resolveAvatarUrl(url) {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+    return IMAGE_BASE + url;
+}
+
 function normalizeListItem(c) {
     return {
-        id: c.character_id || c.id,
-        name: c.name || 'Unknown',
-        avatarUrl: c.avatar || null,
+        id: c.characterId || c.character_id || c.uuid || c.id,
+        name: c.chatName || c.chat_name || c.name || 'Unknown',
+        avatarUrl: resolveAvatarUrl(c.avatar),
         tags: (c.tags || []).map(t => (typeof t === 'string' ? stripEmoji(t) : stripEmoji(t.name))).filter(Boolean),
-        tokens: c.total_tokens || 0,
-        creator: c.creator_name || '',
+        tokens: c.totalTokens || c.total_tokens || 0,
+        creator: c.creatorName || c.creator_name || '',
         nsfw: Boolean(c.is_nsfw),
         source: 'datacat'
     };
@@ -245,19 +269,19 @@ function convertToGlaze(raw) {
         .filter(Boolean);
 
     return {
-        name: raw.name || 'Unknown',
-        description: raw.description || '',
-        personality: raw.personality || '',
+        name: raw.name || raw.chatName || raw.chat_name || 'Unknown',
+        description: raw.personality || raw.description || '',
+        personality: '',
         scenario: raw.scenario || '',
         first_mes: raw.first_mes || raw.first_message || '',
         mes_example: raw.mes_example || '',
-        creator_notes: raw.creator_notes || '',
+        creator_notes: raw.description || raw.creator_notes || '',
         system_prompt: raw.system_prompt || '',
         post_history_instructions: raw.post_history_instructions || '',
         alternate_greetings: Array.isArray(raw.alternate_greetings) ? raw.alternate_greetings : [],
         tags,
         creator: raw.creator || '',
         character_book: raw.character_book || null,
-        extensions: { datacat: { id: raw.character_id || raw.id } }
+        extensions: { datacat: { id: raw.characterId || raw.character_id || raw.uuid || raw.id } }
     };
 }

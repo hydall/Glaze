@@ -64,21 +64,42 @@ const JANNY_HEADERS = (token) => ({
  * Search JanitorAI characters via MeiliSearch.
  * @param {{ query?: string, page?: number, sort?: string }} opts
  */
-export async function janitorSearch({ query = '', page = 1, sort = 'createdAtStamp:desc' } = {}) {
+export async function janitorSearch({ query = '', page = 1, sort = 'createdAtStamp:desc', filters = {} } = {}) {
     let token = await getSearchToken();
+
+    const meiliFilters = [];
+    const minTok = filters.minTokens !== undefined ? filters.minTokens : 29;
+    meiliFilters.push(`totalToken >= ${minTok}`);
+    if (filters.maxTokens !== undefined) meiliFilters.push(`totalToken <= ${filters.maxTokens}`);
+    if (filters.nsfw === false) meiliFilters.push('isNsfw = false');
+    if (filters.tagIds?.length) {
+        const tagClauses = filters.tagIds.map(id => `tagIds = ${id}`);
+        meiliFilters.push(tagClauses.join(' AND '));
+    }
+
+    const sortMap = {
+        newest: ['createdAtStamp:desc'],
+        oldest: ['createdAtStamp:asc'],
+        tokens_desc: ['totalToken:desc'],
+        tokens_asc: ['totalToken:asc'],
+        popular: [] // Not supported inside Meilisearch, usually handled via Hampter
+    };
+
+    let activeSort = filters.sort ? (sortMap[filters.sort] || sortMap.newest) : [sort];
+    if (activeSort.length === 0) activeSort = undefined; // e.g. for relevance or if empty
 
     const body = {
         queries: [{
             indexUid: 'janny-characters',
             q: query,
-            facets: ['isLowQuality', 'tagIds', 'totalToken'],
+            facets: ['isLowQuality', 'tagIds', 'totalToken', 'isNsfw'],
             attributesToCrop: ['description:300'],
             cropMarker: '...',
-            filter: ['totalToken <= 4101 AND totalToken >= 29'],
+            filter: meiliFilters.length > 0 ? meiliFilters : undefined,
             attributesToHighlight: ['name', 'description'],
             hitsPerPage: 40,
             page,
-            sort: [sort]
+            sort: activeSort
         }]
     };
 
@@ -110,9 +131,11 @@ export async function janitorSearch({ query = '', page = 1, sort = 'createdAtSta
 /**
  * Fallback: search via Hampter API (no auth needed).
  */
-export async function janitorHampterSearch({ query = '', page = 1, sort = 'trending' } = {}) {
-    const params = new URLSearchParams({ sort, page: String(page) });
+export async function janitorHampterSearch({ query = '', page = 1, sort = 'trending', filters = {} } = {}) {
+    const sortMode = filters.sort === 'popular' ? 'popular' : 'trending';
+    const params = new URLSearchParams({ sort: sortMode, page: String(page) });
     if (query) params.set('search', query);
+    if (filters.nsfw === false) params.set('mode', 'sfw');
 
     const data = await catalogGet(`${HAMPTER_URL}?${params}`, {
         'Origin': 'https://janitorai.com',
@@ -155,7 +178,15 @@ function decodeAstroValue(val) {
     if (!Array.isArray(val) || val.length < 2) return val;
     const [type, data] = val;
     if (type === 0) {
-        // Object
+        if (!data || typeof data !== 'object') return data;
+        const keys = Object.keys(data);
+        // Compact string: all-numeric keys → reconstruct string from char map
+        if (keys.length > 0 && keys.every(k => /^\d+$/.test(k))) {
+            const maxIdx = Math.max(...keys.map(Number));
+            const arr = new Array(maxIdx + 1).fill('');
+            for (const k of keys) arr[Number(k)] = data[k];
+            return arr.join('');
+        }
         const obj = {};
         for (const [k, v] of Object.entries(data)) {
             obj[k] = decodeAstroValue(v);
@@ -163,7 +194,6 @@ function decodeAstroValue(val) {
         return obj;
     }
     if (type === 1) {
-        // Array
         return data.map(decodeAstroValue);
     }
     return data;
@@ -209,6 +239,15 @@ function findCharacterInProps(obj, depth = 0) {
 
 // ─── Normalization ────────────────────────────────────────────────────────────
 
+function resolveJanitorAvatar(url) {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+    if (url.startsWith('/')) return `https://image.jannyai.com${url}`;
+    // Filename (no slashes) → bot-avatars CDN path
+    if (!url.includes('/')) return `https://image.jannyai.com/bot-avatars/${url}`;
+    return `https://image.jannyai.com/${url}`;
+}
+
 // Static JanitorAI tag ID → name map
 const TAG_MAP = {
     1: 'Male', 2: 'Female', 3: 'Non-binary', 4: 'Human', 5: 'Anime', 6: 'Fantasy',
@@ -229,7 +268,7 @@ function normalizeSearchHit(hit) {
     return {
         id: hit.id,
         name: hit.name || 'Unknown',
-        avatarUrl: hit.avatar || null,
+        avatarUrl: resolveJanitorAvatar(hit.avatar),
         tags: tagIdsToNames(hit.tagIds),
         tokens: hit.totalToken || 0,
         creator: hit.creatorUsername || '',
@@ -243,7 +282,7 @@ function normalizeHampterHit(hit) {
     return {
         id: hit.id,
         name: hit.name || hit.bot_name || 'Unknown',
-        avatarUrl: hit.avatar || hit.image || null,
+        avatarUrl: resolveJanitorAvatar(hit.avatar || hit.image),
         tags: tagIdsToNames(hit.tagIds || []),
         tokens: hit.totalToken || 0,
         creator: hit.creatorUsername || hit.creator || '',
