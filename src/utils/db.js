@@ -79,6 +79,7 @@ function normalizeChatData(chatData) {
                     pendingDrafts: [],
                     settings: {
                     enabled: true,
+                    autoCreateEnabled: true,
                     maxInjectedEntries: 3,
                     batchSize: 1,
                         parallelJobs: 1,
@@ -107,6 +108,7 @@ function normalizeChatData(chatData) {
                 memoryBook.settings = {};
             }
             if (typeof memoryBook.settings.enabled !== 'boolean') memoryBook.settings.enabled = true;
+            if (typeof memoryBook.settings.autoCreateEnabled !== 'boolean') memoryBook.settings.autoCreateEnabled = true;
             if (!Number.isFinite(memoryBook.settings.maxInjectedEntries)) memoryBook.settings.maxInjectedEntries = 3;
             if (!Number.isFinite(memoryBook.settings.batchSize)) memoryBook.settings.batchSize = 1;
             if (!Number.isFinite(memoryBook.settings.parallelJobs)) memoryBook.settings.parallelJobs = 1;

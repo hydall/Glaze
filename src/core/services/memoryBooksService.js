@@ -72,6 +72,7 @@ export function ensureSessionMemoryBook(chatData, sessionId) {
             pendingDrafts: [],
             settings: {
                 enabled: true,
+                autoCreateEnabled: true,
                 maxInjectedEntries: 3,
                 autoCreateInterval: 12,
                 useDelayedAutomation: true,
