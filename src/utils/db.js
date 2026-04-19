@@ -90,6 +90,7 @@ function normalizeChatData(chatData) {
                         generationEndpoint: '',
                         generationApiKey: '',
                         generationTemperature: null,
+                        generationMaxTokens: null,
                         promptPreset: 'detailed_beats',
                         customPrompts: []
                     },
@@ -118,6 +119,9 @@ function normalizeChatData(chatData) {
             if (typeof memoryBook.settings.generationApiKey !== 'string') memoryBook.settings.generationApiKey = '';
             if (!(memoryBook.settings.generationTemperature === null || Number.isFinite(memoryBook.settings.generationTemperature))) {
                 memoryBook.settings.generationTemperature = null;
+            }
+            if (!(memoryBook.settings.generationMaxTokens === null || Number.isFinite(memoryBook.settings.generationMaxTokens))) {
+                memoryBook.settings.generationMaxTokens = null;
             }
             if (typeof memoryBook.settings.promptPreset !== 'string') memoryBook.settings.promptPreset = 'detailed_beats';
             if (!Array.isArray(memoryBook.settings.customPrompts)) memoryBook.settings.customPrompts = [];

@@ -84,6 +84,7 @@ export function ensureSessionMemoryBook(chatData, sessionId) {
                 generationEndpoint: '',
                 generationApiKey: '',
                 generationTemperature: null,
+                generationMaxTokens: null,
                 promptPreset: 'detailed_beats',
                 customPrompts: []
             },
