@@ -157,7 +157,11 @@ export async function generateChatResponse({
     const squashRole = activePreset?.squashRole || 'assistant';
 
     if (activePreset && typeof activePreset.reasoningEnabled === 'boolean') {
-        requestReasoning = activePreset.reasoningEnabled;
+        // Only override if preset explicitly enables it, otherwise keep user setting
+        if (activePreset.reasoningEnabled === true) {
+            requestReasoning = true;
+        }
+        // If preset is false and user enabled reasoning in API settings, keep user's choice
     }
     if (activePreset && activePreset.reasoningEffort) {
         reasoningEffort = activePreset.reasoningEffort;
@@ -171,6 +175,11 @@ export async function generateChatResponse({
     const varsKey = `gz_vars_${charId}_${sessionId}`;
     let sessionVars = {};
     try { sessionVars = JSON.parse(localStorage.getItem(varsKey)) || {}; } catch (e) { }
+
+    // Set reasoning macros for {{reasoningPrefix}} and {{reasoningSuffix}}
+    sessionVars.reasoningPrefix = tagStart;
+    sessionVars.reasoningSuffix = tagEnd;
+    localStorage.setItem(varsKey, JSON.stringify(sessionVars));
 
     let globalRegexes = [];
     try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
@@ -380,9 +389,12 @@ export async function generateChatResponse({
         messages: messages,
         temperature: temp,
         top_p: topP,
-        stream: stream,
-        reasoning_effort: reasoningEffort || 'medium'
+        stream: stream
     };
+
+    if (reasoningEffort && reasoningEffort !== 'auto') {
+        requestBody.reasoning_effort = reasoningEffort;
+    }
 
     if (maxTokens > 0) {
         requestBody.max_tokens = maxTokens;
@@ -413,6 +425,12 @@ export async function generateChatResponse({
         if (m.name) cleanMsg.name = m.name;
         return cleanMsg;
     });
+
+    // Final abort check before API call
+    if (controller?.signal?.aborted) {
+        if (onError) onError(new DOMException('Aborted', 'AbortError'));
+        return;
+    }
 
     // Call LLM API
     try {

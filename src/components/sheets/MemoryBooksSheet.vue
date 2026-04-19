@@ -100,6 +100,10 @@ const keyMatchMode = computed(() => {
   return 'Plain contains';
 });
 
+const draftsNeedingGeneration = computed(() => {
+  return pendingDrafts.value.filter(d => !d.content && d.status === 'pending_generation');
+});
+
 const uncoveredSegments = computed(() => {
   const coveredIds = new Set();
   for (const entry of entries.value) {
@@ -108,14 +112,14 @@ const uncoveredSegments = computed(() => {
   for (const draft of pendingDrafts.value) {
     if (Array.isArray(draft.messageIds)) draft.messageIds.forEach(id => coveredIds.add(id));
   }
-  
-  const stableMessages = props.currentMessages.filter(m => 
+
+  const stableMessages = props.currentMessages.filter(m =>
     m && !m.isTyping && !m.isHidden && !m.isError && (m.role === 'user' || m.role === 'char')
   );
   const uncovered = stableMessages.filter(m => m.id && !coveredIds.has(m.id));
   const interval = normalizeAutoCreateInterval(props.memoryBook);
   const segmentsNeeded = Math.ceil(uncovered.length / interval);
-  
+
   return {
     count: uncovered.length,
     segmentsNeeded,
@@ -343,23 +347,32 @@ defineExpose({ open, close });
       </div>
 
       <!-- Batch Actions (Scan & Generate) -->
-      <div v-if="uncoveredSegments.count > 0" class="memory-batch-actions">
-        <div class="memory-batch-info">
-          <strong>{{ uncoveredSegments.count }}</strong> uncovered messages ({{ uncoveredSegments.segmentsNeeded }} segments of {{ uncoveredSegments.interval }})
-        </div>
-        <div class="memory-batch-buttons">
-          <button type="button" class="memory-btn memory-btn-secondary" @click="handleScanChat">
-            Scan Chat
-          </button>
-          <button
-            type="button"
-            class="memory-btn memory-btn-primary"
-            :disabled="memoryDraftState.active"
-            @click="handleBatchGenerate"
-          >
-            Generate Drafts
-          </button>
-        </div>
+      <div v-if="draftsNeedingGeneration.length > 0 || uncoveredSegments.count > 0" class="memory-batch-actions">
+        <template v-if="draftsNeedingGeneration.length > 0">
+          <div class="memory-batch-info">
+            <strong>{{ draftsNeedingGeneration.length }}</strong> draft{{ draftsNeedingGeneration.length > 1 ? 's' : '' }} need generation
+          </div>
+          <div class="memory-batch-buttons">
+            <button
+              type="button"
+              class="memory-btn memory-btn-primary"
+              :disabled="memoryDraftState.active"
+              @click="handleBatchGenerate"
+            >
+              Generate Batch
+            </button>
+          </div>
+        </template>
+        <template v-else-if="uncoveredSegments.count > 0">
+          <div class="memory-batch-info">
+            <strong>{{ uncoveredSegments.count }}</strong> uncovered messages ({{ uncoveredSegments.segmentsNeeded }} segments of {{ uncoveredSegments.interval }})
+          </div>
+          <div class="memory-batch-buttons">
+            <button type="button" class="memory-btn memory-btn-secondary" @click="handleScanChat">
+              Scan Chat
+            </button>
+          </div>
+        </template>
       </div>
 
       <!-- Draft Generation Progress -->

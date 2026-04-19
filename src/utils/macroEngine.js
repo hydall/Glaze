@@ -44,9 +44,28 @@ export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyO
         return "";
     });
 
+    // {{setglobalvar::name::value}}
+    result = result.replace(/{{setglobalvar::([\s\S]*?)::([\s\S]*?)}}/gi, (match, name, value) => {
+        _setGlobalVar(name, value);
+        return "";
+    });
+
     // {{getvar::name}}
     result = result.replace(/{{getvar::([\s\S]*?)}}/gi, (match, name) => {
         return sessionVars[name] !== undefined ? sessionVars[name] : "";
+    });
+
+    // {{getglobalvar::name}}
+    result = result.replace(/{{getglobalvar::([\s\S]*?)}}/gi, (match, name) => {
+        const val = _getGlobalVar(name);
+        return val !== null ? val : "";
+    });
+
+    // {{lumiaDef}}, {{lumiaOOC}}, {{loomRetrofits}}, etc. - custom macros from preset
+    // These are treated as global variables set via setglobalvar
+    result = result.replace(/\{\{(lumiaDef|lumiaOOC|lumiaOOCErotic|lumiaOOCEroticBleed|lumiaPersonality|loomRetrofits|loomStyle|loomSummary|loomUtils|sim_tracker|suggest)\}\}/gi, (match, name) => {
+        const val = _getGlobalVar(name);
+        return val !== null ? val : match; // return original macro if not found
     });
 
     // {{random::a::b::c}}
@@ -68,6 +87,20 @@ export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyO
     // {{roll::1d20}}
     result = result.replace(/{{roll::(.*?)}}/gi, (match, dice) => {
         return _rollDice(dice);
+    });
+
+    // {{date}} / {{time}} / {{weekday}} - current datetime
+    const now = new Date();
+    result = result.replace(/\{\{date\}\}/gi, () => now.toLocaleDateString());
+    result = result.replace(/\{\{time\}\}/gi, () => now.toLocaleTimeString());
+    result = result.replace(/\{\{weekday\}\}/gi, () => now.toLocaleDateString('en-US', { weekday: 'long' }));
+
+    // {{reasoningPrefix}} / {{reasoningSuffix}} - reasoning tags from sessionVars or localStorage
+    result = result.replace(/\{\{reasoningPrefix\}\}/gi, () => {
+        return sessionVars.reasoningPrefix || localStorage.getItem('gz_api_reasoning_start') || '<think>';
+    });
+    result = result.replace(/\{\{reasoningSuffix\}\}/gi, () => {
+        return sessionVars.reasoningSuffix || localStorage.getItem('gz_api_reasoning_end') || '';
     });
 
     // --- Escaping: \{\{ → {{ and \}\} → }} ---
@@ -93,6 +126,23 @@ function _getSessionVars(charId, sessionId) {
 function _saveSessionVars(charId, sessionId, vars) {
     const key = `gz_vars_${charId}_${sessionId}`;
     localStorage.setItem(key, JSON.stringify(vars));
+}
+
+function _getGlobalVar(name) {
+    try {
+        const globalVars = JSON.parse(localStorage.getItem('gz_global_vars') || '{}');
+        return globalVars[name] !== undefined ? globalVars[name] : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function _setGlobalVar(name, value) {
+    try {
+        const globalVars = JSON.parse(localStorage.getItem('gz_global_vars') || '{}');
+        globalVars[name] = value;
+        localStorage.setItem('gz_global_vars', JSON.stringify(globalVars));
+    } catch (e) { }
 }
 
 function _simpleHash(str) {

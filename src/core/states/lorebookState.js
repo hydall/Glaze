@@ -253,10 +253,9 @@ export const lorebookState = reactive({
         matchWholeWords: false,
         useGroupScoring: false,
         alertOnOverflow: false,
-        // Vector search global settings
-        vectorSearchEnabled: false,
-        keySearchEnabled: true,
-        vectorScanDepth: 5,
+        // Search type: 'keys' | 'vector' | 'both'
+        searchType: 'keys',
+        embeddingTarget: 'content', // 'content' or 'keys'
         vectorThreshold: 0.45,
         vectorTopK: 10
     },
@@ -771,7 +770,8 @@ export async function indexLorebookEntry(entry, lorebookId) {
     }
 
     const config = getEmbeddingConfig();
-    const text = getEntryIndexingText(entry, config.target);
+    const target = lorebookState.globalSettings.embeddingTarget || config.target || 'content';
+    const text = getEntryIndexingText(entry, target);
 
     const textHash = await computeTextHash(buildEmbeddingFingerprint(entry, text));
 
@@ -836,7 +836,8 @@ export async function indexLorebookEntries(lorebookId, onProgress, options = {})
 
     for (let i = 0; i < processedEntries.length; i++) {
         const entry = processedEntries[i];
-        const text = getEntryIndexingText(entry, config.target);
+        const target = lorebookState.globalSettings.embeddingTarget || config.target || 'content';
+        const text = getEntryIndexingText(entry, target);
         const textHash = await computeTextHash(buildEmbeddingFingerprint(entry, text));
 
         if (!text) {
@@ -929,9 +930,9 @@ export async function deleteLorebookEmbeddings(lorebookId) {
 }
 
 export async function vectorSearchLorebooks(history = [], currentText = '', char = null, chatId = null) {
-    // Check global vector search setting
-    if (!lorebookState.globalSettings.vectorSearchEnabled) {
-        console.info('[vectorSearchLorebooks] skipped: global vector search disabled');
+    // Check global search type setting - skip if keys-only
+    if (lorebookState.globalSettings.searchType === 'keys') {
+        console.info('[vectorSearchLorebooks] skipped: keys-only search mode');
         return [];
     }
 

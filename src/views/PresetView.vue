@@ -127,6 +127,7 @@ function openSquashRoleSelector() {
 
 function openReasoningEffortSelector() {
     const options = [
+        { value: 'auto', label: t('reasoning_effort_auto') || 'Auto' },
         { value: 'low', label: t('reasoning_effort_low') || 'Low' },
         { value: 'medium', label: t('reasoning_effort_medium') || 'Medium' },
         { value: 'high', label: t('reasoning_effort_high') || 'High' }
