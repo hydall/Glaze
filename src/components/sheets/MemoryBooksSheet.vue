@@ -163,8 +163,8 @@ function normalizeEntryMessageIds(entry) {
 }
 
 const currentlyGeneratingDraft = computed(() => {
-  if (!memoryDraftState.value?.active) return null;
-  const label = memoryDraftState.value.label || '';
+  if (!props.memoryDraftState?.active) return null;
+  const label = props.memoryDraftState.label || '';
   // Match draft by checking if any pendingDraft has matching messageIds pattern
   // This is a simple heuristic - the actual tracking happens in the parent
   return null;
