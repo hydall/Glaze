@@ -247,12 +247,17 @@ export function normalizeMemoryEntryShape(entry) {
         id: entry.id || genMemoryEntryId(),
         title: entry.title || '',
         content: entry.content || '',
+        rawContent: entry.rawContent || entry.content || '',
         keys: Array.isArray(entry.keys) ? entry.keys : [],
+        glazeKeys: Array.isArray(entry.glazeKeys) ? entry.glazeKeys : [],
         messageIds: normalizeEntryMessageIds(entry),
+        messageRange: entry.messageRange && typeof entry.messageRange === 'object' ? { ...entry.messageRange } : null,
         status: entry.status || 'active',
         vectorSearch: !!entry.vectorSearch,
+        source: entry.source || 'manual',
         createdAt: entry.createdAt || Date.now(),
-        updatedAt: entry.updatedAt || Date.now()
+        updatedAt: entry.updatedAt || Date.now(),
+        generatedAt: entry.generatedAt || null
     };
     
     return normalized;

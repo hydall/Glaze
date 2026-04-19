@@ -721,12 +721,39 @@ defineExpose({ open, openEntry, close, openLorebook });
                     </div>
                     
                     <div v-if="isGlobalSettingsExpanded" class="global-settings-content">
+                        <!-- Search Type Selector -->
+                        <div class="settings-item">
+                            <label>{{ t('label_search_type') || 'Search Type' }}</label>
+                            <div class="clickable-selector" @click="openOptionSelector({
+                                title: t('label_search_type') || 'Search Type',
+                                options: [
+                                    { value: 'keys', label: t('search_type_keys') || 'Keys' },
+                                    { value: 'vector', label: t('search_type_vector') || 'Vector' },
+                                    { value: 'both', label: t('search_type_both') || 'Combined' }
+                                ],
+                                currentValue: lorebookState.globalSettings.searchType,
+                                onSelect: (v) => lorebookState.globalSettings.searchType = v
+                            })">
+                                <span>
+                                    {{ lorebookState.globalSettings.searchType === 'vector' ? (t('search_type_vector') || 'Vector') :
+                                       lorebookState.globalSettings.searchType === 'both' ? (t('search_type_both') || 'Combined') :
+                                       (t('search_type_keys') || 'Keys') }}
+                                </span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </div>
+
+                        <!-- Scan Depth based on search type -->
                         <div class="settings-row">
                             <div class="settings-col">
-                                <label>{{ t('label_scan_depth_lore') }}</label>
-                                <input type="number" v-model="lorebookState.globalSettings.scanDepth">
+                                <label>
+                                    {{ lorebookState.globalSettings.searchType === 'vector' ? (t('label_vector_scan_depth') || 'Vector Scan Depth') :
+                                       lorebookState.globalSettings.searchType === 'both' ? (t('label_combined_scan_depth') || 'Combined Scan Depth') :
+                                       (t('label_scan_depth_lore') || 'Scan Depth') }}
+                                </label>
+                                <input type="number" v-model="lorebookState.globalSettings.scanDepth" min="1" max="50">
                             </div>
-                             <div class="settings-col">
+                            <div class="settings-col">
                                 <label>{{ t('label_lorebook_reserve_mode') }}</label>
                                 <div class="clickable-selector" @click="openOptionSelector({
                                     title: t('label_lorebook_reserve_mode'),
@@ -807,24 +834,50 @@ defineExpose({ open, openEntry, close, openLorebook });
                              <label>{{ t('label_case_sensitive_global') }}</label>
                              <input type="checkbox" v-model="lorebookState.globalSettings.caseSensitive" class="vk-switch small-switch">
                         </div>
-                         <div class="settings-item">
-                             <label>{{ t('label_match_whole_words_global') }}</label>
-                             <div class="clickable-selector" @click="openOptionSelector({
-                                 title: t('label_match_whole_words_global'),
-                                 options: [
-                                     { value: false, label: t('off') },
-                                     { value: true, label: t('match_whole_words_st') },
-                                     { value: 'glaze', label: t('match_whole_words_glaze') }
-                                 ],
-                                 currentValue: lorebookState.globalSettings.matchWholeWords,
-                                 onSelect: (v) => lorebookState.globalSettings.matchWholeWords = v
-                             })">
-                                 <span>{{ lorebookState.globalSettings.matchWholeWords === 'glaze' ? t('match_whole_words_glaze') : (lorebookState.globalSettings.matchWholeWords ? t('match_whole_words_st') : t('off')) }}</span>
-                                 <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                             </div>
-                        </div>
-                    </div>
-                </div>
+<div class="settings-item">
+                              <label>{{ t('label_match_whole_words_global') }}</label>
+                              <div class="clickable-selector" @click="openOptionSelector({
+                                  title: t('label_match_whole_words_global'),
+                                  options: [
+                                      { value: false, label: t('off') },
+                                      { value: true, label: t('match_whole_words_st') },
+                                      { value: 'glaze', label: t('match_whole_words_glaze') }
+                                  ],
+                                  currentValue: lorebookState.globalSettings.matchWholeWords,
+                                  onSelect: (v) => lorebookState.globalSettings.matchWholeWords = v
+                              })">
+                                  <span>{{ lorebookState.globalSettings.matchWholeWords === 'glaze' ? t('match_whole_words_glaze') : (lorebookState.globalSettings.matchWholeWords ? t('match_whole_words_st') : t('off')) }}</span>
+                                  <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                              </div>
+                          </div>
+
+                          <!-- Embedding Target (only when vector search is enabled) -->
+                          <div v-if="lorebookState.globalSettings.searchType !== 'keys'" class="settings-item">
+                              <label>{{ t('label_embedding_target') || 'Embedding Target' }}</label>
+                              <div class="clickable-selector" @click="openOptionSelector({
+                                  title: t('label_embedding_target') || 'Embedding Target',
+                                  options: [
+                                      { value: 'content', label: t('target_content') || 'Entry Content' },
+                                      { value: 'keys', label: t('target_keys') || 'Entry Keys' }
+                                  ],
+                                  currentValue: lorebookState.globalSettings.embeddingTarget,
+                                  onSelect: (v) => lorebookState.globalSettings.embeddingTarget = v
+                              })">
+                                  <span>{{ lorebookState.globalSettings.embeddingTarget === 'keys' ? (t('target_keys') || 'Keys') : (t('target_content') || 'Content') }}</span>
+                                  <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                              </div>
+                          </div>
+
+                          <!-- Vector Threshold -->
+                          <div v-if="lorebookState.globalSettings.searchType !== 'keys'" class="settings-item-range">
+                              <div class="range-row">
+                                  <label>{{ t('label_similarity_threshold') || 'Similarity Threshold' }}</label>
+                                  <input type="number" v-model.number="lorebookState.globalSettings.vectorThreshold" class="range-input-val" step="0.01">
+                              </div>
+                              <input type="range" v-model.number="lorebookState.globalSettings.vectorThreshold" min="0" max="1" step="0.01">
+                          </div>
+                      </div>
+                  </div>
 
                 <div v-if="lorebookState.lorebooks.length === 0" class="empty-state">
                     <svg class="empty-icon" viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg>

@@ -63,17 +63,14 @@ const embeddingSettings = reactive({
 
 const embeddingStatus = ref('idle');
 const embeddingDimension = ref(null);
+const embeddingError = ref('');
 
 function loadEmbeddingSettings() {
     const config = getEmbeddingConfig();
     embeddingSettings.useSame = config.useSame;
-    embeddingSettings.endpoint = config.useSame ? '' : config.endpoint.replace(/\/embeddings$/, '');
+    embeddingSettings.endpoint = config.useSame ? '' : config.endpoint;
     embeddingSettings.key = config.useSame ? '' : config.apiKey;
     embeddingSettings.model = config.useSame ? '' : config.model;
-    embeddingSettings.target = config.target;
-    embeddingSettings.scanDepth = config.scanDepth;
-    embeddingSettings.threshold = config.threshold;
-    embeddingSettings.topK = config.topK;
     embeddingSettings.maxChunkTokens = config.maxChunkTokens;
     embeddingSettings.enabled = config.enabled;
 }
@@ -93,6 +90,7 @@ async function testEmbedding() {
         embeddingStatus.value = 'connected';
     } catch (e) {
         console.warn('Embedding test failed:', e);
+        embeddingError.value = e?.message || String(e);
         embeddingStatus.value = 'failed';
     }
 }
@@ -260,6 +258,7 @@ function openModelSelector() {
 
 function openReasoningEffortSelector() {
     const options = [
+        { value: 'auto', label: t('reasoning_effort_auto') || 'Auto' },
         { value: 'low', label: t('reasoning_effort_low') || 'Low' },
         { value: 'medium', label: t('reasoning_effort_medium') || 'Medium' },
         { value: 'high', label: t('reasoning_effort_high') || 'High' }
@@ -669,37 +668,7 @@ onBeforeUnmount(() => {
                             </div>
                         </template>
                         <div class="settings-item">
-                            <label>{{ t('label_embedding_target') || 'Embedding Target' }}</label>
-                            <div class="clickable-selector" @click="openOptionSelector({
-                                title: t('label_embedding_target') || 'Embedding Target',
-                                options: [
-                                    { value: 'content', label: t('target_content') || 'Entry Content' },
-                                    { value: 'keys', label: t('target_keys') || 'Entry Keys' }
-                                ],
-                                currentValue: embeddingSettings.target,
-                                onSelect: (v) => { embeddingSettings.target = v; onEmbeddingInput('gz_embedding_target', v); }
-                            })">
-                                <span>{{ embeddingSettings.target === 'keys' ? (t('target_keys') || 'Keys') : (t('target_content') || 'Content') }}</span>
-                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                            </div>
-                        </div>
-                        <div class="settings-item">
-                            <label>{{ t('label_vector_scan_depth') || 'Scan Depth' }}</label>
-                            <input type="number" v-model.number="embeddingSettings.scanDepth" @input="onEmbeddingInput('gz_embedding_scan_depth', $event.target.value)" min="1" max="50">
-                        </div>
-                        <div class="settings-item-range">
-                            <div class="range-row">
-                                <label>{{ t('label_similarity_threshold') || 'Similarity Threshold' }}</label>
-                                <input type="number" v-model.number="embeddingSettings.threshold" @input="onEmbeddingInput('gz_embedding_threshold', $event.target.value)" class="range-input-val" step="0.01">
-                            </div>
-                            <input type="range" v-model.number="embeddingSettings.threshold" @input="onEmbeddingInput('gz_embedding_threshold', $event.target.value)" min="0" max="1" step="0.01">
-                        </div>
-                        <div class="settings-item">
-                            <label>{{ t('label_top_k') || 'Max Vector Results' }}</label>
-                            <input type="number" v-model.number="embeddingSettings.topK" @input="onEmbeddingInput('gz_embedding_top_k', $event.target.value)" min="1" max="50">
-                        </div>
-                        <div class="settings-item">
-                            <label>{{ t('label_max_chunk_tokens') || 'Max Tokens Per Chunk' }}</label>
+                                <label>{{ t('label_max_chunk_tokens') || 'Max Tokens Per Chunk' }}</label>
                             <input type="number" v-model.number="embeddingSettings.maxChunkTokens" @input="onEmbeddingInput('gz_embedding_max_chunk_tokens', $event.target.value)" min="128" max="32768">
                             <div class="settings-desc" style="margin-top:4px;">{{ t('desc_max_chunk_tokens') || 'Auto-splits long texts into chunks' }}</div>
                         </div>
@@ -708,7 +677,7 @@ onBeforeUnmount(() => {
                                 {{ embeddingStatus === 'connecting' ? (t('btn_testing') || 'Testing...') : (t('btn_test_connection') || 'Test Connection') }}
                             </button>
                             <div v-if="embeddingStatus === 'connected'" class="settings-desc" style="margin-top:8px; color: #34c759;">{{ t('embedding_connected') || 'Connected' }} (dim: {{ embeddingDimension }})</div>
-                            <div v-if="embeddingStatus === 'failed'" class="settings-desc" style="margin-top:8px; color: #ff3b30;">{{ t('embedding_failed') || 'Connection failed' }}</div>
+                            <div v-if="embeddingStatus === 'failed'" class="settings-desc" style="margin-top:8px; color: #ff3b30;">{{ embeddingError || t('embedding_failed') || 'Connection failed' }}</div>
                         </div>
                     </template>
                 </div>

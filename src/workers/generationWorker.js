@@ -148,6 +148,11 @@ function applyRegexes(text, placementFilter, ephemeralityFilter, allScripts, opt
 }
 
 function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalSettings, activations) {
+    // If search type is 'vector' only, skip keyword scan
+    if (globalSettings?.searchType === 'vector') {
+        return [];
+    }
+
     const charId = char?.id;
 
     const activeLorebooks = lorebooks.filter(lb => {

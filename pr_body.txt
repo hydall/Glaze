@@ -1,0 +1,23 @@
+## Summary
+
+- Prevent keyboard overlap CSS variables from being incorrectly applied on desktop/web platforms
+- Fix Magic Drawer not opening on desktop (viewport-based keyboard detection was closing drawer on mount)
+- Fix console.timeEnd errors for updateContextCutoff timer
+
+## Changes
+
+- **keyboardHandler.js**: Early return on non-native platforms, set --keyboard-overlap to 0px on desktop, skip native keyboard listeners
+- **SheetView.vue**: Remove desktop focus-based keyboard state tracking that incorrectly applied keyboard-open CSS class
+- **BottomSheet.vue**: checkFocus() now always resets isLocalKeyboardOpen = false on desktop platforms
+- **ChatInput.vue**: Add Capacitor.isNativePlatform() guard for viewport-based keyboard detection on mount
+- **ChatView.vue**: Remove console.timeEnd calls that caused Timer does not exist errors when cache was used
+
+## Testing
+
+- [x] Magic Drawer opens correctly on desktop
+- [x] No false keyboard open state on desktop when focusing inputs
+- [x] Build passes
+
+## Note
+
+The gray artifact issue when Generate Drafts opens on desktop exists in upstream (verified by testing upstream/dev) - this PR does not fix that existing bug.

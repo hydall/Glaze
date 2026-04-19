@@ -1,23 +1,3 @@
-import { normalizeEndpoint } from '@/core/config/APISettings.js';
-
-function normalizeEmbeddingEndpoint(url) {
-    if (!url) return '';
-    let normalized = url.trim();
-    if (!/^https?:\/\//i.test(normalized)) {
-        normalized = 'https://' + normalized;
-    }
-    if (normalized.endsWith('/')) normalized = normalized.slice(0, -1);
-    const suffix = '/embeddings';
-    if (normalized.toLowerCase().endsWith(suffix)) {
-        normalized = normalized.slice(0, -suffix.length);
-    }
-    if (normalized.endsWith('/v1')) {
-        // keep /v1, it's the base path
-    }
-    if (normalized.endsWith('/')) normalized = normalized.slice(0, -1);
-    return normalized;
-}
-
 export function getEmbeddingConfig() {
     const useSame = localStorage.getItem('gz_embedding_use_same') !== 'false';
 
@@ -31,18 +11,20 @@ export function getEmbeddingConfig() {
     };
 
     if (useSame) {
+        const rawEndpoint = (localStorage.getItem('api-endpoint') || '').trim();
         return {
             ...base,
-            endpoint: normalizeEndpoint(localStorage.getItem('api-endpoint') || ''),
+            endpoint: rawEndpoint,
             apiKey: localStorage.getItem('api-key') || '',
             model: localStorage.getItem('api-model') || '',
             useSame: true
         };
     }
 
+    const rawEndpoint = (localStorage.getItem('gz_embedding_endpoint') || '').trim();
     return {
         ...base,
-        endpoint: normalizeEmbeddingEndpoint(localStorage.getItem('gz_embedding_endpoint') || ''),
+        endpoint: rawEndpoint,
         apiKey: localStorage.getItem('gz_embedding_key') || '',
         model: localStorage.getItem('gz_embedding_model') || '',
         useSame: false

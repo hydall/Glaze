@@ -144,6 +144,42 @@ export async function executeRequest({
         }
 
         if (stream) {
+            if (!response.body || typeof response.body.getReader !== 'function') {
+                console.warn('[llmApi] Streaming body is unavailable on this platform/runtime, falling back to non-streaming response handling.');
+
+                const data = await response.json();
+                logger.debug('LLM Response (stream fallback):', data);
+
+                if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
+                    throw new Error('Invalid API response structure (stream fallback): ' + JSON.stringify(data));
+                }
+
+                const content = data.choices[0].message.content;
+                const rawReasoning = data.choices[0].message.reasoning_content;
+
+                let finalText = content || '';
+                let finalReasoning = requestReasoning ? (rawReasoning || '') : '';
+                let inlineReasoning = '';
+
+                if (hasInlineTags && content && content.includes(tagStart)) {
+                    const startIndex = content.indexOf(tagStart);
+                    const endIndex = content.indexOf(tagEnd, startIndex);
+                    if (endIndex !== -1) {
+                        inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
+                        finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
+                    }
+                }
+
+                if (finalReasoning && inlineReasoning) {
+                    finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
+                } else if (inlineReasoning) {
+                    finalReasoning = inlineReasoning;
+                }
+
+                if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
+                return;
+            }
+
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
             let isFirst = true;

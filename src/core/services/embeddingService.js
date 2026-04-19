@@ -81,8 +81,9 @@ async function callEmbeddingAPI(url, headers, requestBody) {
         data = await res.json();
     }
 
-    if (!data.data || !Array.isArray(data.data)) {
-        throw new Error('Invalid embedding response: missing data array');
+    if (!data || !Array.isArray(data.data)) {
+        const providerMessage = data?.error?.message || data?.message || '';
+        throw new Error(providerMessage ? `Invalid embedding response: ${providerMessage}` : 'Invalid embedding response: missing data array');
     }
 
     return data.data.sort((a, b) => a.index - b.index).map(item => item.embedding);
@@ -100,7 +101,8 @@ export async function getEmbeddings(texts) {
     if (!config.endpoint) throw new Error('Embedding endpoint not configured');
     if (!config.model) throw new Error('Embedding model not configured');
 
-    const url = `${config.endpoint}/embeddings`;
+    const endpoint = config.endpoint;
+    const url = /\/embeddings\/?$/i.test(endpoint) ? endpoint : `${endpoint.replace(/\/+$/, '')}/embeddings`;
     const headers = { 'Content-Type': 'application/json' };
     if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
 
