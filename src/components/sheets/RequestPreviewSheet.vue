@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { getLastPrompt } from '@/core/services/generationService.js';
+import { getLastNetworkTrace, isNetworkDebugEnabled, setNetworkDebugEnabled, clearLastNetworkTrace } from '@/core/services/networkDebugService.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
@@ -10,14 +11,32 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const sheet = ref(null);
 const previewData = ref(null);
+const traceData = ref(null);
 const previewTab = ref('formatted');
 const expandedMessages = ref(new Set());
+const debugEnabled = ref(isNetworkDebugEnabled());
 
 const open = () => {
     const prompt = getLastPrompt();
     previewData.value = prompt;
+    traceData.value = getLastNetworkTrace();
+    debugEnabled.value = isNetworkDebugEnabled();
     expandedMessages.value.clear();
     if (sheet.value) sheet.value.open();
+};
+
+const toggleDebugCapture = () => {
+    const next = !debugEnabled.value;
+    debugEnabled.value = next;
+    setNetworkDebugEnabled(next);
+    if (!next) {
+        clearLastNetworkTrace();
+        traceData.value = null;
+    }
+};
+
+const refreshTrace = () => {
+    traceData.value = getLastNetworkTrace();
 };
 
 const toggleMessage = (index) => {
@@ -54,6 +73,27 @@ const getRawJson = () => {
     return JSON.stringify(clean, null, 2);
 };
 
+const getTraceRequestJson = () => {
+    if (!traceData.value?.request) return '';
+    return JSON.stringify(traceData.value.request, null, 2);
+};
+
+const getTraceResponseJson = () => {
+    if (traceData.value?.rawResponse === null || traceData.value?.rawResponse === undefined) return '';
+    if (typeof traceData.value.rawResponse === 'string') return traceData.value.rawResponse;
+    return JSON.stringify(traceData.value.rawResponse, null, 2);
+};
+
+const getTraceHeadersJson = (headers) => {
+    if (!headers) return '';
+    return JSON.stringify(headers, null, 2);
+};
+
+const getStreamLinesText = () => {
+    if (!traceData.value?.streamLines?.length) return '';
+    return traceData.value.streamLines.join('\n');
+};
+
 defineExpose({ open });
 </script>
 
@@ -64,6 +104,12 @@ defineExpose({ open });
         </template>
         <template #header-bottom>
             <div class="gen-sheet-tabs">
+                <div class="debug-toolbar">
+                    <div class="debug-toggle" :class="{ active: debugEnabled }" @click="toggleDebugCapture">
+                        {{ debugEnabled ? 'Debug Capture On' : 'Debug Capture Off' }}
+                    </div>
+                    <div class="debug-action" @click="refreshTrace">Refresh</div>
+                </div>
                 <div class="segmented-control">
                     <div class="sub-tab-btn" :class="{ active: previewTab === 'formatted' }" @click="previewTab = 'formatted'">{{ t('label_formatted') || 'Formatted' }}</div>
                     <div class="sub-tab-btn" :class="{ active: previewTab === 'raw' }" @click="previewTab = 'raw'">{{ t('label_raw_json') || 'Raw JSON' }}</div>
@@ -73,6 +119,46 @@ defineExpose({ open });
         </template>
         <div class="preview-container" v-if="previewData">
             <div v-if="previewTab === 'formatted'">
+                <div v-if="traceData" class="trace-summary-card">
+                    <div class="preview-section-title">Network Trace</div>
+                    <div class="params-grid">
+                        <div class="param-item">
+                            <div class="param-label">Type</div>
+                            <div class="param-value">{{ traceData.requestType || 'unknown' }}</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">Status</div>
+                            <div class="param-value">{{ traceData.responseStatus ?? 'pending' }}</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">Streaming</div>
+                            <div class="param-value">{{ traceData.stream ? 'yes' : 'no' }}</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">Duration</div>
+                            <div class="param-value">{{ traceData.durationMs ?? 0 }} ms</div>
+                        </div>
+                    </div>
+                    <div class="preview-section-title">Parsed Response</div>
+                    <div class="message-card">
+                        <div class="message-body always-open">
+                            <pre>{{ traceData.parsed?.text || '' }}</pre>
+                        </div>
+                    </div>
+                    <div v-if="traceData.parsed?.reasoning" class="preview-section-title">Parsed Reasoning</div>
+                    <div v-if="traceData.parsed?.reasoning" class="message-card">
+                        <div class="message-body always-open">
+                            <pre>{{ traceData.parsed?.reasoning }}</pre>
+                        </div>
+                    </div>
+                    <div v-if="traceData.parsed?.error" class="preview-section-title">Error</div>
+                    <div v-if="traceData.parsed?.error" class="message-card">
+                        <div class="message-body always-open">
+                            <pre>{{ traceData.parsed?.error }}</pre>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="preview-section-title">{{ t('section_gen_params') || 'Parameters' }}</div>
                 <div class="params-grid">
                     <div v-for="(value, key) in getParams(previewData)" :key="key" class="param-item">
@@ -104,7 +190,20 @@ defineExpose({ open });
                 </div>
             </div>
             <div v-else class="raw-block">
+                <div class="preview-section-title">Prompt JSON</div>
                 <pre>{{ getRawJson() }}</pre>
+                <template v-if="traceData">
+                    <div class="preview-section-title">Request JSON</div>
+                    <pre>{{ getTraceRequestJson() }}</pre>
+                    <div class="preview-section-title">Request Headers</div>
+                    <pre>{{ getTraceHeadersJson(traceData.requestHeaders) }}</pre>
+                    <div class="preview-section-title">Response Headers</div>
+                    <pre>{{ getTraceHeadersJson(traceData.responseHeaders) }}</pre>
+                    <div class="preview-section-title">Raw Response</div>
+                    <pre>{{ getTraceResponseJson() }}</pre>
+                    <div v-if="traceData.streamLines?.length" class="preview-section-title">Raw SSE Lines</div>
+                    <pre v-if="traceData.streamLines?.length">{{ getStreamLinesText() }}</pre>
+                </template>
             </div>
         </div>
         <div class="empty-state" v-else>
@@ -126,6 +225,29 @@ defineExpose({ open });
 .gen-sheet-tabs {
     padding: 10px 16px;
     flex-shrink: 0;
+}
+
+.debug-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.debug-toggle,
+.debug-action {
+    padding: 8px 12px;
+    border-radius: 10px;
+    background-color: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.debug-toggle.active {
+    background-color: rgba(72, 149, 239, 0.2);
+    border-color: rgba(72, 149, 239, 0.45);
+    color: var(--vk-blue);
 }
 
 .segmented-control {
@@ -306,6 +428,10 @@ defineExpose({ open });
     background-color: rgba(0, 0, 0, 0.2);
 }
 
+.message-body.always-open {
+    border-top: none;
+}
+
 .message-body pre {
     margin: 0;
     white-space: pre-wrap;
@@ -318,5 +444,9 @@ defineExpose({ open });
 .raw-block pre {
     white-space: pre-wrap;
     word-break: break-all;
+}
+
+.trace-summary-card {
+    margin-bottom: 16px;
 }
 </style>

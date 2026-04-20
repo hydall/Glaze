@@ -4,6 +4,7 @@ import { startGenerationNotification, stopGenerationNotification } from '@/core/
 import { cleanText } from '@/utils/textFormatter.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
+import { startNetworkTrace, updateNetworkTrace, appendNetworkTraceLine, finishNetworkTrace } from '@/core/services/networkDebugService.js';
 import { logger } from '../../utils/logger.js';
 
 export async function executeRequest({
@@ -15,6 +16,7 @@ export async function executeRequest({
     requestReasoning,
     tagStart,
     tagEnd,
+    requestType,
     callbacks
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
@@ -67,6 +69,14 @@ export async function executeRequest({
     };
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
+    startNetworkTrace({
+        requestType,
+        apiUrl,
+        stream,
+        requestBody,
+        headers
+    });
+
     try {
         logger.debug("LLM Request Body:", JSON.stringify(requestBody, null, 2));
 
@@ -85,11 +95,14 @@ export async function executeRequest({
 
             if (response.status >= 400) {
                 const errorData = typeof response.data === 'object' ? JSON.stringify(response.data) : String(response.data || '');
+                updateNetworkTrace({ responseStatus: response.status });
+                finishNetworkTrace({ rawResponse: response.data, error: `API Error: ${response.status} ${errorData}` });
                 throw new Error(`API Error: ${response.status} ${errorData}`);
             }
 
             const data = response.data;
             logger.debug("LLM Response (Native):", data);
+            updateNetworkTrace({ responseStatus: response.status });
             
             // Defensive check: ensure API returned valid structure
             if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
@@ -118,6 +131,8 @@ export async function executeRequest({
                 finalReasoning = inlineReasoning;
             }
 
+            finishNetworkTrace({ rawResponse: data, text: cleanText(finalText), reasoning: finalReasoning || null });
+
             if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
 
             // Exit function, finally block will still run for cleanup
@@ -140,8 +155,15 @@ export async function executeRequest({
         if (!response.ok) {
             let errText = "";
             try { errText = await response.text(); } catch (e) { }
+            updateNetworkTrace({ responseStatus: response.status, responseHeaders: Object.fromEntries(response.headers.entries()) });
+            finishNetworkTrace({ rawResponse: errText, error: `API Error: ${response.status} ${errText}` });
             throw new Error(`API Error: ${response.status} ${errText}`);
         }
+
+        updateNetworkTrace({
+            responseStatus: response.status,
+            responseHeaders: Object.fromEntries(response.headers.entries())
+        });
 
         if (stream) {
             if (!response.body || typeof response.body.getReader !== 'function') {
@@ -176,14 +198,16 @@ export async function executeRequest({
                     finalReasoning = inlineReasoning;
                 }
 
+                finishNetworkTrace({ rawResponse: data, text: cleanText(finalText), reasoning: finalReasoning || null });
+
                 if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
                 return;
             }
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
-            let isFirst = true;
             let previousEffectiveText = "";
+            let pendingLineBuffer = '';
 
             const resetStreamTimer = () => {
                 if (streamTimer) clearTimeout(streamTimer);
@@ -197,7 +221,9 @@ export async function executeRequest({
                 resetStreamTimer();
 
                 const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\n');
+                pendingLineBuffer += chunk;
+                const lines = pendingLineBuffer.split('\n');
+                pendingLineBuffer = lines.pop() || '';
 
                 for (const line of lines) {
                     const trimmed = line.trim();
@@ -205,6 +231,7 @@ export async function executeRequest({
 
                     const dataStr = trimmed.substring(6);
                     if (dataStr === '[DONE]') continue;
+                    appendNetworkTraceLine(dataStr);
 
                     try {
                         const json = JSON.parse(dataStr);
@@ -284,6 +311,14 @@ export async function executeRequest({
                 }
             }
 
+            const trailingLine = pendingLineBuffer.trim();
+            if (trailingLine.startsWith('data: ')) {
+                const dataStr = trailingLine.substring(6);
+                if (dataStr && dataStr !== '[DONE]') {
+                    appendNetworkTraceLine(dataStr);
+                }
+            }
+
             if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
 
             // Final processing for onComplete
@@ -307,6 +342,15 @@ export async function executeRequest({
             }
 
             logger.debug("Stream finished:", finalText);
+
+            finishNetworkTrace({
+                rawResponse: {
+                    mode: 'sse',
+                    eventCount: null
+                },
+                text: cleanText(finalText),
+                reasoning: finalReasoning || null
+            });
 
             if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
 
@@ -341,6 +385,8 @@ export async function executeRequest({
                 finalReasoning = inlineReasoning;
             }
 
+            finishNetworkTrace({ rawResponse: data, text: cleanText(finalText), reasoning: finalReasoning || null });
+
             if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
         }
     } catch (e) {
@@ -348,8 +394,10 @@ export async function executeRequest({
             if (timedOut) {
                 // Timeout-induced abort — treat as error, not user cancellation
                 if (fullText.length > 0) {
+                    finishNetworkTrace({ text: cleanText(fullText), reasoning: requestReasoning ? accumulatedReasoning : null, error: 'Generation timed out' });
                     if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null, { partialError: "Generation timed out" });
                 } else {
+                    finishNetworkTrace({ error: 'Generation timed out — no response from server' });
                     if (onError) onError(new Error("Generation timed out — no response from server"));
                 }
                 return;
@@ -357,8 +405,10 @@ export async function executeRequest({
 
             // User-initiated abort — save partial text if available
             if (fullText.length > 0) {
+                finishNetworkTrace({ text: cleanText(fullText), reasoning: requestReasoning ? accumulatedReasoning : null, error: 'Generation aborted' });
                 if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null);
             } else {
+                finishNetworkTrace({ error: e });
                 if (onError) onError(e);
             }
             return;
@@ -368,10 +418,12 @@ export async function executeRequest({
         if (fullText.length > 0) {
             console.warn("Network error during stream, saving partial response:", e);
             const errorMsg = e.message || "Stream Error";
+            finishNetworkTrace({ text: cleanText(fullText), reasoning: requestReasoning ? accumulatedReasoning : null, error: errorMsg });
             if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null, { partialError: errorMsg });
             return;
         }
 
+        finishNetworkTrace({ error: e });
         if (onError) onError(e);
     } finally {
         if (connectTimer) clearTimeout(connectTimer);

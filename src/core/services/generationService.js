@@ -448,6 +448,7 @@ export async function generateChatResponse({
             requestReasoning,
             tagStart,
             tagEnd,
+            requestType: 'chat',
             callbacks: { onUpdate, onComplete, onError }
         });
     } catch (e) {
@@ -1044,19 +1045,23 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
     let result = "";
     
     let requestError = null;
+    const requestBody = {
+        model,
+        messages: [{ role: 'user', content: finalPrompt }],
+        temperature: temp,
+        max_tokens: memoryDraftMaxTokens,
+        stream: false
+    };
+
+    lastPrompt = JSON.parse(JSON.stringify(requestBody));
     
     await executeRequest({
         apiUrl,
         apiKey,
-        requestBody: {
-            model,
-            messages: [{ role: 'user', content: finalPrompt }],
-            temperature: temp,
-            max_tokens: memoryDraftMaxTokens,
-            stream: false
-        },
+        requestBody,
         stream: false,
         controller,
+        requestType: 'memory_draft',
         callbacks: {
             onUpdate: (chunk, reasoningChunk, effectiveText) => {
                 if (effectiveText) result = effectiveText;
