@@ -3112,6 +3112,26 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         }
     }, 100);
 
+    const clearTypingStateForMessage = async () => {
+        const idx = currentMessages.value.findIndex(m => m.id === msgId);
+        if (idx !== -1) {
+            currentMessages.value[idx].isTyping = false;
+        }
+
+        try {
+            const data = await getChatData(char.id);
+            if (data && data.sessions[sessionId]) {
+                const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
+                if (dbIdx !== -1) {
+                    data.sessions[sessionId][dbIdx].isTyping = false;
+                    await db.saveChat(char.id, data);
+                }
+            }
+        } catch (dbErr) {
+            console.error('[generation] Failed to clear typing state:', dbErr);
+        }
+    };
+
     const restoreState = async (isError = false) => {
         if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
         if (generatingStates[char.id]?.timerId) clearInterval(generatingStates[char.id].timerId);
@@ -3399,13 +3419,18 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
 
             if (!currentState || currentState.genId !== genId) {
+                await clearTypingStateForMessage();
                 ensureCleanup();
+                window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
                 return;
             }
             
             // Guard against race with abort
-            if (controller.signal.aborted) {
+            const hasCompletionPayload = !!(response || finalReasoning || meta?.partialError);
+            if (controller.signal.aborted && !hasCompletionPayload) {
+                await clearTypingStateForMessage();
                 ensureCleanup();
+                window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
                 return;
             }
 
