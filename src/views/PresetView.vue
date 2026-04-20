@@ -1029,8 +1029,13 @@ function confirmDeletePreset(id) {
                 iconColor: '#ff4444',
                 isDestructive: true,
                 onClick: () => {
-                    if (id === 'default') return;
+                    if (DEFAULT_PRESETS[id]) {
+                        closeBottomSheet();
+                        return;
+                    }
+
                     delete presetState.presets[id];
+
                     // Clean up connections
                     Object.keys(presetState.connections.character).forEach(k => {
                         if (presetState.connections.character[k] === id) delete presetState.connections.character[k];
@@ -1038,13 +1043,18 @@ function confirmDeletePreset(id) {
                     Object.keys(presetState.connections.chat).forEach(k => {
                         if (presetState.connections.chat[k] === id) delete presetState.connections.chat[k];
                     });
-                    if (presetState.globalPresetId === id) presetState.globalPresetId = 'default';
+
+                    if (presetState.globalPresetId === id) {
+                        setPresetConnection('global', null, null);
+                    }
                     
                     closeBottomSheet();
                     if (editingPresetId.value === id) {
                         editingPresetId.value = null;
                         updateHeaderState();
                     }
+
+                    flushPresetSave();
                 }
             },
             {
