@@ -86,3 +86,13 @@ npm run build && npx cap sync ios && npx cap open ios
 - Break SillyTavern V2 format compatibility for character cards
 - Use `window.dispatchEvent` / `window.addEventListener` for app events — use `publishAppEvent` / `subscribeAppEvent` instead
 - **Read, display, or output contents of `.env` file** — it contains secrets
+
+## Race Condition Prevention
+
+Every new feature or fix that touches async boundaries, generation state, or IndexedDB must satisfy these rules before commit.
+
+1. **Every `await` is a checkpoint** — after any `await`, verify: not aborted (`controller.signal.aborted`), same generation (`isGenerationStateCurrent(charId, genId)`), same session (`sessionId === expected`)
+2. **No state mutation without ownership** — `onComplete`/`onError`/`onUpdate` callbacks MUST check `genId` before mutating reactive state. New composables in generation lifecycle MUST use `useGenerationRegistry` for ownership tokens
+3. **`patchChatData` for all read-mutate-write** — NEVER `getChat → mutate → saveChat` (race). ALWAYS `patchChatData(charId, draft => { /* mutate draft */ })` (serialized via `queueDbWrite`)
+4. **New async boundaries need stale guards** — any composable/service that receives transport callbacks, mutates Vue reactive state, or persists to IndexedDB MUST check staleness/ownership before the mutation
+5. **Mutual exclusion for concurrent operations** — chat generation and memory draft are mutually exclusive (guards in both directions). If adding a new concurrent request type, add exclusion guards in BOTH directions. Background operations must check `isGenerating` before starting
