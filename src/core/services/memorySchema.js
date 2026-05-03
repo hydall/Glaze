@@ -1,3 +1,29 @@
+const MEMORY_SETTINGS_KEY = 'gz_memory_settings';
+
+export function getMemorySettings() {
+    try {
+        const raw = localStorage.getItem(MEMORY_SETTINGS_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                normalizeMemorySettings(parsed);
+                return parsed;
+            }
+        }
+    } catch (_e) {}
+    const defaults = createDefaultMemorySettings();
+    try { localStorage.setItem(MEMORY_SETTINGS_KEY, JSON.stringify(defaults)); } catch (_e) {}
+    return defaults;
+}
+
+export function saveMemorySettings(settings) {
+    if (!settings || typeof settings !== 'object') return;
+    const current = getMemorySettings();
+    Object.assign(current, settings);
+    normalizeMemorySettings(current);
+    try { localStorage.setItem(MEMORY_SETTINGS_KEY, JSON.stringify(current)); } catch (_e) {}
+}
+
 export function createEmptyMemoryCoverage() {
     return {
         entryIds: [],
@@ -100,11 +126,12 @@ export function normalizeMemoryEntryInPlace(entry) {
 export function ensureSessionMemoryBook(chatData, sessionId) {
     if (!chatData.memoryBooks) chatData.memoryBooks = {};
     if (!chatData.memoryBooks[sessionId]) {
+        const globalSettings = getMemorySettings();
         chatData.memoryBooks[sessionId] = {
             id: `memorybook_${sessionId}`,
             entries: [],
             pendingDrafts: [],
-            settings: createDefaultMemorySettings(),
+            settings: { ...globalSettings },
             updatedAt: 0
         };
     }

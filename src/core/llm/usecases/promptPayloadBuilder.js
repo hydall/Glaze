@@ -2,6 +2,7 @@ import { lorebookState } from '@/core/states/lorebookState.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { db } from '@/utils/db.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
+import { getMemorySettings } from '@/core/services/memorySchema.js';
 
 function loadGlobalVars() {
     try {
@@ -70,7 +71,7 @@ export async function getMemoryReserveEstimate(char, safeContext) {
     try {
         const chatData = await db.getChat(charId);
         const memoryBook = chatData?.memoryBooks?.[sessionId];
-        const settings = memoryBook?.settings || {};
+        const settings = getMemorySettings();
         const activeEntries = (Array.isArray(memoryBook?.entries) ? memoryBook.entries : [])
             .filter(e => e && (e.status || 'active') === 'active' && (e.content || '').trim());
         if (!settings.enabled || !activeEntries.length) return 0;

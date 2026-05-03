@@ -4,6 +4,7 @@ import { getEmbeddings } from '@/core/services/embeddingService.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { findTopK } from '@/utils/vectorMath.js';
 import { checkKeyMatch, normalizeMessageIdList, buildSummaryExcerpt } from './memoryKeyMatching.js';
+import { getMemorySettings } from '@/core/services/memorySchema.js';
 
 async function vectorSearchMemoryEntries(entries, history = [], currentText = '') {
     const config = getEmbeddingConfig();
@@ -53,7 +54,7 @@ export async function buildMemoryInjection({ char, history, summary, safeContext
 
     const chatData = await db.getChat(charId);
     const memoryBook = chatData?.memoryBooks?.[sessionId];
-    const settings = memoryBook?.settings || {};
+    const settings = getMemorySettings();
     const activeEntries = (Array.isArray(memoryBook?.entries) ? memoryBook.entries : [])
         .filter(entry => entry && (entry.status || 'active') === 'active' && (entry.content || '').trim());
 

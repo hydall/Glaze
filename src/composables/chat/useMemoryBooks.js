@@ -11,6 +11,7 @@
  */
 
 import { ref } from 'vue';
+import { saveMemorySettings, getMemorySettings } from '@/core/services/memorySchema.js';
 import {
     ensureSessionMemoryBook,
     normalizeAutoCreateInterval,
@@ -184,6 +185,8 @@ export function useMemoryBooks(deps) {
         }
         const sessionId = activeChatChar.sessionId || chatData.currentId;
         const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+        const globalSettings = getMemorySettings();
+        Object.assign(memoryBook.settings, globalSettings);
         let shouldPersistReset = false;
         if (memoryBook.automation?.isGeneratingDraft && !memoryDraftState.value.active) {
             memoryBook.automation.isGeneratingDraft = false;
@@ -260,6 +263,8 @@ export function useMemoryBooks(deps) {
                 {
                     label: 'Keys',
                     onClick: async () => {
+                        const newSettings = { vectorSearchEnabled: false, keyMatchMode: 'glaze' };
+                        saveMemorySettings(newSettings);
                         await db.patchChatData(activeChatChar.id, (data) => {
                             const sid = activeChatChar.sessionId || data.currentId;
                             const mb = data.memoryBooks?.[sid];
@@ -280,6 +285,8 @@ export function useMemoryBooks(deps) {
                         setMemoryVectorSearchOnEntries(memoryBook, true);
                         showToast('Reindexing memory entries...', 1500);
                         await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
+                        const newSettings = { vectorSearchEnabled: true, keyMatchMode: 'plain' };
+                        saveMemorySettings(newSettings);
                         await db.patchChatData(activeChatChar.id, (data) => {
                             const sid = activeChatChar.sessionId || data.currentId;
                             const mb = data.memoryBooks?.[sid];
@@ -301,6 +308,8 @@ export function useMemoryBooks(deps) {
                         setMemoryVectorSearchOnEntries(memoryBook, true);
                         showToast('Reindexing memory entries...', 1500);
                         await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
+                        const newSettings = { vectorSearchEnabled: true, keyMatchMode: 'both' };
+                        saveMemorySettings(newSettings);
                         await db.patchChatData(activeChatChar.id, (data) => {
                             const sid = activeChatChar.sessionId || data.currentId;
                             const mb = data.memoryBooks?.[sid];
@@ -358,6 +367,7 @@ export function useMemoryBooks(deps) {
                     mb.updatedAt = Date.now();
                 }
             });
+            saveMemorySettings({ vectorSearchEnabled: enabled });
             await loadCurrentMemoryBook(activeChatChar);
             setTimeout(() => memoryBooksSheet.value?.open(), 50);
         } catch (error) {

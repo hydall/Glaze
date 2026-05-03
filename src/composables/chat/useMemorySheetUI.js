@@ -8,6 +8,7 @@ import { db } from '@/utils/db.js';
 import { getChatData } from '@/utils/sessions.js';
 import { addDeletedStats } from '@/core/services/statsService.js';
 import { getApiConfig } from '@/core/config/APISettings.js';
+import { saveMemorySettings, getMemorySettings } from '@/core/services/memorySchema.js';
 
 const {
     createEmptyMemoryCoverage,
@@ -430,12 +431,8 @@ export function useMemorySheetUI({
         const activeChatChar = getActiveChatChar();
         if (!activeChatChar) return;
 
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        if (!memoryBook.settings) memoryBook.settings = {};
+        const settings = getMemorySettings();
         const currentApiConfig = getApiConfig();
-        const settings = memoryBook.settings;
         const state = getNormalizedMemoryGenerationState(settings, initialState || {});
 
         const renderSheet = () => {
@@ -614,6 +611,7 @@ export function useMemorySheetUI({
                     s.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
                     s.promptPreset = state.promptPreset || 'detailed_beats';
                     mb.updatedAt = Date.now();
+                    saveMemorySettings(s);
                 });
                 closeBottomSheet();
                 setTimeout(() => openMemoryBooksSheet(), 50);
@@ -632,10 +630,7 @@ export function useMemorySheetUI({
     async function openMemoryPromptManager() {
         const activeChatChar = getActiveChatChar();
         if (!activeChatChar) return;
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        const settings = memoryBook.settings || {};
+        const settings = getMemorySettings();
         if (!Array.isArray(settings.customPrompts)) settings.customPrompts = [];
 
         const content = document.createElement('div');
@@ -695,6 +690,7 @@ export function useMemorySheetUI({
                     mb.settings.customPrompts = mb.settings.customPrompts.filter(item => item.id !== promptId);
                     if (mb.settings.promptPreset === promptId) mb.settings.promptPreset = 'detailed_beats';
                     mb.updatedAt = Date.now();
+                    saveMemorySettings(mb.settings);
                 });
                 closeBottomSheet();
                 setTimeout(() => openMemoryPromptManager(), 50);
@@ -764,6 +760,7 @@ export function useMemorySheetUI({
                     mb.settings.promptPreset = created.id;
                 }
                 mb.updatedAt = Date.now();
+                saveMemorySettings(mb.settings);
             });
             closeBottomSheet();
             setTimeout(() => openMemoryPromptManager(), 50);

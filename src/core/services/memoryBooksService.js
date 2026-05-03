@@ -27,7 +27,8 @@ import {
     createDefaultMemorySettings,
     normalizeMemorySettings,
     normalizeMemoryEntryInPlace,
-    ensureSessionMemoryBook
+    ensureSessionMemoryBook,
+    getMemorySettings
 } from '@/core/services/memorySchema.js';
 
 export {
@@ -68,7 +69,8 @@ export function countCompletedExchangesSince(startCount, currentCount) {
 }
 
 export function normalizeAutoCreateInterval(memoryBook) {
-    const raw = Number(memoryBook?.settings?.autoCreateInterval || 15);
+    const settings = getMemorySettings();
+    const raw = Number(settings.autoCreateInterval || 15);
     return Math.max(1, Math.min(200, Number.isFinite(raw) ? Math.round(raw) : 15));
 }
 
@@ -353,11 +355,11 @@ export function shouldEnableMemoryVectorSearch() {
 }
 
 export function getMemoryVectorSearchEnabled(memoryBook) {
-    return memoryBook?.settings?.vectorSearchEnabled !== false;
+    return getMemorySettings().vectorSearchEnabled !== false;
 }
 
 export function getMemoryKeyMatchMode(memoryBook) {
-    const mode = memoryBook?.settings?.keyMatchMode;
+    const mode = getMemorySettings().keyMatchMode;
     if (mode === 'plain' || mode === 'glaze' || mode === 'both') {
         return mode;
     }

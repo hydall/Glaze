@@ -3,6 +3,7 @@ import { db } from '@/utils/db.js';
 import { generateMemoryDraft } from '@/core/llm/usecases/generateMemoryDraft.js';
 import { showToast } from '@/core/states/toastState.js';
 import { formatError } from '@/utils/errors.js';
+import { saveMemorySettings } from '@/core/services/memorySchema.js';
 import {
     ensureSessionMemoryBook,
     ensureMemoryAutomationState,
@@ -671,6 +672,7 @@ export function useMemoryAutomation({
         settings.generationModel = model || '';
         settings.generationUseCurrentModelOverride = false;
         currentMemoryBookData.updatedAt = Date.now();
+        saveMemorySettings({ generationModel: model || '', generationUseCurrentModelOverride: false });
         db.patchChatData(getActiveChatChar().id, (chatData) => {
             const sessionId = getActiveChatChar().sessionId || chatData.currentId;
             const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
