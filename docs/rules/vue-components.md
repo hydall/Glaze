@@ -52,7 +52,7 @@ src/views/          — Page-level components (composable wiring)
 
 ## ChatView.vue exception
 
-ChatView.vue (~1390 script lines) is a known exception to the 400-line rule. Further extraction would cause prop-drilling due to 30+ shared dependencies. `openChat()` (~400 lines) remains due to high dependency count. This is acknowledged tech debt.
+ChatView.vue (~1705 script lines) is a known exception to the 400-line rule. Further extraction would cause prop-drilling due to 30+ shared dependencies. `openChat()` (~400 lines) remains due to high dependency count. This is acknowledged tech debt.
 
 ## Async operation lifecycle
 

@@ -68,12 +68,8 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 | Branch | Purpose | PR |
 |--------|---------|----|
 | `origin/dev` | Local mirror of upstream integration branch | No PR |
-| `feat/character-gallery` | Character gallery tab, CharX/ZIP import-export, gallery composable, imageUtils dedup | #91 |
-| `fix/abort-empty-message-and-dropdown-scroll` | Abort pipeline onError propagation, desktop dropdown scroll (linear chain from feat/character-gallery) | Not yet |
-| `fix/preset-stackoverflow-and-chat-perf` | Preset token consistency, persona breakdown, stack overflow & chat perf (linear chain from fix/abort-empty-message-and-dropdown-scroll) | Not yet |
-| `fix/summary-deletion-and-context-cutoff` | Prevent summary object destruction by asyncSave/onVisibilityChange, invalidate context cache on context limit change | Not yet |
-| `fix/authornote-regex-prompt` | findRegex→regex conversion, mergePrompts regex gap, AN save on chat switch, context cache AN invalidation, native appState AN/summary save (linear chain from fix/summary-deletion-and-context-cutoff) | Not yet |
-| `fix/memory-reserve-double-count` | Eliminate memoryReserve double-counting, add actualPromptTokens to context breakdown, null guard in initHeaderScroll (linear chain from fix/authornote-regex-prompt) | Not yet |
+| `fix/migrate-getchatdata-savechat-to-patchchatdata` | Migrate 40+ getChatData+saveChat to patchChatData, normalizeChatData normalization, reindex guard | #118 |
+| `fix/memory-settings-global` | Memory book settings global (localStorage) instead of per-session (linear chain from fix/migrate-getchatdata-savechat-to-patchchatdata) | #119 |
 
 ### Historical (merged & deleted)
 - `feat/refactor-phase1-event-hub` → merged into `feat/chat-persistence-and-reasoning-fixes`, then upstream/dev
