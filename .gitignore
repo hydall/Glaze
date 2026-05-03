@@ -91,6 +91,7 @@ captures/
 !CONTRIBUTING.md
 !ARCHITECTURE.md
 !docs/
+!docs/refactoring/
 /BUGFIX_TODO.md
 /UNTESTED_TASKS.md
 /TESTING_CHECKLIST.md

@@ -1,11 +1,14 @@
 # Architecture Audit — Tokenizer, Vectorization, MemoryBooks, Macros, Cloud Sync
 
 Related docs:
-- Refactor history (Phases 1–14): `docs/refactor-history.md`
-- Known gaps & deferred items: `docs/rules/known-gaps.md`
+- Refactor history (Phases 0–14): `docs/refactoring/completed-phases.md`
+- Forward plan (async integrity, DB safety): `docs/refactoring/async-integrity.md`
+- Deferred items: `docs/refactoring/deferred-items.md`
+- Known gaps: `docs/rules/known-gaps.md`
 - Vue guard rails: `docs/rules/vue-components.md`
 - Generation invariants: `docs/rules/generation.md`
 - Race condition rules: `docs/rules/race-conditions.md`
+- Database rules: `docs/rules/database.md`
 - Formal invariants with code refs: `docs/INVARIANTS.md`
 
 ## 0. Architecture Overview
@@ -201,10 +204,12 @@ src/
 ## 3. MemoryBooks
 
 ### Files
-- `src/views/ChatView.vue` — Primary implementation
+- `src/composables/chat/useMemoryBooks.js` — Memory book CRUD, entry management, vector toggle, reindex, draft generation
+- `src/composables/chat/useMemorySheetUI.js` — Memory sheet DOM, entry editor, prompt manager, generation settings
+- `src/composables/chat/useMemoryAutomation.js` — Auto-creation, stable-turn triggers, bootstrap, quick model change
 - `src/core/services/generationService.js` — Memory injection during generation
 - `src/core/states/lorebookState.js` — Vector search for memories
-- `src/utils/db.js` — Chat persistence with memory books
+- `src/utils/db.js` — Chat persistence with memory books via `patchChatData`
 
 ### Structure
 
@@ -591,10 +596,12 @@ Native-only scope retained:
 - `ChatView.vue` is a large composable-wiring surface (~1390 script lines). It is a known exception to the 400-line guard rail because further extraction would cause prop-drilling (see Guard Rails). `openChat()` (~400 lines) remains due to high dependency count.
 - Runtime config has multiple owners: `localStorage`, IndexedDB API presets, reactive `ApiView.vue` state, onboarding writes, and direct reads in feature views.
 - Worker/service boundaries are not documented clearly: keyword lore lives in the worker, vector retrieval and memory injection happen later in the service layer.
-- Callback signatures are flexible but brittle across chat, summary, and memory-draft flows.
-- **Resolved (PR #72):** AbortController signal previously did not reach `fetch()`, so stop button only cleared UI state while TCP connection stayed open. Now signal propagates end-to-end through `requestConfig` → `completionsClient` → `streamingSse:readChunk()`.
-- **Resolved (PR #72):** Stale completions from aborted generations could mutate typing state for newer active generations. Now guarded by `expectedGenId` checks in finalize/restore/complete/setup paths.
-- **Resolved (PR #72):** No crash recovery — closing the browser tab during generation or auto-save race conditions could lose messages. Now `useSessionPersistence` writes crash buffer on `pagehide`/`beforeunload`/`visibilitychange`.
+
+### Resolved Problems
+- **AbortController signal propagation (PR #72):** Signal now reaches `fetch()` through `requestConfig` → `completionsClient` → `streamingSse:readChunk()`. Stop button closes the TCP connection immediately.
+- **Stale completions (PR #72):** Guarded by `expectedGenId` checks in finalize/restore/complete/setup paths.
+- **Crash recovery (PR #72):** `useSessionPersistence` writes crash buffer on `pagehide`/`beforeunload`/`visibilitychange`.
+- **Read-mutate-write races:** All 40+ `getChatData+saveChat` patterns migrated to `patchChatData`. See `docs/rules/database.md`.
 
 ### Actual Architecture (Landed)
 
@@ -667,7 +674,7 @@ Native-only scope retained:
 - `src/core/states/requestPreviewState.js` — joins prompt preview + request trace for UI
 - `src/core/events/projections/debugStateProjection.js` — event→state projection: subscribes to debug events, routes to trace/preview state modules
 
-Composable directory listing and per-phase decomposition details: `docs/refactor-history.md`
+Composable directory listing and per-phase decomposition details: `docs/refactoring/completed-phases.md`
 
 **UI Composables:**
 - `src/composables/ui/useSidebarResizer.js` — desktop sidebar resize logic
@@ -807,6 +814,50 @@ Composable directory listing and per-phase decomposition details: `docs/refactor
 - `debugStateProjection.js` subscribes to those events and routes them to `requestTraceState.js` and `promptPreviewState.js` (both keyed by `debugKey`)
 - `requestPreviewState.js` joins prompt preview + request trace for UI consumption
 - `RequestPreviewSheet.vue` combines both views, now per-generation instead of global singleton
+
+---
+
+## Database Layer
+
+### Files
+- `src/utils/db.js` — IndexedDB wrapper with write queue and patchChatData
+
+### Write Queue (`queueDbWrite`)
+
+All IDB writes are serialized through a global promise chain (`_dbWriteQueue`). Each write waits for the previous one to complete before starting. This prevents concurrent writes from interleaving.
+
+### `patchChatData` (read-mutate-write)
+
+Atomically reads chat data, applies mutations, normalizes, and writes back — all inside one queued operation:
+
+```js
+await db.patchChatData(charId, (data) => {
+    data.sessions[sessionId] = newMessages;
+});
+```
+
+- Reads fresh data from IDB (no stale snapshots)
+- Mutations are synchronous (no async work inside callback)
+- `normalizeChatData` + `toPlain` applied before write
+- localStorage fallback on write failure
+- **Never** do `getChatData` + mutate + `saveChat` — this is a race condition
+
+### `patchChatDataBatch` (planned)
+
+Extends `patchChatData` to accept multiple mutation functions in a single read-mutate-write cycle. Eliminates redundant reads and gaps between sequential patches.
+
+### `saveChat` (full replacement)
+
+Used only for:
+- Creating new chat data from scratch
+- Resetting chat to empty state
+- Cloud sync (data from server)
+- Chat importer (new data)
+- DB internals (recursive calls inside `patchChatData`/`saveChat`)
+
+### Crash Recovery Buffer
+
+`useSessionPersistence.js` writes a crash buffer to `localStorage` on `visibilitychange`, `pagehide`, and `beforeunload`. Covers: messages, draft, authorsNote, summary, scrollAnchor. Does NOT cover: memory books, session management, character metadata.
 
 ---
 
