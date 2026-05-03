@@ -286,53 +286,55 @@ export function useMemoryAutomation({
             const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, getActiveChatChar()?.name || 'Character']);
 
             let wasExistingDraft = false;
-            await db.patchChatData(getActiveChatChar().id, (latestChatData) => {
-                const latestSessionId = getActiveChatChar().sessionId || latestChatData.currentId;
-                const latestMemoryBook = ensureSessionMemoryBook(latestChatData, latestSessionId);
-                const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
+            await db.patchChatDataBatch(getActiveChatChar().id, [
+                (latestChatData) => {
+                    const latestSessionId = getActiveChatChar().sessionId || latestChatData.currentId;
+                    const latestMemoryBook = ensureSessionMemoryBook(latestChatData, latestSessionId);
+                    const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
 
-                if (!Array.isArray(latestMemoryBook.pendingDrafts)) latestMemoryBook.pendingDrafts = [];
+                    if (!Array.isArray(latestMemoryBook.pendingDrafts)) latestMemoryBook.pendingDrafts = [];
 
-                const latestExistingDraft = existingDraftId
-                    ? latestMemoryBook.pendingDrafts.find(d => d.id === existingDraftId)
-                    : null;
-                wasExistingDraft = !!latestExistingDraft;
+                    const latestExistingDraft = existingDraftId
+                        ? latestMemoryBook.pendingDrafts.find(d => d.id === existingDraftId)
+                        : null;
+                    wasExistingDraft = !!latestExistingDraft;
 
-                if (latestExistingDraft) {
-                    latestExistingDraft.content = (parsedDraft.content || parsedDraft.raw || '').trim();
-                    latestExistingDraft.rawContent = (parsedDraft.raw || parsedDraft.content || '').trim();
-                    latestExistingDraft.keys = parsedDraft.keys || [];
-                    latestExistingDraft.glazeKeys = [];
-                    latestExistingDraft.vectorSearch = vectorEnabled;
-                    latestExistingDraft.status = 'pending_approval';
-                    latestExistingDraft.source = source;
-                    latestExistingDraft.updatedAt = generatedAt;
-                    latestExistingDraft.generatedAt = generatedAt;
-                } else {
-                    const createdDraft = createPendingMemoryDraft(latestMemoryBook, selected, { source, vectorSearch: vectorEnabled });
-                    if (createdDraft) {
-                        createdDraft.content = (parsedDraft.content || parsedDraft.raw || '').trim();
-                        createdDraft.rawContent = (parsedDraft.raw || parsedDraft.content || '').trim();
-                        createdDraft.keys = parsedDraft.keys || [];
-                        createdDraft.glazeKeys = [];
-                        createdDraft.vectorSearch = vectorEnabled;
-                        createdDraft.status = 'pending_approval';
-                        createdDraft.source = source;
-                        createdDraft.updatedAt = generatedAt;
-                        createdDraft.generatedAt = generatedAt;
+                    if (latestExistingDraft) {
+                        latestExistingDraft.content = (parsedDraft.content || parsedDraft.raw || '').trim();
+                        latestExistingDraft.rawContent = (parsedDraft.raw || parsedDraft.content || '').trim();
+                        latestExistingDraft.keys = parsedDraft.keys || [];
+                        latestExistingDraft.glazeKeys = [];
+                        latestExistingDraft.vectorSearch = vectorEnabled;
+                        latestExistingDraft.status = 'pending_approval';
+                        latestExistingDraft.source = source;
+                        latestExistingDraft.updatedAt = generatedAt;
+                        latestExistingDraft.generatedAt = generatedAt;
+                    } else {
+                        const createdDraft = createPendingMemoryDraft(latestMemoryBook, selected, { source, vectorSearch: vectorEnabled });
+                        if (createdDraft) {
+                            createdDraft.content = (parsedDraft.content || parsedDraft.raw || '').trim();
+                            createdDraft.rawContent = (parsedDraft.raw || parsedDraft.content || '').trim();
+                            createdDraft.keys = parsedDraft.keys || [];
+                            createdDraft.glazeKeys = [];
+                            createdDraft.vectorSearch = vectorEnabled;
+                            createdDraft.status = 'pending_approval';
+                            createdDraft.source = source;
+                            createdDraft.updatedAt = generatedAt;
+                            createdDraft.generatedAt = generatedAt;
+                        }
                     }
+                    latestAutomation.isGeneratingDraft = true;
+                    latestMemoryBook.updatedAt = generatedAt;
+                },
+                (postSaveChatData) => {
+                    const postSaveSessionId = getActiveChatChar().sessionId || postSaveChatData.currentId;
+                    const postSaveMemoryBook = ensureSessionMemoryBook(postSaveChatData, postSaveSessionId);
+                    const postSaveAutomation = ensureMemoryAutomationState(postSaveMemoryBook);
+                    postSaveAutomation.isGeneratingDraft = Object.keys(memoryDraftState.value.activeDrafts || {}).length > 0;
+                    postSaveMemoryBook.updatedAt = Date.now();
                 }
-                latestAutomation.isGeneratingDraft = true;
-                latestMemoryBook.updatedAt = generatedAt;
-            });
+            ]);
             stopMemoryDraftProgress(progressDraftId);
-            await db.patchChatData(getActiveChatChar().id, (postSaveChatData) => {
-                const postSaveSessionId = getActiveChatChar().sessionId || postSaveChatData.currentId;
-                const postSaveMemoryBook = ensureSessionMemoryBook(postSaveChatData, postSaveSessionId);
-                const postSaveAutomation = ensureMemoryAutomationState(postSaveMemoryBook);
-                postSaveAutomation.isGeneratingDraft = Object.keys(memoryDraftState.value.activeDrafts || {}).length > 0;
-                postSaveMemoryBook.updatedAt = Date.now();
-            });
             await updatePendingMemoryMessageIds(getActiveChatChar());
             await loadCurrentMemoryBook(getActiveChatChar());
             showToast(wasExistingDraft ? 'Draft updated' : 'Memory draft created');
@@ -495,26 +497,27 @@ export function useMemoryAutomation({
         if (!segments.length) return 0;
 
         let createdCount = 0;
-        await db.patchChatData(charId, (chatData) => {
-            if (!chatData?.sessions?.[sessionId]) return;
-            const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-            const automation = ensureMemoryAutomationState(memoryBook);
-            automation.pendingTrigger = null;
-            for (const segment of segments) {
-                const created = createPendingMemoryDraft(memoryBook, segment, { source: 'import_bootstrap' });
-                if (created) createdCount += 1;
+        await db.patchChatDataBatch(charId, [
+            (chatData) => {
+                if (!chatData?.sessions?.[sessionId]) return;
+                const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+                const automation = ensureMemoryAutomationState(memoryBook);
+                automation.pendingTrigger = null;
+                for (const segment of segments) {
+                    const created = createPendingMemoryDraft(memoryBook, segment, { source: 'import_bootstrap' });
+                    if (created) createdCount += 1;
+                }
+                memoryBook.updatedAt = Date.now();
+            },
+            (latestData) => {
+                if (!latestData?.sessions?.[sessionId]) return;
+                const latestMemoryBook = ensureSessionMemoryBook(latestData, sessionId);
+                const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
+                latestAutomation.lastProcessedMessageCount = countStableConversationMessages(latestData.sessions[sessionId]);
+                latestAutomation.pendingTrigger = null;
+                latestMemoryBook.updatedAt = Date.now();
             }
-            memoryBook.updatedAt = Date.now();
-        });
-
-        await db.patchChatData(charId, (latestData) => {
-            if (!latestData?.sessions?.[sessionId]) return;
-            const latestMemoryBook = ensureSessionMemoryBook(latestData, sessionId);
-            const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
-            latestAutomation.lastProcessedMessageCount = countStableConversationMessages(latestData.sessions[sessionId]);
-            latestAutomation.pendingTrigger = null;
-            latestMemoryBook.updatedAt = Date.now();
-        });
+        ]);
         return createdCount;
     }
 

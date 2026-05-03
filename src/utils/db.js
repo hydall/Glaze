@@ -539,11 +539,25 @@ export const db = {
             throw err;
         }
     },
+    /**
+     * Apply a single mutation to chat data in a serialized read-mutate-write cycle.
+     * For 2+ mutations with no async work between them, use patchChatDataBatch instead.
+     */
     patchChatData: async (charId, patchFn) => {
+        return db.patchChatDataBatch(charId, [patchFn]);
+    },
+    /**
+     * Apply multiple mutations to chat data in a single read-mutate-write cycle.
+     * All patchFns must be synchronous — no async work between mutations.
+     * Reduces IDB reads and eliminates the gap between sequential patches.
+     */
+    patchChatDataBatch: async (charId, patchFns) => {
         return queueDbWrite(async () => {
             const data = await db.getChat(charId);
             if (!data) return;
-            patchFn(data);
+            for (const patchFn of patchFns) {
+                patchFn(data);
+            }
             const normalized = normalizeChatData(data);
             const snapshot = toPlain(normalized);
             try {
