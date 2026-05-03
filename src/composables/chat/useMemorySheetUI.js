@@ -98,20 +98,30 @@ export function useMemorySheetUI({
             const retrievalChanged = JSON.stringify(entry.keys || []) !== JSON.stringify(nextKeys)
                 || String(entry.content || '') !== nextContent;
 
-            entry.title = nextTitle;
-            entry.content = nextContent;
-            entry.keys = nextKeys;
-            entry.updatedAt = Date.now();
-            normalizeMemoryEntryShape(entry);
-            memoryBook.updatedAt = Date.now();
-            reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-            chatData.sessions[sessionId] = currentMessages.value;
-
             try {
                 if (getMemoryVectorSearchEnabled(memoryBook) && retrievalChanged) {
+                    entry.content = nextContent;
+                    entry.keys = nextKeys;
                     await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
                 }
-                await db.saveChat(activeChatChar.id, chatData);
+                await db.patchChatData(activeChatChar.id, (chatData) => {
+                    const sid = activeChatChar.sessionId || chatData.currentId;
+                    const mb = ensureSessionMemoryBook(chatData, sid);
+                    const e = mb.entries.find(item => item.id === entryId);
+                    if (!e) return;
+                    e.title = nextTitle;
+                    e.content = nextContent;
+                    e.keys = nextKeys;
+                    e.updatedAt = Date.now();
+                    normalizeMemoryEntryShape(e);
+                    mb.updatedAt = Date.now();
+                    reconcileSessionMemoryState(chatData, sid, currentMessages.value);
+                    chatData.sessions[sid] = currentMessages.value;
+                });
+                entry.title = nextTitle;
+                entry.content = nextContent;
+                entry.keys = nextKeys;
+                entry.updatedAt = Date.now();
                 closeBottomSheet();
                 setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
             } catch (error) {
@@ -188,12 +198,14 @@ export function useMemorySheetUI({
             createdAt: Date.now(),
             updatedAt: Date.now()
         });
-        memoryBook.entries.push(createdEntry);
-
-        memoryBook.updatedAt = Date.now();
-        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-        chatData.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(activeChatChar.id, chatData);
+        await db.patchChatData(activeChatChar.id, (chatData) => {
+            const sid = activeChatChar.sessionId || chatData.currentId;
+            const mb = ensureSessionMemoryBook(chatData, sid);
+            mb.entries.push(createdEntry);
+            mb.updatedAt = Date.now();
+            reconcileSessionMemoryState(chatData, sid, currentMessages.value);
+            chatData.sessions[sid] = currentMessages.value;
+        });
         await indexMemoryEntryIfNeeded(createdEntry, activeChatChar.id, sessionId);
         clearSelection();
     }
@@ -256,9 +268,16 @@ export function useMemorySheetUI({
                 showToast('Reindexing memory entry...', 1500);
                 entry.vectorSearch = true;
                 await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
-                entry.updatedAt = Date.now();
-                memoryBook.updatedAt = Date.now();
-                await db.saveChat(activeChatChar.id, chatData);
+                await db.patchChatData(activeChatChar.id, (chatData) => {
+                    const sid = activeChatChar.sessionId || chatData.currentId;
+                    const mb = ensureSessionMemoryBook(chatData, sid);
+                    const e = mb.entries.find(item => item.id === entry.id);
+                    if (e) {
+                        e.vectorSearch = true;
+                        e.updatedAt = Date.now();
+                    }
+                    mb.updatedAt = Date.now();
+                });
                 showToast('Memory entry reindexed');
             } catch (error) {
                 console.error('Failed to reindex memory entry:', error);
@@ -271,15 +290,15 @@ export function useMemorySheetUI({
         content.querySelector('#memory-preview-delete')?.addEventListener('click', async () => {
             const activeChatChar = getActiveChatChar();
             if (!activeChatChar) return;
-            const chatData = await getChatData(activeChatChar.id);
-            const sessionId = activeChatChar.sessionId || chatData.currentId;
-            const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
             await deleteMemoryEntryIndexIfPresent(entry.id);
-            memoryBook.entries = memoryBook.entries.filter(item => item.id !== entry.id);
-            memoryBook.updatedAt = Date.now();
-            reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-            chatData.sessions[sessionId] = currentMessages.value;
-            await db.saveChat(activeChatChar.id, chatData);
+            await db.patchChatData(activeChatChar.id, (chatData) => {
+                const sid = activeChatChar.sessionId || chatData.currentId;
+                const mb = ensureSessionMemoryBook(chatData, sid);
+                mb.entries = mb.entries.filter(item => item.id !== entry.id);
+                mb.updatedAt = Date.now();
+                reconcileSessionMemoryState(chatData, sid, currentMessages.value);
+                chatData.sessions[sid] = currentMessages.value;
+            });
             closeBottomSheet();
             setTimeout(() => openMemoryBooksSheet(), 50);
         });
@@ -381,36 +400,29 @@ export function useMemorySheetUI({
         const activeChatChar = getActiveChatChar();
         if (!activeChatChar || selectedMessages.value.size === 0) return;
 
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
         const selectedIds = new Set(currentMessages.value.filter(msg => msg && selectedMessages.value.has(msg.id)).map(msg => msg.id));
         if (!selectedIds.size) return;
 
-        const removedEntryIds = memoryBook.entries
-            .filter(entry => normalizeEntryMessageIds(entry).some(id => selectedIds.has(id)))
-            .map(entry => entry.id);
-
-        if (!removedEntryIds.length) {
-            clearSelection();
-            return;
-        }
-
-        memoryBook.entries = memoryBook.entries.filter(entry => !removedEntryIds.includes(entry.id));
-        memoryBook.updatedAt = Date.now();
-
-        for (const msg of currentMessages.value) {
-            if (!msg?.memoryCoverage) msg.memoryCoverage = createEmptyMemoryCoverage();
-            const wasCovered = Array.isArray(msg.memoryCoverage.entryIds) && msg.memoryCoverage.entryIds.some(id => removedEntryIds.includes(id));
-            msg.memoryCoverage.entryIds = (msg.memoryCoverage.entryIds || []).filter(id => !removedEntryIds.includes(id));
-            if (wasCovered) {
-                msg.memoryCoverage.needsRebuild = true;
-                msg.memoryCoverage.stale = false;
+        await db.patchChatData(activeChatChar.id, (chatData) => {
+            const sid = activeChatChar.sessionId || chatData.currentId;
+            const mb = ensureSessionMemoryBook(chatData, sid);
+            const removedEntryIds = mb.entries
+                .filter(entry => normalizeEntryMessageIds(entry).some(id => selectedIds.has(id)))
+                .map(entry => entry.id);
+            if (!removedEntryIds.length) return;
+            mb.entries = mb.entries.filter(entry => !removedEntryIds.includes(entry.id));
+            mb.updatedAt = Date.now();
+            for (const msg of currentMessages.value) {
+                if (!msg?.memoryCoverage) msg.memoryCoverage = createEmptyMemoryCoverage();
+                const wasCovered = Array.isArray(msg.memoryCoverage.entryIds) && msg.memoryCoverage.entryIds.some(id => removedEntryIds.includes(id));
+                msg.memoryCoverage.entryIds = (msg.memoryCoverage.entryIds || []).filter(id => !removedEntryIds.includes(id));
+                if (wasCovered) {
+                    msg.memoryCoverage.needsRebuild = true;
+                    msg.memoryCoverage.stale = false;
+                }
             }
-        }
-
-        chatData.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(activeChatChar.id, chatData);
+            chatData.sessions[sid] = currentMessages.value;
+        });
         clearSelection();
     }
 
@@ -566,37 +578,43 @@ export function useMemorySheetUI({
                 setTimeout(() => openMemoryBooksSheet(), 50);
             });
             content.querySelector('#memory-settings-save')?.addEventListener('click', async () => {
-                settings.generationSource = state.source;
-                settings.generationUseCurrentModelOverride = false;
-                settings.generationModel = state.model || '';
-                settings.generationEndpoint = state.source === 'custom'
-                    ? (content.querySelector('#memory-endpoint-input')?.value?.trim() || '')
-                    : '';
-                settings.generationApiKey = state.source === 'custom'
-                    ? (content.querySelector('#memory-apikey-input')?.value || '')
-                    : '';
+                const endpointValue = content.querySelector('#memory-endpoint-input')?.value?.trim() || '';
+                const apiKeyValue = content.querySelector('#memory-apikey-input')?.value || '';
                 const tempValue = content.querySelector('#memory-temperature-input')?.value?.trim();
-                settings.generationTemperature = tempValue === '' ? null : Number(tempValue);
                 const maxTokensValue = content.querySelector('#memory-max-tokens-input')?.value?.trim();
-                settings.generationMaxTokens = maxTokensValue === ''
-                    ? null
-                    : Math.max(200, Math.min(32000, Number.isFinite(Number(maxTokensValue)) ? Math.round(Number(maxTokensValue)) : 2000));
-                settings.autoCreateEnabled = !!content.querySelector('#memory-auto-create-toggle')?.checked;
-                settings.autoGenerateEnabled = !!content.querySelector('#memory-auto-generate-toggle')?.checked;
+                const autoCreateEnabled = !!content.querySelector('#memory-auto-create-toggle')?.checked;
+                const autoGenerateEnabled = !!content.querySelector('#memory-auto-generate-toggle')?.checked;
                 const autoIntervalRaw = content.querySelector('#memory-auto-interval-input')?.value?.trim();
-                const autoIntervalValue = autoIntervalRaw !== '' ? Number(autoIntervalRaw) : 15;
-                settings.autoCreateInterval = Number.isFinite(autoIntervalValue) && autoIntervalValue > 0 ? Math.max(1, Math.min(200, Math.round(autoIntervalValue))) : 15;
                 const batchSizeRaw = content.querySelector('#memory-batch-size-input')?.value?.trim();
-                const batchSizeValue = batchSizeRaw !== '' ? Number(batchSizeRaw) : 3;
-                settings.batchSize = Number.isFinite(batchSizeValue) && batchSizeValue > 0 ? Math.max(1, Math.min(50, Math.round(batchSizeValue))) : 3;
-                settings.useDelayedAutomation = !!content.querySelector('#memory-delayed-automation-toggle')?.checked;
+                const useDelayedAutomation = !!content.querySelector('#memory-delayed-automation-toggle')?.checked;
                 const maxInjectedRaw = content.querySelector('#memory-max-injected-input')?.value?.trim();
+                const autoIntervalValue = autoIntervalRaw !== '' ? Number(autoIntervalRaw) : 15;
+                const batchSizeValue = batchSizeRaw !== '' ? Number(batchSizeRaw) : 3;
                 const maxInjectedValue = maxInjectedRaw !== '' ? Number(maxInjectedRaw) : 7;
-                settings.maxInjectedEntries = Number.isFinite(maxInjectedValue) && maxInjectedValue > 0 ? Math.max(1, Math.min(20, Math.round(maxInjectedValue))) : 7;
-                settings.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
-                settings.promptPreset = state.promptPreset || 'detailed_beats';
-                memoryBook.updatedAt = Date.now();
-                await db.saveChat(activeChatChar.id, chatData);
+                await db.patchChatData(activeChatChar.id, (chatData) => {
+                    const sid = activeChatChar.sessionId || chatData.currentId;
+                    const mb = ensureSessionMemoryBook(chatData, sid);
+                    if (!mb.settings) mb.settings = {};
+                    const s = mb.settings;
+                    s.generationSource = state.source;
+                    s.generationUseCurrentModelOverride = false;
+                    s.generationModel = state.model || '';
+                    s.generationEndpoint = state.source === 'custom' ? endpointValue : '';
+                    s.generationApiKey = state.source === 'custom' ? apiKeyValue : '';
+                    s.generationTemperature = tempValue === '' ? null : Number(tempValue);
+                    s.generationMaxTokens = maxTokensValue === ''
+                        ? null
+                        : Math.max(200, Math.min(32000, Number.isFinite(Number(maxTokensValue)) ? Math.round(Number(maxTokensValue)) : 2000));
+                    s.autoCreateEnabled = autoCreateEnabled;
+                    s.autoGenerateEnabled = autoGenerateEnabled;
+                    s.autoCreateInterval = Number.isFinite(autoIntervalValue) && autoIntervalValue > 0 ? Math.max(1, Math.min(200, Math.round(autoIntervalValue))) : 15;
+                    s.batchSize = Number.isFinite(batchSizeValue) && batchSizeValue > 0 ? Math.max(1, Math.min(50, Math.round(batchSizeValue))) : 3;
+                    s.useDelayedAutomation = useDelayedAutomation;
+                    s.maxInjectedEntries = Number.isFinite(maxInjectedValue) && maxInjectedValue > 0 ? Math.max(1, Math.min(20, Math.round(maxInjectedValue))) : 7;
+                    s.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
+                    s.promptPreset = state.promptPreset || 'detailed_beats';
+                    mb.updatedAt = Date.now();
+                });
                 closeBottomSheet();
                 setTimeout(() => openMemoryBooksSheet(), 50);
             });
@@ -669,10 +687,15 @@ export function useMemorySheetUI({
         content.querySelectorAll('[data-prompt-delete]').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const promptId = btn.getAttribute('data-prompt-delete');
-                settings.customPrompts = settings.customPrompts.filter(item => item.id !== promptId);
-                if (settings.promptPreset === promptId) settings.promptPreset = 'detailed_beats';
-                memoryBook.updatedAt = Date.now();
-                await db.saveChat(activeChatChar.id, chatData);
+                await db.patchChatData(activeChatChar.id, (chatData) => {
+                    const sid = activeChatChar.sessionId || chatData.currentId;
+                    const mb = ensureSessionMemoryBook(chatData, sid);
+                    if (!mb.settings) mb.settings = {};
+                    if (!Array.isArray(mb.settings.customPrompts)) mb.settings.customPrompts = [];
+                    mb.settings.customPrompts = mb.settings.customPrompts.filter(item => item.id !== promptId);
+                    if (mb.settings.promptPreset === promptId) mb.settings.promptPreset = 'detailed_beats';
+                    mb.updatedAt = Date.now();
+                });
                 closeBottomSheet();
                 setTimeout(() => openMemoryPromptManager(), 50);
             });
@@ -724,19 +747,24 @@ export function useMemorySheetUI({
                 showToast('Prompt text is required');
                 return;
             }
-            if (existing) {
-                const target = settings.customPrompts.find(item => item.id === existing.id);
-                if (target) {
-                    target.name = name;
-                    target.prompt = prompt;
+            await db.patchChatData(activeChatChar.id, (chatData) => {
+                const sid = activeChatChar.sessionId || chatData.currentId;
+                const mb = ensureSessionMemoryBook(chatData, sid);
+                if (!mb.settings) mb.settings = {};
+                if (!Array.isArray(mb.settings.customPrompts)) mb.settings.customPrompts = [];
+                if (existing) {
+                    const target = mb.settings.customPrompts.find(item => item.id === existing.id);
+                    if (target) {
+                        target.name = name;
+                        target.prompt = prompt;
+                    }
+                } else {
+                    const created = { id: genMemoryPromptId(), name, prompt };
+                    mb.settings.customPrompts.push(created);
+                    mb.settings.promptPreset = created.id;
                 }
-            } else {
-                const created = { id: genMemoryPromptId(), name, prompt };
-                settings.customPrompts.push(created);
-                settings.promptPreset = created.id;
-            }
-            memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.id, chatData);
+                mb.updatedAt = Date.now();
+            });
             closeBottomSheet();
             setTimeout(() => openMemoryPromptManager(), 50);
         });

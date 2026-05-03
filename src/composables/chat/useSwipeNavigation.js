@@ -1,14 +1,14 @@
-import { getAllGreetings, getChatData } from '@/utils/sessions.js';
+import { getAllGreetings } from '@/utils/sessions.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { activePersona } from '@/core/states/personaState.js';
 import { db } from '@/utils/db.js';
 
 async function updateSessionMessage(char, msgIndex, newMsgData) {
-    const data = await getChatData(char.id);
-    if (data && data.sessions[data.currentId]) {
-        data.sessions[data.currentId][msgIndex] = newMsgData;
-        await db.saveChat(char.id, data);
-    }
+    await db.patchChatData(char.id, (data) => {
+        if (data.sessions[data.currentId]) {
+            data.sessions[data.currentId][msgIndex] = newMsgData;
+        }
+    });
 }
 
 export function useSwipeNavigation({ currentMessages, isGenerating, getActiveChatChar, regenerateMessage }) {

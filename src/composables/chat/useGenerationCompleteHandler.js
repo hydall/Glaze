@@ -118,7 +118,7 @@ export async function handleGenerationComplete({
     triggerAutoSyncCheck,
     addNotification
 }) {
-    const { getChatData, db } = persistence;
+    const { db } = persistence;
     const { notifyGenerationEnded, notifyChatUpdated } = app;
     const ensureCleanup = () => {
         finalizeGenerationState({
@@ -259,10 +259,14 @@ export async function handleGenerationComplete({
             sendMessageNotification(char.name, finalResponse, char.avatar, char.id, sessionId, msgId);
 
             if (guidanceType === 'GENERATION') {
-                const autoData = await getChatData(char.id);
+                let autoData = null;
+                let autoSessionId = sessionId;
+                await db.patchChatData(char.id, (data) => {
+                    autoData = data;
+                    autoSessionId = char.sessionId || data.currentId;
+                    data.sessions[autoSessionId] = currentMessages.value;
+                });
                 if (autoData) {
-                    const autoSessionId = char.sessionId || autoData.currentId;
-                    autoData.sessions[autoSessionId] = currentMessages.value;
                     await runMemoryAutomationAfterStableTurn(autoData, autoSessionId, currentMessages.value, {
                         allowImmediate: true,
                         charId: char.id,
@@ -275,80 +279,104 @@ export async function handleGenerationComplete({
             return;
         }
 
-        const bgData = await getChatData(char.id);
-        if (bgData && bgData.sessions[sessionId]) {
-            const bIdx = bgData.sessions[sessionId].findIndex(m => m.id === msgId);
-            if (bIdx !== -1) {
-                const msg = bgData.sessions[sessionId][bIdx];
-                const finalResponse = resolveFinalResponse(cleanedResponse, msg.text);
-                msg.time = time;
-                applyCompletionToMessage({
-                    msg,
-                    response: finalResponse,
-                    finalReasoning,
-                    duration,
-                    meta,
-                    guidanceText,
-                    guidanceType,
-                    estimateTokens,
-                    char,
+        let bgMessageFound = false;
+        let bgFinalResponse = null;
+        let bgMsgId = null;
+        let bgBIdx = -1;
+        let bgMessages = null;
+        let bgDataSnapshot = null;
+
+        await db.patchChatData(char.id, (data) => {
+            if (!data || !data.sessions[sessionId]) return;
+            const bIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
+            if (bIdx === -1) return;
+            bgMessageFound = true;
+            bgDataSnapshot = data;
+            const msg = data.sessions[sessionId][bIdx];
+            bgFinalResponse = resolveFinalResponse(cleanedResponse, msg.text);
+            msg.time = time;
+            applyCompletionToMessage({
+                msg,
+                response: bgFinalResponse,
+                finalReasoning,
+                duration,
+                meta,
+                guidanceText,
+                guidanceType,
+                estimateTokens,
+                char,
                 sessionId,
                 addMessageStats,
                 addRegenerationStats,
                 triggerAutoSyncCheck,
                 includeInitialGuidanceMeta: false
             });
+            bgMsgId = msg.id;
+            bgBIdx = bIdx;
+            bgMessages = data.sessions[sessionId];
+        });
 
-                processMessageImages(finalResponse, (updatedText) => {
-                    msg.text = updatedText;
-                    msg.swipes[msg.swipeId || 0] = updatedText;
-                    if (!updatedText.includes('imggen-loading')) {
-                        db.saveChat(char.id, bgData);
-                    }
-            }, {
-                charAvatar: char.avatar || null,
-                userAvatar,
-                messages: bgData.sessions[sessionId],
-                currentMsgIndex: bIdx,
-                msgId: msg.id
-            }).then(finalText => {
-                    if (finalText !== msg.text) {
-                        msg.text = finalText;
-                        msg.swipes[msg.swipeId || 0] = finalText;
-                        db.saveChat(char.id, bgData);
-                    }
-                }).catch(e => console.error('[ImageGen] background processMessageImages failed:', e));
-
-                await db.saveChat(char.id, bgData);
-
-                if (guidanceType === 'GENERATION') {
-                    await runMemoryAutomationAfterStableTurn(bgData, sessionId, bgData.sessions[sessionId], {
-                        allowImmediate: true,
-                        charId: char.id,
-                        syncUi: false
-                    });
-                }
-
-                sendMessageNotification(char.name, finalResponse, char.avatar, char.id, sessionId, msgId);
-
-                if (meta?.allReasoning && addNotification) {
-                    addNotification('The entire response went into the reasoning block', 'warning');
-                }
-
-                db.get('gz_unread').then(unread => {
-                    const newUnread = unread || {};
-                    newUnread[char.id] = true;
-                    db.set('gz_unread', newUnread);
-                    notifyChatUpdated();
-                });
-
-                notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
-                return;
-            }
+        if (!bgMessageFound) {
+            ensureCleanup();
+            notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
+            return;
         }
 
-        ensureCleanup();
+        processMessageImages(bgFinalResponse, (updatedText) => {
+            if (!updatedText.includes('imggen-loading')) {
+                db.patchChatData(char.id, (data) => {
+                    if (!data || !data.sessions[sessionId]) return;
+                    const idx = data.sessions[sessionId].findIndex(m => m.id === msgId);
+                    if (idx === -1) return;
+                    const msg = data.sessions[sessionId][idx];
+                    msg.text = updatedText;
+                    const swipeIdx = msg.swipeId || 0;
+                    if (msg.swipes) msg.swipes[swipeIdx] = updatedText;
+                });
+            }
+        }, {
+            charAvatar: char.avatar || null,
+            userAvatar,
+            messages: bgMessages,
+            currentMsgIndex: bgBIdx,
+            msgId: bgMsgId
+        }).then(finalText => {
+            db.patchChatData(char.id, (data) => {
+                if (!data || !data.sessions[sessionId]) return;
+                const idx = data.sessions[sessionId].findIndex(m => m.id === msgId);
+                if (idx === -1) return;
+                const msg = data.sessions[sessionId][idx];
+                if (finalText !== msg.text) {
+                    msg.text = finalText;
+                    const swipeIdx = msg.swipeId || 0;
+                    if (msg.swipes) msg.swipes[swipeIdx] = finalText;
+                }
+            });
+        }).catch(e => console.error('[ImageGen] background processMessageImages failed:', e));
+
+        if (guidanceType === 'GENERATION' && bgDataSnapshot) {
+            await runMemoryAutomationAfterStableTurn(bgDataSnapshot, sessionId, bgMessages, {
+                allowImmediate: true,
+                charId: char.id,
+                syncUi: false
+            });
+        }
+
+        sendMessageNotification(char.name, bgFinalResponse, char.avatar, char.id, sessionId, msgId);
+
+        if (meta?.allReasoning && addNotification) {
+            addNotification('The entire response went into the reasoning block', 'warning');
+        }
+
+        db.get('gz_unread').then(unread => {
+            const newUnread = unread || {};
+            newUnread[char.id] = true;
+            db.set('gz_unread', newUnread);
+            notifyChatUpdated();
+        });
+
         notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
+        return;
     } catch (completeErr) {
         console.error('[onComplete] Completion handler failed:', completeErr);
         ensureCleanup();

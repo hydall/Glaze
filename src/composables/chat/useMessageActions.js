@@ -34,11 +34,13 @@ export function useMessageActions(deps) {
 
     async function persistCurrentSessionMessages(chatChar) {
         if (!chatChar?.id) return;
-        const data = await getChatData(chatChar.id);
-        const sessionId = chatChar.sessionId || data?.currentId;
-        if (!data || !sessionId) return;
-        data.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(chatChar.id, data);
+        const snapshot = JSON.parse(JSON.stringify(currentMessages.value));
+        await db.patchChatData(chatChar.id, (data) => {
+            const sessionId = chatChar.sessionId || data.currentId;
+            if (!sessionId) return;
+            data.sessions[sessionId] = snapshot;
+        });
+        const sessionId = chatChar.sessionId;
         try { localStorage.removeItem(`gz_chat_recovery_${chatChar.id}_${sessionId}`); } catch (_e) {}
         publishAppEvent(APP_EVENTS.domain.chat.updated);
     }
@@ -149,34 +151,32 @@ export function useMessageActions(deps) {
 
         const oldSessionId = data.currentId;
         const oldAuthorsNote = data.authorsNotes?.[oldSessionId] ? JSON.parse(JSON.stringify(data.authorsNotes[oldSessionId])) : null;
+        const oldMemoryBook = data.memoryBooks?.[oldSessionId]
+            ? JSON.parse(JSON.stringify(data.memoryBooks[oldSessionId]))
+            : null;
 
         await dbCreateSession(activeChatChar.id);
         await loadChats();
 
-        const newData = await getChatData(activeChatChar.id);
-        newData.sessions[newData.currentId] = newHistory;
-        const newSessionId = newData.currentId;
-        const oldMemoryBook = data.memoryBooks?.[oldSessionId]
-            ? JSON.parse(JSON.stringify(data.memoryBooks[oldSessionId]))
-            : null;
-        if (oldMemoryBook) {
-            if (!newData.memoryBooks) newData.memoryBooks = {};
-            newData.memoryBooks[newSessionId] = oldMemoryBook;
-        }
-        reconcileSessionMemoryState(newData, newSessionId, newHistory);
-
-        if (oldAuthorsNote) {
-            if (!newData.authorsNotes) newData.authorsNotes = {};
-            newData.authorsNotes[newData.currentId] = oldAuthorsNote;
-        }
-        const oldVarsKey = `gz_vars_${activeChatChar.id}_${oldSessionId}`;
-        const oldVars = localStorage.getItem(oldVarsKey);
-        if (oldVars) {
-            const newVarsKey = `gz_vars_${activeChatChar.id}_${newData.currentId}`;
-            localStorage.setItem(newVarsKey, oldVars);
-        }
-
-        await db.saveChat(activeChatChar.id, newData);
+        await db.patchChatData(activeChatChar.id, (newData) => {
+            const newSessionId = newData.currentId;
+            newData.sessions[newSessionId] = newHistory;
+            if (oldMemoryBook) {
+                if (!newData.memoryBooks) newData.memoryBooks = {};
+                newData.memoryBooks[newSessionId] = oldMemoryBook;
+            }
+            reconcileSessionMemoryState(newData, newSessionId, newHistory);
+            if (oldAuthorsNote) {
+                if (!newData.authorsNotes) newData.authorsNotes = {};
+                newData.authorsNotes[newSessionId] = oldAuthorsNote;
+            }
+            const oldVarsKey = `gz_vars_${activeChatChar.id}_${oldSessionId}`;
+            const oldVars = localStorage.getItem(oldVarsKey);
+            if (oldVars) {
+                const newVarsKey = `gz_vars_${activeChatChar.id}_${newSessionId}`;
+                localStorage.setItem(newVarsKey, oldVars);
+            }
+        });
 
         const charObj = { ...activeChatChar };
         delete charObj.sessionId;

@@ -538,41 +538,38 @@ watch([isSearchMode, isSelectionMode], () => {
 // --- Data Management ---
 
 async function loadChats() {
-    // Preserve in-memory data for ANY character currently generating
     for (const charId of listGeneratingCharIds()) {
-        const memData = await getChatData(charId);
-        if (!memData) continue;
-
         const state = getGenerationState(charId);
+        await db.patchChatData(charId, (memData) => {
+            if (!memData) return;
+            let foundMsg = null;
+            let foundSessionId = memData.currentId;
 
-        let foundMsg = null;
-        let foundSessionId = memData.currentId;
-
-        if (memData.sessions[foundSessionId]) {
-            foundMsg = memData.sessions[foundSessionId].find(m => m.id === state.msgId);
-        }
-        if (!foundMsg) {
-            for (const [sid, sess] of Object.entries(memData.sessions)) {
-                const m = sess.find(msg => msg.id === state.msgId);
-                if (m) {
-                    foundMsg = m;
-                    foundSessionId = sid;
-                    break;
+            if (memData.sessions[foundSessionId]) {
+                foundMsg = memData.sessions[foundSessionId].find(m => m.id === state.msgId);
+            }
+            if (!foundMsg) {
+                for (const [sid, sess] of Object.entries(memData.sessions)) {
+                    const m = sess.find(msg => msg.id === state.msgId);
+                    if (m) {
+                        foundMsg = m;
+                        foundSessionId = sid;
+                        break;
+                    }
                 }
             }
-        }
 
-        if (foundMsg) {
-            if (!memData.sessions[foundSessionId]) memData.sessions[foundSessionId] = [];
-            const dbSession = memData.sessions[foundSessionId];
-            const dbIdx = dbSession.findIndex(m => m.id === state.msgId);
-            if (dbIdx !== -1) {
-                dbSession[dbIdx] = foundMsg;
-            } else {
-                dbSession.push(foundMsg);
+            if (foundMsg) {
+                if (!memData.sessions[foundSessionId]) memData.sessions[foundSessionId] = [];
+                const dbSession = memData.sessions[foundSessionId];
+                const dbIdx = dbSession.findIndex(m => m.id === state.msgId);
+                if (dbIdx !== -1) {
+                    dbSession[dbIdx] = foundMsg;
+                } else {
+                    dbSession.push(foundMsg);
+                }
             }
-            await db.saveChat(charId, memData);
-        }
+        });
     }
 
     if (activeChatChar) {
@@ -711,13 +708,13 @@ async function openChat(char, onBack, force = false) {
     await loadChats();
 
     if (char.sessionId) {
-        const data = await getChatData(char.id);
-        if (data && data.sessions && data.sessions[char.sessionId]) {
-            if (data.currentId !== char.sessionId) {
-                data.currentId = char.sessionId;
-                await db.saveChat(char.id, data);
+        await db.patchChatData(char.id, (data) => {
+            if (data && data.sessions && data.sessions[char.sessionId]) {
+                if (data.currentId !== char.sessionId) {
+                    data.currentId = char.sessionId;
+                }
             }
-        }
+        });
     }
 
     const chatData = await getChatData(char.id);
@@ -813,20 +810,23 @@ async function openChat(char, onBack, force = false) {
         if (crashBufferRaw) {
             const crashBuffer = JSON.parse(crashBufferRaw);
             if (Array.isArray(crashBuffer?.messages) && crashBuffer.messages.length > msgs.length) {
-                msgs = crashBuffer.messages;
-                chatData.sessions[currentSessionId] = msgs;
-                if (typeof crashBuffer.draft === 'string') {
-                    chatData.draft = crashBuffer.draft;
-                }
-                if (crashBuffer.authorsNote !== undefined) {
-                    if (!chatData.authorsNotes) chatData.authorsNotes = {};
-                    chatData.authorsNotes[currentSessionId] = crashBuffer.authorsNote;
-                }
-                if (crashBuffer.summary !== undefined) {
-                    if (!chatData.summaries) chatData.summaries = {};
-                    chatData.summaries[currentSessionId] = crashBuffer.summary;
-                }
-                await db.saveChat(char.id, chatData);
+                const restoredMsgs = crashBuffer.messages;
+                const restoredDraft = typeof crashBuffer.draft === 'string' ? crashBuffer.draft : undefined;
+                const restoredAN = crashBuffer.authorsNote;
+                const restoredSummary = crashBuffer.summary;
+                await db.patchChatData(char.id, (data) => {
+                    data.sessions[currentSessionId] = restoredMsgs;
+                    if (restoredDraft !== undefined) data.draft = restoredDraft;
+                    if (restoredAN !== undefined) {
+                        if (!data.authorsNotes) data.authorsNotes = {};
+                        data.authorsNotes[currentSessionId] = restoredAN;
+                    }
+                    if (restoredSummary !== undefined) {
+                        if (!data.summaries) data.summaries = {};
+                        data.summaries[currentSessionId] = restoredSummary;
+                    }
+                });
+                msgs = restoredMsgs;
             }
             clearCrashBuffer(char.id, currentSessionId);
         }
@@ -847,7 +847,6 @@ async function openChat(char, onBack, force = false) {
     });
     chatData.sessions[currentSessionId] = msgs;
 
-    // Cleanup phantom generations or errors
     let dirty = false;
     while (msgs.length > 0) {
         const lastMsg = msgs[msgs.length - 1];
@@ -890,7 +889,10 @@ async function openChat(char, onBack, force = false) {
         }
     }
     if (dirty) {
-        await db.saveChat(char.id, chatData);
+        const dirtyMsgs = JSON.parse(JSON.stringify(msgs));
+        await db.patchChatData(char.id, (data) => {
+            data.sessions[currentSessionId] = dirtyMsgs;
+        });
     }
 
     // Cleanup stuck imggen-loading states (saved during interrupted generation).
@@ -910,8 +912,10 @@ async function openChat(char, onBack, force = false) {
             }
         }
         if (dirtyImggen) {
-            chatData.sessions[currentSessionId] = msgs;
-            await db.saveChat(char.id, chatData);
+            const fixedMsgs = JSON.parse(JSON.stringify(msgs));
+            await db.patchChatData(char.id, (data) => {
+                data.sessions[currentSessionId] = fixedMsgs;
+            });
         }
     }
 
@@ -939,11 +943,12 @@ async function openChat(char, onBack, force = false) {
         currentMessages.value.push(firstMsg);
         if (activeChatChar) {
             const sessionId = activeChatChar.sessionId;
-            const data = await getChatData(activeChatChar.id);
-            if (data && sessionId && data.sessions?.[sessionId]) {
-                data.sessions[sessionId] = currentMessages.value;
-                await db.saveChat(activeChatChar.id, data);
-            }
+            const snapshot = JSON.parse(JSON.stringify(currentMessages.value));
+            await db.patchChatData(activeChatChar.id, (data) => {
+                if (sessionId && data.sessions?.[sessionId]) {
+                    data.sessions[sessionId] = snapshot;
+                }
+            });
         }
         scrollToBottom(false);
     }
@@ -1076,15 +1081,13 @@ async function openChat(char, onBack, force = false) {
 async function handleMemoryFlushSave() {
     if (!activeChatChar || !currentMemoryBookData.value) return;
     try {
-        const chatData = await getChatData(activeChatChar.id);
-        if (chatData) {
+        await db.patchChatData(activeChatChar.id, (chatData) => {
             const sessionId = activeChatChar.sessionId || chatData.currentId;
             const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
             memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.id, chatData);
-            await loadCurrentMemoryBook(activeChatChar);
-            await updatePendingMemoryMessageIds(activeChatChar);
-        }
+        });
+        await loadCurrentMemoryBook(activeChatChar);
+        await updatePendingMemoryMessageIds(activeChatChar);
     } catch (e) {
         console.error('[MemoryBooks] flush-save error:', e);
     }

@@ -64,8 +64,9 @@ export function useSessionManagement(deps) {
                     await db.saveChat(char.id, { currentId: 1, sessions: {} });
                 } else if (data.sessions) {
                     if (data.sessions[sessionId]) deletedCount = data.sessions[sessionId].length;
-                    delete data.sessions[sessionId];
-                    await db.saveChat(char.id, data);
+                    await db.patchChatData(char.id, (d) => {
+                        delete d.sessions[sessionId];
+                    });
                 }
                 if (deletedCount > 0) addDeletedStats(char.id, sessionId, deletedCount);
             } else {
@@ -178,17 +179,17 @@ export function useSessionManagement(deps) {
                                         triggerChatImport(char.id, null, async (result) => {
                                             await loadChats();
                                             if (result?.sessionId) {
-                                                const importedData = await getChatData(char.id);
-                                                if (importedData?.sessions?.[result.sessionId]) {
-                                                    const mb = ensureSessionMemoryBook(importedData, result.sessionId);
-                                                    const auto = ensureMemoryAutomationState(mb);
-                                                    const stableCount = getStableVisibleMessages(importedData.sessions[result.sessionId])
-                                                        .filter(m => m.role === 'user' || m.role === 'char').length;
-                                                    auto.lastProcessedMessageCount = stableCount;
-                                                    auto.pendingTrigger = null;
-                                                    mb.updatedAt = Date.now();
-                                                    await db.saveChat(char.id, importedData);
-                                                }
+                                                await db.patchChatData(char.id, (importedData) => {
+                                                    if (importedData?.sessions?.[result.sessionId]) {
+                                                        const mb = ensureSessionMemoryBook(importedData, result.sessionId);
+                                                        const auto = ensureMemoryAutomationState(mb);
+                                                        const stableCount = getStableVisibleMessages(importedData.sessions[result.sessionId])
+                                                            .filter(m => m.role === 'user' || m.role === 'char').length;
+                                                        auto.lastProcessedMessageCount = stableCount;
+                                                        auto.pendingTrigger = null;
+                                                        mb.updatedAt = Date.now();
+                                                    }
+                                                });
                                             }
                                             const charObj = { ...char, sessionId: result?.sessionId || char.sessionId };
                                             openChat(charObj, null, true);

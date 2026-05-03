@@ -1,4 +1,4 @@
-export function useTypingStateCleanup({ currentMessages, getChatData, db }) {
+export function useTypingStateCleanup({ currentMessages, db }) {
     return {
         async clearTypingStateForMessage({ charId, sessionId, msgId, errorLabel = '[generation]' }) {
             const idx = currentMessages.value.findIndex(m => m.id === msgId);
@@ -7,14 +7,14 @@ export function useTypingStateCleanup({ currentMessages, getChatData, db }) {
             }
 
             try {
-                const data = await getChatData(charId);
-                if (data && data.sessions[sessionId]) {
-                    const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
-                    if (dbIdx !== -1) {
-                        data.sessions[sessionId][dbIdx].isTyping = false;
-                        await db.saveChat(charId, data);
+                await db.patchChatData(charId, (data) => {
+                    if (data.sessions[sessionId]) {
+                        const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
+                        if (dbIdx !== -1) {
+                            data.sessions[sessionId][dbIdx].isTyping = false;
+                        }
                     }
-                }
+                });
             } catch (dbErr) {
                 console.error(`${errorLabel} Failed to clear isTyping in DB:`, dbErr);
             }

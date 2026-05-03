@@ -12,37 +12,36 @@ export async function createNewSession(charId) {
 
 export async function deleteSession(charId, sessionId) {
     await db.deleteSession(charId, sessionId);
-    const data = await db.getChat(charId);
-
-    // Also cleanup authors notes if exists
-    if (data.authorsNotes && Object.prototype.hasOwnProperty.call(data.authorsNotes, sessionId)) {
-        delete data.authorsNotes[sessionId];
-        await db.saveChat(charId, data);
-    }
+    await db.patchChatData(charId, (data) => {
+        if (data.authorsNotes && Object.prototype.hasOwnProperty.call(data.authorsNotes, sessionId)) {
+            delete data.authorsNotes[sessionId];
+        }
+    });
 
     const refreshed = await db.get(`gz_chat_${charId}`);
     if (!refreshed || !refreshed.sessions || Object.keys(refreshed.sessions).length === 0) {
         await markSyncDeletedEntry('chat', charId);
     }
 
+    const data = await db.getChat(charId);
     return data.currentId;
 }
 
 export async function switchSession(charId, sessionId) {
+    await db.patchChatData(charId, (data) => {
+        if (data.sessions[sessionId]) {
+            data.currentId = sessionId;
+        }
+    });
     const data = await db.getChat(charId);
-
-    if (data.sessions[sessionId]) {
-        data.currentId = sessionId;
-        await db.saveChat(charId, data);
-    }
     return data.currentId;
 }
 
 export async function renameSession(charId, sessionId, newName) {
-    const data = await db.getChat(charId);
-    if (!data.sessionNames) data.sessionNames = {};
-    data.sessionNames[sessionId] = newName;
-    await db.saveChat(charId, data);
+    await db.patchChatData(charId, (data) => {
+        if (!data.sessionNames) data.sessionNames = {};
+        data.sessionNames[sessionId] = newName;
+    });
 }
 
 export function getAllGreetings(char, persona) {

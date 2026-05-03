@@ -44,7 +44,7 @@ export async function handleGenerationPromptReady({
     persistence,
     snapshotPromptMeta
 }) {
-    const { getChatData, db } = persistence;
+    const { db } = persistence;
     const triggeredLorebooks = mapTriggeredLorebooks(loreEntries);
     const triggeredMemories = mapTriggeredMemories(memoryEntries);
     const contextRefs = buildContextRefs(triggeredLorebooks, triggeredMemories, sessionId);
@@ -64,9 +64,8 @@ export async function handleGenerationPromptReady({
         assignRefs(currentMessages.value[msgIndex - 1]);
     }
 
-    const data = await getChatData(char.id);
-    if (data) {
-        data.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(char.id, data);
-    }
+    const snapshot = JSON.parse(JSON.stringify(currentMessages.value));
+    await db.patchChatData(char.id, (data) => {
+        data.sessions[sessionId] = snapshot;
+    });
 }

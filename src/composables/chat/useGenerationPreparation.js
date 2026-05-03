@@ -66,7 +66,6 @@ export async function ensureGenerationPlaceholderMessage({
     genMsgId,
     charId,
     sessionId,
-    getChatData,
     db,
     scrollToBottom
 }) {
@@ -92,11 +91,10 @@ export async function ensureGenerationPlaceholderMessage({
 
     currentMessages.value.push(msg);
     const nextMsgIndex = currentMessages.value.length - 1;
-    const data = await getChatData(charId);
-    if (data) {
-        data.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(charId, data);
-    }
+    const snapshot = JSON.parse(JSON.stringify(currentMessages.value));
+    await db.patchChatData(charId, (data) => {
+        data.sessions[sessionId] = snapshot;
+    });
     scrollToBottom();
 
     return nextMsgIndex;

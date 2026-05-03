@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue';
 
-export function useMessageSelection(currentMessages, { getChatData, db, addDeletedStats, reconcileSessionMemoryState, debouncedUpdateContextCutoff, getActiveChatChar } = {}) {
+export function useMessageSelection(currentMessages, { db, addDeletedStats, reconcileSessionMemoryState, debouncedUpdateContextCutoff, getActiveChatChar } = {}) {
     const selectedMessages = ref(new Set());
     const isSelectionMode = computed(() => selectedMessages.value.size > 0);
 
@@ -37,16 +37,13 @@ export function useMessageSelection(currentMessages, { getChatData, db, addDelet
 
         const activeChatChar = getActiveChatChar ? getActiveChatChar() : null;
         if (activeChatChar) {
-            if (count > 0) {
-                const sid = activeChatChar.sessionId || (await getChatData(activeChatChar.id)).currentId;
-                addDeletedStats(activeChatChar.id, sid, count);
-            }
-
-            const chatData = await getChatData(activeChatChar.id);
-            const sessionId = activeChatChar.sessionId || chatData.currentId;
-            reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-            chatData.sessions[sessionId] = currentMessages.value;
-            await db.saveChat(activeChatChar.id, chatData);
+            const snapshot = JSON.parse(JSON.stringify(currentMessages.value));
+            await db.patchChatData(activeChatChar.id, (data) => {
+                const sessionId = activeChatChar.sessionId || data.currentId;
+                if (count > 0) addDeletedStats(activeChatChar.id, sessionId, count);
+                reconcileSessionMemoryState(data, sessionId, snapshot);
+                data.sessions[sessionId] = snapshot;
+            });
             debouncedUpdateContextCutoff();
         }
 
@@ -64,10 +61,11 @@ export function useMessageSelection(currentMessages, { getChatData, db, addDelet
 
         const activeChatChar = getActiveChatChar ? getActiveChatChar() : null;
         if (activeChatChar) {
-            const chatData = await getChatData(activeChatChar.id);
-            const sessionId = activeChatChar.sessionId || chatData.currentId;
-            chatData.sessions[sessionId] = currentMessages.value;
-            await db.saveChat(activeChatChar.id, chatData);
+            const snapshot = JSON.parse(JSON.stringify(currentMessages.value));
+            await db.patchChatData(activeChatChar.id, (data) => {
+                const sessionId = activeChatChar.sessionId || data.currentId;
+                data.sessions[sessionId] = snapshot;
+            });
             debouncedUpdateContextCutoff();
         }
 

@@ -11,7 +11,7 @@ export function createGenerationStreamUpdater({
     persistence,
     onRawText
 }) {
-    const { getChatData, db } = persistence;
+    const { db } = persistence;
     let backgroundUpdateTimer = null;
     let backgroundPendingText = null;
     let backgroundPendingReasoning = null;
@@ -51,15 +51,17 @@ export function createGenerationStreamUpdater({
 
             if (!isGenerationStateCurrent(char.id, { genId, sessionId, type: 'chat' })) return;
 
-            const data = await getChatData(char.id);
-            if (data && data.sessions[sessionId]) {
-                const dbMsg = data.sessions[sessionId].find(m => m.id === msgId);
-                if (dbMsg) {
-                    dbMsg.text = backgroundPendingText;
-                    dbMsg.reasoning = backgroundPendingReasoning;
-                    await db.saveChat(char.id, data);
+            const pendingText = backgroundPendingText;
+            const pendingReasoning = backgroundPendingReasoning;
+            await db.patchChatData(char.id, (data) => {
+                if (data.sessions[sessionId]) {
+                    const dbMsg = data.sessions[sessionId].find(m => m.id === msgId);
+                    if (dbMsg) {
+                        dbMsg.text = pendingText;
+                        dbMsg.reasoning = pendingReasoning;
+                    }
                 }
-            }
+            });
         }, backgroundPersistDelay);
     };
 

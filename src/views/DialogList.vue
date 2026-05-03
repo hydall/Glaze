@@ -309,9 +309,13 @@ const openActions = (chat, mode = 'flat') => {
                                 }
                                 if (sessionCount <= 1) {
                                     if (charData) {
-                                        if (Array.isArray(charData)) charData = { currentId: 1, sessions: {} };
-                                        else if (charData.sessions) delete charData.sessions[chat.sessionId];
-                                        await db.saveChat(chat.id, charData);
+                                        if (Array.isArray(charData)) {
+                                            await db.saveChat(chat.id, { currentId: 1, sessions: {} });
+                                        } else if (charData.sessions) {
+                                            await db.patchChatData(chat.id, (d) => {
+                                                delete d.sessions[chat.sessionId];
+                                            });
+                                        }
                                     }
                                 } else {
                                     await deleteSession(chat.id, chat.sessionId);

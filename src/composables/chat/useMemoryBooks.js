@@ -190,8 +190,14 @@ export function useMemoryBooks(deps) {
             shouldPersistReset = true;
         }
         if (shouldPersistReset) {
+            memoryBook.automation.isGeneratingDraft = false;
             memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.id, chatData);
+            await db.patchChatData(activeChatChar.id, (data) => {
+                const sid = activeChatChar.sessionId || data.currentId;
+                const mb = data.memoryBooks?.[sid];
+                if (mb?.automation) mb.automation.isGeneratingDraft = false;
+                if (mb) mb.updatedAt = Date.now();
+            });
         }
         currentMemoryBookData.value = memoryBook;
     }
@@ -254,10 +260,15 @@ export function useMemoryBooks(deps) {
                 {
                     label: 'Keys',
                     onClick: async () => {
-                        memoryBook.settings.vectorSearchEnabled = false;
-                        memoryBook.settings.keyMatchMode = 'glaze';
-                        memoryBook.updatedAt = Date.now();
-                        await db.saveChat(activeChatChar.id, chatData);
+                        await db.patchChatData(activeChatChar.id, (data) => {
+                            const sid = activeChatChar.sessionId || data.currentId;
+                            const mb = data.memoryBooks?.[sid];
+                            if (mb) {
+                                mb.settings.vectorSearchEnabled = false;
+                                mb.settings.keyMatchMode = 'glaze';
+                                mb.updatedAt = Date.now();
+                            }
+                        });
                         closeBottomSheet();
                         await loadCurrentMemoryBook(activeChatChar);
                         setTimeout(() => memoryBooksSheet.value?.open(), 50);
@@ -266,13 +277,19 @@ export function useMemoryBooks(deps) {
                 {
                     label: 'Vector',
                     onClick: async () => {
-                        memoryBook.settings.vectorSearchEnabled = true;
-                        memoryBook.settings.keyMatchMode = 'plain';
                         setMemoryVectorSearchOnEntries(memoryBook, true);
                         showToast('Reindexing memory entries...', 1500);
                         await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
-                        memoryBook.updatedAt = Date.now();
-                        await db.saveChat(activeChatChar.id, chatData);
+                        await db.patchChatData(activeChatChar.id, (data) => {
+                            const sid = activeChatChar.sessionId || data.currentId;
+                            const mb = data.memoryBooks?.[sid];
+                            if (mb) {
+                                mb.settings.vectorSearchEnabled = true;
+                                mb.settings.keyMatchMode = 'plain';
+                                setMemoryVectorSearchOnEntries(mb, true);
+                                mb.updatedAt = Date.now();
+                            }
+                        });
                         closeBottomSheet();
                         await loadCurrentMemoryBook(activeChatChar);
                         setTimeout(() => memoryBooksSheet.value?.open(), 50);
@@ -281,13 +298,19 @@ export function useMemoryBooks(deps) {
                 {
                     label: 'Combined',
                     onClick: async () => {
-                        memoryBook.settings.vectorSearchEnabled = true;
-                        memoryBook.settings.keyMatchMode = 'both';
                         setMemoryVectorSearchOnEntries(memoryBook, true);
                         showToast('Reindexing memory entries...', 1500);
                         await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
-                        memoryBook.updatedAt = Date.now();
-                        await db.saveChat(activeChatChar.id, chatData);
+                        await db.patchChatData(activeChatChar.id, (data) => {
+                            const sid = activeChatChar.sessionId || data.currentId;
+                            const mb = data.memoryBooks?.[sid];
+                            if (mb) {
+                                mb.settings.vectorSearchEnabled = true;
+                                mb.settings.keyMatchMode = 'both';
+                                setMemoryVectorSearchOnEntries(mb, true);
+                                mb.updatedAt = Date.now();
+                            }
+                        });
                         closeBottomSheet();
                         await loadCurrentMemoryBook(activeChatChar);
                         setTimeout(() => memoryBooksSheet.value?.open(), 50);
@@ -326,7 +349,15 @@ export function useMemoryBooks(deps) {
                 }
                 showToast('Memory vector search disabled');
             }
-            await db.saveChat(activeChatChar.id, chatData);
+            await db.patchChatData(activeChatChar.id, (data) => {
+                const sid = activeChatChar.sessionId || data.currentId;
+                const mb = data.memoryBooks?.[sid];
+                if (mb) {
+                    mb.settings.vectorSearchEnabled = enabled;
+                    setMemoryVectorSearchOnEntries(mb, enabled);
+                    mb.updatedAt = Date.now();
+                }
+            });
             await loadCurrentMemoryBook(activeChatChar);
             setTimeout(() => memoryBooksSheet.value?.open(), 50);
         } catch (error) {
@@ -355,7 +386,11 @@ export function useMemoryBooks(deps) {
                 return result;
             }
             memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.id, chatData);
+            await db.patchChatData(activeChatChar.id, (data) => {
+                const sid = activeChatChar.sessionId || data.currentId;
+                const mb = data.memoryBooks?.[sid];
+                if (mb) mb.updatedAt = Date.now();
+            });
             showToast('Memory entries reindexed');
             await loadCurrentMemoryBook(activeChatChar);
             setTimeout(() => memoryBooksSheet.value?.open(), 50);
@@ -450,11 +485,50 @@ export function useMemoryBooks(deps) {
             });
         }
 
-        // Clear planned segments since we now have actual draft placeholders
-        if (!memoryBook.automation) memoryBook.automation = {};
-        memoryBook.automation.plannedSegments = [];
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
+        await db.patchChatData(activeChatChar.id, (data) => {
+            const sid = activeChatChar.sessionId || data.currentId;
+            const mb = ensureSessionMemoryBook(data, sid);
+            if (!Array.isArray(mb.pendingDrafts)) mb.pendingDrafts = [];
+
+            for (let i = 0; i < segments.length; i++) {
+                const segment = segments[i];
+                const segmentIds = segment.map(m => m.id);
+                const firstMsg = segment[0];
+                const lastMsg = segment[segment.length - 1];
+
+                const firstIdx = allMessages.findIndex(m => m.id === firstMsg.id);
+                const lastIdx = allMessages.findIndex(m => m.id === lastMsg.id);
+                const rangeDisplay = firstIdx >= 0 && lastIdx >= 0 ? `${firstIdx + 1}-${lastIdx + 1}` : `${i * interval + 1}-${Math.min((i + 1) * interval, uncovered.length)}`;
+
+                const existingDraft = mb.pendingDrafts.find(d =>
+                    d.messageIds && JSON.stringify(d.messageIds.sort()) === JSON.stringify(segmentIds.sort())
+                );
+                if (existingDraft) continue;
+
+                mb.pendingDrafts.push({
+                    id: `draft_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                    title: rangeDisplay,
+                    content: '',
+                    keys: [],
+                    glazeKeys: [],
+                    vectorSearch: false,
+                    messageIds: segmentIds,
+                    messageRange: {
+                        start: firstIdx >= 0 ? firstIdx + 1 : i * interval + 1,
+                        end: lastIdx >= 0 ? lastIdx + 1 : Math.min((i + 1) * interval, uncovered.length)
+                    },
+                    status: 'pending_generation',
+                    source: 'scan_chat',
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                    generatedAt: null
+                });
+            }
+
+            if (!mb.automation) mb.automation = {};
+            mb.automation.plannedSegments = [];
+            mb.updatedAt = Date.now();
+        });
 
         showToast(`${segments.length} draft placeholders created (${uncovered.length} messages)`);
         await updatePendingMemoryMessageIds(activeChatChar);
@@ -521,7 +595,16 @@ export function useMemoryBooks(deps) {
 
         reconcileSessionMemoryState(chatData, sessionId, currentMessages);
         chatData.sessions[sessionId] = currentMessages;
-        await db.saveChat(activeChatChar.id, chatData);
+        await db.patchChatData(activeChatChar.id, (data) => {
+            const sid = activeChatChar.sessionId || data.currentId;
+            const mb = data.memoryBooks?.[sid];
+            if (!mb) return;
+            mb.entries.push(approvedEntry);
+            mb.pendingDrafts = mb.pendingDrafts.filter(entry => entry.id !== draftId);
+            mb.updatedAt = Date.now();
+            reconcileSessionMemoryState(data, sid, currentMessages);
+            data.sessions[sid] = currentMessages;
+        });
         try {
             await indexMemoryEntryIfNeeded(approvedEntry, activeChatChar.id, sessionId);
         } catch (e) {
@@ -550,16 +633,17 @@ export function useMemoryBooks(deps) {
     async function handleMemoryDeleteDraft(draftId, activeChatChar, memoryBooksSheet) {
         if (!activeChatChar || !currentMemoryBookData.value) return;
         
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
         if (memoryDraftState.value?.activeDrafts?.[draftId]) {
             cancelMemoryDraft(draftId);
         }
         
-        memoryBook.pendingDrafts = memoryBook.pendingDrafts.filter(entry => entry.id !== draftId);
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
+        await db.patchChatData(activeChatChar.id, (data) => {
+            const sessionId = activeChatChar.sessionId || data.currentId;
+            const mb = data.memoryBooks?.[sessionId];
+            if (!mb) return;
+            mb.pendingDrafts = mb.pendingDrafts.filter(entry => entry.id !== draftId);
+            mb.updatedAt = Date.now();
+        });
         
         await updatePendingMemoryMessageIds(activeChatChar);
         await loadCurrentMemoryBook(activeChatChar);
@@ -569,14 +653,14 @@ export function useMemoryBooks(deps) {
     async function handleMemoryDeleteAllDrafts(activeChatChar, memoryBooksSheet) {
         if (!activeChatChar || !currentMemoryBookData.value) return;
 
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-
         cancelMemoryDraft();
-        memoryBook.pendingDrafts = [];
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
+        await db.patchChatData(activeChatChar.id, (data) => {
+            const sessionId = activeChatChar.sessionId || data.currentId;
+            const mb = data.memoryBooks?.[sessionId];
+            if (!mb) return;
+            mb.pendingDrafts = [];
+            mb.updatedAt = Date.now();
+        });
 
         await updatePendingMemoryMessageIds(activeChatChar);
         await loadCurrentMemoryBook(activeChatChar);
@@ -594,16 +678,17 @@ export function useMemoryBooks(deps) {
     async function handleMemoryDeleteEntry(entryId, activeChatChar, currentMessages, memoryBooksSheet) {
         if (!activeChatChar || !currentMemoryBookData.value) return;
         
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        
         await deleteMemoryEntryIndexIfPresent(entryId);
-        memoryBook.entries = memoryBook.entries.filter(entry => entry.id !== entryId);
-        memoryBook.updatedAt = Date.now();
-        reconcileSessionMemoryState(chatData, sessionId, currentMessages);
-        chatData.sessions[sessionId] = currentMessages;
-        await db.saveChat(activeChatChar.id, chatData);
+        
+        await db.patchChatData(activeChatChar.id, (data) => {
+            const sessionId = activeChatChar.sessionId || data.currentId;
+            const mb = data.memoryBooks?.[sessionId];
+            if (!mb) return;
+            mb.entries = mb.entries.filter(entry => entry.id !== entryId);
+            mb.updatedAt = Date.now();
+            reconcileSessionMemoryState(data, sessionId, currentMessages);
+            data.sessions[sessionId] = currentMessages;
+        });
         
         await updatePendingMemoryMessageIds(activeChatChar);
         await loadCurrentMemoryBook(activeChatChar);

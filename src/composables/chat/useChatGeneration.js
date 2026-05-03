@@ -1,7 +1,6 @@
 import { ref, nextTick } from 'vue';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { db } from '@/utils/db.js';
-import { getChatData } from '@/utils/sessions.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { getApiRuntimeStorage } from '@/core/config/APISettings.js';
@@ -84,13 +83,14 @@ export function useChatGeneration(deps) {
             };
             currentMessages.value.push(msgData);
             if (activeChatChar) {
-                const currentSessionId = activeChatChar.sessionId || (await getChatData(activeChatChar.id))?.currentId;
+                const currentSessionId = activeChatChar.sessionId || (await db.getChat(activeChatChar.id))?.currentId;
                 addMessageStats(activeChatChar.id, currentSessionId, msgData.tokens, processedText.length, msgData.timestamp);
-                const data = await getChatData(activeChatChar.id);
-                if (data && currentSessionId && data.sessions?.[currentSessionId]) {
-                    data.sessions[currentSessionId] = currentMessages.value;
-                    await db.saveChat(activeChatChar.id, data);
-                }
+                const snapshot = JSON.parse(JSON.stringify(currentMessages.value));
+                await db.patchChatData(activeChatChar.id, (data) => {
+                    if (currentSessionId && data.sessions?.[currentSessionId]) {
+                        data.sessions[currentSessionId] = snapshot;
+                    }
+                });
             }
 
             nextTick(() => {
