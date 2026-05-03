@@ -1,6 +1,6 @@
-# Async Integrity & DB Safety
+# Async Integrity, DB Safety & Composable Decomposition
 
-Forward plan for fixing async operation lifecycle, DB write safety, and lifecycle save durability.
+Forward plan for fixing async operation lifecycle, DB write safety, lifecycle save durability, and composable size hygiene.
 
 ## Rationale
 
@@ -11,6 +11,8 @@ After migrating 40+ call sites to `patchChatData`, the most common read-mutate-w
 2. **`patchChatData` is not enough for multi-field operations.** Two sequential `patchChatData` calls are NOT atomic — another writer can slip in between. And each call does a full read of chat data from IDB.
 
 3. **Lifecycle saves are fire-and-forget.** `visibilitychange` / `appStateChange` handlers fire off `patchChatData` promises without awaiting. The OS can kill the process before the IDB write queue drains.
+
+Additionally, several composables have grown past the 400-line guard rail. The worst offenders mix UI orchestration, business logic, and imperative DOM manipulation in a single function.
 
 ---
 
@@ -231,6 +233,133 @@ Lowest priority: cloud sync works, no data loss bugs traced to merge logic, asyn
 
 ---
 
+## Task 7: `useMemorySheetUI` → Vue SFC rewrite
+
+**Status:** not started
+**Priority:** high
+**Depends on:** none
+**Scope:** `src/composables/chat/useMemorySheetUI.js` (872 lines)
+
+### What
+
+Rewrite the memory sheet UI from imperative DOM (`document.createElement` + `addEventListener`) to a proper Vue SFC component. The current composable is ~600 lines of DOM construction that cannot be tested, reused, or read.
+
+Split into:
+- `MemoryBooksSheet.vue` — main sheet (entry list, search, action buttons)
+- `MemoryGenerationSettings.vue` — generation settings form
+- `MemoryPromptManager.vue` — custom prompt CRUD
+- `MemoryEntryEditor.vue` — entry key/content/weight editor
+- `useMemoryState.js` (~150 lines) — reactive state only (currentMemoryBookData, pendingIds, draft progress)
+
+### Why
+
+Imperative DOM is the single biggest source of code volume in the memory composables. A Vue SFC with proper template, computed, and v-model bindings would be ~40% fewer lines, testable, and readable. The current pattern (createElement → querySelector → addEventListener → closeBottomSheet → setTimeout → reopen) is fragile and creates the open/close/reopen chains that make bugs hard to trace.
+
+### Size estimate
+
+| Current | After | Reduction |
+|---------|-------|-----------|
+| useMemorySheetUI.js: 872 | 4 Vue SFCs (~120-180 each) + useMemoryState.js (~150) | ~200 lines saved, but main gain is testability |
+
+---
+
+## Task 8: `useMemoryBooks` split — state vs. handlers
+
+**Status:** not started
+**Priority:** medium
+**Depends on:** Task 7
+**Scope:** `src/composables/chat/useMemoryBooks.js` (806 lines)
+
+### What
+
+Split into focused composables by responsibility:
+
+| New composable | Lines | Responsibility |
+|---------------|-------|---------------|
+| `useMemoryState.js` | ~150 | Reactive state (currentMemoryBookData, pendingIds, draft progress) — shared by all memory composables |
+| `useMemoryCRUD.js` | ~200 | Entry create, edit, delete, reorder, scan/approve/reject drafts |
+| `useMemoryVectorOps.js` | ~150 | Vector toggle, reindex, search type switch |
+| `useMemorySheetOrchestrator.js` | ~250 | Sheet open/close, load/reload, UI coordination |
+
+The reactive state composable is extracted first (it's already loosely defined by the ref declarations at the top of useMemoryBooks). The other three split by operation domain.
+
+### Why
+
+`useMemoryBooks` currently mixes reactive state management, CRUD operations, vector operations, and sheet orchestration in one function. A change to vector toggle logic requires understanding 800 lines. After split, each composable is <250 lines and has a clear single responsibility.
+
+### Risk
+
+Low — purely structural. No behavior changes. The main risk is prop-drilling between the split composables, which is mitigated by the shared `useMemoryState` composable.
+
+---
+
+## Task 9: `useMemoryAutomation` — extract orchestration from business logic
+
+**Status:** not started
+**Priority:** medium
+**Depends on:** Task 8
+**Scope:** `src/composables/chat/useMemoryAutomation.js` (703 lines)
+
+### What
+
+Split into:
+
+| New composable | Lines | Responsibility |
+|---------------|-------|---------------|
+| `useMemoryDraftGeneration.js` | ~250 | Generate draft text, batch generation, single draft, cancel |
+| `useMemoryAutoCreate.js` | ~200 | Stable-turn detection, trigger resolution, bootstrap, interval logic |
+| `useMemoryQuickActions.js` | ~150 | Quick model change, prompt preset shortcuts |
+
+The automation orchestration (when to trigger, what to do) stays in `useMemoryAutomation` but becomes a thin coordinator (~150 lines) that delegates to the three new composables.
+
+### Why
+
+Currently, draft generation, auto-create triggers, and quick model changes are all interleaved. The `runMemoryAutomationAfterStableTurn` function alone is ~180 lines with deeply nested conditionals. Splitting makes each concern independently testable and editable.
+
+---
+
+## Task 10: `useVirtualScroll` encapsulation audit
+
+**Status:** not started
+**Priority:** low
+**Depends on:** none
+**Scope:** `src/composables/chat/useVirtualScroll.js` (716 lines)
+
+### What
+
+`useVirtualScroll` is 716 lines but is self-contained — it manages DOM recycling, scroll anchoring, and item measurement. It doesn't leak concerns into other composables.
+
+Audit for:
+1. Any business logic that should be in a service (currently none found)
+2. Dead code from scroll strategies that were tried and abandoned
+3. Opportunities to extract a generic `useVirtualScroll` utility (currently chat-specific)
+
+If the audit finds no issues, leave as-is. 716 lines of isolated, well-scoped code is acceptable. The guard rail exists to prevent god-objects, not to enforce arbitrary line counts.
+
+---
+
+## Current composable size audit (May 2026)
+
+| Composable | Lines | Status |
+|-----------|-------|--------|
+| useMemorySheetUI | 872 | **Over limit** — Task 7 |
+| useMemoryBooks | 806 | **Over limit** — Task 8 |
+| useVirtualScroll | 716 | Self-contained — Task 10 audit |
+| useMemoryAutomation | 703 | **Over limit** — Task 9 |
+| useMessageActions | 476 | Slightly over — monitor |
+| useApiSettings | 452 | Slightly over — monitor |
+| useGenerationCompleteHandler | 391 | OK |
+| useContextCutoff | 333 | OK |
+| useChatGeneration | 289 | OK |
+| useSessionPersistence | 265 | OK |
+| useMessageSwipe | 262 | OK |
+| useSessionManagement | 255 | OK |
+| ChatView.vue script | 1705 | Known exception (wiring surface) |
+
+Guard rail: composables should be ≤400 lines. Views are exempt if they are primarily composable wiring. Services have no hard limit but should be decomposed when they exceed 500 lines with mixed concerns.
+
+---
+
 ## Dependency graph
 
 ```
@@ -244,12 +373,22 @@ Task 4 (Lifecycle save durability) — depends on Task 3
 Task 5 (ESLint rule) — independent
 
 Task 6 (Cloud sync refactor) — independent, lowest priority
+
+Task 7 (Memory Sheet → Vue SFC) — independent
+  └── Task 8 (useMemoryBooks split) — depends on Task 7
+       └── Task 9 (useMemoryAutomation split) — depends on Task 8
+
+Task 10 (useVirtualScroll audit) — independent
 ```
 
 Recommended order:
 1. Task 5 — quick win, prevents regression
 2. Task 3 — `patchChatDataBatch`, unblocks Task 4
-3. Task 1 — `AsyncOperationScope`, unblocks Task 2
-4. Task 4 — Lifecycle save durability, needs Task 3
-5. Task 2 — Refactor generation state, needs Task 1
-6. Task 6 — Cloud sync, whenever convenient
+3. Task 7 — Memory Sheet Vue SFC, highest ROI composable fix
+4. Task 1 — `AsyncOperationScope`, unblocks Task 2
+5. Task 8 — `useMemoryBooks` split, needs Task 7 first
+6. Task 4 — Lifecycle save durability, needs Task 3
+7. Task 2 — Refactor generation state, needs Task 1
+8. Task 9 — `useMemoryAutomation` split, needs Task 8
+9. Task 10 — `useVirtualScroll` audit, whenever convenient
+10. Task 6 — Cloud sync, whenever convenient
