@@ -1,10 +1,12 @@
 import js from '@eslint/js';
 import pluginVue from 'eslint-plugin-vue';
 import noAbortInUnmount from './eslint-rules/no-abort-in-unmount.js';
+import noReadMutateWrite from './eslint-rules/no-read-mutate-write.js';
 
 const localRulesPlugin = {
     rules: {
-        'no-abort-in-unmount': noAbortInUnmount
+        'no-abort-in-unmount': noAbortInUnmount,
+        'no-read-mutate-write': noReadMutateWrite
     }
 };
 
@@ -154,7 +156,8 @@ export default [
             'vue/first-attribute-line': 'off',
             'vue/attributes-order': 'off',
             'no-empty': 'off',
-            'glaze/no-abort-in-unmount': 'error'
+            'glaze/no-abort-in-unmount': 'error',
+            'glaze/no-read-mutate-write': 'error'
         }
     }
 ];
