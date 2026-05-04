@@ -1,15 +1,13 @@
-// src/composables/useVirtualScroll.js
 import { ref, computed, watch, nextTick, onBeforeUnmount, unref } from 'vue';
 import { Capacitor } from '@capacitor/core';
 import { shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 
 export function useVirtualScroll(itemsRef, containerRef, options = {}) {
     const getBuffer = () => unref(options.buffer) ?? 10;
-    const estimateHeight = options.estimateHeight ?? 80; // Fallback height for unmeasured items
+    const estimateHeight = options.estimateHeight ?? 80;
 
-    // State
     const renderStart = ref(0);
-    const renderEnd = ref(20); // Initial chunk size
+    const renderEnd = ref(20);
     const paddingTop = ref(0);
     const paddingBottom = ref(0);
     const columns = ref(1);
@@ -17,21 +15,86 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
     const isProgrammaticScrolling = ref(false);
     let scrollTimeout = null;
     let scrollRaf = null;
+    let programmaticSeq = 0;
+    const pendingTimeouts = new Set();
 
-    // Cache for item heights: index -> height
     const itemHeights = new Map();
+    let prefixSumCache = null;
+    let prefixSumDirty = true;
 
-    // Set of currently visible indices (intersecting the viewport)
     const visibleIndices = new Set();
-    // Set of indices actually visible on screen (ignoring rootMargin)
     const realVisibleIndices = new Set();
 
     let observer = null;
     let realObserver = null;
     let gridResizeObserver = null;
+    let mounted = true;
 
-    // Computed slice of items to render
-    // We wrap them to preserve original index
+    function trackTimeout(fn, delay) {
+        const id = setTimeout(() => {
+            pendingTimeouts.delete(id);
+            if (mounted) fn();
+        }, delay);
+        pendingTimeouts.add(id);
+        return id;
+    }
+
+    function clearAllPendingTimeouts() {
+        for (const id of pendingTimeouts) {
+            clearTimeout(id);
+        }
+        pendingTimeouts.clear();
+        if (scrollTimeout) {
+            clearTimeout(scrollTimeout);
+            scrollTimeout = null;
+        }
+    }
+
+    function invalidatePrefixSum() {
+        prefixSumDirty = true;
+    }
+
+    function ensurePrefixSum() {
+        if (!prefixSumDirty && prefixSumCache) return prefixSumCache;
+
+        const items = itemsRef.value || [];
+        const cols = columns.value;
+        const count = items.length;
+        const sums = [0];
+
+        for (let i = 0; i < count; i += cols) {
+            let rowHeight = 0;
+            for (let j = 0; j < cols && i + j < count; j++) {
+                const h = itemHeights.get(i + j) || estimateHeight;
+                if (h > rowHeight) rowHeight = h;
+            }
+            sums.push(sums[sums.length - 1] + rowHeight);
+        }
+
+        prefixSumCache = sums;
+        prefixSumDirty = false;
+        return sums;
+    }
+
+    function getHeightUpTo(index) {
+        const sums = ensurePrefixSum();
+        const cols = columns.value;
+        const rowIdx = Math.floor(index / cols);
+        return rowIdx < sums.length ? sums[rowIdx] : sums[sums.length - 1];
+    }
+
+    function getTotalHeight() {
+        const sums = ensurePrefixSum();
+        return sums[sums.length - 1];
+    }
+
+    function pruneStaleHeights() {
+        const count = itemsRef.value?.length || 0;
+        for (const key of itemHeights.keys()) {
+            if (key >= count) itemHeights.delete(key);
+        }
+    }
+
     const visibleItems = computed(() => {
         const items = itemsRef.value || [];
         const start = Math.max(0, renderStart.value);
@@ -42,50 +105,36 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             slice.push({
                 item: items[i],
                 index: i,
-                key: `${items[i].id || items[i].timestamp || ''}_${i}` // Ensure strictly unique keys to prevent duplication artifacts
+                key: `${items[i].id || items[i].timestamp || ''}_${i}`
             });
         }
         return slice;
     });
 
-    // Calculate spacers based on heights
     const updateSpacers = () => {
-        const items = itemsRef.value || [];
+        pruneStaleHeights();
+        const sums = ensurePrefixSum();
         const start = renderStart.value;
         const end = renderEnd.value;
-        const total = items.length;
         const cols = columns.value;
+        const total = itemsRef.value?.length || 0;
 
-        // Calculate Top Padding
-        let top = 0;
-        for (let i = 0; i < start; i += cols) {
-            let rowHeight = 0;
-            for (let j = 0; j < cols && i + j < start; j++) {
-                const h = itemHeights.get(i + j) || estimateHeight;
-                if (h > rowHeight) rowHeight = h;
-            }
-            top += rowHeight;
-        }
-        paddingTop.value = top;
+        const startRow = Math.floor(start / cols);
+        paddingTop.value = startRow < sums.length ? sums[startRow] : 0;
 
-        // Calculate Bottom Padding
         let bottom = 0;
         let rowStart = end;
         if (cols > 1) {
             rowStart = Math.ceil(end / cols) * cols;
         }
-        for (let i = rowStart; i < total; i += cols) {
-            let rowHeight = 0;
-            for (let j = 0; j < cols && i + j < total; j++) {
-                const h = itemHeights.get(i + j) || estimateHeight;
-                if (h > rowHeight) rowHeight = h;
-            }
-            bottom += rowHeight;
+        const endRow = Math.floor(rowStart / cols);
+        const totalRows = sums.length - 1;
+        if (endRow < totalRows) {
+            bottom = sums[totalRows] - sums[Math.min(endRow, totalRows)];
         }
         paddingBottom.value = bottom;
     };
 
-    // Update the render window based on what's visible
     const updateWindow = () => {
         if (visibleIndices.size === 0) return;
 
@@ -94,7 +143,6 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         const maxVis = indices[indices.length - 1];
         const total = itemsRef.value?.length || 0;
 
-        // Expand window by buffer
         const buffer = getBuffer();
         const cols = columns.value;
         let newStart = Math.max(0, minVis - buffer);
@@ -106,7 +154,6 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             newEnd = Math.min(total, newEnd);
         }
 
-        // Only update if changed significantly to avoid thrashing
         if (newStart !== renderStart.value || newEnd !== renderEnd.value) {
             renderStart.value = newStart;
             renderEnd.value = newEnd;
@@ -116,8 +163,6 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
 
     const observeItems = () => {
         if (!containerRef.value) return;
-        // Disconnect and reinitialize observers to clear stale element references
-        // This prevents unbounded growth of observed elements across item updates
         if (observer) observer.disconnect();
         if (realObserver) realObserver.disconnect();
 
@@ -129,89 +174,58 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         });
     };
 
-    // Handle programmatic or fast scrolling
     const onContainerScroll = () => {
         if (!containerRef.value || isProgrammaticScrolling.value) return;
 
-        // Set scrolling state for UI optimizations (e.g. disable pointer-events)
         if (!isScrolling.value) isScrolling.value = true;
         clearTimeout(scrollTimeout);
         scrollTimeout = setTimeout(() => {
-            isScrolling.value = false;
+            if (mounted) isScrolling.value = false;
         }, 150);
 
         const runScrollWork = () => {
             scrollRaf = null;
+            if (!mounted || !containerRef.value) return;
 
             const scrollTop = containerRef.value.scrollTop;
             const clientHeight = containerRef.value.clientHeight;
 
-            // Define the rendered area in pixels
             const renderedTop = paddingTop.value;
 
-            // Calculate height of currently rendered items
-            let renderedContentHeight = 0;
+            const sums = ensurePrefixSum();
             const start = renderStart.value;
             const end = renderEnd.value;
             const cols = columns.value;
-
-            for (let i = start; i < end; i += cols) {
-                let rowHeight = 0;
-                for (let j = 0; j < cols && i + j < end; j++) {
-                    const h = itemHeights.get(i + j) || estimateHeight;
-                    if (h > rowHeight) rowHeight = h;
-                }
-                renderedContentHeight += rowHeight;
-            }
+            const startRow = Math.floor(start / cols);
+            const endRow = Math.floor(end / cols);
+            const renderedContentHeight = (endRow < sums.length ? sums[endRow] : sums[sums.length - 1]) - (startRow < sums.length ? sums[startRow] : 0);
             const renderedBottom = renderedTop + renderedContentHeight;
 
-            // Buffer to detect "jump" (scrolled far outside rendered area)
-            // We use a large buffer so normal scrolling is handled by IntersectionObserver
-            // Increased to 2000 to match larger render buffers and prevent jitter
             const scrollBuffer = 2000;
 
-            // Check if viewport is significantly outside the rendered bounds
             if (scrollTop < renderedTop - scrollBuffer || scrollTop + clientHeight > renderedBottom + scrollBuffer) {
-                // We jumped far away. Recalculate window.
-
-                // Find target index at scrollTop
-                let currentTop = 0;
-                let targetIndex = -1;
                 const count = itemsRef.value.length;
-
-                for (let i = 0; i < count; i += cols) {
-                    let rowHeight = 0;
-                    for (let j = 0; j < cols && i + j < count; j++) {
-                        const h = itemHeights.get(i + j) || estimateHeight;
-                        if (h > rowHeight) rowHeight = h;
-                    }
-                    if (currentTop + rowHeight > scrollTop) {
-                        targetIndex = i;
+                let targetRow = -1;
+                for (let r = 0; r < sums.length - 1; r++) {
+                    if (sums[r + 1] > scrollTop) {
+                        targetRow = r;
                         break;
                     }
-                    currentTop += rowHeight;
                 }
 
-                // If we scrolled past the end (estimation error), target the last item
-                if (targetIndex === -1) targetIndex = Math.max(0, count - 1);
+                let targetIndex = targetRow >= 0 ? targetRow * cols : Math.max(0, count - 1);
 
-                // Center window around target
                 const buffer = getBuffer();
                 let newStart = Math.max(0, targetIndex - buffer);
 
-                // Estimate end based on clientHeight
                 let hSum = 0;
-                let i = targetIndex;
-                while (hSum < clientHeight + 1000 && i < count) {
-                    let rowHeight = 0;
-                    for (let j = 0; j < cols && i + j < count; j++) {
-                        const h = itemHeights.get(i + j) || estimateHeight;
-                        if (h > rowHeight) rowHeight = h;
-                    }
-                    hSum += rowHeight;
-                    i += cols;
+                let r = Math.floor(targetIndex / cols);
+                while (hSum < clientHeight + 1000 && r * cols < count) {
+                    const rowH = sums[r + 1] - sums[r];
+                    hSum += rowH;
+                    r++;
                 }
-                let newEnd = Math.min(count, i + buffer);
+                let newEnd = Math.min(count, r * cols + buffer);
 
                 if (cols > 1) {
                     newStart = Math.floor(newStart / cols) * cols;
@@ -222,19 +236,17 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
                 if (newStart !== renderStart.value || newEnd !== renderEnd.value) {
                     renderStart.value = newStart;
                     renderEnd.value = newEnd;
-                    visibleIndices.clear(); // Clear stale indices to prevent window expansion ghosting
+                    visibleIndices.clear();
                     realVisibleIndices.clear();
                     updateSpacers();
                     nextTick(observeItems);
                 }
             } else if (!shouldUseBatterySaverUI()) {
-                // Periodic visibility health check during normal scroll
-                // This ensures realVisibleIndices doesn't get stuck if Observer missed a fast transition
                 const children = containerRef.value.querySelectorAll('[data-index]');
                 const containerRect = containerRef.value.getBoundingClientRect();
                 const style = window.getComputedStyle(containerRef.value);
-                const paddingBottom = parseFloat(style.paddingBottom) || 0;
-                const visibleBottom = containerRect.bottom - paddingBottom;
+                const paddingBottomVal = parseFloat(style.paddingBottom) || 0;
+                const visibleBottom = containerRect.bottom - paddingBottomVal;
                 const visibleTop = containerRect.top;
 
                 children.forEach(el => {
@@ -242,7 +254,6 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
                     if (isNaN(index)) return;
                     const rect = el.getBoundingClientRect();
 
-                    // If the top is above visible bottom AND bottom is below visible top
                     if (rect.top < visibleBottom - 20 && rect.bottom > visibleTop + 20) {
                         realVisibleIndices.add(index);
                     } else {
@@ -283,6 +294,20 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         return { index: (itemsRef.value?.length || 0) - 1, offset: 0 };
     };
 
+    function beginProgrammaticScroll() {
+        programmaticSeq += 1;
+        isProgrammaticScrolling.value = true;
+        return programmaticSeq;
+    }
+
+    function endProgrammaticScroll(seq, delay = 50) {
+        trackTimeout(() => {
+            if (programmaticSeq === seq) {
+                isProgrammaticScrolling.value = false;
+            }
+        }, delay);
+    }
+
     const scrollToAnchor = (anchor) => {
         return new Promise((resolve) => {
             if (!anchor || typeof anchor.index !== 'number') {
@@ -296,9 +321,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             }
 
             const index = Math.max(0, Math.min(anchor.index, count - 1));
-
-            // Lock scroll handler to prevent "jump" logic from interfering
-            isProgrammaticScrolling.value = true;
+            const seq = beginProgrammaticScroll();
 
             const buffer = getBuffer();
             const cols = columns.value;
@@ -318,121 +341,116 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             updateSpacers();
 
             nextTick(() => {
-                if (containerRef.value) {
-                    // Measure rendered items immediately to ensure accuracy
-                    const children = containerRef.value.querySelectorAll('[data-index]');
-                    children.forEach(el => {
-                        const idx = parseInt(el.dataset.index);
-                        if (!isNaN(idx)) {
-                            const h = el.getBoundingClientRect().height;
-                            if (h > 0) itemHeights.set(idx, h);
-                        }
-                    });
-
-                    let targetTop = paddingTop.value;
-                    const cols = columns.value;
-                    const alignedIndex = Math.floor(index / cols) * cols;
-
-                    for (let i = renderStart.value; i < alignedIndex; i += cols) {
-                        let rowHeight = 0;
-                        for (let j = 0; j < cols && i + j < alignedIndex; j++) {
-                            const h = itemHeights.get(i + j) || estimateHeight;
-                            if (h > rowHeight) rowHeight = h;
-                        }
-                        targetTop += rowHeight;
-                    }
-                    targetTop += (anchor.offset || 0);
-
-                    // Fix: Account for container padding-top (e.g. header space)
-                    const style = window.getComputedStyle(containerRef.value);
-                    const containerPaddingTop = parseFloat(style.paddingTop) || 0;
-                    targetTop += containerPaddingTop;
-
-                    containerRef.value.scrollTop = targetTop;
-                    observeItems();
-
-                    // Unlock after a short delay to let scroll settle
-                    setTimeout(() => {
-                        isProgrammaticScrolling.value = false;
-                        resolve();
-                    }, 50);
-                } else {
+                if (!mounted || !containerRef.value) {
                     resolve();
+                    return;
                 }
+                const currentCount = itemsRef.value.length;
+                if (currentCount !== count) {
+                    endProgrammaticScroll(seq);
+                    resolve();
+                    return;
+                }
+
+                const children = containerRef.value.querySelectorAll('[data-index]');
+                children.forEach(el => {
+                    const idx = parseInt(el.dataset.index);
+                    if (!isNaN(idx)) {
+                        const h = el.getBoundingClientRect().height;
+                        if (h > 0) itemHeights.set(idx, h);
+                    }
+                });
+                invalidatePrefixSum();
+
+                let targetTop = paddingTop.value;
+                const alignedIndex = Math.floor(index / cols) * cols;
+
+                for (let i = renderStart.value; i < alignedIndex; i += cols) {
+                    let rowHeight = 0;
+                    for (let j = 0; j < cols && i + j < alignedIndex; j++) {
+                        const h = itemHeights.get(i + j) || estimateHeight;
+                        if (h > rowHeight) rowHeight = h;
+                    }
+                    targetTop += rowHeight;
+                }
+                targetTop += (anchor.offset || 0);
+
+                const style = window.getComputedStyle(containerRef.value);
+                const containerPaddingTop = parseFloat(style.paddingTop) || 0;
+                targetTop += containerPaddingTop;
+
+                containerRef.value.scrollTop = targetTop;
+                observeItems();
+                endProgrammaticScroll(seq);
+                resolve();
             });
         });
     };
 
-    // Force scroll to bottom helper
     const scrollToBottom = (behavior = 'auto') => {
         const count = itemsRef.value.length;
         if (count === 0) return;
 
         let effectiveBehavior = behavior;
 
-        // Check distance to determine if we should smooth scroll
         if (containerRef.value) {
             const { scrollTop, scrollHeight, clientHeight } = containerRef.value;
-            // If distance is large (> 3000px), force auto to avoid "stuck in middle" issues
             if (scrollHeight - scrollTop - clientHeight > 3000) {
                 effectiveBehavior = 'auto';
             }
         }
 
-        // Force render window to end immediately
-        renderStart.value = Math.max(0, count - 20);
+        const viewportHeight = containerRef.value?.clientHeight || 800;
+        const estimatedItemsInView = Math.max(20, Math.ceil(viewportHeight / estimateHeight) + getBuffer());
+
+        renderStart.value = Math.max(0, count - estimatedItemsInView);
         renderEnd.value = count;
         visibleIndices.clear();
         updateSpacers();
 
-        // Lock scrolling to prevent observer interference
-        isProgrammaticScrolling.value = true;
+        const seq = beginProgrammaticScroll();
 
         nextTick(() => {
-            // Need to double nextTick to allow Vue to render the newly added items first
             nextTick(() => {
                 requestAnimationFrame(() => {
-                    if (containerRef.value) {
-                        // Ensure layout is updated and scroll to bottom
-                        const doScroll = () => {
-                            if (containerRef.value) {
-                                containerRef.value.scrollTop = containerRef.value.scrollHeight;
-                                observeItems();
+                    if (!mounted || !containerRef.value) return;
+                    const doScroll = () => {
+                        if (!mounted || !containerRef.value) return;
+                        containerRef.value.scrollTop = containerRef.value.scrollHeight;
+                        observeItems();
+                    };
 
-                                const timeout = effectiveBehavior === 'smooth' ? 500 : 150;
-                                setTimeout(() => { isProgrammaticScrolling.value = false; }, timeout);
-                            }
-                        };
-
-                        if (effectiveBehavior === 'smooth') {
-                            containerRef.value.scrollTo({ top: containerRef.value.scrollHeight, behavior: 'smooth' });
-                            observeItems();
-                            setTimeout(() => { isProgrammaticScrolling.value = false; }, 500);
-                        } else {
-                            doScroll();
-                            // Double check if layout shifted after scroll
-                            setTimeout(doScroll, 50);
-                        }
+                    if (effectiveBehavior === 'smooth') {
+                        containerRef.value.scrollTo({ top: containerRef.value.scrollHeight, behavior: 'smooth' });
+                        observeItems();
+                        endProgrammaticScroll(seq, 500);
+                    } else {
+                        doScroll();
+                        endProgrammaticScroll(seq, 150);
+                        trackTimeout(doScroll, 50);
                     }
                 });
             });
         });
     };
 
-    // Initialize Observers
     const initObservers = () => {
         if (observer) observer.disconnect();
 
         observer = new IntersectionObserver((entries) => {
+            if (!mounted) return;
             let changed = false;
             entries.forEach(entry => {
                 const index = parseInt(entry.target.dataset.index);
                 if (isNaN(index)) return;
 
-                // Update height cache
                 const rect = entry.boundingClientRect;
                 if (rect.height > 0) {
-                    itemHeights.set(index, rect.height);
+                    const prev = itemHeights.get(index);
+                    if (prev !== rect.height) {
+                        itemHeights.set(index, rect.height);
+                        invalidatePrefixSum();
+                    }
                 }
 
                 if (entry.isIntersecting) {
@@ -440,7 +458,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
                     changed = true;
                 } else {
                     visibleIndices.delete(index);
-                    changed = true; // Visibility changed
+                    changed = true;
                 }
             });
 
@@ -449,29 +467,26 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             }
         }, {
             root: containerRef.value,
-            threshold: 0.01, // Trigger as soon as 1% is visible
-            rootMargin: '1000px' // Pre-load margin significantly increased
+            threshold: 0.01,
+            rootMargin: '1000px'
         });
 
         realObserver = new IntersectionObserver((entries) => {
+            if (!mounted) return;
             entries.forEach(entry => {
                 const index = parseInt(entry.target.dataset.index);
                 if (isNaN(index)) return;
 
                 if (entry.isIntersecting) {
-                    // Check if it's actually within the visible (non-padded) area
-                    // We check if the element's top is below the container's visible bottom
                     const container = containerRef.value;
                     if (container) {
                         const containerRect = container.getBoundingClientRect();
                         const entryRect = entry.boundingClientRect;
 
-                        // Get current padding bottom (reserved for keyboard/input)
                         const style = window.getComputedStyle(container);
-                        const paddingBottom = parseFloat(style.paddingBottom) || 0;
-                        const visibleBottom = containerRect.bottom - paddingBottom;
+                        const paddingBottomVal = parseFloat(style.paddingBottom) || 0;
+                        const visibleBottom = containerRect.bottom - paddingBottomVal;
 
-                        // If the top of the message is already below the visible area, it's "behind" the keyboard
                         if (entryRect.top >= visibleBottom - 20) {
                             realVisibleIndices.delete(index);
                             return;
@@ -484,10 +499,9 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             });
         }, {
             root: containerRef.value,
-            threshold: [0, 0.1, 0.5, 1.0] // Multi-threshold for better tracking
+            threshold: [0, 0.1, 0.5, 1.0]
         });
 
-        // Observe all rendered items
         nextTick(() => {
             observeItems();
         });
@@ -507,61 +521,62 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             const numCols = gridCols.split(' ').length;
             if (columns.value !== numCols) {
                 columns.value = numCols > 0 ? numCols : 1;
-                // If columns changed, we re-evaluate everything
+                invalidatePrefixSum();
                 updateWindow();
                 updateSpacers();
             }
         }
     };
 
-    // Watchers
     watch(itemsRef, (newItems, oldItems) => {
         const newLen = newItems ? newItems.length : 0;
         const oldLen = oldItems ? oldItems.length : 0;
 
-        // If items added to bottom (chat scenario), auto-expand end
+        invalidatePrefixSum();
+        pruneStaleHeights();
+
         if (newLen > oldLen) {
-            renderEnd.value = newLen;
-            // If we were at the bottom, keep us at the bottom
-            // (ChatView handles scroll, we just ensure it's rendered)
             const wasAtBottom = containerRef.value && (containerRef.value.scrollHeight - containerRef.value.scrollTop - containerRef.value.clientHeight < 100);
             if (wasAtBottom) {
-                // Use slight delay to allow dom updates
-                setTimeout(() => {
-                    scrollToBottom('auto');
+                renderEnd.value = newLen;
+                const viewportHeight = containerRef.value?.clientHeight || 800;
+                const estimatedItemsInView = Math.max(20, Math.ceil(viewportHeight / estimateHeight) + getBuffer());
+                renderStart.value = Math.max(0, newLen - estimatedItemsInView);
+                trackTimeout(() => {
+                    if (mounted) scrollToBottom('auto');
                 }, 50);
+            } else {
+                if (newLen > renderEnd.value) {
+                    renderEnd.value = newLen;
+                }
             }
         }
         updateSpacers();
         nextTick(observeItems);
     });
 
-    // Handle deep changes (like text streaming) updating heights
-    // We use a ResizeObserver on the container to detect layout shifts if needed,
-    // but for specific items, we rely on re-observation or manual trigger.
-    // Since ChatView updates text, the DOM element size changes.
-    // IntersectionObserver updates rect on intersection, but not on resize if already visible.
-    // We can add a ResizeObserver for visible items if strict precision is needed.
-
     watch(visibleItems, () => {
         nextTick(observeItems);
     });
 
-    // Public method to force refresh (e.g. after chat switch)
     const refresh = () => {
         itemHeights.clear();
+        invalidatePrefixSum();
         visibleIndices.clear();
-        renderStart.value = Math.max(0, (itemsRef.value?.length || 0) - 20); // Start at bottom for chat
-        renderEnd.value = itemsRef.value?.length || 0;
+        realVisibleIndices.clear();
+        const count = itemsRef.value?.length || 0;
+        const viewportHeight = containerRef.value?.clientHeight || 800;
+        const estimatedItemsInView = Math.max(20, Math.ceil(viewportHeight / estimateHeight) + getBuffer());
+        renderStart.value = Math.max(0, count - estimatedItemsInView);
+        renderEnd.value = count;
         updateSpacers();
         nextTick(() => {
+            if (!mounted) return;
             initObservers();
-            // Force update spacers after render
-            setTimeout(updateSpacers, 100);
+            trackTimeout(updateSpacers, 100);
         });
     };
 
-    // Lifecycle
     watch(containerRef, (el, oldEl) => {
         if (oldEl) {
             oldEl.removeEventListener('scroll', onContainerScroll);
@@ -573,6 +588,8 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
     });
 
     onBeforeUnmount(() => {
+        mounted = false;
+        clearAllPendingTimeouts();
         if (observer) observer.disconnect();
         if (realObserver) realObserver.disconnect();
         if (gridResizeObserver) gridResizeObserver.disconnect();
@@ -583,6 +600,9 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             cancelAnimationFrame(scrollRaf);
             scrollRaf = null;
         }
+        itemHeights.clear();
+        visibleIndices.clear();
+        realVisibleIndices.clear();
     });
 
     const scrollToIndex = (index, behavior = 'auto', align = 'center') => {
@@ -598,12 +618,15 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             }
 
             index = Math.max(0, Math.min(index, count - 1));
+            const seq = beginProgrammaticScroll();
 
-            isProgrammaticScrolling.value = true;
-
-            // Check if already in rendered range and within visible bounds roughly
             if (index >= renderStart.value && index < renderEnd.value && containerRef.value) {
                 nextTick(() => {
+                    if (!mounted || !containerRef.value) {
+                        endProgrammaticScroll(seq);
+                        resolve();
+                        return;
+                    }
                     const el = containerRef.value.querySelector(`[data-index="${index}"]`);
                     if (el) {
                         const containerRect = containerRef.value.getBoundingClientRect();
@@ -620,17 +643,17 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
                             const style = window.getComputedStyle(containerRef.value);
                             const containerPaddingTop = parseFloat(style.paddingTop) || 0;
                             targetTop = targetTop - containerPaddingTop;
-                            targetTop -= 10; // Extra margin
+                            targetTop -= 10;
                         }
 
                         containerRef.value.scrollTo({ top: Math.max(0, targetTop), behavior });
                     }
-                    setTimeout(() => { isProgrammaticScrolling.value = false; resolve(); }, behavior === 'smooth' ? 300 : 50);
+                    endProgrammaticScroll(seq, behavior === 'smooth' ? 300 : 50);
+                    resolve();
                 });
                 return;
             }
 
-            // If completely out of bounds, change render window
             const buffer = getBuffer();
             const cols = columns.value;
             let newStart = Math.max(0, index - buffer);
@@ -649,51 +672,55 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             updateSpacers();
 
             nextTick(() => {
-                if (containerRef.value) {
-                    // Measure rendered items immediately
-                    const children = containerRef.value.querySelectorAll('[data-index]');
-                    children.forEach(el => {
-                        const idx = parseInt(el.dataset.index);
-                        if (!isNaN(idx)) {
-                            const h = el.getBoundingClientRect().height;
-                            if (h > 0) itemHeights.set(idx, h);
-                        }
-                    });
-
-                    let targetTop = paddingTop.value;
-                    const cols = columns.value;
-                    const alignedIndex = Math.floor(index / cols) * cols;
-
-                    for (let i = renderStart.value; i < alignedIndex; i += cols) {
-                        let rowHeight = 0;
-                        for (let j = 0; j < cols && i + j < alignedIndex; j++) {
-                            const h = itemHeights.get(i + j) || estimateHeight;
-                            if (h > rowHeight) rowHeight = h;
-                        }
-                        targetTop += rowHeight;
-                    }
-
-                    const itemH = itemHeights.get(index) || estimateHeight;
-
-                    if (align === 'center') {
-                        targetTop = targetTop - (containerRef.value.clientHeight / 2) + (itemH / 2);
-                        const style = window.getComputedStyle(containerRef.value);
-                        const containerPaddingTop = parseFloat(style.paddingTop) || 0;
-                        targetTop += containerPaddingTop;
-                    } else if (align === 'top') {
-                        targetTop -= 10; // Extra margin
-                    }
-
-                    containerRef.value.scrollTo({ top: Math.max(0, targetTop), behavior });
-                    observeItems();
-
-                    setTimeout(() => {
-                        isProgrammaticScrolling.value = false;
-                        resolve();
-                    }, behavior === 'smooth' ? 300 : 50);
-                } else {
+                if (!mounted || !containerRef.value) {
+                    endProgrammaticScroll(seq);
                     resolve();
+                    return;
                 }
+                const currentCount = itemsRef.value.length;
+                if (currentCount !== count) {
+                    endProgrammaticScroll(seq);
+                    resolve();
+                    return;
+                }
+
+                const children = containerRef.value.querySelectorAll('[data-index]');
+                children.forEach(el => {
+                    const idx = parseInt(el.dataset.index);
+                    if (!isNaN(idx)) {
+                        const h = el.getBoundingClientRect().height;
+                        if (h > 0) itemHeights.set(idx, h);
+                    }
+                });
+                invalidatePrefixSum();
+
+                let targetTop = paddingTop.value;
+                const alignedIndex = Math.floor(index / cols) * cols;
+
+                for (let i = renderStart.value; i < alignedIndex; i += cols) {
+                    let rowHeight = 0;
+                    for (let j = 0; j < cols && i + j < alignedIndex; j++) {
+                        const h = itemHeights.get(i + j) || estimateHeight;
+                        if (h > rowHeight) rowHeight = h;
+                    }
+                    targetTop += rowHeight;
+                }
+
+                const itemH = itemHeights.get(index) || estimateHeight;
+
+                if (align === 'center') {
+                    targetTop = targetTop - (containerRef.value.clientHeight / 2) + (itemH / 2);
+                    const style = window.getComputedStyle(containerRef.value);
+                    const containerPaddingTop = parseFloat(style.paddingTop) || 0;
+                    targetTop += containerPaddingTop;
+                } else if (align === 'top') {
+                    targetTop -= 10;
+                }
+
+                containerRef.value.scrollTo({ top: Math.max(0, targetTop), behavior });
+                observeItems();
+                endProgrammaticScroll(seq, behavior === 'smooth' ? 300 : 50);
+                resolve();
             });
         });
     };
