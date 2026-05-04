@@ -3,6 +3,10 @@ import * as memoryBooksService from '@/core/services/memoryBooksService.js';
 import { getMemoryPromptOptions, getMemoryPromptLabelByKey, getNormalizedMemoryGenerationState } from '@/core/services/memoryPromptPresets.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { showToast } from '@/core/states/toastState.js';
+import { mountSheetComponent } from '@/core/utils/mountSheetComponent.js';
+import MemoryPromptPreviewSheet from '@/components/sheets/MemoryPromptPreviewSheet.vue';
+import MemoryEntryEditorSheet from '@/components/sheets/MemoryEntryEditorSheet.vue';
+import MemoryTextPreviewSheet from '@/components/sheets/MemoryTextPreviewSheet.vue';
 import { formatError } from '@/utils/errors.js';
 import { db } from '@/utils/db.js';
 import { getChatData } from '@/utils/sessions.js';
@@ -59,104 +63,54 @@ export function useMemorySheetUI({
         const entry = memoryBook.entries.find(item => item.id === entryId);
         if (!entry) return;
 
-        const content = document.createElement('div');
-        content.className = 'context-sheet';
-        content.innerHTML = `
-            <div class="settings-item">
-                <label>Title</label>
-                <input id="memory-entry-title" type="text" value="${(entry.title || '').replace(/"/g, '&quot;')}" placeholder="Memory title">
-            </div>
-            <div class="settings-item">
-                <label>Content</label>
-                <textarea id="memory-entry-content" rows="8" placeholder="Memory text">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
-            </div>
-            <div class="settings-item">
-                <label>Keys</label>
-                <input id="memory-entry-keys" type="text" value="${(Array.isArray(entry.keys) ? entry.keys.join(', ') : '').replace(/"/g, '&quot;')}" placeholder="key one, key two">
-                <div class="context-sheet-note">Only this field is used for keyword retrieval.</div>
-            </div>
-            <div class="context-sheet-actions">
-                <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-entry-cancel">Cancel</button>
-                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-entry-save">Save</button>
-            </div>
-        `;
-
-        content.querySelector('#memory-entry-cancel')?.addEventListener('click', () => {
-            closeBottomSheet();
-            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
-        });
-
-        content.querySelector('#memory-entry-save')?.addEventListener('click', async () => {
-            const nextTitle = content.querySelector('#memory-entry-title')?.value?.trim() || 'Untitled memory';
-            const nextContent = content.querySelector('#memory-entry-content')?.value?.trim() || '';
-            const nextKeys = parseMemoryKeyInput(content.querySelector('#memory-entry-keys')?.value);
-
-            if (!nextContent) {
-                showToast('Memory content is required');
-                return;
-            }
-
+        async function handleSave({ title: nextTitle, content: nextContent, keys: nextKeys }) {
             const retrievalChanged = JSON.stringify(entry.keys || []) !== JSON.stringify(nextKeys)
                 || String(entry.content || '') !== nextContent;
 
-            try {
-                if (getMemoryVectorSearchEnabled(memoryBook) && retrievalChanged) {
-                    entry.content = nextContent;
-                    entry.keys = nextKeys;
-                    await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
-                }
-                await db.patchChatData(activeChatChar.id, (chatData) => {
-                    const sid = activeChatChar.sessionId || chatData.currentId;
-                    const mb = ensureSessionMemoryBook(chatData, sid);
-                    const e = mb.entries.find(item => item.id === entryId);
-                    if (!e) return;
-                    e.title = nextTitle;
-                    e.content = nextContent;
-                    e.keys = nextKeys;
-                    e.updatedAt = Date.now();
-                    normalizeMemoryEntryShape(e);
-                    mb.updatedAt = Date.now();
-                    reconcileSessionMemoryState(chatData, sid, currentMessages.value);
-                    chatData.sessions[sid] = currentMessages.value;
-                });
-                entry.title = nextTitle;
+            if (getMemoryVectorSearchEnabled(memoryBook) && retrievalChanged) {
                 entry.content = nextContent;
                 entry.keys = nextKeys;
-                entry.updatedAt = Date.now();
-                closeBottomSheet();
-                setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
-            } catch (error) {
-                console.error('Failed to save memory entry:', error);
-                showToast(`Memory save failed: ${formatError(error)}`);
+                await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
             }
-        });
+            await db.patchChatData(activeChatChar.id, (chatData) => {
+                const sid = activeChatChar.sessionId || chatData.currentId;
+                const mb = ensureSessionMemoryBook(chatData, sid);
+                const e = mb.entries.find(item => item.id === entryId);
+                if (!e) return;
+                e.title = nextTitle;
+                e.content = nextContent;
+                e.keys = nextKeys;
+                e.updatedAt = Date.now();
+                normalizeMemoryEntryShape(e);
+                mb.updatedAt = Date.now();
+                reconcileSessionMemoryState(chatData, sid, currentMessages.value);
+                chatData.sessions[sid] = currentMessages.value;
+            });
+            entry.title = nextTitle;
+            entry.content = nextContent;
+            entry.keys = nextKeys;
+            entry.updatedAt = Date.now();
+            closeBottomSheet();
+            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
+        }
 
-        showBottomSheet({ title: 'Edit Memory Entry', content, isSolid: true });
+        const { el } = mountSheetComponent(MemoryEntryEditorSheet, {
+            entry: { title: entry.title, content: entry.content, keys: entry.keys },
+            onSave: handleSave,
+            onPreview: () => openMemoryTextPreview(entry, 'Memory Entry')
+        });
+        showBottomSheet({ title: 'Edit Memory Entry', content: el, isSolid: true });
     }
 
     function openMemoryPromptPreview(item, options = {}) {
         if (!item) return;
         const { onClose } = options;
-        const hasOnClose = typeof onClose === 'function';
-        const content = document.createElement('div');
-        content.className = 'context-sheet';
-        content.innerHTML = `
-            <div class="settings-item">
-                <label>Rule</label>
-                <div class="context-sheet-note">${(item.label || 'Prompt').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            </div>
-            <div class="memory-entry-fulltext">${(item.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            <div class="context-sheet-actions">
-                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-preview-close">${hasOnClose ? 'Back' : 'Close'}</button>
-            </div>
-        `;
-        content.querySelector('#memory-prompt-preview-close')?.addEventListener('click', () => {
-            closeBottomSheet();
-            if (hasOnClose) {
-                setTimeout(() => onClose(), 50);
-            }
+        const { el } = mountSheetComponent(MemoryPromptPreviewSheet, {
+            label: item.label || 'Prompt',
+            prompt: item.prompt || '',
+            onClose: onClose || null
         });
-        showBottomSheet({ title: 'Generation Rule', content, isSolid: true });
+        showBottomSheet({ title: 'Generation Rule', content: el, isSolid: true });
     }
 
     async function createMemoryFromSelection() {
@@ -223,36 +177,8 @@ export function useMemorySheetUI({
 
     function openMemoryTextPreview(entry, kind = 'Memory') {
         if (!entry) return;
-        const keys = Array.isArray(entry.keys) && entry.keys.length
-            ? entry.keys.map(key => `<span class="memory-chip">${String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`).join('')
-            : '<span class="context-sheet-note">No keys yet</span>';
-        const isApprovedEntry = kind === 'Memory Entry';
-        const content = document.createElement('div');
-        content.className = 'context-sheet';
-        content.innerHTML = `
-            <div class="settings-item">
-                <label>${kind}</label>
-                <div class="context-sheet-note">${(entry.title || kind).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            </div>
-            <div class="settings-item">
-                <label>Retrieval</label>
-                <div class="context-sheet-note">Vector search: ${entry.vectorSearch ? 'enabled' : 'disabled'}</div>
-                <div class="memory-chip-list">${keys}</div>
-            </div>
-            <div class="memory-entry-fulltext">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            <div class="context-sheet-actions">
-                <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-regenerate">Regenerate</button>
-                ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-edit">Edit</button>` : ''}
-                ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-reindex">Reindex</button>` : ''}
-                ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary memory-preview-delete" id="memory-preview-delete">Delete</button>` : ''}
-                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-preview-close">${isApprovedEntry ? 'Close' : 'Back'}</button>
-            </div>
-        `;
-        content.querySelector('#memory-preview-edit')?.addEventListener('click', () => {
-            closeBottomSheet();
-            setTimeout(() => openMemoryEntryEditor(entry.id), 50);
-        });
-        content.querySelector('#memory-preview-reindex')?.addEventListener('click', async () => {
+
+        async function handleReindex() {
             const activeChatChar = getActiveChatChar();
             if (!activeChatChar) return;
             const chatData = await getChatData(activeChatChar.id);
@@ -262,10 +188,7 @@ export function useMemorySheetUI({
                 showToast('Enable Memory Books vector search first');
                 return;
             }
-            const reindexButton = content.querySelector('#memory-preview-reindex');
             try {
-                reindexButton.disabled = true;
-                reindexButton.textContent = 'Reindexing...';
                 showToast('Reindexing memory entry...', 1500);
                 entry.vectorSearch = true;
                 await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
@@ -283,12 +206,10 @@ export function useMemorySheetUI({
             } catch (error) {
                 console.error('Failed to reindex memory entry:', error);
                 showToast(`Reindex failed: ${formatError(error)}`);
-            } finally {
-                reindexButton.disabled = false;
-                reindexButton.textContent = 'Reindex';
             }
-        });
-        content.querySelector('#memory-preview-delete')?.addEventListener('click', async () => {
+        }
+
+        async function handleDelete() {
             const activeChatChar = getActiveChatChar();
             if (!activeChatChar) return;
             await deleteMemoryEntryIndexIfPresent(entry.id);
@@ -302,8 +223,9 @@ export function useMemorySheetUI({
             });
             closeBottomSheet();
             setTimeout(() => openMemoryBooksSheet(), 50);
-        });
-        content.querySelector('#memory-preview-regenerate')?.addEventListener('click', async () => {
+        }
+
+        async function handleRegenerate() {
             const activeChatChar = getActiveChatChar();
             if (!activeChatChar || !entry.messageIds || !entry.messageIds.length) {
                 showToast('Cannot regenerate: no message range');
@@ -326,12 +248,19 @@ export function useMemorySheetUI({
                 console.error('Failed to regenerate draft:', error);
                 showToast(`Regeneration failed: ${formatError(error)}`);
             }
+        }
+
+        const { el } = mountSheetComponent(MemoryTextPreviewSheet, {
+            entry,
+            kind,
+            vectorEnabled: entry.vectorSearch || false,
+            onEdit: () => { closeBottomSheet(); setTimeout(() => openMemoryEntryEditor(entry.id), 50); },
+            onReindex: handleReindex,
+            onDelete: handleDelete,
+            onRegenerate: handleRegenerate,
+            onClose: () => openMemoryBooksSheet()
         });
-        content.querySelector('#memory-preview-close')?.addEventListener('click', () => {
-            closeBottomSheet();
-            setTimeout(() => openMemoryBooksSheet(), 50);
-        });
-        showBottomSheet({ title: kind, content, isSolid: true });
+        showBottomSheet({ title: kind, content: el, isSolid: true });
     }
 
     async function openMessageMemoryCoverage(message) {
