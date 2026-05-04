@@ -70,6 +70,7 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 | `origin/dev` | Local mirror of upstream integration branch | No PR |
 | `fix/migrate-getchatdata-savechat-to-patchchatdata` | Migrate 40+ getChatData+saveChat to patchChatData, normalizeChatData normalization, reindex guard | #118 |
 | `fix/memory-settings-global` | Memory book settings global (localStorage) instead of per-session (linear chain from fix/migrate-getchatdata-savechat-to-patchchatdata) | #119 |
+| `refactor/async-integrity-and-composables` | Async integrity, composable decomposition (T1-T5, T7-T10 done; T6 cloud sync deferred) | Pending |
 
 ### Historical (merged & deleted)
 - `feat/refactor-phase1-event-hub` → merged into `feat/chat-persistence-and-reasoning-fixes`, then upstream/dev

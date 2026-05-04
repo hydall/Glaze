@@ -58,6 +58,15 @@ src/
 │   ├── app/                   # App-level init, event subscriptions, onboarding
 │   ├── character/             # Character editor, thumbnails, import/export
 │   ├── chat/                  # Chat generation, context, memory, message selection, auto-sync
+│   │   ... existing composables ...
+│   │   useVirtualScroll.js    # Orchestrator (354 lines)
+│   │   useVirtualScrollNavigation.js # Scroll-to operations (274 lines)
+│   │   virtualScrollHeightCache.js   # Pure height cache with prefix-sum (137 lines)
+│   │   useMemoryDraftProgress.js     # Draft generation progress (extracted from useMemoryBooks)
+│   │   useMemoryIndexing.js          # Vector toggle/reindex (extracted from useMemoryBooks)
+│   │   useMemoryCRUD.js             # Entry CRUD (extracted from useMemoryBooks)
+│   │   useMemoryDraftContext.js      # Draft context builder (extracted from useMemoryAutomation)
+│   │   useMemoryBatchGeneration.js   # Batch generation (extracted from useMemoryAutomation)
 │   ├── lorebook/              # Lorebook vector status, embedding logic
 │   ├── theme/                 # Theme presets, settings, renderer
 │   └── ui/                    # Header, glossary, viewer composables
@@ -204,9 +213,13 @@ src/
 ## 3. MemoryBooks
 
 ### Files
-- `src/composables/chat/useMemoryBooks.js` — Memory book CRUD, entry management, vector toggle, reindex, draft generation
-- `src/composables/chat/useMemorySheetUI.js` — Memory sheet DOM, entry editor, prompt manager, generation settings
-- `src/composables/chat/useMemoryAutomation.js` — Auto-creation, stable-turn triggers, bootstrap, quick model change
+- `src/composables/chat/useMemoryBooks.js` — Memory book orchestrator (~350 lines; wires sub-composables)
+- `src/composables/chat/useMemoryCRUD.js` — Entry create, edit, delete, reorder, scan/approve/reject drafts (~200 lines)
+- `src/composables/chat/useMemoryDraftProgress.js` — Draft generation progress tracking (~120 lines)
+- `src/composables/chat/useMemoryIndexing.js` — Vector toggle, reindex, search type switch (~150 lines)
+- `src/composables/chat/useMemoryAutomation.js` — Auto-creation, stable-turn triggers, quick model change (~400 lines; wires sub-modules)
+- `src/composables/chat/useMemoryDraftContext.js` — Draft context building, continuity context (~150 lines)
+- `src/composables/chat/useMemoryBatchGeneration.js` — Batch draft generation, single draft, cancel (~200 lines)
 - `src/core/services/generationService.js` — Memory injection during generation
 - `src/core/states/lorebookState.js` — Vector search for memories
 - `src/utils/db.js` — Chat persistence with memory books via `patchChatData`
@@ -575,7 +588,7 @@ These are compatibility-first runtime optimizations added after the network refa
 - Background persistence for in-flight stream text is slower on native and moderately slower in desktop battery-saver mode (`useGenerationStreamUpdate.js`) to reduce IndexedDB churn.
 - `requestRuntimePolicy.js` delays foreground/background runtime activation for short requests and enables it immediately when the app is backgrounded mid-generation.
 - Native auto-sync is skipped while generation is active or the app is backgrounded, and it now has a cooldown between runs.
-- `useVirtualScroll.js` skips its extra per-scroll visibility health check and schedules heavy scroll work through `requestAnimationFrame` while battery-saver UI mode is active.
+- `useVirtualScroll.js` (orchestrator, 354 lines) + `useVirtualScrollNavigation.js` (scroll-to ops, 274 lines) + `virtualScrollHeightCache.js` (prefix-sum height cache, 137 lines) skip the extra per-scroll visibility health check and schedule heavy scroll work through `requestAnimationFrame` while battery-saver UI mode is active.
 
 Battery-saver UI scope:
 - The shared toggle enables the lighter UI/rendering guardrails: reduced animation, batched stream painting, slower stream persistence, and lighter virtual-scroll behavior, regardless of whether the user is in desktop or forced-mobile layout.
@@ -842,7 +855,7 @@ await db.patchChatData(charId, (data) => {
 - localStorage fallback on write failure
 - **Never** do `getChatData` + mutate + `saveChat` — this is a race condition
 
-### `patchChatDataBatch` (planned)
+### `patchChatDataBatch` (implemented)
 
 Extends `patchChatData` to accept multiple mutation functions in a single read-mutate-write cycle. Eliminates redundant reads and gaps between sequential patches.
 

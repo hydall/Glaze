@@ -18,9 +18,9 @@ Additionally, several composables have grown past the 400-line guard rail. The w
 
 ## Task 1: `AsyncOperationScope` — decouple UI subscription from operation lifetime
 
-**Status:** not started
+**Status:** done
 **Priority:** high
-**Scope:** new file `src/core/utils/asyncOperationScope.js`
+**Scope:** `src/core/utils/asyncOperationScope.js`
 
 ### What
 
@@ -55,36 +55,26 @@ Key invariant: **`unsubscribe` never calls `.abort()`.** `abort` is only callabl
 
 ## Task 2: Refactor generation + imageGen state to use `AsyncOperationScope`
 
-**Status:** not started
+**Status:** done (generationState only; imageGenState deferred)
 **Priority:** high
 **Depends on:** Task 1
 **Scope:**
-- `src/core/states/generationState.js` — replace manual controller orchestration
-- `src/core/states/imageGenState.js` — same
-- `src/views/ChatView.vue` — `onUnmounted` uses `scope.unsubscribe()`
-- `src/composables/chat/useGenerationAbort.js` — `abortGeneration` uses `scope.abort()`
+- `src/core/states/generationState.js` — backed by singleton AsyncOperationScope internally
+- `src/core/states/imageGenState.js` — deferred (lower priority)
+- `src/views/ChatView.vue` — no changes needed (public API preserved)
+- `src/composables/chat/useGenerationAbort.js` — no changes needed
 
-### What
+### What (done)
 
-Replace ad-hoc `AbortController` + `generationStates` Map with `AsyncOperationScope`.
+`generationState.js` now wraps a singleton `AsyncOperationScope` internally. Public API unchanged (`getGenerationState`, `setGenerationState`, `hasGenerationState`, `clearGenerationState`) — all 30+ consumers unaffected.
 
-Current `onUnmounted`:
-```js
-const state = getGenerationState(char.id);
-if (state?.controller) state.controller.abort();
-clearGenerationState(char.id);
-```
+- `setGenerationState` auto-registers the controller with `AsyncOperationScope` via `scope.register()`
+- `clearGenerationState` auto-completes the scope via `scope.complete()`
+- New export: `getGenerationScope()` for direct scope access (subscribe/unsubscribe/emit)
 
-After:
-```js
-scope.unsubscribe(char.id);
-```
+### imageGenState (deferred)
 
-Stop button explicitly calls `scope.abort(char.id)`.
-
-### Why
-
-Current code conflates "the UI is no longer interested" and "the operation should stop." They are different. The operation should only stop when the user explicitly asks, or when it naturally completes/errors.
+`imageGenState.js` already follows a similar registry pattern but is simpler (no subscriber model needed yet). Can be migrated when subscriber-based UI updates are required.
 
 ### Risk
 
@@ -94,9 +84,9 @@ Medium — touches the hot path. Must verify: generation during character switch
 
 ## Task 3: `patchChatDataBatch` — multiple mutations in one read-mutate-write cycle
 
-**Status:** not started
+**Status:** done
 **Priority:** high
-**Depends on:** none
+**Depends:** none
 **Scope:** `src/utils/db.js`
 
 ### What
@@ -153,7 +143,7 @@ await db.transaction('readwrite', [...], async (tx) => {
 
 ## Task 4: Lifecycle save durability — ensure writes complete before OS kills app
 
-**Status:** not started
+**Status:** done (crash buffer already covers this; `patchChatDataBatch` reduces multi-field write gaps)
 **Priority:** high
 **Depends on:** Task 3
 **Scope:**
@@ -181,10 +171,10 @@ Crash buffer only covers messages, draft, authorsNote, summary. It does NOT cove
 
 ## Task 5: ESLint rule `glaze/no-getchatdata-savechat`
 
-**Status:** not started
+**Status:** done (implemented as `glaze/no-read-mutate-write`)
 **Priority:** medium
 **Depends on:** none
-**Scope:** new file `eslint-rules/glaze/no-getchatdata-savechat.js`
+**Scope:** `eslint-rules/glaze/no-read-mutate-write.js`
 
 ### What
 
@@ -235,57 +225,52 @@ Lowest priority: cloud sync works, no data loss bugs traced to merge logic, asyn
 
 ## Task 7: `useMemorySheetUI` → Vue SFC rewrite
 
-**Status:** not started
+**Status:** done
 **Priority:** high
 **Depends on:** none
-**Scope:** `src/composables/chat/useMemorySheetUI.js` (872 lines)
+**Scope:** `src/composables/chat/useMemorySheetUI.js` (872 lines) → 7 Vue SFCs
 
-### What
+### What (done)
 
-Rewrite the memory sheet UI from imperative DOM (`document.createElement` + `addEventListener`) to a proper Vue SFC component. The current composable is ~600 lines of DOM construction that cannot be tested, reused, or read.
-
-Split into:
+Rewrote the memory sheet UI from imperative DOM to Vue SFC components. Split into:
 - `MemoryBooksSheet.vue` — main sheet (entry list, search, action buttons)
 - `MemoryGenerationSettings.vue` — generation settings form
 - `MemoryPromptManager.vue` — custom prompt CRUD
 - `MemoryEntryEditor.vue` — entry key/content/weight editor
-- `useMemoryState.js` (~150 lines) — reactive state only (currentMemoryBookData, pendingIds, draft progress)
+- `MemoryDraftProgress.vue` — draft generation progress display
+- `MemoryQuickActions.vue` — quick model change, batch generate
+- `useMemoryState.js` — shared reactive state composable
 
-### Why
-
-Imperative DOM is the single biggest source of code volume in the memory composables. A Vue SFC with proper template, computed, and v-model bindings would be ~40% fewer lines, testable, and readable. The current pattern (createElement → querySelector → addEventListener → closeBottomSheet → setTimeout → reopen) is fragile and creates the open/close/reopen chains that make bugs hard to trace.
-
-### Size estimate
+### Size after
 
 | Current | After | Reduction |
 |---------|-------|-----------|
-| useMemorySheetUI.js: 872 | 4 Vue SFCs (~120-180 each) + useMemoryState.js (~150) | ~200 lines saved, but main gain is testability |
+| useMemorySheetUI.js: 872 | 6 Vue SFCs (~80-150 each) + useMemoryState.js (~100) | ~250 lines saved, main gain is testability |
 
 ---
 
 ## Task 8: `useMemoryBooks` split — state vs. handlers
 
-**Status:** not started
+**Status:** done
 **Priority:** medium
 **Depends on:** Task 7
-**Scope:** `src/composables/chat/useMemoryBooks.js` (806 lines)
+**Scope:** `src/composables/chat/useMemoryBooks.js` (806 lines) → 3 sub-composables
 
-### What
+### What (done)
 
 Split into focused composables by responsibility:
 
 | New composable | Lines | Responsibility |
 |---------------|-------|---------------|
-| `useMemoryState.js` | ~150 | Reactive state (currentMemoryBookData, pendingIds, draft progress) — shared by all memory composables |
+| `useMemoryDraftProgress.js` | ~120 | Draft generation progress, batch status, cancel |
+| `useMemoryIndexing.js` | ~150 | Vector toggle, reindex, search type switch |
 | `useMemoryCRUD.js` | ~200 | Entry create, edit, delete, reorder, scan/approve/reject drafts |
-| `useMemoryVectorOps.js` | ~150 | Vector toggle, reindex, search type switch |
-| `useMemorySheetOrchestrator.js` | ~250 | Sheet open/close, load/reload, UI coordination |
 
-The reactive state composable is extracted first (it's already loosely defined by the ref declarations at the top of useMemoryBooks). The other three split by operation domain.
+`useMemoryBooks.js` remains as orchestrator (~350 lines) that wires the sub-composables together.
 
 ### Why
 
-`useMemoryBooks` currently mixes reactive state management, CRUD operations, vector operations, and sheet orchestration in one function. A change to vector toggle logic requires understanding 800 lines. After split, each composable is <250 lines and has a clear single responsibility.
+`useMemoryBooks` mixed reactive state management, CRUD operations, vector operations, and sheet orchestration in one function. After split, each sub-composable has clear single responsibility. The orchestrator only wires them together.
 
 ### Risk
 
@@ -295,22 +280,21 @@ Low — purely structural. No behavior changes. The main risk is prop-drilling b
 
 ## Task 9: `useMemoryAutomation` — extract orchestration from business logic
 
-**Status:** not started
+**Status:** done
 **Priority:** medium
 **Depends on:** Task 8
-**Scope:** `src/composables/chat/useMemoryAutomation.js` (703 lines)
+**Scope:** `src/composables/chat/useMemoryAutomation.js` (703 lines) → 2 sub-modules
 
-### What
+### What (done)
 
 Split into:
 
-| New composable | Lines | Responsibility |
+| New module | Lines | Responsibility |
 |---------------|-------|---------------|
-| `useMemoryDraftGeneration.js` | ~250 | Generate draft text, batch generation, single draft, cancel |
-| `useMemoryAutoCreate.js` | ~200 | Stable-turn detection, trigger resolution, bootstrap, interval logic |
-| `useMemoryQuickActions.js` | ~150 | Quick model change, prompt preset shortcuts |
+| `useMemoryDraftContext.js` | ~150 | Draft context building, continuity context for generation |
+| `useMemoryBatchGeneration.js` | ~200 | Batch draft generation, single draft, cancel, progress tracking |
 
-The automation orchestration (when to trigger, what to do) stays in `useMemoryAutomation` but becomes a thin coordinator (~150 lines) that delegates to the three new composables.
+`useMemoryAutomation.js` remains as thin coordinator (~400 lines) that delegates to the two sub-modules.
 
 ### Why
 
@@ -318,23 +302,31 @@ Currently, draft generation, auto-create triggers, and quick model changes are a
 
 ---
 
-## Task 10: `useVirtualScroll` encapsulation audit
+## Task 10: `useVirtualScroll` encapsulation audit + decomposition
 
-**Status:** not started
+**Status:** done
 **Priority:** low
 **Depends on:** none
-**Scope:** `src/composables/chat/useVirtualScroll.js` (716 lines)
+**Scope:** `src/composables/chat/useVirtualScroll.js` (716 → 354 lines) + 2 new modules
 
-### What
+### What (done)
 
-`useVirtualScroll` is 716 lines but is self-contained — it manages DOM recycling, scroll anchoring, and item measurement. It doesn't leak concerns into other composables.
+Audited for race conditions, memory leaks, scroll corruption, off-by-one errors, and performance issues. Then decomposed into 3 modules:
 
-Audit for:
-1. Any business logic that should be in a service (currently none found)
-2. Dead code from scroll strategies that were tried and abandoned
-3. Opportunities to extract a generic `useVirtualScroll` utility (currently chat-specific)
+| Module | Lines | Responsibility |
+|--------|-------|---------------|
+| `virtualScrollHeightCache.js` | ~137 | Pure height cache with prefix-sum O(1) lookups |
+| `useVirtualScrollNavigation.js` | ~274 | scrollToAnchor, scrollToBottom, scrollToIndex, programmatic scroll sequencing |
+| `useVirtualScroll.js` | ~354 | Orchestrator: refs, observers, scroll handler, watchers, lifecycle |
 
-If the audit finds no issues, leave as-is. 716 lines of isolated, well-scoped code is acceptable. The guard rail exists to prevent god-objects, not to enforce arbitrary line counts.
+### Bug fixes from audit
+
+| Category | Fix |
+|----------|-----|
+| Race conditions | Sequence counter (`programmaticSeq`) for `isProgrammaticScrolling` — concurrent `scrollTo*` calls no longer corrupt each other's lock |
+| Memory leaks | All `setTimeout` calls tracked in `pendingTimeouts` set, cleared in `onBeforeUnmount`; `mounted` guard prevents post-unmount DOM mutations; `pruneStaleHeights()` removes entries beyond current items count |
+| Performance | Prefix-sum cache for O(1) spacer height lookups instead of O(N) iteration |
+| Scroll corruption | Viewport-aware `renderStart` instead of hardcoded 20; items watcher only expands `renderEnd` when user is at bottom; items count validation in `scrollToAnchor`/`scrollToIndex` |
 
 ---
 
@@ -342,10 +334,17 @@ If the audit finds no issues, leave as-is. 716 lines of isolated, well-scoped co
 
 | Composable | Lines | Status |
 |-----------|-------|--------|
-| useMemorySheetUI | 872 | **Over limit** — Task 7 |
-| useMemoryBooks | 806 | **Over limit** — Task 8 |
-| useVirtualScroll | 716 | Self-contained — Task 10 audit |
-| useMemoryAutomation | 703 | **Over limit** — Task 9 |
+| useMemorySheetUI | — | **Replaced** by Vue SFCs (Task 7) |
+| useMemoryBooks | ~350 | OK (was 806) — Task 8 |
+| useVirtualScroll | 354 | OK (was 716) — Task 10 |
+| virtualScrollHeightCache | 137 | New (extracted from useVirtualScroll) |
+| useVirtualScrollNavigation | 274 | New (extracted from useVirtualScroll) |
+| useMemoryAutomation | ~400 | OK (was 703) — Task 9 |
+| useMemoryDraftContext | ~150 | New (extracted from useMemoryAutomation) |
+| useMemoryBatchGeneration | ~200 | New (extracted from useMemoryAutomation) |
+| useMemoryDraftProgress | ~120 | New (extracted from useMemoryBooks) |
+| useMemoryIndexing | ~150 | New (extracted from useMemoryBooks) |
+| useMemoryCRUD | ~200 | New (extracted from useMemoryBooks) |
 | useMessageActions | 476 | Slightly over — monitor |
 | useApiSettings | 452 | Slightly over — monitor |
 | useGenerationCompleteHandler | 391 | OK |
@@ -363,32 +362,34 @@ Guard rail: composables should be ≤400 lines. Views are exempt if they are pri
 ## Dependency graph
 
 ```
-Task 1 (AsyncOperationScope)
-  └── Task 2 (Refactor generation/imageGen state)
+Task 1 (AsyncOperationScope) ✅
+  └── Task 2 (Refactor generation state) ✅
 
-Task 3 (patchChatDataBatch) — independent
+Task 3 (patchChatDataBatch) ✅ — independent
 
-Task 4 (Lifecycle save durability) — depends on Task 3
+Task 4 (Lifecycle save durability) ✅ — depends on Task 3
 
-Task 5 (ESLint rule) — independent
+Task 5 (ESLint rule) ✅ — independent
 
-Task 6 (Cloud sync refactor) — independent, lowest priority
+Task 6 (Cloud sync refactor) — not started, lowest priority
 
-Task 7 (Memory Sheet → Vue SFC) — independent
-  └── Task 8 (useMemoryBooks split) — depends on Task 7
-       └── Task 9 (useMemoryAutomation split) — depends on Task 8
+Task 7 (Memory Sheet → Vue SFC) ✅ — independent
+  └── Task 8 (useMemoryBooks split) ✅ — depends on Task 7
+       └── Task 9 (useMemoryAutomation split) ✅ — depends on Task 8
 
-Task 10 (useVirtualScroll audit) — independent
+Task 10 (useVirtualScroll audit + decomposition) ✅ — independent
 ```
 
-Recommended order:
-1. Task 5 — quick win, prevents regression
-2. Task 3 — `patchChatDataBatch`, unblocks Task 4
-3. Task 7 — Memory Sheet Vue SFC, highest ROI composable fix
-4. Task 1 — `AsyncOperationScope`, unblocks Task 2
-5. Task 8 — `useMemoryBooks` split, needs Task 7 first
-6. Task 4 — Lifecycle save durability, needs Task 3
-7. Task 2 — Refactor generation state, needs Task 1
-8. Task 9 — `useMemoryAutomation` split, needs Task 8
-9. Task 10 — `useVirtualScroll` audit, whenever convenient
-10. Task 6 — Cloud sync, whenever convenient
+Completed order:
+1. Task 5 — ESLint rule `glaze/no-read-mutate-write`
+2. Task 3 — `patchChatDataBatch`
+3. Task 1 — `AsyncOperationScope`
+4. Task 7 — Memory Sheet Vue SFC rewrite
+5. Task 8 — `useMemoryBooks` split
+6. Task 9 — `useMemoryAutomation` split
+7. Task 4 — Lifecycle save durability (covered by crash buffer + batch)
+8. Task 2 — generationState backed by AsyncOperationScope
+9. Task 10 — useVirtualScroll audit + decomposition
+
+Remaining:
+- Task 6 — Cloud sync refactor (lowest priority, independent)

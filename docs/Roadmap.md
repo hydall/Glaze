@@ -4,7 +4,43 @@ Active work and upcoming tasks. Historical items are removed once merged.
 
 ## Active Branch
 
-`fix/inline-image-edit-bg-gen-db-crash-streaming` (linear chain from `fix/preset-token-discrepancy`)
+`refactor/async-integrity-and-composables` (from `fix/migrate-getchatdata-savechat-to-patchchatdata`)
+
+## Async Integrity & Composable Decomposition (2026-05-04)
+
+Status: `implementation done`, 9/10 tasks complete
+
+### Completed Tasks
+
+| Task | Description | Testing |
+|------|-------------|---------|
+| T1 | `AsyncOperationScope` primitive | not tested |
+| T2 | generationState backed by AsyncOperationScope | not tested |
+| T3 | `patchChatDataBatch` — multi-mutation in one read-mutate-write | not tested |
+| T4 | Lifecycle save durability (crash buffer + batch) | not tested |
+| T5 | ESLint rule `glaze/no-read-mutate-write` | not tested |
+| T7 | useMemorySheetUI → 7 Vue SFCs | not tested |
+| T8 | useMemoryBooks split → 3 sub-composables | not tested |
+| T9 | useMemoryAutomation split → 2 sub-modules | not tested |
+| T10 | useVirtualScroll audit + decomposition → 3 modules | not tested |
+
+### Remaining
+
+| Task | Description | Priority |
+|------|-------------|----------|
+| T6 | Cloud sync refactor (syncEngine.js 955→5 modules) | lowest |
+
+### Key New Files
+
+- `src/core/utils/asyncOperationScope.js` — AsyncOperationScope primitive
+- `src/composables/chat/virtualScrollHeightCache.js` — pure height cache with prefix-sum
+- `src/composables/chat/useVirtualScrollNavigation.js` — scroll navigation composable
+- `src/composables/chat/useMemoryDraftProgress.js` — draft progress composable
+- `src/composables/chat/useMemoryIndexing.js` — vector toggle/reindex composable
+- `src/composables/chat/useMemoryCRUD.js` — entry CRUD composable
+- `src/composables/chat/useMemoryDraftContext.js` — draft context builder
+- `src/composables/chat/useMemoryBatchGeneration.js` — batch generation logic
+- `eslint-rules/glaze/no-read-mutate-write.js` — custom ESLint rule
 
 ## Bug Investigations (2026-05-03)
 

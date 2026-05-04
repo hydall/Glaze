@@ -6,7 +6,7 @@ Known gaps and deferred work from completed phases.
 
 - `openChat()` (~400 lines) extraction — deferred due to ~30+ dependency injections. ChatView already under 2000 lines.
 - Context/tokenizer sheet actions (~32 lines) — too small for dedicated composable
-- `useMemorySheetUI.js` (844 lines) — ~600 lines of imperative DOM; only meaningful fix is Vue-template rewrite, out of scope
+- ~~`useMemorySheetUI.js` (844 lines) — ~600 lines of imperative DOM; only meaningful fix is Vue-template rewrite, out of scope~~ — **Done in Task 7**, replaced by Vue SFCs
 
 ## From Phase 9 — State Ownership
 
