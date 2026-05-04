@@ -501,7 +501,7 @@ function getBreakdownBucket(type) {
     if (type === ENTITY_TYPES.CHARACTER) return 'characters';
     if (type === ENTITY_TYPES.PERSONA) return 'personas';
     if (type === ENTITY_TYPES.CHAT) return 'chats';
-    if (type === ENTITY_TYPES.GALLERY) return 'characters';
+    if (type === ENTITY_TYPES.GALLERY) return 'gallery';
     return 'settings';
 }
 
@@ -524,6 +524,119 @@ function getConflictName(type, localEntity, cloudEntity, id) {
         return getChatName(localEntity, cloudEntity, id);
     }
     return id;
+}
+
+async function computeBinaryHash(arrayBuffer) {
+    const digest = await crypto.subtle.digest('SHA-256', arrayBuffer);
+    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function applyGalleryEntriesForChar(adapter, entries, charId, localEntries, onConflict) {
+    const char = await getLocalCharacterWithImages(charId);
+    if (!char) return entries.length;
+    if (!Array.isArray(char.images)) char.images = [];
+
+    const localHashes = new Map();
+    for (const img of char.images) {
+        if (img?.src) {
+            try {
+                const h = await computeImageHash(img.src);
+                localHashes.set(h, img);
+            } catch {}
+        }
+    }
+
+    let applied = 0;
+    const galleryConflicts = [];
+    for (const cloudEntry of entries) {
+        const localEntry = localEntries?.[entryKey(ENTITY_TYPES.GALLERY, cloudEntry.id)];
+        if (localEntry && !localEntry.deleted && localEntry.updatedAt > cloudEntry.updatedAt) {
+            const conflict = {
+                type: ENTITY_TYPES.GALLERY,
+                id: cloudEntry.id,
+                name: `Gallery: ${cloudEntry.imgId}`,
+                charId,
+                imgId: cloudEntry.imgId,
+                local: { imgId: localEntry.imgId, hash: localEntry.hash, updatedAt: localEntry.updatedAt },
+                cloud: { imgId: cloudEntry.imgId, hash: cloudEntry.hash, updatedAt: cloudEntry.updatedAt },
+                cloudModified: cloudEntry.updatedAt
+            };
+            galleryConflicts.push(conflict);
+            if (onConflict) onConflict(conflict);
+            continue;
+        }
+
+        try {
+            if (cloudEntry.deleted) {
+                char.images = char.images.filter(im => im.id !== cloudEntry.imgId);
+                applied++;
+                continue;
+            }
+
+            const binary = await adapter.downloadBinary(cloudEntry.path);
+            if (!binary) continue;
+
+            const cloudHash = await computeBinaryHash(binary);
+            const existingByIdIdx = char.images.findIndex(im => im.id === cloudEntry.imgId);
+
+            if (existingByIdIdx >= 0) {
+                const blob = new Blob([binary]);
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                const old = char.images[existingByIdIdx];
+                char.images[existingByIdIdx] = { id: cloudEntry.imgId, src: dataUrl, name: old?.name || '', thumbnail: null };
+                applied++;
+            } else {
+                const existingByHash = localHashes.get(cloudHash);
+                if (existingByHash) {
+                    const existingIdx = char.images.findIndex(im => im.id === existingByHash.id);
+                    const blob = new Blob([binary]);
+                    const dataUrl = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
+                    if (existingIdx >= 0) {
+                        char.images[existingIdx] = { id: cloudEntry.imgId, src: dataUrl, name: char.images[existingIdx]?.name || '', thumbnail: null };
+                    } else {
+                        char.images.push({ id: cloudEntry.imgId, src: dataUrl, name: '', thumbnail: null });
+                    }
+                    localHashes.delete(cloudHash);
+                    localHashes.set(cloudHash, { id: cloudEntry.imgId });
+                    applied++;
+                } else {
+                    const blob = new Blob([binary]);
+                    const dataUrl = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
+                    char.images.push({ id: cloudEntry.imgId, src: dataUrl, name: '', thumbnail: null });
+                    localHashes.set(cloudHash, { id: cloudEntry.imgId });
+                    applied++;
+                }
+            }
+        } catch (e) {
+            console.warn(`[sync] Gallery entry ${cloudEntry.imgId} for char ${charId} failed:`, e);
+        }
+    }
+
+    await db.put('characters', char);
+    return { applied, conflicts: galleryConflicts };
+}
+
+async function removeGalleryEntryFromChar(charId, imgId) {
+    const char = await getLocalCharacterWithImages(charId);
+    if (char?.images) {
+        char.images = char.images.filter(im => im.id !== imgId);
+        await db.put('characters', char);
+    }
 }
 
 async function deleteCloudFileIfExists(adapter, entry) {
@@ -560,7 +673,7 @@ async function pushManifestV2(adapter, key, onProgress) {
     const cloudManifest = await readCloudManifestV2(adapter);
     const localManifest = await buildLocalManifestV2();
     const cloudEntries = cloudManifest?.entries || {};
-    const breakdown = { characters: 0, personas: 0, chats: 0, settings: 0 };
+    const breakdown = { characters: 0, personas: 0, chats: 0, gallery: 0, settings: 0 };
     let pushed = 0;
     let skipped = 0;
 
@@ -609,6 +722,9 @@ async function pushManifestV2(adapter, key, onProgress) {
                     if (img?.src) {
                         const binary = await dataUrlToBinary(img.src);
                         await adapter.uploadBinary(localEntry.path, binary);
+                    } else {
+                        localManifest.entries[keyName] = { ...localEntry, deleted: true, updatedAt: Date.now() };
+                        await deleteCloudFileIfExists(adapter, localEntry);
                     }
                 }
 
@@ -685,70 +801,50 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
     const localEntries = localManifest.entries || {};
     const allKeys = new Set([...Object.keys(cloudEntries), ...Object.keys(localEntries)]);
     const allEntries = Array.from(allKeys);
-    const breakdown = { characters: 0, personas: 0, chats: 0, settings: 0 };
+    const breakdown = { characters: 0, personas: 0, chats: 0, gallery: 0, settings: 0 };
     const decryptErrors = [];
     const conflicts = [];
     let pulled = 0;
 
-    const tasks = allEntries.map((keyName, i) => {
+    const galleryEntriesByChar = new Map();
+    const nonGalleryTasks = [];
+
+    for (let i = 0; i < allEntries.length; i++) {
+        const keyName = allEntries[i];
         const cloudEntry = cloudEntries[keyName];
         const localEntry = localEntries[keyName];
         const phase = getBreakdownBucket((cloudEntry || localEntry)?.type);
 
+        if (!cloudEntry) continue;
+
+        const cloudIsNewer = !localEntry || cloudEntry.hash !== localEntry.hash || cloudEntry.deleted !== localEntry.deleted;
+        if (!cloudIsNewer) continue;
+
+        if (cloudEntry.type === ENTITY_TYPES.GALLERY) {
+            if (!galleryEntriesByChar.has(cloudEntry.charId)) {
+                galleryEntriesByChar.set(cloudEntry.charId, []);
+            }
+            galleryEntriesByChar.get(cloudEntry.charId).push(cloudEntry);
+            continue;
+        }
+
+        nonGalleryTasks.push({ cloudEntry, localEntry, phase, index: i });
+    }
+
+    for (const [charId, entries] of galleryEntriesByChar) {
+        const result = await applyGalleryEntriesForChar(adapter, entries, charId, localEntries, onConflict);
+        pulled += result.applied;
+        breakdown.gallery += result.applied;
+        if (result.conflicts.length > 0) {
+            conflicts.push(...result.conflicts);
+        }
+        for (let j = 0; j < entries.length; j++) {
+            if (onProgress) onProgress('gallery', j + 1, entries.length);
+        }
+    }
+
+    const ngTasks = nonGalleryTasks.map(({ cloudEntry, localEntry, phase, index }) => {
         return async () => {
-            if (!cloudEntry) {
-                if (onProgress) onProgress(phase, i + 1, allEntries.length);
-                return;
-            }
-
-            const cloudIsNewer = !localEntry || cloudEntry.hash !== localEntry.hash || cloudEntry.deleted !== localEntry.deleted;
-            if (!cloudIsNewer) {
-                if (onProgress) onProgress(phase, i + 1, allEntries.length);
-                return;
-            }
-
-            if (cloudEntry.type === ENTITY_TYPES.GALLERY) {
-                try {
-                    if (cloudEntry.deleted) {
-                        const char = await getLocalCharacterWithImages(cloudEntry.charId);
-                        if (char?.images) {
-                            char.images = char.images.filter(im => im.id !== cloudEntry.imgId);
-                            await db.put('characters', char);
-                        }
-                    } else {
-                        const binary = await adapter.downloadBinary(cloudEntry.path);
-                        if (binary) {
-                            const blob = new Blob([binary]);
-                            const dataUrl = await new Promise((resolve, reject) => {
-                                const reader = new FileReader();
-                                reader.onload = () => resolve(reader.result);
-                                reader.onerror = reject;
-                                reader.readAsDataURL(blob);
-                            });
-                            const char = await getLocalCharacterWithImages(cloudEntry.charId);
-                            if (char) {
-                                if (!Array.isArray(char.images)) char.images = [];
-                                const existingIdx = char.images.findIndex(im => im.id === cloudEntry.imgId);
-                                const imgEntry = { id: cloudEntry.imgId, src: dataUrl, name: '', thumbnail: null };
-                                if (existingIdx >= 0) {
-                                    imgEntry.name = char.images[existingIdx].name || '';
-                                    char.images[existingIdx] = imgEntry;
-            } else {
-                localStorage.setItem(lsKey, lsVal);
-            }
-                                await db.put('characters', char);
-                            }
-                        }
-                    }
-                    pulled++;
-                    breakdown[phase]++;
-                } catch (e) {
-                    decryptErrors.push({ type: cloudEntry.type, id: cloudEntry.id, error: e.message });
-                }
-                if (onProgress) onProgress(phase, i + 1, allEntries.length);
-                return;
-            }
-
             if (needsConflict(localEntry, cloudEntry)) {
                 const localEntity = await getLocalConflictEntity(cloudEntry.type, cloudEntry.id);
                 let cloudEntity = null;
@@ -757,7 +853,7 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
                         cloudEntity = await readCloudEntityByEntry(adapter, cloudEntry, key);
                     } catch (e) {
                         decryptErrors.push({ type: cloudEntry.type, id: cloudEntry.id, error: e.message });
-                        if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                        if (onProgress) onProgress(phase, index + 1, allEntries.length);
                         return;
                     }
                 }
@@ -771,7 +867,7 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
                 };
                 conflicts.push(conflict);
                 if (onConflict) onConflict(conflict);
-                if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                if (onProgress) onProgress(phase, index + 1, allEntries.length);
                 return;
             }
 
@@ -783,11 +879,11 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
                 decryptErrors.push({ type: cloudEntry.type, id: cloudEntry.id, error: e.message });
             }
 
-            if (onProgress) onProgress(phase, i + 1, allEntries.length);
+            if (onProgress) onProgress(phase, index + 1, allEntries.length);
         };
     });
 
-    await runParallel(tasks, 3, 300);
+    await runParallel(ngTasks, 3, 300);
 
     await writeLocalManifestV2(clone(cloudManifest));
 
@@ -862,21 +958,18 @@ async function listAllFiles(adapter) {
 }
 
 async function getLocalCharacter(id) {
-    const all = await db.getAll('characters');
-    const char = all.find(c => c.id === id) || null;
+    const char = await db.get('characters', id);
     if (!char) return null;
     const { images: _images, ...rest } = char;
     return rest;
 }
 
 async function getLocalCharacterWithImages(id) {
-    const all = await db.getAll('characters');
-    return all.find(c => c.id === id) || null;
+    return (await db.get('characters', id)) || null;
 }
 
 async function getLocalPersona(id) {
-    const all = await db.getAll('personas');
-    return all.find(p => p.id === id) || null;
+    return (await db.get('personas', id)) || null;
 }
 
 async function getLocalChat(charId) {
@@ -935,6 +1028,12 @@ export async function wipeCloudData(adapter, onProgress) {
 }
 
 export async function resolveConflict(conflict, choice) {
+    if (conflict.type === ENTITY_TYPES.GALLERY) {
+        if (choice === 'local') return null;
+        const char = await getLocalCharacterWithImages(conflict.charId);
+        if (!char) return null;
+        return char;
+    }
     const entity = choice === 'cloud' ? conflict.cloud : conflict.local;
     if (choice === 'cloud' && !entity) {
         if (conflict.type === ENTITY_TYPES.CHARACTER) {

@@ -65,6 +65,7 @@ function formatSyncBreakdown(result) {
     if (!result?.breakdown) return '';
     const parts = [];
     if (result.breakdown.characters) parts.push(`${result.breakdown.characters} ${t('header_characters') || 'characters'}`);
+    if (result.breakdown.gallery) parts.push(`${result.breakdown.gallery} ${t('sync_type_gallery') || 'gallery'}`);
     if (result.breakdown.personas) parts.push(`${result.breakdown.personas} ${t('menu_personas') || 'personas'}`);
     if (result.breakdown.chats) parts.push(`${result.breakdown.chats} ${t('tab_dialogs') || 'chats'}`);
     if (result.breakdown.settings) parts.push(`${result.breakdown.settings} ${t('title_settings') || 'settings'}`);

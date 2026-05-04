@@ -25,6 +25,7 @@ const hasConflicts = computed(() => unresolvedConflicts.value.length > 0);
 const typeIcon = (type) => {
     if (type === 'character') return '<svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
     if (type === 'persona') return '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>';
+    if (type === 'gallery') return '<svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
     return '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>';
 };
 
@@ -32,6 +33,7 @@ const typeLabel = (type) => {
     if (type === 'character') return t('sync_type_character') || 'Character';
     if (type === 'persona') return t('sync_type_persona') || 'Persona';
     if (type === 'chat') return t('sync_type_chat') || 'Chat';
+    if (type === 'gallery') return t('sync_type_gallery') || 'Gallery';
     return type;
 };
 
@@ -49,6 +51,10 @@ const entityFields = (entity, type) => {
         if (entity.description) fields.push({ key: 'description', label: t('label_description') || 'Description', value: truncate(entity.description, 200) });
         if (entity.personality) fields.push({ key: 'personality', label: t('label_personality') || 'Personality', value: truncate(entity.personality, 200) });
         if (entity.scenario) fields.push({ key: 'scenario', label: t('label_scenario') || 'Scenario', value: truncate(entity.scenario, 200) });
+        if (entity.first_mes) fields.push({ key: 'first_mes', label: t('label_first_message') || 'First message', value: truncate(entity.first_mes, 200) });
+        if (entity.system_prompt) fields.push({ key: 'system_prompt', label: t('label_system_prompt') || 'System prompt', value: truncate(entity.system_prompt, 200) });
+        if (entity.creator) fields.push({ key: 'creator', label: t('label_creator') || 'Creator', value: entity.creator });
+        if (entity.tags?.length) fields.push({ key: 'tags', label: t('label_tags') || 'Tags', value: entity.tags.join(', ') });
     } else if (type === 'persona') {
         if (entity.name) fields.push({ key: 'name', label: t('label_name') || 'Name', value: entity.name });
         if (entity.prompt) fields.push({ key: 'prompt', label: t('label_description') || 'Description', value: truncate(entity.prompt, 200) });
@@ -60,9 +66,22 @@ const entityFields = (entity, type) => {
             const preview = (last.mes || last.content || '').substring(0, 100);
             if (preview) fields.push({ key: 'last_msg', label: t('sync_last_message') || 'Last message', value: truncate(preview, 100) });
         }
+    } else if (type === 'gallery') {
+        fields.push({ key: 'imgId', label: 'Image ID', value: entity.imgId || '—' });
+        fields.push({ key: 'hash', label: 'Hash', value: truncate(entity.hash || '—', 16) });
     }
     fields.push({ key: 'updatedAt', label: t('sync_modified') || 'Modified', value: formatTimestamp(entity.updatedAt) });
     return fields;
+};
+
+const hasAvatar = (entity) => entity?.avatar && typeof entity.avatar === 'string' && entity.avatar.startsWith('data:');
+
+const diffFields = (localFields, cloudFields) => {
+    const cloudMap = new Map(cloudFields.map(f => [f.key, f.value]));
+    return localFields.map(f => ({
+        ...f,
+        differs: f.key !== 'updatedAt' && cloudMap.has(f.key) && cloudMap.get(f.key) !== f.value
+    }));
 };
 
 function truncate(str, max) {
@@ -196,29 +215,51 @@ defineExpose({ open, close });
                     </div>
 
                     <div class="cs-item-detail" v-if="expandedConflictId === conflict.id">
-                        <div class="cs-compare">
-                            <div class="cs-side cs-local">
+                        <div class="cs-avatar-row" v-if="conflict.type === 'character' && (hasAvatar(conflict.local) || hasAvatar(conflict.cloud))">
+                            <div class="cs-avatar-side cs-local">
                                 <div class="cs-side-label">
                                     <svg viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/></svg>
                                     {{ t('sync_version_local') || 'Local' }}
                                 </div>
+                                <img v-if="hasAvatar(conflict.local)" :src="conflict.local.avatar" class="cs-avatar-img" />
+                                <div v-else class="cs-avatar-placeholder">—</div>
+                            </div>
+                            <div class="cs-vs">
+                                VS
+                            </div>
+                            <div class="cs-avatar-side cs-cloud">
+                                <div class="cs-side-label">
+                                    <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
+                                    {{ t('sync_version_cloud') || 'Cloud' }}
+                                </div>
+                                <img v-if="hasAvatar(conflict.cloud)" :src="conflict.cloud.avatar" class="cs-avatar-img" />
+                                <div v-else class="cs-avatar-placeholder">—</div>
+                            </div>
+                        </div>
+
+                        <div class="cs-compare">
+                            <div class="cs-side cs-local">
+                                <div class="cs-side-label" v-if="conflict.type !== 'character' || !hasAvatar(conflict.local) && !hasAvatar(conflict.cloud)">
+                                    <svg viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/></svg>
+                                    {{ t('sync_version_local') || 'Local' }}
+                                </div>
                                 <div class="cs-fields">
-                                    <div v-for="field in entityFields(conflict.local, conflict.type)" :key="field.key" class="cs-field">
+                                    <div v-for="field in diffFields(entityFields(conflict.local, conflict.type), entityFields(conflict.cloud, conflict.type))" :key="field.key" class="cs-field" :class="{ 'cs-field-diff': field.differs }">
                                         <span class="cs-field-label">{{ field.label }}</span>
                                         <span class="cs-field-value">{{ field.value }}</span>
                                     </div>
                                 </div>
                             </div>
                             <div class="cs-vs">
-VS
-</div>
+                                VS
+                            </div>
                             <div class="cs-side cs-cloud">
-                                <div class="cs-side-label">
+                                <div class="cs-side-label" v-if="conflict.type !== 'character' || !hasAvatar(conflict.local) && !hasAvatar(conflict.cloud)">
                                     <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
                                     {{ t('sync_version_cloud') || 'Cloud' }}
                                 </div>
                                 <div class="cs-fields">
-                                    <div v-for="field in entityFields(conflict.cloud, conflict.type)" :key="field.key" class="cs-field">
+                                    <div v-for="field in diffFields(entityFields(conflict.cloud, conflict.type), entityFields(conflict.local, conflict.type))" :key="field.key" class="cs-field" :class="{ 'cs-field-diff': field.differs }">
                                         <span class="cs-field-label">{{ field.label }}</span>
                                         <span class="cs-field-value">{{ field.value }}</span>
                                     </div>
@@ -496,6 +537,57 @@ VS
     word-break: break-word;
     max-height: 60px;
     overflow: hidden;
+}
+
+.cs-field-diff {
+    background: rgba(255, 149, 0, 0.06);
+    border-radius: 4px;
+    padding: 2px 4px;
+    border-left: 2px solid #FF9500;
+}
+
+.cs-avatar-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.cs-avatar-side {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.cs-avatar-side.cs-local {
+    border: 1px solid rgba(255, 149, 0, 0.2);
+}
+
+.cs-avatar-side.cs-cloud {
+    border: 1px solid rgba(var(--vk-blue-rgb), 0.2);
+}
+
+.cs-avatar-img {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.cs-avatar-placeholder {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    color: var(--text-gray, #8e8e93);
 }
 
 .cs-actions {

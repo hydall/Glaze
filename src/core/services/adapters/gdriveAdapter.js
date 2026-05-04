@@ -26,6 +26,36 @@ const FOLDER_NAME = 'Glaze';
 let folderIdCache = null;
 let pickerApiLoaded = false;
 
+const _fileIdCache = new Map();
+
+function loadFileIdCache() {
+    try {
+        const raw = localStorage.getItem('gz_gdrive_file_id_cache');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            for (const [k, v] of Object.entries(parsed)) _fileIdCache.set(k, v);
+        }
+    } catch {}
+}
+
+function saveFileIdCache() {
+    try {
+        const obj = Object.fromEntries(_fileIdCache.entries());
+        localStorage.setItem('gz_gdrive_file_id_cache', JSON.stringify(obj));
+    } catch {}
+}
+
+function cacheFileId(path, fileId) {
+    _fileIdCache.set(path, fileId);
+    saveFileIdCache();
+}
+
+function getCachedFileId(path) {
+    return _fileIdCache.get(path) || null;
+}
+
+loadFileIdCache();
+
 function getRedirectUri() {
     if (Capacitor.isNativePlatform()) return REDIRECT_URI_NATIVE;
     if (isElectron()) return `http://127.0.0.1:${localStorage.getItem('gz_electron_oauth_port') || '0'}/oauth/callback`;
@@ -433,6 +463,8 @@ async function folderHasContent(folderId) {
 export function invalidateGlazeFolderCache() {
     folderIdCache = null;
     _folderIdCache.clear();
+    _fileIdCache.clear();
+    saveFileIdCache();
 }
 
 export async function setGlazeFolderId(folderId) {
@@ -695,7 +727,19 @@ async function findFileByName(name, parentId) {
 
 export async function upload(path, data) {
     const { parentId, fileName } = await resolvePathToParent(path);
-    const existingFile = await findFileByName(fileName, parentId);
+    let existingFile = null;
+    const cachedId = getCachedFileId(path);
+    if (cachedId) {
+        const check = await apiRequest(`${API_BASE}/files/${cachedId}?fields=id,name,trashed&supportsAllDrives=true`);
+        if (check.ok) {
+            const info = await check.json();
+            if (!info.trashed) existingFile = info;
+        }
+    }
+    if (!existingFile) {
+        existingFile = await findFileByName(fileName, parentId);
+        if (existingFile) cacheFileId(path, existingFile.id);
+    }
 
     const body = typeof data === 'string' ? data : JSON.stringify(data);
 
@@ -795,14 +839,28 @@ export async function upload(path, data) {
             throw new Error(err.error?.message || `Upload failed ${response.status}`);
         }
 
-        return response.json();
+        const result = await response.json();
+        if (result?.id) cacheFileId(path, result.id);
+        return result;
     }
 }
 
 export async function uploadBinary(path, arrayBuffer) {
     if (!arrayBuffer) return null;
     const { parentId, fileName } = await resolvePathToParent(path);
-    const existingFile = await findFileByName(fileName, parentId);
+    let existingFile = null;
+    const cachedId = getCachedFileId(path);
+    if (cachedId) {
+        const check = await apiRequest(`${API_BASE}/files/${cachedId}?fields=id,name,trashed&supportsAllDrives=true`);
+        if (check.ok) {
+            const info = await check.json();
+            if (!info.trashed) existingFile = info;
+        }
+    }
+    if (!existingFile) {
+        existingFile = await findFileByName(fileName, parentId);
+        if (existingFile) cacheFileId(path, existingFile.id);
+    }
     const accessToken = await getValidAccessToken();
     if (!accessToken) throw new Error('Not connected to Google Drive');
 
@@ -845,12 +903,26 @@ export async function uploadBinary(path, arrayBuffer) {
         }
     );
     if (!response.ok) throw new Error(`Binary upload failed ${response.status}`);
-    return response.json();
+    const result = await response.json();
+    if (result?.id) cacheFileId(path, result.id);
+    return result;
 }
 
 export async function downloadBinary(path, _retry = false) {
     const { parentId, fileName } = await resolvePathToParent(path);
-    const file = await findFileByName(fileName, parentId);
+    let file = null;
+    const cachedId = getCachedFileId(path);
+    if (cachedId) {
+        const check = await apiRequest(`${API_BASE}/files/${cachedId}?fields=id,name,trashed&supportsAllDrives=true`);
+        if (check.ok) {
+            const info = await check.json();
+            if (!info.trashed) file = info;
+        }
+    }
+    if (!file) {
+        file = await findFileByName(fileName, parentId);
+        if (file) cacheFileId(path, file.id);
+    }
 
     if (!file) {
         if (!_retry && parentId === folderIdCache) {
@@ -874,7 +946,19 @@ export async function downloadBinary(path, _retry = false) {
 
 export async function download(path, _retry = false) {
     const { parentId, fileName } = await resolvePathToParent(path);
-    const file = await findFileByName(fileName, parentId);
+    let file = null;
+    const cachedId = getCachedFileId(path);
+    if (cachedId) {
+        const check = await apiRequest(`${API_BASE}/files/${cachedId}?fields=id,name,trashed&supportsAllDrives=true`);
+        if (check.ok) {
+            const info = await check.json();
+            if (!info.trashed) file = info;
+        }
+    }
+    if (!file) {
+        file = await findFileByName(fileName, parentId);
+        if (file) cacheFileId(path, file.id);
+    }
 
     if (!file) {
         if (!_retry && parentId === folderIdCache) {
