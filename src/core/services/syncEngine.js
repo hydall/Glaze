@@ -276,6 +276,8 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
 
         if (!cloudEntry) continue;
 
+        if (localEntry?.deleted && !cloudEntry.deleted) continue;
+
         const cloudIsNewer = !localEntry || cloudEntry.hash !== localEntry.hash || cloudEntry.deleted !== localEntry.deleted;
         if (!cloudIsNewer) continue;
 

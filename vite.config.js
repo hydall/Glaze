@@ -15,6 +15,7 @@ export default defineConfig({
   plugins: [vue()],
   base: './', // Это ГЛАВНОЕ: заставляет пути быть относительными
   server: {
+    host: true,
     proxy: {
       '/dc-proxy': {
         target: 'https://datacat.run',

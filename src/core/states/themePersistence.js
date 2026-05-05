@@ -26,14 +26,22 @@ export async function presetFromStateWithBlobs(state) {
     const preset = presetFromState(state);
     if (state.hasBackgroundImage) {
         preset.bgImage = await db.get('gz_theme_bg');
+    } else {
+        preset.bgImage = null;
     }
     if (state.customFontName) {
         preset.customFont = await db.get('gz_theme_font');
         preset.customFontName = await db.get('gz_theme_font_name');
+    } else {
+        preset.customFont = null;
+        preset.customFontName = null;
     }
     if (state.chatFontName) {
         preset.chatFont = await db.get('gz_theme_chat_font');
         preset.chatFontName = await db.get('gz_theme_chat_font_name');
+    } else {
+        preset.chatFont = null;
+        preset.chatFontName = null;
     }
     return preset;
 }
