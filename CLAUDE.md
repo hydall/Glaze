@@ -168,8 +168,11 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 
 ## Workflow
 
-- Branch (`feat/xxx`) off `master`, push to `origin`, open a PR — see `docs/WORKFLOW.md` for branching, Trello, and cleanup checklists.
-- Open PRs only against upstream repository `hydall/Glaze` (base: `hydall/Glaze:master`), not against fork repos.
+- Repository: `hydall/Glaze`. Development uses three long-lived branches:
+  - `nightly` — active development (replaces the old `dev` branch).
+  - `staging` — changes promoted from `nightly` after verification; release candidates are built here.
+  - `stable` — stable versioned releases only (`0.7.0`, `0.7.1`, etc.), promoted from `staging`.
+- Branch (`feat/xxx`) off `nightly`, push to `origin`, and open the PR against `hydall/Glaze:nightly` — see `docs/WORKFLOW.md` for promotion, Trello, and cleanup checklists.
 - Run `dart run build_runner build` after changing any freezed/drift model.
 - Single responsibility: split a class before it grows past ~200-250 lines (thin orchestrators, fat specialists, constructor injection). Details: `docs/CODE_STYLE.md`.
 
@@ -181,7 +184,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 - Store API keys in plain text in Drift
 - Mutate state directly — use immutable patterns with freezed
 - Forget `ref.watch` select for streaming UI (causes full rebuild per chunk)
-- Commit directly to `master` — always use a feature branch
+- Commit directly to `nightly`, `staging`, or `stable` — use feature branches and promotion PRs
 - Use the `gh` CLI — GitHub operations go through GitHub MCP tools
 - Bypass `_requireCapability` in the JS bridge — every `glaze.*` method must enforce the matching capability (default-deny)
 - Run user JS in a same-origin iframe — panel/sandbox scripts go in `sandbox="allow-scripts"` (no `allow-same-origin`)

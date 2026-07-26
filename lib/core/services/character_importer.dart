@@ -94,7 +94,7 @@ class CharacterImporter {
   }
 
   Future<CharacterImportResult> _importCharX(Uint8List zipBytes) async {
-    final archive = ZipDecoder().decodeBytes(zipBytes);
+    final archive = ZipDecoder().decodeBytes(_charXZipBytes(zipBytes));
 
     String? cardJsonContent;
     final assetFiles = <String, Uint8List>{};
@@ -190,6 +190,34 @@ class CharacterImporter {
         characterBookData: data['character_book'] as Map<String, dynamic>?,
         galleryImages: galleryImages.isNotEmpty ? galleryImages : null);
   }
+
+  Uint8List _charXZipBytes(Uint8List bytes) {
+    if (_hasZipSignature(bytes, 0)) return bytes;
+
+    final isJpeg =
+        bytes.length >= 3 &&
+        bytes[0] == 0xff &&
+        bytes[1] == 0xd8 &&
+        bytes[2] == 0xff;
+    if (!isJpeg) return bytes;
+
+    for (var i = 3; i <= bytes.length - 4; i++) {
+      if (_hasZipSignature(bytes, i) &&
+          i >= 2 &&
+          bytes[i - 2] == 0xff &&
+          bytes[i - 1] == 0xd9) {
+        return Uint8List.sublistView(bytes, i);
+      }
+    }
+    return bytes;
+  }
+
+  bool _hasZipSignature(Uint8List bytes, int offset) =>
+      offset + 4 <= bytes.length &&
+      bytes[offset] == 0x50 &&
+      bytes[offset + 1] == 0x4b &&
+      bytes[offset + 2] == 0x03 &&
+      bytes[offset + 3] == 0x04;
 
   Map<String, dynamic> _normalizeCharacterData(Map<String, dynamic> json) {
     final spec = json['spec'] as String?;
