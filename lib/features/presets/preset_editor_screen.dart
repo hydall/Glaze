@@ -1197,8 +1197,8 @@ class _BlockEditorInline extends StatelessWidget {
       GenericEditorSection(
         title: null,
         fields: [
-          const GenericEditorField(key: 'name', label: 'placeholder_block_name'.tr(), type: 'text'),
-          const GenericEditorField(
+          GenericEditorField(key: 'name', label: 'placeholder_block_name'.tr(), type: 'text'),
+          GenericEditorField(
             key: 'role',
             label: 'label_role'.tr(),
             type: 'select',
@@ -1208,7 +1208,7 @@ class _BlockEditorInline extends StatelessWidget {
               {'label': 'Assistant', 'value': 'assistant'},
             ],
           ),
-          const GenericEditorField(
+          GenericEditorField(
             key: 'insertionMode',
             label: 'label_insertion'.tr(),
             type: 'select',
@@ -1224,7 +1224,7 @@ class _BlockEditorInline extends StatelessWidget {
             options: List.generate(20, (i) => {'label': '${i + 1}', 'value': i + 1}),
             showIf: (item) => item['insertionMode'] == 'depth',
           ),
-          const GenericEditorField(
+          GenericEditorField(
             key: 'appendToLastMessage',
             label: 'label_append_last_user'.tr(),
             type: 'select',
@@ -1233,7 +1233,7 @@ class _BlockEditorInline extends StatelessWidget {
               {'label': 'Yes', 'value': true},
             ],
           ),
-          const GenericEditorField(
+          GenericEditorField(
             key: 'content',
             label: 'section_content'.tr(),
             type: 'textarea',
@@ -1321,7 +1321,7 @@ class _AuthorsNoteBlockEditor extends ConsumerWidget {
       GenericEditorSection(
         title: null,
         fields: [
-          const GenericEditorField(
+          GenericEditorField(
             key: 'role',
             label: 'label_role'.tr(),
             type: 'select',
@@ -1331,7 +1331,7 @@ class _AuthorsNoteBlockEditor extends ConsumerWidget {
               {'label': 'Assistant', 'value': 'assistant'},
             ],
           ),
-          const GenericEditorField(
+          GenericEditorField(
             key: 'insertionMode',
             label: 'label_insertion'.tr(),
             type: 'select',
@@ -1410,7 +1410,7 @@ class _SummaryBlockEditor extends ConsumerWidget {
       GenericEditorSection(
         title: null,
         fields: [
-          const GenericEditorField(
+          GenericEditorField(
             key: 'role',
             label: 'label_role'.tr(),
             type: 'select',
@@ -1420,7 +1420,7 @@ class _SummaryBlockEditor extends ConsumerWidget {
               {'label': 'Assistant', 'value': 'assistant'},
             ],
           ),
-          const GenericEditorField(
+          GenericEditorField(
             key: 'insertionMode',
             label: 'label_insertion'.tr(),
             type: 'select',
@@ -1436,7 +1436,7 @@ class _SummaryBlockEditor extends ConsumerWidget {
             options: List.generate(20, (i) => {'label': '${i + 1}', 'value': i + 1}),
             showIf: (item) => item['insertionMode'] == 'depth',
           ),
-          const GenericEditorField(
+          GenericEditorField(
             key: 'prefix',
             label: 'label_prefix'.tr(),
             type: 'text',
