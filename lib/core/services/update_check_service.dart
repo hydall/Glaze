@@ -7,7 +7,7 @@ import '../constants/app_version.dart';
 /// the new build's date plus the list of commit subjects since the installed
 /// build (see `.github/workflows/build-branch.yml`).
 class UpdateInfo {
-  /// Full git SHA of the latest successful `master` build.
+  /// Full git SHA of the latest successful `stable` build.
   final String headSha;
 
   /// When the CI run was created (UTC).
@@ -60,7 +60,7 @@ class UpdateCheckResult {
   const UpdateCheckResult(this.status, [this.info]);
 }
 
-/// Checks GitHub Actions for a `master` build newer than the installed one.
+/// Checks GitHub Actions for a `stable` build newer than the installed one.
 ///
 /// The repo is public, so the Actions REST API is reachable unauthenticated
 /// (60 req/h per IP — ample for an occasional check). No token is sent.
@@ -68,7 +68,7 @@ class UpdateCheckService {
   static const _owner = 'hydall';
   static const _repo = 'Glaze';
   static const _workflowFile = 'build-branch.yml';
-  static const _branch = 'master';
+  static const _branch = 'stable';
 
   /// Cap on commit subjects shown in the dialog — matches the bot's `head -10`.
   static const _commitCap = 10;
@@ -136,7 +136,7 @@ class UpdateCheckService {
     }
   }
 
-  /// Latest successful run of the release workflow on `master`, or null.
+  /// Latest successful run of the release workflow on `stable`, or null.
   Future<Map<String, dynamic>?> _latestSuccessfulRun() async {
     final res = await _dio.get<Map<String, dynamic>>(
       '/repos/$_owner/$_repo/actions/workflows/$_workflowFile/runs',
