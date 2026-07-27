@@ -45,6 +45,7 @@ class AboutScreen extends ConsumerWidget {
           const _UpdatesSection(),
           _CommunitySection(lang: lang, onLink: _openLink),
           const _AuthorsSection(),
+          const _HallOfFameSection(),
           _LicenseSection(onLink: _openLink),
         ],
       ),
@@ -341,6 +342,26 @@ class _AuthorsSection extends StatelessWidget {
           initial: 'D',
           accentColor: Color(0xFF79CE96),
           imageAsset: 'assets/danvitv.png',
+        ),
+      ],
+    );
+  }
+}
+
+class _HallOfFameSection extends StatelessWidget {
+  const _HallOfFameSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return MenuGroup(
+      header: 'about_hall_of_fame_header'.tr(),
+      headerIcon: Icons.military_tech_rounded,
+      items: [
+        MenuItem(
+          icon: Icons.stars_rounded,
+          label: 'about_hall_of_fame'.tr(),
+          subtitle: 'about_hall_of_fame_desc'.tr(),
+          onTap: () => context.push('/menu/about/hall-of-fame'),
         ),
       ],
     );
