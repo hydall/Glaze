@@ -171,6 +171,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 ## Workflow
 
 - Branch (`feat/xxx`) off `nightly`, push to `origin`, open a PR — see `docs/WORKFLOW.md` for branching, Trello, and cleanup checklists.
+- **Feature branches are always based on `nightly`** — `stable` is the default branch, so a fresh clone starts there; check the base first, and `git rebase origin/nightly` a branch that was cut from the wrong one before opening the PR.
 - Open PRs only against upstream repository `hydall/Glaze` (base: `hydall/Glaze:nightly`), not against fork repos.
 - PR title and body are **in English**, and the body lists the changes as bullets (one bullet per change, `##` headings when a PR carries several independent fixes) plus how it was verified. Full rules: `docs/WORKFLOW.md` § PR title and body.
 - PRs are squash-merged and gated on CI (`.github/workflows/ci.yml` — `flutter analyze` + `flutter test`); a red check blocks the merge.

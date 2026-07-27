@@ -19,6 +19,7 @@ build settings automatically as it is promoted — see `docs/RELEASE_CHANNELS.md
 Each feature = a branch off `nightly`, pushed to `origin`, then a PR into
 upstream `hydall/Glaze:nightly`.
 
+- **Always base a feature branch on `nightly`** — never on `stable` or `staging`, and never on whatever happened to be checked out. `stable` is the repository's *default* branch, so a fresh clone (and every agent session started from one) lands there: check the base before the first commit. If a branch was already cut from the wrong base, rebase it before opening the PR — `git fetch origin nightly && git rebase origin/nightly` — so the PR carries only its own commits.
 - **No direct commits to `nightly`, `staging` or `stable`** — always use a feature branch.
 - **Never PR straight into `staging` or `stable`** — features enter through `nightly` and are promoted.
 - **Squash-merge every PR** — one feature = one commit on `nightly`, so a regression found later is a single `git revert <sha>` instead of untangling a range.
