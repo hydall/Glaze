@@ -47,6 +47,12 @@ class BuildWatermark extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                if (isBetaVersion)
+                  Text(
+                    'BETA',
+                    textAlign: TextAlign.right,
+                    style: style.copyWith(color: Colors.orange.withValues(alpha: 0.5)),
+                  ),
                 if (buildBranch.isNotEmpty)
                   Text(buildBranch, textAlign: TextAlign.right, style: style),
                 Text(_dateLabel, textAlign: TextAlign.right, style: style),

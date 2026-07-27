@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../constants/app_version.dart';
 import '../constants/build_channel.dart';
 import 'shared_prefs_provider.dart';
 
@@ -48,7 +49,7 @@ class HideBuildWatermarkNotifier extends Notifier<bool> {
   @override
   bool build() {
     final prefs = ref.watch(sharedPreferencesProvider).value;
-    return prefs?.getBool(_prefsKey) ?? isStableChannel;
+    return prefs?.getBool(_prefsKey) ?? (isStableChannel && !isBetaVersion);
   }
 
   Future<void> set(bool value) async {

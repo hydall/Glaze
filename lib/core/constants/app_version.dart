@@ -6,3 +6,10 @@ const buildBranch = String.fromEnvironment('BUILD_BRANCH');
 /// (`--dart-define=BUILD_COMMIT=<sha>`). Empty for local/dev builds, in which
 /// case the update checker cannot diff against the latest CI build.
 const buildCommit = String.fromEnvironment('BUILD_COMMIT');
+
+bool get isBetaVersion {
+  final parts = appVersion.split('.');
+  if (parts.isEmpty) return false;
+  final major = int.tryParse(parts.first);
+  return major != null && major == 0;
+}

@@ -97,7 +97,31 @@ class _HeroCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  const _VersionBadge(),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const _VersionBadge(),
+                      if (isBetaVersion) const SizedBox(width: 8),
+                      if (isBetaVersion)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+                          ),
+                          child: const Text(
+                            'BETA',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.orange,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                   if (buildDate.isNotEmpty || buildBranch.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     if (buildDate.isNotEmpty)
