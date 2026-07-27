@@ -9,12 +9,12 @@
 
 [Русский](README.ru.md)
 
-Glaze is a local, novice-friendly AI roleplay chat client. It works with any OpenAI-compatible (Chat Completion) LLM provider, and keeps your data on your own device.
-
-The app is now native Flutter, and it replaces the original JS/Vue (Capacitor) client — that version is abandoned legacy and no longer maintained. All development continues here, on a native cross-platform stack: local SQLite storage, real desktop support, and a sandboxed extension runtime, while keeping the approachability and SillyTavern compatibility of the original.
+Glaze is a local, user-friendly AI roleplay chat client. It works with any OpenAI-compatible (Chat Completion) LLM provider, and keeps your data on your own device.
 
 > [!WARNING]
 > Glaze is still under heavy development. The app is not yet stable and may contain bugs.
+>
+> 🧪 **Disclaimer**: This app was **vibecoded** using a plethora of models. Curb your expectations.
 
 ## ✨ Key Features
 
@@ -27,6 +27,8 @@ The app is now native Flutter, and it replaces the original JS/Vue (Capacitor) c
 - **Image Generation** — Generate images from inside the app and wire image output into roleplay flows and extension blocks.
 - **Cloud Sync** — Optional Dropbox and Google Drive sync for moving your local data between devices.
 - **Local-First Storage** — Characters, sessions, presets, API configuration, personas, lorebooks, and extension data all live in a local SQLite database.
+- **Extensions (ExtBlocks)** — Automate post-generation actions: info blocks, image generation, JS scripts, and interactive HTML panels. *(under development)*
+- **Glaze Studio** — A multi-agent pipeline for improving response quality: cleanup, fact-checking, entity tracking, and constraint enforcement. *(under development)*
 
 ## 🤝 Basic SillyTavern Compatibility
 
@@ -40,7 +42,7 @@ The app is now native Flutter, and it replaces the original JS/Vue (Capacitor) c
 
 Glaze includes a sandboxed extension system for post-generation automation and interactive UI blocks.
 
-- **Post-generation blocks** — Run `infoblock`, `imageGen`, `jsRunner`, and `interactive` blocks after assistant messages, after user messages, or on periodic timers.
+- **Post-generation blocks** — Run `infoblock`, `imageGen`, `jsRunner`, and `interactive` blocks after assistant messages and after user messages.
 - **Interactive panels** — Render extension-owned HTML panels under assistant messages without giving scripts same-origin access to the app.
 - **JS extension SDK** — Sandboxed scripts can use `window.glaze.*` APIs for variables, text generation, prompt injection, audio, command execution, toasts, and more.
 - **Capability permissions** — Every bridge method is gated by explicit per-preset capabilities. The default is deny.
@@ -57,15 +59,11 @@ Download the latest release from the [Releases](../../releases) page.
 - **Windows** — Download the Windows build and run it directly on your PC.
 - **macOS / Linux** — Buildable from source, but not published as prebuilt releases yet; packaging and signing are still to be set up.
 
-### 🔄 Migrating from the old Vue client
-
-The JS/Vue version is legacy and receives no further updates. Your data comes across in one step: export a `.glz` backup from the old app, then in Glaze open **Menu → Backups** and import it. A `.glz` restores the full application state — characters, chats, presets, lorebooks, personas and API configuration.
-
-Backups from **SillyTavern** (`.zip`) can be imported the same way.
+Backups from **SillyTavern** (`.zip`) can be imported via **Menu → Backups**.
 
 ## 🛠️ Development
 
-Built with Flutter, Riverpod, Drift/SQLite, Dio, and GoRouter, with a WebView-based chat and extension renderer.
+Built with Flutter, using local SQLite storage, native desktop support, and a sandboxed extension runtime. Powered by Riverpod, Drift/SQLite, Dio, GoRouter, and a WebView-based chat renderer.
 
 ### 📋 Prerequisites
 
