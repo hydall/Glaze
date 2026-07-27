@@ -547,19 +547,19 @@ void main() {
     () {
       expect(
         cloudPath('extension_preset', 'ep-123'),
-        equals('/Glaze/extension_presets/ep-123.json'),
+        equals('$cloudBase/extension_presets/ep-123.json'),
       );
       expect(
         cloudPath('extensions_settings', 'extensions_settings'),
-        equals('/Glaze/extensions_settings.json'),
+        equals('$cloudBase/extensions_settings.json'),
       );
       expect(
         cloudPath('info_block', 'session-abc'),
-        equals('/Glaze/info_blocks/session-abc.json'),
+        equals('$cloudBase/info_blocks/session-abc.json'),
       );
       expect(
         cloudPath('tracker_value', 'session-abc'),
-        equals('/Glaze/tracker_values/session-abc.json'),
+        equals('$cloudBase/tracker_values/session-abc.json'),
       );
     },
   );
@@ -660,7 +660,7 @@ void main() {
     await deviceA.engine.pushEntities(onProgress: (_) {});
 
     expect(
-      deviceA.cloud.files.containsKey('/Glaze/extensions_settings.json'),
+      deviceA.cloud.files.containsKey('$cloudBase/extensions_settings.json'),
       isTrue,
       reason: 'ExtensionsSettings should be uploaded to cloud',
     );
@@ -866,17 +866,17 @@ void main() {
       // Verify paths are correct
       expect(
         manifest.entries[entryKey('extension_preset', 'ep1')]!.path,
-        equals('/Glaze/extension_presets/ep1.json'),
+        equals('$cloudBase/extension_presets/ep1.json'),
       );
       expect(
         manifest
             .entries[entryKey('extensions_settings', 'extensions_settings')]!
             .path,
-        equals('/Glaze/extensions_settings.json'),
+        equals('$cloudBase/extensions_settings.json'),
       );
       expect(
         manifest.entries[entryKey('info_block', 'session1')]!.path,
-        equals('/Glaze/info_blocks/session1.json'),
+        equals('$cloudBase/info_blocks/session1.json'),
       );
     },
   );

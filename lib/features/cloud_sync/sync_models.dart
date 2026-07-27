@@ -1,3 +1,5 @@
+import '../../core/constants/build_channel.dart';
+
 enum SyncProvider { dropbox, gdrive }
 
 enum SyncStatus { idle, syncing, error, conflict }
@@ -170,7 +172,21 @@ class SyncManifest {
 
 String entryKey(String type, String id) => '$type:$id';
 
-const String cloudBase = '/Glaze';
+/// Name of the Glaze root folder in the cloud provider.
+///
+/// Reuses [glazeDataFolderName] so the cloud tree is named exactly like the
+/// desktop data folder: `Glaze` on stable, `Glaze-staging` / `Glaze-nightly`
+/// elsewhere. Keeping the channels apart matters as soon as two of them are
+/// installed side by side and pointed at the same cloud account — otherwise
+/// they overwrite each other's entities through a shared manifest.
+const String cloudRootFolderName = glazeDataFolderName;
+
+/// Root of the Glaze tree in the cloud provider, as an absolute path.
+///
+/// Every cloud path in the sync layer is built from this, so the channel split
+/// is a single-constant change for Google Drive. Dropbox needs one extra step
+/// — see `_channelSubfolder` in `dropbox_adapter.dart`.
+const String cloudBase = '/$cloudRootFolderName';
 
 const int maxSyncPayloadBytes = 30 * 1024 * 1024;
 
@@ -226,7 +242,9 @@ String cloudPath(String type, String id) {
 }
 
 /// Canonical path for comparing manifest entry paths with cloud list_folder results.
-/// Dropbox app-folder listings omit the `/Glaze` prefix; GDrive uses full paths.
+/// Dropbox app-folder listings omit the [cloudBase] prefix; GDrive uses full
+/// paths. (`DropboxAdapter` strips its own channel sub-folder before returning
+/// listings, so both providers reach this function Glaze-root-relative.)
 String normalizeCloudSyncPath(String path) {
   var p = path.trim();
   if (p.isEmpty) return p;

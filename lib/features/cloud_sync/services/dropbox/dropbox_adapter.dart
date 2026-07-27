@@ -3,14 +3,33 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import '../../../../core/constants/build_channel.dart';
 import '../../cloud_adapter.dart';
+import '../../sync_models.dart';
 import 'dropbox_auth.dart';
 
 class DropboxAdapter implements CloudAdapter {
   static const _apiBase = 'https://api.dropboxapi.com/2';
   static const _contentBase = 'https://content.dropboxapi.com/2';
-  static const _appFolderPrefix = '/Glaze';
   static const _deleteBatchPolls = 30;
+
+  // Dropbox hands the app its own App folder as the API root, so the Glaze root
+  // itself collapses to '' — that is why paths are stripped rather than used
+  // as-is. The name of that App folder comes from the Dropbox app registration,
+  // not from us, so it cannot carry the channel.
+  //
+  // Each channel therefore lives in a sub-folder of the App folder, with stable
+  // keeping the flat layout it has always had. This is correct under both
+  // configurations: with one shared DROPBOX_APP_KEY the sub-folder is what
+  // keeps the channels apart, and with a per-channel app key (separate App
+  // folders) it is merely one harmless extra level.
+  static const _channelSubfolder = isStableChannel ? '' : '/$buildChannel';
+
+  // Sub-folder names reserved by the *other* channels. Only reachable from
+  // stable, whose wipe is the one operation that touches the App folder root.
+  static const _foreignChannelFolders = isStableChannel
+      ? {'staging', 'nightly'}
+      : <String>{};
 
   final DropboxAuth _auth;
   final Dio _dio = Dio(
@@ -24,11 +43,43 @@ class DropboxAdapter implements CloudAdapter {
 
   DropboxAdapter(this._auth);
 
+  /// Canonical Glaze path (`/Glaze-nightly/characters/x.json`) to the
+  /// App-folder-relative path Dropbox expects (`/nightly/characters/x.json`).
   String _stripPrefix(String path) {
-    if (path.startsWith(_appFolderPrefix)) {
-      return path.substring(_appFolderPrefix.length);
+    if (path.startsWith(cloudBase)) {
+      return '$_channelSubfolder${path.substring(cloudBase.length)}';
     }
     return path;
+  }
+
+  /// Inverse of [_stripPrefix] for paths coming back from the API.
+  ///
+  /// Drops the channel sub-folder so the rest of the sync layer keeps seeing
+  /// listings relative to the Glaze root — the invariant
+  /// [normalizeCloudSyncPath] relies on to line manifest entries up against
+  /// `list_folder` results. Without this, every entry would look missing on a
+  /// non-stable channel and sync would re-upload the whole library each run.
+  String _unmapChannelPath(String path) {
+    if (_channelSubfolder.isEmpty) return path;
+    if (path == _channelSubfolder) return '/';
+    if (path.startsWith('$_channelSubfolder/')) {
+      return path.substring(_channelSubfolder.length);
+    }
+    return path;
+  }
+
+  /// Whether a root-relative path belongs to a channel that is not this build.
+  ///
+  /// Guards the App-folder-root wipe: with a shared DROPBOX_APP_KEY the other
+  /// channels sit next to us in the same folder, and "delete cloud data" must
+  /// not reach across into them.
+  bool _belongsToAnotherChannel(String? path) {
+    if (_foreignChannelFolders.isEmpty) return false;
+    if (path == null || path.isEmpty) return false;
+    final first = path
+        .split('/')
+        .firstWhere((segment) => segment.isNotEmpty, orElse: () => '');
+    return _foreignChannelFolders.contains(first.toLowerCase());
   }
 
   Future<Map<String, String>> _headers() async {
@@ -209,6 +260,13 @@ class DropboxAdapter implements CloudAdapter {
       hasMore = result['has_more'] as bool? ?? false;
     }
 
+    // Leave the other channels' sub-trees alone — see _belongsToAnotherChannel.
+    entries.removeWhere(
+      (e) => _belongsToAnotherChannel(
+        (e['path_lower'] ?? e['path_display']) as String?,
+      ),
+    );
+
     if (entries.isEmpty) return;
 
     try {
@@ -288,9 +346,18 @@ class DropboxAdapter implements CloudAdapter {
   List<CloudFileInfo> _parseEntries(List<Object?> entries) {
     return entries
         .whereType<Map<String, dynamic>>()
+        // Another channel's sub-folder is not ours to see. Listing the App
+        // folder root from stable would otherwise surface `nightly/` as cloud
+        // content — which, among other things, kept the post-wipe
+        // "waiting for cloud to finalize" poll spinning until it timed out.
+        .where(
+          (e) => !_belongsToAnotherChannel(
+            (e['path_lower'] ?? e['path_display']) as String?,
+          ),
+        )
         .map(
           (e) => CloudFileInfo(
-            path: e['path_display'] as String? ?? '',
+            path: _unmapChannelPath(e['path_display'] as String? ?? ''),
             name: e['name'] as String? ?? '',
             isFolder: e['.tag'] == 'folder',
           ),

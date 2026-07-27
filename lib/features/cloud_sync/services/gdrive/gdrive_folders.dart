@@ -2,8 +2,12 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
+import '../../sync_models.dart';
+
 class GDriveFolders {
-  static const _folderName = 'Glaze';
+  // Per-channel, so stable / staging / nightly get sibling folders in the
+  // user's Drive root instead of writing into one shared tree.
+  static const _folderName = cloudRootFolderName;
 
   final Dio _dio = Dio(
     BaseOptions(

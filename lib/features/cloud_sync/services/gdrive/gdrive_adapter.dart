@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 
 import '../../cloud_adapter.dart';
+import '../../sync_models.dart';
 import 'gdrive_auth.dart';
 import 'gdrive_files.dart';
 import 'gdrive_folders.dart';
@@ -28,8 +29,8 @@ class GDriveAdapter implements CloudAdapter {
 
   @override
   Future<void> ensureFolder(String path) async {
-    if (!path.startsWith('/Glaze')) {
-      path = '/Glaze/$path';
+    if (!path.startsWith(cloudBase)) {
+      path = '$cloudBase/$path';
     }
     await _folders.ensureFolder(path);
   }
