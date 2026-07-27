@@ -49,7 +49,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 77;
+  int get schemaVersion => 78;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1388,6 +1388,15 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 77) {
         await m.createTable(ledgerReconciliationCleanupJournals);
+      }
+      if (from < 78) {
+        final prefs = await SharedPreferences.getInstance();
+        if (!prefs.containsKey('gz_disabled_third_party_providers')) {
+          await prefs.setStringList(
+            'gz_disabled_third_party_providers',
+            <String>[],
+          );
+        }
       }
     },
   );

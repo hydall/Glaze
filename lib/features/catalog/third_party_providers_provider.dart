@@ -24,15 +24,15 @@ extension ThirdPartyProviderX on ThirdPartyProvider {
 }
 
 /// Holds the set of DISABLED third-party providers (a provider absent from the
-/// set is enabled). Persisted so the choice survives launches; defaults to all
-/// enabled (empty set).
+/// set is enabled). Persisted so the choice survives launches; defaults to
+/// janitor enabled (all others disabled).
 class ThirdPartyProvidersNotifier extends Notifier<Set<ThirdPartyProvider>> {
   static const _key = 'gz_disabled_third_party_providers';
 
   @override
   Set<ThirdPartyProvider> build() {
     _load();
-    return const {};
+    return {ThirdPartyProvider.janny, ThirdPartyProvider.datacat, ThirdPartyProvider.chub, ThirdPartyProvider.saucepan};
   }
 
   Future<void> _load() async {
@@ -46,7 +46,7 @@ class ThirdPartyProvidersNotifier extends Notifier<Set<ThirdPartyProvider>> {
       );
       if (match != null) disabled.add(match);
     }
-    if (disabled.isNotEmpty) state = disabled;
+    state = disabled;
   }
 
   bool isEnabled(ThirdPartyProvider p) => !state.contains(p);
