@@ -1,0 +1,62 @@
+name: CI (PR checks)
+
+# Gate for pull requests into the release branches. Runs the two checks that can
+# be automated — the analyzer and the test suite — so a PR is never merged on a
+# broken tree just because nobody ran them locally.
+#
+# Only *errors* fail the analyzer here (`--no-fatal-infos --no-fatal-warnings`):
+# the project's lint set is strict, and infos/hints are not build-breaking. Same
+# filter as the diagnostic command documented in CLAUDE.md.
+
+on:
+  pull_request:
+    branches:
+      - nightly
+      - staging
+      - stable
+  workflow_dispatch:
+
+# A new push to the PR branch makes the in-flight run pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-and-test:
+    name: Analyze + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Create placeholder .env
+        # .env is gitignored but declared as an asset in pubspec.yaml, so the
+        # asset bundle fails to build without it. The checks need no real
+        # credentials, only the file.
+        run: touch .env
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        # *.g.dart / *.freezed.dart are gitignored, so they must be built here.
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Test
+        run: flutter test --reporter expanded
