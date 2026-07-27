@@ -30,15 +30,24 @@ void main() {
   late ProviderContainer container;
   late StateNotifierProvider<CatalogNotifier, CatalogState> testCatalogProvider;
 
-  setUp(() {
+  setUp(() async {
     pending.clear();
     // Start on chub: janitor/janny kick off a real tag fetch inside search().
-    SharedPreferences.setMockInitialValues({'gz_catalog_provider': 'chub'});
+    // With the new janitor-only default we must also ensure all providers are
+    // marked enabled so the catalog sees chub / datacat.
+    SharedPreferences.setMockInitialValues({
+      'gz_catalog_provider': 'chub',
+      'gz_disabled_third_party_providers': <String>[],
+    });
     testCatalogProvider =
         StateNotifierProvider<CatalogNotifier, CatalogState>(
           (ref) => CatalogNotifier(ref, fetchOverride: makeFetcher()),
         );
     container = ProviderContainer();
+    // Let the third-party provider loader settle so enabledCatalogProvidersProvider
+    // sees the saved (all-enabled) set before the catalog notifier queries it.
+    container.read(thirdPartyProvidersProvider);
+    await pumpEventQueue();
     addTearDown(container.dispose);
   });
 
@@ -146,15 +155,12 @@ void main() {
   });
 
   test('a saved provider that is now disabled is not restored', () async {
-    // chub is the saved provider but has since been disabled; janitor/janny too,
-    // so datacat is the only enabled one.
-    SharedPreferences.setMockInitialValues({
-      'gz_catalog_provider': 'chub',
-      'gz_disabled_third_party_providers': ['chub', 'janitor', 'janny'],
-    });
-    // Let the disabled set settle first, so the restore below sees it.
-    container.read(thirdPartyProvidersProvider);
-    await pumpEventQueue();
+    // disable chub, janitor, and janny so only datacat remains enabled
+    final tpNotifier = container.read(thirdPartyProvidersProvider.notifier);
+    await tpNotifier.setEnabled(ThirdPartyProvider.chub, false);
+    await tpNotifier.setEnabled(ThirdPartyProvider.janitor, false);
+    await tpNotifier.setEnabled(ThirdPartyProvider.janny, false);
+    await tpNotifier.setEnabled(ThirdPartyProvider.saucepan, false);
     expect(container.read(enabledCatalogProvidersProvider), [
       CatalogProvider.datacat,
     ]);
