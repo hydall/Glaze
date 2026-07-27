@@ -19,6 +19,17 @@ import 'image_storage_service.dart';
 enum BackupFormat { legacyJsonGlaze, flutterZip, sillyTavernZip, tavoZip }
 
 class BackupService {
+  /// Master switch for Tavo (`.tbk`) backup import.
+  ///
+  /// Disabled: the format is not advertised in the UI and is not detected
+  /// here, so a Tavo archive is rejected as an unsupported ZIP. The importer
+  /// ([TavoBackupImporter]), its LMDB reader and [BackupFormat.tavoZip] stay
+  /// in the tree — flipping this back to `true` re-enables the whole path.
+  ///
+  /// Deliberately `final` rather than `const` so the disabled branch is not
+  /// treated as dead code by the analyzer.
+  static final bool tavoImportEnabled = false;
+
   static const _zipMagic = [0x50, 0x4B, 0x03, 0x04];
   static const _legacyV1JsonGlazeMaxBytes = 4;
 
@@ -88,11 +99,13 @@ class BackupService {
           header[2] == _zipMagic[2] &&
           header[3] == _zipMagic[3]) {
         final archive = ZipDecoder().decodeStream(InputFileStream(filePath));
-        if (_isTavoArchive(archive)) return BackupFormat.tavoZip;
+        if (tavoImportEnabled && _isTavoArchive(archive)) {
+          return BackupFormat.tavoZip;
+        }
         if (_isSillyTavernArchive(archive)) return BackupFormat.sillyTavernZip;
         if (_isFlutterGlazeArchive(archive)) return BackupFormat.flutterZip;
         throw const FormatException(
-            'ZIP is neither a Tavo (.tbk), SillyTavern, nor Glaze backup');
+            'ZIP is neither a SillyTavern nor a Glaze backup');
       }
       if (header.isNotEmpty && header[0] == 0x7B) {
         return BackupFormat.legacyJsonGlaze;

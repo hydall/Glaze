@@ -185,8 +185,8 @@ lib/
 │   │   │   ├── flutter_backup_importer.dart  # Imports Glaze-native backup
 │   │   │   ├── js_backup_importer.dart       # Legacy ST ZIP import (orchestrator)
 │   │   │   ├── st_backup_importer.dart       # SillyTavern ZIP import (orchestrator)
-│   │   │   ├── tavo_backup_importer.dart     # Tavo/LMDB backup import
-│   │   │   ├── tavo_lmdb_reader.dart         # LMDB reader for Tavo archives
+│   │   │   ├── tavo_backup_importer.dart     # Tavo/LMDB backup import (disabled — BackupService.tavoImportEnabled)
+│   │   │   ├── tavo_lmdb_reader.dart         # LMDB reader for Tavo archives (disabled with the importer)
 │   │   │   ├── js_character_importer.dart    # Imports ST character PNG/JSON files
 │   │   │   ├── js_chat_importer.dart         # Imports ST JSONL chat files
 │   │   │   ├── js_api_config_importer.dart   # Parses ST settings → ApiConfig

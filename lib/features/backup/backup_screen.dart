@@ -129,11 +129,16 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     }
   }
 
+  /// Extensions the picker offers, in sync with what `BackupService` still
+  /// accepts. `tbk` (Tavo) is omitted while `BackupService.tavoImportEnabled`
+  /// is off.
+  static const List<String> _importExtensions = ['glz', 'json', 'zip'];
+
   Future<void> _triggerImport() async {
     final result = await FilePicker.pickFiles(
       type: Platform.isIOS ? FileType.any : FileType.custom,
       allowMultiple: false,
-      allowedExtensions: Platform.isIOS ? null : ['glz', 'json', 'zip', 'tbk'],
+      allowedExtensions: Platform.isIOS ? null : _importExtensions,
     );
     if (result == null || result.files.isEmpty) return;
 
@@ -175,7 +180,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     });
 
     try {
-      if (ext == 'glz' || ext == 'json' || ext == 'zip' || ext == 'tbk') {
+      if (_importExtensions.contains(ext)) {
         setState(() {
           _importStage = 1;
           _importProgressText = 'backup_progress_reading'.tr();
@@ -277,7 +282,10 @@ class _NormalView extends StatelessWidget {
               const SizedBox(height: 4),
               _Hint(
                 lines: [
-                  _HintLine.markup('backup_hint_import_tavo'.tr()),
+                  // Tavo (.tbk) is hidden while
+                  // `BackupService.tavoImportEnabled` is off — the
+                  // `backup_hint_import_tavo` string stays in the translations
+                  // for when the format comes back.
                   _HintLine.markup('backup_hint_import_st'.tr()),
                   _HintLine.markup('backup_hint_import_glaze'.tr()),
                 ],
@@ -410,8 +418,9 @@ class _HintLine {
   const _HintLine({this.bold, required this.text});
 
   /// Splits a localized hint that marks its lead-in with `<b>…</b>`, e.g.
-  /// `<b>Tavo (.tbk):</b> characters, presets, chats`, into the bold run and
-  /// the remainder. Falls back to an unstyled line when the markup is absent.
+  /// `<b>SillyTavern (.zip):</b> characters, presets, chats`, into the bold run
+  /// and the remainder. Falls back to an unstyled line when the markup is
+  /// absent.
   factory _HintLine.markup(String source) {
     final m = RegExp(r'^<b>(.*?)</b>\s*(.*)$', dotAll: true).firstMatch(source);
     if (m == null) return _HintLine(text: source);

@@ -61,7 +61,7 @@ Download the latest release from the [Releases](../../releases) page.
 
 The JS/Vue version is legacy and receives no further updates. Your data comes across in one step: export a `.glz` backup from the old app, then in Glaze open **Menu → Backups** and import it. A `.glz` restores the full application state — characters, chats, presets, lorebooks, personas and API configuration.
 
-Backups from **SillyTavern** (`.zip`) and **Tavo** (`.tbk`) can be imported the same way.
+Backups from **SillyTavern** (`.zip`) can be imported the same way.
 
 ## 🛠️ Development
 
