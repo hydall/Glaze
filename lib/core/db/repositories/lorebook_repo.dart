@@ -81,7 +81,7 @@ class LorebookRepo implements SyncLorebookStore {
     final lorebook = Lorebook(
       id: characterId,
       name: name.isNotEmpty ? name : 'Lorebook for $characterId',
-      enabled: true,
+      enabled: false,
       activationScope: 'character',
       activationTargetId: characterId,
       entries: entries,

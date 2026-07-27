@@ -158,7 +158,7 @@ class JsLorebookImporter extends BackupHelpers {
               lorebookId: cbId,
               name: cbRaw['name'] as String? ??
                   '${char['name'] ?? 'Char'} Lorebook',
-              enabled: Value(cbRaw['enabled'] as bool? ?? true),
+              enabled: Value(cbRaw['enabled'] as bool? ?? false),
               activationScope: Value('character'),
               activationTargetId: Value(charId),
               entriesJson: jsonEncode(mappedEntries),

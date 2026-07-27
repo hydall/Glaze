@@ -44,7 +44,7 @@ Lorebook convertCharacterBook(
   return Lorebook(
     id: 'charbook_${characterId}_${DateTime.now().millisecondsSinceEpoch}',
     name: (bookData['name'] as String?) ?? 'Character Book',
-    enabled: true,
+    enabled: false,
     activationScope: 'character',
     activationTargetId: characterId,
     entries: entries,
