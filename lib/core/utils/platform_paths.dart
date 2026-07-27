@@ -4,6 +4,8 @@ import 'package:path/path.dart' as p;
 // ignore: depend_on_referenced_packages
 import 'package:path_provider/path_provider.dart';
 
+import '../constants/build_channel.dart';
+
 /// Cached Glaze data root, populated on the first [getAppDataDir] call (which
 /// happens at startup via ImageStorageService.create / AppDatabase open).
 /// Used by [resolveGlazeFilePath] so widgets can rebase stale absolute paths
@@ -42,16 +44,22 @@ String? resolveGlazeFilePath(String? path) {
     return p.join(base, path);
   }
   // Absolute: if it already exists, keep it. Otherwise try to rebase onto the
-  // current base by the last "/Glaze/" marker.
+  // current base by the last data-root marker.
   if (File(path).existsSync()) return path;
 
   final normalized = path.replaceAll('\\', '/');
-  const marker = '/Glaze/';
-  final idx = normalized.lastIndexOf(marker);
-  if (idx < 0) return path;
-  final suffix = normalized.substring(idx + marker.length);
-  if (suffix.isEmpty) return path;
-  return p.join(base, suffix);
+  // This channel's folder first, then the bare "Glaze" root, so a path written
+  // by a stable build — or by any build from before the channels got their own
+  // desktop data folders — still rebases. The set collapses to one entry on
+  // stable and on mobile, where both names are the same.
+  for (final marker in {'/$glazeDataFolderName/', '/Glaze/'}) {
+    final idx = normalized.lastIndexOf(marker);
+    if (idx < 0) continue;
+    final suffix = normalized.substring(idx + marker.length);
+    if (suffix.isEmpty) continue;
+    return p.join(base, suffix);
+  }
+  return path;
 }
 
 /// Returns the on-disk path to the 512px thumbnail JPG for a stored avatar
@@ -76,14 +84,14 @@ String? resolveGlazeThumbnailPath(String? avatarPath) {
 String _desktopDataDir() {
   if (Platform.isWindows) {
     final appData = Platform.environment['APPDATA']!;
-    return p.join(appData, 'Glaze');
+    return p.join(appData, glazeDataFolderName);
   } else if (Platform.isLinux) {
     final xdg = Platform.environment['XDG_DATA_HOME'] ??
         p.join(Platform.environment['HOME']!, '.local', 'share');
-    return p.join(xdg, 'Glaze');
+    return p.join(xdg, glazeDataFolderName);
   } else if (Platform.isMacOS) {
     return p.join(Platform.environment['HOME']!, 'Library',
-        'Application Support', 'Glaze');
+        'Application Support', glazeDataFolderName);
   }
   throw UnsupportedError('Platform not supported yet');
 }

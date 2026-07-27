@@ -1,0 +1,14 @@
+// Per-channel identity for the iOS Runner target.
+//
+// Keeps stable / staging / nightly on distinct bundle identifiers so the three
+// builds can sit on one device at the same time instead of overwriting each
+// other. iOS keys an install on CFBundleIdentifier alone, so a shared signing
+// identity is fine — only the identifier has to differ.
+//
+// CI overwrites this file from the branch it is building (see the "Configure
+// iOS channel identity" step in .github/workflows/build-branch.yml). The values
+// committed here are the local-developer defaults and mirror the Dart default
+// in lib/core/constants/build_channel.dart, which is also `nightly`.
+
+BUNDLE_ID_SUFFIX = .nightly
+APP_DISPLAY_NAME = Glaze Nightly

@@ -210,6 +210,10 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Read by android/app/build.gradle.kts to derive the applicationId
+          # suffix and the launcher label, so the three channels co-install.
+          # Signing is unaffected — all channels use the same keystore above.
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
         run: >
           flutter build apk --release --no-pub --target-platform android-arm64
           "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
@@ -328,6 +332,23 @@ jobs:
 
       - name: Install CocoaPods
         run: cd ios && pod install && cd ..
+
+      - name: Configure iOS channel identity
+        # Overwrites the checked-in defaults in ios/Flutter/Channel.xcconfig so
+        # the bundle identifier and the home-screen name match the channel being
+        # built and the three IPAs can live on one device.
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+        run: |
+          set -euo pipefail
+          case "$BUILD_CHANNEL" in
+            stable)  SUFFIX="";         NAME="Glaze" ;;
+            staging) SUFFIX=".staging"; NAME="Glaze Staging" ;;
+            *)       SUFFIX=".nightly"; NAME="Glaze Nightly" ;;
+          esac
+          printf 'BUNDLE_ID_SUFFIX = %s\nAPP_DISPLAY_NAME = %s\n' \
+            "$SUFFIX" "$NAME" > ios/Flutter/Channel.xcconfig
+          cat ios/Flutter/Channel.xcconfig
 
       - name: Build iOS (release, no signing)
         run: |

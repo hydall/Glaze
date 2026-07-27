@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import '../../../core/constants/build_channel.dart';
 import '../../../core/utils/platform_paths.dart';
 import 'chat_webview_settings.dart';
 
@@ -362,7 +363,11 @@ Directory _glazeDataDirectory() {
   if (Platform.isWindows) {
     final appData = Platform.environment['APPDATA'];
     if (appData != null && appData.isNotEmpty) {
-      return Directory('$appData${Platform.pathSeparator}Glaze');
+      // Must track the same per-channel folder as getAppDataDir(), or the
+      // file-serving root would point at another channel's install.
+      return Directory(
+        '$appData${Platform.pathSeparator}$glazeDataFolderName',
+      );
     }
   }
   return Directory.current;

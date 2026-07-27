@@ -7,6 +7,31 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Release channel this APK is built for. CI exports it as an environment
+// variable holding the same value it passes to Dart through
+// --dart-define=BUILD_CHANNEL; a local build, which sets neither, falls back to
+// "nightly" exactly like lib/core/constants/build_channel.dart does.
+val buildChannel: String =
+    System.getenv("BUILD_CHANNEL")?.takeIf { it.isNotBlank() }?.trim()?.lowercase()
+        ?: "nightly"
+
+// Every channel gets its own applicationId so stable / staging / nightly can be
+// installed next to each other on one device. All three are still signed with
+// the same CI keystore — Android refuses to co-install packages that share an
+// applicationId, not ones that share a signing certificate.
+val channelApplicationIdSuffix = when (buildChannel) {
+    "stable" -> ""
+    "staging" -> ".staging"
+    else -> ".nightly"
+}
+
+// Launcher label, so three icons on the home screen are told apart.
+val channelAppLabel = when (buildChannel) {
+    "stable" -> "Glaze"
+    "staging" -> "Glaze Staging"
+    else -> "Glaze Nightly"
+}
+
 // CI signing: the keystore is passed in as base64 through KEYSTORE_BASE64.
 // An *unset* secret still reaches Gradle as an empty string, so blank must be
 // treated exactly like "no CI keystore" — otherwise we write a 0-byte file and
@@ -99,7 +124,8 @@ android {
     }
 
     defaultConfig {
-        applicationId = "app.glaze.flutter"
+        applicationId = "app.glaze.flutter$channelApplicationIdSuffix"
+        manifestPlaceholders["appLabel"] = channelAppLabel
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

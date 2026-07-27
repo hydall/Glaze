@@ -23,7 +23,7 @@
          keeps every PopScope working; the only thing lost is the predictive-back
          peek animation. Re-enable only after verifying WebView back handling. -->
     <application
-        android:label="Glaze"
+        android:label="${appLabel}"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="false"
