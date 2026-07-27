@@ -35,6 +35,27 @@ git push -u origin feat/xxx
 
 Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use the **GitHub MCP tools** (`mcp__plugin_github_github__create_pull_request`) or the GitHub web UI. Do **not** use the `gh` CLI — GitHub operations go through GitHub MCP (project + global convention).
 
+## PR title and body
+
+- **English only** — title and body. The repository is public and AGPL-3.0; the
+  PR is the permanent record of *why* a change landed, and it has to stay
+  readable for contributors who do not read Russian. (Chat with the maintainer
+  happens in whatever language is convenient — this rule is about what gets
+  written to GitHub.)
+- **Describe the changes as a bullet list** — one bullet per change, not a wall
+  of prose. Group with `##` headings when a PR carries several independent
+  fixes, and keep one list under each.
+- **Say what changed and why**, referencing the concrete symbol / file when it
+  helps a reviewer find it (`HistoryAssembler.assemble`, not "the prompt code").
+- **Title = the squash commit subject** — imperative mood, conventional-commit
+  prefix and scope, e.g. `fix(chat): keep the error flag when a regen is
+  cancelled`. Keep it under ~72 characters.
+- **Close with how it was verified** — tests added, what was run, and what could
+  *not* be run (e.g. an agent with no Flutter SDK relying on CI). Never imply a
+  check passed when it was never executed.
+- **Nothing secret** — no keys, tokens, `.env` values or internal hostnames,
+  even when a template asks for them.
+
 ## CI gate
 
 `.github/workflows/ci.yml` runs on every PR into `nightly`, `staging` or

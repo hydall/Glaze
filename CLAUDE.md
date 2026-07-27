@@ -172,6 +172,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 
 - Branch (`feat/xxx`) off `nightly`, push to `origin`, open a PR — see `docs/WORKFLOW.md` for branching, Trello, and cleanup checklists.
 - Open PRs only against upstream repository `hydall/Glaze` (base: `hydall/Glaze:nightly`), not against fork repos.
+- PR title and body are **in English**, and the body lists the changes as bullets (one bullet per change, `##` headings when a PR carries several independent fixes) plus how it was verified. Full rules: `docs/WORKFLOW.md` § PR title and body.
 - PRs are squash-merged and gated on CI (`.github/workflows/ci.yml` — `flutter analyze` + `flutter test`); a red check blocks the merge.
 - Release branches are `nightly` → `staging` → `stable`, one per build channel; features enter at `nightly` and are promoted by merge. Channel semantics: `docs/RELEASE_CHANNELS.md`.
 - Run `dart run build_runner build` after changing any freezed/drift model.
