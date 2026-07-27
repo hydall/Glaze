@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
@@ -36,6 +38,7 @@ class ThemeSettings {
 
 class ThemeNotifier extends StateNotifier<ThemeSettings> {
   ThemePresetStorage? _storage;
+  final Completer<void> _ready = Completer<void>();
 
   ThemeNotifier() : super(const ThemeSettings()) {
     _init();
@@ -44,6 +47,7 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
   Future<void> _init() async {
     _storage = await ThemePresetStorage.create();
     await _load();
+    _ready.complete();
   }
 
   Future<void> _load() async {
@@ -71,11 +75,13 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
   }
 
   Future<void> applyPreset(ThemePreset preset) async {
+    await _ready.future;
     state = state.copyWith(accentColor: preset.accent, activePreset: preset);
     await _storage?.setActive(preset.id);
   }
 
   Future<void> importPreset(ThemePreset preset) async {
+    await _ready.future;
     await _storage?.addPreset(preset);
     final presets = await _storage?.loadAll() ?? state.presets;
     state = state.copyWith(presets: presets);
@@ -95,6 +101,7 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
   }
 
   Future<void> deletePreset(String id) async {
+    await _ready.future;
     await _storage?.removePreset(id);
     final presets = await _storage?.loadAll() ?? state.presets;
     var active = state.activePreset;
@@ -110,6 +117,7 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
 
   /// Live-update the active preset and persist it (mirrors JS auto-save on change).
   Future<void> updatePreset(ThemePreset preset) async {
+    await _ready.future;
     final updated = state.presets
         .map((p) => p.id == preset.id ? preset : p)
         .toList();
@@ -118,7 +126,7 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
       accentColor: preset.accent,
       presets: updated,
     );
-    await _storage?.saveAll(updated);
+    await _storage!.saveAll(updated);
   }
 
   Future<void> reload() async {

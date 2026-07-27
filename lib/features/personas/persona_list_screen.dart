@@ -11,6 +11,7 @@ import '../../core/services/persona_character_converter.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/shared_prefs_provider.dart';
 import 'persona_connections_sheet.dart';
 import 'persona_list_provider.dart';
 import '../../core/utils/id_generator.dart';
@@ -345,6 +346,13 @@ class _PersonaEditorScreenState extends ConsumerState<_PersonaEditorScreen> {
     );
 
     _container.read(personaListProvider.notifier).updatePersona(persona);
+
+    if (widget.existing == null) {
+      _container.read(activePersonaIdProvider.notifier).state = _personaId;
+      _container.read(sharedPreferencesProvider.future).then((prefs) {
+        prefs.setString('activePersonaId', _personaId);
+      });
+    }
   }
 
   @override
