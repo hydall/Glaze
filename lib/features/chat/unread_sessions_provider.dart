@@ -12,8 +12,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Writers:
 /// - [markUnread] on generation completion for a non-active session (see
 ///   `sync_notification_stage.dart` and `ChatNotifier.continueMessage`).
-/// - [markRead] when the user opens / focuses the session
-///   (`SessionLifecycleTracker`).
+/// - [markRead] when the user opens / focuses the session — on entry, on chat
+///   state changes, and on app resume (`SessionLifecycleTracker`).
+///
+/// A reply that lands while its session is the one on screen is never flagged:
+/// both writers snapshot `isActiveSession` *before* awaiting the notification
+/// pipeline and re-check it after, and [markRead] wins over a late hydration.
 final unreadSessionsProvider =
     NotifierProvider<UnreadSessionsNotifier, Set<String>>(
       UnreadSessionsNotifier.new,
@@ -21,6 +25,11 @@ final unreadSessionsProvider =
 
 class UnreadSessionsNotifier extends Notifier<Set<String>> {
   static const _prefsKey = 'unread_sessions';
+
+  /// Sessions read before [_load] finished. Hydration must not resurrect their
+  /// dot — see [_load].
+  final Set<String> _readBeforeHydration = {};
+  bool _hydrated = false;
 
   @override
   Set<String> build() {
@@ -35,10 +44,21 @@ class UnreadSessionsNotifier extends Notifier<Set<String>> {
       final stored = prefs.getStringList(_prefsKey);
       if (stored == null || stored.isEmpty) return;
       // Merge rather than overwrite: any marks that happened during the async
-      // load must not be lost.
-      state = {...state, ...stored};
+      // load must not be lost. Sessions the user already opened during the load
+      // are dropped — otherwise a chat opened right after launch (deep link,
+      // restored route, notification tap) would light up as unread again the
+      // moment the persisted set lands.
+      final restored = stored
+          .where((id) => !_readBeforeHydration.contains(id))
+          .toList();
+      state = {...state, ...restored};
+      // Persist the pruning so the dropped ids stay dropped across restarts.
+      if (restored.length != stored.length) unawaited(_persist());
     } catch (e) {
       debugPrint('[UnreadSessions] load failed: $e');
+    } finally {
+      _hydrated = true;
+      _readBeforeHydration.clear();
     }
   }
 
@@ -58,6 +78,9 @@ class UnreadSessionsNotifier extends Notifier<Set<String>> {
   }
 
   void markRead(String sessionId) {
+    // Before hydration `state` is still empty, so the removal below is a no-op:
+    // remember the id so `_load` does not merge it back in.
+    if (!_hydrated) _readBeforeHydration.add(sessionId);
     if (!state.contains(sessionId)) return;
     state = {...state}..remove(sessionId);
     unawaited(_persist());
