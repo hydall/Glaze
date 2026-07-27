@@ -30,6 +30,7 @@ class UnreadSessionsNotifier extends Notifier<Set<String>> {
   /// dot — see [_load].
   final Set<String> _readBeforeHydration = {};
   bool _hydrated = false;
+  bool _persistPending = false;
 
   @override
   Set<String> build() {
@@ -39,6 +40,7 @@ class UnreadSessionsNotifier extends Notifier<Set<String>> {
   }
 
   Future<void> _load() async {
+    var prunedStored = false;
     try {
       final prefs = await SharedPreferences.getInstance();
       final stored = prefs.getStringList(_prefsKey);
@@ -52,14 +54,30 @@ class UnreadSessionsNotifier extends Notifier<Set<String>> {
           .where((id) => !_readBeforeHydration.contains(id))
           .toList();
       state = {...state, ...restored};
-      // Persist the pruning so the dropped ids stay dropped across restarts.
-      if (restored.length != stored.length) unawaited(_persist());
+      // Re-persist so the pruned ids stay dropped across restarts.
+      prunedStored = restored.length != stored.length;
     } catch (e) {
       debugPrint('[UnreadSessions] load failed: $e');
     } finally {
       _hydrated = true;
       _readBeforeHydration.clear();
+      if (prunedStored || _persistPending) {
+        _persistPending = false;
+        unawaited(_persist());
+      }
     }
+  }
+
+  /// Writes the set out, but never before hydration finished: until [_load]
+  /// merges, the in-memory set is not authoritative, and flushing it would wipe
+  /// the ids still sitting in prefs (a reply landing during app start used to
+  /// clear every other session's dot). Pending writes are flushed by [_load].
+  void _schedulePersist() {
+    if (!_hydrated) {
+      _persistPending = true;
+      return;
+    }
+    unawaited(_persist());
   }
 
   Future<void> _persist() async {
@@ -74,7 +92,7 @@ class UnreadSessionsNotifier extends Notifier<Set<String>> {
   void markUnread(String sessionId) {
     if (state.contains(sessionId)) return;
     state = {...state, sessionId};
-    unawaited(_persist());
+    _schedulePersist();
   }
 
   void markRead(String sessionId) {
@@ -83,6 +101,6 @@ class UnreadSessionsNotifier extends Notifier<Set<String>> {
     if (!_hydrated) _readBeforeHydration.add(sessionId);
     if (!state.contains(sessionId)) return;
     state = {...state}..remove(sessionId);
-    unawaited(_persist());
+    _schedulePersist();
   }
 }

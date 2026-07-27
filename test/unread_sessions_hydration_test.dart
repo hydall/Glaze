@@ -41,13 +41,17 @@ void main() {
     expect(prefs.getStringList('unread_sessions'), ['s2']);
   });
 
-  test('mark during hydration survives the merge', () async {
+  test('mark during hydration survives the merge and does not clobber prefs', () async {
     setUpContainer(['s1']);
 
+    // A reply landing during app start must not flush the still-empty set over
+    // the stored one — that used to wipe every other session's dot.
     container.read(unreadSessionsProvider.notifier).markUnread('s2');
     await pumpEventQueue();
 
     expect(container.read(unreadSessionsProvider), {'s1', 's2'});
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getStringList('unread_sessions')?.toSet(), {'s1', 's2'});
   });
 
   test('a fresh reply after hydration re-flags a previously read session', () async {
@@ -64,6 +68,8 @@ void main() {
   test('stored set is restored untouched when nothing was read early', () async {
     setUpContainer(['s1', 's2']);
 
+    // The provider is lazy — read it first so `build` kicks off the load.
+    expect(container.read(unreadSessionsProvider), isEmpty);
     await pumpEventQueue();
 
     expect(container.read(unreadSessionsProvider), {'s1', 's2'});
