@@ -184,6 +184,53 @@ void main() {
     expect(prefs.getBool('gz_thumb_v6_backfilled'), isTrue);
   });
 
+  test(
+    'thumbnail migration preserves existing files when prefs move',
+    () async {
+      final thumbDir = Directory(p.join(tmpDir.path, 'thumbnails'));
+      await thumbDir.create(recursive: true);
+      final thumbnail = File(p.join(thumbDir.path, 'existing.jpg'));
+      await thumbnail.writeAsBytes([1, 2, 3]);
+      final prefs = await SharedPreferences.getInstance();
+
+      await service.migrateOldThumbnails(prefs);
+
+      expect(await thumbnail.exists(), isTrue);
+      expect(prefs.getBool('gz_thumb_v6_migrated'), isTrue);
+      expect(
+        await File(p.join(tmpDir.path, '.thumbnails-v6-migrated')).exists(),
+        isTrue,
+      );
+      expect(
+        await File(
+          p.join(tmpDir.path, '.thumbnails-v6-refresh-required'),
+        ).exists(),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'adopting an existing v6 library only backfills missing files',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'gz_thumb_v6_migrated': true,
+        'gz_thumb_v6_backfilled': true,
+      });
+      final prefs = await SharedPreferences.getInstance();
+
+      await service.migrateOldThumbnails(prefs);
+
+      expect(prefs.getBool('gz_thumb_v6_backfilled'), isFalse);
+      expect(
+        await File(
+          p.join(tmpDir.path, '.thumbnails-v6-refresh-required'),
+        ).exists(),
+        isFalse,
+      );
+    },
+  );
+
   group('absolutePath rebasing (iOS sandbox UUID change)', () {
     test('relative path is joined onto baseDir', () {
       // Compare path-equivalently (separator-agnostic).
@@ -196,44 +243,48 @@ void main() {
       );
     });
 
-    test('existing absolute path is returned unchanged (Android/Windows)',
-        () async {
-      // Save a real avatar so the absolute path exists, then confirm
-      // absolutePath returns it verbatim — no rebasing when the file is valid.
-      final png = makePng(80, 80);
-      final abs = await service.saveAvatar('valid', png);
-      expect(File(abs).isAbsolute, isTrue);
-      expect(File(abs).existsSync(), isTrue);
-      expect(service.absolutePath(abs), equals(abs));
-    });
+    test(
+      'existing absolute path is returned unchanged (Android/Windows)',
+      () async {
+        // Save a real avatar so the absolute path exists, then confirm
+        // absolutePath returns it verbatim — no rebasing when the file is valid.
+        final png = makePng(80, 80);
+        final abs = await service.saveAvatar('valid', png);
+        expect(File(abs).isAbsolute, isTrue);
+        expect(File(abs).existsSync(), isTrue);
+        expect(service.absolutePath(abs), equals(abs));
+      },
+    );
 
-    test('stale absolute path under /Glaze/ is rebased onto current baseDir',
-        () async {
-      // Simulate an iOS path persisted under an OLD container UUID. The file
-      // does not exist at that absolute location, but the same sub-path
-      // exists under the current baseDir → should rebase.
-      //
-      // The rebasing only triggers when the input is recognised as absolute.
-      // On the Windows test host a unix path like /var/... is NOT absolute,
-      // so gate this assertion to POSIX hosts (where iOS-style paths apply).
-      final png = makePng(80, 80);
-      await service.saveAvatar('moved', png); // creates avatars/moved.png
+    test(
+      'stale absolute path under /Glaze/ is rebased onto current baseDir',
+      () async {
+        // Simulate an iOS path persisted under an OLD container UUID. The file
+        // does not exist at that absolute location, but the same sub-path
+        // exists under the current baseDir → should rebase.
+        //
+        // The rebasing only triggers when the input is recognised as absolute.
+        // On the Windows test host a unix path like /var/... is NOT absolute,
+        // so gate this assertion to POSIX hosts (where iOS-style paths apply).
+        final png = makePng(80, 80);
+        await service.saveAvatar('moved', png); // creates avatars/moved.png
 
-      const stale =
-          '/var/mobile/Containers/Data/Application/OLD-UUID/Documents/Glaze/avatars/moved.png';
-      final resolved = service.absolutePath(stale)!;
-      if (File(stale).isAbsolute) {
-        expect(
-          p.equals(resolved, p.join(tmpDir.path, 'avatars', 'moved.png')),
-          isTrue,
-          reason: 'stale /Glaze/ path should rebase onto current baseDir',
-        );
-        expect(File(resolved).existsSync(), isTrue);
-      } else {
-        // Non-absolute on this host → treated as relative, joined onto base.
-        expect(resolved, contains('moved.png'));
-      }
-    });
+        const stale =
+            '/var/mobile/Containers/Data/Application/OLD-UUID/Documents/Glaze/avatars/moved.png';
+        final resolved = service.absolutePath(stale)!;
+        if (File(stale).isAbsolute) {
+          expect(
+            p.equals(resolved, p.join(tmpDir.path, 'avatars', 'moved.png')),
+            isTrue,
+            reason: 'stale /Glaze/ path should rebase onto current baseDir',
+          );
+          expect(File(resolved).existsSync(), isTrue);
+        } else {
+          // Non-absolute on this host → treated as relative, joined onto base.
+          expect(resolved, contains('moved.png'));
+        }
+      },
+    );
 
     test('empty and null are passed through', () {
       expect(service.absolutePath(''), equals(''));
@@ -252,7 +303,9 @@ String base64Encode(Uint8List bytes) {
     final b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
     buf.write(chars[(b0 >> 2) & 0x3F]);
     buf.write(chars[((b0 << 4) | (b1 >> 4)) & 0x3F]);
-    buf.write(i + 1 < bytes.length ? chars[((b1 << 2) | (b2 >> 6)) & 0x3F] : '=');
+    buf.write(
+      i + 1 < bytes.length ? chars[((b1 << 2) | (b2 >> 6)) & 0x3F] : '=',
+    );
     buf.write(i + 2 < bytes.length ? chars[b2 & 0x3F] : '=');
   }
   return buf.toString();

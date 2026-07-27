@@ -9,8 +9,8 @@ void main() {
       'lib/features/chat/widgets/authors_note_sheet.dart',
       'lib/features/chat/widgets/chat_stats_sheet.dart',
       'lib/features/chat/widgets/lorebook_coverage_sheet.dart',
-      'lib/features/chat/widgets/context_info_sheet.dart',
-      'lib/features/chat/widgets/chat_dialogs.dart',
+      // context_info_sheet.dart and chat_dialogs.dart were deleted in 0565341;
+      // they are intentionally absent from this list.
       'lib/features/chat/widgets/memory_books_sheet.dart',
       'lib/features/regex/regex_sheet.dart',
       'lib/features/personas/persona_list_screen.dart',
@@ -33,10 +33,21 @@ void main() {
       }
     });
 
+    // Documented exception. chat_stats_sheet.dart reads sessions straight from
+    // chatRepoProvider on purpose — see the comment at its _initData(): the
+    // cached provider is not invalidated on message edits/deletions, so the
+    // stats counts would lag, and a plain repo future is guaranteed to complete
+    // where the provider may stay unresolved. Deliberate, so the rule below
+    // skips it rather than the rule being deleted for everyone else.
+    final directRepoExceptions = <String>{
+      'lib/features/chat/widgets/chat_stats_sheet.dart',
+    };
+
     test('no widget files directly import *RepoProvider', () {
       for (final path in widgetFiles) {
+        if (directRepoExceptions.contains(path)) continue;
         final source = File(path).readAsStringSync();
-        
+
         // Check that files don't directly use repo providers for data access
         // Note: Some files may still import db_provider.dart for other providers
         // like imageStorageProvider or characterImporterProvider
@@ -59,8 +70,8 @@ void main() {
       }
     });
 
-    test('total widget files count is 17', () {
-      expect(widgetFiles.length, 17);
+    test('total widget files count is 15', () {
+      expect(widgetFiles.length, 15);
     });
 
     test('no .put() calls on repos in widget code', () async {

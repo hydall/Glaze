@@ -52,6 +52,11 @@ class _SessionLifecycleTrackerState extends ConsumerState<SessionLifecycleTracke
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _enteredAt = DateTime.now();
+      // `isActiveSession` is false while the app is backgrounded, so a reply
+      // that landed then was flagged unread even though this chat stayed open.
+      // Coming back to it is reading it — clear the dot (and restore the active
+      // context, which suppresses redundant notifications).
+      _syncActiveContext();
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _flushTime();
     }

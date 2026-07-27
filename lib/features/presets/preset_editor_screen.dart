@@ -97,18 +97,20 @@ class PresetEditorBody extends ConsumerStatefulWidget {
 }
 
 class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
-  late final _nameCtrl =
-      TextEditingController(text: widget.preset?.name ?? '');
+  late final _nameCtrl = TextEditingController(text: widget.preset?.name ?? '');
   late String _author = widget.preset?.author ?? '';
   late List<PresetBlock> _blocks;
   late List<PresetRegex> _regexes;
   late bool _parseInlineReasoning = widget.preset?.reasoningEnabled ?? false;
-  late final _reasoningStartCtrl =
-      TextEditingController(text: widget.preset?.reasoningStart ?? '');
-  late final _reasoningEndCtrl =
-      TextEditingController(text: widget.preset?.reasoningEnd ?? '');
-  late final _impersonationPromptCtrl =
-      TextEditingController(text: widget.preset?.impersonationPrompt ?? '');
+  late final _reasoningStartCtrl = TextEditingController(
+    text: widget.preset?.reasoningStart ?? '',
+  );
+  late final _reasoningEndCtrl = TextEditingController(
+    text: widget.preset?.reasoningEnd ?? '',
+  );
+  late final _impersonationPromptCtrl = TextEditingController(
+    text: widget.preset?.impersonationPrompt ?? '',
+  );
   late bool _mergePrompts = widget.preset?.mergePrompts ?? false;
   bool _showAdvanced = false;
   int? _expandedBlockIndex;
@@ -118,7 +120,8 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
 
   Timer? _saveTimer;
   late final String _currentId = widget.preset?.id ?? generateId();
-  late final int _createdAt = widget.preset?.createdAt ?? currentTimestampSeconds();
+  late final int _createdAt =
+      widget.preset?.createdAt ?? currentTimestampSeconds();
 
   @override
   void initState() {
@@ -168,7 +171,9 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   }
 
   Future<void> _performSave() async {
-    final name = _nameCtrl.text.trim().isEmpty ? 'New Preset' : _nameCtrl.text.trim();
+    final name = _nameCtrl.text.trim().isEmpty
+        ? 'New Preset'
+        : _nameCtrl.text.trim();
     final presetToSave = Preset(
       id: _currentId,
       name: name,
@@ -279,7 +284,8 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       key: const ValueKey('dashboard'),
       padding: EdgeInsets.only(
         top: MediaQuery.paddingOf(context).top,
-        bottom: MediaQuery.paddingOf(context).bottom +
+        bottom:
+            MediaQuery.paddingOf(context).bottom +
             MediaQuery.viewInsetsOf(context).bottom,
       ),
       child: Column(
@@ -297,8 +303,9 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   // ─── Dashboard card ──────────────────────────────────────────────────────
 
   Widget _buildDashboard() {
-    final displayName =
-        _nameCtrl.text.trim().isEmpty ? 'New Preset' : _nameCtrl.text.trim();
+    final displayName = _nameCtrl.text.trim().isEmpty
+        ? 'New Preset'
+        : _nameCtrl.text.trim();
     final addBlockAtTop =
         ref.watch(appSettingsProvider).value?.addBlockAtTop ?? false;
 
@@ -338,8 +345,9 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w500,
-                                  color:
-                                      context.cs.primary.withValues(alpha: 0.8),
+                                  color: context.cs.primary.withValues(
+                                    alpha: 0.8,
+                                  ),
                                 ),
                               ),
                           ],
@@ -364,7 +372,10 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
                   const Spacer(),
                   _BlocksBadge(
                     count: _blocks
-                        .where((b) => b.enabled && !b.isStashed && b.content.isNotEmpty)
+                        .where(
+                          (b) =>
+                              b.enabled && !b.isStashed && b.content.isNotEmpty,
+                        )
                         .fold(0, (sum, b) => sum + estimateTokens(b.content)),
                   ),
                 ],
@@ -399,9 +410,11 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           if (_expandedBlockIndex == oldIndex) {
             _expandedBlockIndex = newIndex;
           } else if (_expandedBlockIndex != null) {
-            if (oldIndex < _expandedBlockIndex! && newIndex >= _expandedBlockIndex!) {
+            if (oldIndex < _expandedBlockIndex! &&
+                newIndex >= _expandedBlockIndex!) {
               _expandedBlockIndex = _expandedBlockIndex! - 1;
-            } else if (oldIndex > _expandedBlockIndex! && newIndex <= _expandedBlockIndex!) {
+            } else if (oldIndex > _expandedBlockIndex! &&
+                newIndex <= _expandedBlockIndex!) {
               _expandedBlockIndex = _expandedBlockIndex! + 1;
             }
           }
@@ -449,21 +462,21 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
             children: [
               Text(
                 'Advanced Settings',
-                 style: TextStyle(
-                   fontSize: 14,
-                   fontWeight: FontWeight.w600,
-                   color: context.cs.onSurfaceVariant,
-                 ),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: context.cs.onSurfaceVariant,
+                ),
               ),
               const Spacer(),
               AnimatedRotation(
                 turns: _showAdvanced ? 0.5 : 0,
                 duration: const Duration(milliseconds: 300),
-                 child: Icon(
-                   Icons.expand_more,
-                   color: context.cs.onSurfaceVariant,
-                   size: 20,
-                 ),
+                child: Icon(
+                  Icons.expand_more,
+                  color: context.cs.onSurfaceVariant,
+                  size: 20,
+                ),
               ),
             ],
           ),
@@ -755,8 +768,6 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     _scheduleSave();
   }
 
-
-
   void _showRenameDialog() {
     GlazeBottomSheet.show<void>(
       context,
@@ -900,8 +911,9 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   InputDecoration _inputDecoration(String hint) {
     return InputDecoration(
       hintText: hint,
-      hintStyle:
-          TextStyle(color: context.cs.onSurfaceVariant.withValues(alpha: 0.5)),
+      hintStyle: TextStyle(
+        color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+      ),
       filled: true,
       fillColor: Colors.white.withValues(alpha: 0.04),
       border: OutlineInputBorder(
@@ -916,8 +928,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         borderRadius: BorderRadius.circular(10),
         borderSide: BorderSide(color: context.cs.primary),
       ),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     );
   }
 }
@@ -965,11 +976,11 @@ class _AddBlockRow extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 'Add Block',
-                 style: TextStyle(
-                   fontSize: 15,
-                   fontWeight: FontWeight.w600,
-                   color: context.cs.primary,
-                 ),
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: context.cs.primary,
+                ),
               ),
             ],
           ),
@@ -988,7 +999,7 @@ class _DotsButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-            color: context.cs.primary.withValues(alpha: 0.1),
+      color: context.cs.primary.withValues(alpha: 0.1),
       shape: const CircleBorder(),
       child: InkWell(
         onTap: onTap,
@@ -1013,8 +1024,11 @@ class _UtilButton extends StatelessWidget {
   final IconData icon;
   final int count;
   final VoidCallback onTap;
-  const _UtilButton(
-      {required this.icon, required this.count, required this.onTap});
+  const _UtilButton({
+    required this.icon,
+    required this.count,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1116,7 +1130,10 @@ class _SectionLabel extends StatelessWidget {
     if (helpTerm == null) return label;
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: [label, HelpTip(term: helpTerm!)],
+      children: [
+        label,
+        HelpTip(term: helpTerm!),
+      ],
     );
   }
 }
@@ -1142,10 +1159,7 @@ class _SettingsToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final labelWidget = Text(
       label,
-      style: TextStyle(
-        fontSize: 14,
-        color: context.cs.onSurface,
-      ),
+      style: TextStyle(fontSize: 14, color: context.cs.onSurface),
     );
     return Row(
       children: [
@@ -1156,7 +1170,10 @@ class _SettingsToggle extends StatelessWidget {
               if (helpTerm != null)
                 Row(
                   mainAxisSize: MainAxisSize.min,
-                  children: [labelWidget, HelpTip(term: helpTerm!)],
+                  children: [
+                    labelWidget,
+                    HelpTip(term: helpTerm!),
+                  ],
                 )
               else
                 labelWidget,
@@ -1197,7 +1214,11 @@ class _BlockEditorInline extends StatelessWidget {
       GenericEditorSection(
         title: null,
         fields: [
-          GenericEditorField(key: 'name', label: 'placeholder_block_name'.tr(), type: 'text'),
+          GenericEditorField(
+            key: 'name',
+            label: 'placeholder_block_name'.tr(),
+            type: 'text',
+          ),
           GenericEditorField(
             key: 'role',
             label: 'label_role'.tr(),
@@ -1221,7 +1242,10 @@ class _BlockEditorInline extends StatelessWidget {
             key: 'depth',
             label: 'label_depth'.tr(),
             type: 'select',
-            options: List.generate(20, (i) => {'label': '${i + 1}', 'value': i + 1}),
+            options: List.generate(
+              20,
+              (i) => {'label': '${i + 1}', 'value': i + 1},
+            ),
             showIf: (item) => item['insertionMode'] == 'depth',
           ),
           GenericEditorField(
@@ -1259,7 +1283,12 @@ class _BlockEditorInline extends StatelessWidget {
         ),
         // Delete button
         Padding(
-          padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.paddingOf(context).bottom + 16),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            0,
+            16,
+            MediaQuery.paddingOf(context).bottom + 16,
+          ),
           child: Material(
             color: const Color(0xFFFF4444).withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
@@ -1271,7 +1300,11 @@ class _BlockEditorInline extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.delete_outlined, size: 20, color: Color(0xFFFF4444)),
+                    Icon(
+                      Icons.delete_outlined,
+                      size: 20,
+                      color: Color(0xFFFF4444),
+                    ),
                     SizedBox(width: 8),
                     Text(
                       'Delete Block',
@@ -1344,7 +1377,10 @@ class _AuthorsNoteBlockEditor extends ConsumerWidget {
             key: 'depth',
             label: 'label_depth'.tr(),
             type: 'select',
-            options: List.generate(20, (i) => {'label': '${i + 1}', 'value': i + 1}),
+            options: List.generate(
+              20,
+              (i) => {'label': '${i + 1}', 'value': i + 1},
+            ),
             showIf: (item) => item['insertionMode'] == 'depth',
           ),
         ],
@@ -1433,7 +1469,10 @@ class _SummaryBlockEditor extends ConsumerWidget {
             key: 'depth',
             label: 'label_depth'.tr(),
             type: 'select',
-            options: List.generate(20, (i) => {'label': '${i + 1}', 'value': i + 1}),
+            options: List.generate(
+              20,
+              (i) => {'label': '${i + 1}', 'value': i + 1},
+            ),
             showIf: (item) => item['insertionMode'] == 'depth',
           ),
           GenericEditorField(
@@ -1549,7 +1588,11 @@ Widget _linkedSessionContentCard(
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.edit_outlined, size: 18, color: context.cs.primary),
+                        Icon(
+                          Icons.edit_outlined,
+                          size: 18,
+                          color: context.cs.primary,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           'Edit content',
@@ -1571,4 +1614,3 @@ Widget _linkedSessionContentCard(
     ),
   );
 }
-

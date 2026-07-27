@@ -70,16 +70,33 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         widget.skipStartup || const bool.fromEnvironment('FLUTTER_TEST');
     GlazeApp._restart = widget.restart;
     WidgetsBinding.instance.addObserver(this);
-    loadActiveSelections(ref);
-    loadLorebookActivations(ref);
-    loadLorebookSettings(ref);
-    seedDefaultPresets(ref);
-    seedFeaturedPresets(ref);
+    _initInBackground(loadActiveSelections(ref), 'active selections');
+    _initInBackground(loadLorebookActivations(ref), 'lorebook activations');
+    _initInBackground(loadLorebookSettings(ref), 'lorebook settings');
+    _initInBackground(seedDefaultPresets(ref), 'default preset seeding');
+    _initInBackground(seedFeaturedPresets(ref), 'featured preset seeding');
     if (!widget.skipStartup) {
       _warmInitialListProviders();
     }
     if (_startupReady) return;
     unawaited(_initializeStartup());
+  }
+
+  /// Runs a fire-and-forget init task and keeps its failure contained.
+  ///
+  /// These are started unawaited from [initState], so without a handler any
+  /// failure becomes an unhandled async error — and one that can outlive the
+  /// widget: in widget tests the task is still in flight when teardown closes
+  /// the database, and the late "Can't re-open a database after closing it"
+  /// then lands on whichever test happens to be running.
+  ///
+  /// None of these tasks is needed for the first frame — they hydrate state
+  /// that the UI already renders empty — so a failure is logged and dropped
+  /// rather than escalated.
+  void _initInBackground(Future<void> work, String what) {
+    unawaited(work.catchError((Object e) {
+      debugPrint('Glaze init: $what failed — $e');
+    }));
   }
 
   /// Starts the DB-backed providers behind the initial routes now, concurrently

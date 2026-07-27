@@ -5,9 +5,29 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/chat/bridge/chat_bridge_controller.dart';
 import 'package:glaze_flutter/features/chat/bridge/chat_overlay_blur_region.dart';
+import 'package:glaze_flutter/features/chat/widgets/chat_message_sync.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_webview_sync_dispatcher.dart';
 
 void main() {
+  group('ChatMessageSync', () {
+    test('appends persisted user message while virtual placeholder exists', () {
+      final bridge = _FakeBridge();
+      final greeting = _assistant('a1');
+      final user = _user('u1');
+
+      const ChatMessageSync().sync(
+        bridge: bridge,
+        oldMsgs: [greeting],
+        newMsgs: [greeting, user],
+        visibleStartIndex: 0,
+        isGenerating: true,
+        sessionSwitching: false,
+      );
+
+      expect(bridge.appendedMessages, [user]);
+    });
+  });
+
   group('ChatWebViewSyncDispatcher', () {
     test(
       'does not skip just-sent user message after stale streaming flag',
@@ -103,45 +123,42 @@ void main() {
       expect(bridge.evalCalls.single, contains('setPostGenRunning(false)'));
     });
 
-    test(
-      'does not flag a non-trailing assistant as last when a user message '
-      'trails after a cancelled generation',
-      () {
-        // Reproduces the cancel+regen stuck-Regenerate-button bug: after Stop
-        // trims the empty assistant placeholder, the trailing message is the
-        // user turn. The falling edge must NOT stamp data-is-last on the
-        // earlier char bubble (greeting), otherwise two sections carry the flag
-        // and setLastMessage (single querySelector) can never clear the
-        // user-message Regenerate button on the next generation.
-        final bridge = _FakeBridge()..isGenerating = true;
-        final greeting = _assistant('greeting');
-        final user = _user('u1');
-        final dispatcher = ChatWebViewSyncDispatcher(
-          state: ChatWebViewSyncState()..wasGenerating = true,
-        );
+    test('does not flag a non-trailing assistant as last when a user message '
+        'trails after a cancelled generation', () {
+      // Reproduces the cancel+regen stuck-Regenerate-button bug: after Stop
+      // trims the empty assistant placeholder, the trailing message is the
+      // user turn. The falling edge must NOT stamp data-is-last on the
+      // earlier char bubble (greeting), otherwise two sections carry the flag
+      // and setLastMessage (single querySelector) can never clear the
+      // user-message Regenerate button on the next generation.
+      final bridge = _FakeBridge()..isGenerating = true;
+      final greeting = _assistant('greeting');
+      final user = _user('u1');
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState()..wasGenerating = true,
+      );
 
-        dispatcher.dispatch(
-          bridge: bridge,
-          old: _fields(isGenerating: true, messages: [greeting, user]),
-          current: _fields(isGenerating: false, messages: [greeting, user]),
-          oldMessages: [greeting, user],
-          newMessages: [greeting, user],
-          streamingId: '__streaming__',
-          onSyncExtBlockPanels: () async {},
-          appendMessage: (_) async {},
-          buildStreamingPlaceholder: () => _assistant('__streaming__'),
-        );
+      dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(isGenerating: true, messages: [greeting, user]),
+        current: _fields(isGenerating: false, messages: [greeting, user]),
+        oldMessages: [greeting, user],
+        newMessages: [greeting, user],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
 
-        // The trailing message is the user turn → the last assistant bubble is
-        // not last and must be refreshed with isLast=false.
-        expect(bridge.updatedMessages, [greeting]);
-        expect(bridge.updatedIsLast, [false]);
-        // setLastMessage targets the trailing user message (which injects and
-        // owns the sole data-is-last / Regenerate button).
-        expect(bridge.lastMessageIds, ['u1']);
-        expect(bridge.evalCalls.single, contains('setGenerating(false)'));
-      },
-    );
+      // The trailing message is the user turn → the last assistant bubble is
+      // not last and must be refreshed with isLast=false.
+      expect(bridge.updatedMessages, [greeting]);
+      expect(bridge.updatedIsLast, [false]);
+      // setLastMessage targets the trailing user message (which injects and
+      // owns the sole data-is-last / Regenerate button).
+      expect(bridge.lastMessageIds, ['u1']);
+      expect(bridge.evalCalls.single, contains('setGenerating(false)'));
+    });
 
     test('continuation flags its target instead of adding a placeholder', () {
       // A continuation extends an existing bubble; a typing placeholder would
@@ -309,6 +326,7 @@ class _FakeBridge implements ChatBridgeController {
   final List<List<ChatOverlayBlurRegion>> overlayBlurCalls = [];
   final List<String> evalCalls = [];
   final List<ChatMessage> updatedMessages = [];
+  final List<ChatMessage> appendedMessages = [];
   final List<bool> updatedIsLast = [];
   final List<String?> lastMessageIds = [];
 
@@ -326,6 +344,14 @@ class _FakeBridge implements ChatBridgeController {
 
   @override
   Future<void> removeMessage(String _) async {}
+
+  @override
+  Future<void> appendMessages(
+    List<ChatMessage> messages, {
+    int startIndex = 0,
+  }) async {
+    appendedMessages.addAll(messages);
+  }
 
   @override
   Future<void> updateMessage(

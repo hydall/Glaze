@@ -5,12 +5,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
 import 'core/debug/perf_debug.dart';
+import 'core/services/windows_preferences_migration.dart';
 
 final appRestartKey = GlobalKey();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   PerfDebug.installFrameLoggerIfEnabled();
+  try {
+    await migrateLegacyWindowsPreferences();
+  } catch (error, stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'startup',
+        context: ErrorDescription('Windows preferences migration failed'),
+      ),
+    );
+  }
   await EasyLocalization.ensureInitialized();
   try {
     await SystemChrome.setPreferredOrientations([

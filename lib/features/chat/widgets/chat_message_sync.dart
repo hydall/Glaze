@@ -13,7 +13,7 @@ import '../bridge/chat_bridge_controller.dart';
 ///   * First load (old empty) → `setMessages`.
 ///   * Cleared (new empty) → `clearAll`.
 ///   * Head prepend → `prependMessages` for the prefix.
-///   * Tail append (skipping the streaming placeholder) → `appendMessages`.
+///   * Tail append → `appendMessages`.
 ///   * Head truncation → `removeMessage` per removed id.
 ///   * Tail truncation → `removeMessage` for trimmed ids.
 ///   * Same length with at least one swap → `clearAll` + `setMessages`.
@@ -24,9 +24,9 @@ class ChatMessageSync {
   const ChatMessageSync();
 
   /// Apply the diff between [oldMsgs] and [newMsgs] using the given
-  /// [bridge]. [streamingSkipLast] is set when the last message is a
-  /// streaming placeholder that should be excluded from the tail append
-  /// (the bridge keeps it in place from the previous frame).
+  /// [bridge]. The virtual streaming placeholder is owned by the bridge and is
+  /// never part of [newMsgs], so every message in this list must participate in
+  /// the diff.
   /// [visibleStartIndex] is forwarded to `setMessages` / `prependMessages`
   /// for the scrollback window.
   /// [isGenerating] controls whether `setLastMessage` is called after
@@ -38,7 +38,6 @@ class ChatMessageSync {
     required List<ChatMessage> oldMsgs,
     required List<ChatMessage> newMsgs,
     required int visibleStartIndex,
-    required bool streamingSkipLast,
     required bool isGenerating,
     required bool sessionSwitching,
   }) {
@@ -47,7 +46,7 @@ class ChatMessageSync {
 
     final oldIds = oldMsgs.map((m) => m.id).toList();
     final newIds = newMsgs.map((m) => m.id).toList();
-    final newLen = newIds.length - (streamingSkipLast ? 1 : 0);
+    final newLen = newIds.length;
 
     if (oldIds.isEmpty) {
       bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);

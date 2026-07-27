@@ -821,7 +821,6 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       oldMsgs: oldMsgs,
       newMsgs: widget.messages,
       visibleStartIndex: widget.visibleStartIndex,
-      streamingSkipLast: widget.isGenerating && _syncState.streamingSent,
       isGenerating: widget.isGenerating,
       sessionSwitching: _sessionSwitching,
     );

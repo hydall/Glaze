@@ -14,7 +14,10 @@ final Map<String, String> _resolvedThumbCache = {};
 String? _resolveAvatarThumb(String? avatarPath) {
   if (avatarPath == null || avatarPath.isEmpty) return null;
   final cached = _resolvedThumbCache[avatarPath];
-  if (cached != null) return cached;
+  if (cached != null) {
+    if (File(cached).existsSync()) return cached;
+    _resolvedThumbCache.remove(avatarPath);
+  }
   final resolved = resolveGlazeThumbnailPath(avatarPath);
   if (resolved == null || resolved.isEmpty) return null;
   final sep = Platform.pathSeparator;

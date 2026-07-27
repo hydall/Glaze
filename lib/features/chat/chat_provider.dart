@@ -788,6 +788,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
       final preview = buildMessagePreview(completedResult.messages);
       final finalSessionId = completedResult.session?.id;
+      // Snapshot before the notification pipeline awaits platform channels —
+      // leaving the chat during that gap must not flag a reply the user just
+      // watched land. Mirrors `SyncNotificationStage`.
+      final wasActive = notifService.isActiveSession(arg, finalSessionId);
       await notifService.onGenerationCompleted(
         character?.name ?? 'Unknown',
         arg,
@@ -800,6 +804,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       );
 
       if (finalSessionId != null &&
+          !wasActive &&
           !notifService.isActiveSession(arg, finalSessionId)) {
         ref.read(unreadSessionsProvider.notifier).markUnread(finalSessionId);
       }

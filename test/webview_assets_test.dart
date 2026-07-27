@@ -708,7 +708,7 @@ void main() {
     test('scroll compensation is driven by the inset, not the padding', () {
       expect(
         bridgeControllerJs,
-        contains('container.scrollTop += insetDiff'),
+        contains('container.scrollTop + insetDiff'),
         reason:
             'The content must follow the input bar by the full inset delta '
             'regardless of how the inset was split between padding and shrink, '

@@ -18,7 +18,12 @@ class CharacterImportResult {
   final Map<String, dynamic>? characterBookData;
   final List<GalleryImageData>? galleryImages;
 
-  CharacterImportResult({required this.character, required this.hadAvatar, this.characterBookData, this.galleryImages});
+  CharacterImportResult({
+    required this.character,
+    required this.hadAvatar,
+    this.characterBookData,
+    this.galleryImages,
+  });
 }
 
 class GalleryImageData {
@@ -26,7 +31,11 @@ class GalleryImageData {
   final Uint8List bytes;
   final String ext;
 
-  GalleryImageData({required this.label, required this.bytes, required this.ext});
+  GalleryImageData({
+    required this.label,
+    required this.bytes,
+    required this.ext,
+  });
 }
 
 class CharacterImporter {
@@ -49,7 +58,9 @@ class CharacterImporter {
   }
 
   Future<CharacterImportResult> importFromBytes(
-      Uint8List bytes, String fileName) async {
+    Uint8List bytes,
+    String fileName,
+  ) async {
     final ext = p.extension(fileName).toLowerCase();
 
     if (ext == '.png') {
@@ -71,8 +82,10 @@ class CharacterImporter {
     _logCharacterBook('png', data);
     final character = await _saveCharacterWithAvatar(data, pngBytes);
     return CharacterImportResult(
-        character: character, hadAvatar: true,
-        characterBookData: data['character_book'] as Map<String, dynamic>?);
+      character: character,
+      hadAvatar: true,
+      characterBookData: data['character_book'] as Map<String, dynamic>?,
+    );
   }
 
   Future<CharacterImportResult> _importJson(Uint8List jsonBytes) async {
@@ -89,12 +102,14 @@ class CharacterImporter {
 
     final character = await _saveCharacterWithAvatar(data, avatarBytes);
     return CharacterImportResult(
-        character: character, hadAvatar: avatarBytes != null,
-        characterBookData: data['character_book'] as Map<String, dynamic>?);
+      character: character,
+      hadAvatar: avatarBytes != null,
+      characterBookData: data['character_book'] as Map<String, dynamic>?,
+    );
   }
 
   Future<CharacterImportResult> _importCharX(Uint8List zipBytes) async {
-    final archive = ZipDecoder().decodeBytes(zipBytes);
+    final archive = ZipDecoder().decodeBytes(_charXZipBytes(zipBytes));
 
     String? cardJsonContent;
     final assetFiles = <String, Uint8List>{};
@@ -139,7 +154,7 @@ class CharacterImporter {
     if (avatarBytes == null) {
       final avatarSrc = data['avatar'] as String?;
       if (avatarSrc != null && avatarSrc.isNotEmpty) {
-      avatarBytes = dataUrlToBytes(avatarSrc);
+        avatarBytes = dataUrlToBytes(avatarSrc);
       }
     }
 
@@ -153,13 +168,16 @@ class CharacterImporter {
         final uri = gMap['uri'] as String?;
         if (uri != null) {
           final zipPath = _resolveEmbeddedUri(uri);
-          if (assetFiles.containsKey(zipPath) && assetFiles[zipPath]!.isNotEmpty) {
+          if (assetFiles.containsKey(zipPath) &&
+              assetFiles[zipPath]!.isNotEmpty) {
             final fileExt = p.extension(zipPath).replaceFirst('.', '');
-            galleryImages.add(GalleryImageData(
-              label: gMap['label'] as String? ?? '',
-              bytes: assetFiles[zipPath]!,
-              ext: fileExt.isEmpty ? 'png' : fileExt,
-            ));
+            galleryImages.add(
+              GalleryImageData(
+                label: gMap['label'] as String? ?? '',
+                bytes: assetFiles[zipPath]!,
+                ext: fileExt.isEmpty ? 'png' : fileExt,
+              ),
+            );
           }
         }
       }
@@ -172,13 +190,16 @@ class CharacterImporter {
         final uri = assetMap['uri'] as String?;
         if (type == 'gallery' && uri != null) {
           final zipPath = _resolveEmbeddedUri(uri);
-          if (assetFiles.containsKey(zipPath) && assetFiles[zipPath]!.isNotEmpty) {
+          if (assetFiles.containsKey(zipPath) &&
+              assetFiles[zipPath]!.isNotEmpty) {
             final fileExt = p.extension(zipPath).replaceFirst('.', '');
-            galleryImages.add(GalleryImageData(
-              label: assetMap['name'] as String? ?? '',
-              bytes: assetFiles[zipPath]!,
-              ext: fileExt.isEmpty ? 'png' : fileExt,
-            ));
+            galleryImages.add(
+              GalleryImageData(
+                label: assetMap['name'] as String? ?? '',
+                bytes: assetFiles[zipPath]!,
+                ext: fileExt.isEmpty ? 'png' : fileExt,
+              ),
+            );
           }
         }
       }
@@ -186,10 +207,40 @@ class CharacterImporter {
 
     final character = await _saveCharacterWithAvatar(data, avatarBytes);
     return CharacterImportResult(
-        character: character, hadAvatar: avatarBytes != null,
-        characterBookData: data['character_book'] as Map<String, dynamic>?,
-        galleryImages: galleryImages.isNotEmpty ? galleryImages : null);
+      character: character,
+      hadAvatar: avatarBytes != null,
+      characterBookData: data['character_book'] as Map<String, dynamic>?,
+      galleryImages: galleryImages.isNotEmpty ? galleryImages : null,
+    );
   }
+
+  Uint8List _charXZipBytes(Uint8List bytes) {
+    if (_hasZipSignature(bytes, 0)) return bytes;
+
+    final isJpeg =
+        bytes.length >= 3 &&
+        bytes[0] == 0xff &&
+        bytes[1] == 0xd8 &&
+        bytes[2] == 0xff;
+    if (!isJpeg) return bytes;
+
+    for (var i = 3; i <= bytes.length - 4; i++) {
+      if (_hasZipSignature(bytes, i) &&
+          i >= 2 &&
+          bytes[i - 2] == 0xff &&
+          bytes[i - 1] == 0xd9) {
+        return Uint8List.sublistView(bytes, i);
+      }
+    }
+    return bytes;
+  }
+
+  bool _hasZipSignature(Uint8List bytes, int offset) =>
+      offset + 4 <= bytes.length &&
+      bytes[offset] == 0x50 &&
+      bytes[offset + 1] == 0x4b &&
+      bytes[offset + 2] == 0x03 &&
+      bytes[offset + 3] == 0x04;
 
   Map<String, dynamic> _normalizeCharacterData(Map<String, dynamic> json) {
     final spec = json['spec'] as String?;
@@ -209,19 +260,23 @@ class CharacterImporter {
   void _logCharacterBook(String source, Map<String, dynamic> data) {
     final book = data['character_book'];
     if (book == null) {
-      debugPrint('[character_import] source=$source name=${data['name']} character_book=null');
+      debugPrint(
+        '[character_import] source=$source name=${data['name']} character_book=null',
+      );
       return;
     }
     if (book is! Map) {
-      debugPrint('[character_import] source=$source name=${data['name']} character_book_type=${book.runtimeType}');
+      debugPrint(
+        '[character_import] source=$source name=${data['name']} character_book_type=${book.runtimeType}',
+      );
       return;
     }
     final entries = book['entries'];
     final entryCount = entries is List
         ? entries.length
         : entries is Map
-            ? entries.length
-            : 0;
+        ? entries.length
+        : 0;
     debugPrint(
       '[character_import] source=$source name=${data['name']} '
       'book_name=${book['name']} entries_type=${entries.runtimeType} '
@@ -230,7 +285,9 @@ class CharacterImporter {
   }
 
   Future<Character> _saveCharacterWithAvatar(
-      Map<String, dynamic> data, Uint8List? avatarBytes) async {
+    Map<String, dynamic> data,
+    Uint8List? avatarBytes,
+  ) async {
     final id = generateId();
     String? avatarPath;
 
@@ -239,8 +296,7 @@ class CharacterImporter {
     } else {
       final avatarSrc = data['avatar'] as String?;
       if (avatarSrc != null && avatarSrc.isNotEmpty) {
-        avatarPath =
-            await _imageStorage.saveAvatarFromDataUrl(id, avatarSrc);
+        avatarPath = await _imageStorage.saveAvatarFromDataUrl(id, avatarSrc);
       }
     }
 
@@ -264,7 +320,9 @@ class CharacterImporter {
       createdAt: currentTimestampSeconds(),
       fav: data['fav'] as bool? ?? false,
       extensions: _extractExtensions(data),
-      characterVersion: data['character_version'] is String ? data['character_version'] as String : '1',
+      characterVersion: data['character_version'] is String
+          ? data['character_version'] as String
+          : '1',
       depthPrompt: _extractDepthPrompt(data),
       depthPromptDepth: _extractDepthPromptDepth(data),
       depthPromptRole: _extractDepthPromptRole(data),

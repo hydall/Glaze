@@ -21,6 +21,8 @@ upstream `hydall/Glaze:nightly`.
 
 - **No direct commits to `nightly`, `staging` or `stable`** — always use a feature branch.
 - **Never PR straight into `staging` or `stable`** — features enter through `nightly` and are promoted.
+- **Squash-merge every PR** — one feature = one commit on `nightly`, so a regression found later is a single `git revert <sha>` instead of untangling a range.
+- **CI must be green before merge** — see below.
 - **Stack while catching up** — if a feature depends on another not-yet-merged branch, branch off that branch instead of `nightly`.
 - **Run `dart run build_runner build`** after changing any freezed/drift model.
 
@@ -32,6 +34,20 @@ git push -u origin feat/xxx
 ```
 
 Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use the **GitHub MCP tools** (`mcp__plugin_github_github__create_pull_request`) or the GitHub web UI. Do **not** use the `gh` CLI — GitHub operations go through GitHub MCP (project + global convention).
+
+## CI gate
+
+`.github/workflows/ci.yml` runs on every PR into `nightly`, `staging` or
+`stable` and does two things: `flutter analyze` and `flutter test`. A red check
+means the PR is not merged — no exceptions, no "it works on my machine".
+
+Only analyzer **errors** fail the run (`--no-fatal-infos --no-fatal-warnings`);
+infos and hints from the strict lint set are not build-breaking and must not be
+allowed to block every PR.
+
+Running `flutter analyze` locally before opening the PR is still useful — it is
+faster feedback — but it is not the gate. The gate is CI, because it cannot be
+skipped or forgotten.
 
 ## Before starting work
 
@@ -48,6 +64,20 @@ Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use the **GitHu
 - Sync nightly: `git checkout nightly && git pull`
 
 ## Promoting a release
+
+Promotion is a merge, not a PR. A `nightly → staging` diff is an aggregate of
+many features that nobody reads; opening a PR for it adds ceremony without
+adding a check.
+
+**`nightly → staging` is gated on a real device, not on the diff.** Promote only
+after a build of `nightly` (the *Build (Branch)* workflow) has been installed and
+actually used, and nothing obvious is broken. CI proves the code compiles and the
+tests pass; only a build on a phone or desktop proves the app still works.
+`staging` therefore means "someone held this in their hands", and `stable` means
+"that held up".
+
+When a promoted build turns out to be broken, revert the squashed commit of the
+offending feature on `nightly` and re-promote — that is what squash-merging buys.
 
 ```bash
 # nightly → staging (cut a release candidate)
