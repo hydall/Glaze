@@ -35,6 +35,7 @@ class MessageActionsCallbacks {
   final RegenerateCallback? onRegenerate;
   final RerunCleanerCallback? onRerunCleaner;
   final ToggleHiddenCallback? onToggleHidden;
+  final ToggleHiddenCallback? onToggleImageHidden;
   final InjectClickCallback? onInjectClick;
   final MemoryClickCallback? onMemoryClick;
   final GuidedSwipeCallback? onGuidedSwipe;
@@ -47,6 +48,7 @@ class MessageActionsCallbacks {
     this.onRegenerate,
     this.onRerunCleaner,
     this.onToggleHidden,
+    this.onToggleImageHidden,
     this.onInjectClick,
     this.onMemoryClick,
     this.onGuidedSwipe,

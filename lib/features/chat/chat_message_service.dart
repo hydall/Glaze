@@ -193,6 +193,19 @@ class ChatMessageService {
     return _persist(session, newMessages);
   }
 
+  /// Flips [ChatMessage.imageHidden] for the message at [index]. The bubble
+  /// keeps showing the attachment either way — only prompt inclusion changes
+  /// (see `HistoryAssembler.assemble`). No-op when the message carries no
+  /// image.
+  ChatSession toggleImageHidden(ChatSession session, int index) {
+    if (index < 0 || index >= session.messages.length) return session;
+    final msg = session.messages[index];
+    if (msg.imagePath == null || msg.imagePath!.isEmpty) return session;
+    final newMessages = List<ChatMessage>.from(session.messages);
+    newMessages[index] = msg.copyWith(imageHidden: !msg.imageHidden);
+    return _persist(session, newMessages);
+  }
+
   ChatSession unhideAllMessages(ChatSession session) {
     bool changed = false;
     final newMessages = session.messages.map((m) {
@@ -279,6 +292,10 @@ class ChatMessageService {
     final updated = msg.copyWith(
       swipeId: swipeId,
       content: activeContent,
+      // Switching variation is fresh activity: restamp so the chat list
+      // (sorted on the last message's timestamp) reorders. The message keeps
+      // its position inside the chat — only the stamp moves.
+      timestamp: DateTime.now().millisecondsSinceEpoch,
       // Error state is tracked per-swipe (swipesMeta[i]['isError']) so the
       // error styling follows the active variation only. Navigating to a
       // healthy swipe clears the error window; navigating back restores it.
@@ -375,6 +392,8 @@ class ChatMessageService {
     final updated = msg.copyWith(
       agentSwipeId: agentSwipeId,
       content: swipe.content,
+      // Same rule as the green swipes above: restamp on variation switch.
+      timestamp: DateTime.now().millisecondsSinceEpoch,
       reasoning: swipe.reasoning,
       genTime: swipe.genTime,
       tokens: swipe.tokens,

@@ -277,6 +277,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<void> toggleMessageHidden(int index) =>
       _messageOpsCtrl.toggleMessageHidden(index);
 
+  Future<void> toggleImageHidden(int index) =>
+      _messageOpsCtrl.toggleImageHidden(index);
+
   Future<void> unhideAllMessages() => _messageOpsCtrl.unhideAllMessages();
 
   Future<void> hideTopMessages(int count) =>

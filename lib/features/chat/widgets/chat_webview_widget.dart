@@ -531,6 +531,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onGuidedSwipe = callbacks.onGuidedSwipe;
     bridge.onMemoryClick = callbacks.onMemoryClick;
     bridge.onToggleHidden = callbacks.onToggleHidden;
+    bridge.onToggleImageHidden = callbacks.onToggleImageHidden;
     bridge.onInjectClick = callbacks.onInjectClick;
     bridge.onImgRetry = callbacks.onImgRetry;
     bridge.onImgFind = callbacks.onImgFind;

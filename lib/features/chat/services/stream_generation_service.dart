@@ -606,10 +606,9 @@ class StreamGenerationService {
         onError: (error) {
           idleGuard.dispose();
           if (idleTimedOut) {
-            final msg =
-                'Нет ответа от модели за ${idleTimeoutMs ~/ 1000}с — '
-                'соединение прервано. Проверьте endpoint или увеличьте '
-                'таймаут в настройках API.';
+            final msg = 'error_first_chunk_timeout'.tr(
+              namedArgs: {'seconds': '${idleTimeoutMs ~/ 1000}'},
+            );
             if (regenTargetId != null && saveSession != null) {
               finalState = _writer.writeRegenError(
                 errorText: msg,

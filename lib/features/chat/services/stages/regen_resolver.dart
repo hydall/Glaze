@@ -8,6 +8,7 @@ import '../../../chat_history/chat_history_provider.dart';
 import '../../chat_session_service.dart';
 import '../../chat_state.dart';
 import '../generation_pipeline.dart' show GenerationOutcome;
+import '../variation_error_state.dart';
 import 'stage_context.dart';
 
 /// Resolves the regen result: success / rollback / no-restoration branches.
@@ -86,7 +87,10 @@ class RegenResolver {
       swipesMeta: rollbackSwipesMeta,
       swipeDirection: original.swipeDirection,
       isTyping: false,
-      isError: false,
+      // Rolling back restores the pre-regen variation verbatim — including its
+      // error state. Clearing it here turned an errored variation into a
+      // normal-looking bubble whose text is an error message.
+      isError: restoredVariationIsError(original, rollbackSwipesMeta),
     );
     final restoredMessages = [...restoreSession.messages];
     restoredMessages[idx] = restored;

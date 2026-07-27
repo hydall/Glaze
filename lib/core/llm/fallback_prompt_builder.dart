@@ -29,7 +29,7 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
       PromptMessage(
         role: msg.role,
         content: macroResult.text,
-        imagePath: msg.imagePath,
+        imagePath: msg.imageHidden ? null : msg.imagePath,
       ),
     );
   }

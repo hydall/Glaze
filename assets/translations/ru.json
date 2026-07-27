@@ -393,6 +393,7 @@
   "error_connection_timed_out": "Время ожидания соединения истекло",
   "error_server_too_long": "Сервер слишком долго отвечает",
   "error_upload_timed_out": "Время отправки истекло",
+  "error_first_chunk_timeout": "Нет ответа от модели за {seconds}с — соединение прервано. Проверьте endpoint или увеличьте таймаут в настройках API.",
   "error_connection_failed_check_network": "Не удалось подключиться - проверьте эндпоинт и сеть",
   "error_ssl_certificate": "Ошибка SSL-сертификата",
   "error_request_failed": "Запрос не удался",

@@ -1,5 +1,5 @@
 import { ICON } from './icon_library.js';
-import { createImageAttachment } from './image_embed.js';
+import { createImageAttachment, setImageAttachmentHidden } from './image_embed.js';
 import { writeShadowContent } from './markdown.js';
 import {
   defaultName,
@@ -347,6 +347,17 @@ if (messageData.isEditing) classes.push('editing');
   /* ----- Image attachment ----- */
   _createImageAttachment(src, hidden) {
     return createImageAttachment(src, hidden, ICON);
+  }
+
+  /* Flip an existing attachment between "sent to the model" and "hidden from
+   * the model" without rebuilding the bubble. */
+  updateImageAttachmentHidden(sectionEl, hidden) {
+    if (!sectionEl) return;
+    setImageAttachmentHidden(
+      sectionEl.querySelector('.msg-image-attachment'),
+      hidden,
+      ICON,
+    );
   }
 
   /* ----- Typing container ----- */
@@ -940,19 +951,32 @@ if (messageData.isEditing) classes.push('editing');
     });
   }
 
-  setSearch(query, activeIndex = -1) {
+  setSearch(query, activeIndex = -1, _retried = false) {
+    // Nothing highlighted and nothing to highlight: skip the full re-render.
+    // This is the common path when a chat opens without an active search.
+    if (!query && !this.searchQuery) {
+      this.searchQuery = query;
+      this.activeSearchIndex = -1;
+      this.searchMatches = [];
+      return;
+    }
+
     this.searchQuery = query;
     this.activeSearchIndex = activeIndex;
     this.searchMatches = [];
     const globalState = { matchIndex: 0 };
-    
-    const items = (window.bridge && window.bridge.virtualList) 
-      ? window.bridge.virtualList.items.map(it => it.el) 
+
+    // Every message, not just the ones the virtual list currently mounts —
+    // `items` keeps the (possibly detached) element of each message, so match
+    // indices stay aligned with the ones Flutter counted over the raw text.
+    const items = (window.bridge && window.bridge.virtualList)
+      ? window.bridge.virtualList.items.map(it => it.el)
       : document.querySelectorAll('.message-section');
-      
+
     let activeMessageId = null;
 
     items.forEach(section => {
+      if (!section) return;
       const isUser = section.classList.contains('user');
       
       const processHost = (host, rawText) => {
@@ -981,21 +1005,37 @@ if (messageData.isEditing) classes.push('editing');
       }
     });
 
+    const total = globalState.matchIndex;
+
+    // Flutter counts matches over the raw message text while this pass counts
+    // them over the formatted HTML, so the two can drift apart (markdown
+    // syntax, display regexes). Rather than leaving the arrows dead when the
+    // requested index overshoots, clamp into range and re-run once.
+    if (!_retried && activeIndex >= total && total > 0) {
+      this.setSearch(query, total - 1, true);
+      return;
+    }
+
     if (activeMessageId && window.bridge) {
+      // The match may live in a message the virtual list has not mounted:
+      // scrollToMessage renders the window around it first, so only then can
+      // the highlight itself be brought into view.
       window.bridge.scrollToMessage(activeMessageId);
-      setTimeout(() => this._scrollToActiveMatch(), 150);
+      setTimeout(() => this._scrollToActiveMatch(), 250);
     } else {
       this._scrollToActiveMatch();
     }
   }
 
   _scrollToActiveMatch() {
-    document.querySelectorAll('.message-content').forEach(host => {
-      if (host.shadowRoot) {
-        const active = host.shadowRoot.querySelector('.search-highlight-text.active-search-match');
-        if (active) active.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    });
+    const hosts = document.querySelectorAll('.message-content');
+    for (const host of hosts) {
+      if (!host.shadowRoot) continue;
+      const active = host.shadowRoot.querySelector('.search-highlight-text.active-search-match');
+      if (!active) continue;
+      active.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
   }
 
   scrollToSearchMatch(index) { this.setSearch(this.searchQuery, index); }

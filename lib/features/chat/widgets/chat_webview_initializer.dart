@@ -178,6 +178,17 @@ class ChatWebViewInitializer {
     bridge.chatOrigin = ChatBridgeController.originMarkerFor(
       ref.read(chatProvider(input.charId)).value?.session,
     );
+    // The WebView is kept alive across chats, so the renderer still holds the
+    // previous chat's search query and would re-highlight every message it
+    // renders below. Push this chat's search state (usually empty) *before*
+    // the first paint; the second push after setMessages re-runs the scroll to
+    // the active match once the sections exist.
+    await bridge.setSearch(
+      query: input.searchQuery ?? '',
+      activeIndex: (input.searchQuery?.isNotEmpty ?? false)
+          ? input.searchCurrentIndex
+          : -1,
+    );
     await bridge.setMessages(
       input.messages,
       visibleStartIndex: input.visibleStartIndex,

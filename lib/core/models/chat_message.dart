@@ -120,6 +120,12 @@ abstract class ChatMessage with _$ChatMessage {
     String? personaId,
     String? personaName,
     String? imagePath,
+
+    /// Attachment visibility for the LLM. `false` (the default) means the
+    /// image travels with the message in the prompt; the eye toggle on the
+    /// bubble flips it so the attachment stays visible in the chat but is
+    /// dropped from the request (see [HistoryAssembler.assemble]).
+    @Default(false) bool imageHidden,
     @Default([]) List<String> swipes,
     @Default(0) int swipeId,
     String? reasoning,

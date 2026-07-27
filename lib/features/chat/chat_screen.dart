@@ -146,6 +146,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       },
     );
     _search = ChatSearchDelegate();
+    // The delegate holds the query, the match list and the active match index.
+    // Nothing else rebuilds on those: without this listener, `searchNext` /
+    // `searchPrev` only mutated the delegate and the new active index never
+    // reached the WebView, so the prev/next buttons looked dead and closing
+    // search left the highlight behind until some unrelated rebuild.
+    _search.addListener(_onSearchChanged);
     if (widget.forceNewSession || widget.initialSessionIndex != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _applySessionPreference();
@@ -153,9 +159,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
   }
 
+  void _onSearchChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   @override
   void dispose() {
     _drawerCtrl.dispose();
+    _search.removeListener(_onSearchChanged);
     _search.dispose();
     super.dispose();
   }
@@ -1389,6 +1401,16 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                               ref
                                   .read(chatProvider(widget.charId).notifier)
                                   .toggleMessageHidden(idx);
+                            }
+                          },
+                          onToggleImageHidden: (id) {
+                            final idx = widget.state.messages.indexWhere(
+                              (m) => m.id == id,
+                            );
+                            if (idx >= 0) {
+                              ref
+                                  .read(chatProvider(widget.charId).notifier)
+                                  .toggleImageHidden(idx);
                             }
                           },
                           onMemoryClick: (id) {

@@ -23,7 +23,9 @@ class HistoryAssembler {
           reasoningContent: msg.reasoning,
           isHistory: true,
           sourceMessageId: msg.id,
-          imagePath: msg.imagePath,
+          // The eye toggle on an attachment hides it from the model only —
+          // the bubble keeps rendering it. Default is visible.
+          imagePath: msg.imageHidden ? null : msg.imagePath,
         ),
       );
     }

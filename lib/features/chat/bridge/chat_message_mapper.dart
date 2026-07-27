@@ -130,6 +130,7 @@ class ChatMessageMapper {
       'displayName': displayName,
       'avatarColor': ?avatarColor,
       if (m.imagePath != null) 'imagePath': m.imagePath,
+      if (m.imagePath != null) 'imageHidden': m.imageHidden,
       if (m.personaName != null && (!isUser || userMessagePersonaName != null))
         'personaName': m.personaName,
       if (m.swipes.isNotEmpty) 'swipeIndex': m.swipeId,

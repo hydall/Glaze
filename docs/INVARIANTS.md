@@ -436,6 +436,16 @@ The preset's `blocks` list fully controls what appears in the prompt and in what
 Character fields appear only when a matching preset block ID resolves them.
 If a block is disabled, that field is omitted. `PromptBuilder` is the sole enforcer.
 
+### INV-PS1b: Image attachments are sent to the model unless explicitly hidden
+
+`ChatMessage.imageHidden` defaults to `false`, so a picture attached to a
+message travels with it into the request (`PromptMessage.imagePath` →
+`toApiMap()` → the protocol converters). The eye button on the attachment
+(`toggle-image-hidden` → `onToggleImageHidden` →
+`ChatMessageService.toggleImageHidden`) flips the flag; `HistoryAssembler.assemble`
+and `buildFallbackPrompt` then drop `imagePath` from the prompt message. The
+bubble keeps rendering the image either way — hiding affects the request only.
+
 ### INV-PS2: Vector scan runs before keyword scan; keyword deduplicates vector
 
 1. Vector lorebook scan runs async in `PromptPayloadBuilder.buildFromSession()` — results packed into `PromptPayload.vectorEntries`.
@@ -662,6 +672,18 @@ On abort, `ChatNotifier.abortGeneration()` restores:
 - `ChatState.isGenerating → false`
 - `ChatState.isGeneratingImage → false`
 - Session variables mutated during prompt build — ✅ on success only (see INV-C5)
+
+### INV-A2b: A rollback restores the variation's error state too
+
+Error state is per swipe (`swipesMeta[i]['isError']`, see
+`ChatMessageService.setSwipe`). When a regen is cancelled and the pre-regen
+snapshot is put back — `AbortHandler._finalizeAbortWithPartial` (no partial
+text) and `RegenResolver.resolve` (rollback branch) — the restored message
+takes its `isError` from `restoredVariationIsError(snapshot, swipesMeta)`, not
+a hard `false`. Clearing the flag there turned an errored variation into a
+normal-looking bubble whose text is an error message, and re-opened the
+post-gen chain gated on `isError` (INV-EG4). Partial text is a new, healthy
+swipe and stays `isError: false`.
 
 ### INV-A3: Regen during active generation aborts first
 

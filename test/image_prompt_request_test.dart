@@ -44,6 +44,30 @@ void main() {
     });
   });
 
+  test('attachments are sent to the model unless the eye hides them', () {
+    final visible = assembler.assemble([
+      const ChatMessage(
+        id: 'm1',
+        role: 'user',
+        content: 'What is this?',
+        imagePath: image,
+      ),
+    ]).single;
+    final hidden = assembler.assemble([
+      const ChatMessage(
+        id: 'm1',
+        role: 'user',
+        content: 'What is this?',
+        imagePath: image,
+        imageHidden: true,
+      ),
+    ]).single;
+
+    expect(visible.hasImage, isTrue);
+    expect(hidden.hasImage, isFalse);
+    expect(hidden.toApiMap(), {'role': 'user', 'content': 'What is this?'});
+  });
+
   test('image-only message remains a valid multimodal request', () {
     const prompt = PromptMessage(role: 'user', content: '', imagePath: image);
 

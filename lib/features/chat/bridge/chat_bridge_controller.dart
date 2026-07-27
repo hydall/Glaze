@@ -285,6 +285,10 @@ class ChatBridgeController {
   void Function(String id, String guidanceText)? onGuidedSwipe;
   void Function(String id)? onMemoryClick;
   void Function(String id)? onToggleHidden;
+
+  /// Eye button on a message's image attachment: hides/shows the image for
+  /// the model without touching the bubble itself. Carries the message id.
+  void Function(String id)? onToggleImageHidden;
   void Function(List<String> ids)? onSelectionChange;
   void Function(String id)? onInjectClick;
   void Function(String instruction, String messageId)? onImgRetry;
@@ -407,6 +411,8 @@ class ChatBridgeController {
         onMemoryClick?.call(s);
       case 'onToggleHidden':
         onToggleHidden?.call(s);
+      case 'onToggleImageHidden':
+        onToggleImageHidden?.call(s);
       case 'onInjectClick':
         onInjectClick?.call(s);
       case 'onExtBlocksRunAll':

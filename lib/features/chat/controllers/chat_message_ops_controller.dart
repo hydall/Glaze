@@ -138,6 +138,18 @@ class ChatMessageOpsController {
     _setState(AsyncData(current.copyWith(session: updated)));
   }
 
+  /// Eye button on an image attachment: flips whether the image is sent to
+  /// the model. Attachments start visible.
+  Future<void> toggleImageHidden(int index) async {
+    if (!_ref.mounted) return;
+    final current = _getState().value;
+    if (current == null || current.session == null) return;
+    final updated = _messageSvc.toggleImageHidden(current.session!, index);
+    if (identical(updated, current.session)) return;
+    _invalidateHistory();
+    _setState(AsyncData(current.copyWith(session: updated)));
+  }
+
   Future<void> unhideAllMessages() async {
     if (!_ref.mounted) return;
     final current = _getState().value;

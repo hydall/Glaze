@@ -15,6 +15,7 @@ import 'state/studio_cycle_state_provider.dart';
 import 'chat_session_service.dart';
 import 'chat_state.dart';
 import 'services/continuation_message_merger.dart';
+import 'services/variation_error_state.dart';
 
 class AbortHandler {
   final Ref _ref;
@@ -254,7 +255,13 @@ class AbortHandler {
           genTime: partialText.isNotEmpty ? null : restoration.genTime,
           tokens: partialText.isNotEmpty ? null : restoration.tokens,
           isTyping: false,
-          isError: false,
+          // Partial text becomes a fresh (healthy) swipe; with nothing
+          // streamed we put the pre-regen variation back untouched — an
+          // errored one included, so cancelling a regen over an error does
+          // not launder the error away.
+          isError: partialText.isNotEmpty
+              ? false
+              : restoredVariationIsError(restoration, keptSwipesMeta),
           swipeDirection: partialText.isNotEmpty
               ? 'right'
               : restoration.swipeDirection,

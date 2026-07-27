@@ -393,6 +393,7 @@
   "error_connection_timed_out": "Connection timed out",
   "error_server_too_long": "Server took too long to respond",
   "error_upload_timed_out": "Upload timed out",
+  "error_first_chunk_timeout": "No response from the model for {seconds}s — the connection was aborted. Check the endpoint or raise the timeout in the API settings.",
   "error_connection_failed_check_network": "Connection failed - check endpoint and network",
   "error_ssl_certificate": "SSL certificate error",
   "error_request_failed": "Request failed",

@@ -528,6 +528,10 @@ export class Bridge {
       section.classList.toggle('msg-hidden', !!msg.isHidden);
     }
 
+    if (msg.imageHidden !== undefined) {
+      this.renderer.updateImageAttachmentHidden(section, !!msg.imageHidden);
+    }
+
     if (msg.swipeIndex !== undefined) section.dataset.swipeId = String(msg.swipeIndex);
     if (msg.swipeTotal !== undefined) section.dataset.swipeTotal = String(msg.swipeTotal);
     if (msg.agentSwipeIndex !== undefined) section.dataset.agentSwipeId = String(msg.agentSwipeIndex);

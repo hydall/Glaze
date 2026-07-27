@@ -140,6 +140,11 @@ class SavedMessageWriter {
           content: text,
           reasoning: reasoning,
           isAllReasoning: isAllReasoning,
+          // A full regen is a fresh event: restamp the message so the chat
+          // list (sorted on the last message's timestamp) surfaces the
+          // session again. The message keeps its position in the chat — only
+          // the stamp moves.
+          timestamp: DateTime.now().millisecondsSinceEpoch,
           isError: false,
           isTyping: false,
           genTime: genTime,

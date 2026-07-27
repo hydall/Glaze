@@ -73,6 +73,7 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onGuidedSwipe': HandlerSpec(HandlerKind.idStringStringPair),
   'onMemoryClick': HandlerSpec(HandlerKind.stringArg),
   'onToggleHidden': HandlerSpec(HandlerKind.stringArg),
+  'onToggleImageHidden': HandlerSpec(HandlerKind.stringArg),
   'onSelectionChange': HandlerSpec(HandlerKind.idList),
   'onInjectClick': HandlerSpec(HandlerKind.stringArg),
   // Image generation

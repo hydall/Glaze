@@ -111,6 +111,10 @@ class ChatWebViewCallbacks {
     messageActions.onToggleHidden?.call(id);
   }
 
+  void onToggleImageHidden(String id) {
+    messageActions.onToggleImageHidden?.call(id);
+  }
+
   void onInjectClick(String id) {
     messageActions.onInjectClick?.call(id);
   }
