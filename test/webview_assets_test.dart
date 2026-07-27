@@ -240,6 +240,87 @@ void main() {
     });
   });
 
+  // ─── markdown image options button ────────────────────────────────────────
+  group('markdown image card (formatter/formatter.js)', () {
+    test('the card is stashed whole, not emitted as raw HTML mid-pipeline', () {
+      // Raw HTML emitted before the tag extraction gets torn apart: <img>,
+      // <svg> and <path> are *block* tags, so the paragraph step isolates each
+      // of them and the wrapper <span>, the image and the options <button> end
+      // up in three different <p> elements. The button then loses its
+      // positioned wrapper and its `position: absolute` resolves against the
+      // message container — the 3-dot menu jumps to the top of the message.
+      expect(formatterFormatterJs, contains('const mdImages = []'));
+      expect(formatterFormatterJs, contains('mdImages.push('));
+
+      final pushIdx = formatterFormatterJs.indexOf('mdImages.push(');
+      final tagExtractIdx = formatterFormatterJs.indexOf(
+        '// 6. Extract HTML Tags',
+      );
+      expect(tagExtractIdx, isNot(-1));
+      expect(
+        pushIdx < tagExtractIdx,
+        isTrue,
+        reason: 'the image card must be stashed before tag extraction runs',
+      );
+    });
+
+    test('wrapper, image and options button live in one atomic chunk', () {
+      final pushIdx = formatterFormatterJs.indexOf('mdImages.push(');
+      final chunk = formatterFormatterJs.substring(
+        pushIdx,
+        formatterFormatterJs.indexOf('\n', pushIdx),
+      );
+      expect(chunk, contains('janitor-img-wrapper'));
+      expect(chunk, contains('class="janitor-img"'));
+      expect(chunk, contains('janitor-options-btn'));
+      expect(chunk, contains(r'data-action="img-options"'));
+    });
+
+    test('the card is restored after paragraph splitting', () {
+      final restoreIdx = formatterFormatterJs.indexOf(
+        r'html = html.replace(/\x01MI_(\d+)\x01/g',
+      );
+      expect(
+        restoreIdx,
+        isNot(-1),
+        reason: 'markdown image placeholders must be restored',
+      );
+      final paragraphIdx = formatterFormatterJs.indexOf('// 11. Paragraphs');
+      expect(paragraphIdx, isNot(-1));
+      expect(
+        restoreIdx > paragraphIdx,
+        isTrue,
+        reason:
+            'restoring before the paragraph step would expose the card to the '
+            'block-placeholder isolation again',
+      );
+    });
+
+    test('options button is positioned against the image wrapper', () {
+      final wrapperIdx = rendererJs.indexOf('.janitor-img-wrapper {');
+      expect(wrapperIdx, isNot(-1));
+      final wrapperBlock = rendererJs.substring(
+        wrapperIdx,
+        rendererJs.indexOf('}', wrapperIdx) + 1,
+      );
+      expect(
+        wrapperBlock,
+        contains('position: relative'),
+        reason: 'the wrapper is the containing block of the options button',
+      );
+
+      final btnIdx = rendererJs.indexOf('.janitor-options-btn,');
+      expect(btnIdx, isNot(-1));
+      final btnBlock = rendererJs.substring(
+        btnIdx,
+        rendererJs.indexOf('}', btnIdx) + 1,
+      );
+      expect(btnBlock, contains('position: absolute'));
+      expect(btnBlock, contains('top: 8px'));
+      expect(btnBlock, contains('right: 8px'));
+    });
+  });
+
   // ─── Headless engine (Phase 6.1) ────────────────────────────────────────────
   group('headless engine (headless.html)', () {
     test('loads glaze_sdk.js', () {

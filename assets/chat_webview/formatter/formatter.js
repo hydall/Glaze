@@ -129,9 +129,22 @@ export class Formatter {
     });
 
     // 5b. Janitor images: ![alt](url) → <span class="janitor-img-wrapper"> with options button
+    //
+    // The card is stashed as ONE atomic placeholder and restored at the very
+    // end (step 12c). Emitting its raw HTML here instead would hand it to the
+    // tag extraction in step 6, which classifies <img>/<svg>/<path> as *block*
+    // tags — step 11 then isolates every block placeholder in its own
+    // paragraph, so `<span class="janitor-img-wrapper">`, the `<img>` and the
+    // options `<button>` end up in three different <p> elements. The button
+    // would lose its positioned wrapper and its `position: absolute` would
+    // resolve against the message container, pinning the 3-dot menu to the top
+    // of the whole message instead of the top of the image.
+    const mdImages = [];
     html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, url) => {
       const safeUrl = this._escapeHtml(this._normalizeMdUrl(url));
-      return `<span class="janitor-img-wrapper"><img src="${safeUrl}" alt="${this._escapeHtml(alt)}" class="janitor-img" loading="lazy" data-action="image-click" data-src="${safeUrl}"><button class="janitor-options-btn" type="button" data-action="img-options" data-src="${safeUrl}" title="Options">${OPTIONS_SVG}</button></span>`;
+      const id = this._ph('MI_', mdImages.length);
+      mdImages.push(`<span class="janitor-img-wrapper"><img src="${safeUrl}" alt="${this._escapeHtml(alt)}" class="janitor-img" loading="lazy" data-action="image-click" data-src="${safeUrl}"><button class="janitor-options-btn" type="button" data-action="img-options" data-src="${safeUrl}" title="Options">${OPTIONS_SVG}</button></span>`);
+      return id;
     });
 
     // 5c. Glaze image gen tags
@@ -286,6 +299,10 @@ export class Formatter {
 
     // 12b. Restore list blocks
     html = html.replace(/\x01LB_BLOCK_(\d+)\x01/g, (_, i) => listBlocks[parseInt(i)]);
+
+    // 12c. Restore markdown image cards — kept whole so the options button
+    //      stays inside its positioned .janitor-img-wrapper (see step 5b).
+    html = html.replace(/\x01MI_(\d+)\x01/g, (_, i) => mdImages[parseInt(i)]);
 
     // 13. Restore CSS comments
     html = html.replace(/\x01CC_(\d+)\x01/g, (_, i) => cssComments[parseInt(i)]);
