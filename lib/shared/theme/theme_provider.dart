@@ -45,9 +45,12 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
   }
 
   Future<void> _init() async {
-    _storage = await ThemePresetStorage.create();
-    await _load();
-    _ready.complete();
+    try {
+      _storage = await ThemePresetStorage.create();
+      await _load();
+    } finally {
+      _ready.complete();
+    }
   }
 
   Future<void> _load() async {
@@ -126,7 +129,7 @@ class ThemeNotifier extends StateNotifier<ThemeSettings> {
       accentColor: preset.accent,
       presets: updated,
     );
-    await _storage!.saveAll(updated);
+    await _storage?.saveAll(updated);
   }
 
   Future<void> reload() async {
