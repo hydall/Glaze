@@ -317,10 +317,10 @@ jobs:
           "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
 
       - name: Zip Windows build
-        shell: bash
+        shell: pwsh
         run: |
           cd build/windows/x64/runner/Release
-          zip -r "${{ needs.metadata.outputs.tag_name }}-windows.zip" .
+          Compress-Archive -Path * -DestinationPath "${{ needs.metadata.outputs.tag_name }}-windows.zip"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
