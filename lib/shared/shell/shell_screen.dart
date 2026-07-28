@@ -72,7 +72,7 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     };
     final showNavBar =
         !location.startsWith('/chat/') &&
-        !hideNavBarRoutes.contains(location);
+        !hideNavBarRoutes.any((r) => location.startsWith(r));
     return GlazeBackground(
       child: PopScope(
         canPop: false,

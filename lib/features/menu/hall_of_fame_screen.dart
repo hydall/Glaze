@@ -2,9 +2,11 @@ import 'dart:math';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../shared/theme/app_colors.dart';
+import '../../shared/shell/shell_header_provider.dart';
 
 final _random = Random();
 
@@ -42,15 +44,15 @@ class _Snowflake {
   });
 }
 
-class HallOfFameScreen extends StatefulWidget {
+class HallOfFameScreen extends ConsumerStatefulWidget {
   const HallOfFameScreen({super.key});
 
   @override
-  State<HallOfFameScreen> createState() => _HallOfFameScreenState();
+  ConsumerState<HallOfFameScreen> createState() => _HallOfFameScreenState();
 }
 
-class _HallOfFameScreenState extends State<HallOfFameScreen>
-    with TickerProviderStateMixin {
+class _HallOfFameScreenState extends ConsumerState<HallOfFameScreen>
+    with TickerProviderStateMixin, ShellHeaderMixin {
   late final AnimationController _master;
   late final Animation<double> _bgOpacity;
   late final Animation<double> _starsOpacity;
@@ -58,6 +60,15 @@ class _HallOfFameScreenState extends State<HallOfFameScreen>
   late final AnimationController _starsPulse;
   late final AnimationController _snowfall;
   late final AnimationController _crawl;
+
+  @override
+  int get headerBranchIndex => 3;
+
+  bool _showHeaderForExit = false;
+
+  @override
+  ShellHeaderConfig buildShellHeader() =>
+      ShellHeaderConfig(hidden: !_showHeaderForExit);
 
   final List<_Star> _starSeed = [];
   final List<_Snowflake> _snowflakes = [];
@@ -150,6 +161,8 @@ class _HallOfFameScreenState extends State<HallOfFameScreen>
   }
 
   void _close() {
+    _showHeaderForExit = true;
+    refreshShellHeader();
     _master.reverse().then((_) {
       if (mounted) context.go('/menu/about');
     });
@@ -169,7 +182,7 @@ class _HallOfFameScreenState extends State<HallOfFameScreen>
         animation: _master,
         builder: (context, child) {
           return Scaffold(
-            backgroundColor: Colors.black,
+            backgroundColor: Colors.transparent,
             resizeToAvoidBottomInset: false,
             body: GestureDetector(
               onTap: _close,
@@ -177,14 +190,12 @@ class _HallOfFameScreenState extends State<HallOfFameScreen>
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // --- star-field backdrop ---
                   _StarField(
                     stars: _starSeed,
                     opacity: _starsOpacity.value,
                     pulse: _starsPulse,
                   ),
 
-                  // --- snowfall ---
                   _SnowfallLayer(
                     flakes: _snowflakes,
                     opacity: _starsOpacity.value,
@@ -192,7 +203,6 @@ class _HallOfFameScreenState extends State<HallOfFameScreen>
                     size: size,
                   ),
 
-                  // --- crawl ---
                   if (_crawlProgress.value > 0)
                     _CrawlLayer(
                       progress: _crawlProgress.value,
@@ -202,12 +212,10 @@ class _HallOfFameScreenState extends State<HallOfFameScreen>
                       size: size,
                     ),
 
-                  // --- vignette gradient ---
                   IgnorePointer(
                     child: _Vignette(size: size),
                   ),
 
-                  // --- dark overlay ---
                   IgnorePointer(
                     child: AnimatedOpacity(
                       opacity: _bgOpacity.value,
@@ -216,7 +224,6 @@ class _HallOfFameScreenState extends State<HallOfFameScreen>
                     ),
                   ),
 
-                  // --- close hint ---
                   Positioned(
                     bottom: 48,
                     left: 0,
@@ -410,52 +417,53 @@ class _CrawlLayer extends StatelessWidget {
         transform: Matrix4.identity()
           ..setEntry(3, 2, 0.002)
           ..rotateX(0.62),
-        child: Positioned(
-          top: top,
-          left: size.width * 0.08,
-          right: size.width * 0.08,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w900,
-                  color: accent,
-                  letterSpacing: 5,
-                  shadows: [
-                    Shadow(
-                      color: accent.withValues(alpha: 0.35),
-                      blurRadius: 18,
-                    ),
-                  ],
+        child: Transform.translate(
+          offset: Offset(0, top),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: size.width * 0.08),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    color: accent,
+                    letterSpacing: 5,
+                    shadows: [
+                      Shadow(
+                        color: accent.withValues(alpha: 0.35),
+                        blurRadius: 18,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 28),
-              ...names.map(
-                (name) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Text(
-                    name,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: accent.withValues(alpha: 0.9),
-                      letterSpacing: 2,
-                      shadows: [
-                        Shadow(
-                          color: accent.withValues(alpha: 0.25),
-                          blurRadius: 12,
-                        ),
-                      ],
+                const SizedBox(height: 28),
+                ...names.map(
+                  (name) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Text(
+                      name,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: accent.withValues(alpha: 0.9),
+                        letterSpacing: 2,
+                        shadows: [
+                          Shadow(
+                            color: accent.withValues(alpha: 0.25),
+                            blurRadius: 12,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
