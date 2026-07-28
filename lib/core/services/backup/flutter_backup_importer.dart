@@ -212,8 +212,9 @@ class FlutterBackupImporter extends BackupHelpers {
           if (columns.isEmpty) continue;
 
           final placeholders = columns.map((_) => '?').join(', ');
+          final quotedColumns = columns.map((c) => '"$c"').join(', ');
           final sql =
-              'INSERT OR REPLACE INTO $tableName (${columns.join(', ')}) VALUES ($placeholders)';
+              'INSERT OR REPLACE INTO $tableName ($quotedColumns) VALUES ($placeholders)';
           final args = <dynamic>[];
           for (final c in columns) {
             final v = r[c];
@@ -275,8 +276,9 @@ class FlutterBackupImporter extends BackupHelpers {
               final columns = r.keys.where(knownCols.contains).toList();
               if (columns.isEmpty) continue;
               final placeholders = columns.map((_) => '?').join(', ');
+              final quotedColumns = columns.map((c) => '"$c"').join(', ');
               final sql =
-                  'INSERT OR REPLACE INTO $tableName (${columns.join(', ')}) VALUES ($placeholders)';
+                  'INSERT OR REPLACE INTO $tableName ($quotedColumns) VALUES ($placeholders)';
               final args = <dynamic>[];
               for (final c in columns) {
                 final v = r[c];
