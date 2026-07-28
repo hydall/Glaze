@@ -271,6 +271,9 @@ class ChatWebViewSurface extends ConsumerWidget {
                 // load stop wins the race, run init here.
                 await onInitWebView();
               },
+              shouldOverrideUrlLoading: (controller, request) async {
+                return ShouldOverrideUrlLoadingAction.CANCEL;
+              },
             ),
           ),
         ),

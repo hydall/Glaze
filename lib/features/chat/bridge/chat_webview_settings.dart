@@ -87,6 +87,7 @@ InAppWebViewSettings chatWebViewInAppSettings({bool isInspectable = true}) {
     allowFileAccessFromFileURLs: chatWebViewAllowFileAccessFromFileUrls(),
     allowUniversalAccessFromFileURLs: false,
     mixedContentMode: chatWebViewMixedContentMode(),
+    useShouldOverrideUrlLoading: true,
     webViewAssetLoader: chatWebViewAssetLoader(),
   );
 }
