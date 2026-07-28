@@ -293,6 +293,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   }
 
   Future<void> _initWebView() {
+    if (_bridge == null) return Future.value();
     return _initFuture ??= _initWebViewOnce();
   }
 
