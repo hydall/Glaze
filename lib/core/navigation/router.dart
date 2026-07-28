@@ -34,6 +34,19 @@ import '../../shared/shell/desktop/desktop_shell.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
+CustomTransitionPage<void> _noTransitionPage({
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    transitionDuration: Duration.zero,
+    reverseTransitionDuration: Duration.zero,
+    child: child,
+    transitionsBuilder: (_, _, _, child) => child,
+  );
+}
+
 CustomTransitionPage<void> _overlayPage({
   required GoRouterState state,
   required Widget child,
@@ -257,7 +270,7 @@ GoRouter buildRouter(
                   routes: [
                     GoRoute(
                       path: 'hall-of-fame',
-                      pageBuilder: (_, state) => _overlayPage(
+                      pageBuilder: (_, state) => _noTransitionPage(
                         state: state,
                         child: const HallOfFameScreen(),
                       ),

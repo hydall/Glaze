@@ -16,6 +16,7 @@ import 'package:glaze_flutter/features/menu/menu_screen.dart';
 import 'package:glaze_flutter/features/settings/app_settings_screen.dart';
 import 'package:glaze_flutter/features/settings/theme_preset_screen.dart';
 import 'package:glaze_flutter/features/menu/about_screen.dart';
+import 'package:glaze_flutter/features/menu/hall_of_fame_screen.dart';
 import 'package:glaze_flutter/features/lorebooks/lorebook_list_screen.dart';
 import 'package:glaze_flutter/features/lorebooks/lorebook_global_settings_screen.dart';
 import 'package:glaze_flutter/features/lorebooks/embedding_settings_screen.dart';
@@ -82,6 +83,12 @@ const screenRegistry = <ScreenEntry>[
     screenType: AboutScreen,
     parentPath: '/menu',
     description: 'About screen',
+  ),
+  ScreenEntry(
+    path: '/menu/about/hall-of-fame',
+    screenType: HallOfFameScreen,
+    parentPath: '/menu/about',
+    description: 'Hall of Fame screen',
   ),
   ScreenEntry(
     path: '/tools/api',
