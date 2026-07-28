@@ -447,9 +447,91 @@ jobs:
           name: Glaze-release-iOS
           path: "${{ needs.metadata.outputs.file_slug }}.ipa"
 
+  # ── linux ──────────────────────────────────────────────────────────────────
+  build-linux:
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Create .env from secrets
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
+          DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
+          DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          case "$BUILD_CHANNEL" in
+            stable)  CHANNEL_DROPBOX_KEY="" ;;
+            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
+            *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
+          esac
+          {
+            echo "DROPBOX_APP_KEY=${CHANNEL_DROPBOX_KEY:-$DROPBOX_APP_KEY}"
+            echo "DROPBOX_REDIRECT_NATIVE=$DROPBOX_REDIRECT_NATIVE"
+            echo "GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID"
+            echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive"
+          } >> .env
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang cmake git ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev pacman-package-manager
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build Linux (release)
+        run: >
+          chmod +x scripts/build_linux_packages.sh &&
+          ./scripts/build_linux_packages.sh
+          "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
+          "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}"
+          "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
+          "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
+          "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+
+      - name: Rename Linux Packages
+        run: |
+          mv build/linux/deb/*.deb "build/linux/deb/${{ needs.metadata.outputs.file_slug }}-linux.deb"
+          mv build/linux/arch/*.pkg.tar.zst "build/linux/arch/${{ needs.metadata.outputs.file_slug }}-linux.pkg.tar.zst"
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-DEB
+          path: "build/linux/deb/${{ needs.metadata.outputs.file_slug }}-linux.deb"
+
+      - name: Upload Pacman artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-Pacman
+          path: "build/linux/arch/${{ needs.metadata.outputs.file_slug }}-linux.pkg.tar.zst"
+
   # ── telegram notify ────────────────────────────────────────────────────────
   notify:
-    needs: [metadata, build-android, build-ios]
+    needs: [metadata, build-android, build-ios, build-linux]
     runs-on: ubuntu-latest
     # Run when either delivery toggle is on: the group post and/or the direct
     # messages to developers. Each individual step is gated on its own toggle.
@@ -472,6 +554,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: Glaze-release-iOS
+          path: artifacts/
+
+      - name: Download DEB
+        uses: actions/download-artifact@v4
+        with:
+          name: Glaze-release-DEB
+          path: artifacts/
+
+      - name: Download Pacman
+        uses: actions/download-artifact@v4
+        with:
+          name: Glaze-release-Pacman
           path: artifacts/
 
       - name: Send to Telegram
@@ -523,6 +617,16 @@ jobs:
             -F "reply_to_message_id=${MSG_ID}" \
             -F "document=@artifacts/${FILE_SLUG}.apk"
 
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
+            -F "chat_id=${TG_CHAT_ID}" \
+            -F "reply_to_message_id=${MSG_ID}" \
+            -F "document=@artifacts/${FILE_SLUG}-linux.deb"
+
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
+            -F "chat_id=${TG_CHAT_ID}" \
+            -F "reply_to_message_id=${MSG_ID}" \
+            -F "document=@artifacts/${FILE_SLUG}-linux.pkg.tar.zst"
+
       - name: Send build to developers (DM)
         # Direct-message the APK + IPA to each developer's private chat when the
         # "Отправить в ЛС разработчикам" toggle is on.
@@ -573,6 +677,16 @@ jobs:
               -F "chat_id=${CID}" \
               -F "reply_to_message_id=${MSG_ID}" \
               -F "document=@artifacts/${FILE_SLUG}.apk"
+
+            curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
+              -F "chat_id=${CID}" \
+              -F "reply_to_message_id=${MSG_ID}" \
+              -F "document=@artifacts/${FILE_SLUG}-linux.deb"
+
+            curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
+              -F "chat_id=${CID}" \
+              -F "reply_to_message_id=${MSG_ID}" \
+              -F "document=@artifacts/${FILE_SLUG}-linux.pkg.tar.zst"
           done
 
       - name: Advance build/last tag
