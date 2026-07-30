@@ -39,18 +39,24 @@ class ChatMessageSelectionController {
     clearSelection();
   }
 
+  /// Deletes every selected message and leaves selection mode.
+  ///
+  /// Deliberately not `async`: the indices are resolved and the selection is
+  /// dropped synchronously, so a caller that rebuilds before awaiting the
+  /// returned future sees the toolbar gone on the frame of the tap. The delete
+  /// itself is optimistic (see `ChatMessageOpsController.deleteMessages`) — a
+  /// toolbar that outlived the bubbles would be the only thing still lagging.
   Future<void> deleteSelected(
     WidgetRef ref,
     String charId,
     List<ChatMessage> messages,
-  ) async {
+  ) {
     final indices = selectedMessageIds
         .map((id) => messages.indexWhere((m) => m.id == id))
         .where((idx) => idx >= 0)
         .toSet();
-    if (indices.isNotEmpty) {
-      await ref.read(chatProvider(charId).notifier).deleteMessages(indices);
-    }
     clearSelection();
+    if (indices.isEmpty) return Future<void>.value();
+    return ref.read(chatProvider(charId).notifier).deleteMessages(indices);
   }
 }

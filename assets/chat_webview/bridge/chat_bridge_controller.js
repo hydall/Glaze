@@ -699,7 +699,14 @@ export class Bridge {
     const el = document.querySelector(`[data-message-id="${messageId}"]`);
     if (el && this.renderer) {
       this.renderer.animateRemoveSection(el, () => {
-        this.virtualList.remove(messageId);
+        // The exit animation runs for ~340ms and the id can be re-registered
+        // in the meantime — the streaming placeholder reuses one constant id,
+        // and `append` already evicted the node we animated out. Dropping the
+        // id here regardless would delete the *new* bubble.
+        const item = this.virtualList.itemMap?.get(messageId);
+        if (!item || item.el === el) {
+          this.virtualList.remove(messageId);
+        }
         this._pruneOrphanSeparators();
       });
     } else {

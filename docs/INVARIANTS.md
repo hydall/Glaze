@@ -348,7 +348,11 @@ when newer rows are deleted.
 
 Code refs: `lib/core/db/repositories/tracker_snapshot_repo.dart`,
 `lib/core/llm/studio_ledger_service.dart`,
-`lib/features/chat/chat_message_service.dart:deleteMessage` → `deleteForMessage`.
+`lib/features/chat/chat_message_service.dart:commitDeleteMessages` →
+`deleteForMessages`. The UI publishes the shortened message list before this
+commit runs (`ChatMessageOpsController.deleteMessages` is optimistic), so the
+snapshot rollback is *not* observable state — it lands with the transaction,
+and a failed commit restores the pre-delete session in the UI.
 
 ### INV-TS2: Sentinel anchor survives per-message deletes ✅ ENFORCED (Phase 7)
 

@@ -291,8 +291,13 @@ class UseVirtualScroll {
 
     append(id, el) {
         if (this.itemMap.has(id)) {
-            this.update(id, el);
-            return;
+            // An append must land at the tail even when the id is already
+            // known. The streaming placeholder reuses one constant id and the
+            // bridge defers its removal behind a ~340ms exit animation, so a
+            // message sent inside that window used to re-render the
+            // placeholder in place — at the slot it held *before* the user
+            // message that had just been appended. Evict first, then append.
+            this.remove(id);
         }
         const idx = this.items.length;
         el.dataset.index = idx;

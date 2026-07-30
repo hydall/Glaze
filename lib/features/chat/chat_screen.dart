@@ -1811,11 +1811,19 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                         if (mounted) setState(() {});
                                       },
                                       onDeleteSelected: () async {
-                                        await _selectionCtrl.deleteSelected(
-                                          ref,
-                                          widget.charId,
-                                          widget.state.messages,
-                                        );
+                                        // deleteSelected drops the selection
+                                        // synchronously; rebuild before
+                                        // awaiting so the toolbar closes with
+                                        // the messages instead of after the
+                                        // DB cleanup finishes.
+                                        final pending = _selectionCtrl
+                                            .deleteSelected(
+                                              ref,
+                                              widget.charId,
+                                              widget.state.messages,
+                                            );
+                                        if (mounted) setState(() {});
+                                        await pending;
                                         if (mounted) setState(() {});
                                       },
                                       isDrawerOpen:

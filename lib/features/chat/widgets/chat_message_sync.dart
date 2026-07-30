@@ -14,8 +14,9 @@ import '../bridge/chat_bridge_controller.dart';
 ///   * Cleared (new empty) → `clearAll`.
 ///   * Head prepend → `prependMessages` for the prefix.
 ///   * Tail append → `appendMessages`.
-///   * Head truncation → `removeMessage` per removed id.
-///   * Tail truncation → `removeMessage` for trimmed ids.
+///   * Any pure removal — head truncation, tail truncation, mid-chat
+///     delete, scattered bulk delete → `removeMessage` per removed id.
+///   * Shorter with a reorder → `clearAll` + `setMessages`.
 ///   * Same length with at least one swap → `clearAll` + `setMessages`.
 ///   * Same length, per-index change → `updateMessage` if the
 ///     content / swipe / hidden / typing / error / guidance / greeting
@@ -89,19 +90,17 @@ class ChatMessageSync {
     }
 
     if (newIds.length < oldIds.length) {
-      final newFirstId = newIds.first;
-      final oldIdx = oldIds.indexOf(newFirstId);
-      if (oldIdx > 0) {
-        for (int i = 0; i < oldIdx; i++) {
-          await bridge.removeMessage(oldIds[i]);
-        }
-        return;
-      }
-      final newLastId = newIds.last;
-      final oldLastIdx = oldIds.indexOf(newLastId);
-      if (oldLastIdx >= 0 && newIds.length == oldLastIdx + 1) {
-        for (int i = oldIds.length - 1; i > oldLastIdx; i--) {
-          await bridge.removeMessage(oldIds[i]);
+      // Every shrink that keeps the surviving ids in order — a head trim from
+      // scrollback windowing, a tail trim from a branch/abort, a delete from
+      // the middle, a bulk delete of scattered messages — is a plain list of
+      // removals. Emitting them one by one keeps the WebView's exit animation
+      // and its scroll position; the `clearAll` + `setMessages` fallback below
+      // flashes the loading screen and re-renders the whole window instead,
+      // which is what made a delete land late and with a visible stall.
+      final removed = _removedIdsIfSubsequence(oldIds, newIds);
+      if (removed != null) {
+        for (final id in removed) {
+          await bridge.removeMessage(id);
         }
         if (!isGenerating) {
           await bridge.setLastMessage(
@@ -193,6 +192,31 @@ class ChatMessageSync {
       );
     }
   }
+}
+
+/// Returns the ids present in [oldIds] but not in [newIds] when [newIds] is a
+/// subsequence of [oldIds] — i.e. the diff is a pure removal with no reorder,
+/// no insert and no id reuse. Returns null otherwise, so the caller falls back
+/// to a full re-render.
+///
+/// Both lists are id lists in chat order. Runs a single linear walk: every
+/// `newIds` entry must be matched, in order, against the remaining `oldIds`.
+List<String>? _removedIdsIfSubsequence(
+  List<String> oldIds,
+  List<String> newIds,
+) {
+  final removed = <String>[];
+  var newIdx = 0;
+  for (final oldId in oldIds) {
+    if (newIdx < newIds.length && newIds[newIdx] == oldId) {
+      newIdx++;
+    } else {
+      removed.add(oldId);
+    }
+  }
+  // Some new id never matched → the lists diverge by more than deletions.
+  if (newIdx != newIds.length) return null;
+  return removed;
 }
 
 /// Appends the virtual streaming message only after persisted message changes

@@ -95,14 +95,36 @@ class ChatMessageService {
   }
 
   /// Deletes multiple messages with one session write and one cleanup pass.
+  ///
+  /// Convenience wrapper over [planDeleteMessages] + [commitDeleteMessages] for
+  /// callers that do not need to paint the removal before the writes land. The
+  /// chat UI uses the two halves directly so the bubbles disappear on the frame
+  /// of the tap (see `ChatMessageOpsController.deleteMessages`).
   Future<ChatSession> deleteMessages(
     ChatSession session,
     Set<int> indices,
   ) async {
+    final plan = planDeleteMessages(session, indices);
+    if (plan == null) return session;
+    return commitDeleteMessages(session, plan);
+  }
+
+  /// Synchronous half of a message deletion: the session as it will look once
+  /// the delete lands, plus everything [commitDeleteMessages] needs to clean up
+  /// the dependent tables. Returns null when [indices] selects nothing, so a
+  /// caller can bail out before touching any state.
+  ///
+  /// Split out of [deleteMessages] so the UI can publish the shortened message
+  /// list immediately — the commit below runs a multi-table transaction whose
+  /// latency is visible as a stuck Delete button on long chats.
+  MessageDeletionPlan? planDeleteMessages(
+    ChatSession session,
+    Set<int> indices,
+  ) {
     final validIndices = indices
         .where((index) => index >= 0 && index < session.messages.length)
         .toSet();
-    if (validIndices.isEmpty) return session;
+    if (validIndices.isEmpty) return null;
 
     final earliestDeletedIndex = validIndices.reduce((a, b) => a < b ? a : b);
     final invalidatedMessageIds = session.messages
@@ -115,14 +137,6 @@ class ChatMessageService {
         if (!validIndices.contains(i)) session.messages[i],
     ];
 
-    final snapshotRepo = _ref.read(trackerSnapshotRepoProvider);
-    final trackerRepo = _ref.read(trackerRepoProvider);
-    final memoryBookRepo = _ref.read(memoryBookRepoProvider);
-    final knowledgeRepo = _ref.read(characterKnowledgeFactRepoProvider);
-    final checkpointRepo = _ref.read(
-      ledgerReconciliationCheckpointRepoProvider,
-    );
-    final chatRepo = _ref.read(chatRepoProvider);
     // Track the running count of deleted messages so the chat statistics can
     // report it after the messages themselves are gone. Every per-message
     // delete path (single + bulk, native menu, selection mode) funnels through
@@ -131,17 +145,45 @@ class ChatMessageService {
     final updatedVars = Map<String, String>.from(session.sessionVars)
       ..[ChatSessionX.deletedMessagesVarKey] =
           (session.deletedMessageCount + validIndices.length).toString();
-    final updated = session.copyWith(
-      messages: newMessages,
-      sessionVars: updatedVars,
-      updatedAt: currentTimestampSeconds(),
+
+    return MessageDeletionPlan(
+      session: session.copyWith(
+        messages: newMessages,
+        sessionVars: updatedVars,
+        updatedAt: currentTimestampSeconds(),
+      ),
+      deletedIndices: validIndices,
+      earliestDeletedIndex: earliestDeletedIndex,
+      invalidatedMessageIds: invalidatedMessageIds,
     );
+  }
+
+  /// Persists [plan] and rolls back everything anchored at or after the
+  /// earliest deleted message. [session] is the *pre-delete* session — the
+  /// snapshot search walks its surviving prefix to pick a rollback base.
+  ///
+  /// Throws whatever the transaction throws; the caller owns the decision to
+  /// restore [session] in the UI.
+  Future<ChatSession> commitDeleteMessages(
+    ChatSession session,
+    MessageDeletionPlan plan,
+  ) async {
+    final snapshotRepo = _ref.read(trackerSnapshotRepoProvider);
+    final trackerRepo = _ref.read(trackerRepoProvider);
+    final memoryBookRepo = _ref.read(memoryBookRepoProvider);
+    final knowledgeRepo = _ref.read(characterKnowledgeFactRepoProvider);
+    final checkpointRepo = _ref.read(
+      ledgerReconciliationCheckpointRepoProvider,
+    );
+    final chatRepo = _ref.read(chatRepoProvider);
+    final updated = plan.session;
+    final invalidatedMessageIds = plan.invalidatedMessageIds;
 
     // Select the rollback base by chat order. Snapshot timestamps have
     // second-level precision and cannot reliably order adjacent turns.
     TrackerSnapshot? fallbackSnapshot;
     for (final message
-        in session.messages.take(earliestDeletedIndex).toList().reversed) {
+        in session.messages.take(plan.earliestDeletedIndex).toList().reversed) {
       final candidate = await snapshotRepo.getByAnchor(
         sessionId: session.id,
         messageId: message.id,
@@ -892,6 +934,37 @@ class ChatMessageService {
     ChatSessionService.updateCache(updated);
     return updated;
   }
+}
+
+/// Everything a message deletion needs, computed synchronously by
+/// [ChatMessageService.planDeleteMessages] and consumed by
+/// [ChatMessageService.commitDeleteMessages].
+///
+/// Splitting the plan from the commit lets the chat publish [session] (and its
+/// bumped deleted-message counter) before the DB work starts, so the bubbles
+/// leave the list on the frame of the tap instead of after the transaction.
+class MessageDeletionPlan {
+  /// The session as it looks once the deletion lands: messages removed,
+  /// `deletedMessages` session var bumped, `updatedAt` restamped.
+  final ChatSession session;
+
+  /// Indices that were actually in range — the ones this plan deletes.
+  final Set<int> deletedIndices;
+
+  /// Lowest index in [deletedIndices]. Everything from here on is invalidated.
+  final int earliestDeletedIndex;
+
+  /// Ids of every message at or after [earliestDeletedIndex] in the *original*
+  /// session, including the deleted ones. Snapshots, memory entries, knowledge
+  /// facts and ext blocks anchored to these ids no longer describe the chat.
+  final Set<String> invalidatedMessageIds;
+
+  const MessageDeletionPlan({
+    required this.session,
+    required this.deletedIndices,
+    required this.earliestDeletedIndex,
+    required this.invalidatedMessageIds,
+  });
 }
 
 /// Result of [ChatMessageService.changeSwipe].

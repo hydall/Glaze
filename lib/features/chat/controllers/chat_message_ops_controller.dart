@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
@@ -10,6 +11,7 @@ import '../state/token_breakdown_cache.dart';
 import '../state/cached_token_breakdown.dart';
 import '../../../core/llm/regex_service.dart';
 import '../../../core/state/active_selection_provider.dart';
+import '../../../shared/widgets/glaze_toast.dart';
 import '../../personas/persona_list_provider.dart';
 
 class ChatMessageOpsController {
@@ -28,6 +30,13 @@ class ChatMessageOpsController {
   });
 
   ChatMessageService get _messageSvc => ChatMessageService(_ref);
+
+  /// Tail of the in-flight delete commits. Publishing the shortened list before
+  /// the write makes it easy to fire a second delete while the first is still
+  /// in its transaction; unserialized, the two session writes interleave and
+  /// whichever lands last wins — which can put back messages the later delete
+  /// already took off screen. Chaining keeps the DB in UI order.
+  Future<void> _deleteCommits = Future<void>.value();
 
   Future<void> editMessage(
     int index,
@@ -122,11 +131,50 @@ class ChatMessageOpsController {
   Future<void> deleteMessages(Set<int> indices) async {
     if (!_ref.mounted) return;
     final current = _getState().value;
-    if (current == null || current.session == null) return;
-    final updated = await _messageSvc.deleteMessages(current.session!, indices);
+    final original = current?.session;
+    if (current == null || original == null) return;
+
+    final svc = _messageSvc;
+    final plan = svc.planDeleteMessages(original, indices);
+    if (plan == null) return;
+
+    // Optimistic: drop the bubbles on the frame of the tap. The commit below
+    // runs a multi-table transaction (knowledge rollback, memory, snapshots,
+    // ledger, embedding index) plus a full session re-encode, which is long
+    // enough on a big chat to read as an unresponsive Delete button.
+    ChatSessionService.updateCache(plan.session);
+    _setState(AsyncData(current.copyWith(session: plan.session)));
+    _invalidateHistory();
+
+    final commit = _deleteCommits.then(
+      (_) => svc.commitDeleteMessages(original, plan),
+    );
+    // Keep the chain usable after a failed commit.
+    _deleteCommits = commit.then<void>((_) {}, onError: (Object _) {});
+
+    try {
+      await commit;
+    } catch (e) {
+      debugPrint('[ChatMessageOps] delete failed, restoring messages: $e');
+      if (!_ref.mounted) return;
+      final after = _getState().value;
+      // Only undo the optimistic write when nothing else has touched the
+      // session since — a newer edit/generation owns the state by then, and
+      // restoring the pre-delete session would resurrect more than the failure.
+      if (after != null && identical(after.session, plan.session)) {
+        ChatSessionService.updateCache(original);
+        _setState(AsyncData(after.copyWith(session: original)));
+        _invalidateHistory();
+      }
+      GlazeToast.showWithoutContext(
+        'Failed to delete message: $e',
+        isError: true,
+        duration: 5000,
+      );
+      return;
+    }
     if (!_ref.mounted) return;
     _invalidateHistory();
-    _setState(AsyncData(current.copyWith(session: updated)));
   }
 
   Future<void> toggleMessageHidden(int index) async {
