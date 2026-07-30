@@ -11,6 +11,7 @@ import '../../../core/models/character.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/utils/platform_paths.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/utils/variant_label.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../character_editor_screen.dart';
@@ -288,13 +289,6 @@ class CharacterVariationsSheet extends ConsumerWidget {
     if (groupSize <= 1) Navigator.of(context, rootNavigator: true).pop();
     await ref.read(charactersProvider.notifier).remove(variant.id);
   }
-}
-
-/// Display label for a variation: its name, or "Original" for the unnamed row
-/// the group grew out of.
-String variantLabel(Character variant) {
-  final name = variant.variantName?.trim();
-  return (name != null && name.isNotEmpty) ? name : 'variation_original'.tr();
 }
 
 class _AddVariationTile extends StatelessWidget {

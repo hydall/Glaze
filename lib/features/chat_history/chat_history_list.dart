@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,7 +9,14 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/utils/avatar_image.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../core/state/character_provider.dart' show avatarVersionProvider;
+import '../../core/models/character.dart';
+import '../../core/state/character_provider.dart'
+    show
+        avatarVersionProvider,
+        characterSessionCountsProvider,
+        charactersProvider,
+        revealHiddenCharactersProvider;
+import '../../shared/utils/variant_label.dart';
 import '../chat/chat_actions_service.dart';
 import '../chat/chat_provider.dart';
 import '../chat/generating_sessions_provider.dart';
@@ -1003,44 +1012,107 @@ class _GroupHeader extends ConsumerWidget {
     );
   }
 
-  void _showGroupActions(
+  Future<void> _showGroupActions(
     BuildContext context,
     WidgetRef ref,
     ChatSessionInfo info,
-  ) {
-    // The group can span several variations; both actions target the most
-    // recently used one, so name it — otherwise "New session" on a group of
-    // four silently picks one of them.
-    final spansVariations = _variantCount() > 1;
+  ) async {
+    // The group can span several variations. "Edit character" targets the most
+    // recently used one, so name it; "New session" asks instead (see below).
+    // Both read the group from the library, not from this group's sessions, so
+    // a variation you have not chatted with yet still counts.
+    final variants = _groupVariants(ref, info.variantGroupId);
+    final spansVariations = variants.length > 1;
     final variantHint = spansVariations
         ? (info.variantName ?? 'variation_original'.tr())
         : info.variantName;
-    GlazeBottomSheet.show<String>(
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    final result = await GlazeBottomSheet.show<String>(
       context,
       title: info.characterName,
       items: [
         BottomSheetItem(
           icon: Icons.add_comment_outlined,
           label: 'action_new_session'.tr(),
-          hint: variantHint,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('new'),
+          hint: spansVariations ? 'variation_pick_title'.tr() : null,
+          onTap: () => rootNav.pop('new'),
         ),
         BottomSheetItem(
           icon: Icons.edit_note_rounded,
           label: 'action_edit_character'.tr(),
           hint: variantHint,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('edit'),
+          onTap: () => rootNav.pop('edit'),
         ),
       ],
-    ).then((result) {
-      if (!context.mounted) return;
-      if (result == 'new') {
-        ref.read(chatProvider(info.characterId).notifier).createNewSession();
-        context.go('/chat/${info.characterId}');
-      } else if (result == 'edit') {
-        context.push('/character/${info.characterId}/edit');
-      }
-    });
+    );
+    if (result == null || !context.mounted) return;
+    if (result == 'edit') {
+      unawaited(context.push('/character/${info.characterId}/edit'));
+      return;
+    }
+
+    // A new session belongs to exactly one variation and can never be moved
+    // between them, so when the group has several, ask which one instead of
+    // silently taking the most recently used.
+    final charId = await _resolveNewSessionCharacter(
+      context,
+      ref,
+      info,
+      variants,
+    );
+    if (charId == null || !context.mounted) return;
+    await ref.read(chatProvider(charId).notifier).createNewSession();
+    if (!context.mounted) return;
+    context.go('/chat/$charId');
+  }
+
+  /// The character a new session should be created for: the group's only
+  /// variation, or the one the user picks. Null when the picker is dismissed.
+  Future<String?> _resolveNewSessionCharacter(
+    BuildContext context,
+    WidgetRef ref,
+    ChatSessionInfo info,
+    List<Character> variants,
+  ) async {
+    if (variants.length < 2) return info.characterId;
+
+    final sessionCounts =
+        ref.read(characterSessionCountsProvider).value ?? const <String, int>{};
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    return GlazeBottomSheet.show<String>(
+      context,
+      title: 'variation_pick_title'.tr(),
+      items: [
+        for (var i = 0; i < variants.length; i++)
+          BottomSheetItem(
+            icon: Icons.person_outline_rounded,
+            label: variantLabel(variants[i]),
+            hint: variantPickerHint(
+              sessionCounts[variants[i].id] ?? 0,
+              isCover: i == 0,
+            ),
+            onTap: () => rootNav.pop(variants[i].id),
+          ),
+      ],
+    );
+  }
+
+  /// Every variation of [groupId], cover first.
+  ///
+  /// Read from the library rather than from this group's sessions, so a
+  /// variation you have never chatted with — the one most likely to be the
+  /// point of starting a new session — is offered too.
+  List<Character> _groupVariants(WidgetRef ref, String groupId) {
+    final all = ref.read(charactersProvider).value ?? const <Character>[];
+    final revealHidden = ref.read(revealHiddenCharactersProvider);
+    return all
+        .where(
+          (c) =>
+              (c.variantGroupId.isEmpty ? c.id : c.variantGroupId) == groupId &&
+              (revealHidden || !c.hidden),
+        )
+        .toList()
+      ..sort((a, b) => a.variantOrder.compareTo(b.variantOrder));
   }
 }
 

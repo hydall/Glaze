@@ -38,6 +38,7 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/image_viewer.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/colored_markdown.dart';
+import '../../shared/utils/variant_label.dart';
 import 'character_editor_screen.dart';
 import 'widgets/character_variations_sheet.dart';
 import 'widgets/character_hiding_onboarding_sheet.dart';
@@ -628,10 +629,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
           BottomSheetItem(
             icon: Icons.person_outline_rounded,
             label: variantLabel(variants[i]),
-            // Same "N chats" fact the variations sheet shows — variations of one
-            // character share a name stem and an avatar, so the chat count is
-            // often the only thing that identifies the one you meant.
-            hint: _variationHint(
+            hint: variantPickerHint(
               sessionCounts[variants[i].id] ?? 0,
               isCover: i == 0,
             ),
@@ -640,11 +638,6 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
           ),
       ],
     );
-  }
-
-  String _variationHint(int sessionCount, {required bool isCover}) {
-    final chats = '$sessionCount ${'count_chats'.plural(sessionCount)}';
-    return isCover ? '$chats · ${'variation_cover'.tr()}' : chats;
   }
 
   Future<void> _importChat(String charId) async {
