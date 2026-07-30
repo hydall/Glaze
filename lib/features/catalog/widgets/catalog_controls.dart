@@ -82,6 +82,34 @@ class CatalogControls extends ConsumerWidget {
     return opts[state.filters.sort] ?? state.filters.sort;
   }
 
+  // Icon per sort-mode key, shared across providers since the same key
+  // (e.g. 'latest', 'popular') always carries the same meaning.
+  static const Map<String, IconData> _sortIcons = {
+    'trending': Icons.trending_up_rounded,
+    'trending_week': Icons.trending_up_rounded,
+    'trending_24h': Icons.local_fire_department_rounded,
+    'popular': Icons.star_rounded,
+    'latest': Icons.schedule_rounded,
+    'newest': Icons.schedule_rounded,
+    'oldest': Icons.history_rounded,
+    'tokens_desc': Icons.arrow_downward_rounded,
+    'tokens_asc': Icons.arrow_upward_rounded,
+    'relevant': Icons.auto_awesome_rounded,
+    'recent': Icons.schedule_rounded,
+    'fresh': Icons.new_releases_rounded,
+    'score_week': Icons.star_rounded,
+    'score_24h': Icons.local_fire_department_rounded,
+    'chat_count_week': Icons.chat_bubble_rounded,
+    'chat_count_24h': Icons.whatshot_rounded,
+    'rating': Icons.thumb_up_rounded,
+    'updated': Icons.update_rounded,
+  };
+
+  static IconData sortIconForKey(String key) =>
+      _sortIcons[key] ?? Icons.sort_rounded;
+
+  IconData _currentSortIcon() => sortIconForKey(state.filters.sort);
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final enabledProviders = ref.watch(enabledCatalogProvidersProvider);
@@ -128,8 +156,9 @@ class CatalogControls extends ConsumerWidget {
           ),
         ),
         const SizedBox(width: 8),
-        _LabeledChip(
-          label: _currentSortLabel(),
+        _SortIconChip(
+          icon: _currentSortIcon(),
+          tooltip: _currentSortLabel(),
           onTap: () => _showPickerSheet(
             context,
             title: 'sort_by'.tr(),
@@ -242,6 +271,51 @@ class _LabeledChip extends StatelessWidget {
                   color: context.cs.primary,
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SortIconChip extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _SortIconChip({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: SizedBox(
+          height: 32,
+          child: GlassSurface(
+            borderRadius: BorderRadius.circular(16),
+            tint: context.cs.surface,
+            border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 18, color: context.cs.primary),
+                  const SizedBox(width: 2),
+                  Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 18,
+                    color: context.cs.primary,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
