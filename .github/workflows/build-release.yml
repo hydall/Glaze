@@ -13,6 +13,24 @@ on:
         required: false
         type: string
         default: ''
+      # Platform selection. Each toggle gates its build job, the GitHub Release
+      # asset and the Telegram post, so an unchecked platform is simply absent
+      # from the release.
+      build_android:
+        description: 'Android (APK)'
+        required: false
+        default: true
+        type: boolean
+      build_windows:
+        description: 'Windows (ZIP)'
+        required: false
+        default: true
+        type: boolean
+      build_ios:
+        description: 'iOS (IPA)'
+        required: false
+        default: true
+        type: boolean
       post_to_telegram:
         description: 'Post build to Telegram'
         required: false
@@ -111,6 +129,7 @@ jobs:
   # ── android ────────────────────────────────────────────────────────────────
   build-android:
     needs: metadata
+    if: ${{ github.event.inputs.build_android == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -254,6 +273,7 @@ jobs:
   # ── windows ────────────────────────────────────────────────────────────────
   build-windows:
     needs: metadata
+    if: ${{ github.event.inputs.build_windows == 'true' }}
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -317,20 +337,23 @@ jobs:
           "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
 
       - name: Zip Windows build
+        # Written outside the directory being archived so the zip cannot end up
+        # inside itself.
         shell: pwsh
         run: |
-          cd build/windows/x64/runner/Release
-          Compress-Archive -Path * -DestinationPath "${{ needs.metadata.outputs.tag_name }}-windows.zip"
+          Compress-Archive -Path build/windows/x64/runner/Release/* `
+            -DestinationPath "${{ needs.metadata.outputs.tag_name }}-windows.zip"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: Glaze-release-Windows
-          path: "build/windows/x64/runner/Release/${{ needs.metadata.outputs.tag_name }}-windows.zip"
+          path: "${{ needs.metadata.outputs.tag_name }}-windows.zip"
 
   # ── ios ────────────────────────────────────────────────────────────────────
   build-ios:
     needs: metadata
+    if: ${{ github.event.inputs.build_ios == 'true' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -440,28 +463,29 @@ jobs:
   release:
     needs: [metadata, build-android, build-windows, build-ios]
     runs-on: ubuntu-latest
+    # An unselected platform leaves its build job "skipped", which would block
+    # the implicit success() gate, so the results are checked explicitly: no
+    # failure among the needs, and at least one platform actually built.
+    if: >-
+      ${{ !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      (github.event.inputs.build_android == 'true' ||
+       github.event.inputs.build_windows == 'true' ||
+       github.event.inputs.build_ios == 'true') }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
 
-      - name: Download APK
+      - name: Download built artifacts
+        # Picks up whichever of the three platform artifacts exist, so the
+        # platform toggles alone decide which assets the release carries.
         uses: actions/download-artifact@v4
         with:
-          name: Glaze-release-APK
-          path: release-assets/
-
-      - name: Download Windows
-        uses: actions/download-artifact@v4
-        with:
-          name: Glaze-release-Windows
-          path: release-assets/
-
-      - name: Download IPA
-        uses: actions/download-artifact@v4
-        with:
-          name: Glaze-release-iOS
+          pattern: Glaze-release-*
+          merge-multiple: true
           path: release-assets/
 
       - name: Prepare release notes
@@ -493,10 +517,13 @@ jobs:
 
   # ── telegram notify ────────────────────────────────────────────────────────
   notify:
-    needs: [metadata, build-android, build-ios, release]
+    needs: [metadata, build-android, build-windows, build-ios, release]
     runs-on: ubuntu-latest
     if: >-
-      ${{ success() &&
+      ${{ !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      needs.release.result == 'success' &&
       (github.event.inputs.post_to_telegram == 'true' ||
        github.event.inputs.dm_developers == 'true') }}
     steps:
@@ -504,30 +531,22 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Download APK
+      - name: Download built artifacts
         uses: actions/download-artifact@v4
         with:
-          name: Glaze-release-APK
+          pattern: Glaze-release-*
+          merge-multiple: true
           path: artifacts/
 
-      - name: Download IPA
-        uses: actions/download-artifact@v4
-        with:
-          name: Glaze-release-iOS
-          path: artifacts/
-
-      - name: Send to Telegram
-        if: ${{ github.event.inputs.post_to_telegram == 'true' }}
+      - name: Compose announcement
+        id: text
         env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
           TG_MENTIONS:  ${{ secrets.TG_MENTIONS }}
           NOTIFY_PEOPLE: ${{ github.event.inputs.notify_people || 'true' }}
           VERSION:      ${{ needs.metadata.outputs.version }}
           TAG_NAME:     ${{ needs.metadata.outputs.tag_name }}
           BUILD_DATE:   ${{ needs.metadata.outputs.build_date }}
           BUILD_BRANCH: ${{ needs.metadata.outputs.build_branch }}
-          FILE_SLUG:    ${{ needs.metadata.outputs.file_slug }}
           COMMITS:      ${{ needs.metadata.outputs.commits }}
         run: |
           COMMITS_SECTION=""
@@ -540,69 +559,54 @@ jobs:
             MENTIONS_SECTION=$(printf '\n\n<tg-spoiler>%s</tg-spoiler>' "$TG_MENTIONS")
           fi
 
-          TEXT=$(printf 'Новый релиз: %s\n\n%s\n%s\n%s%s%s' \
-            "$TAG_NAME" "$VERSION" "$BUILD_DATE" "$BUILD_BRANCH" \
-            "$COMMITS_SECTION" "$MENTIONS_SECTION")
+          # The group post carries the mentions; the DM version does not, since
+          # its only reader is already the person being notified.
+          {
+            echo "group<<DELIM"
+            printf 'Новый релиз: %s\n\n%s\n%s\n%s%s%s\n' \
+              "$TAG_NAME" "$VERSION" "$BUILD_DATE" "$BUILD_BRANCH" \
+              "$COMMITS_SECTION" "$MENTIONS_SECTION"
+            echo "DELIM"
+            echo "dm<<DELIM"
+            printf 'Новый релиз (в ЛС): %s\n\n%s\n%s\n%s%s\n' \
+              "$TAG_NAME" "$VERSION" "$BUILD_DATE" "$BUILD_BRANCH" "$COMMITS_SECTION"
+            echo "DELIM"
+          } >> $GITHUB_OUTPUT
 
-          MSG_ID=$(curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg cid "$TG_CHAT_ID" --arg text "$TEXT" \
-              '{chat_id: $cid, text: $text, parse_mode: "HTML"}')" \
-            | jq -r '.result.message_id')
-
-          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/pinChatMessage" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg cid "$TG_CHAT_ID" --arg mid "$MSG_ID" \
-              '{chat_id: $cid, message_id: ($mid | tonumber), disable_notification: true}')"
-
-          for f in artifacts/*; do
-            curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
-              -F "chat_id=${TG_CHAT_ID}" \
-              -F "reply_to_message_id=${MSG_ID}" \
-              -F "document=@${f}"
-          done
+      - name: Send to Telegram
+        if: ${{ github.event.inputs.post_to_telegram == 'true' }}
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          # Chat id of the public group the releases are announced in.
+          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
+          # Message thread id of the topic inside that group. Leave the secret
+          # unset for a group without topics — the post then goes to the chat
+          # itself, which is the pre-topic behaviour.
+          TG_TOPIC_ID:  ${{ secrets.TG_TOPIC_ID }}
+          TEXT:         ${{ steps.text.outputs.group }}
+          PIN:          'true'
+          RUN_URL:      ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/telegram_post.sh "$TG_CHAT_ID" "$TG_TOPIC_ID"
 
       - name: Send build to developers (DM)
         if: ${{ github.event.inputs.dm_developers == 'true' }}
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_DEV_CHAT_IDS: ${{ secrets.TG_DEV_CHAT_IDS }}
-          VERSION:      ${{ needs.metadata.outputs.version }}
-          TAG_NAME:     ${{ needs.metadata.outputs.tag_name }}
-          BUILD_DATE:   ${{ needs.metadata.outputs.build_date }}
-          BUILD_BRANCH: ${{ needs.metadata.outputs.build_branch }}
-          FILE_SLUG:    ${{ needs.metadata.outputs.file_slug }}
-          COMMITS:      ${{ needs.metadata.outputs.commits }}
+          TEXT:         ${{ steps.text.outputs.dm }}
+          RUN_URL:      ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ -z "$TG_DEV_CHAT_IDS" ]; then
             echo "::warning::TG_DEV_CHAT_IDS secret is empty — skipping developer DMs."
             exit 0
           fi
 
-          COMMITS_SECTION=""
-          if [ -n "$COMMITS" ]; then
-            COMMITS_SECTION=$(printf '\n\n%s' "$COMMITS")
-          fi
-
-          TEXT=$(printf 'Новый релиз (в ЛС): %s\n\n%s\n%s\n%s%s' \
-            "$TAG_NAME" "$VERSION" "$BUILD_DATE" "$BUILD_BRANCH" "$COMMITS_SECTION")
-
+          # Accept commas or whitespace as separators between chat IDs. A private
+          # chat has no topics, so no thread id is passed.
           IDS=$(printf '%s' "$TG_DEV_CHAT_IDS" | tr ',' ' ')
           for CID in $IDS; do
             [ -z "$CID" ] && continue
-
-            MSG_ID=$(curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n --arg cid "$CID" --arg text "$TEXT" \
-                '{chat_id: $cid, text: $text, parse_mode: "HTML"}')" \
-              | jq -r '.result.message_id')
-
-            for f in artifacts/*; do
-              curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument" \
-                -F "chat_id=${CID}" \
-                -F "reply_to_message_id=${MSG_ID}" \
-                -F "document=@${f}"
-            done
+            bash .github/scripts/telegram_post.sh "$CID"
           done
 
       - name: Advance build/last tag

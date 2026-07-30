@@ -109,6 +109,52 @@ git checkout staging && git pull && git merge --no-ff nightly && git push
 git checkout stable && git pull && git merge --no-ff staging && git push
 ```
 
+## Build distribution
+
+Two manual workflows produce installable builds. Both are started from the
+Actions tab, and both take the branch from GitHub's native "Use workflow from"
+selector.
+
+| Workflow | File | Produces |
+|----------|------|----------|
+| *Build (Branch)* | `.github/workflows/build-branch.yml` | Dev build of any branch — APK, Windows ZIP, IPA as run artifacts |
+| *Build Release (Publish)* | `.github/workflows/build-release.yml` | The same three, plus a tagged GitHub Release carrying them as assets |
+
+**Platform selection.** Each workflow has an *Android (APK)* / *Windows (ZIP)* /
+*iOS (IPA)* checkbox, all on by default. An unchecked platform does not build at
+all, so it costs no runner time and is absent from the release and the Telegram
+post. Unchecking all three leaves nothing to do and the run stops after the
+metadata job.
+
+**Telegram delivery.** `post_to_telegram` announces the build in the public
+group and replies to that announcement with each selected file;
+`dm_developers` sends the same set to the developers' private chats. Both go
+through `.github/scripts/telegram_post.sh`, which is also where the 50 MB Bot
+API upload limit is handled — a file over the limit is replaced by a reply
+linking to the workflow run instead of failing the post. Because the Windows ZIP
+is the one artifact that can realistically cross that limit, check the run log
+after a Windows build if the ZIP does not show up in the group.
+
+Secrets used by the delivery step:
+
+| Secret | Meaning |
+|--------|---------|
+| `TG_BOT_TOKEN` | Bot token |
+| `TG_CHAT_ID` | Chat id of the public group builds are announced in |
+| `TG_TOPIC_ID` | Message thread id of the topic inside that group. Leave unset for a group without topics — the post then goes to the chat itself |
+| `TG_MENTIONS` | Text posted in a spoiler when `notify_people` is on |
+| `TG_DEV_CHAT_IDS` | Numeric private chat ids for `dm_developers`, comma- or whitespace-separated |
+
+The bot has to be a member of the group, and an administrator with
+*Pin messages* for the announcement pin to work — a failed pin is a warning, not
+a failed run. To read a topic's thread id, open the topic in Telegram Web: it is
+the last number in the URL (`.../#-1001234567890_25` → topic `25`).
+
+A successful group post moves the `build/last` tag to the built commit, which is
+the baseline for the "commits since last build" list in the next announcement.
+The developer DMs deliberately do not move it — an internal share is not an
+announcement.
+
 ## Trello board
 
 - **Board URL:** https://trello.com/b/jRUaax0b/glazeflutter
