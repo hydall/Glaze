@@ -15,7 +15,22 @@ import '../extensions/state/message_variables_notifier.dart';
 class ChatSessionInfo {
   final String sessionId;
   final String characterId;
+
+  /// The character's own name — **without** any variation suffix. The variation
+  /// travels separately in [variantName] so the list can render it as a chip
+  /// that survives truncation, instead of gluing it onto the end of a string
+  /// where the ellipsis eats exactly the part that tells two rows apart.
   final String characterName;
+
+  /// Variation group of [characterId], used to keep a character's variations in
+  /// one collapsible group instead of scattering them across the list as
+  /// look-alike top-level entries.
+  final String variantGroupId;
+
+  /// Name of the variation this session belongs to, or null for the group's
+  /// original/unnamed character row.
+  final String? variantName;
+
   final String? avatarPath;
   final String lastMessage;
   final int lastMessageTime;
@@ -27,6 +42,8 @@ class ChatSessionInfo {
     required this.sessionId,
     required this.characterId,
     required this.characterName,
+    required this.variantGroupId,
+    this.variantName,
     this.avatarPath,
     required this.lastMessage,
     required this.lastMessageTime,
@@ -34,6 +51,30 @@ class ChatSessionInfo {
     required this.sessionIndex,
     this.sessionName,
   });
+
+  /// Full name for places that need one flat string (dialog copy, tooltips).
+  String get fullCharacterName {
+    final variant = variantName?.trim();
+    return (variant != null && variant.isNotEmpty)
+        ? '$characterName — $variant'
+        : characterName;
+  }
+
+  /// This session with a new display name. Takes the name positionally so a
+  /// null genuinely clears it, rather than being read as "leave unchanged".
+  ChatSessionInfo withSessionName(String? name) => ChatSessionInfo(
+    sessionId: sessionId,
+    characterId: characterId,
+    characterName: characterName,
+    variantGroupId: variantGroupId,
+    variantName: variantName,
+    avatarPath: avatarPath,
+    lastMessage: lastMessage,
+    lastMessageTime: lastMessageTime,
+    messageCount: messageCount,
+    sessionIndex: sessionIndex,
+    sessionName: name,
+  );
 }
 
 final chatHistoryProvider =
@@ -92,12 +133,13 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
       final baseName = char?.displayName?.trim().isNotEmpty == true
           ? char!.displayName!.trim()
           : (char?.name ?? 'Unknown');
-      // Variations are separate history groups; surface the variation name on
-      // the chip as "Name — Variation" so they stay distinguishable.
+      // Variation identity is carried as its own field, not concatenated into
+      // the name: the list renders it as a chip, and grouping keys off the
+      // group id so a character's variations stay under one entry.
       final variant = char?.variantName?.trim();
-      final characterName = (variant != null && variant.isNotEmpty)
-          ? '$baseName — $variant'
-          : baseName;
+      final variantGroupId = (char == null || char.variantGroupId.isEmpty)
+          ? m.characterId
+          : char.variantGroupId;
       // While the origin event (branch/creation) is the most recent thing to
       // have happened, surface it as the preview and sort key so a freshly
       // branched or created chat rises to the top with a "Branched on …" /
@@ -114,7 +156,9 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
         ChatSessionInfo(
           sessionId: m.sessionId,
           characterId: m.characterId,
-          characterName: characterName,
+          characterName: baseName,
+          variantGroupId: variantGroupId,
+          variantName: (variant != null && variant.isNotEmpty) ? variant : null,
           avatarPath: char?.avatarPath,
           lastMessage: lastMessage,
           lastMessageTime: lastMessageTime,
@@ -148,6 +192,8 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
       final ai = a[i], bi = b[i];
       if (ai.sessionId != bi.sessionId ||
           ai.characterName != bi.characterName ||
+          ai.variantName != bi.variantName ||
+          ai.variantGroupId != bi.variantGroupId ||
           ai.avatarPath != bi.avatarPath ||
           ai.lastMessageTime != bi.lastMessageTime ||
           ai.messageCount != bi.messageCount ||
@@ -200,17 +246,7 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
       (sessions) => [
         for (final item in sessions)
           item.sessionId == sessionId
-              ? ChatSessionInfo(
-                  sessionId: item.sessionId,
-                  characterId: item.characterId,
-                  characterName: item.characterName,
-                  avatarPath: item.avatarPath,
-                  lastMessage: item.lastMessage,
-                  lastMessageTime: item.lastMessageTime,
-                  messageCount: item.messageCount,
-                  sessionIndex: item.sessionIndex,
-                  sessionName: durableName,
-                )
+              ? item.withSessionName(durableName)
               : item,
       ],
     );

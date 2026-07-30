@@ -320,6 +320,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     final isHidden = char?.hidden ?? false;
     final catalogUrl = char?.extensions['catalogUrl'];
     final hasCatalogUrl = catalogUrl is String && catalogUrl.isNotEmpty;
+    final variantCount = _variantCount(char);
     GlazeBottomSheet.show<void>(
       context,
       items: [
@@ -354,6 +355,11 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
         BottomSheetItem(
           icon: Icons.dynamic_feed_rounded,
           label: 'variations_title'.tr(),
+          // Surface the group size on the entry point itself, so the menu says
+          // whether there is anything behind it before you tap.
+          hint: variantCount > 1
+              ? 'variations_count'.plural(variantCount)
+              : 'variations_hint_single'.tr(),
           onTap: () {
             rootNav.pop();
             if (!mounted) return;
@@ -446,19 +452,37 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     }
   }
 
-  void _showVariations(BuildContext context) {
+  /// Number of variations in [char]'s group (1 for a standalone character).
+  int _variantCount(Character? char) {
+    if (char == null) return 1;
+    final groupId = char.variantGroupId.isEmpty
+        ? char.id
+        : char.variantGroupId;
+    return ref.read(variantGroupStatsProvider).value?[groupId]?.count ?? 1;
+  }
+
+  /// Opens the variations sheet. It pops with the id of the variation the user
+  /// picked, which continues straight into that variation's chat picker — the
+  /// sheet answers "which variation", `_openChat` answers "which session", so
+  /// the variation prompt inside it would be a duplicate question.
+  Future<void> _showVariations(BuildContext context) async {
     final char = ref.read(characterByIdProvider(widget.charId));
     final groupId = (char == null || char.variantGroupId.isEmpty)
         ? widget.charId
         : char.variantGroupId;
-    showModalBottomSheet<void>(
+    final pickedId = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => CharacterVariationsSheet(groupId: groupId),
+      builder: (_) => CharacterVariationsSheet(
+        groupId: groupId,
+        sourceId: widget.charId,
+      ),
     );
+    if (pickedId == null || !mounted || !context.mounted) return;
+    await _openChat(context, pickedId, pickVariation: false);
   }
 
   /// Import FAB tap. When the previewed character ships attached lorebooks the
@@ -501,12 +525,21 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     );
   }
 
-  Future<void> _openChat(BuildContext context, String cId) async {
+  /// Opens a chat with [cId]. Set [pickVariation] to false when the caller has
+  /// already resolved which variation to use (the variations sheet does), so
+  /// the user isn't asked the same question twice.
+  Future<void> _openChat(
+    BuildContext context,
+    String cId, {
+    bool pickVariation = true,
+  }) async {
     // When the character has multiple variations, choose which one to start the
     // chat with. The chosen variation is a distinct character id, so its chat
     // sessions (and history group) are independent and can't be switched later.
     final all = ref.read(charactersProvider).value ?? const <Character>[];
-    final current = all.where((c) => c.id == cId).firstOrNull;
+    final current = pickVariation
+        ? all.where((c) => c.id == cId).firstOrNull
+        : null;
     if (current != null) {
       final groupId = current.variantGroupId.isEmpty
           ? current.id
@@ -585,20 +618,33 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     BuildContext context,
     List<Character> variants,
   ) {
+    final sessionCounts =
+        ref.read(characterSessionCountsProvider).value ?? const <String, int>{};
     return GlazeBottomSheet.show<String>(
       context,
       title: 'variation_pick_title'.tr(),
       items: [
-        for (final v in variants)
+        for (var i = 0; i < variants.length; i++)
           BottomSheetItem(
             icon: Icons.person_outline_rounded,
-            label: v.variantName?.trim().isNotEmpty == true
-                ? v.variantName!.trim()
-                : 'variation_original'.tr(),
-            onTap: () => Navigator.of(context, rootNavigator: true).pop(v.id),
+            label: variantLabel(variants[i]),
+            // Same "N chats" fact the variations sheet shows — variations of one
+            // character share a name stem and an avatar, so the chat count is
+            // often the only thing that identifies the one you meant.
+            hint: _variationHint(
+              sessionCounts[variants[i].id] ?? 0,
+              isCover: i == 0,
+            ),
+            onTap: () =>
+                Navigator.of(context, rootNavigator: true).pop(variants[i].id),
           ),
       ],
     );
+  }
+
+  String _variationHint(int sessionCount, {required bool isCover}) {
+    final chats = '$sessionCount ${'count_chats'.plural(sessionCount)}';
+    return isCover ? '$chats · ${'variation_cover'.tr()}' : chats;
   }
 
   Future<void> _importChat(String charId) async {

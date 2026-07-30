@@ -18,6 +18,7 @@ import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../character_detail_screen.dart';
 import 'character_hiding_onboarding_sheet.dart';
+import 'character_variations_sheet.dart';
 import '../../../core/llm/character_tokens.dart';
 import '../character_selection_provider.dart';
 import 'add_to_folder_sheet.dart';
@@ -56,6 +57,13 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
   DustParticles? _dust;
 
   Character get character => widget.character;
+
+  /// Variation group this card represents. Legacy rows can still carry an empty
+  /// group id, in which case the character is its own group.
+  String get _groupId => character.variantGroupId.isEmpty
+      ? character.id
+      : character.variantGroupId;
+
   String get _displayName {
     final displayName = character.displayName?.trim();
     return (displayName != null && displayName.isNotEmpty)
@@ -127,7 +135,12 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
     );
     final scale = _pressed ? 0.96 : (_hovered ? 1.01 : 1.0);
     final dy = _hovered && !_pressed ? -4.0 : 0.0;
-    final isFav = character.fav;
+    // The card stands for a whole variation group, so both the favorite accent
+    // and the badge come from group-level stats — a favorite living on a
+    // non-cover variation must still light this card up.
+    final groupStats = variantGroupStatsOf(ref, _groupId);
+    final isFav = groupStats.anyFav;
+    final variantCount = groupStats.count;
     final shadowAlpha = _hovered
         ? (isFav ? 0.25 : 0.3)
         : 0.1;
@@ -226,10 +239,23 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
                     child: _CardInfo(
                       character: character,
                       tokenCount: _tokenCount,
+                      isFav: isFav,
                     ),
                   ),
-                  if (character.hidden)
-                    const Positioned(top: 8, left: 8, child: _HiddenBadge()),
+                  if (character.hidden || variantCount > 1)
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Row(
+                        children: [
+                          if (character.hidden) const _HiddenBadge(),
+                          if (character.hidden && variantCount > 1)
+                            const SizedBox(width: 6),
+                          if (variantCount > 1)
+                            _VariationsBadge(count: variantCount),
+                        ],
+                      ),
+                    ),
                   Positioned(
                     top: 8,
                     right: 8,
@@ -237,7 +263,12 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
                         ? _SelectionCheck(selected: selected)
                         : _CardMenuButton(
                             character: character,
-                            onTap: () => _showActions(context, ref),
+                            onTap: () => _showActions(
+                              context,
+                              ref,
+                              isFav: isFav,
+                              variantCount: variantCount,
+                            ),
                           ),
                   ),
                   Positioned.fill(
@@ -333,7 +364,12 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
     }
   }
 
-  void _showActions(BuildContext context, WidgetRef ref) {
+  void _showActions(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool isFav,
+    required int variantCount,
+  }) {
     GlazeBottomSheet.show<void>(
       context,
       items: [
@@ -353,14 +389,29 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
             context.push('/character/${character.id}/edit');
           },
         ),
+        // Same entry point as the detail sheet's menu — the card menu used to
+        // omit it entirely, so variations were reachable only two levels deep.
         BottomSheetItem(
-          icon: Icons.favorite,
-          label: character.fav ? 'action_remove_fav'.tr() : 'action_add_fav'.tr(),
+          icon: Icons.dynamic_feed_rounded,
+          label: 'variations_title'.tr(),
+          hint: variantCount > 1
+              ? 'variations_count'.plural(variantCount)
+              : 'variations_hint_single'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
+            _showVariations(context);
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.favorite,
+          label: isFav ? 'action_remove_fav'.tr() : 'action_add_fav'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            // Group-wide: the card reads as favorited when any variation is, so
+            // a cover-only write would leave "remove" looking like a no-op.
             ref
                 .read(charactersProvider.notifier)
-                .add(character.copyWith(fav: !character.fav));
+                .setGroupFav(character.id, !isFav);
           },
         ),
         BottomSheetItem(
@@ -422,6 +473,23 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
         ),
       ],
     );
+  }
+
+  /// Opens the variations sheet for this card's group. Picking a variation in
+  /// it resolves to that variation's chat — the sheet answers "which of these
+  /// do I want to play with", so the tap should land in a chat, not an editor.
+  Future<void> _showVariations(BuildContext context) async {
+    final pickedId = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) =>
+          CharacterVariationsSheet(groupId: _groupId, sourceId: character.id),
+    );
+    if (pickedId == null || !context.mounted) return;
+    context.go('/chat/$pickedId');
   }
 
   void _showExportOptions(BuildContext context) {
@@ -557,7 +625,15 @@ class _CardInfo extends StatelessWidget {
   final Character character;
   final int tokenCount;
 
-  const _CardInfo({required this.character, required this.tokenCount});
+  /// Group-wide favorite flag — passed in rather than read off [character],
+  /// which is only this group's cover row.
+  final bool isFav;
+
+  const _CardInfo({
+    required this.character,
+    required this.tokenCount,
+    required this.isFav,
+  });
 
   String get _displayName {
     final displayName = character.displayName?.trim();
@@ -568,7 +644,6 @@ class _CardInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isFav = character.fav;
     const favColor = Color(0xFFFF6B6B);
 
     return Padding(
@@ -686,6 +761,53 @@ class _HiddenBadge extends StatelessWidget {
         Icons.visibility_off_rounded,
         size: 18,
         color: Colors.white,
+      ),
+    );
+  }
+}
+
+/// Corner badge marking a card that stands for a variation group, with the
+/// number of variations it collapses.
+///
+/// Without it a group of five was pixel-identical to a lone character, which is
+/// why nobody found the feature: there was nothing on the card to suggest more
+/// was hiding behind it.
+class _VariationsBadge extends StatelessWidget {
+  final int count;
+
+  const _VariationsBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.15),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.dynamic_feed_rounded,
+            size: 15,
+            color: Colors.white,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            '$count',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            ),
+          ),
+        ],
       ),
     );
   }

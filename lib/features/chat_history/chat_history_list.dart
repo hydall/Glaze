@@ -46,7 +46,9 @@ class ChatHistoryList extends ConsumerStatefulWidget {
 }
 
 class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
-  final Set<String> _expandedCharIds = {};
+  /// Expanded groups, keyed by variation group id (a character and all of its
+  /// variations expand together).
+  final Set<String> _expandedGroupIds = {};
 
   /// Avatar paths already warmed so we don't re-precache on every rebuild.
   final Set<String> _precachedAvatars = {};
@@ -84,6 +86,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
               .where(
                 (s) =>
                     s.characterName.toLowerCase().contains(q) ||
+                    (s.variantName?.toLowerCase().contains(q) ?? false) ||
                     (s.sessionName?.toLowerCase().contains(q) ?? false) ||
                     s.lastMessage.toLowerCase().contains(q),
               )
@@ -151,9 +154,12 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
   }
 
   Widget _buildGroupedList(List<ChatSessionInfo> sessions) {
+    // Keyed by variation group, not character id: variations are separate
+    // character rows, so grouping by id scattered one character's variations
+    // across the list as several look-alike entries with the same avatar.
     final groupsMap = <String, List<ChatSessionInfo>>{};
     for (final s in sessions) {
-      groupsMap.putIfAbsent(s.characterId, () => []).add(s);
+      groupsMap.putIfAbsent(s.variantGroupId, () => []).add(s);
     }
 
     final sortedGroups = groupsMap.entries.toList()
@@ -173,19 +179,19 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
       itemBuilder: (_, i) {
         if (i == 0) return _buildCountHeader(sessions.length);
         final entry = sortedGroups[i - 1];
-        final charId = entry.key;
+        final groupId = entry.key;
         final group = [...entry.value]
           ..sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
-        final isExpanded = _expandedCharIds.contains(charId);
+        final isExpanded = _expandedGroupIds.contains(groupId);
         return _ChatHistoryGroupSection(
           sessions: group,
           isExpanded: isExpanded,
           onTap: () {
             setState(() {
               if (isExpanded) {
-                _expandedCharIds.remove(charId);
+                _expandedGroupIds.remove(groupId);
               } else {
-                _expandedCharIds.add(charId);
+                _expandedGroupIds.add(groupId);
               }
             });
           },
@@ -427,7 +433,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
       onTap: () =>
           context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
       child: Tooltip(
-        message: info.characterName,
+        message: info.fullCharacterName,
         preferBelow: false,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
@@ -508,6 +514,13 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            // Outside the Flexible on purpose: the character
+                            // name gives way to the ellipsis first, the chip
+                            // that identifies the variation always survives.
+                            if (info.variantName != null) ...[
+                              const SizedBox(width: 6),
+                              VariationChip(name: info.variantName!),
+                            ],
                           ],
                         ),
                       ),
@@ -599,6 +612,12 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      // Inside a group the rows are sessions of possibly
+                      // different variations, so each one names its own.
+                      if (info.variantName != null) ...[
+                        const SizedBox(width: 6),
+                        VariationChip(name: info.variantName!),
+                      ],
                     ],
                   ),
                 ),
@@ -663,7 +682,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
       bigInfo: BottomSheetBigInfo(
         icon: Icons.delete_outline,
         description:
-            '${'action_delete_session'.tr()} \u2014 ${info.characterName}? ${'chat_clear_confirm'.tr()}',
+            '${'action_delete_session'.tr()} \u2014 ${info.fullCharacterName}? ${'chat_clear_confirm'.tr()}',
       ),
       items: [
         BottomSheetItem(
@@ -869,7 +888,9 @@ class _GroupHeader extends ConsumerWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'count_sessions_format'.plural(sessions.length),
+                        _subtitle(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 12,
                           color: context.cs.onSurfaceVariant,
@@ -908,6 +929,19 @@ class _GroupHeader extends ConsumerWidget {
       ),
     );
   }
+
+  /// "N sessions", plus "· K variations" when the group spans more than one —
+  /// the collapsed header is the only place that can say the group is not just
+  /// a pile of sessions of one character.
+  String _subtitle() {
+    final sessionsLine = 'count_sessions_format'.plural(sessions.length);
+    final variantCount = _variantCount();
+    if (variantCount < 2) return sessionsLine;
+    return '$sessionsLine · ${'variations_count'.plural(variantCount)}';
+  }
+
+  /// Distinct variations represented among this group's sessions.
+  int _variantCount() => sessions.map((s) => s.characterId).toSet().length;
 
   Widget _buildAvatar(
     BuildContext context,
@@ -974,6 +1008,13 @@ class _GroupHeader extends ConsumerWidget {
     WidgetRef ref,
     ChatSessionInfo info,
   ) {
+    // The group can span several variations; both actions target the most
+    // recently used one, so name it — otherwise "New session" on a group of
+    // four silently picks one of them.
+    final spansVariations = _variantCount() > 1;
+    final variantHint = spansVariations
+        ? (info.variantName ?? 'variation_original'.tr())
+        : info.variantName;
     GlazeBottomSheet.show<String>(
       context,
       title: info.characterName,
@@ -981,11 +1022,13 @@ class _GroupHeader extends ConsumerWidget {
         BottomSheetItem(
           icon: Icons.add_comment_outlined,
           label: 'action_new_session'.tr(),
+          hint: variantHint,
           onTap: () => Navigator.of(context, rootNavigator: true).pop('new'),
         ),
         BottomSheetItem(
           icon: Icons.edit_note_rounded,
-          label: 'Edit Character',
+          label: 'action_edit_character'.tr(),
+          hint: variantHint,
           onTap: () => Navigator.of(context, rootNavigator: true).pop('edit'),
         ),
       ],
@@ -998,6 +1041,39 @@ class _GroupHeader extends ConsumerWidget {
         context.push('/character/${info.characterId}/edit');
       }
     });
+  }
+}
+
+/// Pill naming the variation a chat belongs to.
+///
+/// A chip rather than a `"Name — Variation"` suffix on purpose: the suffix was
+/// the last thing on a single-line, ellipsized row, so the part that told two
+/// otherwise identical rows apart was the first part to be cut off.
+class VariationChip extends StatelessWidget {
+  final String name;
+
+  const VariationChip({super.key, required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 110),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+      decoration: BoxDecoration(
+        color: context.cs.primary.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: context.cs.primary,
+        ),
+      ),
+    );
   }
 }
 

@@ -1247,6 +1247,18 @@
   "variation_delete": "Delete variation",
   "variation_delete_confirm": "Delete this variation? Its chats and images will be removed.",
   "variation_pick_title": "Choose variation",
+  "variations_count": {
+    "one": "{} variation",
+    "other": "{} variations"
+  },
+  "variations_hint_single": "No variations yet",
+  "variations_reorder_hint": "drag to reorder, top one is the cover",
+  "variation_cover": "Cover",
+  "variation_make_cover_hint": "Show this one in the library",
+  "variation_duplicate": "Duplicate",
+  "variation_duplicate_hint": "Create a copy of this variation",
+  "variation_default_name": "Variation {n}",
+  "action_edit_character": "Edit character",
   "action_hide": "Hide character",
   "action_unhide": "Unhide character",
   "char_hidden_toast": "Character hidden",

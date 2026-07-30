@@ -72,69 +72,100 @@ final filteredCharactersProvider = Provider.autoDispose
       final all = ref.watch(charactersProvider).value ?? const <Character>[];
       final showHidden = ref.watch(revealHiddenCharactersProvider);
 
-      // Collapse variation groups to one representative card. Tags are unioned
-      // across the group so search/filter match against every variation, and
-      // fav is OR'd so a favorited variation surfaces its card.
-      Iterable<Character> list = _collapseGroups(all);
+      // Collapse variation groups to one representative card. Matching happens
+      // against the whole group (union of tags, OR of `fav`, every variation
+      // name), but the card itself stays the untouched representative row.
+      Iterable<GroupView> list = _collapseGroups(all);
       // Hidden characters stay out of search/filter results unless revealed.
-      if (!showHidden) list = list.where((c) => !c.hidden);
+      if (!showHidden) list = list.where((g) => !g.rep.hidden);
       if (q.folderId != null) {
         final memberships =
             ref.watch(folderMembershipsProvider).value ??
             FolderMemberships.empty;
         final ids = memberships.charsIn(q.folderId!);
-        list = list.where((c) => ids.contains(c.id));
+        list = list.where((g) => ids.contains(g.rep.id));
       }
 
-      final result = list.where((c) => _passes(q, c)).toList();
+      final result = list.where((g) => _passes(q, g)).toList();
       _sort(result, q);
-      return result;
+      return [for (final g in result) g.rep];
     });
 
+/// One variation group as the library query sees it: the representative card
+/// plus the group-wide facts search and filters match against.
+///
+/// The representative is kept **unmodified** on purpose. It used to be a
+/// `copyWith` carrying the group's unioned tags and OR'd `fav`, and the card
+/// menus wrote that object straight back to the DB — one favorite toggle
+/// permanently merged every variation's tags into the cover row.
+class GroupView {
+  final Character rep;
+  final Set<String> tags;
+  final bool fav;
+  final List<String> variantNames;
+
+  const GroupView({
+    required this.rep,
+    required this.tags,
+    required this.fav,
+    required this.variantNames,
+  });
+}
+
 /// Reduces a flat character list (which contains every variation row) to one
-/// representative per variation group. The representative is the lowest-ordered
-/// row, augmented with the union of all variations' tags and an OR of their
-/// `fav` flags so search/filter behave group-wide.
-List<Character> _collapseGroups(List<Character> all) {
+/// [GroupView] per variation group; the representative is the lowest-ordered
+/// row.
+List<GroupView> _collapseGroups(List<Character> all) {
   final groups = <String, List<Character>>{};
   for (final c in all) {
     final gid = c.variantGroupId.isEmpty ? c.id : c.variantGroupId;
     groups.putIfAbsent(gid, () => <Character>[]).add(c);
   }
-  final reps = <Character>[];
+  final views = <GroupView>[];
   for (final members in groups.values) {
-    if (members.length == 1) {
-      reps.add(members.first);
-      continue;
+    if (members.length > 1) {
+      members.sort((a, b) => a.variantOrder.compareTo(b.variantOrder));
     }
-    members.sort((a, b) => a.variantOrder.compareTo(b.variantOrder));
-    final rep = members.first;
     var fav = false;
-    final extraTags = <String>[];
-    final seen = rep.tags.toSet();
+    final tags = <String>{};
+    final variantNames = <String>[];
     for (final m in members) {
       fav = fav || m.fav;
-      for (final t in m.tags) {
-        if (seen.add(t)) extraTags.add(t);
+      tags.addAll(m.tags);
+      final variantName = m.variantName?.trim();
+      if (variantName != null && variantName.isNotEmpty) {
+        variantNames.add(variantName);
       }
     }
-    reps.add(rep.copyWith(tags: [...rep.tags, ...extraTags], fav: fav));
+    views.add(
+      GroupView(
+        rep: members.first,
+        tags: tags,
+        fav: fav,
+        variantNames: variantNames,
+      ),
+    );
   }
-  return reps;
+  return views;
 }
 
-bool _passes(CharacterQuery q, Character c) {
+bool _passes(CharacterQuery q, GroupView g) {
+  final c = g.rep;
   if (q.search.isNotEmpty) {
     final query = q.search.toLowerCase();
     final displayName = c.displayName?.toLowerCase() ?? '';
+    // Variation names match too, so a group is reachable by the name of any of
+    // its variations — the chat list has always searched them (they were baked
+    // into the row title), the library silently did not.
     final matchesSearch =
-        c.name.toLowerCase().contains(query) || displayName.contains(query);
+        c.name.toLowerCase().contains(query) ||
+        displayName.contains(query) ||
+        g.variantNames.any((n) => n.toLowerCase().contains(query));
     if (!matchesSearch) return false;
   }
-  if (q.favOnly && !c.fav) return false;
+  if (q.favOnly && !g.fav) return false;
   if (q.tags.isNotEmpty) {
-    final charTags = c.tags.toSet();
-    if (!q.tags.every(charTags.contains)) return false;
+    if (!q.tags.every(g.tags.contains)) return false;
   }
   if (q.hasTokenFilter) {
     final tokens = c.tokenCount > 0 ? c.tokenCount : estimateCharacterTokens(c);
@@ -148,13 +179,15 @@ String _displayNameOf(Character c) {
   return (displayName != null && displayName.isNotEmpty) ? displayName : c.name;
 }
 
-void _sort(List<Character> list, CharacterQuery q) {
+void _sort(List<GroupView> list, CharacterQuery q) {
   // lastChat ordering isn't available client-side here; fall back to name.
   final effectiveSort = q.sortBy == SortType.lastChat
       ? SortType.name
       : q.sortBy;
-  list.sort((a, b) {
-    if (a.fav != b.fav) return a.fav ? -1 : 1;
+  list.sort((ga, gb) {
+    // Group-wide fav, so a favorite on any variation floats its card to the top.
+    if (ga.fav != gb.fav) return ga.fav ? -1 : 1;
+    final a = ga.rep, b = gb.rep;
     final cmp = switch (effectiveSort) {
       SortType.name => _displayNameOf(
         a,

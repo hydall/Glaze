@@ -15,6 +15,33 @@ enum CharacterSortField { name, date, lastChat }
 
 enum CharacterSortDir { asc, desc }
 
+/// Group-level facts about one variation group, used by the My Characters grid
+/// to render a card that stands for the whole group: how many variations it
+/// holds and whether *any* of them is favorited.
+///
+/// The grid only ever renders the representative row (`variant_order 0`), so
+/// without this the card could not tell a 5-variation group from a lone
+/// character, and a favorite living on a non-cover variation stayed invisible.
+class VariantGroupStats {
+  final int count;
+  final bool anyFav;
+
+  const VariantGroupStats({required this.count, required this.anyFav});
+
+  /// A group of one, unfavorited — the fallback for a character whose group has
+  /// not been observed yet (stream still loading).
+  static const single = VariantGroupStats(count: 1, anyFav: false);
+
+  @override
+  bool operator ==(Object other) =>
+      other is VariantGroupStats &&
+      other.count == count &&
+      other.anyFav == anyFav;
+
+  @override
+  int get hashCode => Object.hash(count, anyFav);
+}
+
 class CharacterRepo implements SyncCharacterStore {
   final AppDatabase _db;
   CharacterRepo(this._db);
@@ -244,10 +271,19 @@ class CharacterRepo implements SyncCharacterStore {
     await CharacterDeletionRepo(_db).deleteCharacters({id});
   }
 
+  /// Membership predicate for a variation group. Legacy rows (and catalog
+  /// imports predating the group backfill) can carry an empty
+  /// `variant_group_id`; for a standalone character the group id is its own
+  /// `char_id`, so those are matched by id too — otherwise the variations sheet
+  /// came up empty for every character created before the column existed.
+  Expression<bool> _groupPredicate($CharactersTable t, String groupId) =>
+      t.variantGroupId.equals(groupId) |
+      (t.variantGroupId.equals('') & t.charId.equals(groupId));
+
   /// All variations in a group, ordered by variant_order (representative first).
   Future<List<Character>> getVariants(String groupId) async {
     final rows = await (_db.select(_db.characters)
-          ..where((t) => t.variantGroupId.equals(groupId))
+          ..where((t) => _groupPredicate(t, groupId))
           ..orderBy([(t) => OrderingTerm.asc(t.variantOrder)]))
         .get();
     return rows.map(_toModel).toList();
@@ -255,10 +291,55 @@ class CharacterRepo implements SyncCharacterStore {
 
   Stream<List<Character>> watchVariants(String groupId) {
     return (_db.select(_db.characters)
-          ..where((t) => t.variantGroupId.equals(groupId))
+          ..where((t) => _groupPredicate(t, groupId))
           ..orderBy([(t) => OrderingTerm.asc(t.variantOrder)]))
         .watch()
         .map((rows) => rows.map(_toModel).toList());
+  }
+
+  /// Per-group [VariantGroupStats] for the whole library, keyed by group id.
+  ///
+  /// Reads only the three columns the aggregate needs and folds them in Dart:
+  /// legacy rows can still carry an empty `variant_group_id` (their group is
+  /// their own `char_id`), which a plain SQL `GROUP BY variant_group_id` would
+  /// collapse into one bogus bucket.
+  Stream<Map<String, VariantGroupStats>> watchVariantGroupStats() {
+    final query = _db.selectOnly(_db.characters)
+      ..addColumns([
+        _db.characters.charId,
+        _db.characters.variantGroupId,
+        _db.characters.fav,
+      ]);
+    return query.watch().map((rows) {
+      final counts = <String, int>{};
+      final favs = <String>{};
+      for (final row in rows) {
+        final id = row.read(_db.characters.charId) ?? '';
+        final rawGroup = row.read(_db.characters.variantGroupId) ?? '';
+        final groupId = rawGroup.isEmpty ? id : rawGroup;
+        counts[groupId] = (counts[groupId] ?? 0) + 1;
+        if (row.read(_db.characters.fav) ?? false) favs.add(groupId);
+      }
+      return {
+        for (final entry in counts.entries)
+          entry.key: VariantGroupStats(
+            count: entry.value,
+            anyFav: favs.contains(entry.key),
+          ),
+      };
+    });
+  }
+
+  /// Favorites or unfavorites an entire variation group.
+  ///
+  /// The grid shows one card per group and treats "favorite" as an OR across
+  /// its variations, so the toggle has to be group-wide — clearing the flag on
+  /// the cover alone would leave the card still reading as favorited. Matches
+  /// legacy empty-group-id rows by id, exactly like [setHidden].
+  Future<void> setGroupFav(String groupId, bool fav) async {
+    await (_db.update(_db.characters)
+          ..where((t) => _groupPredicate(t, groupId)))
+        .write(CharactersCompanion(fav: Value(fav)));
   }
 
   /// Next free variant_order for a group (max + 1, or 0 for a fresh group).
@@ -266,10 +347,21 @@ class CharacterRepo implements SyncCharacterStore {
     final maxExpr = _db.characters.variantOrder.max();
     final query = _db.selectOnly(_db.characters)
       ..addColumns([maxExpr])
-      ..where(_db.characters.variantGroupId.equals(groupId));
+      ..where(_groupPredicate(_db.characters, groupId));
     final row = await query.getSingleOrNull();
     final current = row?.read(maxExpr);
     return current == null ? 0 : current + 1;
+  }
+
+  /// Backfills `variant_group_id` for a character that predates the column, so
+  /// it and the variations added to it form one queryable group. Called before
+  /// the first variation is cloned off a legacy row — without it the group is
+  /// split in two and both rows keep `variant_order 0`, which surfaces the same
+  /// character twice in the library grid.
+  Future<void> normalizeGroupId(String charId) async {
+    await (_db.update(_db.characters)
+          ..where((t) => t.charId.equals(charId) & t.variantGroupId.equals('')))
+        .write(CharactersCompanion(variantGroupId: Value(charId)));
   }
 
   Future<void> renameVariant(String charId, String? name) async {
@@ -281,19 +373,11 @@ class CharacterRepo implements SyncCharacterStore {
   }
 
   /// Hides or reveals an entire variation group. Applied group-wide so that
-  /// promoting a sibling on delete never resurfaces a hidden character.
-  ///
-  /// Legacy rows (and catalog imports predating the group backfill) can still
-  /// carry an empty `variant_group_id`; for a standalone character [groupId] is
-  /// its own `char_id`, so we also match those by id — otherwise the update
-  /// silently affected zero rows and the hide toggle appeared to do nothing.
+  /// promoting a sibling on delete never resurfaces a hidden character. See
+  /// [_groupPredicate] for why legacy rows are matched by id too.
   Future<void> setHidden(String groupId, bool hidden) async {
     await (_db.update(_db.characters)
-          ..where(
-            (t) =>
-                t.variantGroupId.equals(groupId) |
-                (t.variantGroupId.equals('') & t.charId.equals(groupId)),
-          ))
+          ..where((t) => _groupPredicate(t, groupId)))
         .write(CharactersCompanion(hidden: Value(hidden)));
   }
 

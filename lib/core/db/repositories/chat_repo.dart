@@ -36,6 +36,28 @@ class ChatRepo implements SyncChatStore {
     return rows.map(_toMetadata).toList();
   }
 
+  /// Number of chat sessions per character id, aggregated in SQL.
+  ///
+  /// Feeds the variations sheet, where "how many chats does this variation
+  /// have" is the fact that tells two same-looking variations apart. Counting
+  /// via [getAllSessionMetadata] would decode every session's messages just to
+  /// throw them away.
+  Stream<Map<String, int>> watchSessionCountsByCharacter() {
+    final countExpr = _db.chatSessions.sessionId.count();
+    final query = _db.selectOnly(_db.chatSessions)
+      ..addColumns([_db.chatSessions.characterId, countExpr])
+      ..groupBy([_db.chatSessions.characterId]);
+    return query.watch().map((rows) {
+      final counts = <String, int>{};
+      for (final row in rows) {
+        final charId = row.read(_db.chatSessions.characterId);
+        if (charId == null || charId.isEmpty) continue;
+        counts[charId] = row.read(countExpr) ?? 0;
+      }
+      return counts;
+    });
+  }
+
   Future<List<ChatSession>> getAllSessions() async {
     final rows = await (_db.select(
       _db.chatSessions,
