@@ -106,24 +106,24 @@ depends=('gtk3' 'glib2' 'sqlite3')
 options=('!strip' '!emptydirs')
 
 package() {
-    mkdir -p "\\\$pkgdir/opt/$APP_NAME"
-    mkdir -p "\\\$pkgdir/usr/bin"
-    mkdir -p "\\\$pkgdir/usr/share/applications"
-    mkdir -p "\\\$pkgdir/usr/share/icons/hicolor/512x512/apps"
+    mkdir -p "\$pkgdir/opt/$APP_NAME"
+    mkdir -p "\$pkgdir/usr/bin"
+    mkdir -p "\$pkgdir/usr/share/applications"
+    mkdir -p "\$pkgdir/usr/share/icons/hicolor/512x512/apps"
 
     # Copy from the flutter release bundle
-    cp -r "\\\$srcdir/../../../x64/release/bundle/"* "\\\$pkgdir/opt/$APP_NAME/"
+    cp -r "\$srcdir/../../x64/release/bundle/"* "\$pkgdir/opt/$APP_NAME/"
     
     # Symlink binary
-    ln -s "/opt/$APP_NAME/glaze_flutter" "\\\$pkgdir/usr/bin/$APP_NAME"
+    ln -s "/opt/$APP_NAME/glaze_flutter" "\$pkgdir/usr/bin/$APP_NAME"
     
     # Copy icon
-    if [ -f "\\\$srcdir/../../../../assets/logos/glaze.png" ]; then
-        cp "\\\$srcdir/../../../../assets/logos/glaze.png" "\\\$pkgdir/usr/share/icons/hicolor/512x512/apps/$APP_NAME.png"
+    if [ -f "\$srcdir/../../../../assets/logos/glaze.png" ]; then
+        cp "\$srcdir/../../../../assets/logos/glaze.png" "\$pkgdir/usr/share/icons/hicolor/512x512/apps/$APP_NAME.png"
     fi
 
     # Create desktop file
-    cat <<DESKTOP > "\\\$pkgdir/usr/share/applications/$APP_NAME.desktop"
+    cat <<DESKTOP > "\$pkgdir/usr/share/applications/$APP_NAME.desktop"
 [Desktop Entry]
 Name=Glaze
 Comment=Native LLM frontend for AI roleplay

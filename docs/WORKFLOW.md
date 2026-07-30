@@ -117,23 +117,28 @@ selector.
 
 | Workflow | File | Produces |
 |----------|------|----------|
-| *Build (Branch)* | `.github/workflows/build-branch.yml` | Dev build of any branch — APK, Windows ZIP, IPA as run artifacts |
-| *Build Release (Publish)* | `.github/workflows/build-release.yml` | The same three, plus a tagged GitHub Release carrying them as assets |
+| *Build (Branch)* | `.github/workflows/build-branch.yml` | Dev build of any branch — APK, Windows ZIP, IPA, Linux DEB + pacman package as run artifacts |
+| *Build Release (Publish)* | `.github/workflows/build-release.yml` | The same set, plus a tagged GitHub Release carrying them as assets |
 
 **Platform selection.** Each workflow has an *Android (APK)* / *Windows (ZIP)* /
-*iOS (IPA)* checkbox, all on by default. An unchecked platform does not build at
-all, so it costs no runner time and is absent from the release and the Telegram
-post. Unchecking all three leaves nothing to do and the run stops after the
-metadata job.
+*iOS (IPA)* / *Linux (DEB + pacman)* checkbox, all on by default. An unchecked
+platform does not build at all, so it costs no runner time and is absent from the
+release and the Telegram post. Unchecking every platform leaves nothing to do and
+the run stops after the metadata job.
+
+The Linux job produces two packages from `scripts/build_linux_packages.sh` — a
+`.deb` (dpkg-deb) and an Arch/CachyOS `.pkg.tar.zst` (makepkg). A format whose
+tooling is missing is skipped with a warning rather than failing the job; the run
+only fails when neither package comes out.
 
 **Telegram delivery.** `post_to_telegram` announces the build in the public
 group and replies to that announcement with each selected file;
 `dm_developers` sends the same set to the developers' private chats. Both go
 through `.github/scripts/telegram_post.sh`, which is also where the 50 MB Bot
 API upload limit is handled — a file over the limit is replaced by a reply
-linking to the workflow run instead of failing the post. Because the Windows ZIP
-is the one artifact that can realistically cross that limit, check the run log
-after a Windows build if the ZIP does not show up in the group.
+linking to the workflow run instead of failing the post. The Windows ZIP and the
+Linux packages are the artifacts that can realistically cross that limit, so
+check the run log if one of them does not show up in the group.
 
 Secrets used by the delivery step:
 

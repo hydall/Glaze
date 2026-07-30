@@ -9,7 +9,7 @@ on:
     inputs:
       # Platform selection. Each toggle gates both the build job and the upload,
       # so an unchecked platform costs no runner time and simply does not appear
-      # in the Telegram post. Unchecking all three leaves nothing to post.
+      # in the Telegram post. Unchecking every platform leaves nothing to post.
       build_android:
         description: 'Android (APK)'
         required: false
@@ -22,6 +22,11 @@ on:
         type: boolean
       build_ios:
         description: 'iOS (IPA)'
+        required: false
+        default: true
+        type: boolean
+      build_linux:
+        description: 'Linux (DEB + pacman)'
         required: false
         default: true
         type: boolean
@@ -475,9 +480,118 @@ jobs:
           name: Glaze-release-iOS
           path: "${{ needs.metadata.outputs.file_slug }}.ipa"
 
+  # ── linux ──────────────────────────────────────────────────────────────────
+  build-linux:
+    needs: metadata
+    if: ${{ github.event.inputs.build_linux == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Create .env from secrets
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
+          DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
+          DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          case "$BUILD_CHANNEL" in
+            stable)  CHANNEL_DROPBOX_KEY="" ;;
+            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
+            *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
+          esac
+          {
+            echo "DROPBOX_APP_KEY=${CHANNEL_DROPBOX_KEY:-$DROPBOX_APP_KEY}"
+            echo "DROPBOX_REDIRECT_NATIVE=$DROPBOX_REDIRECT_NATIVE"
+            echo "GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID"
+            echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive"
+          } >> .env
+
+      - name: Install Linux dependencies
+        # pacman-package-manager brings makepkg, which the packaging script uses
+        # for the Arch/CachyOS package; the rest is the standard Flutter Linux
+        # desktop toolchain.
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang cmake git ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev pacman-package-manager
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build Linux packages (release)
+        run: >
+          ./scripts/build_linux_packages.sh
+          "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
+          "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}"
+          "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
+          "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
+          "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+
+      - name: Rename Linux packages
+        # The script skips a format whose tooling is missing instead of failing,
+        # so the rename reports what actually came out and only fails when
+        # neither package was produced.
+        env:
+          SLUG: ${{ needs.metadata.outputs.file_slug }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          DEB=(build/linux/deb/*.deb)
+          PKG=(build/linux/arch/*.pkg.tar.zst)
+
+          if [ ${#DEB[@]} -gt 0 ]; then
+            mv "${DEB[0]}" "build/linux/deb/${SLUG}-linux.deb"
+          else
+            echo "::warning::No .deb was produced — dpkg-deb missing or the build failed."
+          fi
+
+          if [ ${#PKG[@]} -gt 0 ]; then
+            mv "${PKG[0]}" "build/linux/arch/${SLUG}-linux.pkg.tar.zst"
+          else
+            echo "::warning::No pacman package was produced — makepkg missing or the build failed."
+          fi
+
+          if [ ${#DEB[@]} -eq 0 ] && [ ${#PKG[@]} -eq 0 ]; then
+            echo "::error::build_linux_packages.sh produced no package at all."
+            exit 1
+          fi
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-DEB
+          path: "build/linux/deb/${{ needs.metadata.outputs.file_slug }}-linux.deb"
+
+      - name: Upload Pacman artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-Pacman
+          path: "build/linux/arch/${{ needs.metadata.outputs.file_slug }}-linux.pkg.tar.zst"
+
   # ── telegram notify ────────────────────────────────────────────────────────
   notify:
-    needs: [metadata, build-android, build-windows, build-ios]
+    needs: [metadata, build-android, build-windows, build-ios, build-linux]
     runs-on: ubuntu-latest
     # Run when either delivery toggle is on: the group post and/or the direct
     # messages to developers. Each individual step is gated on its own toggle.
@@ -491,7 +605,8 @@ jobs:
       !contains(needs.*.result, 'cancelled') &&
       (github.event.inputs.build_android == 'true' ||
        github.event.inputs.build_windows == 'true' ||
-       github.event.inputs.build_ios == 'true') &&
+       github.event.inputs.build_ios == 'true' ||
+       github.event.inputs.build_linux == 'true') &&
       (github.event.inputs.post_to_telegram == 'true' ||
        github.event.inputs.dm_developers == 'true') }}
     steps:
