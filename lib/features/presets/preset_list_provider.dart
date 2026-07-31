@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/preset.dart';
+import '../../core/services/featured_presets.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
 import '../../core/utils/id_generator.dart';
@@ -42,6 +43,9 @@ class PresetListNotifier extends AsyncNotifier<List<Preset>> {
     final copy = preset.copyWith(
       id: generateId(),
       name: '${preset.name} (copy)',
+      // A featured preset resolves its cover from its fixed id, which the copy
+      // no longer has — pin the bundled asset so the clone keeps the artwork.
+      imagePath: preset.imagePath ?? featuredPresetImageAsset(preset.id),
       createdAt: currentTimestampSeconds(),
     );
     await ref.read(presetRepoProvider).put(copy);

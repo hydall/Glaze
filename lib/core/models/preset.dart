@@ -58,6 +58,12 @@ abstract class Preset with _$Preset {
     required String id,
     required String name,
     String? author,
+
+    /// Cover image shown on the preset cards. Either a path to a user-picked
+    /// file under the Glaze data dir, or a bundled `assets/...` path carried
+    /// over from a featured preset (e.g. when one is cloned). Null = no cover;
+    /// featured presets resolve theirs from their fixed id instead.
+    String? imagePath,
     @Default([]) List<PresetBlock> blocks,
     @Default([]) List<PresetRegex> regexes,
     @Default(false) bool reasoningEnabled,

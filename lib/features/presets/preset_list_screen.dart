@@ -19,6 +19,7 @@ import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import 'preset_connections_sheet.dart';
 import 'preset_editor_screen.dart';
+import 'preset_image.dart';
 import 'preset_list_provider.dart';
 
 class PresetListScreen extends ConsumerStatefulWidget {
@@ -293,11 +294,16 @@ class _PsCard extends ConsumerWidget {
     required this.onEdit,
   });
 
+  /// Height of a card that shows a cover image. Plain cards keep their
+  /// intrinsic (single-row) height.
+  static const double _coverHeight = 132;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connections = ref.watch(presetConnectionsProvider);
     final hasCharBinding = connections.character.values.contains(preset.id);
     final hasChatBinding = connections.chat.values.contains(preset.id);
+    final cover = presetCoverImage(preset);
 
     return GlassSurface(
       enableRipple: true,
@@ -315,95 +321,172 @@ class _PsCard extends ConsumerWidget {
         width: isActive ? 2 : 1,
       ),
       onTap: onActivate,
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            // Circular icon
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: context.cs.primary.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
+      child: cover == null
+          ? Padding(
+              padding: const EdgeInsets.all(10),
+              child: _buildRow(
+                context,
+                hasChatBinding: hasChatBinding,
+                hasCharBinding: hasCharBinding,
+                onCover: false,
               ),
-              child: Icon(
-                Icons.description_outlined,
-                size: 20,
-                color: context.cs.primary,
-              ),
-            ),
-            const SizedBox(width: 12),
-            // Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    preset.name,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: context.cs.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      _SmallBadge(
-                        icon: Icons.description,
-                        label: '${_presetTokenCount(preset)}',
-                      ),
-                      if (preset.author != null &&
-                          preset.author!.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            'by ${preset.author}',
-                             style: TextStyle(
-                               fontSize: 12,
-                               color: context.cs.onSurfaceVariant,
-                             ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            // Connection badge — tappable, colour shows binding type
-            _ConnBadge(
-              isActive: isActive,
+            )
+          : _buildCover(
+              context,
+              cover,
               hasChatBinding: hasChatBinding,
               hasCharBinding: hasCharBinding,
-              onTap: onConnections,
             ),
-            const SizedBox(width: 8),
-            // Edit button
-            SizedBox(
-              width: 34,
-              height: 34,
-              child: Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-                child: InkWell(
-                  onTap: onEdit,
-                  borderRadius: BorderRadius.circular(8),
-                   child: Icon(
-                     Icons.edit_outlined,
-                     size: 18,
-                     color: context.cs.onSurfaceVariant,
-                   ),
-                ),
+    );
+  }
+
+  /// Taller card: the cover fills it, a scrim keeps the text legible and the
+  /// usual info row sits at the bottom.
+  Widget _buildCover(
+    BuildContext context,
+    ImageProvider cover, {
+    required bool hasChatBinding,
+    required bool hasCharBinding,
+  }) {
+    return SizedBox(
+      height: _coverHeight,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image(
+            image: cover,
+            fit: BoxFit.cover,
+            // A missing/corrupt file falls back to the plain glass surface
+            // rather than Flutter's error box.
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0x33000000), Color(0xD9000000)],
               ),
             ),
-          ],
-        ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildRow(
+                  context,
+                  hasChatBinding: hasChatBinding,
+                  hasCharBinding: hasCharBinding,
+                  onCover: true,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  /// Shared info row. Over a cover the leading icon is dropped (the art already
+  /// identifies the preset) and the text switches to light-on-dark.
+  Widget _buildRow(
+    BuildContext context, {
+    required bool hasChatBinding,
+    required bool hasCharBinding,
+    required bool onCover,
+  }) {
+    final primaryText = onCover ? Colors.white : context.cs.onSurface;
+    final secondaryText = onCover
+        ? Colors.white.withValues(alpha: 0.75)
+        : context.cs.onSurfaceVariant;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        if (!onCover) ...[
+          // Circular icon
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: context.cs.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.description_outlined,
+              size: 20,
+              color: context.cs.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
+        ],
+        // Info
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                preset.name,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: primaryText,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  _SmallBadge(
+                    icon: Icons.description,
+                    label: '${_presetTokenCount(preset)}',
+                    foreground: secondaryText,
+                    onCover: onCover,
+                  ),
+                  if (preset.author != null && preset.author!.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        'by ${preset.author}',
+                        style: TextStyle(fontSize: 12, color: secondaryText),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        // Connection badge — tappable, colour shows binding type
+        _ConnBadge(
+          isActive: isActive,
+          hasChatBinding: hasChatBinding,
+          hasCharBinding: hasCharBinding,
+          onTap: onConnections,
+        ),
+        const SizedBox(width: 8),
+        // Edit button
+        SizedBox(
+          width: 34,
+          height: 34,
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              onTap: onEdit,
+              borderRadius: BorderRadius.circular(8),
+              child: Icon(
+                Icons.edit_outlined,
+                size: 18,
+                color: secondaryText,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -413,27 +496,42 @@ class _PsCard extends ConsumerWidget {
 class _SmallBadge extends StatelessWidget {
   final IconData icon;
   final String label;
-  const _SmallBadge({required this.icon, required this.label});
+
+  /// Overrides the icon/label colour (set when the badge sits on a cover).
+  final Color? foreground;
+
+  /// Over a cover the near-transparent black pill disappears, so a light
+  /// scrim is used instead.
+  final bool onCover;
+  const _SmallBadge({
+    required this.icon,
+    required this.label,
+    this.foreground,
+    this.onCover = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final color = foreground ?? context.cs.onSurfaceVariant;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.05),
+        color: onCover
+            ? Colors.black.withValues(alpha: 0.35)
+            : Colors.black.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: context.cs.onSurfaceVariant),
+          Icon(icon, size: 12, color: color),
           const SizedBox(width: 4),
           Text(
             label,
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w700,
-              color: context.cs.onSurfaceVariant,
+              color: color,
             ),
           ),
         ],

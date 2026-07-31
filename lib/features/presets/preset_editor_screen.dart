@@ -1,12 +1,17 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:easy_localization/easy_localization.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/preset.dart';
+import '../../core/services/featured_presets.dart';
 import '../../core/services/preset_defaults.dart';
+import '../../core/state/db_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../shared/theme/app_colors.dart';
@@ -16,6 +21,7 @@ import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/generic_editor.dart';
 import '../../shared/widgets/help_tip.dart';
+import 'preset_image.dart';
 import 'preset_list_provider.dart';
 import 'preset_export.dart';
 import 'widgets/preset_block_row.dart';
@@ -99,6 +105,7 @@ class PresetEditorBody extends ConsumerStatefulWidget {
 class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   late final _nameCtrl = TextEditingController(text: widget.preset?.name ?? '');
   late String _author = widget.preset?.author ?? '';
+  late String? _imagePath = widget.preset?.imagePath;
   late List<PresetBlock> _blocks;
   late List<PresetRegex> _regexes;
   late bool _parseInlineReasoning = widget.preset?.reasoningEnabled ?? false;
@@ -122,6 +129,10 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   late final String _currentId = widget.preset?.id ?? generateId();
   late final int _createdAt =
       widget.preset?.createdAt ?? currentTimestampSeconds();
+
+  /// Bundled featured presets ship with a fixed author and cover image — both
+  /// are read-only here. Cloning one produces a normal, fully editable preset.
+  bool get _isFeatured => isFeaturedPreset(widget.preset?.id);
 
   @override
   void initState() {
@@ -178,6 +189,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       id: _currentId,
       name: name,
       author: _author.trim().isEmpty ? null : _author.trim(),
+      imagePath: _imagePath,
       blocks: _blocks,
       regexes: _regexes,
       reasoningEnabled: _parseInlineReasoning,
@@ -308,6 +320,10 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         : _nameCtrl.text.trim();
     final addBlockAtTop =
         ref.watch(appSettingsProvider).value?.addBlockAtTop ?? false;
+    final cover = resolvePresetCoverImage(
+      presetId: _currentId,
+      imagePath: _imagePath,
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -323,6 +339,22 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (cover != null) ...[
+                    GestureDetector(
+                      onTap: _isFeatured ? null : _pickImage,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image(
+                          image: cover,
+                          width: 52,
+                          height: 52,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
                   Expanded(
                     child: GestureDetector(
                       onTap: _showRenameDialog,
@@ -802,6 +834,52 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     );
   }
 
+  /// Picks a cover image, stores it next to the character/persona avatars (so
+  /// it gets a thumbnail) and saves the new path on the preset.
+  Future<void> _pickImage() async {
+    if (_isFeatured) return;
+
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+    } catch (_) {}
+    if (result == null || result.files.isEmpty) return;
+
+    final picked = result.files.first;
+    Uint8List? bytes = picked.bytes;
+    if ((bytes == null || bytes.isEmpty) &&
+        picked.path != null &&
+        picked.path!.isNotEmpty) {
+      bytes = await File(picked.path!).readAsBytes();
+    }
+    if (bytes == null || bytes.isEmpty) return;
+
+    final storage = await ref.read(imageStorageProvider.future);
+    final savedPath = await storage.saveAvatar(
+      presetImageStorageId(_currentId),
+      bytes,
+    );
+    // The file name never changes, so the previously decoded frames have to be
+    // dropped or the card keeps showing the old cover.
+    await FileImage(File(savedPath)).evict();
+    final thumbPath = storage.thumbnailPath(savedPath);
+    if (thumbPath != null) await FileImage(File(thumbPath)).evict();
+
+    if (!mounted) return;
+    setState(() => _imagePath = savedPath);
+    _scheduleSave();
+  }
+
+  void _removeImage() {
+    if (_isFeatured) return;
+    setState(() => _imagePath = null);
+    _scheduleSave();
+  }
+
   /// Builds a [Preset] from the live editor state (used for Export and Clone).
   Preset _currentSnapshot() {
     final name = _nameCtrl.text.trim().isEmpty
@@ -811,6 +889,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       id: _currentId,
       name: name,
       author: _author.trim().isEmpty ? null : _author.trim(),
+      imagePath: _imagePath,
       blocks: _blocks,
       regexes: _regexes,
       reasoningEnabled: _parseInlineReasoning,
@@ -841,14 +920,35 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
             _showRenameDialog();
           },
         ),
-        BottomSheetItem(
-          icon: Icons.person_outline,
-          label: 'action_set_author'.tr(),
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _showAuthorDialog();
-          },
-        ),
+        // Author and cover image are part of a bundled featured preset — the
+        // user edits them on a clone, not on the original.
+        if (!_isFeatured)
+          BottomSheetItem(
+            icon: Icons.person_outline,
+            label: 'action_set_author'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _showAuthorDialog();
+            },
+          ),
+        if (!_isFeatured)
+          BottomSheetItem(
+            icon: Icons.image_outlined,
+            label: 'change_image'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _pickImage();
+            },
+          ),
+        if (!_isFeatured && _imagePath != null && _imagePath!.isNotEmpty)
+          BottomSheetItem(
+            icon: Icons.hide_image_outlined,
+            label: 'action_remove_image'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _removeImage();
+            },
+          ),
         BottomSheetItem(
           icon: Icons.copy_outlined,
           label: 'action_clone_block'.tr(),

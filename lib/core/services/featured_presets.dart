@@ -85,6 +85,12 @@ String? featuredPresetImageAsset(String? presetId) {
   return null;
 }
 
+/// Whether [presetId] is one of the bundled featured presets. Their author and
+/// cover image are part of the shipped preset, so the editor must not let the
+/// user change either (a clone gets a fresh id and is fully editable).
+bool isFeaturedPreset(String? presetId) =>
+    presetId != null && featuredPresets.any((f) => f.id == presetId);
+
 /// Loads and parses a featured preset's bundled ST JSON into a [Preset],
 /// stamping the fixed id/name/author/metadata so re-seeding is idempotent.
 Future<Preset> loadFeaturedPreset(FeaturedPreset f) async {

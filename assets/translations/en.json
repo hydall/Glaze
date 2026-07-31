@@ -297,6 +297,7 @@
   "preset_options": "Preset Options",
   "change_author": "Change Author",
   "change_image": "Change Image",
+  "action_remove_image": "Remove Image",
   "action_edit_name": "Change Name",
   "label_active_preset": "Active Preset",
   "level_chat": "Chat",

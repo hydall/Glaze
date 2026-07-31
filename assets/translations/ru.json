@@ -299,6 +299,7 @@
   "preset_options": "Опции пресета",
   "change_author": "Изменить автора",
   "change_image": "Изменить картинку",
+  "action_remove_image": "Удалить картинку",
   "action_edit_name": "Изменить название",
   "label_active_preset": "Активный пресет",
   "level_chat": "Чат",

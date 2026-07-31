@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/services/featured_presets.dart';
+import '../../core/models/preset.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/active_studio_preset_provider.dart';
 import '../../core/utils/platform_paths.dart';
@@ -14,6 +14,7 @@ import '../../core/state/db_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
 import '../personas/persona_list_provider.dart';
+import '../presets/preset_image.dart';
 import '../presets/preset_list_provider.dart';
 import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/app_colors.dart';
@@ -54,18 +55,20 @@ final _resolvedPersonaAvatarPathProvider = FutureProvider<String?>((ref) async {
   return null;
 });
 
-final _activePresetNameProvider = FutureProvider<String>((ref) async {
+/// The globally active preset. Watches the list (not just the id) so a rename
+/// or a new cover image is reflected on the card without leaving the screen.
+final _activePresetProvider = Provider<Preset?>((ref) {
   final activeId = ref.watch(activePresetIdProvider);
-  if (activeId == null) return 'label_default'.tr();
-  final preset = await ref
-      .read(presetListProvider.notifier)
-      .getPresetById(activeId);
-  return preset?.name ?? 'label_default'.tr();
+  if (activeId == null) return null;
+  final presets = ref.watch(presetListProvider).value ?? const <Preset>[];
+  return presets.where((p) => p.id == activeId).firstOrNull;
 });
 
-/// Cover image asset for the active preset, when it's a bundled featured preset.
-final _activePresetImageProvider = Provider<String?>((ref) {
-  return featuredPresetImageAsset(ref.watch(activePresetIdProvider));
+/// Cover image of the active preset — a user-picked one, or the bundled art of
+/// a featured preset.
+final _activePresetImageProvider = Provider<ImageProvider?>((ref) {
+  final preset = ref.watch(_activePresetProvider);
+  return preset != null ? presetCoverImage(preset) : null;
 });
 
 // SVG paths matching ToolsView.vue
@@ -149,7 +152,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     final personaInfo = ref.watch(_activePersonaInfoProvider);
     final resolvedAvatar = ref.watch(_resolvedPersonaAvatarPathProvider).value;
     final presetName =
-        ref.watch(_activePresetNameProvider).value ?? 'label_default'.tr();
+        ref.watch(_activePresetProvider)?.name ?? 'label_default'.tr();
     final presetImage = ref.watch(_activePresetImageProvider);
     final studioEnabled = ref.watch(studioFeatureEnabledProvider);
     final topPad = MediaQuery.of(context).padding.top + 66.0;
@@ -181,7 +184,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
                 iconPath: _kIconPresets,
                 title: 'tab_presets'.tr(),
                 subtitle: presetName,
-                backgroundAsset: presetImage,
+                backgroundImage: presetImage,
                 onTap: () => context.push('/tools/presets'),
               ),
               const SizedBox(height: 10),
@@ -293,9 +296,10 @@ class _HeroCard extends StatelessWidget {
   final bool isAvatar;
   final String? avatarPath;
 
-  /// Bundled asset shown as the card background (e.g. a featured preset's cover).
+  /// Image shown as the card background (e.g. a preset's cover — a bundled
+  /// asset for a featured preset, a stored file for a user-picked one).
   /// Applies only to the non-avatar layout and does not change the card size.
-  final String? backgroundAsset;
+  final ImageProvider? backgroundImage;
   final VoidCallback onTap;
 
   const _HeroCard({
@@ -304,7 +308,7 @@ class _HeroCard extends StatelessWidget {
     required this.subtitle,
     this.isAvatar = false,
     this.avatarPath,
-    this.backgroundAsset,
+    this.backgroundImage,
     required this.onTap,
   });
 
@@ -351,12 +355,13 @@ class _HeroCard extends StatelessWidget {
                   ),
                 ),
               ),
-            ] else if (backgroundAsset != null) ...[
+            ] else if (backgroundImage != null) ...[
               Positioned.fill(
-                child: Image.asset(
-                  backgroundAsset!,
-                  key: ValueKey(backgroundAsset),
+                child: Image(
+                  image: backgroundImage!,
+                  key: ValueKey(backgroundImage),
                   fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
                 ),
               ),
               // Dark scrim so the white label/subtitle stay legible over art.
