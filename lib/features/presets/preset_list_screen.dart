@@ -298,6 +298,13 @@ class _PsCard extends ConsumerWidget {
   /// intrinsic (single-row) height.
   static const double _coverHeight = 132;
 
+  /// Border width of the active card, and of any card carrying artwork.
+  static const double _accentBorderWidth = 2;
+
+  /// How long the active highlight takes to cross-fade when the selection
+  /// moves between presets.
+  static const _activeFade = Duration(milliseconds: 220);
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connections = ref.watch(presetConnectionsProvider);
@@ -305,38 +312,58 @@ class _PsCard extends ConsumerWidget {
     final hasChatBinding = connections.chat.values.contains(preset.id);
     final cover = presetCoverImage(preset);
 
-    return GlassSurface(
-      enableRipple: true,
-      tint: isActive
-          ? Color.alphaBlend(
-              context.cs.primary.withValues(alpha: 0.12),
-              context.cs.surfaceContainerHighest,
-            )
-          : null,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(
-        color: isActive
-            ? context.cs.primary.withValues(alpha: 0.5)
-            : context.cs.outline,
-        width: isActive ? 2 : 1,
-      ),
-      onTap: onActivate,
-      child: cover == null
-          ? Padding(
-              padding: const EdgeInsets.all(10),
-              child: _buildRow(
-                context,
-                hasChatBinding: hasChatBinding,
-                hasCharBinding: hasCharBinding,
-                onCover: false,
-              ),
-            )
-          : _buildCover(
+    // A card filled with artwork needs a real frame even when idle — a hairline
+    // disappears against the cover (same treatment as the Tools hero card).
+    final idleBorder = cover != null
+        ? context.cs.outlineVariant
+        : context.cs.outline;
+    final idleWidth = cover != null ? _accentBorderWidth : 1.0;
+    final activeBorder = context.cs.primary.withValues(alpha: 0.5);
+    final baseTint = context.cs.surfaceContainerHighest;
+    final activeTint = Color.alphaBlend(
+      context.cs.primary.withValues(alpha: 0.12),
+      baseTint,
+    );
+
+    final content = cover == null
+        ? Padding(
+            padding: const EdgeInsets.all(10),
+            child: _buildRow(
               context,
-              cover,
               hasChatBinding: hasChatBinding,
               hasCharBinding: hasCharBinding,
+              onCover: false,
             ),
+          )
+        : _buildCover(
+            context,
+            cover,
+            hasChatBinding: hasChatBinding,
+            hasCharBinding: hasCharBinding,
+          );
+
+    // `begin` only applies on the first build, so a card that is already active
+    // when the list opens starts highlighted instead of animating in; later
+    // changes to `end` fade the border (and its tint) between the two states.
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(
+        begin: isActive ? 1.0 : 0.0,
+        end: isActive ? 1.0 : 0.0,
+      ),
+      duration: _activeFade,
+      curve: Curves.easeOut,
+      child: content,
+      builder: (context, t, child) => GlassSurface(
+        enableRipple: true,
+        tint: Color.lerp(baseTint, activeTint, t),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Color.lerp(idleBorder, activeBorder, t)!,
+          width: idleWidth + (_accentBorderWidth - idleWidth) * t,
+        ),
+        onTap: onActivate,
+        child: child!,
+      ),
     );
   }
 
