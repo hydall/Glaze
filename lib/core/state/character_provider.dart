@@ -412,11 +412,6 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
     ref.invalidateSelf();
   }
 
-  Future<void> reorderVariants(String groupId, List<String> orderedIds) async {
-    await ref.read(characterRepoProvider).reorderVariants(groupId, orderedIds);
-    ref.invalidateSelf();
-  }
-
   Future<void> delete(String id) async {
     final repo = ref.read(characterRepoProvider);
     await repo.delete(id);

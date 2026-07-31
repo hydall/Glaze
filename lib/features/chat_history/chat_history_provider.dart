@@ -31,7 +31,14 @@ class ChatSessionInfo {
   /// original/unnamed character row.
   final String? variantName;
 
+  /// This session's own variation avatar.
   final String? avatarPath;
+
+  /// Avatar of the group's original. The collapsed group header stands for the
+  /// whole character rather than for one of its variations, so it uses this and
+  /// its face stops changing with whichever variation you chatted with last.
+  final String? groupAvatarPath;
+
   final String lastMessage;
   final int lastMessageTime;
   final int messageCount;
@@ -45,6 +52,7 @@ class ChatSessionInfo {
     required this.variantGroupId,
     this.variantName,
     this.avatarPath,
+    this.groupAvatarPath,
     required this.lastMessage,
     required this.lastMessageTime,
     required this.messageCount,
@@ -69,6 +77,7 @@ class ChatSessionInfo {
     variantGroupId: variantGroupId,
     variantName: variantName,
     avatarPath: avatarPath,
+    groupAvatarPath: groupAvatarPath,
     lastMessage: lastMessage,
     lastMessageTime: lastMessageTime,
     messageCount: messageCount,
@@ -121,6 +130,9 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
   ) async {
     final charIds = allMeta.map((m) => m.characterId).toSet();
     final charMap = await charRepo.getByIds(charIds);
+    // Keyed by group, not by session character: a group's original may have no
+    // chats of its own, so it can be missing from [charMap] entirely.
+    final groupAvatars = await charRepo.getGroupAvatars();
 
     final result = <ChatSessionInfo>[];
     for (final m in allMeta) {
@@ -160,6 +172,8 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
           variantGroupId: variantGroupId,
           variantName: (variant != null && variant.isNotEmpty) ? variant : null,
           avatarPath: char?.avatarPath,
+          groupAvatarPath:
+              groupAvatars[variantGroupId] ?? char?.avatarPath,
           lastMessage: lastMessage,
           lastMessageTime: lastMessageTime,
           messageCount: m.messageCount,
@@ -195,6 +209,7 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
           ai.variantName != bi.variantName ||
           ai.variantGroupId != bi.variantGroupId ||
           ai.avatarPath != bi.avatarPath ||
+          ai.groupAvatarPath != bi.groupAvatarPath ||
           ai.lastMessageTime != bi.lastMessageTime ||
           ai.messageCount != bi.messageCount ||
           ai.lastMessage != bi.lastMessage ||

@@ -330,6 +330,35 @@ class CharacterRepo implements SyncCharacterStore {
     });
   }
 
+  /// Avatar of each group's original (the `variant_order 0` row), keyed by
+  /// group id.
+  ///
+  /// The chat list's collapsed group header stands for the whole character, so
+  /// it shows the original's picture rather than whichever variation happened
+  /// to be used last — that used to make a group's face change as you chatted.
+  ///
+  /// A future rather than a stream: its only caller already rebuilds on every
+  /// character write.
+  Future<Map<String, String?>> getGroupAvatars() async {
+    final query = _db.selectOnly(_db.characters)
+      ..addColumns([
+        _db.characters.charId,
+        _db.characters.variantGroupId,
+        _db.characters.avatarPath,
+      ])
+      ..where(_db.characters.variantOrder.equals(0));
+    final rows = await query.get();
+    final avatars = <String, String?>{};
+    for (final row in rows) {
+      final id = row.read(_db.characters.charId) ?? '';
+      final rawGroup = row.read(_db.characters.variantGroupId) ?? '';
+      avatars[rawGroup.isEmpty ? id : rawGroup] = row.read(
+        _db.characters.avatarPath,
+      );
+    }
+    return avatars;
+  }
+
   /// Favorites or unfavorites an entire variation group.
   ///
   /// The grid shows one card per group and treats "favorite" as an OR across
@@ -406,19 +435,6 @@ class CharacterRepo implements SyncCharacterStore {
                   (t.variantGroupId.equals('') & t.charId.isIn(groupList)),
             ))
           .write(CharactersCompanion(hidden: Value(hidden)));
-    });
-  }
-
-  /// Reassigns variant_order so [orderedIds] becomes 0..n-1 (index 0 = cover).
-  Future<void> reorderVariants(String groupId, List<String> orderedIds) async {
-    await _db.batch((b) {
-      for (var i = 0; i < orderedIds.length; i++) {
-        b.update(
-          _db.characters,
-          CharactersCompanion(variantOrder: Value(i)),
-          where: ($CharactersTable t) => t.charId.equals(orderedIds[i]),
-        );
-      }
     });
   }
 

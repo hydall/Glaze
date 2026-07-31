@@ -17,6 +17,7 @@ import '../../core/state/character_provider.dart'
         charactersProvider,
         revealHiddenCharactersProvider;
 import '../../shared/utils/variant_label.dart';
+import '../../shared/widgets/variation_chip.dart';
 import '../chat/chat_actions_service.dart';
 import '../chat/chat_provider.dart';
 import '../chat/generating_sessions_provider.dart';
@@ -68,10 +69,11 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       for (final s in sessions) {
-        final path = s.avatarPath;
-        if (path == null || path.isEmpty) continue;
-        if (!_precachedAvatars.add(path)) continue;
-        precacheGlazeAvatar(context, path);
+        for (final path in [s.avatarPath, s.groupAvatarPath]) {
+          if (path == null || path.isEmpty) continue;
+          if (!_precachedAvatars.add(path)) continue;
+          precacheGlazeAvatar(context, path);
+        }
       }
     });
   }
@@ -958,7 +960,8 @@ class _GroupHeader extends ConsumerWidget {
     ChatSessionInfo info,
   ) {
     ref.watch(avatarVersionProvider);
-    final image = glazeAvatarImage(info.avatarPath);
+    // The group's face is the original's, not the last-used variation's.
+    final image = glazeAvatarImage(info.groupAvatarPath ?? info.avatarPath);
     if (image != null) {
       return ClipOval(
         child: SizedBox.square(
@@ -1083,15 +1086,12 @@ class _GroupHeader extends ConsumerWidget {
       context,
       title: 'variation_pick_title'.tr(),
       items: [
-        for (var i = 0; i < variants.length; i++)
+        for (final variant in variants)
           BottomSheetItem(
             icon: Icons.person_outline_rounded,
-            label: variantLabel(variants[i]),
-            hint: variantPickerHint(
-              sessionCounts[variants[i].id] ?? 0,
-              isCover: i == 0,
-            ),
-            onTap: () => rootNav.pop(variants[i].id),
+            label: variantLabel(variant),
+            hint: variantPickerHint(sessionCounts[variant.id] ?? 0),
+            onTap: () => rootNav.pop(variant.id),
           ),
       ],
     );
@@ -1113,39 +1113,6 @@ class _GroupHeader extends ConsumerWidget {
         )
         .toList()
       ..sort((a, b) => a.variantOrder.compareTo(b.variantOrder));
-  }
-}
-
-/// Pill naming the variation a chat belongs to.
-///
-/// A chip rather than a `"Name — Variation"` suffix on purpose: the suffix was
-/// the last thing on a single-line, ellipsized row, so the part that told two
-/// otherwise identical rows apart was the first part to be cut off.
-class VariationChip extends StatelessWidget {
-  final String name;
-
-  const VariationChip({super.key, required this.name});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 110),
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-      decoration: BoxDecoration(
-        color: context.cs.primary.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: context.cs.primary,
-        ),
-      ),
-    );
   }
 }
 

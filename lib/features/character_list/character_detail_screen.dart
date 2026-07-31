@@ -38,8 +38,8 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/image_viewer.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/colored_markdown.dart';
-import '../../shared/utils/variant_label.dart';
 import 'character_editor_screen.dart';
+import '../character_gallery/widgets/character_gallery_view.dart';
 import 'widgets/character_variations_sheet.dart';
 import 'widgets/character_hiding_onboarding_sheet.dart';
 
@@ -69,13 +69,17 @@ Border _detailHeaderBorder(BuildContext context, ThemePreset preset) {
 
 // ─── Tabs ──────────────────────────────────────────────────────────────────
 
-// Only two tabs: Info (with comments folded in under the bio) and Prompt Blocks
-// (with lorebooks folded in under the prompts).
+// Info (with comments folded in under the bio), Prompt Blocks (with lorebooks
+// folded in under the prompts), and the character's image gallery.
 List<GlazeTabItem> _detailTabs(BuildContext context) => [
   GlazeTabItem(label: 'section_info'.tr(), icon: Icons.info_outline_rounded),
   GlazeTabItem(
     label: 'section_prompt_blocks'.tr(),
     icon: Icons.description_outlined,
+  ),
+  GlazeTabItem(
+    label: 'section_images'.tr(),
+    icon: Icons.photo_library_outlined,
   ),
 ];
 
@@ -345,15 +349,6 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
           },
         ),
         BottomSheetItem(
-          icon: Icons.photo_library_outlined,
-          label: 'menu_image_viewer'.tr(),
-          onTap: () {
-            rootNav.pop();
-            if (!mounted) return;
-            context.push('/character/${widget.charId}/gallery');
-          },
-        ),
-        BottomSheetItem(
           icon: Icons.dynamic_feed_rounded,
           label: 'variations_title'.tr(),
           // Surface the group size on the entry point itself, so the menu says
@@ -462,28 +457,18 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     return ref.read(variantGroupStatsProvider).value?[groupId]?.count ?? 1;
   }
 
-  /// Opens the variations sheet. It pops with the id of the variation the user
-  /// picked, which continues straight into that variation's chat picker — the
-  /// sheet answers "which variation", `_openChat` answers "which session", so
-  /// the variation prompt inside it would be a duplicate question.
-  Future<void> _showVariations(BuildContext context) async {
+  /// Opens the variations grid for this character's group. Picking a card there
+  /// opens that variation's own sheet on top of this one, so nothing comes back.
+  void _showVariations(BuildContext context) {
     final char = ref.read(characterByIdProvider(widget.charId));
     final groupId = (char == null || char.variantGroupId.isEmpty)
         ? widget.charId
         : char.variantGroupId;
-    final pickedId = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      useRootNavigator: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => CharacterVariationsSheet(
-        groupId: groupId,
-        sourceId: widget.charId,
-      ),
+    showCharacterVariationsSheet(
+      context,
+      groupId: groupId,
+      sourceId: widget.charId,
     );
-    if (pickedId == null || !mounted || !context.mounted) return;
-    await _openChat(context, pickedId, pickVariation: false);
   }
 
   /// Import FAB tap. When the previewed character ships attached lorebooks the
@@ -526,41 +511,13 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     );
   }
 
-  /// Opens a chat with [cId]. Set [pickVariation] to false when the caller has
-  /// already resolved which variation to use (the variations sheet does), so
-  /// the user isn't asked the same question twice.
-  Future<void> _openChat(
-    BuildContext context,
-    String cId, {
-    bool pickVariation = true,
-  }) async {
-    // When the character has multiple variations, choose which one to start the
-    // chat with. The chosen variation is a distinct character id, so its chat
-    // sessions (and history group) are independent and can't be switched later.
-    final all = ref.read(charactersProvider).value ?? const <Character>[];
-    final current = pickVariation
-        ? all.where((c) => c.id == cId).firstOrNull
-        : null;
-    if (current != null) {
-      final groupId = current.variantGroupId.isEmpty
-          ? current.id
-          : current.variantGroupId;
-      final variants =
-          all
-              .where(
-                (c) =>
-                    (c.variantGroupId.isEmpty ? c.id : c.variantGroupId) ==
-                    groupId,
-              )
-              .toList()
-            ..sort((a, b) => a.variantOrder.compareTo(b.variantOrder));
-      if (variants.length > 1) {
-        final pickedId = await _pickVariation(context, variants);
-        if (pickedId == null || !context.mounted) return;
-        cId = pickedId;
-      }
-    }
-
+  /// Opens a chat with [cId], asking only which *session* to open.
+  ///
+  /// It no longer asks which variation: this sheet now belongs to exactly one
+  /// variation (the library opens the variations grid first, and picking a card
+  /// there opens that variation's sheet), so a prompt here would be the same
+  /// question twice.
+  Future<void> _openChat(BuildContext context, String cId) async {
     final sessions = await ref
         .read(chatSessionOpsProvider.notifier)
         .getSessionMetadataByCharacter(cId);
@@ -613,31 +570,6 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
         ? (sessions.isEmpty ? '/chat/$cId' : '/chat/$cId?new=1')
         : '/chat/$cId?session=${result.substring('session:'.length)}';
     Navigator.of(context, rootNavigator: true).pop<String>(route);
-  }
-
-  Future<String?> _pickVariation(
-    BuildContext context,
-    List<Character> variants,
-  ) {
-    final sessionCounts =
-        ref.read(characterSessionCountsProvider).value ?? const <String, int>{};
-    return GlazeBottomSheet.show<String>(
-      context,
-      title: 'variation_pick_title'.tr(),
-      items: [
-        for (var i = 0; i < variants.length; i++)
-          BottomSheetItem(
-            icon: Icons.person_outline_rounded,
-            label: variantLabel(variants[i]),
-            hint: variantPickerHint(
-              sessionCounts[variants[i].id] ?? 0,
-              isCover: i == 0,
-            ),
-            onTap: () =>
-                Navigator.of(context, rootNavigator: true).pop(variants[i].id),
-          ),
-      ],
-    );
   }
 
   Future<void> _importChat(String charId) async {
@@ -738,6 +670,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
       );
     }
     final safeBottom = MediaQuery.of(context).padding.bottom;
+    final tabs = _detailTabs(context);
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
       child: SingleChildScrollView(
@@ -755,14 +688,14 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: GlazeTabBar(
-                tabs: _detailTabs(context),
+                tabs: tabs,
                 activeIndex: _activeTabIndex,
                 onChanged: _onTabChanged,
               ),
             ),
             SwipeTabSwitcher(
               index: _activeTabIndex,
-              length: 2,
+              length: tabs.length,
               onChanged: _onTabChanged,
               child: TabSlideSwitcher(
                 index: _activeTabIndex,
@@ -777,6 +710,18 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
   }
 
   Widget _buildTabContent(Character char) {
+    if (_activeTabIndex == 2) {
+      // Gallery. In preview mode the character is not in the DB, so the entries
+      // come from the in-memory card instead of a query that would find nothing.
+      return KeyedSubtree(
+        key: const ValueKey('gallery'),
+        child: CharacterGalleryView(
+          charId: widget.charId,
+          shrinkWrap: true,
+          entries: widget.isPreview ? char.gallery : null,
+        ),
+      );
+    }
     if (_activeTabIndex == 0) {
       // Info tab: bio/tags, with the character's comments folded in below it.
       return KeyedSubtree(

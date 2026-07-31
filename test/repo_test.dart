@@ -494,16 +494,29 @@ void main() {
         expect(page.map((c) => c.id), equals(['c1b']));
       });
 
-      test('reorderVariants reassigns order 0..n-1', () async {
+      // Variations are ordered by creation and the user cannot reorder them:
+      // the row at order 0 is the original, which is what makes "which one
+      // represents the group" a question with only one answer.
+      test('getVariants returns the group in creation order, original first',
+          () async {
         await putVariant('a', 'g', 0);
         await putVariant('b', 'g', 1);
         await putVariant('c', 'g', 2);
 
-        await repo.reorderVariants('g', ['c', 'a', 'b']);
+        final variants = await repo.getVariants('g');
+        expect(variants.map((v) => v.id), equals(['a', 'b', 'c']));
+        expect(variants.map((v) => v.variantOrder), equals([0, 1, 2]));
+      });
+
+      test('setHidden hides every variation in the group', () async {
+        await putVariant('a', 'g', 0);
+        await putVariant('b', 'g', 1);
+        await putVariant('c', 'g', 2);
+
+        await repo.setHidden('g', true);
 
         final variants = await repo.getVariants('g');
-        expect(variants.map((v) => v.id), equals(['c', 'a', 'b']));
-        expect(variants.map((v) => v.variantOrder), equals([0, 1, 2]));
+        expect(variants.map((v) => v.hidden), everyElement(isTrue));
       });
 
       test('standalone put backfills variantGroupId to its own id', () async {

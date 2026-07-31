@@ -13,12 +13,10 @@ String variantLabel(Character variant) {
   return (name != null && name.isNotEmpty) ? name : 'variation_original'.tr();
 }
 
-/// Secondary line under [variantLabel] in a variation picker: how many chats
-/// the variation has, and whether it is the group's cover.
+/// Secondary line under [variantLabel] in a variation picker: how many chats the
+/// variation has.
 ///
 /// The chat count is what actually identifies the variation you meant —
 /// variations of one character share a name stem and, usually, an avatar.
-String variantPickerHint(int sessionCount, {required bool isCover}) {
-  final chats = '$sessionCount ${'count_chats'.plural(sessionCount)}';
-  return isCover ? '$chats · ${'variation_cover'.tr()}' : chats;
-}
+String variantPickerHint(int sessionCount) =>
+    '$sessionCount ${'count_chats'.plural(sessionCount)}';

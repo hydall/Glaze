@@ -19,6 +19,8 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../character_detail_screen.dart';
 import 'character_hiding_onboarding_sheet.dart';
 import 'character_variations_sheet.dart';
+import '../../../shared/widgets/variation_chip.dart';
+import '../../../shared/utils/variant_label.dart';
 import '../../../core/llm/character_tokens.dart';
 import '../character_selection_provider.dart';
 import 'add_to_folder_sheet.dart';
@@ -31,11 +33,21 @@ class CharacterCard extends ConsumerStatefulWidget {
   /// enables the "Remove from folder" action.
   final String? folderId;
 
+  /// True when this card stands for one variation inside the variations grid
+  /// rather than for a whole group in the library.
+  ///
+  /// In the library a card is the group's original and tapping it drills into
+  /// the group; in the grid a card is a concrete variation and tapping it opens
+  /// that variation. The differences are small enough that one flag beats a
+  /// second near-identical widget — see the branches that read it.
+  final bool inVariationsGrid;
+
   const CharacterCard({
     super.key,
     required this.character,
     this.entryDelay = Duration.zero,
     this.folderId,
+    this.inVariationsGrid = false,
   });
 
   @override
@@ -70,6 +82,12 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
         ? displayName
         : character.name;
   }
+
+  /// The corner count badge belongs to the library, where it says "there is
+  /// more behind this card". Inside the grid every card would repeat the same
+  /// number about the group you are already looking at.
+  bool _showsVariationsBadge(int variantCount) =>
+      !widget.inVariationsGrid && variantCount > 1;
 
   /// Prefer the cached count persisted on import/save; fall back to a live
   /// (memoized) estimate only for rows that predate the cached column.
@@ -128,19 +146,31 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
       },
     );
 
+    // Bulk selection belongs to the library. Inside the variations grid a
+    // long-press would select sibling rows whose bulk actions then apply to the
+    // whole group anyway — a gesture that cannot mean what it looks like.
     final selectionActive =
+        !widget.inVariationsGrid &&
         ref.watch(characterSelectionProvider.select((s) => s.active));
-    final selected = ref.watch(
-      characterSelectionProvider.select((s) => s.contains(character.id)),
-    );
+    final selected =
+        !widget.inVariationsGrid &&
+        ref.watch(
+          characterSelectionProvider.select((s) => s.contains(character.id)),
+        );
     final scale = _pressed ? 0.96 : (_hovered ? 1.01 : 1.0);
     final dy = _hovered && !_pressed ? -4.0 : 0.0;
-    // The card stands for a whole variation group, so both the favorite accent
-    // and the badge come from group-level stats — a favorite living on a
-    // non-cover variation must still light this card up.
+    // In the library the card stands for a whole variation group, so the
+    // favorite accent comes from group-level stats — a favorite living on a
+    // non-original variation must still light this card up.
     final groupStats = variantGroupStatsOf(ref, _groupId);
     final isFav = groupStats.anyFav;
     final variantCount = groupStats.count;
+    // The chip names the variation this card *is*: the group's original in the
+    // library, the variation itself in the grid. A lone character has nothing
+    // to disambiguate, so it gets no chip.
+    final variationLabel = (widget.inVariationsGrid || variantCount > 1)
+        ? variantLabel(character)
+        : null;
     final shadowAlpha = _hovered
         ? (isFav ? 0.25 : 0.3)
         : 0.1;
@@ -183,20 +213,24 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
             if (selectionActive) {
               ref.read(characterSelectionProvider.notifier).toggle(character.id);
             } else {
-              _showDetailSheet(context);
+              _handleTap(context, variantCount);
             }
           },
           onTapDown: (_) => setState(() => _pressed = true),
           onTapUp: (_) => setState(() => _pressed = false),
           onTapCancel: () => setState(() => _pressed = false),
-          onLongPress: () {
-            final notifier = ref.read(characterSelectionProvider.notifier);
-            if (selectionActive) {
-              notifier.toggle(character.id);
-            } else {
-              notifier.start(character.id);
-            }
-          },
+          onLongPress: widget.inVariationsGrid
+              ? null
+              : () {
+                  final notifier = ref.read(
+                    characterSelectionProvider.notifier,
+                  );
+                  if (selectionActive) {
+                    notifier.toggle(character.id);
+                  } else {
+                    notifier.start(character.id);
+                  }
+                },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeOutBack,
@@ -240,18 +274,25 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
                       character: character,
                       tokenCount: _tokenCount,
                       isFav: isFav,
+                      variationLabel: variationLabel,
+                      // Inside the grid the chip is a label, not a door: every
+                      // card would otherwise reopen the sheet you are already in.
+                      onVariationTap: widget.inVariationsGrid
+                          ? null
+                          : () => _showVariations(context),
                     ),
                   ),
-                  if (character.hidden || variantCount > 1)
+                  if (character.hidden || _showsVariationsBadge(variantCount))
                     Positioned(
                       top: 8,
                       left: 8,
                       child: Row(
                         children: [
                           if (character.hidden) const _HiddenBadge(),
-                          if (character.hidden && variantCount > 1)
+                          if (character.hidden &&
+                              _showsVariationsBadge(variantCount))
                             const SizedBox(width: 6),
-                          if (variantCount > 1)
+                          if (_showsVariationsBadge(variantCount))
                             _VariationsBadge(count: variantCount),
                         ],
                       ),
@@ -351,6 +392,19 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
     return context.cs.primary;
   }
 
+  /// Where a tap on the card lands.
+  ///
+  /// In the library a card with variations is a *group*, so it drills into the
+  /// grid — asking "which one" before showing a character sheet that could only
+  /// ever have been one of them. Everything else opens the character directly.
+  void _handleTap(BuildContext context, int variantCount) {
+    if (!widget.inVariationsGrid && variantCount > 1) {
+      _showVariations(context);
+    } else {
+      _showDetailSheet(context);
+    }
+  }
+
   void _showDetailSheet(BuildContext context) async {
     final result = await showModalBottomSheet<String>(
       context: context,
@@ -389,26 +443,49 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
             context.push('/character/${character.id}/edit');
           },
         ),
-        // Same entry point as the detail sheet's menu — the card menu used to
-        // omit it entirely, so variations were reachable only two levels deep.
-        BottomSheetItem(
-          icon: Icons.dynamic_feed_rounded,
-          label: 'variations_title'.tr(),
-          hint: variantCount > 1
-              ? 'variations_count'.plural(variantCount)
-              : 'variations_hint_single'.tr(),
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _showVariations(context);
-          },
-        ),
+        // Renaming and duplicating are per-variation, so they only belong to a
+        // card that stands for one; in the library the card is a whole group.
+        if (widget.inVariationsGrid) ...[
+          BottomSheetItem(
+            icon: Icons.drive_file_rename_outline,
+            label: 'action_rename'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _promptRenameVariation(context, ref);
+            },
+          ),
+          BottomSheetItem(
+            icon: Icons.copy_all_outlined,
+            label: 'variation_duplicate'.tr(),
+            hint: 'variation_duplicate_hint'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              ref
+                  .read(charactersProvider.notifier)
+                  .addVariant(character, '');
+            },
+          ),
+        ] else
+          // Same entry point as the detail sheet's menu — the card menu used to
+          // omit it entirely, so variations were reachable only two levels deep.
+          BottomSheetItem(
+            icon: Icons.dynamic_feed_rounded,
+            label: 'variations_title'.tr(),
+            hint: variantCount > 1
+                ? 'variations_count'.plural(variantCount)
+                : 'variations_hint_single'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _showVariations(context);
+            },
+          ),
         BottomSheetItem(
           icon: Icons.favorite,
           label: isFav ? 'action_remove_fav'.tr() : 'action_add_fav'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             // Group-wide: the card reads as favorited when any variation is, so
-            // a cover-only write would leave "remove" looking like a no-op.
+            // writing only the original would leave "remove" looking like a no-op.
             ref
                 .read(charactersProvider.notifier)
                 .setGroupFav(character.id, !isFav);
@@ -475,21 +552,32 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
     );
   }
 
-  /// Opens the variations sheet for this card's group. Picking a variation in
-  /// it resolves to that variation's chat — the sheet answers "which of these
-  /// do I want to play with", so the tap should land in a chat, not an editor.
-  Future<void> _showVariations(BuildContext context) async {
-    final pickedId = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      useRootNavigator: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) =>
-          CharacterVariationsSheet(groupId: _groupId, sourceId: character.id),
+  /// Opens the variations grid for this card's group. Picking a card there
+  /// opens that variation's own sheet on top, so nothing comes back here.
+  void _showVariations(BuildContext context) {
+    showCharacterVariationsSheet(
+      context,
+      groupId: _groupId,
+      sourceId: character.id,
     );
-    if (pickedId == null || !context.mounted) return;
-    context.go('/chat/$pickedId');
+  }
+
+  void _promptRenameVariation(BuildContext context, WidgetRef ref) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'action_rename'.tr(),
+      input: BottomSheetInput(
+        placeholder: 'variation_name'.tr(),
+        value: character.variantName ?? '',
+        confirmLabel: 'btn_save'.tr(),
+        onConfirm: (val) {
+          Navigator.of(context, rootNavigator: true).pop();
+          ref
+              .read(charactersProvider.notifier)
+              .renameVariant(character.id, val.trim());
+        },
+      ),
+    );
   }
 
   void _showExportOptions(BuildContext context) {
@@ -626,13 +714,22 @@ class _CardInfo extends StatelessWidget {
   final int tokenCount;
 
   /// Group-wide favorite flag — passed in rather than read off [character],
-  /// which is only this group's cover row.
+  /// which is only one row of the group.
   final bool isFav;
+
+  /// Name of the variation this card represents, or null for a lone character
+  /// that has nothing to disambiguate.
+  final String? variationLabel;
+
+  /// Tapping the chip drills into the group. Null makes the chip a plain label.
+  final VoidCallback? onVariationTap;
 
   const _CardInfo({
     required this.character,
     required this.tokenCount,
     required this.isFav,
+    required this.variationLabel,
+    required this.onVariationTap,
   });
 
   String get _displayName {
@@ -652,6 +749,19 @@ class _CardInfo extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (variationLabel != null) ...[
+            // Above the name, so the card answers "which variation is this?"
+            // before you read whose it is. The Column is bottom-anchored and
+            // grows upward into the gradient, so the extra line costs no name
+            // space. Opaque hit test so the tap does not fall through to the
+            // card underneath.
+            GestureDetector(
+              onTap: onVariationTap,
+              behavior: HitTestBehavior.opaque,
+              child: VariationChip(name: variationLabel!, maxWidth: 140),
+            ),
+            const SizedBox(height: 4),
+          ],
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
