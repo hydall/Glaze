@@ -1,14 +1,19 @@
+import 'dart:io';
+
 import 'package:flutter/widgets.dart';
 
 import '../../core/models/preset.dart';
 import '../../core/services/featured_presets.dart';
+import '../../core/services/preset_image_paths.dart';
+import '../../core/utils/platform_paths.dart';
 import '../../shared/utils/avatar_image.dart';
 
-/// True when [path] points at a bundled asset instead of a file on disk.
-/// Featured covers live in the asset bundle and stay there when a preset is
-/// cloned, so both kinds of path can end up in `Preset.imagePath`.
-bool isPresetAssetImage(String? path) =>
-    path != null && path.startsWith('assets/');
+export '../../core/services/preset_image_paths.dart'
+    show
+        isPresetAssetImage,
+        presetImageRelativePath,
+        presetImageStorageId,
+        presetImageStorageIdOf;
 
 /// Cover image of [preset], or null when it has none.
 ///
@@ -26,13 +31,18 @@ ImageProvider? resolvePresetCoverImage({
 }) {
   if (imagePath != null && imagePath.isNotEmpty) {
     if (isPresetAssetImage(imagePath)) return AssetImage(imagePath);
-    return glazeAvatarImage(imagePath);
+    // A path can outlive its file — a cover synced from another device before
+    // its binary arrived, or a data dir restored without the images. Fall
+    // through to the featured cover (or none) instead of handing back a
+    // provider that only ever fails to decode.
+    if (_coverFileExists(imagePath)) return glazeAvatarImage(imagePath);
   }
   final asset = featuredPresetImageAsset(presetId);
   return asset != null ? AssetImage(asset) : null;
 }
 
-/// Storage id used for a preset's user-picked cover, so the file lands next to
-/// the character/persona avatars (and gets a thumbnail) instead of in a
-/// preset-specific folder.
-String presetImageStorageId(String presetId) => 'preset_$presetId';
+bool _coverFileExists(String imagePath) {
+  final resolved = resolveGlazeFilePath(imagePath);
+  if (resolved == null || resolved.isEmpty) return false;
+  return File(resolved).existsSync();
+}

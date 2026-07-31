@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/preset.dart';
 import '../../core/services/featured_presets.dart';
+import '../../core/services/image_storage_service.dart';
 import '../../core/services/preset_defaults.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/utils/id_generator.dart';
@@ -834,8 +835,9 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     );
   }
 
-  /// Picks a cover image, stores it next to the character/persona avatars (so
-  /// it gets a thumbnail) and saves the new path on the preset.
+  /// Picks a cover image and stores it next to the character/persona avatars
+  /// (so it gets a thumbnail). The preset keeps a *relative*, version-suffixed
+  /// path — see `preset_image_paths.dart` for why both matter to cloud sync.
   Future<void> _pickImage() async {
     if (_isFeatured) return;
 
@@ -859,25 +861,44 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     if (bytes == null || bytes.isEmpty) return;
 
     final storage = await ref.read(imageStorageProvider.future);
-    final savedPath = await storage.saveAvatar(
-      presetImageStorageId(_currentId),
-      bytes,
+    final storageId = presetImageStorageId(
+      _currentId,
+      currentTimestampSeconds(),
     );
-    // The file name never changes, so the previously decoded frames have to be
-    // dropped or the card keeps showing the old cover.
-    await FileImage(File(savedPath)).evict();
-    final thumbPath = storage.thumbnailPath(savedPath);
-    if (thumbPath != null) await FileImage(File(thumbPath)).evict();
+    // saveAvatar always writes `<id>.png` (plus a thumbnail).
+    await storage.saveAvatar(storageId, bytes);
+    final previous = _imagePath;
 
     if (!mounted) return;
-    setState(() => _imagePath = savedPath);
+    setState(() => _imagePath = presetImageRelativePath(storageId, 'png'));
     _scheduleSave();
+
+    await _deleteStoredCover(storage, previous);
   }
 
   void _removeImage() {
     if (_isFeatured) return;
+    final previous = _imagePath;
     setState(() => _imagePath = null);
     _scheduleSave();
+    unawaited(
+      ref
+          .read(imageStorageProvider.future)
+          .then((storage) => _deleteStoredCover(storage, previous)),
+    );
+  }
+
+  /// Drops the file a replaced/removed cover left behind. Bundled asset covers
+  /// (a cloned featured preset) have no file to delete.
+  Future<void> _deleteStoredCover(
+    ImageStorageService storage,
+    String? path,
+  ) async {
+    final storageId = presetImageStorageIdOf(path);
+    if (storageId == null) return;
+    try {
+      await storage.deleteAvatar(storageId);
+    } catch (_) {}
   }
 
   /// Builds a [Preset] from the live editor state (used for Export and Clone).

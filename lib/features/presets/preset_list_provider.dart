@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/preset.dart';
 import '../../core/services/featured_presets.dart';
+import '../../core/services/preset_image_paths.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
 import '../../core/utils/id_generator.dart';
@@ -40,17 +42,42 @@ class PresetListNotifier extends AsyncNotifier<List<Preset>> {
   /// suffixed name. Blocks and regexes are carried over unchanged (their ids
   /// are scoped to the owning preset). Returns the new preset.
   Future<Preset> clone(Preset preset) async {
+    final newId = generateId();
     final copy = preset.copyWith(
-      id: generateId(),
+      id: newId,
       name: '${preset.name} (copy)',
       // A featured preset resolves its cover from its fixed id, which the copy
       // no longer has — pin the bundled asset so the clone keeps the artwork.
-      imagePath: preset.imagePath ?? featuredPresetImageAsset(preset.id),
+      imagePath:
+          await _copyCoverForClone(preset.imagePath, newId) ??
+          featuredPresetImageAsset(preset.id),
       createdAt: currentTimestampSeconds(),
     );
     await ref.read(presetRepoProvider).put(copy);
     ref.invalidateSelf();
     return copy;
+  }
+
+  /// Gives the clone its own copy of a file-based cover, so that replacing or
+  /// removing the image on either preset cannot delete the other's file.
+  /// Bundled asset covers are shared as-is (there is no file to own), and a
+  /// failed copy falls back to sharing the source path rather than dropping the
+  /// artwork.
+  Future<String?> _copyCoverForClone(String? sourcePath, String newId) async {
+    if (sourcePath == null || sourcePath.isEmpty) return null;
+    if (isPresetAssetImage(sourcePath)) return sourcePath;
+    try {
+      final storage = await ref.read(imageStorageProvider.future);
+      final abs = storage.absolutePath(sourcePath);
+      if (abs == null) return sourcePath;
+      final file = File(abs);
+      if (!await file.exists()) return sourcePath;
+      final storageId = presetImageStorageId(newId, currentTimestampSeconds());
+      await storage.saveAvatar(storageId, await file.readAsBytes());
+      return presetImageRelativePath(storageId, 'png');
+    } catch (_) {
+      return sourcePath;
+    }
   }
 
   Future<void> remove(String id) async {

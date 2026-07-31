@@ -319,12 +319,22 @@ class _HeroCard extends StatelessWidget {
     color: Color(0xE6FFFFFF), // rgba(255,255,255,0.9)
   );
 
+  /// Cards filled with artwork — the persona avatar, a preset cover — get a
+  /// stronger accent outline: the default hairline is invisible against a
+  /// photo, and the frame is what separates the art from the page background.
+  bool get _hasArtwork => isAvatar || backgroundImage != null;
+
   @override
   Widget build(BuildContext context) {
     final card = GlassSurface(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: context.cs.outlineVariant),
+      border: Border.all(
+        color: _hasArtwork
+            ? context.cs.primary.withValues(alpha: 0.5)
+            : context.cs.outlineVariant,
+        width: _hasArtwork ? 2 : 1,
+      ),
       child: SizedBox(
         height: isAvatar ? null : 140,
         child: Stack(

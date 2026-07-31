@@ -266,3 +266,8 @@ String galleryCloudPath(String charId, String imgId, String ext) =>
 
 String personaAvatarCloudPath(String personaId, String ext) =>
     '$cloudBase/persona_avatars/$personaId/avatar.$ext';
+
+/// Cover image of an LLM preset. Presets themselves travel as the single
+/// `theme_presets` entry, so their binaries are keyed by preset id here.
+String presetImageCloudPath(String presetId, String ext) =>
+    '$cloudBase/preset_images/$presetId/cover.$ext';

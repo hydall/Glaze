@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -6,6 +8,22 @@ import 'package:glaze_flutter/core/services/featured_presets.dart';
 import 'package:glaze_flutter/features/presets/preset_image.dart';
 
 void main() {
+  late Directory tempDir;
+
+  setUp(() {
+    tempDir = Directory.systemTemp.createTempSync('glaze_preset_cover');
+  });
+
+  tearDown(() {
+    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+  });
+
+  String writeCover(String name) {
+    final file = File('${tempDir.path}${Platform.pathSeparator}$name')
+      ..writeAsBytesSync([0x89, 0x50, 0x4E, 0x47]);
+    return file.path;
+  }
+
   group('isFeaturedPreset', () {
     test('recognises every bundled featured preset', () {
       expect(featuredPresets, isNotEmpty);
@@ -43,31 +61,89 @@ void main() {
       expect((cover! as AssetImage).assetName, asset);
     });
 
-    test('a stored file path resolves to a file image', () {
+    test('a stored cover that exists on disk resolves to a file image', () {
+      final path = writeCover('preset_p1_1.png');
       final cover = presetCoverImage(
-        const Preset(
-          id: 'p1',
-          name: 'P',
-          imagePath: '/tmp/glaze/avatars/preset_p1.png',
-        ),
+        Preset(id: 'p1', name: 'P', imagePath: path),
       );
       expect(cover, isA<FileImage>());
     });
 
-    test('a user image overrides a featured preset cover', () {
+    test('a user cover overrides a featured preset cover', () {
+      final featured = featuredPresets.first;
+      final path = writeCover('preset_custom_1.png');
+      final cover = presetCoverImage(
+        Preset(id: featured.id, name: 'P', imagePath: path),
+      );
+      expect(cover, isA<FileImage>());
+    });
+
+    test('a cover whose file is missing reports no cover', () {
+      // Happens between pulling a preset from the cloud and its image binary
+      // arriving — the card must fall back instead of rendering a broken image.
+      final cover = presetCoverImage(
+        Preset(
+          id: 'p1',
+          name: 'P',
+          imagePath: '${tempDir.path}/never_written.png',
+        ),
+      );
+      expect(cover, isNull);
+    });
+
+    test('a missing user cover on a featured preset falls back to the art', () {
       final featured = featuredPresets.first;
       final cover = presetCoverImage(
         Preset(
           id: featured.id,
           name: 'P',
-          imagePath: '/tmp/glaze/avatars/preset_custom.png',
+          imagePath: '${tempDir.path}/never_written.png',
         ),
       );
-      expect(cover, isA<FileImage>());
+      expect(cover, isA<AssetImage>());
+      expect((cover! as AssetImage).assetName, featured.imageAsset);
     });
   });
 
-  test('presetImageStorageId namespaces preset covers', () {
-    expect(presetImageStorageId('abc'), 'preset_abc');
+  group('cover path helpers', () {
+    test('storage ids are namespaced and versioned', () {
+      expect(presetImageStorageId('abc', 42), 'preset_abc_42');
+      // A new pick must produce a new path, otherwise the preset JSON is
+      // unchanged and cloud sync never notices the replacement.
+      expect(
+        presetImageStorageId('abc', 42),
+        isNot(presetImageStorageId('abc', 43)),
+      );
+    });
+
+    test('stored paths are relative to the data dir', () {
+      expect(
+        presetImageRelativePath('preset_abc_42', 'png'),
+        'avatars/preset_abc_42.png',
+      );
+    });
+
+    test('the storage id round-trips out of a stored path', () {
+      expect(
+        presetImageStorageIdOf('avatars/preset_abc_42.png'),
+        'preset_abc_42',
+      );
+      expect(
+        presetImageStorageIdOf(r'C:\Glaze\avatars\preset_abc_42.png'),
+        'preset_abc_42',
+      );
+    });
+
+    test('bundled assets and empty paths own no file', () {
+      expect(presetImageStorageIdOf('assets/presets/renri.jpg'), isNull);
+      expect(presetImageStorageIdOf(null), isNull);
+      expect(presetImageStorageIdOf(''), isNull);
+    });
+
+    test('asset paths are recognised', () {
+      expect(isPresetAssetImage('assets/presets/renri.jpg'), isTrue);
+      expect(isPresetAssetImage('avatars/preset_abc_42.png'), isFalse);
+      expect(isPresetAssetImage(null), isFalse);
+    });
   });
 }

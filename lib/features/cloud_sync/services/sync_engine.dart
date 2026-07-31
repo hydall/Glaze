@@ -97,6 +97,7 @@ class SyncEngine {
       _adapter,
       _characterRepo,
       _personaRepo,
+      _presetRepo,
       _imageStorage,
     );
   }
@@ -112,6 +113,7 @@ class SyncEngine {
     await _adapter.ensureFolder('$cloudBase/chats');
     await _adapter.ensureFolder('$cloudBase/memory_books');
     await _adapter.ensureFolder('$cloudBase/persona_avatars');
+    await _adapter.ensureFolder('$cloudBase/preset_images');
     await _adapter.ensureFolder('$cloudBase/extension_presets');
     await _adapter.ensureFolder('$cloudBase/info_blocks');
     await _adapter.ensureFolder('$cloudBase/tracker_snapshots');
@@ -650,6 +652,11 @@ class SyncEngine {
     if (entry.type == 'persona') {
       await _binarySyncer.pushPersonaAvatar(entry.id);
     }
+    // Presets travel as one singleton entry, so their covers are pushed as a
+    // batch keyed by preset id rather than per manifest entry.
+    if (entry.type == 'theme_presets') {
+      await _binarySyncer.pushPresetImages();
+    }
   }
 
   Future<void> _pullEntry(SyncManifestEntry entry) async {
@@ -669,6 +676,9 @@ class SyncEngine {
     }
     if (entry.type == 'persona') {
       await _binarySyncer.pullPersonaAvatar(entry.id);
+    }
+    if (entry.type == 'theme_presets') {
+      await _binarySyncer.pullPresetImages();
     }
     if (entry.type == 'chat') {
       final charId = cloudData['characterId'] as String?;
