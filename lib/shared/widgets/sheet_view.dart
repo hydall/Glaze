@@ -9,6 +9,10 @@ import 'glaze_background.dart';
 import 'glaze_scaffold.dart';
 import 'top_edge_blur.dart';
 
+/// Corner radius of a modal sheet's top edge, kept constant at every height so
+/// the sheet still reads as a sheet once expanded.
+const double _kSheetCornerRadius = 20;
+
 class SheetViewAction {
   final Widget icon;
   final VoidCallback onPressed;
@@ -573,11 +577,16 @@ class _SheetViewState extends ConsumerState<SheetView>
         valueListenable: _heightN,
         child: content,
         builder: (context, height, child) {
-          final radius = 20.0 * (1.0 - _t(height));
           return SizedBox(
             height: widget.fitContent ? null : height,
             child: ClipRRect(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(radius)),
+              // Constant, so the sheet keeps its rounded top edge when expanded
+              // to full height. It used to taper to 0 on the way up, which made
+              // a sheet opened by tapping the handle end as a square-cornered
+              // slab flush against the status bar.
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(_kSheetCornerRadius),
+              ),
               child: child,
             ),
           );

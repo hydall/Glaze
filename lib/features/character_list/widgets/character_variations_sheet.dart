@@ -50,41 +50,54 @@ class CharacterVariationsSheet extends ConsumerWidget {
     return SheetView(
       title: 'variations_title'.tr(),
       showHandle: true,
-      bodyPadding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      body: CustomScrollView(
-        slivers: [
-          const SliverToBoxAdapter(child: SizedBox(height: 8)),
-          SliverToBoxAdapter(
-            child: _AddVariationTile(
-              onTap: variants.isEmpty
-                  ? null
-                  : () => _promptAdd(context, ref, _source(variants), variants),
+      bodyPadding: const EdgeInsets.symmetric(horizontal: 16),
+      floatingActionButton: variants.isEmpty
+          ? null
+          : _AddVariationFab(
+              onTap: () => _promptAdd(context, ref, _source(variants), variants),
             ),
-          ),
-          if (variants.length > 1)
-            SliverToBoxAdapter(child: _ReorderHint(count: variants.length)),
-          SliverReorderableList(
-            itemCount: variants.length,
-            onReorderItem: (oldIndex, newIndex) =>
-                _reorder(ref, variants, oldIndex, newIndex),
-            itemBuilder: (context, i) {
-              final variant = variants[i];
-              return _VariationTile(
-                // Keyed by id so the reorder animation follows the row, not the
-                // slot it happened to occupy.
-                key: ValueKey(variant.id),
-                index: i,
-                variant: variant,
-                isCover: i == 0,
-                sessionCount: sessionCounts[variant.id] ?? 0,
-                draggable: variants.length > 1,
-                onTap: () =>
-                    Navigator.of(context, rootNavigator: true).pop(variant.id),
-                onMore: () => _variantActions(context, ref, variants, i),
-              );
-            },
-          ),
-        ],
+      // Builder so the padding read below is the one SheetView injects for its
+      // header and the nav bar. A ListView would consume that automatically;
+      // CustomScrollView does not, and without this the first rows scroll under
+      // the header instead of below it.
+      body: Builder(
+        builder: (context) {
+          final inset = MediaQuery.paddingOf(context);
+          return CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(child: SizedBox(height: inset.top + 8)),
+              if (variants.length > 1)
+                SliverToBoxAdapter(child: _ReorderHint(count: variants.length)),
+              SliverReorderableList(
+                itemCount: variants.length,
+                onReorderItem: (oldIndex, newIndex) =>
+                    _reorder(ref, variants, oldIndex, newIndex),
+                itemBuilder: (context, i) {
+                  final variant = variants[i];
+                  return _VariationTile(
+                    // Keyed by id so the reorder animation follows the row, not
+                    // the slot it happened to occupy.
+                    key: ValueKey(variant.id),
+                    index: i,
+                    variant: variant,
+                    isCover: i == 0,
+                    sessionCount: sessionCounts[variant.id] ?? 0,
+                    draggable: variants.length > 1,
+                    onTap: () => Navigator.of(
+                      context,
+                      rootNavigator: true,
+                    ).pop(variant.id),
+                    onMore: () => _variantActions(context, ref, variants, i),
+                  );
+                },
+              ),
+              // Trailing room so the last row can scroll clear of the FAB.
+              SliverToBoxAdapter(
+                child: SizedBox(height: inset.bottom + _kFabClearance),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -291,37 +304,46 @@ class CharacterVariationsSheet extends ConsumerWidget {
   }
 }
 
-class _AddVariationTile extends StatelessWidget {
-  final VoidCallback? onTap;
-  const _AddVariationTile({required this.onTap});
+/// Height reserved below the last row so it can scroll clear of the FAB
+/// (48pt button + the 16pt margin SheetView positions it with, plus air).
+const double _kFabClearance = 80;
+
+/// "Add variation" as a floating pill, mirroring the character sheet's chat
+/// FAB. It used to be the first row of the list, where the sheet header sat on
+/// top of it and it read as part of the content rather than the primary action.
+class _AddVariationFab extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _AddVariationFab({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: context.cs.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            child: Row(
-              children: [
-                Icon(Icons.add_rounded, size: 20, color: context.cs.primary),
-                const SizedBox(width: 12),
-                Text(
-                  'variation_add'.tr(),
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.primary,
-                  ),
-                ),
-              ],
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          color: context.cs.primary,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: const [
+            BoxShadow(blurRadius: 16, color: Color(0x80000000)),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.add_rounded, color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              'variation_add'.tr(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
