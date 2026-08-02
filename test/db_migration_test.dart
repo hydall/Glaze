@@ -232,7 +232,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 102);
+        expect(version.first.read<int>('user_version'), 103);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
     });
 
     test(
@@ -602,7 +602,7 @@ void main() {
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -714,7 +714,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
     });
 
     test(
@@ -824,7 +824,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -864,7 +864,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -898,7 +898,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -972,7 +972,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1409,7 +1409,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1614,7 +1614,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1730,7 +1730,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -2229,7 +2229,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 102);
+      expect(version.read<int>('user_version'), 103);
     });
 
     test(
