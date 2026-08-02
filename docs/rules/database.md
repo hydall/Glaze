@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **101**
+Current version: **103**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -163,6 +163,12 @@ Migration history:
   `session_id` exists in `chat_sessions` are retained; canonical profile-only
   rows are dropped (their runtime payloads were already preserved as migrated
   presets in v99).
+- v103: added `preset_folders` + `preset_folder_members` tables (folders for the
+  Presets list, mirroring the character folders). Membership PK is
+  `{folderId, presetId, kind}` — `kind` is `normal` for rows in `presets` and
+  `agentic` for rows in `studio_preset_rows`, whose id spaces are independent,
+  so it must be part of the key. Deleting a preset must also drop its member
+  rows (`PresetFolderRepo.deleteMembersForPreset`).
 
 ---
 

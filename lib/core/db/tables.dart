@@ -717,6 +717,45 @@ class Presets extends Table {
   Set<Column> get primaryKey => {presetId};
 }
 
+@DataClassName('PresetFolderRow')
+class PresetFolders extends Table {
+  @override
+  String get tableName => 'preset_folders';
+
+  TextColumn get folderId => text()();
+  TextColumn get name => text()();
+  TextColumn get color => text().nullable()();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  IntColumn get createdAt => integer().withDefault(const Constant(0))();
+  IntColumn get updatedAt => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {folderId};
+}
+
+@DataClassName('PresetFolderMemberRow')
+@TableIndex(name: 'idx_pfm_folder', columns: {#folderId})
+@TableIndex(name: 'idx_pfm_preset', columns: {#presetId})
+class PresetFolderMembers extends Table {
+  @override
+  String get tableName => 'preset_folder_members';
+
+  TextColumn get folderId => text()();
+  TextColumn get presetId => text()();
+
+  /// `normal` for rows in `presets`, `agentic` for rows in
+  /// `studio_preset_rows`. The two id spaces are independent, so the kind is
+  /// part of the key — without it an agentic preset could shadow a plain one
+  /// that happens to share its id.
+  TextColumn get kind => text().withDefault(const Constant('normal'))();
+  IntColumn get addedAt => integer().withDefault(const Constant(0))();
+
+  // Composite PK: a preset can live in many folders, but cannot be duplicated
+  // within one folder.
+  @override
+  Set<Column> get primaryKey => {folderId, presetId, kind};
+}
+
 @DataClassName('ApiConfigRow')
 class ApiConfigs extends Table {
   @override

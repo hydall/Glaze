@@ -9,24 +9,13 @@ import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 
 /// Exports an agentic (Studio) preset to JSON and shows a toast with the
-/// result. The payload is the model's own `toJson()` — it keeps the
-/// `agentEnabled` map, which is what the importer in `PresetListScreen` sniffs
-/// to tell an agentic file apart from a SillyTavern preset.
+/// result.
 Future<void> exportStudioPreset(
   BuildContext context,
   StudioPreset preset,
 ) async {
   try {
-    final encoded = const JsonEncoder.withIndent(
-      '  ',
-    ).convert(preset.toJson());
-    final safeName = preset.name.replaceAll(RegExp(r'[^\w\s-]'), '').trim();
-    final savedPath = await FileExportService.export(
-      data: encoded,
-      filename:
-          '${safeName.isNotEmpty ? safeName : 'agentic_preset'}.json',
-      subfolder: 'presets',
-    );
+    final savedPath = await saveStudioPresetJson(preset);
     if (context.mounted) {
       GlazeToast.show(context, 'export_saved_to'.tr(args: [savedPath]));
     }
@@ -39,4 +28,19 @@ Future<void> exportStudioPreset(
       );
     }
   }
+}
+
+/// Writes [preset] to a JSON file and returns the saved path. The payload is
+/// the model's own `toJson()` — it keeps the `agentEnabled` map, which is what
+/// the importer in `PresetListScreen` sniffs to tell an agentic file apart from
+/// a SillyTavern preset. Split out of [exportStudioPreset] so bulk export can
+/// report one summary instead of a toast per file.
+Future<String> saveStudioPresetJson(StudioPreset preset) {
+  final encoded = const JsonEncoder.withIndent('  ').convert(preset.toJson());
+  final safeName = preset.name.replaceAll(RegExp(r'[^\w\s-]'), '').trim();
+  return FileExportService.export(
+    data: encoded,
+    filename: '${safeName.isNotEmpty ? safeName : 'agentic_preset'}.json',
+    subfolder: 'presets',
+  );
 }

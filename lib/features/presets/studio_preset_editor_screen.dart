@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models/preset_folder.dart';
 import '../../core/models/studio_config.dart';
 import '../../core/models/studio_preset_block_groups.dart';
 import '../../core/models/studio_preset_block_reorder.dart';
@@ -19,6 +20,7 @@ import '../studio/studio_preset_stats.dart';
 import '../studio/widgets/studio_block_editor_inline.dart';
 import '../studio/widgets/studio_block_section_list.dart';
 import '../studio/widgets/studio_preset_options_sheet.dart';
+import 'preset_deletion.dart';
 import 'studio_preset_export.dart';
 import 'widgets/preset_dashboard_card.dart';
 
@@ -350,9 +352,8 @@ class StudioPresetEditorBodyState
     );
     if (!ok) return;
     _saveTimer?.cancel();
-    await ref.read(studioPresetRepoProvider).deleteById(preset.id);
+    await deletePresetAndFolderMemberships(ref, preset.id, PresetKind.agentic);
     if (!mounted) return;
-    ref.invalidate(studioPresetListProvider);
     widget.onClose();
   }
 

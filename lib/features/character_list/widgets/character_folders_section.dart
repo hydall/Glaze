@@ -11,7 +11,7 @@ import '../../../core/state/character_provider.dart';
 import '../../../core/utils/platform_paths.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
-import 'folder_name_dialog.dart';
+import '../../../shared/widgets/folder_name_dialog.dart';
 
 /// Folders strip for the My Characters root view: a horizontal row of circular
 /// folder covers. Tapping opens a folder; long-pressing exposes rename/delete.

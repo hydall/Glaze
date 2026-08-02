@@ -2096,5 +2096,24 @@
   "studio_slot_model_auto": "Автоматически",
   "studio_slot_model_hint": "Идентификатор модели, напр. gpt-4o-mini",
   "studio_agent_always_on": "Всегда включён",
-  "studio_blocks_title": "Промпт-блоки"
+  "studio_blocks_title": "Промпт-блоки",
+  "preset_filter_type": "Тип пресета",
+  "preset_type_normal": "Обычный",
+  "preset_type_agentic": "Агентский",
+  "label_no_presets": "Пресетов нет",
+  "preset_folder_empty": "В этой папке нет пресетов",
+  "preset_folder_delete_confirm": "Удалить эту папку? Пресеты в ней удалены не будут.",
+  "preset_delete_none_toast": "Удалять нечего",
+  "preset_exported_toast": {
+    "one": "Экспортирован {} пресет",
+    "few": "Экспортировано {} пресета",
+    "many": "Экспортировано {} пресетов",
+    "other": "Экспортировано {} пресета"
+  },
+  "preset_delete_many_confirm": {
+    "one": "Удалить {} пресет? Это действие необратимо.",
+    "few": "Удалить {} пресета? Это действие необратимо.",
+    "many": "Удалить {} пресетов? Это действие необратимо.",
+    "other": "Удалить {} пресета? Это действие необратимо."
+  }
 }

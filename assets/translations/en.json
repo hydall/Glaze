@@ -2073,5 +2073,20 @@
   "studio_slot_model_auto": "Automatic",
   "studio_slot_model_hint": "Model id, e.g. gpt-4o-mini",
   "studio_agent_always_on": "Always on",
-  "studio_blocks_title": "Prompt Blocks"
+  "studio_blocks_title": "Prompt Blocks",
+  "preset_filter_type": "Preset type",
+  "preset_type_normal": "Regular",
+  "preset_type_agentic": "Agentic",
+  "label_no_presets": "No presets",
+  "preset_folder_empty": "No presets in this folder",
+  "preset_folder_delete_confirm": "Delete this folder? The presets in it won't be deleted.",
+  "preset_delete_none_toast": "Nothing to delete",
+  "preset_exported_toast": {
+    "one": "{} preset exported",
+    "other": "{} presets exported"
+  },
+  "preset_delete_many_confirm": {
+    "one": "Delete {} preset? This cannot be undone.",
+    "other": "Delete {} presets? This cannot be undone."
+  }
 }

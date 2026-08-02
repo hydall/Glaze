@@ -1,16 +1,13 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:easy_localization/easy_localization.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/preset.dart';
+import '../../core/models/preset_folder.dart';
 import '../../core/services/featured_presets.dart';
-import '../../core/services/image_storage_service.dart';
 import '../../core/services/preset_defaults.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/utils/id_generator.dart';
@@ -22,11 +19,14 @@ import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/generic_editor.dart';
 import '../../shared/widgets/help_tip.dart';
+import 'preset_cover_service.dart';
+import 'preset_deletion.dart';
 import 'preset_image.dart';
 import 'preset_list_provider.dart';
 import 'preset_export.dart';
 import 'widgets/preset_block_row.dart';
 import 'widgets/preset_dashboard_card.dart';
+import 'widgets/preset_options_sheet.dart';
 import '../../core/state/summary_providers.dart';
 import '../chat/chat_provider.dart';
 import '../settings/app_settings_provider.dart';
@@ -737,36 +737,24 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   }
 
   void _showRenameDialog() {
-    GlazeBottomSheet.show<void>(
+    showPresetRename(
       context,
-      title: 'action_rename_preset'.tr(),
-      input: BottomSheetInput(
-        placeholder: 'Preset name',
-        value: _nameCtrl.text,
-        confirmLabel: 'Rename',
-        onConfirm: (val) {
-          Navigator.of(context, rootNavigator: true).pop();
-          setState(() => _nameCtrl.text = val);
-          _scheduleSave();
-        },
-      ),
+      currentName: _nameCtrl.text,
+      onRename: (val) {
+        setState(() => _nameCtrl.text = val);
+        _scheduleSave();
+      },
     );
   }
 
   void _showAuthorDialog() {
-    GlazeBottomSheet.show<void>(
+    showPresetAuthorDialog(
       context,
-      title: 'action_set_author'.tr(),
-      input: BottomSheetInput(
-        placeholder: 'Author (optional)',
-        value: _author,
-        confirmLabel: 'Save',
-        onConfirm: (val) {
-          Navigator.of(context, rootNavigator: true).pop();
-          setState(() => _author = val.trim());
-          _scheduleSave();
-        },
-      ),
+      currentAuthor: _author,
+      onSubmit: (val) {
+        setState(() => _author = val);
+        _scheduleSave();
+      },
     );
   }
 
@@ -776,39 +764,15 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   Future<void> _pickImage() async {
     if (_isFeatured) return;
 
-    FilePickerResult? result;
-    try {
-      result = await FilePicker.pickFiles(
-        type: FileType.image,
-        allowMultiple: false,
-        withData: true,
-      );
-    } catch (_) {}
-    if (result == null || result.files.isEmpty) return;
+    final path = await pickPresetCover(ref, _currentId);
+    if (path == null || !mounted) return;
 
-    final picked = result.files.first;
-    Uint8List? bytes = picked.bytes;
-    if ((bytes == null || bytes.isEmpty) &&
-        picked.path != null &&
-        picked.path!.isNotEmpty) {
-      bytes = await File(picked.path!).readAsBytes();
-    }
-    if (bytes == null || bytes.isEmpty) return;
-
-    final storage = await ref.read(imageStorageProvider.future);
-    final storageId = presetImageStorageId(
-      _currentId,
-      currentTimestampSeconds(),
-    );
-    // saveAvatar always writes `<id>.png` (plus a thumbnail).
-    await storage.saveAvatar(storageId, bytes);
     final previous = _imagePath;
-
-    if (!mounted) return;
-    setState(() => _imagePath = presetImageRelativePath(storageId, 'png'));
+    setState(() => _imagePath = path);
     _scheduleSave();
 
-    await _deleteStoredCover(storage, previous);
+    final storage = await ref.read(imageStorageProvider.future);
+    await deleteStoredPresetCover(storage, previous);
   }
 
   void _removeImage() {
@@ -819,21 +783,8 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     unawaited(
       ref
           .read(imageStorageProvider.future)
-          .then((storage) => _deleteStoredCover(storage, previous)),
+          .then((storage) => deleteStoredPresetCover(storage, previous)),
     );
-  }
-
-  /// Drops the file a replaced/removed cover left behind. Bundled asset covers
-  /// (a cloned featured preset) have no file to delete.
-  Future<void> _deleteStoredCover(
-    ImageStorageService storage,
-    String? path,
-  ) async {
-    final storageId = presetImageStorageIdOf(path);
-    if (storageId == null) return;
-    try {
-      await storage.deleteAvatar(storageId);
-    } catch (_) {}
   }
 
   /// Builds a [Preset] from the live editor state (used for Export and Clone).
@@ -864,85 +815,34 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   }
 
   void _showOptionsMenu() {
-    GlazeBottomSheet.show<void>(
+    showPresetOptions(
       context,
-      title: 'preset_options'.tr(),
-      items: [
-        BottomSheetItem(
-          icon: Icons.drive_file_rename_outline,
-          label: 'action_rename'.tr(),
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _showRenameDialog();
-          },
-        ),
-        // Author and cover image are part of a bundled featured preset — the
-        // user edits them on a clone, not on the original.
-        if (!_isFeatured)
-          BottomSheetItem(
-            icon: Icons.person_outline,
-            label: 'action_set_author'.tr(),
-            onTap: () {
-              Navigator.of(context, rootNavigator: true).pop();
-              _showAuthorDialog();
-            },
-          ),
-        if (!_isFeatured)
-          BottomSheetItem(
-            icon: Icons.image_outlined,
-            label: 'change_image'.tr(),
-            onTap: () {
-              Navigator.of(context, rootNavigator: true).pop();
-              _pickImage();
-            },
-          ),
-        if (!_isFeatured && _imagePath != null && _imagePath!.isNotEmpty)
-          BottomSheetItem(
-            icon: Icons.hide_image_outlined,
-            label: 'action_remove_image'.tr(),
-            onTap: () {
-              Navigator.of(context, rootNavigator: true).pop();
-              _removeImage();
-            },
-          ),
-        BottomSheetItem(
-          icon: Icons.copy_outlined,
-          label: 'action_clone_block'.tr(),
-          onTap: () async {
-            Navigator.of(context, rootNavigator: true).pop();
-            // Clone the live editor state (including unsaved edits) rather than
-            // the persisted preset. `clone` assigns a fresh id and a "(copy)"
-            // suffixed name.
-            await ref
-                .read(presetListProvider.notifier)
-                .clone(_currentSnapshot());
-            if (mounted) GlazeToast.show(context, 'Preset cloned');
-          },
-        ),
-        BottomSheetItem(
-          icon: Icons.upload_file_outlined,
-          label: 'action_export_st'.tr(),
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            exportPreset(context, _currentSnapshot());
-          },
-        ),
-        if (widget.preset != null)
-          BottomSheetItem(
-            icon: Icons.delete_outlined,
-            iconColor: const Color(0xFFFF4444),
-            label: 'action_delete_msg'.tr(),
-            isDestructive: true,
-            onTap: () async {
-              Navigator.of(context, rootNavigator: true).pop();
-              await ref
-                  .read(presetListProvider.notifier)
-                  .remove(widget.preset!.id);
-              widget.onDeleted?.call();
-            },
-          ),
-      ],
+      isFeatured: _isFeatured,
+      hasImage: _imagePath != null && _imagePath!.isNotEmpty,
+      canDelete: widget.preset != null,
+      onRename: _showRenameDialog,
+      onSetAuthor: _showAuthorDialog,
+      onPickImage: () => unawaited(_pickImage()),
+      onRemoveImage: _removeImage,
+      // Clone/Export act on the live editor state (including unsaved edits),
+      // not on the persisted preset.
+      onClone: () => unawaited(_clonePreset()),
+      onExport: () => unawaited(exportPreset(context, _currentSnapshot())),
+      onDelete: () => unawaited(_deletePreset()),
     );
+  }
+
+  Future<void> _clonePreset() async {
+    // `clone` assigns a fresh id and a "(copy)" suffixed name.
+    await ref.read(presetListProvider.notifier).clone(_currentSnapshot());
+    if (mounted) GlazeToast.show(context, 'Preset cloned');
+  }
+
+  Future<void> _deletePreset() async {
+    final preset = widget.preset;
+    if (preset == null) return;
+    await deletePresetAndFolderMemberships(ref, preset.id, PresetKind.normal);
+    widget.onDeleted?.call();
   }
 
   Future<void> _showRegexSheet() async {

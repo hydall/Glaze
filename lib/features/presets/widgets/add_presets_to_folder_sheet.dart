@@ -2,99 +2,46 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/state/character_folder_provider.dart';
+import '../../../core/models/preset_folder.dart';
+import '../../../core/state/preset_folder_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/folder_name_dialog.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/sheet_view.dart';
-import '../../../shared/widgets/folder_name_dialog.dart';
 
-/// Multi-select sheet to toggle a character's folder memberships. A character
-/// may be in many folders; tapping a row toggles that membership immediately
-/// (the sheet stays open). Adding to a folder it's already in is a no-op.
-class AddToFolderSheet extends ConsumerWidget {
-  final String characterId;
+/// A preset the folder sheet can act on, identified the way membership rows
+/// store it.
+class PresetFolderTarget {
+  final String id;
+  final PresetKind kind;
 
-  const AddToFolderSheet({super.key, required this.characterId});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final folders = ref.watch(characterFoldersProvider).value ?? const [];
-    final memberships =
-        ref.watch(folderMembershipsProvider).value ?? FolderMemberships.empty;
-    final selected = memberships.foldersOf(characterId);
-    final repo = ref.read(characterFolderRepoProvider);
-
-    return SheetView(
-      title: 'action_add_to_folder'.tr(),
-      showHandle: true,
-      bodyPadding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      body: ListView(
-        children: [
-          const SizedBox(height: 8),
-          _NewFolderTile(
-            onTap: () => GlazeBottomSheet.show<void>(
-              context,
-              title: 'folder_create_title'.tr(),
-              child: FolderNameDialog(
-                confirmLabel: 'btn_create'.tr(),
-                onSubmit: (name) async {
-                  final folder = await repo.create(name: name);
-                  await repo.addMember(folder.id, characterId);
-                },
-              ),
-            ),
-          ),
-          if (folders.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Center(
-                child: Text(
-                  'folder_empty'.tr(),
-                  style: TextStyle(color: context.cs.onSurfaceVariant),
-                ),
-              ),
-            ),
-          for (final folder in folders)
-            _FolderToggleTile(
-              name: folder.name,
-              count: memberships.countFor(folder.id),
-              selected: selected.contains(folder.id),
-              onTap: () {
-                if (selected.contains(folder.id)) {
-                  repo.removeMember(folder.id, characterId);
-                } else {
-                  repo.addMember(folder.id, characterId);
-                }
-              },
-            ),
-        ],
-      ),
-    );
-  }
+  const PresetFolderTarget(this.id, this.kind);
 }
 
-/// Bulk variant of [AddToFolderSheet]: tapping a folder adds every character in
-/// [characterIds] to it at once, then closes the sheet and runs [onDone].
-class AddCharactersToFolderSheet extends ConsumerWidget {
-  final Set<String> characterIds;
+/// Bulk "add to folder" sheet for the Presets list: tapping a folder adds every
+/// preset in [targets] to it at once, then closes and runs [onDone]. Mirrors
+/// `AddCharactersToFolderSheet`.
+class AddPresetsToFolderSheet extends ConsumerWidget {
+  final List<PresetFolderTarget> targets;
   final VoidCallback? onDone;
 
-  const AddCharactersToFolderSheet({
+  const AddPresetsToFolderSheet({
     super.key,
-    required this.characterIds,
+    required this.targets,
     this.onDone,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final folders = ref.watch(characterFoldersProvider).value ?? const [];
+    final folders = ref.watch(presetFoldersProvider).value ?? const [];
     final memberships =
-        ref.watch(folderMembershipsProvider).value ?? FolderMemberships.empty;
-    final repo = ref.read(characterFolderRepoProvider);
+        ref.watch(presetFolderMembershipsProvider).value ??
+        PresetFolderMemberships.empty;
+    final repo = ref.read(presetFolderRepoProvider);
 
     Future<void> addAllTo(String folderId) async {
-      for (final id in characterIds) {
-        await repo.addMember(folderId, id);
+      for (final t in targets) {
+        await repo.addMember(folderId, t.id, t.kind);
       }
     }
 
@@ -124,16 +71,15 @@ class AddCharactersToFolderSheet extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(vertical: 24),
               child: Center(
                 child: Text(
-                  'folder_empty'.tr(),
+                  'preset_folder_empty'.tr(),
                   style: TextStyle(color: context.cs.onSurfaceVariant),
                 ),
               ),
             ),
           for (final folder in folders)
-            _FolderToggleTile(
+            _FolderTile(
               name: folder.name,
               count: memberships.countFor(folder.id),
-              selected: false,
               onTap: () async {
                 await addAllTo(folder.id);
                 if (context.mounted) {
@@ -166,8 +112,11 @@ class _NewFolderTile extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             child: Row(
               children: [
-                Icon(Icons.create_new_folder_rounded,
-                    size: 20, color: context.cs.primary),
+                Icon(
+                  Icons.create_new_folder_rounded,
+                  size: 20,
+                  color: context.cs.primary,
+                ),
                 const SizedBox(width: 12),
                 Text(
                   'folder_new'.tr(),
@@ -186,16 +135,14 @@ class _NewFolderTile extends StatelessWidget {
   }
 }
 
-class _FolderToggleTile extends StatelessWidget {
+class _FolderTile extends StatelessWidget {
   final String name;
   final int count;
-  final bool selected;
   final VoidCallback onTap;
 
-  const _FolderToggleTile({
+  const _FolderTile({
     required this.name,
     required this.count,
-    required this.selected,
     required this.onTap,
   });
 
@@ -216,9 +163,7 @@ class _FolderToggleTile extends StatelessWidget {
                 Icon(
                   Icons.folder_rounded,
                   size: 20,
-                  color: selected
-                      ? context.cs.primary
-                      : context.cs.onSurfaceVariant,
+                  color: context.cs.onSurfaceVariant,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -226,10 +171,7 @@ class _FolderToggleTile extends StatelessWidget {
                     name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: context.cs.onSurface,
-                    ),
+                    style: TextStyle(fontSize: 15, color: context.cs.onSurface),
                   ),
                 ),
                 Text(
@@ -238,16 +180,6 @@ class _FolderToggleTile extends StatelessWidget {
                     fontSize: 13,
                     color: context.cs.onSurfaceVariant,
                   ),
-                ),
-                const SizedBox(width: 12),
-                Icon(
-                  selected
-                      ? Icons.check_circle_rounded
-                      : Icons.radio_button_unchecked_rounded,
-                  size: 22,
-                  color: selected
-                      ? context.cs.primary
-                      : context.cs.onSurfaceVariant.withValues(alpha: 0.5),
                 ),
               ],
             ),

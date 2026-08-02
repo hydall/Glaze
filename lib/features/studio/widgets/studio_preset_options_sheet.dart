@@ -13,6 +13,10 @@ void showStudioPresetOptions(
   required VoidCallback onClone,
   required VoidCallback onExport,
   required VoidCallback onDelete,
+
+  /// Omitted where folders don't apply (e.g. the editor opened outside the
+  /// preset list).
+  VoidCallback? onAddToFolder,
 }) {
   GlazeBottomSheet.show<void>(
     context,
@@ -34,6 +38,15 @@ void showStudioPresetOptions(
           onClone();
         },
       ),
+      if (onAddToFolder != null)
+        BottomSheetItem(
+          icon: Icons.create_new_folder_outlined,
+          label: 'action_add_to_folder'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            onAddToFolder();
+          },
+        ),
       BottomSheetItem(
         icon: Icons.upload_file_outlined,
         label: 'action_export_st'.tr(),

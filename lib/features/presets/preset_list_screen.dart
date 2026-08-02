@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,25 +9,46 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/import/silly_tavern_preset_parser.dart';
-import '../../core/llm/preset_macro_attribution.dart';
 import '../../core/models/preset.dart';
+import '../../core/models/preset_folder.dart';
 import '../../core/models/studio_config.dart';
+import '../../core/services/featured_presets.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/state/active_studio_preset_provider.dart';
+import '../../core/state/preset_folder_provider.dart';
+import '../../core/utils/time_helpers.dart';
 import '../studio/studio_preset_stats.dart';
 import '../studio/studio_preset_workflow_provider.dart';
+import '../studio/widgets/studio_preset_options_sheet.dart';
 import 'studio_preset_editor_screen.dart';
+import 'studio_preset_export.dart';
+import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/widgets/folder_name_dialog.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import 'preset_connections_sheet.dart';
+import 'preset_cover_service.dart';
+import 'preset_deletion.dart';
 import 'preset_editor_screen.dart';
+import 'preset_entry.dart';
+import 'preset_export.dart';
 import 'preset_image.dart';
 import 'preset_list_provider.dart';
+import 'preset_selection_provider.dart';
+import 'widgets/add_presets_to_folder_sheet.dart';
+import 'widgets/preset_filter_sheet.dart';
+import 'widgets/preset_folders_section.dart';
+import 'widgets/preset_options_sheet.dart';
+
+/// Nominal height of one preset row (card + the gap below it). Only used to
+/// estimate the scroll offset of the active preset before its row is laid out;
+/// [Scrollable.ensureVisible] corrects the estimate on the following frame.
+const double _kRowExtent = 72;
 
 class PresetListScreen extends ConsumerStatefulWidget {
   final bool startExpanded;
@@ -48,12 +70,48 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   Preset? _editingPreset;
   bool _isCreating = false;
   String? _editingStudioId;
-  GlobalKey<PresetEditorBodyState> _editorKey = GlobalKey<PresetEditorBodyState>();
+  GlobalKey<PresetEditorBodyState> _editorKey =
+      GlobalKey<PresetEditorBodyState>();
   GlobalKey<StudioPresetEditorBodyState> _studioEditorKey =
       GlobalKey<StudioPresetEditorBodyState>();
 
+  /// Folder currently being browsed, or null at the top level.
+  String? _currentFolderId;
+  PresetListFilters _filters = const PresetListFilters();
+
+  final ScrollController _scrollController = ScrollController();
+
+  /// Key on the header sliver, used to measure what sits above the rows when
+  /// estimating the active preset's scroll offset.
+  final GlobalKey _headerKey = GlobalKey();
+
+  /// Key on the active preset's row, used to fine-tune that scroll.
+  final GlobalKey _activeRowKey = GlobalKey();
+
+  /// The list scrolls to the active preset once per screen open, not on every
+  /// rebuild — otherwise the user could never scroll away from it.
+  bool _didAutoScroll = false;
+
   bool get _inEditor => _isCreating || _editingPreset != null;
   bool get _inStudioEditor => _editingStudioId != null;
+  bool get _inAnyEditor => _inEditor || _inStudioEditor;
+
+  @override
+  void initState() {
+    super.initState();
+    // The selection provider outlives this screen, so a selection left behind
+    // when the sheet was dismissed would reopen with a stale bar. Reset after
+    // the first frame (writing to a provider during initState is not allowed).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(presetSelectionProvider.notifier).clear();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   void _openEditor(Preset? preset) {
     setState(() {
@@ -85,18 +143,33 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     if (_inStudioEditor) {
       final handled = _studioEditorKey.currentState?.handleBack() ?? false;
       if (!handled) _closeEditor();
-    } else if (_inEditor) {
-      final handled = _editorKey.currentState?.handleBack() ?? false;
-      if (!handled) {
-        _closeEditor();
-      }
-    } else {
-      if (widget.startExpanded) {
-        context.go('/tools');
-      } else {
-        Navigator.of(context).maybePop();
-      }
+      return;
     }
+    if (_inEditor) {
+      final handled = _editorKey.currentState?.handleBack() ?? false;
+      if (!handled) _closeEditor();
+      return;
+    }
+    // Selection mode and the folder view are both "inner" states: back leaves
+    // them before it leaves the screen.
+    if (ref.read(presetSelectionProvider).active) {
+      ref.read(presetSelectionProvider.notifier).clear();
+      return;
+    }
+    if (_currentFolderId != null) {
+      setState(() => _currentFolderId = null);
+      return;
+    }
+    if (widget.startExpanded) {
+      context.go('/tools');
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  String? _folderName(String id) {
+    final folders = ref.watch(presetFoldersProvider).value;
+    return folders?.where((f) => f.id == id).firstOrNull?.name;
   }
 
   @override
@@ -104,23 +177,62 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     final presets = ref.watch(presetListProvider);
     final activeId = ref.watch(activePresetIdProvider);
     final studioPresets = ref.watch(studioPresetListProvider);
-    final activeStudioId = ref.watch(activeStudioPresetProvider).value ?? 'default';
+    final activeStudioId =
+        ref.watch(activeStudioPresetProvider).value ?? 'default';
     // The Studio master switch is the single "which kind is in effect" flag:
     // ON → an agentic preset is active, OFF → a plain preset is active. Using
     // it as the discriminator keeps the two lists mutually exclusive so exactly
     // one card is ever highlighted.
     final studioEnabled = ref.watch(studioFeatureEnabledProvider);
+    final selection = ref.watch(presetSelectionProvider);
+    final folderId = _currentFolderId;
+
+    final String title;
+    if (_inStudioEditor) {
+      title = 'Edit Agentic Preset';
+    } else if (_inEditor) {
+      title = _editingPreset != null ? 'Edit Preset' : 'New Preset';
+    } else if (folderId != null) {
+      title = _folderName(folderId) ?? 'Presets';
+    } else {
+      title = 'Presets';
+    }
 
     return SheetView(
       startExpanded: widget.startExpanded,
       showRouteBackground: false,
-      title: _inStudioEditor
-          ? 'Edit Agentic Preset'
-          : _inEditor
-          ? (_editingPreset != null ? 'Edit Preset' : 'New Preset')
-          : 'Presets',
+      title: title,
       showBack: true,
       onBack: _handleBack,
+      actions: _inAnyEditor
+          ? const []
+          : [
+              SheetViewAction(
+                icon: Icon(
+                  Icons.tune_rounded,
+                  size: 20,
+                  color: _filters.isActive
+                      ? context.cs.primary
+                      : context.cs.onSurfaceVariant,
+                ),
+                tooltip: 'catalog_filters'.tr(),
+                onPressed: () => _showFilterSheet(context),
+              ),
+            ],
+      floating: _inAnyEditor || !selection.active
+          ? null
+          : Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, _floatingBottom()),
+                child: _SelectionBar(
+                  count: selection.count,
+                  onCancel: () =>
+                      ref.read(presetSelectionProvider.notifier).clear(),
+                  onMore: () => _showSelectionActions(context, selection),
+                ),
+              ),
+            ),
       body: _inStudioEditor
           ? StudioPresetEditorBody(
               key: _studioEditorKey,
@@ -135,116 +247,389 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               onDeleted: _closeEditor,
             )
           : presets.when(
+              // A save from the editor invalidates the list; keep the rows on
+              // screen instead of flashing a spinner while it reloads.
+              skipLoadingOnReload: true,
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
-              data: (list) => _buildBody(
-                context, ref, list, activeId,
-                studioPresets.value ?? [], activeStudioId, studioEnabled,
+              // The inner Builder reads the MediaQuery padding SheetView
+              // overrides for its body (header inset + nav bar), which the
+              // outer context doesn't carry.
+              data: (list) => Builder(
+                builder: (context) => _buildBody(
+                  context,
+                  list,
+                  activeId,
+                  studioPresets.value ?? const [],
+                  activeStudioId,
+                  studioEnabled,
+                ),
               ),
             ),
     );
   }
 
+  /// The selection bar floats above whichever chrome sits at the bottom: the
+  /// shell nav bar when the screen is opened as a route, the safe-area inset
+  /// when it is opened as a modal sheet.
+  double _floatingBottom() {
+    final navHeight = ref.watch(navHeightProvider);
+    final inset = MediaQuery.paddingOf(context).bottom;
+    return (navHeight > inset ? navHeight : inset) + 16;
+  }
+
+  // ─── list ──────────────────────────────────────────────────────────────
+
   Widget _buildBody(
     BuildContext context,
-    WidgetRef ref,
-    List<Preset> list,
+    List<Preset> presets,
     String? activeId,
     List<StudioPreset> studioList,
     String activeStudioId,
     bool studioEnabled,
   ) {
-    final items = <_PresetItem>[
-      for (final p in list) _PresetItem(preset: p),
-      for (final sp in studioList) _PresetItem(studioPreset: sp),
+    final folderId = _currentFolderId;
+    final memberships =
+        ref.watch(presetFolderMembershipsProvider).value ??
+        PresetFolderMemberships.empty;
+    final selection = ref.watch(presetSelectionProvider);
+
+    var items = <PresetItem>[
+      for (final p in presets) PresetItem(preset: p),
+      for (final sp in studioList) PresetItem(studioPreset: sp),
     ];
-    return Builder(
-      builder: (context) => ListView.builder(
-        padding: const EdgeInsets.fromLTRB(
-          16,
-          12,
-          16,
-          16,
-        ).add(EdgeInsets.only(
-          top: MediaQuery.paddingOf(context).top,
-          bottom: MediaQuery.paddingOf(context).bottom,
-        )),
-        itemCount: items.length + 1,
-        itemBuilder: (_, i) {
-          if (i == items.length) return _buildAddButton(context, ref);
-          final item = items[i];
-          // Studio ON ⇒ only an agentic preset can be active; Studio OFF ⇒ only
-          // a plain preset can be active. So the two lists never both highlight.
-          final isActive = item.isAgentic
-              ? (studioEnabled && item.studioPreset!.id == activeStudioId)
-              : (!studioEnabled && activeId == item.preset!.id);
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _PsCard(
-              item: item,
-              isActive: isActive,
-              onActivate: () {
-                if (!isActive) {
-                  if (item.isAgentic) {
-                    ref.read(activeStudioPresetProvider.notifier)
-                        .set(item.studioPreset!.id);
-                    ref.read(studioFeatureEnabledProvider.notifier).enable();
-                  } else {
-                    setActivePreset(ref, item.preset!.id);
-                    // Switching to a plain preset turns Studio off so the
-                    // agentic pipeline stops overriding it.
-                    ref.read(studioFeatureEnabledProvider.notifier)
-                        .setEnabled(false);
-                  }
-                }
-              },
-              onConnections: item.isAgentic
-                  ? null
-                  : () => showPresetConnections(context, item.preset!.id),
-              onEdit: item.isAgentic
-                  ? () => _openStudioEditor(item.studioPreset!.id)
-                  : () => _openEditor(item.preset),
+    if (folderId != null) {
+      final keys = memberships.presetsIn(folderId);
+      items = items.where((e) => keys.contains(e.memberKey)).toList();
+    }
+    items = items.where(_filters.matches).toList();
+
+    // Studio ON ⇒ only an agentic preset can be active; Studio OFF ⇒ only a
+    // plain preset can be active. So the two kinds never both highlight.
+    bool isActive(PresetItem item) => item.isAgentic
+        ? (studioEnabled && item.studioPreset!.id == activeStudioId)
+        : (!studioEnabled && activeId == item.preset!.id);
+
+    final activeIndex = items.indexWhere(isActive);
+
+    // Auto-reveal the active preset the first time the plain (unfiltered,
+    // top-level) list is shown.
+    if (folderId == null && !_filters.isActive) {
+      _scheduleAutoScroll(activeIndex);
+    }
+
+    final topInset = MediaQuery.paddingOf(context).top;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
+    return CustomScrollView(
+      controller: _scrollController,
+      slivers: [
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(16, 12 + topInset, 16, 0),
+          sliver: SliverToBoxAdapter(
+            child: KeyedSubtree(
+              key: _headerKey,
+              child: folderId == null
+                  ? PresetFoldersSection(
+                      onOpenFolder: (id) {
+                        ref.read(presetSelectionProvider.notifier).clear();
+                        setState(() => _currentFolderId = id);
+                      },
+                    )
+                  : const SizedBox.shrink(),
             ),
-          );
-        },
-      ),
+          ),
+        ),
+        if (items.isEmpty)
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
+            sliver: SliverToBoxAdapter(
+              child: Center(
+                child: Text(
+                  folderId != null
+                      ? 'preset_folder_empty'.tr()
+                      : 'label_no_presets'.tr(),
+                  style: TextStyle(color: context.cs.onSurfaceVariant),
+                ),
+              ),
+            ),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverList.builder(
+              itemCount: items.length,
+              itemBuilder: (_, i) {
+                final item = items[i];
+                final active = isActive(item);
+                return Padding(
+                  key: i == activeIndex ? _activeRowKey : null,
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _PsCard(
+                    item: item,
+                    isActive: active,
+                    selectionMode: selection.active,
+                    isSelected: selection.contains(item.id, item.kind),
+                    onTap: () => _onCardTap(item, active),
+                    onLongPress: () => ref
+                        .read(presetSelectionProvider.notifier)
+                        .start(item.id, item.kind),
+                    onConnections: item.isAgentic
+                        ? null
+                        : () => showPresetConnections(context, item.preset!.id),
+                    onEdit: item.isAgentic
+                        ? () => _openStudioEditor(item.studioPreset!.id)
+                        : () => _openEditor(item.preset),
+                    onMenu: () => _showItemMenu(item),
+                  ),
+                );
+              },
+            ),
+          ),
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + bottomInset),
+          sliver: SliverToBoxAdapter(child: _buildAddButton(context)),
+        ),
+      ],
     );
   }
 
-  Widget _buildAddButton(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Material(
-        color: context.cs.primary,
+  void _onCardTap(PresetItem item, bool isActive) {
+    if (ref.read(presetSelectionProvider).active) {
+      ref.read(presetSelectionProvider.notifier).toggle(item.id, item.kind);
+      return;
+    }
+    if (isActive) return;
+    if (item.isAgentic) {
+      ref.read(activeStudioPresetProvider.notifier).set(item.studioPreset!.id);
+      ref.read(studioFeatureEnabledProvider.notifier).enable();
+    } else {
+      setActivePreset(ref, item.preset!.id);
+      // Switching to a plain preset turns Studio off so the agentic pipeline
+      // stops overriding it.
+      ref.read(studioFeatureEnabledProvider.notifier).setEnabled(false);
+    }
+  }
+
+  /// Jumps the list so the active preset is visible on open. Runs at most once.
+  void _scheduleAutoScroll(int index) {
+    if (_didAutoScroll || index < 0) return;
+    _didAutoScroll = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealIndex(index));
+  }
+
+  void _revealIndex(int index) {
+    if (!mounted || !_scrollController.hasClients) return;
+
+    final headerBox =
+        _headerKey.currentContext?.findRenderObject() as RenderBox?;
+    final double headerExtent = headerBox?.size.height ?? 0.0;
+    final viewport = _scrollController.position.viewportDimension;
+    // Land the row a quarter of the way down the viewport rather than flush
+    // against the top edge, so the presets around it stay in context. Cards
+    // carrying a cover are taller than [_kRowExtent], so this is only a first
+    // approximation.
+    final double estimate =
+        headerExtent + index * _kRowExtent - viewport * 0.25;
+    _scrollController.jumpTo(
+      estimate.clamp(0.0, _scrollController.position.maxScrollExtent),
+    );
+
+    // Correct the estimate now that the row itself is built (it is, after that
+    // jump — the error stays inside the viewport's cache extent).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _activeRowKey.currentContext;
+      if (!mounted || ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.25,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  Widget _buildAddButton(BuildContext context) {
+    return Material(
+      color: context.cs.primary,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: () => _showAddSheet(context),
         borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: () => _showAddSheet(context, ref),
-          borderRadius: BorderRadius.circular(14),
-          splashColor: Colors.white.withValues(alpha: 0.1),
-          child: const Padding(
-            padding: EdgeInsets.symmetric(vertical: 14),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.add, color: Colors.white, size: 20),
-                SizedBox(width: 8),
-                Text(
-                  'Add / Import',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+        splashColor: Colors.white.withValues(alpha: 0.1),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(vertical: 14),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.add, color: Colors.white, size: 20),
+              SizedBox(width: 8),
+              Text(
+                'Add / Import',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  void _showAddSheet(BuildContext context, WidgetRef ref) {
+  // ─── filters ───────────────────────────────────────────────────────────
+
+  void _showFilterSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => PresetFilterSheet(
+        filters: _filters,
+        showTypeFilter:
+            (ref.read(studioPresetListProvider).value ?? const []).isNotEmpty,
+        onApply: (f) {
+          if (mounted) setState(() => _filters = f);
+        },
+      ),
+    );
+  }
+
+  // ─── per-row overflow menu ─────────────────────────────────────────────
+
+  void _showItemMenu(PresetItem item) {
+    if (item.isAgentic) {
+      _showAgenticMenu(item.studioPreset!);
+    } else {
+      _showPlainMenu(item.preset!);
+    }
+  }
+
+  void _showPlainMenu(Preset preset) {
+    final notifier = ref.read(presetListProvider.notifier);
+    showPresetOptions(
+      context,
+      isFeatured: isFeaturedPreset(preset.id),
+      hasImage: preset.imagePath != null && preset.imagePath!.isNotEmpty,
+      canDelete: true,
+      onRename: () => showPresetRename(
+        context,
+        currentName: preset.name,
+        onRename: (val) {
+          final name = val.trim();
+          if (name.isEmpty) return;
+          unawaited(notifier.updatePreset(preset.copyWith(name: name)));
+        },
+      ),
+      onSetAuthor: () => showPresetAuthorDialog(
+        context,
+        currentAuthor: preset.author ?? '',
+        onSubmit: (val) => unawaited(
+          notifier.updatePreset(
+            preset.copyWith(author: val.isEmpty ? null : val),
+          ),
+        ),
+      ),
+      onPickImage: () => unawaited(_changeCover(preset)),
+      onRemoveImage: () => unawaited(_removeCover(preset)),
+      onAddToFolder: () => _showAddToFolder([
+        PresetFolderTarget(preset.id, PresetKind.normal),
+      ]),
+      onClone: () => unawaited(_clonePreset(preset)),
+      onExport: () => unawaited(exportPreset(context, preset)),
+      onDelete: () => unawaited(
+        deletePresetAndFolderMemberships(ref, preset.id, PresetKind.normal),
+      ),
+    );
+  }
+
+  Future<void> _clonePreset(Preset preset) async {
+    await ref.read(presetListProvider.notifier).clone(preset);
+    if (mounted) GlazeToast.show(context, 'Preset cloned');
+  }
+
+  Future<void> _changeCover(Preset preset) async {
+    final path = await pickPresetCover(ref, preset.id);
+    if (path == null || !mounted) return;
+    await ref
+        .read(presetListProvider.notifier)
+        .updatePreset(preset.copyWith(imagePath: path));
+    if (!mounted) return;
+    final storage = await ref.read(imageStorageProvider.future);
+    await deleteStoredPresetCover(storage, preset.imagePath);
+  }
+
+  Future<void> _removeCover(Preset preset) async {
+    await ref
+        .read(presetListProvider.notifier)
+        .updatePreset(preset.copyWith(imagePath: null));
+    if (!mounted) return;
+    final storage = await ref.read(imageStorageProvider.future);
+    await deleteStoredPresetCover(storage, preset.imagePath);
+  }
+
+  void _showAgenticMenu(StudioPreset preset) {
+    showStudioPresetOptions(
+      context,
+      preset: preset,
+      onRename: () => showStudioPresetRename(
+        context,
+        preset: preset,
+        onRename: (name) => unawaited(_renameAgentic(preset, name)),
+      ),
+      onClone: () => unawaited(_cloneAgentic(preset)),
+      onAddToFolder: () => _showAddToFolder([
+        PresetFolderTarget(preset.id, PresetKind.agentic),
+      ]),
+      onExport: () => unawaited(exportStudioPreset(context, preset)),
+      onDelete: () => unawaited(_deleteAgentic(preset)),
+    );
+  }
+
+  Future<void> _renameAgentic(StudioPreset preset, String name) async {
+    await ref
+        .read(studioPresetRepoProvider)
+        .upsert(
+          preset.copyWith(name: name, updatedAt: currentTimestampSeconds()),
+        );
+    if (mounted) ref.invalidate(studioPresetListProvider);
+  }
+
+  Future<void> _cloneAgentic(StudioPreset preset) async {
+    final now = currentTimestampSeconds();
+    await ref
+        .read(studioPresetRepoProvider)
+        .upsert(
+          preset.copyWith(
+            id: 'studio_$now',
+            name: '${preset.name} (copy)',
+            blocks: [...preset.blocks],
+            agentEnabled: {...preset.agentEnabled},
+            updatedAt: now,
+          ),
+        );
+    if (!mounted) return;
+    ref.invalidate(studioPresetListProvider);
+    GlazeToast.show(context, 'studio_preset_cloned'.tr());
+  }
+
+  Future<void> _deleteAgentic(StudioPreset preset) async {
+    final ok = await confirmStudioDelete(
+      context,
+      title: 'studio_delete_preset'.tr(),
+      description: 'studio_confirm_delete_preset'.tr(args: [preset.name]),
+    );
+    if (!ok || !mounted) return;
+    await deletePresetAndFolderMemberships(ref, preset.id, PresetKind.agentic);
+  }
+
+  // ─── add / import ──────────────────────────────────────────────────────
+
+  void _showAddSheet(BuildContext context) {
     GlazeBottomSheet.show<void>(
       context,
       title: 'Add Preset',
@@ -262,7 +647,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           label: 'Add Agentic Preset',
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _createAgenticPreset(ref);
+            _createAgenticPreset();
           },
         ),
         BottomSheetItem(
@@ -270,14 +655,34 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           label: 'Import from File',
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _importPreset(ref);
+            _importPreset();
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.create_new_folder_rounded,
+          label: 'folder_new'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _createFolder(context);
           },
         ),
       ],
     );
   }
 
-  Future<void> _createAgenticPreset(WidgetRef ref) async {
+  void _createFolder(BuildContext context) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'folder_create_title'.tr(),
+      child: FolderNameDialog(
+        confirmLabel: 'btn_create'.tr(),
+        onSubmit: (name) =>
+            ref.read(presetFolderRepoProvider).create(name: name),
+      ),
+    );
+  }
+
+  Future<void> _createAgenticPreset() async {
     final ctx = context;
     try {
       final repo = ref.read(studioPresetRepoProvider);
@@ -305,7 +710,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     }
   }
 
-  Future<void> _importPreset(WidgetRef ref) async {
+  Future<void> _importPreset() async {
     final ctx = context;
     FilePickerResult? result;
     try {
@@ -375,34 +780,201 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           : 'Imported ${imported.length} presets',
     );
   }
-}
 
-int _presetTokenCount(Preset preset) => presetOnlyTokenCount(preset);
+  // ─── multi-select bulk actions ─────────────────────────────────────────
 
+  /// Resolves the current selection back to items, skipping keys whose preset
+  /// disappeared while the sheet was open.
+  List<PresetItem> _selectedItems(PresetSelectionState selection) {
+    final presets = ref.read(presetListProvider).value ?? const <Preset>[];
+    final studio =
+        ref.read(studioPresetListProvider).value ?? const <StudioPreset>[];
+    return <PresetItem>[
+      for (final p in presets) PresetItem(preset: p),
+      for (final sp in studio) PresetItem(studioPreset: sp),
+    ].where((e) => selection.keys.contains(e.memberKey)).toList();
+  }
 
+  void _showSelectionActions(
+    BuildContext context,
+    PresetSelectionState selection,
+  ) {
+    final folderId = _currentFolderId;
+    GlazeBottomSheet.show<void>(
+      context,
+      title: '${selection.count} ${'selected_count'.tr()}',
+      items: [
+        BottomSheetItem(
+          icon: Icons.share_rounded,
+          label: 'action_export'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            unawaited(_massExport(context, selection));
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.create_new_folder_outlined,
+          label: 'action_add_to_folder'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _showAddToFolder([
+              for (final e in _selectedItems(selection))
+                PresetFolderTarget(e.id, e.kind),
+            ], clearSelectionWhenDone: true);
+          },
+        ),
+        if (folderId != null)
+          BottomSheetItem(
+            icon: Icons.folder_off_outlined,
+            label: 'action_remove_from_folder'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              unawaited(_removeSelectedFromFolder(folderId, selection));
+            },
+          ),
+        BottomSheetItem(
+          icon: Icons.delete_rounded,
+          label: 'action_delete'.tr(),
+          isDestructive: true,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _confirmDeleteSelected(context, selection);
+          },
+        ),
+      ],
+    );
+  }
 
-// ─── preset item wrapper ──────────────────────────────────────────────────────
+  void _showAddToFolder(
+    List<PresetFolderTarget> targets, {
+    bool clearSelectionWhenDone = false,
+  }) {
+    if (targets.isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => AddPresetsToFolderSheet(
+        targets: targets,
+        onDone: clearSelectionWhenDone
+            ? () => ref.read(presetSelectionProvider.notifier).clear()
+            : null,
+      ),
+    );
+  }
 
-class _PresetItem {
-  final Preset? preset;
-  final StudioPreset? studioPreset;
-  _PresetItem({this.preset, this.studioPreset});
-  bool get isAgentic => studioPreset != null;
+  Future<void> _massExport(
+    BuildContext context,
+    PresetSelectionState selection,
+  ) async {
+    var exported = 0;
+    String? lastError;
+    for (final item in _selectedItems(selection)) {
+      try {
+        if (item.isAgentic) {
+          await saveStudioPresetJson(item.studioPreset!);
+        } else {
+          await savePresetJson(item.preset!);
+        }
+        exported++;
+      } catch (e) {
+        lastError = '$e';
+      }
+    }
+    if (!context.mounted) return;
+    ref.read(presetSelectionProvider.notifier).clear();
+    if (exported > 0) {
+      GlazeToast.show(context, 'preset_exported_toast'.plural(exported));
+    } else if (lastError != null) {
+      GlazeToast.show(context, lastError);
+    }
+  }
+
+  Future<void> _removeSelectedFromFolder(
+    String folderId,
+    PresetSelectionState selection,
+  ) async {
+    final repo = ref.read(presetFolderRepoProvider);
+    for (final item in _selectedItems(selection)) {
+      await repo.removeMember(folderId, item.id, item.kind);
+    }
+    if (!mounted) return;
+    ref.read(presetSelectionProvider.notifier).clear();
+  }
+
+  void _confirmDeleteSelected(
+    BuildContext context,
+    PresetSelectionState selection,
+  ) {
+    // The built-in `default` agentic preset is re-seeded on demand, so deleting
+    // it would only look like it worked.
+    final deletable = _selectedItems(selection)
+        .where((e) => !(e.isAgentic && e.id == 'default'))
+        .toList();
+    if (deletable.isEmpty) {
+      GlazeToast.show(context, 'preset_delete_none_toast'.tr());
+      return;
+    }
+
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'action_delete'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.delete_outline,
+        description: 'preset_delete_many_confirm'.plural(deletable.length),
+      ),
+      items: [
+        BottomSheetItem(
+          label: 'btn_delete'.tr(),
+          isDestructive: true,
+          centered: true,
+          onTap: () async {
+            Navigator.of(context, rootNavigator: true).pop();
+            ref.read(presetSelectionProvider.notifier).clear();
+            for (final item in deletable) {
+              // Each delete awaits a DB round-trip; bail out if the screen went
+              // away in the meantime rather than reading a disposed ref.
+              if (!mounted) return;
+              await deletePresetAndFolderMemberships(ref, item.id, item.kind);
+            }
+          },
+        ),
+        BottomSheetItem(
+          label: 'btn_cancel'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(),
+        ),
+      ],
+    );
+  }
 }
 
 // ─── ps-card ─────────────────────────────────────────────────────────────────
 
 class _PsCard extends ConsumerWidget {
-  final _PresetItem item;
+  final PresetItem item;
   final bool isActive;
-  final VoidCallback onActivate;
+
+  /// While the list is multi-selecting, the row's action buttons give way to a
+  /// check mark and a tap anywhere on the card toggles it.
+  final bool selectionMode;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onMenu;
   final VoidCallback? onConnections;
   final VoidCallback? onEdit;
 
   const _PsCard({
     required this.item,
     required this.isActive,
-    required this.onActivate,
+    required this.selectionMode,
+    required this.isSelected,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onMenu,
     this.onConnections,
     this.onEdit,
   });
@@ -453,6 +1025,10 @@ class _PsCard extends ConsumerWidget {
       baseTint,
     );
 
+    // While selecting, the highlight tracks the checkbox rather than which
+    // preset is in effect.
+    final highlighted = selectionMode ? isSelected : isActive;
+
     final Widget content;
     if (item.isAgentic) {
       content = Padding(
@@ -483,8 +1059,8 @@ class _PsCard extends ConsumerWidget {
     // changes to `end` fade the border (and its tint) between the two states.
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(
-        begin: isActive ? 1.0 : 0.0,
-        end: isActive ? 1.0 : 0.0,
+        begin: highlighted ? 1.0 : 0.0,
+        end: highlighted ? 1.0 : 0.0,
       ),
       duration: _activeFade,
       curve: Curves.easeOut,
@@ -497,7 +1073,8 @@ class _PsCard extends ConsumerWidget {
           color: Color.lerp(idleBorder, activeBorder, t)!,
           width: idleWidth + (_accentBorderWidth - idleWidth) * t,
         ),
-        onTap: onActivate,
+        onTap: onTap,
+        onLongPress: onLongPress,
         child: child!,
       ),
     );
@@ -593,6 +1170,8 @@ class _PsCard extends ConsumerWidget {
             children: [
               Text(
                 preset.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
@@ -604,7 +1183,7 @@ class _PsCard extends ConsumerWidget {
                 children: [
                   _SmallBadge(
                     icon: Icons.description,
-                    label: '${_presetTokenCount(preset)}',
+                    label: '${item.tokens}',
                     foreground: secondaryText,
                     onCover: onCover,
                   ),
@@ -624,32 +1203,28 @@ class _PsCard extends ConsumerWidget {
           ),
         ),
         const SizedBox(width: 8),
-        // Connection badge — tappable, colour shows binding type
-        _ConnBadge(
-          isActive: isActive,
-          hasChatBinding: hasChatBinding,
-          hasCharBinding: hasCharBinding,
-          onTap: onConnections ?? () {},
-        ),
-        const SizedBox(width: 8),
-        // Edit button
-        SizedBox(
-          width: 34,
-          height: 34,
-          child: Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            child: InkWell(
-              onTap: onEdit,
-              borderRadius: BorderRadius.circular(8),
-              child: Icon(
-                Icons.edit_outlined,
-                size: 18,
-                color: secondaryText,
-              ),
-            ),
+        if (selectionMode)
+          _SelectionCheck(selected: isSelected, onCover: onCover)
+        else ...[
+          // Connection badge — tappable, colour shows binding type
+          _ConnBadge(
+            isActive: isActive,
+            hasChatBinding: hasChatBinding,
+            hasCharBinding: hasCharBinding,
+            onTap: onConnections ?? () {},
           ),
-        ),
+          const SizedBox(width: 4),
+          _RowIconButton(
+            icon: Icons.edit_outlined,
+            color: secondaryText,
+            onTap: onEdit,
+          ),
+          _RowIconButton(
+            icon: Icons.more_vert,
+            color: secondaryText,
+            onTap: onMenu,
+          ),
+        ],
       ],
     );
   }
@@ -657,7 +1232,7 @@ class _PsCard extends ConsumerWidget {
   /// Agentic counterpart of [_buildRow]: same circular icon + name + badge-row
   /// layout as a plain preset, so both kinds render identically. Differs only
   /// in the leading glyph and the badges (token estimate + requests-per-turn),
-  /// and has no connection badge or inline editor.
+  /// and has no connection badge.
   Widget _buildAgenticRow(BuildContext context) {
     final sp = item.studioPreset!;
     return Row(
@@ -695,7 +1270,7 @@ class _PsCard extends ConsumerWidget {
                 children: [
                   _SmallBadge(
                     icon: Icons.memory,
-                    label: '${studioPresetTokenEstimate(sp)}',
+                    label: '${item.tokens}',
                     foreground: context.cs.onSurfaceVariant,
                   ),
                   const SizedBox(width: 8),
@@ -712,33 +1287,82 @@ class _PsCard extends ConsumerWidget {
           ),
         ),
         const SizedBox(width: 8),
-        // Edit button — opens the Studio agents sheet for this preset. Agentic
-        // presets are global, so there is no per-chat/character connection
-        // badge like a plain preset has.
-        SizedBox(
-          width: 34,
-          height: 34,
-          child: Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            child: InkWell(
-              onTap: onEdit,
-              borderRadius: BorderRadius.circular(8),
-              child: Icon(
-                Icons.edit_outlined,
-                size: 18,
-                color: context.cs.onSurfaceVariant,
-              ),
-            ),
+        if (selectionMode)
+          _SelectionCheck(selected: isSelected, onCover: false)
+        else ...[
+          // Agentic presets are global, so there is no per-chat/character
+          // connection badge like a plain preset has.
+          _RowIconButton(
+            icon: Icons.edit_outlined,
+            color: context.cs.onSurfaceVariant,
+            onTap: onEdit,
           ),
-        ),
+          _RowIconButton(
+            icon: Icons.more_vert,
+            color: context.cs.onSurfaceVariant,
+            onTap: onMenu,
+          ),
+        ],
       ],
     );
   }
-
 }
 
 // ─── shared small widgets ─────────────────────────────────────────────────────
+
+class _RowIconButton extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _RowIconButton({
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 32,
+      height: 34,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Icon(icon, size: 18, color: color),
+        ),
+      ),
+    );
+  }
+}
+
+/// Check mark that replaces a row's action buttons while multi-selecting.
+class _SelectionCheck extends StatelessWidget {
+  final bool selected;
+  final bool onCover;
+
+  const _SelectionCheck({required this.selected, required this.onCover});
+
+  @override
+  Widget build(BuildContext context) {
+    final idle = onCover
+        ? Colors.white.withValues(alpha: 0.7)
+        : context.cs.onSurfaceVariant.withValues(alpha: 0.5);
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Icon(
+        selected
+            ? Icons.check_circle_rounded
+            : Icons.radio_button_unchecked_rounded,
+        size: 22,
+        color: selected ? context.cs.primary : idle,
+      ),
+    );
+  }
+}
 
 class _SmallBadge extends StatelessWidget {
   final IconData icon;
@@ -827,6 +1451,96 @@ class _ConnBadge extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(Icons.link, size: 16, color: color),
+      ),
+    );
+  }
+}
+
+/// Bottom selection bar shown while multi-selecting presets. Mirrors the chat's
+/// message-selection bar: a glass pill with a cancel button, the selected
+/// count, and a "more" button that opens the bulk-actions sheet.
+class _SelectionBar extends StatelessWidget {
+  final int count;
+  final VoidCallback onCancel;
+  final VoidCallback onMore;
+
+  const _SelectionBar({
+    required this.count,
+    required this.onCancel,
+    required this.onMore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      elevation: 0,
+      borderRadius: BorderRadius.circular(28),
+      child: GlassSurface(
+        borderRadius: BorderRadius.circular(28),
+        tint: context.cs.surface,
+        border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Row(
+            children: [
+              const SizedBox(width: 8),
+              _CircleIconBtn(icon: Icons.close_rounded, onTap: onCancel),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '$count ${'selected_count'.tr()}',
+                  style: TextStyle(
+                    color: context.cs.onSurface,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              _CircleIconBtn(
+                icon: Icons.more_horiz_rounded,
+                onTap: count > 0 ? onMore : null,
+              ),
+              const SizedBox(width: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CircleIconBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _CircleIconBtn({required this.icon, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 40,
+        height: 40,
+        child: GlassSurface(
+          borderRadius: BorderRadius.circular(20),
+          tint: context.cs.surface,
+          border: Border.all(
+            color: context.cs.primary.withValues(alpha: 0.18),
+          ),
+          child: Center(
+            child: Icon(
+              icon,
+              size: 20,
+              color: onTap != null
+                  ? context.cs.primary
+                  : context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+          ),
+        ),
       ),
     );
   }

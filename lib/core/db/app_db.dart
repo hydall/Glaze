@@ -24,6 +24,8 @@ part 'app_db.g.dart';
     CharacterFolderMembers,
     ChatSessions,
     Presets,
+    PresetFolders,
+    PresetFolderMembers,
     ApiConfigs,
     Personas,
     Lorebooks,
@@ -70,7 +72,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 102;
+  int get schemaVersion => 103;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1972,6 +1974,17 @@ class AppDatabase extends _$AppDatabase {
             studioPresetRows,
             studioPresetRows.ledgerApiConfigId,
           );
+        }
+      }
+      if (from < 103) {
+        final tableNames = (await customSelect(
+          "SELECT name FROM sqlite_master WHERE type = 'table'",
+        ).get()).map((row) => row.read<String>('name')).toSet();
+        if (!tableNames.contains('preset_folders')) {
+          await m.createTable(presetFolders);
+        }
+        if (!tableNames.contains('preset_folder_members')) {
+          await m.createTable(presetFolderMembers);
         }
       }
     },

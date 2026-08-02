@@ -1,7 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
-import '../../../shared/theme/app_colors.dart';
+import '../theme/app_colors.dart';
 
 /// Single-field name input for creating or renaming a folder. Shown via
 /// `GlazeBottomSheet.show(title:…, child: FolderNameDialog(...))`.
