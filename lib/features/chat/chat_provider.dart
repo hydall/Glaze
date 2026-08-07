@@ -365,11 +365,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           );
 
     // Show the user bubble and the typing indicator on the same frame as the
-    // tap. Persisting the session re-encodes the whole message list on the UI
-    // isolate and the ledger commit adds more round trips, so publishing the
-    // state only after those writes made both appear a beat late on long
-    // chats. The writes below just reconcile this optimistic session with the
-    // persisted one.
+    // tap. Session persistence and the ledger commit add asynchronous round
+    // trips, so publishing state only after them made both appear a beat late
+    // on long chats. The writes below reconcile this optimistic session with
+    // the persisted one.
     final optimisticSession = current.session!.copyWith(
       messages: [...current.messages, userMsg],
       draft: '',
@@ -386,11 +385,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (!ref.mounted) return;
 
     final updatedSession = expectedAcceptedVariation == null
-        ? await ref.read(chatRepoProvider).appendUserMessageAndClearDraft(
-            sessionId: current.session!.id,
-            message: userMsg,
-            updatedAt: currentTimestampSeconds(),
-          )
+        ? await ref
+              .read(chatRepoProvider)
+              .appendUserMessageAndClearDraft(
+                sessionId: current.session!.id,
+                message: userMsg,
+                updatedAt: currentTimestampSeconds(),
+              )
         : await ref
               .read(chatRepoProvider)
               .appendUserMessageAndAcceptCurrentVariation(

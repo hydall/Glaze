@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:drift/drift.dart';
 
@@ -9,6 +10,18 @@ import 'lorebook_use_manifest_repo.dart';
 import 'session_deletion_queries.dart';
 import '../../models/chat_message.dart';
 import '../../application/sync_repo_interfaces.dart';
+
+class _PreparedUserMessageAppend {
+  const _PreparedUserMessageAppend({
+    required this.messagesJson,
+    required this.messages,
+    this.didAppend = true,
+  });
+
+  final String messagesJson;
+  final List<ChatMessage> messages;
+  final bool didAppend;
+}
 
 class ChatRepo implements SyncChatStore {
   final AppDatabase _db;
@@ -132,30 +145,27 @@ class ChatRepo implements SyncChatStore {
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return null;
 
-      final messages =
-          (jsonDecode(row.messagesJson) as List<dynamic>)
-              .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-              .toList()
-            ..add(message);
+      final prepared = await _prepareUserMessageAppend(
+        row.messagesJson,
+        message,
+      );
 
       await (_db.update(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
         ChatSessionsCompanion(
-          messagesJson: Value(
-            jsonEncode(messages.map((e) => e.toJson()).toList()),
-          ),
+          messagesJson: Value(prepared.messagesJson),
           draft: const Value(''),
           updatedAt: Value(updatedAt),
         ),
       );
 
       final updatedRow = row.copyWith(
-        messagesJson: jsonEncode(messages.map((e) => e.toJson()).toList()),
+        messagesJson: prepared.messagesJson,
         draft: const Value(''),
         updatedAt: updatedAt,
       );
-      return _toModel(updatedRow);
+      return _toModel(updatedRow, messages: prepared.messages);
     });
   }
 
@@ -181,43 +191,44 @@ class ChatRepo implements SyncChatStore {
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return null;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
+      final prepared = await _prepareAcceptedUserMessageAppend(
+        messagesJson: row.messagesJson,
+        message: message,
+        expectedPrecedingAssistant: expectedPrecedingAssistant,
+      );
+      if (prepared == null) return null;
 
       // A retry after a completed transaction must not append the same user
       // message or a second acceptance event.
-      if (messages.any((existing) => existing.id == message.id)) {
-        return _toModel(row);
-      }
+      if (!prepared.didAppend)
+        return _toModel(row, messages: prepared.messages);
 
-      // A user send accepts only the assistant immediately before it, never an
-      // older assistant found by scanning history after a concurrent change.
-      final preceding = messages.isNotEmpty ? messages.last : null;
-      if (preceding == null ||
-          preceding.role != 'assistant' ||
-          preceding.id != expectedPrecedingAssistant.messageId ||
-          preceding.swipeId != expectedPrecedingAssistant.swipeId ||
-          preceding.agentSwipeId != expectedPrecedingAssistant.agentSwipeId) {
-        return null;
-      }
+      final manifest =
+          await (_db.select(_db.lorebookUseManifests)
+                ..where((t) => t.sessionId.equals(sessionId))
+                ..where(
+                  (t) =>
+                      t.messageId.equals(expectedPrecedingAssistant.messageId),
+                )
+                ..where(
+                  (t) => t.swipeId.equals(expectedPrecedingAssistant.swipeId),
+                )
+                ..where(
+                  (t) => t.agentSwipeId.equals(
+                    expectedPrecedingAssistant.agentSwipeId,
+                  ),
+                ))
+              .getSingleOrNull();
 
-      final manifest = await (_db.select(_db.lorebookUseManifests)
-            ..where((t) => t.sessionId.equals(sessionId))
-            ..where((t) => t.messageId.equals(expectedPrecedingAssistant.messageId))
-            ..where((t) => t.swipeId.equals(expectedPrecedingAssistant.swipeId))
-            ..where((t) => t.agentSwipeId.equals(expectedPrecedingAssistant.agentSwipeId)))
-          .getSingleOrNull();
-
-      messages.add(message);
-      final messagesJson = jsonEncode(messages.map((e) => e.toJson()).toList());
-      await (_db.update(_db.chatSessions)
-            ..where((t) => t.sessionId.equals(sessionId)))
-          .write(ChatSessionsCompanion(
-            messagesJson: Value(messagesJson),
-            draft: const Value(''),
-            updatedAt: Value(updatedAt),
-          ));
+      await (_db.update(
+        _db.chatSessions,
+      )..where((t) => t.sessionId.equals(sessionId))).write(
+        ChatSessionsCompanion(
+          messagesJson: Value(prepared.messagesJson),
+          draft: const Value(''),
+          updatedAt: Value(updatedAt),
+        ),
+      );
 
       if (manifest != null) {
         await LorebookUseManifestRepo(_db).insertVariationAcceptance(
@@ -228,11 +239,14 @@ class ChatRepo implements SyncChatStore {
         );
       }
 
-      return _toModel(row.copyWith(
-        messagesJson: messagesJson,
-        draft: const Value(''),
-        updatedAt: updatedAt,
-      ));
+      return _toModel(
+        row.copyWith(
+          messagesJson: prepared.messagesJson,
+          draft: const Value(''),
+          updatedAt: updatedAt,
+        ),
+        messages: prepared.messages,
+      );
     });
   }
 
@@ -1208,24 +1222,29 @@ class ChatRepo implements SyncChatStore {
     return (count, lastStart);
   }
 
-  ChatSession _toModel(ChatSessionRow c) => ChatSession(
-    id: c.sessionId,
-    characterId: c.characterId,
-    sessionIndex: c.sessionIndex,
-    messages: (jsonDecode(c.messagesJson) as List)
-        .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-        .toList(),
-    updatedAt: c.updatedAt,
-    sessionVars: c.sessionVarsJson != null
-        ? Map<String, String>.from(jsonDecode(c.sessionVarsJson!) as Map)
-        : {},
-    authorsNote: _parseAuthorsNote(c.authorsNoteJson),
-    draft: c.draft,
-    lastScrollAnchor:
-        c.lastScrollAnchorJson != null && c.lastScrollAnchorJson!.isNotEmpty
-        ? Map<String, dynamic>.from(jsonDecode(c.lastScrollAnchorJson!) as Map)
-        : {},
-  );
+  ChatSession _toModel(ChatSessionRow c, {List<ChatMessage>? messages}) =>
+      ChatSession(
+        id: c.sessionId,
+        characterId: c.characterId,
+        sessionIndex: c.sessionIndex,
+        messages:
+            messages ??
+            (jsonDecode(c.messagesJson) as List)
+                .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
+                .toList(),
+        updatedAt: c.updatedAt,
+        sessionVars: c.sessionVarsJson != null
+            ? Map<String, String>.from(jsonDecode(c.sessionVarsJson!) as Map)
+            : {},
+        authorsNote: _parseAuthorsNote(c.authorsNoteJson),
+        draft: c.draft,
+        lastScrollAnchor:
+            c.lastScrollAnchorJson != null && c.lastScrollAnchorJson!.isNotEmpty
+            ? Map<String, dynamic>.from(
+                jsonDecode(c.lastScrollAnchorJson!) as Map,
+              )
+            : {},
+      );
 
   ChatSessionsCompanion _toCompanion(ChatSession m) => ChatSessionsCompanion(
     sessionId: Value(m.id),
@@ -1268,3 +1287,80 @@ class ChatRepo implements SyncChatStore {
     return <String, dynamic>{};
   }
 }
+
+/// Decoding and encoding a long chat history is CPU-bound. Keep it out of the
+/// UI isolate while the repository transaction protects the read-modify-write.
+Future<_PreparedUserMessageAppend> _prepareUserMessageAppend(
+  String messagesJson,
+  ChatMessage message,
+) => Isolate.run(
+  () => _decodeAndAppendUserMessage(messagesJson, message.toJson()),
+);
+
+Future<_PreparedUserMessageAppend?> _prepareAcceptedUserMessageAppend({
+  required String messagesJson,
+  required ChatMessage message,
+  required LorebookUseGenerationIdentity expectedPrecedingAssistant,
+}) => Isolate.run(
+  () => _decodeAndAppendAcceptedUserMessage(
+    messagesJson,
+    message.toJson(),
+    expectedPrecedingAssistant.messageId,
+    expectedPrecedingAssistant.swipeId,
+    expectedPrecedingAssistant.agentSwipeId,
+  ),
+);
+
+_PreparedUserMessageAppend _decodeAndAppendUserMessage(
+  String messagesJson,
+  Map<String, dynamic> messageJson,
+) {
+  final messages = _decodeChatMessages(messagesJson)
+    ..add(ChatMessage.fromJson(messageJson));
+  return _PreparedUserMessageAppend(
+    messagesJson: jsonEncode(
+      messages.map((message) => message.toJson()).toList(),
+    ),
+    messages: messages,
+  );
+}
+
+_PreparedUserMessageAppend? _decodeAndAppendAcceptedUserMessage(
+  String messagesJson,
+  Map<String, dynamic> messageJson,
+  String expectedMessageId,
+  int expectedSwipeId,
+  int expectedAgentSwipeId,
+) {
+  final messages = _decodeChatMessages(messagesJson);
+  final message = ChatMessage.fromJson(messageJson);
+  if (messages.any((existing) => existing.id == message.id)) {
+    return _PreparedUserMessageAppend(
+      messagesJson: messagesJson,
+      messages: messages,
+      didAppend: false,
+    );
+  }
+
+  // A user send accepts only the assistant immediately before it, never an
+  // older assistant found by scanning history after a concurrent change.
+  final preceding = messages.isNotEmpty ? messages.last : null;
+  if (preceding == null ||
+      preceding.role != 'assistant' ||
+      preceding.id != expectedMessageId ||
+      preceding.swipeId != expectedSwipeId ||
+      preceding.agentSwipeId != expectedAgentSwipeId) {
+    return null;
+  }
+
+  messages.add(message);
+  return _PreparedUserMessageAppend(
+    messagesJson: jsonEncode(messages.map((item) => item.toJson()).toList()),
+    messages: messages,
+  );
+}
+
+List<ChatMessage> _decodeChatMessages(String messagesJson) =>
+    (jsonDecode(messagesJson) as List<dynamic>)
+        .map((entry) => ChatMessage.fromJson(entry as Map<String, dynamic>))
+        .toList();
