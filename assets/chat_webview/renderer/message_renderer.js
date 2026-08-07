@@ -104,6 +104,9 @@ export class Renderer {
     if (messageData.agentSwipeIndex != null) section.dataset.agentSwipeId = String(messageData.agentSwipeIndex);
     if (messageData.agentSwipeTotal != null) section.dataset.agentSwipeTotal = String(messageData.agentSwipeTotal);
     if (messageData.greetingTotal != null) section.dataset.greetingTotal = String(messageData.greetingTotal);
+    // Mirrors swipeId: the greeting arrows need the current index to know when
+    // they sit on an edge, since greeting navigation no longer wraps around.
+    if (messageData.greetingIndex != null) section.dataset.greetingId = String(messageData.greetingIndex);
 
     const classes = ['message-section', this._roleKey(role), `layout-${layout}`];
     if (isError) classes.push('error');

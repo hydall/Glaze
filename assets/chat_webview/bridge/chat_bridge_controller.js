@@ -539,6 +539,7 @@ export class Bridge {
     if (msg.agentSwipeIndex !== undefined) section.dataset.agentSwipeId = String(msg.agentSwipeIndex);
     if (msg.agentSwipeTotal !== undefined) section.dataset.agentSwipeTotal = String(msg.agentSwipeTotal);
     if (msg.greetingTotal !== undefined) section.dataset.greetingTotal = String(msg.greetingTotal);
+    if (msg.greetingIndex !== undefined) section.dataset.greetingId = String(msg.greetingIndex);
 
     // Restore data-is-last on char sections after generation ends.
     // setLastMessage(null) clears this flag at generation start; without
@@ -579,7 +580,7 @@ export class Bridge {
     const agentSwipeIndex = msg.agentSwipeIndex !== undefined ? msg.agentSwipeIndex : parseInt(section.dataset.agentSwipeId || '0', 10);
     const agentSwipeTotal = msg.agentSwipeTotal !== undefined ? msg.agentSwipeTotal : parseInt(section.dataset.agentSwipeTotal || '0', 10);
     const agentSwipeFinalCount = msg.agentSwipeFinalCount !== undefined ? msg.agentSwipeFinalCount : 0;
-    const greetingIndex = msg.greetingIndex !== undefined ? msg.greetingIndex : 0;
+    const greetingIndex = msg.greetingIndex !== undefined ? msg.greetingIndex : parseInt(section.dataset.greetingId || '0', 10);
     const greetingTotal = msg.greetingTotal !== undefined ? msg.greetingTotal : parseInt(section.dataset.greetingTotal || '0', 10);
     const messageIndex = parseInt(section.dataset.messageIndex || '-1', 10);
     const hasSwipes = isChar && swipeTotal > 1;

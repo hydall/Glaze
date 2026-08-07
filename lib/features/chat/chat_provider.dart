@@ -575,6 +575,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final regenTargetId = prevAssistant.id;
     _abortHandler.restorationMessage = prevAssistant;
 
+    // The reply always lands as a *new* variation (`SavedMessageWriter`
+    // appends it to `swipes[]`), so open that slot the moment the run starts
+    // instead of when the text arrives: the counter steps N/N → N+1/N+1 on the
+    // tap. This is UI-only — `saveSession` below is the untouched pre-regen
+    // session, so nothing extra is persisted. Cancelling puts it back: the
+    // abort path reloads the durable row when nothing streamed, and rebuilds
+    // `swipes[]` from `restorationMessage` + the partial text when it did.
+    final pendingSwipes = [
+      ...(prevAssistant.swipes.isNotEmpty
+          ? prevAssistant.swipes
+          : [prevAssistant.content]),
+      '',
+    ];
+    final pendingSwipesMeta = [
+      ...?_previousSwipesMetaForRegen(prevAssistant),
+      <String, dynamic>{},
+    ];
+
     final clearedMsg = prevAssistant.copyWith(
       content: '',
       reasoning: null,
@@ -582,6 +600,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       genTime: null,
       tokens: null,
       isError: false,
+      swipes: pendingSwipes,
+      swipeId: pendingSwipes.length - 1,
+      swipesMeta: pendingSwipesMeta,
     );
     final clearedMessages = [...current.messages];
     clearedMessages[lastIdx] = clearedMsg;

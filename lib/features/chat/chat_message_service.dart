@@ -929,17 +929,18 @@ class ChatMessageService {
         ? (dir > 0 ? 'slide-next' : 'slide-prev')
         : 'fade';
 
-    var newIndex = msg.agentSwipeId + dir;
+    final newIndex = msg.agentSwipeId + dir;
 
-    // Wrap-around: index < 0 → last; index >= length → 0.
-    if (newIndex < 0) {
-      newIndex = msg.agentSwipes.length - 1;
-    } else if (newIndex >= msg.agentSwipes.length) {
+    // No wrap-around, same as the green swipes above: the first variation is a
+    // hard left edge and the last one a hard right edge. Wrapping made a tap on
+    // an already-exhausted arrow jump to the opposite end of the list, which
+    // reads as the switcher glitching rather than as navigation.
+    if (newIndex >= msg.agentSwipes.length && isLastMessage) {
       // Right-edge on the last message → full regen (new green swipe).
-      if (isLastMessage) {
-        return const ChangeSwipeResult.needsRegen();
-      }
-      newIndex = 0;
+      return const ChangeSwipeResult.needsRegen();
+    }
+    if (newIndex < 0 || newIndex >= msg.agentSwipes.length) {
+      return const ChangeSwipeResult.noop();
     }
 
     final swipe = msg.agentSwipes[newIndex];
@@ -974,9 +975,10 @@ class ChatMessageService {
       return session;
     }
     if (resolvedGreetings.length <= 1) return session;
-    var idx = newGreetingIndex;
-    if (idx < 0) idx = resolvedGreetings.length - 1;
-    if (idx >= resolvedGreetings.length) idx = 0;
+    // Hard edges, no wrap — the first greeting stays put on a back step and the
+    // last one on a forward step, matching the swipe switchers.
+    final idx = newGreetingIndex;
+    if (idx < 0 || idx >= resolvedGreetings.length) return session;
 
     final msg = session.messages[messageIndex];
     final newText = resolvedGreetings[idx];

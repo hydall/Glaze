@@ -87,12 +87,20 @@ export class SwipeGestureHandler {
       const swipeTotal = parseInt(activeSection.dataset.swipeTotal || '1', 10);
       const isLast = activeSection.dataset.isLast === 'true';
       const greetingTotal = parseInt(activeSection.dataset.greetingTotal || '0', 10);
+      const greetingId = parseInt(activeSection.dataset.greetingId || '0', 10);
       const isFirstMsg = activeSection.dataset.messageIndex === '0';
       const canSwitchGreeting = isFirstMsg && greetingTotal > 1;
 
       const blockLastRegen = isLast && self._disableRegen();
-      if (dx < 0 && !canSwitchGreeting && (blockLastRegen || !isLast) && swipeId >= swipeTotal - 1) return;
-      if (dx > 0 && !canSwitchGreeting && swipeId <= 0) return;
+      // Greetings navigate their own list and no longer wrap, so they get the
+      // same hard edges as the swipes: nothing to switch to → no drag.
+      if (canSwitchGreeting) {
+        if (dx < 0 && greetingId >= greetingTotal - 1) return;
+        if (dx > 0 && greetingId <= 0) return;
+      } else {
+        if (dx < 0 && (blockLastRegen || !isLast) && swipeId >= swipeTotal - 1) return;
+        if (dx > 0 && swipeId <= 0) return;
+      }
 
       if (e.cancelable) e.preventDefault();
       activeBody.style.transform = `translateX(${dx}px)`;
@@ -113,14 +121,15 @@ export class SwipeGestureHandler {
       const swipeTotal = parseInt(section.dataset.swipeTotal || '1', 10);
       const isLast = section.dataset.isLast === 'true';
       const greetingTotal = parseInt(section.dataset.greetingTotal || '0', 10);
+      const greetingId = parseInt(section.dataset.greetingId || '0', 10);
       const isFirstMsg = section.dataset.messageIndex === '0';
       const canSwitchGreeting = isFirstMsg && greetingTotal > 1;
       const msgId = section.dataset.messageId;
 
       if (canSwitchGreeting) {
-        if (dx < -THRESHOLD) {
+        if (dx < -THRESHOLD && greetingId < greetingTotal - 1) {
           self.animateVariantSwap(msgId, 'next', () => self._sendToFlutter('onChangeGreeting', [msgId, 1]), dx);
-        } else if (dx > THRESHOLD) {
+        } else if (dx > THRESHOLD && greetingId > 0) {
           self.animateVariantSwap(msgId, 'prev', () => self._sendToFlutter('onChangeGreeting', [msgId, -1]), dx);
         } else {
           reset(body);
@@ -172,6 +181,17 @@ export class SwipeGestureHandler {
     const body = section?.querySelector('.msg-body');
     if (!body) { after(); return; }
 
+    // Tapping the arrow again before the previous swap settled used to leave
+    // two runs fighting over the same inline styles: the older run's cleanup
+    // timer would fire mid-flight and strip the newer run's transition, or the
+    // newer run would measure a height that was still locked — either way the
+    // bubble could stay faded out or keep a frozen height. Tear the previous
+    // run down (timers, observer, inline styles) before starting a new one.
+    if (body._variantSwap) {
+      body._variantSwap.abort();
+      body._variantSwap = null;
+    }
+
     // dir: 'next' → exit to left, enter from right.  'prev' → mirror.
     const sign = dir === 'next' ? -1 : (dir === 'prev' ? 1 : 0);
     // Exit: continue past current drag position; click case uses a small hint.
@@ -180,6 +200,8 @@ export class SwipeGestureHandler {
     const inX = sign * -28;
 
     // Lock current height so the (async) content swap doesn't reflow the page.
+    // Measured with any leftover lock cleared, so a swap that starts on top of
+    // an aborted one still reads the real content height.
     const startHeight = body.offsetHeight;
     body.style.height = `${startHeight}px`;
     body.style.overflow = 'hidden';
@@ -187,14 +209,52 @@ export class SwipeGestureHandler {
     body.style.opacity = '0';
     if (outX) body.style.transform = `translateX(${outX}px)`;
 
-    setTimeout(() => {
-      let done = false;
-      let fallback;
+    // Everything this run schedules, so a superseding run can tear it down.
+    const run = {
+      timers: [],
+      mo: null,
+      done: false,
+      sent: false,
+      send: () => {
+        if (run.sent) return;
+        run.sent = true;
+        after();
+      },
+      abort: () => {
+        run.done = true;
+        run.timers.forEach(clearTimeout);
+        run.timers.length = 0;
+        if (run.mo) run.mo.disconnect();
+        // The switch request itself is not the animation's to drop: a second
+        // tap that lands inside the 130 ms exit window must still reach Dart,
+        // in order, or one of the two steps is silently swallowed.
+        run.send();
+        // Hand the element back in a neutral state; the new run re-locks it.
+        body.style.transition = '';
+        body.style.transform = '';
+        body.style.height = '';
+        body.style.overflow = '';
+        body.style.opacity = '1';
+      },
+    };
+    body._variantSwap = run;
+
+    const schedule = (fn, ms) => {
+      const t = setTimeout(() => {
+        run.timers = run.timers.filter(id => id !== t);
+        fn();
+      }, ms);
+      run.timers.push(t);
+      return t;
+    };
+
+    schedule(() => {
       const finish = () => {
-        if (done) return;
-        done = true;
-        mo.disconnect();
-        clearTimeout(fallback);
+        if (run.done) return;
+        run.done = true;
+        run.mo.disconnect();
+        run.timers.forEach(clearTimeout);
+        run.timers.length = 0;
 
         // Measure new content's natural height
         body.style.height = 'auto';
@@ -202,27 +262,30 @@ export class SwipeGestureHandler {
         body.style.height = `${startHeight}px`;
 
         requestAnimationFrame(() => {
+          // A newer swap took over between the frame request and this callback.
+          if (body._variantSwap !== run) return;
           body.style.transition = 'opacity 0.22s ease, transform 0.22s ease, height 0.22s ease';
           body.style.opacity = '1';
           body.style.transform = '';
           body.style.height = `${targetHeight}px`;
-          setTimeout(() => {
+          schedule(() => {
             body.style.transition = '';
             body.style.transform = '';
             body.style.height = '';
             body.style.overflow = '';
+            if (body._variantSwap === run) body._variantSwap = null;
           }, 240);
         });
       };
 
       // The renderer rewrites section dataset (rawText / swipeId / etc) when
       // Flutter's updateMessage arrives — that's our cue to animate in.
-      const mo = new MutationObserver(finish);
-      mo.observe(section, { attributes: true });
+      run.mo = new MutationObserver(finish);
+      run.mo.observe(section, { attributes: true });
       // Fallback in case the update is a no-op or attribute setter is skipped.
-      fallback = setTimeout(finish, 300);
+      schedule(finish, 300);
 
-      after();
+      run.send();
       body.style.transition = 'none';
       if (inX) body.style.transform = `translateX(${inX}px)`;
     }, 130);
