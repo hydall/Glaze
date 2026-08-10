@@ -93,11 +93,7 @@ class _CardRewriterStudioSheetState
     if (config == null || _loadingModels) return;
     setState(() => _loadingModels = true);
     try {
-      final models = await ModelFetcher.fetchModelIds(
-        endpoint: config.endpoint,
-        apiKey: config.apiKey,
-        fallbackModel: config.model,
-      );
+      final models = await ModelFetcher.fetchModelIds(config);
       if (!mounted) return;
       setState(() => _models = models);
     } catch (error) {

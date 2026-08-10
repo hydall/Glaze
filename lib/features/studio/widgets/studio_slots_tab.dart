@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/model_fetcher.dart';
+import '../../../core/llm/transport/llm_protocol.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
@@ -326,10 +327,16 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
 
   // ── Fetched model picker ───────────────────────────────────────────────────
 
+  /// The connection named by the "API connection" row above the model picker:
+  /// the slot's own selection, or — only while the slot is left on "Use
+  /// selected LLM connection" — the active LLM preset.
+  ///
+  /// A slot pointing at a deleted config resolves to null rather than falling
+  /// through to the active preset, so the picker can never list models from an
+  /// endpoint other than the one the row displays.
   ApiConfig? _slotApiConfig(String apiConfigId, List<ApiConfig> configs) {
     if (apiConfigId.isNotEmpty) {
-      final selected = configs.where((c) => c.id == apiConfigId).firstOrNull;
-      if (selected != null) return selected;
+      return configs.where((c) => c.id == apiConfigId).firstOrNull;
     }
     return ref.read(activeApiConfigProvider);
   }
@@ -364,13 +371,17 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
       GlazeToast.show(context, 'studio_slot_no_api'.tr());
       return;
     }
+    // Same precondition as the LLM tab's fetch button: OpenRouter's URL is
+    // hardcoded, every other protocol needs an endpoint of its own.
+    final endpointRequired = config.protocol != LlmProtocol.openrouter;
+    if ((endpointRequired && config.endpoint.trim().isEmpty) ||
+        config.apiKey.trim().isEmpty) {
+      GlazeToast.show(context, 'settings_err_endpoint_key'.tr());
+      return;
+    }
     setState(() => _fetchingModelSlots.add(cacheKey));
     try {
-      final ids = await ModelFetcher.fetchModelIds(
-        endpoint: config.endpoint,
-        apiKey: config.apiKey,
-        fallbackModel: config.model,
-      );
+      final ids = await ModelFetcher.fetchModelIds(config);
       if (!mounted) return;
       setState(() => _fetchedModelsBySlot[cacheKey] = ids);
     } catch (e) {

@@ -1179,11 +1179,7 @@ class _MemoryGenerationSettingsSheetState
     }
     setState(() => _fetchingModels = true);
     try {
-      final ids = await ModelFetcher.fetchModelIds(
-        endpoint: config.endpoint,
-        apiKey: config.apiKey,
-        fallbackModel: config.model,
-      );
+      final ids = await ModelFetcher.fetchModelIds(config);
       if (!mounted) return;
       setState(() => _fetchedModels = ids);
     } catch (e) {
