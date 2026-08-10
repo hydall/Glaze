@@ -12,6 +12,14 @@ part 'cleaner_settings.g.dart';
 /// always-on (Studio-only) — there is no enabled toggle. API config is
 /// resolved by [StudioSlotResolver] from `StudioPreset.cleanerApiConfigId`;
 /// `postCleanerModel` overrides the slot's model when non-empty.
+///
+/// Sampling / reasoning parameters that the selected API preset also carries
+/// are paired with a `<field>Override` boolean: `true` sends the value stored
+/// here, `false` leaves it unset so the preset's own value survives. They
+/// default to `true`, so an existing install keeps applying the values it
+/// applied before the flags existed. Temperature, max tokens and the timeout
+/// have no flag — they already encode "not overridden" as a sentinel
+/// (negative temperature, `0` tokens, `0` ms).
 @freezed
 abstract class CleanerSettings with _$CleanerSettings {
   const factory CleanerSettings({
@@ -21,6 +29,12 @@ abstract class CleanerSettings with _$CleanerSettings {
     @Default(0) int postCleanerTopK,
     @Default(0.0) double postCleanerFrequencyPenalty,
     @Default(0.0) double postCleanerPresencePenalty,
+    // Override flags for the sampling parameters above. false = leave the
+    // parameter unset so the selected API preset's value is used.
+    @Default(true) bool postCleanerTopPOverride,
+    @Default(true) bool postCleanerTopKOverride,
+    @Default(true) bool postCleanerFrequencyPenaltyOverride,
+    @Default(true) bool postCleanerPresencePenaltyOverride,
     // ── Model override + timeout ───────────────────────────────────────────
     // Model id override for the cleaner. When non-empty, replaces the Studio
     // cleaner slot's model. Empty = use the slot's configured model.
@@ -53,6 +67,13 @@ abstract class CleanerSettings with _$CleanerSettings {
     @Default(false) bool postCleanerOmitTopP,
     @Default(true) bool postCleanerOmitReasoning,
     @Default(true) bool postCleanerOmitReasoningEffort,
+    // Override flags for the reasoning parameters above. `RequestReasoning`
+    // covers the paired `OmitReasoning` flag and `ReasoningEffort` covers
+    // `OmitReasoningEffort` — each pair is one control in the UI.
+    @Default(true) bool postCleanerRequestReasoningOverride,
+    @Default(true) bool postCleanerShowNativeReasoningOverride,
+    @Default(true) bool postCleanerUseResponsesApiOverride,
+    @Default(true) bool postCleanerReasoningEffortOverride,
     @Default(<ExtraRequestParameter>[])
     List<ExtraRequestParameter> postCleanerExtraRequestParameters,
     // ── Enable toggle ─────────────────────────────────────────────────────

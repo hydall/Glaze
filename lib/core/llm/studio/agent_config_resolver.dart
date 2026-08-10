@@ -1,4 +1,5 @@
 import '../../models/api_config.dart';
+import '../../models/extra_request_parameter.dart';
 import '../../models/pipeline_settings.dart';
 import '../../models/studio_config.dart';
 import '../agent_runner.dart' show ResolvedAgentConfig;
@@ -20,6 +21,11 @@ import '../transport/extra_request_parameters.dart';
 ///   for pre-gen trackers. The final generator intentionally does not read
 ///   PipelineSettings.memoryBookApi.generationModel because that field belongs
 ///   to MemoryBook draft generation.
+///
+/// Every sampling parameter is applied through [_SlotSampling], which resolves
+/// each `<field>Override` flag to either the stored value or `null`. A `null`
+/// reaches `copyWithSampling` untouched, so the selected API preset's own value
+/// is what ends up in the request.
 
 class AgentConfigResolver {
   final Future<List<ApiConfig>> Function() _loadApiConfigs;
@@ -47,117 +53,126 @@ class AgentConfigResolver {
       activeConfig: turnConfig?.activeApiConfig ?? _readActiveApiConfig(),
     );
     final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
+
+    final String modelOverride;
+    final _SlotSampling sampling;
     if (isFinalResponse) {
-      return resolver
-          .resolveAgentConfig(
-            current,
-            selectedApiConfigId,
-            pipeline.studioAgent.studioFinalModelOverride,
-          )
-          .copyWithSampling(
-            topP: pipeline.studioAgent.studioFinalTopP,
-            topK: pipeline.studioAgent.studioFinalTopK,
-            frequencyPenalty: pipeline.studioAgent.studioFinalFrequencyPenalty,
-            presencePenalty: pipeline.studioAgent.studioFinalPresencePenalty,
-            omitTemperature: pipeline.studioAgent.studioFinalOmitTemperature,
-            omitTopP: pipeline.studioAgent.studioFinalOmitTopP,
-            extraRequestParameters: mergeExtraRequestParameters(
-              resolver
-                      .resolveRunConfig(selectedApiConfigId)
-                      ?.extraRequestParameters ??
-                  const [],
-              pipeline.studioAgent.studioFinalExtraRequestParameters,
-            ),
-          );
+      modelOverride = pipeline.studioAgent.studioFinalModelOverride;
+      sampling = _SlotSampling.finalGenerator(pipeline);
     } else if (agent.phase == 'post_processing') {
       // Post Clean and the Ledger share this phase but not their model: the
       // Ledger prefers its own override and only then the cleaner's.
       final ledgerModel = pipeline.ledger.studioLedgerModel;
-      final postModel =
+      modelOverride =
           StudioControllerOntology.specForAgent(agent)?.id == 'ledger' &&
               ledgerModel.isNotEmpty
           ? ledgerModel
           : pipeline.cleaner.postCleanerModel;
-      if (postModel.isNotEmpty) {
-        return resolver
-            .resolveAgentConfig(
-              current,
-              selectedApiConfigId,
-              postModel,
-            )
-            .copyWithSampling(
-              topP: pipeline.cleaner.postCleanerTopP,
-              topK: pipeline.cleaner.postCleanerTopK,
-              frequencyPenalty: pipeline.cleaner.postCleanerFrequencyPenalty,
-              presencePenalty: pipeline.cleaner.postCleanerPresencePenalty,
-              omitTemperature: pipeline.cleaner.postCleanerOmitTemperature,
-              omitTopP: pipeline.cleaner.postCleanerOmitTopP,
-              extraRequestParameters: mergeExtraRequestParameters(
-                resolver
-                        .resolveRunConfig(selectedApiConfigId)
-                        ?.extraRequestParameters ??
-                    const [],
-                pipeline.cleaner.postCleanerExtraRequestParameters,
-              ),
-            );
-      }
-      return resolver
-          .resolveAgentConfig(current, selectedApiConfigId, '')
-          .copyWithSampling(
-            topP: pipeline.cleaner.postCleanerTopP,
-            topK: pipeline.cleaner.postCleanerTopK,
-            frequencyPenalty: pipeline.cleaner.postCleanerFrequencyPenalty,
-            presencePenalty: pipeline.cleaner.postCleanerPresencePenalty,
-            omitTemperature: pipeline.cleaner.postCleanerOmitTemperature,
-            omitTopP: pipeline.cleaner.postCleanerOmitTopP,
-            extraRequestParameters: mergeExtraRequestParameters(
-              resolver
-                      .resolveRunConfig(selectedApiConfigId)
-                      ?.extraRequestParameters ??
-                  const [],
-              pipeline.cleaner.postCleanerExtraRequestParameters,
-            ),
-          );
-    } else if (pipeline.studioAgent.studioControllerModelOverride.isNotEmpty) {
-      return resolver
-          .resolveAgentConfig(
-            current,
-            selectedApiConfigId,
-            pipeline.studioAgent.studioControllerModelOverride,
-          )
-          .copyWithSampling(
-            topP: pipeline.studioAgent.studioControllerTopP,
-            topK: pipeline.studioAgent.studioControllerTopK,
-            frequencyPenalty:
-                pipeline.studioAgent.studioControllerFrequencyPenalty,
-            presencePenalty: pipeline.studioAgent.studioControllerPresencePenalty,
-            omitTemperature: pipeline.studioAgent.studioControllerOmitTemperature,
-            omitTopP: pipeline.studioAgent.studioControllerOmitTopP,
-            extraRequestParameters: mergeExtraRequestParameters(
-              resolver
-                      .resolveRunConfig(selectedApiConfigId)
-                      ?.extraRequestParameters ??
-                  const [],
-              pipeline.studioAgent.studioControllerExtraRequestParameters,
-            ),
-          );
+      sampling = _SlotSampling.cleaner(pipeline);
+    } else {
+      modelOverride = pipeline.studioAgent.studioControllerModelOverride;
+      sampling = _SlotSampling.controller(pipeline);
     }
+
     return resolver
-        .resolveAgentConfig(current, selectedApiConfigId, '')
+        .resolveAgentConfig(current, selectedApiConfigId, modelOverride)
         .copyWithSampling(
-          topP: pipeline.studioAgent.studioControllerTopP,
-          topK: pipeline.studioAgent.studioControllerTopK,
-          frequencyPenalty: pipeline.studioAgent.studioControllerFrequencyPenalty,
-          presencePenalty: pipeline.studioAgent.studioControllerPresencePenalty,
-          omitTemperature: pipeline.studioAgent.studioControllerOmitTemperature,
-          omitTopP: pipeline.studioAgent.studioControllerOmitTopP,
+          topP: sampling.topP,
+          topK: sampling.topK,
+          frequencyPenalty: sampling.frequencyPenalty,
+          presencePenalty: sampling.presencePenalty,
+          omitTemperature: sampling.omitTemperature,
+          omitTopP: sampling.omitTopP,
           extraRequestParameters: mergeExtraRequestParameters(
             resolver
                     .resolveRunConfig(selectedApiConfigId)
                     ?.extraRequestParameters ??
                 const [],
-            pipeline.studioAgent.studioControllerExtraRequestParameters,
+            sampling.extraRequestParameters,
           ),
         );
+  }
+}
+
+/// One slot's sampling parameters, already reduced to "send this" (non-null) or
+/// "leave the API preset's value alone" (null).
+class _SlotSampling {
+  final double? topP;
+  final int? topK;
+  final double? frequencyPenalty;
+  final double? presencePenalty;
+  final bool? omitTemperature;
+  final bool? omitTopP;
+  final List<ExtraRequestParameter> extraRequestParameters;
+
+  const _SlotSampling({
+    required this.topP,
+    required this.topK,
+    required this.frequencyPenalty,
+    required this.presencePenalty,
+    required this.omitTemperature,
+    required this.omitTopP,
+    required this.extraRequestParameters,
+  });
+
+  /// `omitTemperature` rides along with the temperature override, which is
+  /// encoded as a sentinel (negative = not overridden) rather than a flag.
+  factory _SlotSampling.finalGenerator(PipelineSettings pipeline) {
+    final a = pipeline.studioAgent;
+    return _SlotSampling(
+      topP: a.studioFinalTopPOverride ? a.studioFinalTopP : null,
+      topK: a.studioFinalTopKOverride ? a.studioFinalTopK : null,
+      frequencyPenalty: a.studioFinalFrequencyPenaltyOverride
+          ? a.studioFinalFrequencyPenalty
+          : null,
+      presencePenalty: a.studioFinalPresencePenaltyOverride
+          ? a.studioFinalPresencePenalty
+          : null,
+      omitTemperature: a.studioFinalTemperature >= 0
+          ? a.studioFinalOmitTemperature
+          : null,
+      omitTopP: a.studioFinalTopPOverride ? a.studioFinalOmitTopP : null,
+      extraRequestParameters: a.studioFinalExtraRequestParameters,
+    );
+  }
+
+  factory _SlotSampling.controller(PipelineSettings pipeline) {
+    final a = pipeline.studioAgent;
+    return _SlotSampling(
+      topP: a.studioControllerTopPOverride ? a.studioControllerTopP : null,
+      topK: a.studioControllerTopKOverride ? a.studioControllerTopK : null,
+      frequencyPenalty: a.studioControllerFrequencyPenaltyOverride
+          ? a.studioControllerFrequencyPenalty
+          : null,
+      presencePenalty: a.studioControllerPresencePenaltyOverride
+          ? a.studioControllerPresencePenalty
+          : null,
+      omitTemperature: a.studioControllerTemperature >= 0
+          ? a.studioControllerOmitTemperature
+          : null,
+      omitTopP: a.studioControllerTopPOverride
+          ? a.studioControllerOmitTopP
+          : null,
+      extraRequestParameters: a.studioControllerExtraRequestParameters,
+    );
+  }
+
+  factory _SlotSampling.cleaner(PipelineSettings pipeline) {
+    final c = pipeline.cleaner;
+    return _SlotSampling(
+      topP: c.postCleanerTopPOverride ? c.postCleanerTopP : null,
+      topK: c.postCleanerTopKOverride ? c.postCleanerTopK : null,
+      frequencyPenalty: c.postCleanerFrequencyPenaltyOverride
+          ? c.postCleanerFrequencyPenalty
+          : null,
+      presencePenalty: c.postCleanerPresencePenaltyOverride
+          ? c.postCleanerPresencePenalty
+          : null,
+      omitTemperature: c.postCleanerTemperature >= 0
+          ? c.postCleanerOmitTemperature
+          : null,
+      omitTopP: c.postCleanerTopPOverride ? c.postCleanerOmitTopP : null,
+      extraRequestParameters: c.postCleanerExtraRequestParameters,
+    );
   }
 }

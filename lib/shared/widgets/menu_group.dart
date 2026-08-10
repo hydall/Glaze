@@ -933,6 +933,9 @@ class MenuSelectorItem extends StatelessWidget {
   final ValueChanged<bool>? onIncludedChanged;
   final VoidCallback onTap;
 
+  /// Muted hint under the label — same role as [MenuFieldItem.description].
+  final String? description;
+
   const MenuSelectorItem({
     super.key,
     required this.label,
@@ -941,6 +944,7 @@ class MenuSelectorItem extends StatelessWidget {
     this.included,
     this.onIncludedChanged,
     required this.onTap,
+    this.description,
   }) : assert(
          (included == null) == (onIncludedChanged == null),
          'included and onIncludedChanged must be provided together',
@@ -982,6 +986,17 @@ class MenuSelectorItem extends StatelessWidget {
                 if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),
               ],
             ),
+            if (description != null) ...[
+              const SizedBox(height: 1),
+              Text(
+                description!,
+                style: const TextStyle(
+                  color: Color(0xFF99A2AD),
+                  fontSize: 12,
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+            ],
             const SizedBox(height: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14),

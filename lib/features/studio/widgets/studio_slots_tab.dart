@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,12 +21,12 @@ import 'studio_slot_settings_dialog.dart';
 ///
 /// Slots mirror the pipeline stages one-to-one, so they carry the same labels
 /// as the agentic preset editor's sections. Everything is optional — an empty
-/// slot falls back to the chat's own connection, which is the behaviour an
-/// untouched install already has.
+/// slot falls back to the connection selected in the LLM tab, which is the
+/// behaviour an untouched install already has.
 ///
-/// Each stage's model row offers a tune button that opens
-/// [StudioSlotSettingsDialog] for that stage's generation overrides
-/// (temperature, tokens, timeout, Responses API, reasoning, extra params).
+/// Each stage is one group of three dropdown-style rows: the API connection,
+/// the model override, and a link into [StudioSlotSettingsDialog] for that
+/// stage's parameter overrides.
 class StudioSlotsTab extends ConsumerStatefulWidget {
   final ScrollController controller;
 
@@ -193,7 +191,8 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
   // ── Rows ───────────────────────────────────────────────────────────────────
 
   /// One stage = one settings group: the stage name as its header, its blurb
-  /// as the description, and a row per thing you can point at a provider.
+  /// as the description, then the connection, the model override and the link
+  /// to this stage's parameter overrides.
   Widget _slot(
     BuildContext context, {
     required List<ApiConfig> configs,
@@ -214,9 +213,9 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
       header: title,
       description: description,
       items: [
-        MenuItem(
+        MenuSelectorItem(
           label: 'studio_slot_api'.tr(),
-          value: _apiName(configs, apiConfigId),
+          currentValue: _apiName(configs, apiConfigId),
           onTap: () => _pickApiConfig(
             context,
             configs: configs,
@@ -224,55 +223,51 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
             onSelected: onApiConfigChanged,
           ),
         ),
-        _modelMenuItem(
-          configs: configs,
+        _modelSelector(
           slotName: slotName,
           apiConfigId: apiConfigId,
           value: model,
           onChanged: onModelChanged,
-          tuneOnTap: () => _openSlotSettings(studioSlot),
         ),
         if (extraLabel != null && onExtraChanged != null)
-          _modelMenuItem(
-            configs: configs,
+          _modelSelector(
             slotName: 'cleaner_audit',
             apiConfigId: apiConfigId,
             value: extraValue ?? '',
             onChanged: onExtraChanged,
             label: extraLabel,
-            subtitle: extraDescription,
+            description: extraDescription,
           ),
+        MenuItem(
+          icon: Icons.tune,
+          label: 'studio_slot_parameters'.tr(),
+          subtitle: 'studio_slot_parameters_desc'.tr(),
+          trailing: Icon(
+            Icons.chevron_right,
+            size: 22,
+            color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
+          onTap: () => _openSlotSettings(studioSlot, apiConfigId, configs),
+        ),
       ],
     );
   }
 
-  /// A model override row. Opens a fetched-model picker; optionally carries a
-  /// tune button that opens the slot's advanced generation settings.
-  Widget _modelMenuItem({
-    required List<ApiConfig> configs,
+  /// A model override row rendered as a dropdown. Empty reads as "Automatic",
+  /// and the picker always offers that entry back so a slot can be returned to
+  /// the connection's own model.
+  Widget _modelSelector({
     required String slotName,
     required String apiConfigId,
     required String value,
     required ValueChanged<String> onChanged,
     String? label,
-    String? subtitle,
-    VoidCallback? tuneOnTap,
+    String? description,
   }) {
-    return MenuItem(
+    return MenuSelectorItem(
       label: label ?? 'studio_slot_model'.tr(),
-      subtitle: subtitle,
-      value: value.isEmpty ? 'studio_slot_model_auto'.tr() : value,
-      trailing: tuneOnTap == null
-          ? null
-          : IconButton(
-              icon: const Icon(Icons.tune, size: 20),
-              tooltip: 'studio_slot_tune'.tr(),
-              onPressed: tuneOnTap,
-              style: IconButton.styleFrom(
-                padding: const EdgeInsets.all(4),
-                minimumSize: const Size(32, 32),
-              ),
-            ),
+      description: description,
+      currentValue: value.isEmpty ? 'studio_slot_model_auto'.tr() : value,
       onTap: () => _openModelSelector(
         slotName: slotName,
         apiConfigId: apiConfigId,
@@ -406,42 +401,60 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
       ...?_fetchedModelsBySlot[cacheKey],
       if (value.isNotEmpty) value,
     }.toList()..sort();
-    if (models.isEmpty) {
-      GlazeToast.show(context, 'settings_err_no_models'.tr());
-      return;
-    }
+    // "Automatic" is always offered, even when the fetch came back empty —
+    // otherwise a slot pointed at a stale model id could never be reset.
+    final items = <BottomSheetItem>[
+      BottomSheetItem(
+        label: 'studio_slot_model_auto'.tr(),
+        icon: value.isEmpty ? Icons.check : null,
+        iconColor: context.cs.primary,
+        onTap: () {
+          Navigator.of(context, rootNavigator: true).pop();
+          onChanged('');
+        },
+      ),
+      for (final m in models)
+        BottomSheetItem(
+          label: m,
+          icon: m == value ? Icons.check : null,
+          iconColor: context.cs.primary,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            onChanged(m);
+          },
+        ),
+    ];
+    if (models.isEmpty) GlazeToast.show(context, 'settings_err_no_models'.tr());
     final selectedIndex = models.indexOf(value);
     await GlazeBottomSheet.show<void>(
       context,
       title: 'onboarding_select_model'.tr(),
-      scrollToIndex: selectedIndex >= 0 ? selectedIndex : null,
-      items: models
-          .map(
-            (m) => BottomSheetItem(
-              label: m,
-              icon: m == value ? Icons.check : null,
-              iconColor: context.cs.primary,
-              onTap: () {
-                Navigator.of(context, rootNavigator: true).pop();
-                onChanged(m);
-              },
-            ),
-          )
-          .toList(),
+      // +1 for the leading "Automatic" entry.
+      scrollToIndex: selectedIndex >= 0 ? selectedIndex + 1 : null,
+      items: items,
     );
   }
 
   // ── Advanced slot settings ─────────────────────────────────────────────────
 
-  Future<void> _openSlotSettings(StudioSlot slot) async {
+  Future<void> _openSlotSettings(
+    StudioSlot slot,
+    String apiConfigId,
+    List<ApiConfig> configs,
+  ) async {
     final pipeline = ref.read(pipelineSettingsProvider);
+    final presetConfig = _slotApiConfig(apiConfigId, configs);
     final updated = await showModalBottomSheet<StudioSlotSettings>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => StudioSlotSettingsDialog(slot: slot, pipeline: pipeline),
+      builder: (_) => StudioSlotSettingsDialog(
+        slot: slot,
+        pipeline: pipeline,
+        presetConfig: presetConfig,
+      ),
     );
     if (!mounted || updated == null) return;
     await _savePipeline((p) => updated.applyTo(p, slot));

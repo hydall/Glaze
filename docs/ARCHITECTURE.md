@@ -588,6 +588,17 @@ Per-tracker model override (`StudioAgent.modelSource = 'custom'` picks an
 `runInterval` (every-N-th-turn scheduling) are respected. Concurrency cap:
 `_maxConcurrentGroups = 4` (Phase 5.7.2, conservative default for desktop).
 
+Per-slot parameter overrides (Agents tab → *Parameter overrides*) are gated on
+`<field>Override` booleans in `StudioAgentSettings` / `CleanerSettings`. A flag
+that is off makes `AgentConfigResolver` pass `null` for that parameter, so
+`copyWithSampling` / `copyWithReasoning` keep whatever the slot's `ApiConfig`
+resolved to — that is what the sheet shows as the inherited value. Temperature,
+max tokens and the idle timeout carry no flag: they already encode "not
+overridden" as a sentinel (negative / `0`) and fall back to the **per-agent
+spec**, not to the API preset, which is why the sheet labels those as the agent
+default. All flags default to `true` so an upgrade keeps applying the values it
+applied before they existed.
+
 POST-processing (Phase 1.3) stays separate from the tracker pipeline: the
 POST-cleaner runs after the full reply and writes a blue `'cleaned'` agent
 sub-swipe (`post_cleaner_service.dart`, `generation_pipeline.dart`),

@@ -165,52 +165,85 @@ class AgentRunner {
             ? null
             : effectiveTemperature(agent, isFinalResponse, turnConfig));
     final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
+    // Each reasoning parameter is gated on its `*Override` flag: when the flag
+    // is off the argument stays null, and `copyWithReasoning` keeps whatever
+    // the selected API preset resolved to. `DisableReasoning` is a hard kill
+    // switch and wins over both the flag and the preset.
+    final studio = pipeline.studioAgent;
+    final cleaner = pipeline.cleaner;
     final effectiveResolved = isFinalResponse
         ? resolved.copyWithReasoning(
-            useResponsesApi: pipeline.studioAgent.studioFinalUseResponsesApi,
-            requestReasoning: pipeline.studioAgent.studioFinalDisableReasoning
+            useResponsesApi: studio.studioFinalUseResponsesApiOverride
+                ? studio.studioFinalUseResponsesApi
+                : null,
+            requestReasoning: studio.studioFinalDisableReasoning
                 ? false
-                : pipeline.studioAgent.studioFinalRequestReasoning,
-            showNativeReasoning:
-                pipeline.studioAgent.studioFinalShowNativeReasoning,
-            omitReasoning: pipeline.studioAgent.studioFinalDisableReasoning
+                : studio.studioFinalRequestReasoningOverride
+                ? studio.studioFinalRequestReasoning
+                : null,
+            showNativeReasoning: studio.studioFinalShowNativeReasoningOverride
+                ? studio.studioFinalShowNativeReasoning
+                : null,
+            omitReasoning: studio.studioFinalDisableReasoning
                 ? true
-                : pipeline.studioAgent.studioFinalOmitReasoning,
-            omitReasoningEffort:
-                pipeline.studioAgent.studioFinalOmitReasoningEffort,
-            reasoningEffort: pipeline.studioAgent.studioFinalReasoningEffort,
+                : studio.studioFinalRequestReasoningOverride
+                ? studio.studioFinalOmitReasoning
+                : null,
+            omitReasoningEffort: studio.studioFinalReasoningEffortOverride
+                ? studio.studioFinalOmitReasoningEffort
+                : null,
+            reasoningEffort: studio.studioFinalReasoningEffortOverride
+                ? studio.studioFinalReasoningEffort
+                : null,
           )
         : agent.phase == 'post_processing'
         ? resolved.copyWithReasoning(
-            useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApi,
-            requestReasoning: pipeline.cleaner.postCleanerDisableReasoning
+            useResponsesApi: cleaner.postCleanerUseResponsesApiOverride
+                ? cleaner.postCleanerUseResponsesApi
+                : null,
+            requestReasoning: cleaner.postCleanerDisableReasoning
                 ? false
-                : pipeline.cleaner.postCleanerRequestReasoning,
-            showNativeReasoning:
-                pipeline.cleaner.postCleanerShowNativeReasoning,
-            omitReasoning: pipeline.cleaner.postCleanerDisableReasoning
+                : cleaner.postCleanerRequestReasoningOverride
+                ? cleaner.postCleanerRequestReasoning
+                : null,
+            showNativeReasoning: cleaner.postCleanerShowNativeReasoningOverride
+                ? cleaner.postCleanerShowNativeReasoning
+                : null,
+            omitReasoning: cleaner.postCleanerDisableReasoning
                 ? true
-                : pipeline.cleaner.postCleanerOmitReasoning,
-            omitReasoningEffort:
-                pipeline.cleaner.postCleanerOmitReasoningEffort,
-            reasoningEffort: pipeline.cleaner.postCleanerReasoningEffort,
+                : cleaner.postCleanerRequestReasoningOverride
+                ? cleaner.postCleanerOmitReasoning
+                : null,
+            omitReasoningEffort: cleaner.postCleanerReasoningEffortOverride
+                ? cleaner.postCleanerOmitReasoningEffort
+                : null,
+            reasoningEffort: cleaner.postCleanerReasoningEffortOverride
+                ? cleaner.postCleanerReasoningEffort
+                : null,
           )
         : resolved.copyWithReasoning(
-            useResponsesApi:
-                pipeline.studioAgent.studioControllerUseResponsesApi,
-            requestReasoning:
-                pipeline.studioAgent.studioControllerDisableReasoning
+            useResponsesApi: studio.studioControllerUseResponsesApiOverride
+                ? studio.studioControllerUseResponsesApi
+                : null,
+            requestReasoning: studio.studioControllerDisableReasoning
                 ? false
-                : pipeline.studioAgent.studioControllerRequestReasoning,
-            showNativeReasoning:
-                pipeline.studioAgent.studioControllerShowNativeReasoning,
-            omitReasoning: pipeline.studioAgent.studioControllerDisableReasoning
+                : studio.studioControllerRequestReasoningOverride
+                ? studio.studioControllerRequestReasoning
+                : null,
+            showNativeReasoning: studio.studioControllerShowNativeReasoningOverride
+                ? studio.studioControllerShowNativeReasoning
+                : null,
+            omitReasoning: studio.studioControllerDisableReasoning
                 ? true
-                : pipeline.studioAgent.studioControllerOmitReasoning,
-            omitReasoningEffort:
-                pipeline.studioAgent.studioControllerOmitReasoningEffort,
-            reasoningEffort:
-                pipeline.studioAgent.studioControllerReasoningEffort,
+                : studio.studioControllerRequestReasoningOverride
+                ? studio.studioControllerOmitReasoning
+                : null,
+            omitReasoningEffort: studio.studioControllerReasoningEffortOverride
+                ? studio.studioControllerOmitReasoningEffort
+                : null,
+            reasoningEffort: studio.studioControllerReasoningEffortOverride
+                ? studio.studioControllerReasoningEffort
+                : null,
           );
     return _streamRunner.run(
       agent: agent,
@@ -327,6 +360,8 @@ class AgentRunner {
   /// - Trackers: [PipelineSettings.studioAgent.studioControllerTemperature] (>= 0) overrides
   ///   the per-agent default (0.3). Lets the user tune the creativity of all
   ///   7 pre-gen agents at once from the Studio menu.
+  /// - Post-processing: [PipelineSettings.cleaner.postCleanerTemperature]
+  ///   (>= 0), same sentinel.
   /// Returns null when the relevant global override is negative and the
   /// caller should use the agent's own value.
   double? effectiveTemperature(
@@ -341,7 +376,9 @@ class AgentRunner {
       return null;
     }
     if (agent.phase == 'post_processing') {
-      return pipeline.cleaner.postCleanerTemperature;
+      final cleanerGlobal = pipeline.cleaner.postCleanerTemperature;
+      if (cleanerGlobal >= 0) return cleanerGlobal;
+      return null;
     }
     final trackerGlobal = pipeline.studioAgent.studioControllerTemperature;
     if (trackerGlobal >= 0) return trackerGlobal;

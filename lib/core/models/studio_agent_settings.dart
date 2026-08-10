@@ -17,6 +17,20 @@ part 'studio_agent_settings.g.dart';
 /// - Final generator overrides ([studioFinal*]) — Main Writer.
 /// - Controller overrides ([studioController*]) — 7 pre-gen controllers + batch.
 /// - Post-processing context ([studioPostTrackerContextSize]).
+///
+/// ## `*Override` flags
+///
+/// Every sampling / reasoning parameter that the selected API preset also
+/// carries is paired with a `<field>Override` boolean. `true` sends the value
+/// stored here; `false` leaves the parameter unset in the resolved agent
+/// config so the API preset's own value survives (`AgentConfigResolver` passes
+/// `null` into `copyWithSampling` / `copyWithReasoning`, which fall back to
+/// the preset). They default to `true` so an existing install keeps
+/// applying exactly the values it applied before the flags existed.
+///
+/// Temperature, max tokens and the idle timeout have no flag: they already
+/// encode "not overridden" as a sentinel (negative temperature, `0` tokens,
+/// `0` ms) and fall back to the per-agent spec rather than to the preset.
 @freezed
 abstract class StudioAgentSettings with _$StudioAgentSettings {
   const factory StudioAgentSettings({
@@ -38,6 +52,12 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     @Default(0) int studioFinalTopK,
     @Default(0.0) double studioFinalFrequencyPenalty,
     @Default(0.0) double studioFinalPresencePenalty,
+    // Override flags for the sampling parameters above. false = leave the
+    // parameter unset so the selected API preset's value is used.
+    @Default(true) bool studioFinalTopPOverride,
+    @Default(true) bool studioFinalTopKOverride,
+    @Default(true) bool studioFinalFrequencyPenaltyOverride,
+    @Default(true) bool studioFinalPresencePenaltyOverride,
     // Chat history messages override for the final generator. When > 0,
     // overrides StudioPreset.maxFinalHistoryMessages. 0 = use preset
     // StudioConfig default (30).
@@ -53,6 +73,13 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     @Default(false) bool studioFinalOmitTopP,
     @Default(true) bool studioFinalOmitReasoning,
     @Default(true) bool studioFinalOmitReasoningEffort,
+    // Override flags for the reasoning parameters above. `RequestReasoning`
+    // covers the paired `OmitReasoning` flag and `ReasoningEffort` covers
+    // `OmitReasoningEffort` — each pair is one control in the UI.
+    @Default(true) bool studioFinalRequestReasoningOverride,
+    @Default(true) bool studioFinalShowNativeReasoningOverride,
+    @Default(true) bool studioFinalUseResponsesApiOverride,
+    @Default(true) bool studioFinalReasoningEffortOverride,
     // Include reasoning_content from the N most recent assistant messages in
     // final-generator history. -1 includes all retained history; 0 disables it.
     @Default(0) int studioFinalReasoningHistoryCount,
@@ -87,6 +114,12 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     @Default(0) int studioControllerTopK,
     @Default(0.0) double studioControllerFrequencyPenalty,
     @Default(0.0) double studioControllerPresencePenalty,
+    // Override flags for the sampling parameters above. false = leave the
+    // parameter unset so the selected API preset's value is used.
+    @Default(true) bool studioControllerTopPOverride,
+    @Default(true) bool studioControllerTopKOverride,
+    @Default(true) bool studioControllerFrequencyPenaltyOverride,
+    @Default(true) bool studioControllerPresencePenaltyOverride,
     // Temperature for ALL non-final Studio agents. When >= 0, overrides the
     // per-agent default (0.3). Negative = use the agent's own temperature.
     @Default(0.5) double studioControllerTemperature,
@@ -98,6 +131,13 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     @Default(false) bool studioControllerOmitTopP,
     @Default(true) bool studioControllerOmitReasoning,
     @Default(true) bool studioControllerOmitReasoningEffort,
+    // Override flags for the reasoning parameters above. `RequestReasoning`
+    // covers the paired `OmitReasoning` flag and `ReasoningEffort` covers
+    // `OmitReasoningEffort` — each pair is one control in the UI.
+    @Default(true) bool studioControllerRequestReasoningOverride,
+    @Default(true) bool studioControllerShowNativeReasoningOverride,
+    @Default(true) bool studioControllerUseResponsesApiOverride,
+    @Default(true) bool studioControllerReasoningEffortOverride,
     // When true, all non-final Studio agent requests force
     // requestReasoning=false and omitReasoning=true. Trackers emit compact
     // JSON briefs, so a hidden think-block wastes tokens. Gemini-only.

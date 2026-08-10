@@ -288,7 +288,9 @@ class CleanerStage {
       try {
         cleanerConfig = turnConfig.resolveCleanerConfig(
           errorLabel: 'post-cleaner',
-          useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApi,
+          useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApiOverride
+              ? pipeline.cleaner.postCleanerUseResponsesApi
+              : null,
         );
       } catch (e) {
         debugPrint('[PostCleaner] slot resolution failed: $e');
@@ -1094,7 +1096,9 @@ class CleanerStage {
     try {
       cleanerConfig = turnConfig.resolveCleanerConfig(
         errorLabel: 'post-cleaner-rerun',
-        useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApi,
+        useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApiOverride
+            ? pipeline.cleaner.postCleanerUseResponsesApi
+            : null,
       );
     } catch (e) {
       debugPrint('[PostCleaner] rerun slot resolution failed: $e');
