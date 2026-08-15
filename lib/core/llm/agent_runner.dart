@@ -335,8 +335,9 @@ class AgentRunner {
   }
 
   /// Max tokens override. Two tiers:
-  /// - Final generator: [PipelineSettings.studioAgent.studioFinalMaxTokens] (>0)
-  ///   overrides the per-agent default (8000).
+  /// - Final generator: `studioFinalMaxTokensOverride` decides whether
+  ///   `studioFinalMaxTokens` replaces the per-agent default. Zero is valid and
+  ///   causes OpenAI-compatible transports to omit the token-limit field.
   /// - Trackers: [PipelineSettings.studioAgent.studioControllerMaxTokens] (>0) overrides the
   ///   per-agent default (1600). Lets the user tighten/loosen the compact JSON
   ///   brief budget for all 7 pre-gen agents at once from the Studio menu.
@@ -349,9 +350,10 @@ class AgentRunner {
   ]) {
     final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     if (isFinalResponse) {
-      final global = pipeline.studioAgent.studioFinalMaxTokens;
-      if (global > 0) return global;
-      return null;
+      final studio = pipeline.studioAgent;
+      return studio.studioFinalMaxTokensOverride
+          ? studio.studioFinalMaxTokens
+          : null;
     }
     if (agent.phase == 'post_processing') {
       final cleanerGlobal = pipeline.cleaner.postCleanerMaxTokens;

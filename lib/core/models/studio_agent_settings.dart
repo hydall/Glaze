@@ -28,9 +28,9 @@ part 'studio_agent_settings.g.dart';
 /// the preset). They default to `true` so an existing install keeps
 /// applying exactly the values it applied before the flags existed.
 ///
-/// Temperature, max tokens and the idle timeout have no flag: they already
-/// encode "not overridden" as a sentinel (negative temperature, `0` tokens,
-/// `0` ms) and fall back to the per-agent spec rather than to the preset.
+/// Temperature and the idle timeout use sentinels (negative temperature and
+/// `0` ms). Final-generator max tokens has an explicit flag because `0` is a
+/// meaningful override: it tells the transport to omit the token-limit field.
 @freezed
 abstract class StudioAgentSettings with _$StudioAgentSettings {
   const factory StudioAgentSettings({
@@ -44,10 +44,10 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     // ── Final generator (Main Writer) ──────────────────────────────────
     // Final-generator idle timeout (ms). 0 = use agent/global fallback.
     @Default(0) int studioFinalTimeoutMs,
-    // Max tokens for the Studio final generator. When > 0, overrides the
-    // per-agent default (8000). Useful for reasoning models (e.g. Gemini)
-    // that spend most of the budget on thinking. 0 = use agent's maxTokens.
+    // Max tokens for the Studio final generator. When the override is enabled,
+    // 0 deliberately omits the transport's token-limit field.
     @Default(0) int studioFinalMaxTokens,
+    @Default(false) bool studioFinalMaxTokensOverride,
     @Default(0.9) double studioFinalTopP,
     @Default(0) int studioFinalTopK,
     @Default(0.0) double studioFinalFrequencyPenalty,
@@ -173,5 +173,9 @@ Map<String, dynamic> _normalizeStudioAgentSettingsJson(
     'studioFinalReasoningHistoryCount',
     () => n['studioFinalIncludeLastReasoning'] == true ? 1 : 0,
   );
+  n.putIfAbsent('studioFinalMaxTokensOverride', () {
+    final value = n['studioFinalMaxTokens'];
+    return value is num && value.toInt() > 0;
+  });
   return n;
 }

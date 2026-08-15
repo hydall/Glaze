@@ -235,6 +235,31 @@ void main() {
   });
 
   group('AgentRunner Studio final routing', () {
+    test('final max tokens supports an explicit zero override', () {
+      const settings = PipelineSettings(
+        studioAgent: StudioAgentSettings(
+          studioFinalMaxTokens: 0,
+          studioFinalMaxTokensOverride: true,
+        ),
+      );
+      final runner = AgentRunner(
+        configResolver: AgentConfigResolver(
+          loadApiConfigs: () async => const [],
+          readActiveApiConfig: () => null,
+          readPipelineSettings: () => settings,
+        ),
+        readPipelineSettings: () => settings,
+      );
+
+      expect(
+        runner.effectiveMaxTokens(
+          const StudioAgent(id: 'final', name: 'Final'),
+          true,
+        ),
+        0,
+      );
+    });
+
     test('final timeout is not capped at 120 seconds', () {
       const settings = PipelineSettings(
         studioAgent: StudioAgentSettings(studioFinalTimeoutMs: 180000),
@@ -292,10 +317,7 @@ void main() {
         await container
             .read(studioPresetRepoProvider)
             .upsert(
-              StudioPreset(
-                id: 'default',
-                expensiveApiConfigId: expensive.id,
-              ),
+              StudioPreset(id: 'default', expensiveApiConfigId: expensive.id),
             );
         await container
             .read(pipelineSettingsProvider.notifier)
@@ -356,10 +378,7 @@ void main() {
         await container
             .read(studioPresetRepoProvider)
             .upsert(
-              StudioPreset(
-                id: 'default',
-                expensiveApiConfigId: expensive.id,
-              ),
+              StudioPreset(id: 'default', expensiveApiConfigId: expensive.id),
             );
         await container
             .read(pipelineSettingsProvider.notifier)

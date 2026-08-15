@@ -21,8 +21,8 @@ enum StudioSlot { finalGenerator, controller, cleaner, ledger }
 /// Every parameter carries an `*Override` flag. When it is false the parameter
 /// is not written into the request at all, so the API preset selected for the
 /// slot supplies the value. Temperature, max tokens and the timeout have no
-/// flag of their own in [PipelineSettings] — they encode "not overridden" as a
-/// sentinel, so [applyTo] writes `-1` / `0` for them.
+/// flag of their own in [PipelineSettings] — except final-generator max tokens,
+/// where `0` is a meaningful override that omits the request field.
 ///
 /// The ledger only exposes temperature / max tokens / timeout — it has no
 /// sampling or reasoning overrides in [LedgerSettings] — so the ledger dialog
@@ -53,6 +53,7 @@ class StudioSlotSettings {
   final int reasoningHistoryCount;
   final bool excludeReasoningFromContextBudget;
   final int maxTokens;
+  final bool maxTokensOverride;
   final int timeoutMs;
   final List<ExtraRequestParameter> extraRequestParameters;
 
@@ -82,6 +83,7 @@ class StudioSlotSettings {
     this.reasoningHistoryCount = 0,
     this.excludeReasoningFromContextBudget = false,
     required this.maxTokens,
+    required this.maxTokensOverride,
     required this.timeoutMs,
     required this.extraRequestParameters,
   });
@@ -120,6 +122,7 @@ class StudioSlotSettings {
             studioFinalExcludeReasoningFromContextBudget:
                 excludeReasoningFromContextBudget,
             studioFinalMaxTokens: maxTokens,
+            studioFinalMaxTokensOverride: maxTokensOverride,
             studioFinalTimeoutMs: timeoutMs,
             studioFinalExtraRequestParameters: extraRequestParameters,
           ),
@@ -299,7 +302,11 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _reasoningHistoryCountCtrl = TextEditingController(
           text: '${a.studioFinalReasoningHistoryCount}',
         );
-        _initTokensAndTimeout(a.studioFinalMaxTokens, a.studioFinalTimeoutMs);
+        _initTokensAndTimeout(
+          a.studioFinalMaxTokens,
+          a.studioFinalTimeoutMs,
+          maxTokensOverride: a.studioFinalMaxTokensOverride,
+        );
         _extraRequestParameters = a.studioFinalExtraRequestParameters;
       case StudioSlot.controller:
         final a = p.studioAgent;
@@ -346,8 +353,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _requestReasoning = c.postCleanerRequestReasoning;
         _requestReasoningOverride = c.postCleanerRequestReasoningOverride;
         _showNativeReasoning = c.postCleanerShowNativeReasoning;
-        _showNativeReasoningOverride =
-            c.postCleanerShowNativeReasoningOverride;
+        _showNativeReasoningOverride = c.postCleanerShowNativeReasoningOverride;
         _useResponsesApi = c.postCleanerUseResponsesApi;
         _useResponsesApiOverride = c.postCleanerUseResponsesApiOverride;
         _reasoningEffort = c.postCleanerReasoningEffort;
@@ -358,10 +364,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _omitReasoningEffort = c.postCleanerOmitReasoningEffort;
         _excludeReasoningFromContextBudget = false;
         _reasoningHistoryCountCtrl = TextEditingController(text: '0');
-        _initTokensAndTimeout(
-          c.postCleanerMaxTokens,
-          c.postCleanerTimeoutMs,
-        );
+        _initTokensAndTimeout(c.postCleanerMaxTokens, c.postCleanerTimeoutMs);
         _extraRequestParameters = c.postCleanerExtraRequestParameters;
       case StudioSlot.ledger:
         final l = p.ledger;
@@ -388,10 +391,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _omitReasoningEffort = true;
         _excludeReasoningFromContextBudget = false;
         _reasoningHistoryCountCtrl = TextEditingController(text: '0');
-        _initTokensAndTimeout(
-          l.studioLedgerMaxTokens,
-          l.studioLedgerTimeoutMs,
-        );
+        _initTokensAndTimeout(l.studioLedgerMaxTokens, l.studioLedgerTimeoutMs);
         _extraRequestParameters = const [];
     }
   }
@@ -402,11 +402,16 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
     _temperature = stored >= 0 ? stored.clamp(0.0, 2.0) : _temperatureFallback;
   }
 
-  /// `0` is the "inherit" sentinel for both, so an empty field reads as off.
-  void _initTokensAndTimeout(int maxTokens, int timeoutMs) {
-    _maxTokensOverride = maxTokens > 0;
+  /// Other slots retain the legacy `0 = inherit` sentinel. The final generator
+  /// supplies an explicit flag so `0` can mean "omit the request field".
+  void _initTokensAndTimeout(
+    int maxTokens,
+    int timeoutMs, {
+    bool? maxTokensOverride,
+  }) {
+    _maxTokensOverride = maxTokensOverride ?? maxTokens > 0;
     _maxTokensCtrl = TextEditingController(
-      text: maxTokens > 0 ? '$maxTokens' : '',
+      text: _maxTokensOverride ? '$maxTokens' : '',
     );
     _timeoutOverride = timeoutMs > 0;
     _timeoutCtrl = TextEditingController(
@@ -500,6 +505,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
             : reasoningHistoryCount,
         excludeReasoningFromContextBudget: _excludeReasoningFromContextBudget,
         maxTokens: maxTokens,
+        maxTokensOverride: _maxTokensOverride,
         timeoutMs: seconds > 0 ? seconds * 1000 : 0,
         extraRequestParameters: _extraRequestParameters,
       ),
@@ -682,7 +688,8 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         ...studioSlotOverrideBlock(
           label: 'label_use_responses_api'.tr(),
           overridden: _useResponsesApiOverride,
-          onOverrideChanged: (v) => setState(() => _useResponsesApiOverride = v),
+          onOverrideChanged: (v) =>
+              setState(() => _useResponsesApiOverride = v),
           inheritedValue: _inherited.useResponsesApi,
           editor: MenuSwitchItem(
             label: 'label_use_responses_api'.tr(),
@@ -723,14 +730,14 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         ...studioSlotOverrideBlock(
           label: 'label_reasoning_effort'.tr(),
           overridden: _reasoningEffortOverride,
-          onOverrideChanged: (v) => setState(() => _reasoningEffortOverride = v),
+          onOverrideChanged: (v) =>
+              setState(() => _reasoningEffortOverride = v),
           inheritedValue: _inherited.reasoningEffort,
           editor: MenuSelectorItem(
             label: 'label_reasoning_effort'.tr(),
             currentValue: _reasoningEffortLabel(_reasoningEffort),
             included: !_omitReasoningEffort,
-            onIncludedChanged: (v) =>
-                setState(() => _omitReasoningEffort = !v),
+            onIncludedChanged: (v) => setState(() => _omitReasoningEffort = !v),
             onTap: _openReasoningEffortSelector,
           ),
         ),

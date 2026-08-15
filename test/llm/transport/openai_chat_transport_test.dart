@@ -14,6 +14,7 @@ ChatTransportRequest _req({
   String endpoint = 'https://api.openai.com',
   String sessionIdMode = 'openrouter',
   int? receiveTimeoutMs,
+  int maxTokens = 100,
   int topK = 0,
   double frequencyPenalty = 0,
   double presencePenalty = 0,
@@ -32,7 +33,7 @@ ChatTransportRequest _req({
     apiKey: 'sk-test',
     model: 'gpt-test',
     messages: messages,
-    maxTokens: 100,
+    maxTokens: maxTokens,
     temperature: 0.7,
     topP: 0.9,
     topK: topK,
@@ -74,6 +75,20 @@ class _RecordingAdapter implements HttpClientAdapter {
 }
 
 void main() {
+  test('zero max tokens leaves only an explicit completion limit', () {
+    final body = OpenAiChatTransport.buildBody(
+      _req(
+        maxTokens: 0,
+        extraRequestParameters: const [
+          ExtraRequestParameter(key: 'max_completion_tokens', value: '8000'),
+        ],
+      ),
+    );
+
+    expect(body.containsKey('max_tokens'), isFalse);
+    expect(body['max_completion_tokens'], 8000);
+  });
+
   test('per-request zero disables the default receive timeout', () async {
     final adapter = _RecordingAdapter();
     final dio = Dio(BaseOptions(receiveTimeout: const Duration(seconds: 120)))
