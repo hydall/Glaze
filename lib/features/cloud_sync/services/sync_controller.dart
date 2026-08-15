@@ -257,6 +257,7 @@ class SyncController {
         .where((c) => c.key != conflict.key)
         .toList();
     conflictsNotifier.state = optimistic;
+    statusNotifier.state = SyncStatus.syncing;
 
     try {
       await service.resolveConflict(conflict, choice);
@@ -271,6 +272,7 @@ class SyncController {
           setError: (value) => errorNotifier.state = value,
         );
       }
+      statusNotifier.state = SyncStatus.conflict;
       return null;
     } catch (e) {
       // Roll back optimistic removal on error.
@@ -290,6 +292,7 @@ class SyncController {
     final progressNotifier = _ref.read(syncProgressProvider.notifier);
     // Optimistically clear all conflict rows immediately.
     conflictsNotifier.state = [];
+    statusNotifier.state = SyncStatus.syncing;
     try {
       await service.resolveAllConflicts(choice);
       conflictsNotifier.state = List.from(service.conflicts);

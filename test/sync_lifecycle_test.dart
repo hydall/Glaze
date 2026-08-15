@@ -2611,7 +2611,9 @@ void main() {
 
   test('resolve all cloud pulls data and rebuilds manifest', () async {
     final deviceA = SyncWorld();
-    await deviceA.characters.put(makeChar('c1', name: 'Cloud'));
+    for (var i = 0; i < 27; i++) {
+      await deviceA.characters.put(makeChar('c$i', name: 'Cloud $i'));
+    }
     final aManifest = await deviceA.manifestProvider.buildLocalManifest();
     await deviceA.manifestProvider.writeLocalManifest(
       aManifest.copyWith(lastSync: 5000),
@@ -2620,13 +2622,18 @@ void main() {
 
     final deviceB = SyncWorld();
     deviceB.cloud.files.addAll(deviceA.cloud.files);
-    await deviceB.characters.put(makeChar('c1', name: 'Local'));
+    for (var i = 0; i < 27; i++) {
+      await deviceB.characters.put(makeChar('c$i', name: 'Local $i'));
+    }
 
     final yManifest = await deviceB.manifestProvider.buildLocalManifest();
     final patched = Map<String, SyncManifestEntry>.from(yManifest.entries);
-    patched['character:c1'] = patched['character:c1']!.copyWith(
-      updatedAt: DateTime.now().millisecondsSinceEpoch + 100000,
-    );
+    for (var i = 0; i < 27; i++) {
+      final key = 'character:c$i';
+      patched[key] = patched[key]!.copyWith(
+        updatedAt: DateTime.now().millisecondsSinceEpoch + 100000,
+      );
+    }
     await deviceB.manifestProvider.writeLocalManifest(
       yManifest.copyWith(lastSync: 8000, entries: patched),
     );
@@ -2636,19 +2643,17 @@ void main() {
       onProgress: (_) {},
       onConflict: (c) => conflicts.add(c),
     );
-    expect(conflicts, isNotEmpty);
+    expect(conflicts, hasLength(27));
 
-    final resolvedKeys = <String>[];
-    for (final conflict in conflicts) {
-      await deviceB.engine.resolveConflict(conflict, 'cloud');
-      resolvedKeys.add(conflict.key);
-    }
+    final resolvedKeys = conflicts.map((conflict) => conflict.key).toList();
     await deviceB.engine.applyPendingPull(
       onProgress: (_) {},
       resolvedAsCloud: resolvedKeys,
     );
 
-    expect(deviceB.characters.data['c1']?.name, equals('Cloud'));
+    for (var i = 0; i < 27; i++) {
+      expect(deviceB.characters.data['c$i']?.name, equals('Cloud $i'));
+    }
     final manifest = await deviceB.manifestProvider.readLocalManifest();
     expect(manifest.lastSync, greaterThan(0));
     final cloudManifest = SyncManifest.fromJson(

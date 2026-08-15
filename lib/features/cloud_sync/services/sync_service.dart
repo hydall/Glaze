@@ -57,6 +57,7 @@ class SyncService {
   bool _autoSyncEnabled = false;
   int _autoSyncMessageCount = 5;
   int _messageCounter = 0;
+  bool _operationInProgress = false;
 
   final DropboxAuth _dropboxAuth = DropboxAuth();
   final GDriveAuth _gdriveAuth = GDriveAuth();
@@ -212,56 +213,76 @@ class SyncService {
     void Function(SyncProgress)? onProgress,
     bool includeApiKeys = false,
   }) async {
-    await _withSyncForeground(() async {
-      _status = SyncStatus.syncing;
-      _lastError = null;
+    if (_operationInProgress) {
+      throw StateError('Sync operation already in progress');
+    }
+    _operationInProgress = true;
+    try {
+      await _withSyncForeground(() async {
+        _status = SyncStatus.syncing;
+        _lastError = null;
 
-      try {
-        final engine = _engine;
-        await engine.pushEntities(
-          onProgress: onProgress ?? (_) {},
-          includeApiKeys: includeApiKeys,
-        );
-        _lastSyncTime = DateTime.now().millisecondsSinceEpoch;
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setInt('gz_sync_last', _lastSyncTime!);
-        _status = SyncStatus.idle;
-      } catch (e) {
-        _lastError = e.toString();
-        _status = SyncStatus.error;
-        rethrow;
-      }
-    });
-  }
-
-  Future<void> fullPull({void Function(SyncProgress)? onProgress}) async {
-    await _withSyncForeground(() async {
-      _status = SyncStatus.syncing;
-      _lastError = null;
-      _conflicts.clear();
-      _resolvedAsCloud.clear();
-      _resolvedAsLocal = false;
-
-      try {
-        final engine = _engine;
-        await engine.pullEntities(
-          onProgress: onProgress ?? (_) {},
-          onConflict: (c) => _conflicts.add(c),
-        );
-        if (_conflicts.isNotEmpty) {
-          _status = SyncStatus.conflict;
-        } else {
+        try {
+          final engine = _engine;
+          await engine.pushEntities(
+            onProgress: onProgress ?? (_) {},
+            includeApiKeys: includeApiKeys,
+          );
           _lastSyncTime = DateTime.now().millisecondsSinceEpoch;
           final prefs = await SharedPreferences.getInstance();
           await prefs.setInt('gz_sync_last', _lastSyncTime!);
           _status = SyncStatus.idle;
+        } catch (e) {
+          _lastError = e.toString();
+          _status = SyncStatus.error;
+          rethrow;
         }
-      } catch (e) {
-        _lastError = e.toString();
-        _status = SyncStatus.error;
-        rethrow;
-      }
-    });
+      });
+    } finally {
+      _operationInProgress = false;
+    }
+  }
+
+  Future<void> fullPull({void Function(SyncProgress)? onProgress}) async {
+    if (_operationInProgress) {
+      throw StateError('Sync operation already in progress');
+    }
+    _operationInProgress = true;
+    try {
+      await _withSyncForeground(() async {
+        _status = SyncStatus.syncing;
+        _lastError = null;
+        _conflicts.clear();
+        _resolvedAsCloud.clear();
+        _resolvedAsLocal = false;
+
+        try {
+          final engine = _engine;
+          await engine.pullEntities(
+            onProgress: onProgress ?? (_) {},
+            onConflict: (c) {
+              if (_conflicts.every((existing) => existing.key != c.key)) {
+                _conflicts.add(c);
+              }
+            },
+          );
+          if (_conflicts.isNotEmpty) {
+            _status = SyncStatus.conflict;
+          } else {
+            _lastSyncTime = DateTime.now().millisecondsSinceEpoch;
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setInt('gz_sync_last', _lastSyncTime!);
+            _status = SyncStatus.idle;
+          }
+        } catch (e) {
+          _lastError = e.toString();
+          _status = SyncStatus.error;
+          rethrow;
+        }
+      });
+    } finally {
+      _operationInProgress = false;
+    }
   }
 
   Future<void> fullSync({
@@ -299,13 +320,14 @@ class SyncService {
     if (_conflicts.isEmpty) return;
     final conflicts = List<SyncConflict>.from(_conflicts);
     try {
-      for (final conflict in conflicts) {
-        await _engine.resolveConflict(conflict, choice);
-        if (choice == 'cloud') {
-          _resolvedAsCloud.add(conflict.key);
-        } else {
-          _resolvedAsLocal = true;
-        }
+      if (choice == 'cloud') {
+        _resolvedAsCloud.addAll(
+          conflicts
+              .map((conflict) => conflict.key)
+              .where((key) => !_resolvedAsCloud.contains(key)),
+        );
+      } else {
+        _resolvedAsLocal = true;
       }
       _conflicts.clear();
     } catch (e) {
@@ -319,6 +341,10 @@ class SyncService {
   /// cloud-resolved keys). Does NOT trigger a pull — call [applyPendingPull]
   /// once all conflicts have been resolved.
   Future<void> resolveConflict(SyncConflict conflict, String choice) async {
+    if (_operationInProgress) {
+      throw StateError('Sync operation already in progress');
+    }
+    _operationInProgress = true;
     try {
       await _engine.resolveConflict(conflict, choice);
       if (choice == 'cloud') {
@@ -331,6 +357,8 @@ class SyncService {
       _lastError = e.toString();
       _status = SyncStatus.error;
       rethrow;
+    } finally {
+      _operationInProgress = false;
     }
   }
 
@@ -339,28 +367,36 @@ class SyncService {
   Future<void> applyPendingPullAfterResolve({
     required void Function(SyncProgress) onProgress,
   }) async {
-    await _withSyncForeground(() async {
-      try {
-        _status = SyncStatus.syncing;
-        await _engine.applyPendingPull(
-          onProgress: onProgress,
-          resolvedAsCloud: _resolvedAsCloud.isNotEmpty
-              ? List.from(_resolvedAsCloud)
-              : null,
-          pushLocalChanges: _resolvedAsLocal,
-        );
-        _resolvedAsCloud.clear();
-        _resolvedAsLocal = false;
-        _lastSyncTime = DateTime.now().millisecondsSinceEpoch;
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setInt('gz_sync_last', _lastSyncTime!);
-        _status = SyncStatus.idle;
-      } catch (e) {
-        _lastError = e.toString();
-        _status = SyncStatus.error;
-        rethrow;
-      }
-    });
+    if (_operationInProgress) {
+      throw StateError('Sync operation already in progress');
+    }
+    _operationInProgress = true;
+    try {
+      await _withSyncForeground(() async {
+        try {
+          _status = SyncStatus.syncing;
+          await _engine.applyPendingPull(
+            onProgress: onProgress,
+            resolvedAsCloud: _resolvedAsCloud.isNotEmpty
+                ? List.from(_resolvedAsCloud)
+                : null,
+            pushLocalChanges: _resolvedAsLocal,
+          );
+          _resolvedAsCloud.clear();
+          _resolvedAsLocal = false;
+          _lastSyncTime = DateTime.now().millisecondsSinceEpoch;
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setInt('gz_sync_last', _lastSyncTime!);
+          _status = SyncStatus.idle;
+        } catch (e) {
+          _lastError = e.toString();
+          _status = SyncStatus.error;
+          rethrow;
+        }
+      });
+    } finally {
+      _operationInProgress = false;
+    }
   }
 
   Future<void> _withSyncForeground(Future<void> Function() action) async {
