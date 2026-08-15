@@ -43,6 +43,26 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
     );
   }
 
+  Future<void> putSynced({
+    required String sessionId,
+    required String content,
+    required int messageCount,
+    required bool enabled,
+    required String? prompt,
+    required int updatedAt,
+  }) async {
+    await into(chatSummaries).insertOnConflictUpdate(
+      ChatSummariesCompanion.insert(
+        sessionId: sessionId,
+        content: content,
+        enabled: Value(enabled),
+        messageCount: Value(messageCount),
+        prompt: Value(prompt),
+        updatedAt: Value(updatedAt),
+      ),
+    );
+  }
+
   Future<void> setEnabled({
     required String sessionId,
     required bool enabled,

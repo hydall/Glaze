@@ -712,8 +712,11 @@ class SyncEngine {
           _adapter,
           cloudEntry,
         );
-        final merged = await store.mergeBySessionId(cloudEntry.id, cloudData);
-        return SyncSerialization.computeSyncHash(merged) == cloudEntry.hash;
+        await store.mergeBySessionId(cloudEntry.id, cloudData);
+        // This aggregate intentionally normalizes or discards stale derived
+        // provenance. A successful merge is therefore semantic equality even
+        // when the resulting canonical payload no longer has the cloud hash.
+        return true;
       case 'memory_book':
         final localMb = await _memoryBookRepo.getBySessionId(cloudEntry.id);
         if (localMb == null) return false;

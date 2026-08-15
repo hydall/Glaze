@@ -391,6 +391,7 @@ class FakeImageStore implements SyncImageStore {
 
 class FakeReconciliationStateStore implements SyncReconciliationStateStore {
   final Map<String, Map<String, dynamic>> data = {};
+  bool discardCollectors = false;
 
   @override
   Future<List<String>> getAllSessionIds() async => data.keys.toList();
@@ -405,6 +406,7 @@ class FakeReconciliationStateStore implements SyncReconciliationStateStore {
     Map<String, dynamic> incoming,
   ) async {
     final merged = {...?data[sessionId], ...incoming};
+    if (discardCollectors) merged['collectors'] = <dynamic>[];
     data[sessionId] = merged;
     return merged;
   }
@@ -854,6 +856,51 @@ void main() {
             as Map<String, dynamic>,
       );
       expect(uploadedManifest.entries[entry.key]?.hash, entry.hash);
+    },
+  );
+
+  test(
+    'normalized reconciliation state does not repeat on the next pull',
+    () async {
+      final reconciliationStates = FakeReconciliationStateStore()
+        ..discardCollectors = true;
+      final world = SyncWorld(reconciliationStateStore: reconciliationStates);
+      const sessionId = 'normalized-session';
+      final payload = <String, dynamic>{
+        'runs': [
+          {'id': 'cloud-run', 'ordinal': 1},
+        ],
+        'collectors': [
+          {'id': 'stale-collector'},
+        ],
+      };
+      final entry = SyncManifestEntry(
+        type: 'reconciliation_state',
+        id: sessionId,
+        path: cloudPath('reconciliation_state', sessionId),
+        updatedAt: 1000,
+        hash: SyncSerialization.computeSyncHash(payload),
+      );
+      final cloudManifest = SyncManifest(
+        deviceId: 'cloud-device',
+        createdAt: 1,
+        lastSync: 1000,
+        entries: {entry.key: entry},
+      );
+      world.cloud.files[entry.path] = jsonEncode(payload);
+      world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+        cloudManifest.toJson(),
+      );
+
+      await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+      final progress = <SyncProgress>[];
+      await world.engine.pullEntities(
+        onProgress: progress.add,
+        onConflict: (_) {},
+      );
+
+      expect(progress.any((item) => item.message == 'Nothing to pull'), isTrue);
+      expect(reconciliationStates.data[sessionId]!['collectors'], isEmpty);
     },
   );
 

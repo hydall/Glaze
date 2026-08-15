@@ -187,12 +187,13 @@ class ChatSummarySyncStore implements SyncChatSummaryStore {
   Future<void> putRaw(Map<String, dynamic> summary) async {
     final sessionId = summary['sessionId'] as String? ?? '';
     if (sessionId.isEmpty) return;
-    await _repo.put(
+    await _repo.putSynced(
       sessionId: sessionId,
       content: summary['content'] as String? ?? '',
       messageCount: summary['messageCount'] as int? ?? 0,
-      enabled: summary['enabled'] as bool?,
+      enabled: summary['enabled'] as bool? ?? true,
       prompt: summary['prompt'] as String?,
+      updatedAt: summary['updatedAt'] as int? ?? 0,
     );
   }
 
