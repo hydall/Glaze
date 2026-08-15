@@ -14,7 +14,7 @@ class GenericEditorField {
   final String key;
   final String label;
   final String
-  type; // 'text', 'number', 'tags', 'textarea', 'greeting_list', 'select', 'info'
+  type; // 'text', 'number', 'tags', 'textarea', 'greeting_list', 'select', 'switch', 'info'
   final bool expandable;
   final String? helpTerm;
   final String? placeholder;
@@ -50,6 +50,7 @@ class GenericEditor extends StatefulWidget {
   final List<GenericEditorSection> config;
   final bool showAvatar;
   final String avatarField;
+
   /// Defaults to the localized `hint_change_avatar` when not supplied — it
   /// cannot be a constructor default because `.tr()` is not a constant.
   final String? avatarHint;
@@ -421,6 +422,16 @@ class _GenericEditorState extends State<GenericEditor> {
           label: field.label,
           currentValue: _getSelectedLabel(field),
           onTap: () => _openSelectSelector(field),
+        );
+      case 'switch':
+        return MenuSwitchItem(
+          label: field.label,
+          value: _localItem[field.key] as bool? ?? false,
+          onChanged: (value) {
+            setState(() => _localItem[field.key] = value);
+            widget.onChanged(_localItem);
+            _scheduleSave();
+          },
         );
       case 'greeting_list':
         return _buildGreetingItems();

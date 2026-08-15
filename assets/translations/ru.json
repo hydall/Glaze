@@ -1781,6 +1781,7 @@
   "about_telegram": "Telegram",
   "block_append_badge": "↩ Посл. пользователь",
   "block_append_to_last_user": "Добавляется к последнему сообщению пользователя",
+  "label_send_empty_block": "Отправлять пустой блок",
   "label_append_last_user": "Добавлять к последнему сообщению пользователя",
   "catalog_importing": "Импорт...",
   "dev_mode_disabled": "Режим разработчика отключён",

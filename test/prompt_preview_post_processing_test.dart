@@ -70,14 +70,24 @@ void main() {
     expect(rows.single.sources, hasLength(1));
   });
 
-  test('merge keeps a whitespace-only block, matching the request', () {
+  test('merge drops a whitespace-only block by default', () {
     final rows = buildPreviewMessages(const [
       PromptMessage(role: 'system', content: 'kept'),
       PromptMessage(role: 'system', content: '   '),
     ], PromptPostProcessing.merge);
 
     expect(rows, hasLength(1));
-    expect(rows.single.message.content, 'kept\n\n   ');
+    expect(rows.single.message.content, 'kept');
+    expect(rows.single.sources, hasLength(1));
+  });
+
+  test('merge keeps an explicitly enabled empty block', () {
+    final rows = buildPreviewMessages(const [
+      PromptMessage(role: 'system', content: 'kept'),
+      PromptMessage(role: 'system', content: '', sendEmptyBlock: true),
+    ], PromptPostProcessing.merge);
+
+    expect(rows, hasLength(1));
     expect(rows.single.sources, hasLength(2));
   });
 

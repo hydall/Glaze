@@ -12,9 +12,11 @@ class NotifyObj {
 
 class ResolvedContent {
   final String role;
+
   /// Fully expanded content — this is what actually gets sent to the LLM
   /// (all macros resolved: {{summary}}, {{memory}}, {{lorebooks}}, etc.).
   final String content;
+
   /// Preset-only content for token accounting: external injections (character,
   /// persona, memory, lorebooks, summary, guidance) are blanked; in-preset
   /// setvar/getvar/globalvars still count. See docs/INVARIANTS.md INV-PS5.
@@ -39,6 +41,7 @@ ResolvedContent? resolveBlockContent({
   required String? summaryContent,
   required String? summaryPrefix,
   AuthorsNote? authorsNote,
+  bool sendEmptyBlock = false,
 }) {
   String content;
   String resolvedRole = role;
@@ -55,26 +58,38 @@ ResolvedContent? resolveBlockContent({
     case 'user_persona':
       content = _userPersonaContent(persona);
     case 'chat_history':
-      return ResolvedContent(role: resolvedRole, content: '', contentForAccounting: '');
+      return ResolvedContent(
+        role: resolvedRole,
+        content: '',
+        contentForAccounting: '',
+      );
     case 'summary':
       if (summaryContent != null && summaryContent.isNotEmpty) {
         final prefix = summaryPrefix ?? 'Summary: ';
         content = '[$prefix$summaryContent]';
       } else {
-        return null;
+        if (!sendEmptyBlock) return null;
+        content = '';
       }
     case 'guided_generation':
-      if (macroCtx.guidanceText == null || macroCtx.guidanceText!.trim().isEmpty) {
-        return null;
+      if (macroCtx.guidanceText == null ||
+          macroCtx.guidanceText!.trim().isEmpty) {
+        if (!sendEmptyBlock) return null;
+        content = '';
+      } else {
+        content = rawContent;
       }
-      content = rawContent;
     case 'authors_note':
-      if (authorsNote == null || !authorsNote.enabled || authorsNote.content.isEmpty) {
-        return null;
+      if (authorsNote == null ||
+          !authorsNote.enabled ||
+          authorsNote.content.isEmpty) {
+        if (!sendEmptyBlock) return null;
+        content = '';
+      } else {
+        content = authorsNote.content;
       }
-      // Only content + enabled are session-scoped. Role/depth/insertion mode
-      // belong to the preset block, so keep [resolvedRole] = the block's role.
-      content = authorsNote.content;
+    // Only content + enabled are session-scoped. Role/depth/insertion mode
+    // belong to the preset block, so keep [resolvedRole] = the block's role.
     case 'memory':
       // Dedicated Memory Book hard block. Acts as the sink for memory content
       // exactly like the {{memory}} macro: macroCtx.memoryContent is the
@@ -82,13 +97,17 @@ ResolvedContent? resolveBlockContent({
       // cutoff, then PromptBuilder swaps in the real packed memory. When no
       // memory is selected the content is null and the block is skipped.
       final memory = macroCtx.memoryContent;
-      if (memory == null || memory.isEmpty) return null;
-      content = memory;
+      if (memory == null || memory.isEmpty) {
+        if (!sendEmptyBlock) return null;
+        content = '';
+      } else {
+        content = memory;
+      }
     default:
       content = rawContent;
   }
 
-  if (content.isEmpty) return null;
+  if (content.trim().isEmpty && !sendEmptyBlock) return null;
 
   // Fully-expanded content (everything resolved, what the LLM actually sees).
   final macroResult = replaceMacros(content, macroCtx);
@@ -98,14 +117,9 @@ ResolvedContent? resolveBlockContent({
     notifyObj.varsChanged = true;
   }
 
-  // Emptiness is measured the way SillyTavern measures it: a block is empty
-  // only when nothing at all is left, not when nothing *printable* is left.
-  // A block holding just spaces or newlines is content the author put there on
-  // purpose, so it survives and reaches the model (ST: `openai.js` `getChat`,
-  // which keeps any string a JS truthiness check accepts).
-  if (macroResult.text.isEmpty) {
+  if (macroResult.text.trim().isEmpty) {
     final setvarPayload = setvarDefinitionsForAccounting(content);
-    if (setvarPayload.isEmpty) return null;
+    if (setvarPayload.isEmpty && !sendEmptyBlock) return null;
     return ResolvedContent(
       role: resolvedRole,
       content: macroResult.text,
@@ -114,10 +128,13 @@ ResolvedContent? resolveBlockContent({
   }
 
   // Preset-only accounting: blank external injections; keep in-preset vars.
-  final accountingSource =
-      isPresetExternalInjectionBlock(id) ? rawContent : content;
-  final accountingResult =
-      replaceMacros(accountingSource, macroCtx.forPresetAccounting());
+  final accountingSource = isPresetExternalInjectionBlock(id)
+      ? rawContent
+      : content;
+  final accountingResult = replaceMacros(
+    accountingSource,
+    macroCtx.forPresetAccounting(),
+  );
 
   return ResolvedContent(
     role: resolvedRole,

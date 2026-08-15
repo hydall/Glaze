@@ -194,6 +194,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
           insertionMode: insertionMode,
           depth: depth,
           appendToLastMessage: pm['appendToLastMessage'] as bool? ?? false,
+          sendEmptyBlock: pm['sendEmptyBlock'] as bool? ?? false,
         ),
       );
     }
@@ -287,6 +288,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
           isStatic: _staticBlockIds.contains(normalizedId),
           insertionMode: insertionMode,
           depth: depth,
+          sendEmptyBlock: p['sendEmptyBlock'] as bool? ?? false,
         ),
       );
     }

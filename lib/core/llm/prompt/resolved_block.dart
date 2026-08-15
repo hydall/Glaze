@@ -4,12 +4,14 @@ class ResolvedDepthBlock {
   final String content;
   final int depth;
   final bool isSummary;
+  final bool sendEmptyBlock;
   const ResolvedDepthBlock({
     required this.id,
     required this.role,
     required this.content,
     required this.depth,
     this.isSummary = false,
+    this.sendEmptyBlock = false,
   });
 }
 
@@ -29,6 +31,7 @@ class ResolvedRelativeBlock {
   final String contentForAccounting;
   final bool isSummary;
   final bool appendToLastMessage;
+  final bool sendEmptyBlock;
   const ResolvedRelativeBlock({
     required this.id,
     required this.name,
@@ -37,5 +40,6 @@ class ResolvedRelativeBlock {
     required this.contentForAccounting,
     this.isSummary = false,
     this.appendToLastMessage = false,
+    this.sendEmptyBlock = false,
   });
 }

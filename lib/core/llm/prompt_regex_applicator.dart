@@ -63,6 +63,7 @@ List<PromptMessage> applyPromptRegexes({
           sourceMessageId: msg.sourceMessageId,
           reasoningContent: msg.reasoningContent,
           imagePath: msg.imagePath,
+          sendEmptyBlock: msg.sendEmptyBlock,
         ),
       );
       historySeen++;
@@ -88,6 +89,7 @@ List<PromptMessage> applyPromptRegexes({
           sourceMessageId: msg.sourceMessageId,
           reasoningContent: msg.reasoningContent,
           imagePath: msg.imagePath,
+          sendEmptyBlock: msg.sendEmptyBlock,
         ),
       );
     }

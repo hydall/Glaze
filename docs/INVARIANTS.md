@@ -691,21 +691,23 @@ Rules (enforced in `lib/core/llm/prompt_builder.dart:_assembleMessages` via `app
 5. The block is still subject to the standard `enabled` and `isStashed` gates — disabled or stashed blocks are ignored.
 6. The append happens in `_assembleMessages` **after** `HistoryAssembler.assemble(history)` and **before** `interleaveDepthWithHistory`, so depth blocks are still positioned by history depth and regex pipeline sees a single merged user message.
 
-### INV-PS10: A block is empty only when nothing at all is left of it
+### INV-PS10: Empty block emission is explicit
 
-Emptiness is measured the way SillyTavern measures it (`openai.js` `getChat`, which keeps any string a JS truthiness check accepts): **a block is empty only when its content has zero length.** Spaces and newlines are content the preset author typed on purpose, so a whitespace-only block survives every gate and is sent to the model.
+After macro expansion, content that is empty or whitespace-only is not sent as
+an API message by default. `PresetBlock.sendEmptyBlock = true` is the explicit
+per-block opt-in for emitting that blank message.
 
-Enforced at four points, all on the untrimmed string:
+Enforced at four points:
 
-1. `resolveBlockContent()` — `rawContent.isEmpty` before macros, `macroResult.text.isEmpty` after them (`lib/core/llm/prompt_block_resolver.dart`).
-2. `_assembleMessages` — `content.isEmpty` decides whether a block becomes a message (`lib/core/llm/prompt_builder.dart`).
+1. `resolveBlockContent()` checks trimmed content before and after macros (`lib/core/llm/prompt_block_resolver.dart`). Variable mutations still run even when their block is not emitted.
+2. `_assembleMessages` carries the block opt-in into the built message (`lib/core/llm/prompt_builder.dart`).
 3. The final message filter in `buildPrompt`, same file.
-4. `buildApiMessages()` — `content.isNotEmpty || hasImage` (`lib/core/llm/history_assembler.dart`), mirrored by `buildPreviewMessages()` so the inspector shows what the request carries.
+4. `buildApiMessages()` retains whitespace only when `sendEmptyBlock` is true (images remain independently sufficient), mirrored by `buildPreviewMessages()`.
 
 Consequences:
 
-- Block content is **never trimmed** on the way out. Leading and trailing newlines an author typed reach the provider verbatim. Authors who want trimming have the explicit `{{trim}}` macro — see INV-PS7 step 5, which is opt-in and not applied automatically.
-- A block that expands down to whitespace (e.g. `{{setvar::flag::1}}\n`) is a real message carrying that whitespace. Only an expansion down to a zero-length string takes the setvar accounting-only path described in INV-PS5.
+- Non-empty block content is not rewritten or trimmed on the way out. The trim is only an emptiness test.
+- A block containing only `{{setvar::...}}`, `{{memory}}`, or another macro that resolves empty does not create an accidental blank message. Setvar accounting remains as described in INV-PS5.
 - Two places stay trim-based on purpose, because neither emits a block as its own message: `applyAppendToLastMessage` (INV-PS9) joins block text into an existing user message, where whitespace would only add blank lines; and lorebook attribution reporting, which maps rendered entries back to snapshots.
 
 ---

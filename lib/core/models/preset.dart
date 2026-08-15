@@ -15,12 +15,17 @@ abstract class PresetBlock with _$PresetBlock {
     @Default('relative') String insertionMode,
     int? depth,
     String? prefix,
+
     /// When true, this block's content is appended (after macro expansion) to
     /// the last user-role message in the chat history at prompt-assembly time.
     /// The block's own `role` is ignored in this mode — content is always
     /// merged into the last user message. If no user message exists in
     /// history, the block is silently dropped. See docs/INVARIANTS.md.
     @Default(false) bool appendToLastMessage,
+
+    /// Emits this block as an API message even when macro expansion leaves no
+    /// visible content. Disabled by default to avoid accidental blank turns.
+    @Default(false) bool sendEmptyBlock,
   }) = _PresetBlock;
 
   factory PresetBlock.fromJson(Map<String, dynamic> json) =>
@@ -104,6 +109,7 @@ Map<String, dynamic> _normalizeBlock(Map<String, dynamic> json) {
   final alreadyStatic = _coerceBool(n['isStatic'], false);
   n['isStatic'] = alreadyStatic || (id != null && _staticBlockIds.contains(id));
   n['appendToLastMessage'] = _coerceBool(n['appendToLastMessage'], false);
+  n['sendEmptyBlock'] = _coerceBool(n['sendEmptyBlock'], false);
   n['depth'] = _coerceInt(n['depth']);
   // Bring the guided-generation wrapper to parity with hydall/Glaze. Presets
   // still carrying the legacy '[System Note: {{guidance}}]' default (i.e.
@@ -121,19 +127,23 @@ Map<String, dynamic> _normalizeRegex(Map<String, dynamic> json) {
   final n = Map<String, dynamic>.from(json);
 
   // ST key mappings → canonical Glaze keys (defensive for direct fromJson calls)
-  if (!n.containsKey('name') || (n['name'] is String && (n['name'] as String).isEmpty)) {
+  if (!n.containsKey('name') ||
+      (n['name'] is String && (n['name'] as String).isEmpty)) {
     final stName = n['scriptName'];
     if (stName is String && stName.isNotEmpty) n['name'] = stName;
   }
-  if (!n.containsKey('regex') || (n['regex'] is String && (n['regex'] as String).isEmpty)) {
+  if (!n.containsKey('regex') ||
+      (n['regex'] is String && (n['regex'] as String).isEmpty)) {
     final stRegex = n['findRegex'];
     if (stRegex is String && stRegex.isNotEmpty) n['regex'] = stRegex;
   }
-  if (!n.containsKey('replacement') || (n['replacement'] is String && (n['replacement'] as String).isEmpty)) {
+  if (!n.containsKey('replacement') ||
+      (n['replacement'] is String && (n['replacement'] as String).isEmpty)) {
     final stRepl = n['replaceString'];
     if (stRepl is String) n['replacement'] = stRepl;
   }
-  if (!n.containsKey('trimOut') || (n['trimOut'] is String && (n['trimOut'] as String).isEmpty)) {
+  if (!n.containsKey('trimOut') ||
+      (n['trimOut'] is String && (n['trimOut'] as String).isEmpty)) {
     n['trimOut'] = _joinTrimForNormalize(n['trimStrings']);
   }
 
@@ -147,7 +157,9 @@ Map<String, dynamic> _normalizeRegex(Map<String, dynamic> json) {
   n['substituteRegex'] = _coerceInt(n['substituteRegex']) ?? 0;
   if (n['placement'] is List) {
     n['placement'] = _migrateGlazePlacementIds(
-      (n['placement'] as List).map((e) => e is int ? e : int.tryParse(e.toString()) ?? 1).toList(),
+      (n['placement'] as List)
+          .map((e) => e is int ? e : int.tryParse(e.toString()) ?? 1)
+          .toList(),
     );
   }
   return n;

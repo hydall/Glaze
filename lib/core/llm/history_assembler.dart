@@ -75,6 +75,7 @@ class PromptMessage {
   final String? sourceMessageId;
   final String? reasoningContent;
   final String? imagePath;
+  final bool sendEmptyBlock;
 
   const PromptMessage({
     required this.role,
@@ -89,6 +90,7 @@ class PromptMessage {
     this.sourceMessageId,
     this.reasoningContent,
     this.imagePath,
+    this.sendEmptyBlock = false,
   });
 
   bool get hasImage => imagePath?.isNotEmpty == true;
@@ -120,6 +122,7 @@ class PromptMessage {
     'sourceMessageId': sourceMessageId,
     'reasoningContent': reasoningContent,
     'imagePath': imagePath,
+    'sendEmptyBlock': sendEmptyBlock,
   };
 
   factory PromptMessage.fromJson(Map<String, dynamic> json) => PromptMessage(
@@ -135,6 +138,7 @@ class PromptMessage {
     sourceMessageId: json['sourceMessageId'] as String?,
     reasoningContent: json['reasoningContent'] as String?,
     imagePath: json['imagePath'] as String?,
+    sendEmptyBlock: json['sendEmptyBlock'] as bool? ?? false,
   );
 }
 
@@ -142,10 +146,13 @@ List<Map<String, dynamic>> buildApiMessages(
   List<PromptMessage> messages, {
   int reasoningHistoryCount = 0,
 }) {
-  // Same emptiness rule as the block resolver: only a zero-length string counts
-  // as empty. Spaces and newlines are content and go out to the provider.
   final included = messages
-      .where((message) => message.content.isNotEmpty || message.hasImage)
+      .where(
+        (message) =>
+            message.content.trim().isNotEmpty ||
+            message.hasImage ||
+            message.sendEmptyBlock,
+      )
       .toList();
   final result = included.map((message) => message.toApiMap()).toList();
   if (reasoningHistoryCount == 0 || reasoningHistoryCount < -1) return result;

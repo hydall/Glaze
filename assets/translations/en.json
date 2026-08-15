@@ -1838,6 +1838,7 @@
   "regex_only_format_prompt": "Only Format Prompt (promptOnly)",
   "regex_substitute_regex_header": "Substitute Regex (find pattern)",
   "block_append_to_last_user": "Appended to last user message",
+  "label_send_empty_block": "Send empty block",
   "label_append_last_user": "Append to last user message",
   "block_append_badge": "↩ Last User",
   "imggen_ref_keyword": "keyword",

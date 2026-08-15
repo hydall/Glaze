@@ -302,6 +302,7 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
       // runtime payload value, then the resolver default).
       summaryPrefix: rawBlock.prefix ?? payload.summaryPrefix,
       authorsNote: payload.authorsNote,
+      sendEmptyBlock: rawBlock.sendEmptyBlock,
     );
 
     if (notifyObj.varsChanged) {
@@ -331,6 +332,7 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
           content: resolved.content,
           depth: rawBlock.depth ?? 0,
           isSummary: blockIsSummary,
+          sendEmptyBlock: rawBlock.sendEmptyBlock,
         ),
       );
     } else {
@@ -343,6 +345,7 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
           contentForAccounting: resolved.contentForAccounting,
           isSummary: blockIsSummary,
           appendToLastMessage: rawBlock.appendToLastMessage,
+          sendEmptyBlock: rawBlock.sendEmptyBlock,
         ),
       );
     }
@@ -539,6 +542,7 @@ PromptResult _assembleMessages({
             depth: b.depth,
             isDepth: true,
             isSummary: b.isSummary,
+            sendEmptyBlock: b.sendEmptyBlock,
           ),
           classifications: blockLoreClassifications[b.id] ?? const <String>{},
         ),
@@ -676,14 +680,11 @@ PromptResult _assembleMessages({
         );
       }
     } else {
-      // Content goes out as the author wrote it — no trimming. Trimming here
-      // would collapse a spaces-and-newlines block back to empty and drop it
-      // one line below, which is exactly what SillyTavern does not do.
       final content = block.content;
       final accountingContent = block.contentForAccounting;
 
       // setvar-only blocks: no LLM-visible text, but definitions count toward preset.
-      if (content.isEmpty) {
+      if (content.trim().isEmpty && !block.sendEmptyBlock) {
         if (accountingContent.isNotEmpty) {
           attributionBlocks.add(
             StaticBlock(id: block.id, content: accountingContent),
@@ -719,6 +720,7 @@ PromptResult _assembleMessages({
           blockName: block.name,
           content: content,
           isSummary: block.isSummary,
+          sendEmptyBlock: block.sendEmptyBlock,
         ),
       );
 
@@ -892,7 +894,7 @@ PromptResult _assembleMessages({
         }
       }
       historySeen++;
-    } else if (msg.content.isNotEmpty) {
+    } else if (msg.content.trim().isNotEmpty || msg.sendEmptyBlock) {
       finalMessages.add(msg);
     }
   }

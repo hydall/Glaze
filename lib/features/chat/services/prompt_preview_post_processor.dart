@@ -57,10 +57,8 @@ const String _tokenSuffix = '\u0000';
 /// Applies [mode] to [messages] and returns the resulting rows.
 ///
 /// With [PromptPostProcessing.none] every message passes through untouched,
-/// one row each — including blocks with empty content, which the inspector has
-/// always listed even though the request omits them. Any other mode reproduces
-/// the request faithfully instead, so empty blocks are dropped first exactly
-/// as `buildApiMessages` drops them.
+/// one row each. Any other mode reproduces the request faithfully, so empty
+/// blocks are dropped unless their per-block opt-in keeps them.
 List<PreviewMessage> buildPreviewMessages(
   List<PromptMessage> messages,
   String mode, {
@@ -76,7 +74,12 @@ List<PreviewMessage> buildPreviewMessages(
   }
 
   final included = messages
-      .where((message) => message.content.isNotEmpty || message.hasImage)
+      .where(
+        (message) =>
+            message.content.trim().isNotEmpty ||
+            message.hasImage ||
+            message.sendEmptyBlock,
+      )
       .toList();
 
   final tagged = [
@@ -188,6 +191,7 @@ PromptMessage _synthesize(
       sourceMessageId: source.sourceMessageId,
       reasoningContent: source.reasoningContent,
       imagePath: source.imagePath,
+      sendEmptyBlock: source.sendEmptyBlock,
     );
   }
 

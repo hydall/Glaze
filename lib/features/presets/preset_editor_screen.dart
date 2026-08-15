@@ -1019,6 +1019,12 @@ class _BlockEditorInline extends StatelessWidget {
             ],
           ),
           GenericEditorField(
+            key: 'sendEmptyBlock',
+            label: 'label_send_empty_block'.tr(),
+            type: 'switch',
+            showIf: (item) => item['appendToLastMessage'] != true,
+          ),
+          GenericEditorField(
             key: 'content',
             label: 'section_content'.tr(),
             type: 'textarea',
