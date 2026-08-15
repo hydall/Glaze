@@ -210,7 +210,12 @@ class ChatMessageService {
           .read(ledgerReconciliationRunRepoProvider)
           .invalidateForMessageMutation(
             sessionId: session.id,
-            messageIds: plan.deletedMessageIds,
+            // Deleting an earlier message changes the causal transcript for
+            // every later reconciliation range, even when the deleted message
+            // itself was not one of that run's anchors. Conversely, deleting
+            // only a trailing trigger must leave an already-completed range
+            // intact.
+            messageIds: invalidatedMessageIds,
             reason: 'message_deleted',
             createdAt: currentTimestampSeconds(),
           );
@@ -221,7 +226,7 @@ class ChatMessageService {
         sessionId: session.id,
         messageIds: invalidatedMessageIds,
       );
-      await checkpointRepo.deleteBySessionId(session.id);
+      await checkpointRepo.deleteForMessages(session.id, invalidatedMessageIds);
       await trackerRepo.replaceLedgerState(
         session.id,
         fallbackSnapshot?.trackers ?? const [],
