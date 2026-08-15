@@ -28,6 +28,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
   final SyncCharacterFolderStore? _characterFolderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
+  final SyncReconciliationStateStore? _reconciliationStateStore;
   final SyncImageStore? _imageStore;
 
   static const _manifestKey = 'gz_sync_manifest_v2';
@@ -54,6 +55,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
     this._characterFolderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
+    this._reconciliationStateStore,
     this._imageStore,
   });
 
@@ -405,6 +407,31 @@ class SyncManifestBuilder implements SyncManifestProvider {
       }
     }
 
+    if (_reconciliationStateStore != null) {
+      final sessionIds = await _reconciliationStateStore.getAllSessionIds();
+      for (final sessionId in sessionIds) {
+        final state = await _reconciliationStateStore.getBySessionId(sessionId);
+        if (state == null) continue;
+        final hash = SyncSerialization.computeSyncHash(state);
+        final key = entryKey('reconciliation_state', sessionId);
+        final prevEntry = previous.entries[key];
+        final cloudEntry = cloudManifest?.entries[key];
+        final updatedAt = _resolveUpdatedAt(
+          hash: hash,
+          prevEntry: prevEntry,
+          cloudEntry: cloudEntry,
+          now: now,
+        );
+        entries[key] = SyncManifestEntry(
+          type: 'reconciliation_state',
+          id: sessionId,
+          path: cloudPath('reconciliation_state', sessionId),
+          updatedAt: updatedAt,
+          hash: hash,
+        );
+      }
+    }
+
     await _addSingletons(entries, previous, now, cloudManifest);
     await _addDeletedEntries(entries, now);
 
@@ -677,5 +704,14 @@ class SyncManifestBuilder implements SyncManifestProvider {
   Future<void> clearDeleted() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_deletedKey);
+  }
+
+  @override
+  Future<bool> isDeleted(String type, String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_deletedKey);
+    if (raw == null) return false;
+    final deleted = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    return deleted.any((row) => row['type'] == type && row['id'] == id);
   }
 }

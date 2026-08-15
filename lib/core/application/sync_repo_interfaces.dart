@@ -128,3 +128,16 @@ abstract class SyncCharacterKnowledgeStore {
   Future<void> applyBySessionId(String sessionId, Map<String, dynamic> data);
   Future<void> deleteBySessionId(String sessionId);
 }
+
+/// Merge-only reconciliation and Card Evolution provenance for one session.
+/// Implementations must never replace a longer immutable chain with a stale
+/// device's shorter copy.
+abstract class SyncReconciliationStateStore {
+  Future<List<String>> getAllSessionIds();
+  Future<Map<String, dynamic>?> getBySessionId(String sessionId);
+  Future<Map<String, dynamic>> mergeBySessionId(
+    String sessionId,
+    Map<String, dynamic> data,
+  );
+  Future<void> deleteBySessionId(String sessionId);
+}

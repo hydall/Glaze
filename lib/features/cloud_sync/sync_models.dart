@@ -107,7 +107,8 @@ class SyncManifest {
   ///   8 — added `studio_preset` entity type (DB-backed StudioPresetRows).
   ///   9 — added `local_storage` singleton for global PipelineSettings.
   ///  11 — added `character_knowledge` (atomic facts + session baseline).
-  static const int currentVersion = 11;
+  ///  12 — added merge-only `reconciliation_state` provenance.
+  static const int currentVersion = 12;
 
   final int version;
   final String deviceId;
@@ -222,6 +223,8 @@ String cloudPath(String type, String id) {
       return '$cloudBase/memory_graphs/$id.json';
     case 'character_knowledge':
       return '$cloudBase/character_knowledge/$id.json';
+    case 'reconciliation_state':
+      return '$cloudBase/reconciliation_state/$id.json';
     case 'lorebooks':
       return '$cloudBase/lorebooks.json';
     case 'api_presets':

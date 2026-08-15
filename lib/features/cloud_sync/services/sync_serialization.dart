@@ -191,4 +191,20 @@ class SyncSerialization {
       return null;
     }
   }
+
+  static Future<Map<String, dynamic>> readRequiredCloudEntity(
+    CloudAdapter adapter,
+    SyncManifestEntry entry,
+  ) async {
+    final raw = await adapter.download(entry.path);
+    if (raw.isEmpty) {
+      throw StateError('Empty cloud entity: ${entry.key}');
+    }
+    if (raw.length > maxSyncPayloadBytes) {
+      throw Exception(
+        'Payload exceeds ${maxSyncPayloadBytes ~/ 1024 ~/ 1024}MB limit',
+      );
+    }
+    return jsonDecode(raw) as Map<String, dynamic>;
+  }
 }

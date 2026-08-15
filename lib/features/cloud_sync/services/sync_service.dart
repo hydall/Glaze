@@ -41,6 +41,7 @@ class SyncService {
   final SyncCharacterFolderStore? _characterFolderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
+  final SyncReconciliationStateStore? _reconciliationStateStore;
   final SessionDeletionStore _sessionDeletionStore;
   final CharacterDeletionStore _characterDeletionStore;
   final Future<void> Function(LorebookActivations) _saveLorebookActivations;
@@ -111,6 +112,7 @@ class SyncService {
     this._characterFolderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
+    this._reconciliationStateStore,
     required SessionDeletionStore sessionDeletionStore,
     required CharacterDeletionStore characterDeletionStore,
     required Future<void> Function(LorebookActivations) saveLorebookActivations,
@@ -147,6 +149,7 @@ class SyncService {
     characterFolderStore: _characterFolderStore,
     memoryGraphStore: _memoryGraphStore,
     characterKnowledgeStore: _characterKnowledgeStore,
+    reconciliationStateStore: _reconciliationStateStore,
     imageStore: _imageStorage,
   );
 
@@ -177,6 +180,7 @@ class SyncService {
     _sessionDeletionStore,
     _characterDeletionStore,
     _saveLorebookActivations,
+    _reconciliationStateStore,
   );
 
   Future<void> init() async {

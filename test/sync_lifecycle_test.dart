@@ -2,8 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:glaze_flutter/core/db/app_db.dart';
+import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
@@ -12,9 +15,11 @@ import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
+import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 import 'package:glaze_flutter/core/utils/sync_deletion_tracker.dart';
 import 'package:glaze_flutter/core/application/session_deletion_store.dart';
 import 'package:glaze_flutter/core/application/character_deletion_store.dart';
+import 'package:glaze_flutter/features/cloud_sync/adapters/ext_blocks_sync_stores.dart';
 import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/shared/theme/theme_preset.dart';
 import 'package:glaze_flutter/features/cloud_sync/cloud_adapter.dart';
@@ -27,6 +32,7 @@ import 'package:glaze_flutter/features/cloud_sync/sync_models.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
 import 'package:glaze_flutter/features/extensions/models/extensions_settings.dart';
 import 'package:glaze_flutter/features/extensions/models/info_block.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ─── In-memory fakes ────────────────────────────────────────────────
 
@@ -95,6 +101,13 @@ class FakeSessionDeletionStore implements SessionDeletionStore {
     deletedSessionIds.add(sessionId);
     await chats.delete(sessionId);
   }
+}
+
+class NoopSessionDeletionStore implements SessionDeletionStore {
+  const NoopSessionDeletionStore();
+
+  @override
+  Future<void> deleteSession(String sessionId) async {}
 }
 
 class FakeCharacterDeletionStore implements CharacterDeletionStore {
@@ -376,6 +389,32 @@ class FakeImageStore implements SyncImageStore {
   }
 }
 
+class FakeReconciliationStateStore implements SyncReconciliationStateStore {
+  final Map<String, Map<String, dynamic>> data = {};
+
+  @override
+  Future<List<String>> getAllSessionIds() async => data.keys.toList();
+
+  @override
+  Future<Map<String, dynamic>?> getBySessionId(String sessionId) async =>
+      data[sessionId];
+
+  @override
+  Future<Map<String, dynamic>> mergeBySessionId(
+    String sessionId,
+    Map<String, dynamic> incoming,
+  ) async {
+    final merged = {...?data[sessionId], ...incoming};
+    data[sessionId] = merged;
+    return merged;
+  }
+
+  @override
+  Future<void> deleteBySessionId(String sessionId) async {
+    data.remove(sessionId);
+  }
+}
+
 class FakeCloudAdapter implements CloudAdapter {
   final Map<String, String> files = {};
   final List<String> listFolderCalls = [];
@@ -501,6 +540,7 @@ class InMemoryManifestProvider implements SyncManifestProvider {
     SyncTrackerValueStore? trackerValueStore,
     SyncStudioConfigStore? studioConfigStore,
     SyncStudioPresetStore? studioPresetStore,
+    SyncReconciliationStateStore? reconciliationStateStore,
   }) : _builder = SyncManifestBuilder(
           characterRepo: characterRepo,
           chatRepo: chatRepo,
@@ -519,6 +559,7 @@ class InMemoryManifestProvider implements SyncManifestProvider {
           trackerValueStore: trackerValueStore ?? FakeTrackerValueStore(),
           studioConfigStore: studioConfigStore ?? FakeStudioConfigStore(),
           studioPresetStore: studioPresetStore,
+          reconciliationStateStore: reconciliationStateStore,
         );
 
   @override
@@ -558,6 +599,9 @@ class InMemoryManifestProvider implements SyncManifestProvider {
   Future<void> clearDeleted() async {}
 
   @override
+  Future<bool> isDeleted(String type, String id) async => false;
+
+  @override
   Future<String> getDeviceId() => _builder.getDeviceId();
 }
 
@@ -580,8 +624,9 @@ class SyncWorld {
   late final FakeStudioPresetStore studioPresets;
   late final FakeSessionDeletionStore sessionDeletions;
   late final FakeCharacterDeletionStore characterDeletions;
+  late final FakeReconciliationStateStore? reconciliationStates;
 
-  SyncWorld() {
+  SyncWorld({FakeReconciliationStateStore? reconciliationStateStore}) {
     characters = FakeCharacterStore();
     chats = FakeChatStore();
     personas = FakePersonaStore();
@@ -597,6 +642,7 @@ class SyncWorld {
     studioPresets = FakeStudioPresetStore();
     sessionDeletions = FakeSessionDeletionStore(chats);
     characterDeletions = FakeCharacterDeletionStore(characters);
+    reconciliationStates = reconciliationStateStore;
     manifestProvider = InMemoryManifestProvider(
       characterRepo: characters,
       chatRepo: chats,
@@ -608,6 +654,7 @@ class SyncWorld {
       themePresetRepo: uiThemes,
       studioConfigStore: studioConfigs,
       studioPresetStore: studioPresets,
+      reconciliationStateStore: reconciliationStates,
     );
   }
 
@@ -638,6 +685,65 @@ class SyncWorld {
     sessionDeletions,
     characterDeletions,
     (_) async {},
+    reconciliationStates,
+  );
+}
+
+SyncEngine _realStoreEngine({
+  required SyncChatStore chatStore,
+  required SyncReconciliationStateStore reconciliationStore,
+  required FakeCloudAdapter cloud,
+}) {
+  final characters = FakeCharacterStore();
+  final personas = FakePersonaStore();
+  final presets = FakePresetStore();
+  final apiConfigs = FakeApiConfigStore();
+  final memoryBooks = FakeMemoryBookStore();
+  final lorebooks = FakeLorebookStore();
+  final uiThemes = FakeThemePresetStore();
+  final studioConfigs = FakeStudioConfigStore();
+  final studioPresets = FakeStudioPresetStore();
+  final manifestProvider = InMemoryManifestProvider(
+    characterRepo: characters,
+    chatRepo: chatStore,
+    personaRepo: personas,
+    presetRepo: presets,
+    apiRepo: apiConfigs,
+    memoryBookRepo: memoryBooks,
+    lorebookRepo: lorebooks,
+    themePresetRepo: uiThemes,
+    studioConfigStore: studioConfigs,
+    studioPresetStore: studioPresets,
+    reconciliationStateStore: reconciliationStore,
+  );
+  return SyncEngine(
+    cloud,
+    manifestProvider,
+    characters,
+    chatStore,
+    personas,
+    presets,
+    apiConfigs,
+    memoryBooks,
+    lorebooks,
+    FakeEmbeddingStore(),
+    FakeImageStore(),
+    uiThemes,
+    FakeExtensionPresetStore(),
+    FakeExtensionsSettingsStore(),
+    FakeInfoBlockStore(),
+    FakeTrackerSnapshotStore(),
+    FakeTrackerValueStore(),
+    studioConfigs,
+    studioPresets,
+    null,
+    null,
+    null,
+    null,
+    const NoopSessionDeletionStore(),
+    FakeCharacterDeletionStore(characters),
+    (_) async {},
+    reconciliationStore,
   );
 }
 
@@ -679,6 +785,199 @@ void main() {
       progressList.firstWhere(
         (p) => p.total > 0 || p.message?.contains('Nothing to push') == true,
       );
+
+  test(
+    'Push pre-merges cloud-only reconciliation state before rebuilding manifest',
+    () async {
+      final reconciliationStates = FakeReconciliationStateStore();
+      final world = SyncWorld(reconciliationStateStore: reconciliationStates);
+      const sessionId = 'cloud-only-session';
+      const chat = ChatSession(
+        id: sessionId,
+        characterId: 'cloud-character',
+        sessionIndex: 0,
+        updatedAt: 1000,
+      );
+      final payload = <String, dynamic>{
+        'runs': [
+          {'id': 'cloud-run', 'ordinal': 1},
+        ],
+        'collectors': <dynamic>[],
+      };
+      final entry = SyncManifestEntry(
+        type: 'reconciliation_state',
+        id: sessionId,
+        path: cloudPath('reconciliation_state', sessionId),
+        updatedAt: 1000,
+        hash: SyncSerialization.computeSyncHash(payload),
+      );
+      final chatEntry = SyncManifestEntry(
+        type: 'chat',
+        id: sessionId,
+        path: cloudPath('chat', sessionId),
+        updatedAt: 1000,
+        hash: SyncSerialization.computeChatMetadataHash(
+          const SessionMetadata(
+            sessionId: sessionId,
+            characterId: 'cloud-character',
+            sessionIndex: 0,
+            updatedAt: 1000,
+            messageCount: 0,
+            lastMessageContent: '',
+            lastMessageTimestamp: 0,
+          ),
+        ),
+      );
+      final cloudManifest = SyncManifest(
+        deviceId: 'cloud-device',
+        createdAt: 1,
+        lastSync: 1000,
+        entries: {chatEntry.key: chatEntry, entry.key: entry},
+      );
+      world.cloud.files[chatEntry.path] = jsonEncode(chat.toJson());
+      world.cloud.files[entry.path] = jsonEncode(payload);
+      world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+        cloudManifest.toJson(),
+      );
+
+      expect(await reconciliationStates.getAllSessionIds(), isEmpty);
+
+      await world.engine.pushEntities(onProgress: (_) {});
+
+      expect(
+        await reconciliationStates.getBySessionId(sessionId),
+        equals(payload),
+      );
+      expect(jsonDecode(world.cloud.files[entry.path]!), equals(payload));
+      final uploadedManifest = SyncManifest.fromJson(
+        jsonDecode(world.cloud.files[cloudPath('manifest', 'manifest')]!)
+            as Map<String, dynamic>,
+      );
+      expect(uploadedManifest.entries[entry.key]?.hash, entry.hash);
+    },
+  );
+
+  test(
+    'push-first premerge materializes cloud chat before real reconciliation state',
+    () async {
+      final sourceDb = AppDatabase.forTesting(NativeDatabase.memory());
+      final targetDb = AppDatabase.forTesting(NativeDatabase.memory());
+      try {
+        const sessionId = 'fresh-device-session';
+        const openingContent = 'Welcome to the fresh device.';
+        const chat = ChatSession(
+          id: sessionId,
+          characterId: 'character',
+          sessionIndex: 0,
+          updatedAt: 1000,
+          messages: [
+            ChatMessage(
+              id: 'opening-assistant',
+              role: 'assistant',
+              content: openingContent,
+              swipes: [openingContent],
+            ),
+          ],
+        );
+        final sourceChats = ChatRepo(sourceDb);
+        await sourceChats.put(chat);
+        final run = LedgerReconciliationRun(
+          id: 'source-run',
+          sessionId: sessionId,
+          ordinal: 1,
+          anchors: [
+            ReconciliationAnchor(
+              messageId: 'opening-assistant',
+              swipeId: 0,
+              agentSwipeId: 0,
+              role: 'assistant',
+              contentHash: computeHash(openingContent),
+            ),
+          ],
+          acceptedManifestRefs: const [],
+          effectiveCanonStamp: 'source-stamp',
+          effectiveCanonRevision: 1,
+          effectiveCanonHash: 'source-canon',
+          canonicalResult: const {
+            'facts': ['fresh-device-fact'],
+          },
+          predecessorChainHash: '',
+          contractVersion: 1,
+          opsApplied: const [],
+          createdAt: 1,
+        );
+        expect(
+          await LedgerReconciliationRunRepo(sourceDb).append(run),
+          isA<ReconciliationRunAppended>(),
+        );
+        final sourceStore = ReconciliationStateSyncStore(sourceDb);
+        final payload = (await sourceStore.getBySessionId(sessionId))!;
+        final sourceChat = (await sourceChats.getById(sessionId))!;
+        final sourceMetadata =
+            (await sourceChats.getAllSessionMetadata()).single;
+
+        final cloud = FakeCloudAdapter();
+        final chatEntry = SyncManifestEntry(
+          type: 'chat',
+          id: sessionId,
+          path: cloudPath('chat', sessionId),
+          updatedAt: 1000,
+          hash: SyncSerialization.computeChatMetadataHash(sourceMetadata),
+        );
+        final stateEntry = SyncManifestEntry(
+          type: 'reconciliation_state',
+          id: sessionId,
+          path: cloudPath('reconciliation_state', sessionId),
+          updatedAt: 1000,
+          hash: SyncSerialization.computeSyncHash(payload),
+        );
+        final cloudManifest = SyncManifest(
+          deviceId: 'source-device',
+          createdAt: 1,
+          lastSync: 1000,
+          entries: {chatEntry.key: chatEntry, stateEntry.key: stateEntry},
+        );
+        cloud.files[chatEntry.path] = jsonEncode(sourceChat.toJson());
+        cloud.files[stateEntry.path] = jsonEncode(payload);
+        cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+          cloudManifest.toJson(),
+        );
+
+        final targetChats = ChatRepo(targetDb);
+        final targetStore = ReconciliationStateSyncStore(targetDb);
+        expect(await targetChats.getById(sessionId), isNull);
+        expect(
+          await LedgerReconciliationRunRepo(targetDb).getHead(sessionId),
+          isNull,
+        );
+
+        final engine = _realStoreEngine(
+          chatStore: targetChats,
+          reconciliationStore: targetStore,
+          cloud: cloud,
+        );
+        await engine.pushEntities(onProgress: (_) {});
+
+        expect(await targetChats.getById(sessionId), equals(sourceChat));
+        final importedHead = await LedgerReconciliationRunRepo(
+          targetDb,
+        ).getHead(sessionId);
+        expect(importedHead?.id, run.id);
+        expect(importedHead?.chainHash, run.chainHash);
+        expect(jsonDecode(cloud.files[stateEntry.path]!), equals(payload));
+
+        final uploadedManifest = SyncManifest.fromJson(
+          jsonDecode(cloud.files[cloudPath('manifest', 'manifest')]!)
+              as Map<String, dynamic>,
+        );
+        expect(uploadedManifest.entries[chatEntry.key]?.hash, chatEntry.hash);
+        expect(uploadedManifest.entries[stateEntry.key]?.hash, stateEntry.hash);
+      } finally {
+        await sourceDb.close();
+        await targetDb.close();
+      }
+    },
+  );
 
   test('Full sync lifecycle: push → pull → conflict → resolve', () async {
     // ── SCENE 1: Device A pushes to empty cloud ──
@@ -2750,7 +3049,7 @@ void main() {
         jsonDecode(
               world.cloud.files[cloudPath('manifest', 'manifest')]!,
             ) as
-                Map<String, dynamic>,
+            Map<String, dynamic>,
       );
       expect(
         cloudManifest.entries.containsKey(entryKey('studio_preset', 'doomed')),

@@ -32,4 +32,5 @@ abstract class SyncManifestProvider {
   Future<void> clearLocalManifest();
   Future<void> clearDeleted();
   Future<String> getDeviceId();
+  Future<bool> isDeleted(String type, String id);
 }

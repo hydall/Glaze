@@ -7,11 +7,14 @@ import '../../../core/db/app_db.dart';
 import '../../../core/db/repositories/character_folder_repo.dart';
 import '../../../core/db/repositories/extension_presets_repository.dart';
 import '../../../core/db/repositories/info_blocks_repository.dart';
+import '../../../core/db/repositories/card_evolution_collector_run_repo.dart';
+import '../../../core/db/repositories/ledger_reconciliation_run_repo.dart';
 import '../../../core/db/repositories/summary_repo.dart';
 import '../../../core/db/repositories/tracker_snapshot_repo.dart';
 import '../../../core/db/repositories/tracker_repo.dart';
 import '../../../core/models/tracker.dart';
 import '../../../core/models/tracker_snapshot.dart';
+import '../../../core/utils/cast_helpers.dart';
 import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/extensions_settings.dart';
 import '../../extensions/models/info_block.dart';
@@ -525,3 +528,714 @@ class CharacterKnowledgeSyncStore implements SyncCharacterKnowledgeStore {
     )..where((row) => row.chatSessionId.equals(sessionId))).go();
   }
 }
+
+/// Merge-only adapter for immutable reconciliation history and its derived
+/// Card Evolution collector lane. Stale devices may contribute a prefix, but
+/// can never truncate or replace a chain that reaches farther in the chat.
+class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
+  ReconciliationStateSyncStore(this._db);
+
+  final AppDatabase _db;
+
+  @override
+  Future<List<String>> getAllSessionIds() async {
+    final rows = await _db
+        .customSelect(
+          'SELECT DISTINCT session_id FROM reconciliation_successful_runs',
+        )
+        .get();
+    return rows.map((row) => row.read<String>('session_id')).toList();
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getBySessionId(String sessionId) async {
+    final runs =
+        await (_db.select(_db.ledgerReconciliationSuccessfulRuns)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..orderBy([(row) => OrderingTerm.asc(row.ordinal)]))
+            .get();
+    if (runs.isEmpty) return null;
+    final invalidations = await (_db.select(
+      _db.ledgerReconciliationRunInvalidations,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    invalidations.sort((a, b) {
+      final run = a.runId.compareTo(b.runId);
+      if (run != 0) return run;
+      final message = a.causeMessageId.compareTo(b.causeMessageId);
+      return message != 0 ? message : a.reason.compareTo(b.reason);
+    });
+    final manifests = await (_db.select(
+      _db.lorebookUseManifests,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    manifests.sort((a, b) => _manifestKey(a).compareTo(_manifestKey(b)));
+    final manifestEntries = await (_db.select(
+      _db.lorebookUseManifestEntries,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    manifestEntries.sort(
+      (a, b) => _manifestEntryKey(a).compareTo(_manifestEntryKey(b)),
+    );
+    final acceptances = await (_db.select(
+      _db.lorebookUseAcceptanceRecords,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    acceptances.sort((a, b) => a.acceptanceId.compareTo(b.acceptanceId));
+    final collectors =
+        await (_db.select(_db.cardEvolutionCollectorRuns)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..where((row) => row.status.equals('completed'))
+              ..orderBy([(row) => OrderingTerm.asc(row.collectorOrdinal)]))
+            .get();
+    final observations = await (_db.select(
+      _db.cardEvolutionObservations,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    observations.sort(
+      (a, b) => a.semanticScopeKey.compareTo(b.semanticScopeKey),
+    );
+    final claims =
+        await (_db.select(_db.cardEvolutionClaims)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..where((row) => row.status.equals('completed')))
+            .get();
+    final completedCollectorBoundaries = {
+      for (final row in collectors)
+        (row.collectorOrdinal, row.reconciliationChainHash),
+    };
+    claims.removeWhere(
+      (row) => !completedCollectorBoundaries.contains((
+        row.predecessorRunOrdinal,
+        row.predecessorCursorHash,
+      )),
+    );
+    claims.sort((a, b) => a.inputHash.compareTo(b.inputHash));
+    return {
+      '__reconciliationState': true,
+      'schemaVersion': 1,
+      'sessionId': sessionId,
+      'runs': runs.map((row) => row.toJson()).toList(),
+      'invalidations': invalidations.map(_invalidationForSync).toList(),
+      'manifests': manifests.map((row) => row.toJson()).toList(),
+      'manifestEntries': manifestEntries.map((row) => row.toJson()).toList(),
+      'acceptances': acceptances.map((row) => row.toJson()).toList(),
+      'collectors': collectors.map(_collectorForSync).toList(),
+      'observations': observations.map(_observationForSync).toList(),
+      'completedClaims': claims.map(_claimForSync).toList(),
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> mergeBySessionId(
+    String sessionId,
+    Map<String, dynamic> data,
+  ) async {
+    if (data['__reconciliationState'] != true ||
+        data['schemaVersion'] != 1 ||
+        data['sessionId'] != sessionId) {
+      throw const FormatException('Invalid reconciliation sync payload');
+    }
+    await _db.transaction(() async {
+      final runDecision = await _resolveRunMerge(
+        sessionId,
+        _maps(data['runs']),
+        _maps(data['invalidations']),
+      );
+      if (runDecision == _RunMergeDecision.keepLocal) return;
+      if (runDecision == _RunMergeDecision.replaceLocal) {
+        await _clearReconciliationLane(sessionId);
+      }
+      await _mergeSourceRows(sessionId, data);
+      await _mergeRuns(sessionId, _maps(data['runs']));
+      await _mergeInvalidations(sessionId, _maps(data['invalidations']));
+      final collectors = _maps(data['collectors']);
+      final resetDerivedLane = await _resetDerivedLaneForInvalidations(
+        sessionId,
+        collectors,
+      );
+      if (!resetDerivedLane) {
+        await _mergeCollectors(sessionId, collectors);
+        await _mergeObservations(sessionId, _maps(data['observations']));
+      }
+      await _mergeCompletedClaims(sessionId, _maps(data['completedClaims']));
+    });
+    return (await getBySessionId(sessionId))!;
+  }
+
+  Future<_RunMergeDecision> _resolveRunMerge(
+    String sessionId,
+    List<Map<String, dynamic>> incoming,
+    List<Map<String, dynamic>> incomingInvalidations,
+  ) async {
+    incoming.sort(
+      (a, b) => (a['ordinal'] as int).compareTo(b['ordinal'] as int),
+    );
+    final local =
+        await (_db.select(_db.ledgerReconciliationSuccessfulRuns)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..orderBy([(row) => OrderingTerm.asc(row.ordinal)]))
+            .get();
+    final overlap = local.length < incoming.length
+        ? local.length
+        : incoming.length;
+    var divergent = false;
+    for (var i = 0; i < overlap; i++) {
+      final cloud = LedgerReconciliationSuccessfulRunRow.fromJson(incoming[i]);
+      _requireSession(sessionId, cloud.sessionId);
+      if (!_sameDataClass(local[i], cloud)) {
+        divergent = true;
+        break;
+      }
+    }
+    if (!divergent) return _RunMergeDecision.merge;
+
+    final localVisible = await LedgerReconciliationRunRepo(
+      _db,
+    ).readSession(sessionId);
+    final incomingInvalidatedIds = incomingInvalidations
+        .map((row) => row['runId'] as String)
+        .toSet();
+    final incomingVisible = incoming
+        .map(LedgerReconciliationSuccessfulRunRow.fromJson)
+        .where((run) => !incomingInvalidatedIds.contains(run.id))
+        .toList();
+    if (localVisible.isEmpty || incomingVisible.isEmpty) {
+      if (incomingVisible.isNotEmpty) return _RunMergeDecision.replaceLocal;
+      if (localVisible.isNotEmpty) return _RunMergeDecision.keepLocal;
+      throw StateError('Divergent reconciliation chains have no live head');
+    }
+
+    final chat = await _db
+        .customSelect(
+          'SELECT messages_json FROM chat_sessions WHERE session_id = ?',
+          variables: [Variable.withString(sessionId)],
+        )
+        .getSingleOrNull();
+    if (chat == null) {
+      throw StateError('Cannot resolve reconciliation chains without chat');
+    }
+    final messageIds = (jsonDecode(chat.read<String>('messages_json')) as List)
+        .cast<Map<String, dynamic>>()
+        .map((message) => message['id'] as String)
+        .toList();
+    final localHead = localVisible.last;
+    final incomingHead = incomingVisible.last;
+    final localEndpoint = messageIds.indexOf(localHead.endMessageId);
+    final incomingEndpoint = messageIds.indexOf(incomingHead.endMessageId);
+    if (localEndpoint < 0 || incomingEndpoint < 0) {
+      throw StateError('Reconciliation endpoint is absent from chat');
+    }
+    if (incomingEndpoint > localEndpoint) {
+      return _RunMergeDecision.replaceLocal;
+    }
+    if (localEndpoint > incomingEndpoint) {
+      return _RunMergeDecision.keepLocal;
+    }
+    if (incomingHead.createdAt != localHead.createdAt) {
+      return incomingHead.createdAt > localHead.createdAt
+          ? _RunMergeDecision.replaceLocal
+          : _RunMergeDecision.keepLocal;
+    }
+    return incomingHead.chainHash.compareTo(localHead.chainHash) > 0
+        ? _RunMergeDecision.replaceLocal
+        : _RunMergeDecision.keepLocal;
+  }
+
+  Future<void> _clearReconciliationLane(String sessionId) async {
+    await (_db.delete(
+      _db.ledgerReconciliationCheckpoints,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.cardEvolutionCollectorRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.cardEvolutionObservations,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.cardEvolutionClaims,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.ledgerReconciliationRunInvalidations,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.ledgerReconciliationSuccessfulRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.lorebookUseAcceptanceRecords,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.lorebookUseManifestEntries,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.lorebookUseManifests,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+  }
+
+  Future<void> _mergeSourceRows(
+    String sessionId,
+    Map<String, dynamic> data,
+  ) async {
+    for (final json in _maps(data['manifests'])) {
+      final row = LorebookUseManifestRow.fromJson(json);
+      _requireSession(sessionId, row.sessionId);
+      final existing =
+          await (_db.select(_db.lorebookUseManifests)..where(
+                (table) =>
+                    table.sessionId.equals(row.sessionId) &
+                    table.messageId.equals(row.messageId) &
+                    table.swipeId.equals(row.swipeId) &
+                    table.agentSwipeId.equals(row.agentSwipeId),
+              ))
+              .getSingleOrNull();
+      _requireExact(existing, row);
+      if (existing == null) {
+        await _db.into(_db.lorebookUseManifests).insert(row);
+      }
+    }
+    for (final json in _maps(data['manifestEntries'])) {
+      final row = LorebookUseManifestEntryRow.fromJson(json);
+      _requireSession(sessionId, row.sessionId);
+      final existing =
+          await (_db.select(_db.lorebookUseManifestEntries)..where(
+                (table) =>
+                    table.sessionId.equals(row.sessionId) &
+                    table.messageId.equals(row.messageId) &
+                    table.swipeId.equals(row.swipeId) &
+                    table.agentSwipeId.equals(row.agentSwipeId) &
+                    table.lorebookId.equals(row.lorebookId) &
+                    table.entryId.equals(row.entryId) &
+                    table.entryOrder.equals(row.entryOrder),
+              ))
+              .getSingleOrNull();
+      _requireExact(existing, row);
+      if (existing == null) {
+        await _db.into(_db.lorebookUseManifestEntries).insert(row);
+      }
+    }
+    for (final json in _maps(data['acceptances'])) {
+      final row = LorebookUseAcceptanceRecordRow.fromJson(json);
+      _requireSession(sessionId, row.sessionId);
+      final existing =
+          await (_db.select(_db.lorebookUseAcceptanceRecords)
+                ..where((table) => table.acceptanceId.equals(row.acceptanceId)))
+              .getSingleOrNull();
+      _requireExact(existing, row);
+      if (existing == null) {
+        await _db.into(_db.lorebookUseAcceptanceRecords).insert(row);
+      }
+    }
+  }
+
+  Future<void> _mergeRuns(
+    String sessionId,
+    List<Map<String, dynamic>> incoming,
+  ) async {
+    incoming.sort(
+      (a, b) => (a['ordinal'] as int).compareTo(b['ordinal'] as int),
+    );
+    final local =
+        await (_db.select(_db.ledgerReconciliationSuccessfulRuns)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..orderBy([(row) => OrderingTerm.asc(row.ordinal)]))
+            .get();
+    final overlap = local.length < incoming.length
+        ? local.length
+        : incoming.length;
+    for (var i = 0; i < overlap; i++) {
+      final cloud = LedgerReconciliationSuccessfulRunRow.fromJson(incoming[i]);
+      if (!_sameDataClass(local[i], cloud)) {
+        throw StateError('Divergent reconciliation chains for $sessionId');
+      }
+    }
+    final repo = LedgerReconciliationRunRepo(_db);
+    for (var i = local.length; i < incoming.length; i++) {
+      final row = LedgerReconciliationSuccessfulRunRow.fromJson(incoming[i]);
+      _requireSession(sessionId, row.sessionId);
+      final result = await repo.append(_runFromRow(row));
+      if (result is! ReconciliationRunAppended &&
+          result is! ReconciliationRunIdempotent) {
+        throw StateError('Invalid reconciliation chain import: $result');
+      }
+    }
+  }
+
+  Future<void> _mergeInvalidations(
+    String sessionId,
+    List<Map<String, dynamic>> incoming,
+  ) async {
+    final runIds =
+        (await (_db.select(
+              _db.ledgerReconciliationSuccessfulRuns,
+            )..where((row) => row.sessionId.equals(sessionId))).get())
+            .map((row) => row.id)
+            .toSet();
+    for (final json in incoming) {
+      final row = LedgerReconciliationRunInvalidationRow.fromJson(json);
+      _requireSession(sessionId, row.sessionId);
+      if (!runIds.contains(row.runId)) {
+        throw StateError('Invalidation references an unknown run');
+      }
+      await _db
+          .into(_db.ledgerReconciliationRunInvalidations)
+          .insert(
+            LedgerReconciliationRunInvalidationsCompanion.insert(
+              sessionId: row.sessionId,
+              runId: row.runId,
+              causeMessageId: row.causeMessageId,
+              reason: row.reason,
+              createdAt: row.createdAt,
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+    }
+  }
+
+  Future<bool> _resetDerivedLaneForInvalidations(
+    String sessionId,
+    List<Map<String, dynamic>> incomingCollectors,
+  ) async {
+    final invalidatedRunIds =
+        (await (_db.select(
+              _db.ledgerReconciliationRunInvalidations,
+            )..where((row) => row.sessionId.equals(sessionId))).get())
+            .map((row) => row.runId)
+            .toSet();
+    if (invalidatedRunIds.isEmpty) return false;
+    final affectedCollector =
+        await (_db.select(_db.cardEvolutionCollectorRuns)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..where((row) => row.reconciliationRunId.isIn(invalidatedRunIds))
+              ..limit(1))
+            .getSingleOrNull();
+    final incomingAffected = incomingCollectors.any(
+      (row) => invalidatedRunIds.contains(row['reconciliationRunId']),
+    );
+    if (affectedCollector == null && !incomingAffected) return false;
+    await (_db.delete(
+      _db.cardEvolutionCollectorRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.cardEvolutionObservations,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    return true;
+  }
+
+  Future<void> _mergeCollectors(
+    String sessionId,
+    List<Map<String, dynamic>> incoming,
+  ) async {
+    final runRepo = LedgerReconciliationRunRepo(_db);
+    final runs = await runRepo.readSession(sessionId);
+    final pairs = <String, CardEvolutionCollectorPair>{};
+    for (var i = 0; i + 1 < runs.length; i += 2) {
+      final pair = CardEvolutionCollectorPair(runs[i], runs[i + 1]);
+      pairs[pair.boundary.id] = pair;
+    }
+    for (final json in incoming) {
+      final row = CardEvolutionCollectorRunRow.fromJson(json);
+      _requireSession(sessionId, row.sessionId);
+      final pair = pairs[row.reconciliationRunId];
+      if (row.status != 'completed' ||
+          pair == null ||
+          pair.boundary.ordinal != row.reconciliationRunOrdinal ||
+          pair.boundary.chainHash != row.reconciliationChainHash ||
+          pair.rangeHash != row.rangeHash) {
+        throw StateError('Invalid collector provenance import');
+      }
+      final existing =
+          await (_db.select(_db.cardEvolutionCollectorRuns)..where(
+                (table) =>
+                    table.sessionId.equals(sessionId) &
+                    table.collectorOrdinal.equals(row.collectorOrdinal),
+              ))
+              .getSingleOrNull();
+      if (existing != null && existing.status == 'claimed') {
+        await (_db.delete(
+          _db.cardEvolutionCollectorRuns,
+        )..where((item) => item.id.equals(existing.id))).go();
+      }
+      final completed = existing?.status == 'completed' ? existing : null;
+      _requireExact(completed, row, normalize: _collectorForSync);
+      if (completed == null) {
+        await _db
+            .into(_db.cardEvolutionCollectorRuns)
+            .insert(row.copyWith(ownerId: 'cloud-sync', leaseExpiresAt: 0));
+      }
+    }
+  }
+
+  Future<void> _mergeObservations(
+    String sessionId,
+    List<Map<String, dynamic>> incoming,
+  ) async {
+    for (final json in incoming) {
+      final cloud = CardEvolutionObservationRow.fromJson(json);
+      _requireSession(sessionId, cloud.sessionId);
+      final local =
+          await (_db.select(_db.cardEvolutionObservations)..where(
+                (row) =>
+                    row.sessionId.equals(sessionId) &
+                    row.semanticScopeKey.equals(cloud.semanticScopeKey),
+              ))
+              .getSingleOrNull();
+      if (local == null) {
+        await _db
+            .into(_db.cardEvolutionObservations)
+            .insert(
+              cloud.copyWith(
+                id: _observationId(sessionId, cloud.semanticScopeKey),
+              ),
+            );
+        continue;
+      }
+      if (local.characterId != cloud.characterId ||
+          local.targetKind != cloud.targetKind ||
+          local.cardFieldPath != cloud.cardFieldPath ||
+          local.lorebookEntryId != cloud.lorebookEntryId ||
+          local.observedChange != cloud.observedChange ||
+          local.canonicalClaim != cloud.canonicalClaim) {
+        throw StateError('Divergent observation identity');
+      }
+      final clusters = _mergeClusters(
+        local.evidenceClustersJson,
+        cloud.evidenceClustersJson,
+      );
+      final evidence = <String>{for (final cluster in clusters) ...cluster};
+      final retrievalKeys = <String>{
+        ..._strings(local.retrievalKeysJson),
+        ..._strings(cloud.retrievalKeysJson),
+      }.toList()..sort();
+      await (_db.update(
+        _db.cardEvolutionObservations,
+      )..where((row) => row.id.equals(local.id))).write(
+        CardEvolutionObservationsCompanion(
+          evidenceClustersJson: Value(jsonEncode(clusters)),
+          evidenceMessageIds: Value(jsonEncode(evidence.toList()..sort())),
+          retrievalKeysJson: Value(jsonEncode(retrievalKeys)),
+          runOrdinal: Value(
+            local.runOrdinal < cloud.runOrdinal
+                ? local.runOrdinal
+                : cloud.runOrdinal,
+          ),
+          repeatCount: Value(clusters.length),
+          firstSeenRun: Value(
+            local.firstSeenRun < cloud.firstSeenRun
+                ? local.firstSeenRun
+                : cloud.firstSeenRun,
+          ),
+          lastConfirmedRun: Value(
+            _maxNullable(local.lastConfirmedRun, cloud.lastConfirmedRun),
+          ),
+          confidence: Value(
+            local.confidence > cloud.confidence
+                ? local.confidence
+                : cloud.confidence,
+          ),
+          status: Value(_mergedObservationStatus(local.status, cloud.status)),
+          updatedAt: Value(
+            local.updatedAt > cloud.updatedAt
+                ? local.updatedAt
+                : cloud.updatedAt,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _mergeCompletedClaims(
+    String sessionId,
+    List<Map<String, dynamic>> incoming,
+  ) async {
+    for (final json in incoming) {
+      final row = CardEvolutionClaimRow.fromJson(json);
+      _requireSession(sessionId, row.sessionId);
+      if (row.status != 'completed') continue;
+      final boundary =
+          await (_db.select(_db.cardEvolutionCollectorRuns)..where(
+                (item) =>
+                    item.sessionId.equals(sessionId) &
+                    item.collectorOrdinal.equals(row.predecessorRunOrdinal) &
+                    item.status.equals('completed'),
+              ))
+              .getSingleOrNull();
+      if (boundary == null ||
+          boundary.reconciliationChainHash != row.predecessorCursorHash) {
+        continue;
+      }
+      final existing =
+          await (_db.select(_db.cardEvolutionClaims)..where(
+                (item) =>
+                    item.sessionId.equals(sessionId) &
+                    item.inputHash.equals(row.inputHash),
+              ))
+              .getSingleOrNull();
+      if (existing != null && existing.status == 'claimed') {
+        await (_db.delete(
+          _db.cardEvolutionClaims,
+        )..where((item) => item.id.equals(existing.id))).go();
+      }
+      final completed = existing?.status == 'completed' ? existing : null;
+      if (completed == null) {
+        await _db
+            .into(_db.cardEvolutionClaims)
+            .insert(
+              row.copyWith(
+                ownerId: 'cloud-sync',
+                leaseExpiresAt: 0,
+                rewriteJobId: const Value(null),
+              ),
+            );
+      } else if (!_sameDataClass(completed, row, normalize: _claimForSync)) {
+        throw StateError('Conflicting completed writer boundary');
+      }
+    }
+  }
+
+  static void _requireExact(
+    DataClass? existing,
+    DataClass incoming, {
+    Map<String, dynamic> Function(DataClass row)? normalize,
+  }) {
+    if (existing != null &&
+        !_sameDataClass(existing, incoming, normalize: normalize)) {
+      throw StateError('Conflicting immutable sync row');
+    }
+  }
+
+  static bool _sameDataClass(
+    DataClass first,
+    DataClass second, {
+    Map<String, dynamic> Function(DataClass row)? normalize,
+  }) {
+    final firstJson = normalize?.call(first) ?? first.toJson();
+    final secondJson = normalize?.call(second) ?? second.toJson();
+    return jsonEncode(firstJson) == jsonEncode(secondJson);
+  }
+
+  static Map<String, dynamic> _collectorForSync(DataClass value) {
+    final row = value as CardEvolutionCollectorRunRow;
+    return {...row.toJson(), 'ownerId': '', 'leaseExpiresAt': 0};
+  }
+
+  static Map<String, dynamic> _invalidationForSync(
+    LedgerReconciliationRunInvalidationRow row,
+  ) => {...row.toJson(), 'id': 0};
+
+  static Map<String, dynamic> _observationForSync(
+    CardEvolutionObservationRow row,
+  ) => {
+    ...row.toJson(),
+    'id': _observationId(row.sessionId, row.semanticScopeKey),
+  };
+
+  static String _observationId(String sessionId, String semanticScopeKey) =>
+      'cloud-observation-${computeHash('$sessionId\u001f$semanticScopeKey')}';
+
+  static String _manifestKey(LorebookUseManifestRow row) =>
+      '${row.messageId}\u001f${row.swipeId}\u001f${row.agentSwipeId}';
+
+  static String _manifestEntryKey(LorebookUseManifestEntryRow row) =>
+      '${row.messageId}\u001f${row.swipeId}\u001f${row.agentSwipeId}'
+      '\u001f${row.lorebookId}\u001f${row.entryId}\u001f${row.entryOrder}';
+
+  static Map<String, dynamic> _claimForSync(DataClass value) {
+    final row = value as CardEvolutionClaimRow;
+    return {
+      ...row.toJson(),
+      'ownerId': '',
+      'leaseExpiresAt': 0,
+      'rewriteJobId': null,
+    };
+  }
+
+  LedgerReconciliationRun _runFromRow(
+    LedgerReconciliationSuccessfulRunRow row,
+  ) {
+    final anchors = (jsonDecode(row.anchorsJson) as List)
+        .cast<Map<String, dynamic>>()
+        .map(
+          (item) => ReconciliationAnchor(
+            messageId: item['messageId'] as String,
+            swipeId: item['swipeId'] as int,
+            agentSwipeId: item['agentSwipeId'] as int,
+            role: item['role'] as String,
+            contentHash: item['contentHash'] as String,
+          ),
+        )
+        .toList();
+    final refs = (jsonDecode(row.acceptedManifestRefsJson) as List)
+        .cast<Map<String, dynamic>>()
+        .map(
+          (item) => AcceptedManifestRef(
+            acceptanceId: item['acceptanceId'] as String,
+            sessionId: item['sessionId'] as String,
+            messageId: item['messageId'] as String,
+            swipeId: item['swipeId'] as int,
+            agentSwipeId: item['agentSwipeId'] as int,
+            manifestHash: item['manifestHash'] as String,
+            acceptedByUserMessageId: item['acceptedByUserMessageId'] as String,
+          ),
+        )
+        .toList();
+    return LedgerReconciliationRun(
+      id: row.id,
+      sessionId: row.sessionId,
+      ordinal: row.ordinal,
+      anchors: anchors,
+      acceptedManifestRefs: refs,
+      effectiveCanonStamp: row.effectiveCanonStamp,
+      effectiveCanonRevision: row.effectiveCanonRevision,
+      effectiveCanonHash: row.effectiveCanonHash,
+      canonicalResult: Map<String, dynamic>.from(
+        jsonDecode(row.canonicalResultJson) as Map,
+      ),
+      predecessorChainHash: row.predecessorChainHash,
+      contractVersion: row.contractVersion,
+      opsApplied: (jsonDecode(row.opsAppliedJson) as List).cast<String>(),
+      createdAt: row.createdAt,
+    );
+  }
+
+  static List<Map<String, dynamic>> _maps(Object? value) =>
+      (value as List? ?? const []).cast<Map<String, dynamic>>();
+
+  static List<String> _strings(String value) =>
+      (jsonDecode(value) as List).cast<String>();
+
+  static void _requireSession(String expected, String actual) {
+    if (actual != expected) throw const FormatException('Session mismatch');
+  }
+
+  static List<List<String>> _mergeClusters(String first, String second) {
+    final result = <List<String>>[];
+    for (final encoded in [first, second]) {
+      for (final raw in jsonDecode(encoded) as List) {
+        final cluster = (raw as List).cast<String>().toSet().toList()..sort();
+        if (!result.any((item) => _sameStrings(item, cluster))) {
+          result.add(cluster);
+        }
+      }
+    }
+    result.sort((a, b) => a.join('\u001f').compareTo(b.join('\u001f')));
+    return result;
+  }
+
+  static bool _sameStrings(List<String> a, List<String> b) =>
+      a.length == b.length && a.indexed.every((item) => item.$2 == b[item.$1]);
+
+  static int? _maxNullable(int? a, int? b) {
+    if (a == null) return b;
+    if (b == null) return a;
+    return a > b ? a : b;
+  }
+
+  static String _mergedObservationStatus(String a, String b) {
+    const rank = {'active': 0, 'promoted': 1, 'expired': 2, 'consumed': 3};
+    return rank[a]! >= rank[b]! ? a : b;
+  }
+
+  @override
+  Future<void> deleteBySessionId(String sessionId) async {
+    await _db.transaction(() async {
+      await _clearReconciliationLane(sessionId);
+    });
+  }
+}
+
+enum _RunMergeDecision { merge, keepLocal, replaceLocal }

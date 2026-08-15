@@ -448,6 +448,9 @@ class InMemoryManifestProvider implements SyncManifestProvider {
 
   @override
   Future<void> clearDeleted() async {}
+
+  @override
+  Future<bool> isDeleted(String type, String id) async => false;
   @override
   Future<String> getDeviceId() => _builder.getDeviceId();
 }
