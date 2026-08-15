@@ -279,7 +279,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
     for (final config in studioConfigs) {
       final id = config.sessionId;
       final json = config.toJson();
-      final hash = SyncSerialization.computeSyncHash(json);
+      final hash = SyncSerialization.computeStudioConfigHash(json);
       final key = entryKey('studio_config', id);
       final prevEntry = previous.entries[key];
       final cloudEntry = cloudManifest?.entries[key];

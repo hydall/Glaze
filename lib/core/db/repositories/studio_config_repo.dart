@@ -56,7 +56,18 @@ class StudioConfigRepo implements SyncStudioConfigStore {
   Future<StudioConfig?> getById(String id) => getBySessionId(id);
 
   @override
-  Future<void> put(StudioConfig config) => upsert(config);
+  Future<void> put(StudioConfig config) {
+    return db
+        .into(db.studioConfigRows)
+        .insertOnConflictUpdate(
+          StudioConfigRowsCompanion.insert(
+            sessionId: config.sessionId,
+            enabled: Value(config.enabled),
+            createdAt: Value(config.createdAt),
+            updatedAt: Value(config.updatedAt),
+          ),
+        );
+  }
 
   Future<void> upsert(StudioConfig config) {
     return db

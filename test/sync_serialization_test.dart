@@ -49,6 +49,26 @@ void main() {
     expect(StudioPreset.fromJson(wireJson as Map<String, dynamic>), preset);
   });
 
+  test('Studio config hash ignores sync timestamps', () {
+    const first = StudioConfig(
+      sessionId: 'session-1',
+      enabled: true,
+      createdAt: 100,
+      updatedAt: 200,
+    );
+    const second = StudioConfig(
+      sessionId: 'session-1',
+      enabled: true,
+      createdAt: 300,
+      updatedAt: 400,
+    );
+
+    expect(
+      SyncSerialization.computeStudioConfigHash(first.toJson()),
+      SyncSerialization.computeStudioConfigHash(second.toJson()),
+    );
+  });
+
   test('computeMemoryBookHash ignores device-local fields', () {
     final base = MemoryBook(
       id: 'memorybook_s1',

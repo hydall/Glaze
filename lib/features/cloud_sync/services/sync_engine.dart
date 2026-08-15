@@ -728,6 +728,16 @@ class SyncEngine {
         final cloudHash = SyncSerialization.computeMemoryBookHash(cloudData);
         final equal = localHash == cloudHash;
         return equal;
+      case 'studio_config':
+        final localConfig = await _studioConfigStore.getById(cloudEntry.id);
+        if (localConfig == null) return false;
+        final cloudData = await SyncSerialization.readCloudEntity(
+          _adapter,
+          cloudEntry,
+        );
+        if (cloudData == null) return false;
+        return SyncSerialization.computeStudioConfigHash(cloudData) ==
+            SyncSerialization.computeStudioConfigHash(localConfig.toJson());
       case 'api_presets':
         if (cloudManifest.apiKeysIncluded) return false;
         final localAll = await _apiRepo.getAll();

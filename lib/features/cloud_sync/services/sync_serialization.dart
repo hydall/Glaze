@@ -32,6 +32,13 @@ class SyncSerialization {
     return sha256.convert(utf8.encode(json)).toString();
   }
 
+  static String computeStudioConfigHash(Map<String, dynamic> json) {
+    final content = Map<String, dynamic>.from(json)
+      ..remove('createdAt')
+      ..remove('updatedAt');
+    return computeSyncHash(content);
+  }
+
   /// Device-local / derived fields excluded so parity does not false-conflict.
   static const _memoryBookSettingsHashKeys = {
     'enabled',

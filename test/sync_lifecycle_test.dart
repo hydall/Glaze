@@ -3091,6 +3091,16 @@ void main() {
       expect(pulled, isNotNull);
       expect(pulled!.sessionId, 's1');
       expect(pulled.enabled, isTrue);
+
+      final repeatConflicts = <SyncConflict>[];
+      await target.engine.pullEntities(
+        onProgress: (_) {},
+        onConflict: repeatConflicts.add,
+      );
+      expect(
+        repeatConflicts.where((conflict) => conflict.type == 'studio_config'),
+        isEmpty,
+      );
     },
   );
 }
