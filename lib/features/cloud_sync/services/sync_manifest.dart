@@ -430,6 +430,28 @@ class SyncManifestBuilder implements SyncManifestProvider {
           hash: hash,
         );
       }
+      final chatSessionIds = sessions
+          .map((session) => session.sessionId)
+          .toSet();
+      for (final previousEntry in previous.entries.values) {
+        if (previousEntry.type != 'reconciliation_state' ||
+            entries.containsKey(previousEntry.key) ||
+            !chatSessionIds.contains(previousEntry.id)) {
+          continue;
+        }
+        final cloudEntry = cloudManifest?.entries[previousEntry.key];
+        if (cloudEntry == null ||
+            cloudEntry.deleted ||
+            cloudEntry.hash != previousEntry.hash ||
+            await isDeleted(previousEntry.type, previousEntry.id) ||
+            await isDeleted('chat', previousEntry.id)) {
+          continue;
+        }
+        // A cloud state may normalize to no durable runs (for example, stale
+        // legacy anchors). Keep its accepted manifest marker so it is not
+        // downloaded and rejected again on every pull.
+        entries[previousEntry.key] = cloudEntry;
+      }
     }
 
     await _addSingletons(entries, previous, now, cloudManifest);

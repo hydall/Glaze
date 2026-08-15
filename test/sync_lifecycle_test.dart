@@ -392,6 +392,7 @@ class FakeImageStore implements SyncImageStore {
 class FakeReconciliationStateStore implements SyncReconciliationStateStore {
   final Map<String, Map<String, dynamic>> data = {};
   bool discardCollectors = false;
+  bool discardAll = false;
 
   @override
   Future<List<String>> getAllSessionIds() async => data.keys.toList();
@@ -405,6 +406,10 @@ class FakeReconciliationStateStore implements SyncReconciliationStateStore {
     String sessionId,
     Map<String, dynamic> incoming,
   ) async {
+    if (discardAll) {
+      data.remove(sessionId);
+      return {};
+    }
     final merged = {...?data[sessionId], ...incoming};
     if (discardCollectors) merged['collectors'] = <dynamic>[];
     data[sessionId] = merged;
@@ -901,6 +906,55 @@ void main() {
 
       expect(progress.any((item) => item.message == 'Nothing to pull'), isTrue);
       expect(reconciliationStates.data[sessionId]!['collectors'], isEmpty);
+    },
+  );
+
+  test(
+    'reconciliation state normalized to empty does not repeat on next pull',
+    () async {
+      final reconciliationStates = FakeReconciliationStateStore()
+        ..discardAll = true;
+      final world = SyncWorld(reconciliationStateStore: reconciliationStates);
+      const sessionId = 'discarded-session';
+      const chat = ChatSession(
+        id: sessionId,
+        characterId: 'character',
+        sessionIndex: 0,
+        updatedAt: 1000,
+      );
+      await world.chats.put(chat);
+      final payload = <String, dynamic>{
+        'runs': [
+          {'id': 'malformed-cloud-run', 'ordinal': 1},
+        ],
+      };
+      final entry = SyncManifestEntry(
+        type: 'reconciliation_state',
+        id: sessionId,
+        path: cloudPath('reconciliation_state', sessionId),
+        updatedAt: 1000,
+        hash: SyncSerialization.computeSyncHash(payload),
+      );
+      final cloudManifest = SyncManifest(
+        deviceId: 'cloud-device',
+        createdAt: 1,
+        lastSync: 1000,
+        entries: {entry.key: entry},
+      );
+      world.cloud.files[entry.path] = jsonEncode(payload);
+      world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+        cloudManifest.toJson(),
+      );
+
+      await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+      final progress = <SyncProgress>[];
+      await world.engine.pullEntities(
+        onProgress: progress.add,
+        onConflict: (_) {},
+      );
+
+      expect(progress.any((item) => item.message == 'Nothing to pull'), isTrue);
+      expect(reconciliationStates.data[sessionId], isNull);
     },
   );
 

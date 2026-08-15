@@ -333,6 +333,7 @@ class SyncEngine {
     final entries = cloudManifest.entries.values.toList();
     final conflicts = <SyncConflict>[];
     final pullEntries = <SyncManifestEntry>[];
+    final acceptedCloudEntries = <SyncManifestEntry>[];
 
     for (final cloudEntry in entries) {
       final localEntry = localManifest.entries[cloudEntry.key];
@@ -355,6 +356,7 @@ class SyncEngine {
         localEntry,
         cloudManifest,
       )) {
+        acceptedCloudEntries.add(cloudEntry);
         continue;
       }
 
@@ -404,12 +406,17 @@ class SyncEngine {
         localManifest,
         cloudManifest,
         onProgress,
+        acceptedCloudEntries: acceptedCloudEntries,
       );
     } else if (conflicts.isEmpty) {
       onProgress(
         const SyncProgress(current: 0, total: 0, message: 'Nothing to pull'),
       );
-      await _finalizePull(localManifest, cloudManifest);
+      await _finalizePull(
+        localManifest,
+        cloudManifest,
+        acceptedCloudEntries: acceptedCloudEntries,
+      );
     } else {
       await _saveCloudManifestForPendingPull(cloudManifest);
     }
@@ -429,6 +436,7 @@ class SyncEngine {
     );
 
     final pullEntries = <SyncManifestEntry>[];
+    final acceptedCloudEntries = <SyncManifestEntry>[];
 
     for (final cloudEntry in cloudManifest.entries.values) {
       final localEntry = localManifest.entries[cloudEntry.key];
@@ -441,6 +449,7 @@ class SyncEngine {
         localEntry,
         cloudManifest,
       )) {
+        acceptedCloudEntries.add(cloudEntry);
         continue;
       }
       if (SyncConflictDetector.needsConflict(localEntry, cloudEntry)) {
@@ -459,12 +468,17 @@ class SyncEngine {
         localManifest,
         cloudManifest,
         onProgress,
+        acceptedCloudEntries: acceptedCloudEntries,
       );
     } else {
       onProgress(
         const SyncProgress(current: 0, total: 0, message: 'Nothing to pull'),
       );
-      await _finalizePull(localManifest, cloudManifest);
+      await _finalizePull(
+        localManifest,
+        cloudManifest,
+        acceptedCloudEntries: acceptedCloudEntries,
+      );
     }
 
     // A local conflict winner must become cloud truth immediately. In
@@ -484,9 +498,11 @@ class SyncEngine {
     List<SyncManifestEntry> pullEntries,
     SyncManifest localManifest,
     SyncManifest cloudManifest,
-    void Function(SyncProgress) onProgress,
-  ) async {
+    void Function(SyncProgress) onProgress, {
+    List<SyncManifestEntry> acceptedCloudEntries = const [],
+  }) async {
     final tasks = <Future<void> Function()>[];
+    final appliedEntries = <SyncManifestEntry>[];
     var processed = 0;
 
     for (final entry in pullEntries) {
@@ -500,6 +516,7 @@ class SyncEngine {
           ),
         );
         await _pullEntry(entry);
+        appliedEntries.add(entry);
       });
     }
 
@@ -521,7 +538,11 @@ class SyncEngine {
       taskErrors = result.errors;
     }
 
-    await _finalizePull(localManifest, cloudManifest);
+    await _finalizePull(
+      localManifest,
+      cloudManifest,
+      acceptedCloudEntries: [...acceptedCloudEntries, ...appliedEntries],
+    );
 
     if (taskErrors != null && taskErrors.isNotEmpty) {
       throw SyncQueueAggregateError(taskErrors);
@@ -530,17 +551,25 @@ class SyncEngine {
 
   Future<void> _finalizePull(
     SyncManifest localManifest,
-    SyncManifest cloudManifest,
-  ) async {
+    SyncManifest cloudManifest, {
+    List<SyncManifestEntry> acceptedCloudEntries = const [],
+  }) async {
     final rebuilt = await _manifestBuilder.buildLocalManifest(
       cloudManifest: cloudManifest,
     );
+    final entries = Map<String, SyncManifestEntry>.from(rebuilt.entries);
+    for (final entry in acceptedCloudEntries) {
+      if (entry.type == 'reconciliation_state') {
+        entries.putIfAbsent(entry.key, () => entry);
+      }
+    }
     await _manifestBuilder.writeLocalManifest(
       rebuilt.copyWith(
         createdAt: cloudManifest.createdAt != 0
             ? cloudManifest.createdAt
             : rebuilt.createdAt,
         lastSync: DateTime.now().millisecondsSinceEpoch,
+        entries: entries,
       ),
     );
     await _manifestBuilder.clearDeleted();
