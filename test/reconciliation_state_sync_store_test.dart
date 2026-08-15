@@ -285,6 +285,31 @@ void main() {
     );
   });
 
+  test(
+    'stale collector provenance is discarded without failing sync',
+    () async {
+      final runs = await _appendChain(sourceDb, 2);
+      await _completeCollector(sourceDb, runs);
+      final payload = (await sourceStore.getBySessionId('session'))!;
+      final collectors = (payload['collectors'] as List)
+          .cast<Map<String, dynamic>>();
+      payload['collectors'] = [
+        {...collectors.single, 'rangeHash': 'legacy-stale-range'},
+      ];
+
+      final merged = await targetStore.mergeBySessionId('session', payload);
+
+      expect(merged['runs'], hasLength(2));
+      expect(merged['collectors'], isEmpty);
+      expect(
+        await CardEvolutionCollectorRunRepo(
+          targetDb,
+        ).pendingValidPairs('session'),
+        hasLength(1),
+      );
+    },
+  );
+
   test('active collector claims and leases are omitted', () async {
     final runs = await _appendChain(sourceDb, 2);
     final first = await _storedRun(sourceDb, runs.first.id);

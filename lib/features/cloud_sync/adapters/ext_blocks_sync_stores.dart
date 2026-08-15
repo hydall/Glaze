@@ -654,11 +654,14 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
         collectors,
       );
       if (importedComplete && !resetDerivedLane) {
-        await _mergeCollectors(sessionId, collectors);
-        await _mergeObservations(sessionId, _maps(data['observations']));
-      }
-      if (importedComplete) {
-        await _mergeCompletedClaims(sessionId, _maps(data['completedClaims']));
+        final collectorsValid = await _mergeCollectors(sessionId, collectors);
+        if (collectorsValid) {
+          await _mergeObservations(sessionId, _maps(data['observations']));
+          await _mergeCompletedClaims(
+            sessionId,
+            _maps(data['completedClaims']),
+          );
+        }
       }
     });
     return await getBySessionId(sessionId) ?? _emptyPayload(sessionId);
@@ -938,7 +941,7 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
     return true;
   }
 
-  Future<void> _mergeCollectors(
+  Future<bool> _mergeCollectors(
     String sessionId,
     List<Map<String, dynamic>> incoming,
   ) async {
@@ -949,8 +952,8 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       final pair = CardEvolutionCollectorPair(runs[i], runs[i + 1]);
       pairs[pair.boundary.id] = pair;
     }
-    for (final json in incoming) {
-      final row = CardEvolutionCollectorRunRow.fromJson(json);
+    final rows = incoming.map(CardEvolutionCollectorRunRow.fromJson).toList();
+    for (final row in rows) {
       _requireSession(sessionId, row.sessionId);
       final pair = pairs[row.reconciliationRunId];
       if (row.status != 'completed' ||
@@ -958,8 +961,10 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
           pair.boundary.ordinal != row.reconciliationRunOrdinal ||
           pair.boundary.chainHash != row.reconciliationChainHash ||
           pair.rangeHash != row.rangeHash) {
-        throw StateError('Invalid collector provenance import');
+        return false;
       }
+    }
+    for (final row in rows) {
       final existing =
           await (_db.select(_db.cardEvolutionCollectorRuns)..where(
                 (table) =>
@@ -980,6 +985,7 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
             .insert(row.copyWith(ownerId: 'cloud-sync', leaseExpiresAt: 0));
       }
     }
+    return true;
   }
 
   Future<void> _mergeObservations(
