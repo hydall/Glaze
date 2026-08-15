@@ -642,20 +642,26 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
         await _clearReconciliationLane(sessionId);
       }
       await _mergeSourceRows(sessionId, data);
-      await _mergeRuns(sessionId, _maps(data['runs']));
-      await _mergeInvalidations(sessionId, _maps(data['invalidations']));
+      final importedComplete = await _mergeRuns(sessionId, _maps(data['runs']));
+      await _mergeInvalidations(
+        sessionId,
+        _maps(data['invalidations']),
+        ignoreUnknown: !importedComplete,
+      );
       final collectors = _maps(data['collectors']);
       final resetDerivedLane = await _resetDerivedLaneForInvalidations(
         sessionId,
         collectors,
       );
-      if (!resetDerivedLane) {
+      if (importedComplete && !resetDerivedLane) {
         await _mergeCollectors(sessionId, collectors);
         await _mergeObservations(sessionId, _maps(data['observations']));
       }
-      await _mergeCompletedClaims(sessionId, _maps(data['completedClaims']));
+      if (importedComplete) {
+        await _mergeCompletedClaims(sessionId, _maps(data['completedClaims']));
+      }
     });
-    return (await getBySessionId(sessionId))!;
+    return await getBySessionId(sessionId) ?? _emptyPayload(sessionId);
   }
 
   Future<_RunMergeDecision> _resolveRunMerge(
@@ -695,6 +701,15 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
         .map(LedgerReconciliationSuccessfulRunRow.fromJson)
         .where((run) => !incomingInvalidatedIds.contains(run.id))
         .toList();
+    final repo = LedgerReconciliationRunRepo(_db);
+    final incomingMatchesChat = await Future.wait(
+      incomingVisible.map((row) => repo.anchorsMatchSession(_runFromRow(row))),
+    );
+    if (incomingMatchesChat.any((matches) => !matches)) {
+      return localVisible.isNotEmpty
+          ? _RunMergeDecision.keepLocal
+          : _RunMergeDecision.replaceLocal;
+    }
     if (localVisible.isEmpty || incomingVisible.isEmpty) {
       if (incomingVisible.isNotEmpty) return _RunMergeDecision.replaceLocal;
       if (localVisible.isNotEmpty) return _RunMergeDecision.keepLocal;
@@ -823,7 +838,7 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
     }
   }
 
-  Future<void> _mergeRuns(
+  Future<bool> _mergeRuns(
     String sessionId,
     List<Map<String, dynamic>> incoming,
   ) async {
@@ -849,17 +864,22 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       final row = LedgerReconciliationSuccessfulRunRow.fromJson(incoming[i]);
       _requireSession(sessionId, row.sessionId);
       final result = await repo.append(_runFromRow(row));
+      if (result is ReconciliationRunMalformed) return false;
       if (result is! ReconciliationRunAppended &&
           result is! ReconciliationRunIdempotent) {
-        throw StateError('Invalid reconciliation chain import: $result');
+        throw StateError(
+          'Invalid reconciliation chain import: ${_integrityReason(result)}',
+        );
       }
     }
+    return true;
   }
 
   Future<void> _mergeInvalidations(
     String sessionId,
-    List<Map<String, dynamic>> incoming,
-  ) async {
+    List<Map<String, dynamic>> incoming, {
+    bool ignoreUnknown = false,
+  }) async {
     final runIds =
         (await (_db.select(
               _db.ledgerReconciliationSuccessfulRuns,
@@ -870,6 +890,7 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       final row = LedgerReconciliationRunInvalidationRow.fromJson(json);
       _requireSession(sessionId, row.sessionId);
       if (!runIds.contains(row.runId)) {
+        if (ignoreUnknown) continue;
         throw StateError('Invalidation references an unknown run');
       }
       await _db
@@ -1238,5 +1259,28 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
     });
   }
 }
+
+Map<String, dynamic> _emptyPayload(String sessionId) => {
+  '__reconciliationState': true,
+  'schemaVersion': 1,
+  'sessionId': sessionId,
+  'runs': <dynamic>[],
+  'invalidations': <dynamic>[],
+  'manifests': <dynamic>[],
+  'manifestEntries': <dynamic>[],
+  'acceptances': <dynamic>[],
+  'collectors': <dynamic>[],
+  'observations': <dynamic>[],
+  'completedClaims': <dynamic>[],
+};
+
+String _integrityReason(ReconciliationRunIntegrity integrity) =>
+    switch (integrity) {
+      ReconciliationRunMalformed(:final reason) => reason,
+      ReconciliationRunChainGap(:final reason) => reason,
+      ReconciliationRunConcurrencyConflict(:final reason) => reason,
+      ReconciliationRunConflict(:final reason) => reason,
+      _ => integrity.runtimeType.toString(),
+    };
 
 enum _RunMergeDecision { merge, keepLocal, replaceLocal }

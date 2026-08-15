@@ -209,6 +209,44 @@ void main() {
     },
   );
 
+  test('malformed cloud evidence is discarded without failing sync', () async {
+    await _appendChain(
+      sourceDb,
+      1,
+      resultPrefix: 'cloud',
+      progressingEndpoints: true,
+    );
+    await _replaceMessages(sourceDb, [
+      _messages[0],
+      _messages[1],
+      {
+        ..._messages[2],
+        'content': 'Edited assistant response',
+        'swipes': ['Edited assistant response'],
+      },
+    ]);
+    await _replaceMessages(targetDb, [
+      _messages[0],
+      _messages[1],
+      {
+        ..._messages[2],
+        'content': 'Edited assistant response',
+        'swipes': ['Edited assistant response'],
+      },
+    ]);
+
+    final merged = await targetStore.mergeBySessionId(
+      'session',
+      (await sourceStore.getBySessionId('session'))!,
+    );
+
+    expect(merged['runs'], isEmpty);
+    expect(
+      await LedgerReconciliationRunRepo(targetDb).getHead('session'),
+      equals(null),
+    );
+  });
+
   test('completed collector round-trip consumes its valid pair', () async {
     final runs = await _appendChain(sourceDb, 2);
     final collectorRepo = CardEvolutionCollectorRunRepo(sourceDb);

@@ -160,6 +160,9 @@ class LedgerReconciliationRunRepo {
   LedgerReconciliationRunRepo(this._db);
   final AppDatabase _db;
 
+  Future<bool> anchorsMatchSession(LedgerReconciliationRun run) =>
+      _anchorsMatchSession(run);
+
   /// Caller owns the transaction. This method never opens a nested transaction.
   Future<ReconciliationRunIntegrity> append(LedgerReconciliationRun run) async {
     final valid = await _validate(run);
