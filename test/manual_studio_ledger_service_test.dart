@@ -35,7 +35,6 @@ void main() {
   late ApiConfig activeApi;
   late Future<List<ApiConfig>> Function() loadApiConfigs;
 
-  const user1 = ChatMessage(id: 'u1', role: 'user', content: 'First');
   const assistant1 = ChatMessage(id: 'a1', role: 'assistant', content: 'One');
   const user2 = ChatMessage(id: 'u2', role: 'user', content: 'Second');
   const assistant2 = ChatMessage(id: 'a2', role: 'assistant', content: 'Two');
@@ -94,7 +93,7 @@ void main() {
 
   Future<void> putSession(
     String id, {
-    List<ChatMessage> messages = const [user1, assistant1, user2, assistant2],
+    List<ChatMessage> messages = const [assistant1, user2, assistant2],
   }) {
     return chatRepo.put(
       ChatSession(
@@ -244,7 +243,6 @@ void main() {
       await putSession(
         'session',
         messages: const [
-          user1,
           assistant1,
           user2,
           ChatMessage(id: 'a2', role: 'assistant', content: 'Changed'),
@@ -273,7 +271,6 @@ void main() {
       await putSession(
         'session',
         messages: const [
-          user1,
           assistant1,
           user2,
           ChatMessage(id: 'a2', role: 'assistant', content: 'Changed'),

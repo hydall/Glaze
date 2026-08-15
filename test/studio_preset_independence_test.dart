@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/llm/generation_context_inputs.dart';
 import 'package:glaze_flutter/core/llm/studio/studio_context_preparer.dart';
-import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_deduper.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_parser.dart';
 import 'package:glaze_flutter/core/llm/studio_message_builder.dart';
@@ -181,16 +180,19 @@ void main() {
       );
     }
 
-    final withOrdinaryA = buildWithOrdinaryRegex('<ordinary-a>', '</ordinary-a>');
-    final withOrdinaryB = buildWithOrdinaryRegex('<ordinary-b>', '</ordinary-b>');
+    final withOrdinaryA = buildWithOrdinaryRegex(
+      '<ordinary-a>',
+      '</ordinary-a>',
+    );
+    final withOrdinaryB = buildWithOrdinaryRegex(
+      '<ordinary-b>',
+      '</ordinary-b>',
+    );
     final withEmpty = buildWithOrdinaryRegex('', '');
 
     expect(withOrdinaryB, withOrdinaryA);
     expect(withEmpty, withOrdinaryA);
-    expect(
-      withOrdinaryA.join(),
-      contains('<api-think>carefully</api-think>'),
-    );
+    expect(withOrdinaryA.join(), contains('<api-think>carefully</api-think>'));
     expect(withOrdinaryA.join(), isNot(contains('ordinary')));
   });
 

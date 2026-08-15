@@ -1,3 +1,6 @@
+// Named public constructor arguments intentionally initialize private fields.
+// ignore_for_file: prefer_initializing_formals
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';

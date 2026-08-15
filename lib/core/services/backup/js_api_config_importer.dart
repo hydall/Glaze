@@ -79,8 +79,9 @@ class JsApiConfigImporter extends BackupHelpers {
         final pMode = p['mode'] as String?;
         if (pMode == 'embedding' ||
             pMode == 'image_gen' ||
-            pMode == 'memory_books')
+            pMode == 'memory_books') {
           continue;
+        }
         if (pid != resolved.llmProfileId) {
           final ep = (p['endpoint'] as String?) ?? '';
           final ak = (p['apiKey'] as String?) ?? (p['key'] as String?) ?? '';

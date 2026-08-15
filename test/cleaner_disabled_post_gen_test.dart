@@ -92,9 +92,9 @@ void main() {
                 ),
           );
 
-      // The turn just generated is the 6th assistant, i.e. the reconciliation
-      // cadence boundary: the planner fires on the Nth assistant and reviews
-      // up to a(N-1), leaving the fresh aN out of the range.
+      // The turn just generated follows five completed interaction chunks.
+      // The opening assistant belongs to the first chunk; the fresh a6 is only
+      // the acceptance trigger and remains outside the reconciliation range.
       const assistant = ChatMessage(
         id: 'a6',
         role: 'assistant',
@@ -102,6 +102,11 @@ void main() {
         timestamp: 1,
       );
       final messages = <ChatMessage>[
+        const ChatMessage(
+          id: 'a0',
+          role: 'assistant',
+          content: 'Opening message',
+        ),
         for (var turn = 1; turn <= 5; turn++) ...[
           ChatMessage(id: 'u$turn', role: 'user', content: 'User turn $turn'),
           ChatMessage(

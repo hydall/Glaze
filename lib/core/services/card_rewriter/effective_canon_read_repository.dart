@@ -37,23 +37,16 @@ class EffectiveCanonReadRepository {
   /// Runtime-only compatibility boundary. Apply uses the primary constructor,
   /// whose raw state is always read from its own [AppDatabase].
   EffectiveCanonReadRepository.runtime({
-    required AppDatabase db,
-    required CharacterRepo characterRepo,
-    required CharacterRevisionRepo revisionRepo,
-    required CharacterSessionBaselineRepo baselineRepo,
-    required CharacterKnowledgeFactRepo factRepo,
-    required AppliedCanonTransitionRepo transitionRepo,
-    required CanonTransitionFactRefRepo transitionFactRefRepo,
+    required this.db,
+    required this.characterRepo,
+    required this.revisionRepo,
+    required this.baselineRepo,
+    required this.factRepo,
+    required this.transitionRepo,
+    required this.transitionFactRefRepo,
     required Future<LedgerRawTrackerState> Function(String sessionId)
     loadRawTrackerState,
-  }) : db = db,
-       characterRepo = characterRepo,
-       revisionRepo = revisionRepo,
-       baselineRepo = baselineRepo,
-       factRepo = factRepo,
-       transitionRepo = transitionRepo,
-       transitionFactRefRepo = transitionFactRefRepo,
-       _rawTrackerStateReader = LedgerRawTrackerStateReader(db),
+  }) : _rawTrackerStateReader = LedgerRawTrackerStateReader(db),
        _runtimeRawTrackerStateLoader = loadRawTrackerState;
 
   final AppDatabase db;

@@ -597,16 +597,20 @@ class TavoBackupImporter {
           cardData.addAll(v2Data);
         } else if ((s['name'] as String?)?.isNotEmpty == true) {
           cardData['name'] = s['name'];
-          if (s['description'] != null)
+          if (s['description'] != null) {
             cardData['description'] = s['description'];
+          }
           if (s['first_mes'] != null) cardData['first_mes'] = s['first_mes'];
           if (s['scenario'] != null) cardData['scenario'] = s['scenario'];
-          if (s['personality'] != null)
+          if (s['personality'] != null) {
             cardData['personality'] = s['personality'];
-          if (s['mes_example'] != null)
+          }
+          if (s['mes_example'] != null) {
             cardData['mes_example'] = s['mes_example'];
-          if (s['system_prompt'] != null)
+          }
+          if (s['system_prompt'] != null) {
             cardData['system_prompt'] = s['system_prompt'];
+          }
           final altGreet = s['alternate_greetings'];
           if (altGreet is String) {
             try {

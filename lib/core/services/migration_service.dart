@@ -381,14 +381,18 @@ class MigrationService {
         if (r is! Map<String, dynamic>) continue;
         final normalized = Map<String, dynamic>.from(r);
         if (!normalized.containsKey('id')) normalized['id'] = _generateId();
-        if (!normalized.containsKey('name'))
+        if (!normalized.containsKey('name')) {
           normalized['name'] = r['scriptName'] ?? '';
-        if (!normalized.containsKey('regex'))
+        }
+        if (!normalized.containsKey('regex')) {
           normalized['regex'] = r['findRegex'] ?? '';
-        if (!normalized.containsKey('replacement'))
+        }
+        if (!normalized.containsKey('replacement')) {
           normalized['replacement'] = r['replaceString'] ?? '';
-        if (!normalized.containsKey('trimOut'))
+        }
+        if (!normalized.containsKey('trimOut')) {
           normalized['trimOut'] = _joinTrimStrings(r['trimStrings']);
+        }
         if (r['isEnabled'] is bool) {
           normalized['disabled'] = !(r['isEnabled'] as bool);
         }
