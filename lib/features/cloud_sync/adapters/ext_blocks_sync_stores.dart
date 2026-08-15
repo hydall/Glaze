@@ -718,9 +718,10 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
     final incomingHead = incomingVisible.last;
     final localEndpoint = messageIds.indexOf(localHead.endMessageId);
     final incomingEndpoint = messageIds.indexOf(incomingHead.endMessageId);
-    if (localEndpoint < 0 || incomingEndpoint < 0) {
-      throw StateError('Reconciliation endpoint is absent from chat');
+    if (localEndpoint < 0 && incomingEndpoint >= 0) {
+      return _RunMergeDecision.replaceLocal;
     }
+    if (incomingEndpoint < 0) return _RunMergeDecision.keepLocal;
     if (incomingEndpoint > localEndpoint) {
       return _RunMergeDecision.replaceLocal;
     }

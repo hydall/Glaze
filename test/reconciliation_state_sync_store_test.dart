@@ -67,7 +67,12 @@ void main() {
   test(
     'divergent chains at the same endpoint converge deterministically',
     () async {
-      await _appendChain(targetDb, 1, resultPrefix: 'local');
+      await _appendChain(
+        targetDb,
+        1,
+        resultPrefix: 'local',
+        progressingEndpoints: true,
+      );
       await _appendChain(sourceDb, 1, resultPrefix: 'cloud');
       final sourcePayload = (await sourceStore.getBySessionId('session'))!;
       final targetPayload = (await targetStore.getBySessionId('session'))!;
@@ -93,12 +98,7 @@ void main() {
         resultPrefix: 'cloud',
         progressingEndpoints: true,
       );
-      await _appendChain(
-        targetDb,
-        1,
-        resultPrefix: 'local',
-        progressingEndpoints: true,
-      );
+      await _appendChain(targetDb, 1, resultPrefix: 'local');
 
       await targetStore.mergeBySessionId(
         'session',
@@ -130,6 +130,72 @@ void main() {
         resultPrefix: 'local',
         progressingEndpoints: true,
       );
+
+      final merged = await targetStore.mergeBySessionId(
+        'session',
+        (await sourceStore.getBySessionId('session'))!,
+      );
+
+      expect(
+        (merged['runs'] as List).map((run) => (run as Map)['chainHash']),
+        local.map((run) => run.chainHash),
+      );
+    },
+  );
+
+  test(
+    'a divergent incoming chain replaces a local head absent from chat',
+    () async {
+      await _appendChain(
+        targetDb,
+        1,
+        resultPrefix: 'local',
+        progressingEndpoints: true,
+      );
+      final incoming = await _appendChain(
+        sourceDb,
+        2,
+        resultPrefix: 'cloud',
+        progressingEndpoints: true,
+      );
+      await _replaceMessages(targetDb, [
+        _messages[1],
+        _messages[2],
+        _messages[3],
+        _messages[4],
+      ]);
+
+      await targetStore.mergeBySessionId(
+        'session',
+        (await sourceStore.getBySessionId('session'))!,
+      );
+
+      final stored = await LedgerReconciliationRunRepo(
+        targetDb,
+      ).readSession('session');
+      expect(
+        stored.map((run) => run.chainHash),
+        incoming.map((run) => run.chainHash),
+      );
+    },
+  );
+
+  test(
+    'a divergent incoming head absent from chat preserves local state',
+    () async {
+      await _appendChain(
+        sourceDb,
+        2,
+        resultPrefix: 'cloud',
+        progressingEndpoints: true,
+      );
+      final local = await _appendChain(
+        targetDb,
+        1,
+        resultPrefix: 'local',
+        progressingEndpoints: true,
+      );
+      await _replaceMessages(targetDb, _messages.take(3).toList());
 
       final merged = await targetStore.mergeBySessionId(
         'session',
@@ -368,6 +434,14 @@ Future<void> _seedSession(AppDatabase db) => db.customStatement(
   '(session_id, character_id, session_index, messages_json) '
   'VALUES (?, ?, 0, ?)',
   ['session', 'character', jsonEncode(_messages)],
+);
+
+Future<void> _replaceMessages(
+  AppDatabase db,
+  List<Map<String, Object>> messages,
+) => db.customStatement(
+  'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+  [jsonEncode(messages), 'session'],
 );
 
 Future<List<LedgerReconciliationRun>> _appendChain(
