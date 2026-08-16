@@ -11,8 +11,9 @@ final class CanonRevisionIdentity {
   final String hash;
 }
 
-/// Authoritative known revision identity. The resolver accepts no inferred
-/// number/hash pairing; `(0, '')` is the one explicit legacy-compatible pair.
+/// Authoritative known revision identity. Revision numbers are device-local;
+/// hashes identify the same semantic revision across cloud-synced devices.
+/// `(0, '')` is the one explicit legacy-compatible pair.
 final class CanonRevisionLineage {
   CanonRevisionLineage(Iterable<CanonRevisionIdentity> revisions)
     : revisions = List.unmodifiable(revisions) {
@@ -29,6 +30,21 @@ final class CanonRevisionLineage {
   bool contains(int number, String hash) =>
       (number == 0 && hash.isEmpty) ||
       revisions.any((item) => item.number == number && item.hash == hash);
+
+  /// Resolves persisted fact/tracker provenance to this device's local
+  /// revision number. A known hash remains authoritative even when the source
+  /// device assigned it a different ordinal. Unknown hashes fail closed.
+  CanonRevisionIdentity? resolveRecord(int number, String hash) {
+    if (number == 0 && hash.isEmpty) {
+      return const CanonRevisionIdentity(number: 0, hash: '');
+    }
+    final exact = revisions
+        .where((item) => item.number == number && item.hash == hash)
+        .firstOrNull;
+    if (exact != null) return exact;
+    final matches = revisions.where((item) => item.hash == hash).toList();
+    return matches.length == 1 ? matches.single : null;
+  }
 }
 
 final class CanonFenceTransition {
@@ -202,7 +218,11 @@ abstract final class EffectiveCanonFenceResolver {
     final historicalFacts = <CharacterKnowledgeFact>[];
     final rejectedFacts = <RejectedCanonFenceFact>[];
     for (final fact in facts) {
-      if (!lineage.contains(fact.basisRevisionNumber, fact.basisRevisionHash)) {
+      final basis = lineage.resolveRecord(
+        fact.basisRevisionNumber,
+        fact.basisRevisionHash,
+      );
+      if (basis == null) {
         rejectedFacts.add(
           RejectedCanonFenceFact(
             fact,
@@ -211,7 +231,7 @@ abstract final class EffectiveCanonFenceResolver {
         );
         continue;
       }
-      if (fact.basisRevisionNumber > currentRevision.number) {
+      if (basis.number > currentRevision.number) {
         rejectedFacts.add(
           RejectedCanonFenceFact(
             fact,
@@ -221,8 +241,7 @@ abstract final class EffectiveCanonFenceResolver {
         continue;
       }
       final scope = scopes[fact.scopeKey];
-      if (scope != null &&
-          fact.basisRevisionNumber < scope.transition.revisionNumber) {
+      if (scope != null && basis.number < scope.transition.revisionNumber) {
         historicalFacts.add(fact);
       } else {
         activeFacts.add(fact);
@@ -236,17 +255,18 @@ abstract final class EffectiveCanonFenceResolver {
     final filteredTrackers = <Tracker>[];
     final rejectedTrackers = <RejectedCanonFenceTracker>[];
     for (final tracker in trackers) {
-      if (!lineage.contains(
+      final basis = lineage.resolveRecord(
         tracker.basisRevisionNumber,
         tracker.basisRevisionHash,
-      )) {
+      );
+      if (basis == null) {
         rejectedTrackers.add(
           RejectedCanonFenceTracker(
             tracker,
             CanonFenceRecordRejection.unknownBasisRevision,
           ),
         );
-      } else if (tracker.basisRevisionNumber > currentRevision.number) {
+      } else if (basis.number > currentRevision.number) {
         rejectedTrackers.add(
           RejectedCanonFenceTracker(
             tracker,
@@ -254,7 +274,7 @@ abstract final class EffectiveCanonFenceResolver {
           ),
         );
       } else if (fencesByTracker[tracker.name] case final fence?
-          when tracker.basisRevisionNumber < fence.revisionNumber) {
+          when basis.number < fence.revisionNumber) {
         filteredTrackers.add(tracker);
       } else {
         activeTrackers.add(tracker);

@@ -86,6 +86,48 @@ void main() {
     expect(result.rejectedTrackers.single.tracker.name, 'ledger:ada');
   });
 
+  test('resolves cloud record ordinals by authoritative revision hash', () {
+    final result = resolve(
+      facts: [fact('cloud-fact', 5, 'h10')],
+      trackers: [tracker('cloud-tracker', 5, 'h10')],
+    );
+
+    expect(result.activeFacts.single.id, 'cloud-fact');
+    expect(result.activeTrackers.single.name, 'cloud-tracker');
+    expect(result.rejectedFacts, isEmpty);
+    expect(result.rejectedTrackers, isEmpty);
+  });
+
+  test(
+    'uses local hash ordinal when checking cloud records for future data',
+    () {
+      final result = resolve(
+        currentRevision: revision5,
+        facts: [fact('cloud-future', 5, 'h10')],
+        trackers: [tracker('cloud-future', 5, 'h10')],
+      );
+
+      expect(
+        result.rejectedFacts.single.reason,
+        CanonFenceRecordRejection.futureBasisRevision,
+      );
+      expect(
+        result.rejectedTrackers.single.reason,
+        CanonFenceRecordRejection.futureBasisRevision,
+      );
+    },
+  );
+
+  test('rejects a foreign ordinal when its hash is ambiguous locally', () {
+    final ambiguousLineage = CanonRevisionLineage([
+      const CanonRevisionIdentity(number: 1, hash: 'same'),
+      const CanonRevisionIdentity(number: 3, hash: 'same'),
+    ]);
+
+    expect(ambiguousLineage.resolveRecord(2, 'same'), isNull);
+    expect(ambiguousLineage.resolveRecord(3, 'same')?.number, 3);
+  });
+
   test('filters only old affected known trackers', () {
     final result = resolve(
       trackers: [
