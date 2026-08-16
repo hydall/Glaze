@@ -9,10 +9,8 @@ part 'studio_config.g.dart';
 
 enum StudioBlockType { instruction, context, history, priorBriefs }
 
-/// Selects the post-generation Ledger workflow for one Studio preset.
-///
-/// JSON written by older builds (or an unsupported future value) deliberately
-/// resolves to [currentReconciled], preserving the current workflow.
+/// Legacy persisted selector retained for Studio preset JSON compatibility.
+/// Runtime extraction always uses [currentReconciled].
 enum StudioLedgerEngine { currentReconciled, legacyTurnOnly }
 
 /// Per-preset runtime metadata that is NOT duplicated by global

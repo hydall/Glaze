@@ -136,9 +136,13 @@ abstract final class StudioPresetCodec {
             // legacy rather than resetting unrelated settings.
             runtimeJson['requestedLedgerPromptInjectionMode'] = 'legacy';
           }
-          runtime = StudioRuntimeSettings.fromJson(
-            runtimeJson,
-          ).copyWith(version: 1);
+          runtime = StudioRuntimeSettings.fromJson(runtimeJson).copyWith(
+            version: 1,
+            // The legacy post-generation selector is retained in JSON only for
+            // compatibility. Per-turn extraction always uses the current path;
+            // Card Rewriter settings own reconciliation automation.
+            ledgerEngine: StudioLedgerEngine.currentReconciled,
+          );
         } on Object {
           warnings.add(
             'Malformed Studio runtime settings were reset to defaults.',

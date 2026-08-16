@@ -202,11 +202,8 @@ class LedgerStage {
       );
 
       LedgerRunResult? reconciliationResult;
-      final ledgerEngine =
-          studioPreset?.runtime.ledgerEngine ??
-          StudioLedgerEngine.currentReconciled;
       if (shouldRunAutomaticLedgerReconciliation(
-        engine: ledgerEngine,
+        cardRewriterEnabled: pipeline.cardRewriter.enabled,
         isManualRerun: isManualRerun,
       )) {
         final checkpointRepo = ctx.ref.read(
@@ -377,7 +374,7 @@ class LedgerStage {
         cancelToken: cancelToken,
         ledgerBlocks: studioPreset?.blocks ?? const [],
         macroCtx: ledgerMacroCtx,
-        engine: ledgerEngine,
+        engine: StudioLedgerEngine.currentReconciled,
         operationIdentity: 'automatic:$genId',
       );
 
@@ -641,11 +638,10 @@ class LedgerStage {
   }
 }
 
-/// Engine gating is deliberately independent of generation-time Ledger prompt
-/// projection. Projection opt-out controls main-generation context only; this
-/// controls post-generation reconciliation/Card Rewriter automation only.
+/// Reconciliation is the collection phase of automatic Card Rewriter. Per-turn
+/// Ledger extraction remains enabled independently while Studio is active.
 @visibleForTesting
 bool shouldRunAutomaticLedgerReconciliation({
-  required StudioLedgerEngine engine,
+  required bool cardRewriterEnabled,
   required bool isManualRerun,
-}) => !isManualRerun && engine == StudioLedgerEngine.currentReconciled;
+}) => !isManualRerun && cardRewriterEnabled;

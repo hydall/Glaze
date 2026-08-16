@@ -219,9 +219,7 @@ class ManualStudioLedgerService {
         target: target,
         macroCtx: macroCtx,
         isStillCurrent: isTargetCurrent,
-        engine:
-            turnConfig.preset?.runtime.ledgerEngine ??
-            StudioLedgerEngine.currentReconciled,
+        engine: StudioLedgerEngine.currentReconciled,
       ),
     );
     if (!await isTargetCurrent()) {

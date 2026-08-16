@@ -4,6 +4,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models/ledger_prompt_injection_mode.dart';
+import '../../core/models/ledger_prompt_injection_policy.dart';
 import '../../core/models/preset_folder.dart';
 import '../../core/models/studio_config.dart';
 import '../../core/models/studio_preset_block_groups.dart';
@@ -191,11 +193,20 @@ class StudioPresetEditorBodyState
     await _persistNow(applyStudioAgentToggle(preset, specId, value));
   }
 
-  Future<void> _setLedgerEngine(StudioLedgerEngine engine) async {
+  Future<void> _setLedgerPromptInjection(LedgerPromptInjectionMode mode) async {
     final preset = _preset;
     if (preset == null) return;
     await _persistNow(
-      preset.copyWith(runtime: preset.runtime.copyWith(ledgerEngine: engine)),
+      preset.copyWith(
+        runtime: preset.runtime.copyWith(
+          requestedLedgerPromptInjectionMode: mode,
+          requestedLedgerPromptInjectionAlgorithmVersion:
+              mode == LedgerPromptInjectionMode.gapFiller
+              ? ledgerPromptInjectionAlgorithmVersion
+              : null,
+          ledgerEngine: StudioLedgerEngine.currentReconciled,
+        ),
+      ),
     );
   }
 
@@ -621,7 +632,8 @@ class StudioPresetEditorBodyState
       onMoveToGroup: _moveBlockToGroup,
       onMoveToSection: _moveBlockToSection,
       onToggleAgent: _toggleAgent,
-      onLedgerEngineChanged: (engine) => unawaited(_setLedgerEngine(engine)),
+      onLedgerPromptInjectionChanged: (mode) =>
+          unawaited(_setLedgerPromptInjection(mode)),
     );
     return PresetCard(
       child: Column(

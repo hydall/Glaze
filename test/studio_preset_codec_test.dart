@@ -301,6 +301,6 @@ void main() {
 
     expect(absent.runtime.ledgerEngine, StudioLedgerEngine.currentReconciled);
     expect(unknown.runtime.ledgerEngine, StudioLedgerEngine.currentReconciled);
-    expect(legacy.runtime.ledgerEngine, StudioLedgerEngine.legacyTurnOnly);
+    expect(legacy.runtime.ledgerEngine, StudioLedgerEngine.currentReconciled);
   });
 }

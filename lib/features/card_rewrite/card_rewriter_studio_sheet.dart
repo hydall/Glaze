@@ -177,7 +177,7 @@ class _CardRewriterStudioSheetState
             contentPadding: EdgeInsets.zero,
             title: const Text('Enabled'),
             subtitle: const Text(
-              'After Studio Ledger reconciliation, proposes changes to description, personality, and scenario for review.',
+              'Runs periodic Ledger reconciliation and automatic Card Rewriter collection. Per-turn Ledger extraction stays enabled either way.',
             ),
             value: settings.enabled,
             onChanged: (enabled) =>

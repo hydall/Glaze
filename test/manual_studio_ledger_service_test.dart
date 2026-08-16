@@ -155,7 +155,7 @@ void main() {
     expect(diagnostic?.value, 'turn=a2 \u2022 manual rerun, ok (ops=2)');
   });
 
-  test('rerun passes the preset-selected Ledger engine', () async {
+  test('rerun always uses the current Ledger extractor', () async {
     await putSession('session');
     await presetRepo.put(
       const StudioPreset(
@@ -169,7 +169,7 @@ void main() {
 
     await createService().rerun(sessionId: 'session', target: assistant2);
 
-    expect(ledger.lastEngine, StudioLedgerEngine.legacyTurnOnly);
+    expect(ledger.lastEngine, StudioLedgerEngine.currentReconciled);
   });
 
   test(
