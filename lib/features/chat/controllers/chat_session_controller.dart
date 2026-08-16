@@ -46,7 +46,7 @@ class ChatSessionController {
         AsyncData(ChatState(session: session, visibleStartIndex: start)),
       );
     } catch (error, stackTrace) {
-      if (epoch != _switchEpoch) return;
+      if (!_ref.mounted || epoch != _switchEpoch) return;
       final current = _getState().value;
       if (current != null) {
         _setState(AsyncData(current));
