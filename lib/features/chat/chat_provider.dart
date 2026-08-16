@@ -430,6 +430,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       durableAcceptance?.complete(false);
       return;
     }
+    await _sessionWrites.settle();
+    if (!ref.mounted) {
+      durableAcceptance?.complete(false);
+      return;
+    }
+    if (ref.read(editingMessageIdProvider(arg)) != null) {
+      durableAcceptance?.complete(false);
+      return;
+    }
     if (_sendInFlight) {
       durableAcceptance?.complete(false);
       return;
@@ -663,6 +672,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         state.value?.isPostGenRunning == true) {
       await abortGeneration();
     }
+    await _sessionWrites.settle();
+    if (!ref.mounted) return;
+    if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;
     if (current == null ||
         current.session == null ||
@@ -779,6 +791,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<void> impersonate({String? guidanceText}) async {
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
+    await _sessionWrites.settle();
+    if (!ref.mounted) return;
+    if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;
     if (current == null ||
         current.session == null ||
@@ -867,6 +882,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   }
 
   Future<void> continueMessage() async {
+    if (!ref.mounted) return;
+    if (ref.read(editingMessageIdProvider(arg)) != null) return;
+    await _sessionWrites.settle();
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;

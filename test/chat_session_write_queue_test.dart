@@ -72,6 +72,41 @@ void main() {
     expect(await queue.run(() async => 2), 2);
   });
 
+  test('settle waits for pending writes', () async {
+    final queue = ChatSessionWriteQueue();
+    final write = Completer<void>();
+    var settled = false;
+
+    unawaited(queue.run(() => write.future));
+    final barrier = queue.settle().then((_) => settled = true);
+
+    await Future<void>.delayed(Duration.zero);
+    expect(settled, isFalse);
+
+    write.complete();
+    await barrier;
+    expect(settled, isTrue);
+  });
+
+  test('settle includes writes enqueued while it is waiting', () async {
+    final queue = ChatSessionWriteQueue();
+    final first = Completer<void>();
+    final second = Completer<void>();
+    var settled = false;
+
+    unawaited(queue.run(() => first.future));
+    final barrier = queue.settle().then((_) => settled = true);
+    unawaited(queue.run(() => second.future));
+
+    first.complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(settled, isFalse);
+
+    second.complete();
+    await barrier;
+    expect(settled, isTrue);
+  });
+
   group('publication claims', () {
     test('only the newest claim may repaint', () {
       final queue = ChatSessionWriteQueue();

@@ -54,4 +54,17 @@ class ChatSessionWriteQueue {
     _tail = next.then<void>((_) {}, onError: (Object _) {});
     return next;
   }
+
+  /// Waits until every write enqueued before or during the wait has settled.
+  ///
+  /// Generation uses this as a durability barrier after an optimistic message
+  /// deletion: its prompt must not read canon state before the delete's
+  /// multi-table rollback transaction has completed.
+  Future<void> settle() async {
+    while (true) {
+      final pending = _tail;
+      await pending;
+      if (identical(pending, _tail)) return;
+    }
+  }
 }

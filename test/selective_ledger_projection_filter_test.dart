@@ -589,6 +589,32 @@ void main() {
       );
     });
 
+    test('safe materialization never exposes tentative facts', () {
+      final active = _fact(id: 'active', object: 'accepted sentinel');
+      final tentative = _fact(
+        id: 'tentative',
+        object: 'tentative sentinel',
+        lifecycle: CharacterKnowledgeFactLifecycle.tentative,
+      );
+      final materialized = EffectiveCanonPromptMaterializer.materializeSafely(
+        _input(
+          _projection(facts: [active, tentative]),
+          const LedgerPromptInjectionPolicy(
+            presetOptIn: true,
+            mode: LedgerPromptInjectionMode.legacy,
+          ),
+        ),
+        sessionId: 's',
+      );
+
+      expect(materialized.filteredProjection.facts, [active]);
+      expect(materialized.characterKnowledgeContent, contains(active.object));
+      expect(
+        materialized.characterKnowledgeContent,
+        isNot(contains(tentative.object)),
+      );
+    });
+
     test('identity is deterministic and changes with swipe/content/path', () {
       String identity(String content, int swipe, String path) =>
           EffectiveCanonPromptMaterializer.materialize(
@@ -724,6 +750,7 @@ CharacterKnowledgeFact _fact({
       CharacterKnowledgeFactLifecycle.active,
   CharacterKnowledgeEpistemicState epistemic =
       CharacterKnowledgeEpistemicState.confirmed,
+  String object = 'the truth',
 }) => CharacterKnowledgeFact(
   id: id,
   chatSessionId: 's',
@@ -734,7 +761,7 @@ CharacterKnowledgeFact _fact({
   factClass: factClass,
   scopeKey: 'fact:$id',
   predicate: 'knows',
-  object: 'the truth',
+  object: object,
   epistemicState: epistemic,
   sourceMessageId: source,
   sourceSwipeId: 0,

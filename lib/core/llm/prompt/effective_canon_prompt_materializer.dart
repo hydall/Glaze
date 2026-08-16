@@ -78,16 +78,18 @@ abstract final class EffectiveCanonPromptMaterializer {
     String latestUserText = '',
     String latestAssistantText = '',
   }) {
+    final safeInput = _generationSafeInput(input);
     try {
       return materialize(
-        input,
+        safeInput,
         sessionId: sessionId,
         latestUserText: latestUserText,
         latestAssistantText: latestAssistantText,
       );
     } catch (_) {
-      if (input.policy.effectiveMode == LedgerPromptInjectionMode.disabled) {
-        final source = input.projection;
+      if (safeInput.policy.effectiveMode ==
+          LedgerPromptInjectionMode.disabled) {
+        final source = safeInput.projection;
         final empty = EffectiveCanonPromptProjection(
           facts: const [],
           trackers: const [],
@@ -104,10 +106,10 @@ abstract final class EffectiveCanonPromptMaterializer {
           arcContent: null,
           transitionContent: null,
           diagnostics: const [],
-          injectionCacheIdentity: '${input.policy.identity}/disabled',
+          injectionCacheIdentity: '${safeInput.policy.identity}/disabled',
         );
       }
-      final legacyProjection = input.projection;
+      final legacyProjection = safeInput.projection;
       final content = EffectiveCanonPromptFormatter.format(
         legacyProjection,
         sessionId: sessionId,
@@ -127,9 +129,10 @@ abstract final class EffectiveCanonPromptMaterializer {
       }
       String identity;
       try {
-        identity = _identity(input, legacyProjection);
+        identity = _identity(safeInput, legacyProjection);
       } catch (_) {
-        identity = '${input.policy.identity}/${legacyProjection.cacheIdentity}';
+        identity =
+            '${safeInput.policy.identity}/${legacyProjection.cacheIdentity}';
       }
       return EffectiveCanonPromptMaterialization(
         filteredProjection: legacyProjection,
@@ -142,6 +145,34 @@ abstract final class EffectiveCanonPromptMaterializer {
       );
     }
   }
+}
+
+SelectiveLedgerProjectionInput _generationSafeInput(
+  SelectiveLedgerProjectionInput input,
+) {
+  final safeFacts = input.projection.facts
+      .where(isSelectableLedgerFact)
+      .toList(growable: false);
+  if (safeFacts.length == input.projection.facts.length) return input;
+  final source = input.projection;
+  return SelectiveLedgerProjectionInput(
+    policy: input.policy,
+    consumerPath: input.consumerPath,
+    projection: EffectiveCanonPromptProjection(
+      facts: safeFacts,
+      trackers: source.trackers,
+      unblockedTransitionClaims: source.unblockedTransitionClaims,
+      transitions: source.transitions,
+      revisionNumber: source.revisionNumber,
+      revisionHash: source.revisionHash,
+      cacheIdentity: source.cacheIdentity,
+    ),
+    visibleMessages: input.visibleMessages,
+    selectedSwipeByMessageId: input.selectedSwipeByMessageId,
+    focalUserName: input.focalUserName,
+    structuredContinuitySourceIds: input.structuredContinuitySourceIds,
+    freshness: input.freshness,
+  );
 }
 
 String _identity(

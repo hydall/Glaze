@@ -319,7 +319,7 @@ List<_Group> _buildGroups(
     if (relevanceEntities.isNotEmpty && nonFocalEntities.isEmpty) {
       group.factRelevanceDependsOnlyOnFocalUser = true;
     }
-    if (!_isSelectableFact(fact)) {
+    if (!isSelectableLedgerFact(fact)) {
       group.tier = LedgerProjectionDeliveryTier.excluded;
     } else if (_isCriticalFact(fact)) {
       group.tier = LedgerProjectionDeliveryTier.critical;
@@ -615,7 +615,10 @@ bool _isCriticalFact(CharacterKnowledgeFact fact) =>
     fact.factClass == CharacterKnowledgeFactClass.persistentCondition ||
     fact.factClass == CharacterKnowledgeFactClass.identityDevelopment;
 
-bool _isSelectableFact(CharacterKnowledgeFact fact) {
+/// Whether a durable knowledge fact may cross the final-generator prompt
+/// boundary. Tentative and non-canonical epistemic states remain available to
+/// review/reconciliation workflows but must never steer a reroll.
+bool isSelectableLedgerFact(CharacterKnowledgeFact fact) {
   if (fact.lifecycle != CharacterKnowledgeFactLifecycle.active) return false;
   return !const {
     CharacterKnowledgeEpistemicState.inferred,
