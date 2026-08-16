@@ -118,15 +118,14 @@ class _CardRewriterStudioSheetState
       ).pop('/character/${widget.charId}/rewrite/${outcome.job!.id}');
       return;
     }
-    GlazeToast.show(
-      context,
-      _runMessage(outcome),
-      position: ToastPosition.top,
-    );
+    GlazeToast.show(context, _runMessage(outcome), position: ToastPosition.top);
   }
 
-  String _runMessage(CardEvolutionFinalizeOutcome outcome) => switch (outcome.kind) {
-    'notEligible' => 'At least one user and one assistant message are required.',
+  String _runMessage(
+    CardEvolutionFinalizeOutcome outcome,
+  ) => switch (outcome.kind) {
+    'notEligible' =>
+      'At least one user and one assistant message are required.',
     'busy' => 'Card Rewriter is already running for this session.',
     'activeJob' => 'Review or close the current Card Rewriter proposal first.',
     'modelNotConfigured' => 'Choose a valid dedicated API preset and model.',
@@ -140,11 +139,15 @@ class _CardRewriterStudioSheetState
       'Card patch no longer matches the current card: ${outcome.detail ?? 'validation failed'}',
     'invalidLorebookOperation' =>
       'Lorebook patch no longer matches the injected entry.',
-    'invalidLorebookOutput' => 'The lorebook model returned an invalid patch response.',
+    'invalidLorebookOutput' =>
+      'The lorebook model returned an invalid patch response.',
     'emptyModelProposal' =>
       'The model returned no patches despite the supplied evidence. Check the saved debug response.',
     'snapshotUnavailable' || 'stale' || 'staleEvidence' =>
       'The chat or Ledger changed while the snapshot was being prepared. Try again.',
+    'snapshotTooLarge' =>
+      outcome.detail ??
+          'The Card Rewriter snapshot exceeds its safe size limit.',
     'disabled' => 'Enable Card Rewriter first.',
     'cancelled' => 'Card Rewriter was cancelled.',
     _ => 'Card Rewriter skipped: ${outcome.kind}',
@@ -192,7 +195,8 @@ class _CardRewriterStudioSheetState
             value: settings.lorebookEvolutionEnabled,
             onChanged: settings.enabled
                 ? (enabled) => _save(
-                    (value) => value.copyWith(lorebookEvolutionEnabled: enabled),
+                    (value) =>
+                        value.copyWith(lorebookEvolutionEnabled: enabled),
                   )
                 : null,
           ),
@@ -204,7 +208,8 @@ class _CardRewriterStudioSheetState
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
               labelText: 'Writer timeout (seconds)',
-              helperText: 'Idle timeout for each card or lorebook model call. Default: 180 seconds.',
+              helperText:
+                  'Idle timeout for each card or lorebook model call. Default: 180 seconds.',
               isDense: true,
             ),
             onChanged: (raw) {
@@ -270,10 +275,7 @@ class _CardRewriterStudioSheetState
                 ? () => _run(settings)
                 : null,
             icon: _running
-                ? const SizedBox.square(
-                    dimension: 16,
-                    child: GlazeSpinner(),
-                  )
+                ? const SizedBox.square(dimension: 16, child: GlazeSpinner())
                 : const Icon(Icons.auto_fix_high_outlined),
             label: Text(_running ? 'Preparing proposal...' : 'Run now'),
           ),

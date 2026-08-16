@@ -326,6 +326,7 @@ class LedgerStage {
                   'invalidCardOutput',
                   'invalidLorebookOutput',
                   'snapshotUnavailable',
+                  'snapshotTooLarge',
                   'staleEvidence',
                   'canonUnavailable',
                   'fieldMismatch',

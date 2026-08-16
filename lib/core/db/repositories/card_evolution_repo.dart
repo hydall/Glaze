@@ -16,7 +16,8 @@ import 'manual_rewrite_job_repo.dart';
 import 'session_lorebook_evolution_repo.dart';
 
 const _maxChatHistoryMessages = 40;
-const _maxEvolutionSnapshotCharacters = 120000;
+const _writerCollectorBatchSize = 2;
+const _writerReconciliationRunCount = _writerCollectorBatchSize * 2;
 const _maxCanonValueCharacters = 2000;
 const _maxLorebookEntryCharacters = 20000;
 const _maxLorebookTotalCharacters = 40000;
@@ -580,7 +581,10 @@ class CardEvolutionRepo {
 
   Future<String?> _selectedInputForClaim(CardEvolutionClaimRow claim) async {
     final runIds = await _reconciliationRunIdsForClaim(claim);
-    if (claim.predecessorRunOrdinal > 0 && runIds.length != 6) return null;
+    if (claim.predecessorRunOrdinal > 0 &&
+        runIds.length != _writerReconciliationRunCount) {
+      return null;
+    }
     final selected = await _selectInput(
       claim.sessionId,
       reconciliationRunIds: runIds,
@@ -714,9 +718,7 @@ class CardEvolutionRepo {
         'availableObservationRetrievalTargets': availableRetrievalTargets,
         'accumulatedObservations': compactObservations,
       });
-      return selected.length <= _maxEvolutionSnapshotCharacters
-          ? selected
-          : null;
+      return selected;
     } catch (_) {
       return null;
     }
@@ -950,14 +952,14 @@ class CardEvolutionRepo {
               ..where((row) => row.sessionId.equals(claim.sessionId))
               ..where(
                 (row) => row.collectorOrdinal.isBetweenValues(
-                  claim.predecessorRunOrdinal - 2,
+                  claim.predecessorRunOrdinal - _writerCollectorBatchSize + 1,
                   claim.predecessorRunOrdinal,
                 ),
               )
               ..where((row) => row.status.equals('completed'))
               ..orderBy([(row) => OrderingTerm.asc(row.collectorOrdinal)]))
             .get();
-    if (rows.length != 3 ||
+    if (rows.length != _writerCollectorBatchSize ||
         rows.last.reconciliationChainHash != claim.predecessorCursorHash) {
       return const [];
     }

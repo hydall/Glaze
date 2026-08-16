@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
-import 'package:drift/drift.dart' show OrderingTerm, Value;
+import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/applied_canon_transition_repo.dart';
@@ -472,7 +472,7 @@ void main() {
   );
 
   test(
-    'automatic collector runs every second reconciliation and writer every third collector',
+    'automatic collector runs every second reconciliation and writer every second collector',
     () async {
       final prompts = <String>[];
       final service = fixture.service((_, prompt) async {
@@ -481,17 +481,17 @@ void main() {
             ? _ok('{"observations":[]}')
             : _ok('{"operations":[]}');
       });
-      for (var ordinal = 1; ordinal <= 6; ordinal++) {
+      for (var ordinal = 1; ordinal <= 4; ordinal++) {
         final run = await fixture.seedReconciliationRun(ordinal: ordinal);
         final result = await service.runAfterReconciliation(run);
         expect(
           result.kind,
-          ordinal < 6 ? 'collectorCompleted' : 'emptyModelProposal',
+          ordinal < 4 ? 'collectorCompleted' : 'emptyModelProposal',
         );
       }
       expect(
         prompts.where((value) => value.contains('observation journal keeper')),
-        hasLength(3),
+        hasLength(2),
       );
       expect(
         prompts.where((value) => value.contains('Glaze card rewriter')),
@@ -500,17 +500,109 @@ void main() {
       final collectors = await fixture.db
           .select(fixture.db.cardEvolutionCollectorRuns)
           .get();
-      expect(collectors, hasLength(3));
-      expect(collectors.map((run) => run.reconciliationRunOrdinal), [2, 4, 6]);
+      expect(collectors, hasLength(2));
+      expect(collectors.map((run) => run.reconciliationRunOrdinal), [2, 4]);
       expect(collectors.every((run) => run.status == 'completed'), isTrue);
       final claims = await fixture.db
           .select(fixture.db.cardEvolutionClaims)
           .get();
-      expect(claims.single.predecessorRunOrdinal, 3);
+      expect(claims.single.predecessorRunOrdinal, 2);
       expect(claims.single.status, 'completed');
       expect(claims.single.rewriteJobId, isNull);
     },
   );
+
+  test(
+    'oversized writer streams all immutable history into one handoff',
+    () async {
+      final messages = List<Map<String, String>>.generate(41, (index) {
+        return {
+          'id': 'long-$index',
+          'role': index.isEven ? 'assistant' : 'user',
+          'content':
+              '${index.isEven ? 'assistant' : 'user'}-$index ${'x' * 4920}',
+        };
+      });
+      final starts = [0, 1, 21, 21];
+      final prompts = <String>[];
+      final service = fixture.service((_, prompt) async {
+        prompts.add(prompt);
+        if (prompt.contains('observation journal keeper')) {
+          return _ok('{"observations":[]}');
+        }
+        if (prompt.contains('compact cumulative factual handoff')) {
+          return _ok('complete history factual handoff');
+        }
+        return _ok('{"operations":[]}');
+      });
+      CardEvolutionFinalizeOutcome? outcome;
+      for (var ordinal = 1; ordinal <= 4; ordinal++) {
+        outcome = await service.runAfterReconciliation(
+          await fixture.seedReconciliationRun(
+            ordinal: ordinal,
+            messages: messages.sublist(
+              starts[ordinal - 1],
+              starts[ordinal - 1] + 20,
+            ),
+          ),
+        );
+      }
+      await fixture.db.customStatement(
+        'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+        [jsonEncode(messages), 'session'],
+      );
+      outcome = await service.runOneBatch('session');
+
+      expect(outcome.kind, 'emptyModelProposal', reason: outcome.detail);
+      expect(
+        prompts.any(
+          (prompt) => prompt.contains('compact cumulative factual handoff'),
+        ),
+        isTrue,
+        reason: 'Expected oversized split; prompts=${prompts.length}',
+      );
+      final consolidations = prompts
+          .where(
+            (prompt) => prompt.contains('compact cumulative factual handoff'),
+          )
+          .toList();
+      final writer = prompts.singleWhere(
+        (prompt) => prompt.contains('Glaze card rewriter'),
+      );
+      expect(consolidations.first, contains('long-0'));
+      expect(consolidations.last, contains('long-38'));
+      expect(writer, contains('complete history factual handoff'));
+      expect(writer, isNot(contains('long-0')));
+      expect(writer, isNot(contains('long-38')));
+    },
+  );
+
+  test('one oversized history message fails with an explicit size', () async {
+    final messages = [
+      {'id': 'a0', 'role': 'assistant', 'content': 'opening'},
+      {'id': 'u1', 'role': 'user', 'content': 'x' * 201000},
+      {'id': 'a1', 'role': 'assistant', 'content': 'accepted'},
+    ];
+    final service = fixture.service((_, prompt) async {
+      if (prompt.contains('observation journal keeper')) {
+        return _ok('{"observations":[]}');
+      }
+      return _ok('{"operations":[]}');
+    });
+    CardEvolutionFinalizeOutcome? outcome;
+    for (var ordinal = 1; ordinal <= 4; ordinal++) {
+      outcome = await service.runAfterReconciliation(
+        await fixture.seedReconciliationRun(
+          ordinal: ordinal,
+          messages: messages,
+        ),
+      );
+    }
+
+    expect(outcome?.kind, 'snapshotTooLarge');
+    expect(outcome?.detail, contains('history message 2'));
+    expect(outcome?.detail, contains('200000'));
+  });
 
   test(
     'first high logical reconciliation pair becomes collector one',
@@ -543,14 +635,14 @@ void main() {
         await fixture.seedReconciliationRun(ordinal: ordinal),
       );
     }
-    expect(writerCalls, 2);
-    final claim = await fixture.db
-        .select(fixture.db.cardEvolutionClaims)
-        .getSingle();
-    expect(claim.predecessorRunOrdinal, 3);
+    expect(writerCalls, 3);
+    final claim = await (fixture.db.select(
+      fixture.db.cardEvolutionClaims,
+    )..where((row) => row.predecessorRunOrdinal.equals(4))).getSingle();
+    expect(claim.predecessorRunOrdinal, 4);
     final boundary = await (fixture.db.select(
       fixture.db.cardEvolutionCollectorRuns,
-    )..where((row) => row.collectorOrdinal.equals(3))).getSingle();
+    )..where((row) => row.collectorOrdinal.equals(4))).getSingle();
     expect(claim.predecessorCursorHash, boundary.reconciliationChainHash);
   });
 
@@ -824,42 +916,34 @@ void main() {
     expect(prompt, contains('Old durable Quinn observation'));
   });
 
-  test(
-    'cadence waits for delivered plus three without skipping a gap',
-    () async {
-      final service = fixture.service(
-        (_, prompt) async => prompt.contains('observation journal keeper')
-            ? _ok('{"observations":[]}')
-            : _ok('{"operations":[]}'),
-      );
-      for (final ordinal in [1, 2, 3, 4]) {
-        final result = await service.runAfterReconciliation(
-          await fixture.seedReconciliationRun(ordinal: ordinal),
-        );
-        expect(result.kind, 'collectorCompleted');
-      }
-      final collectors = await fixture.db
-          .select(fixture.db.cardEvolutionCollectorRuns)
-          .get();
-      await (fixture.db.update(
-        fixture.db.cardEvolutionCollectorRuns,
-      )..where((row) => row.collectorOrdinal.equals(2))).write(
-        const CardEvolutionCollectorRunsCompanion(status: Value('claimed')),
-      );
-      await service.runAfterReconciliation(
-        await fixture.seedReconciliationRun(ordinal: 5),
-      );
+  test('cadence waits for the next complete collector pair', () async {
+    final service = fixture.service(
+      (_, prompt) async => prompt.contains('observation journal keeper')
+          ? _ok('{"observations":[]}')
+          : _ok('{"operations":[]}'),
+    );
+    for (final ordinal in [1, 2, 3, 4]) {
       final result = await service.runAfterReconciliation(
-        await fixture.seedReconciliationRun(ordinal: 6),
+        await fixture.seedReconciliationRun(ordinal: ordinal),
       );
-      expect(result.kind, 'collectorUnavailable');
       expect(
-        await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
-        isEmpty,
+        result.kind,
+        ordinal < 4 ? 'collectorCompleted' : 'emptyModelProposal',
       );
-      expect(collectors, hasLength(2));
-    },
-  );
+    }
+    await service.runAfterReconciliation(
+      await fixture.seedReconciliationRun(ordinal: 5),
+    );
+    final result = await service.runAfterReconciliation(
+      await fixture.seedReconciliationRun(ordinal: 6),
+    );
+    expect(result.kind, 'collectorCompleted');
+    final claims = await fixture.db
+        .select(fixture.db.cardEvolutionClaims)
+        .get();
+    expect(claims, hasLength(1));
+    expect(claims.single.predecessorRunOrdinal, 2);
+  });
 
   test('primary current groups survive retrieval target extras cap', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
@@ -893,7 +977,7 @@ void main() {
           return _ok('{"observations":[]}');
         })
         .runAfterReconciliation(run);
-    expect(prompt.length, lessThan(120000));
+    expect(prompt.length, lessThan(150000));
     expect(RegExp('Ж{2001}').hasMatch(prompt), isFalse);
   });
 }

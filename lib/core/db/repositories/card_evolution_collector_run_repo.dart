@@ -326,28 +326,30 @@ class CardEvolutionCollectorRunRepo {
     return logical;
   }
 
-  /// Exact three completed collectors ending at [boundary]. Gaps or claimed
+  /// Exact [count] completed collectors ending at [boundary]. Gaps or claimed
   /// rows fail closed, so a writer never substitutes newer reconciliation data.
   Future<List<CardEvolutionCollectorRunRow>> completedBoundary(
     String sessionId,
-    int boundary,
-  ) async {
-    if (boundary < 3) return const [];
+    int boundary, {
+    required int count,
+  }) async {
+    if (count <= 0 || boundary < count) return const [];
     final rows =
         await (db.select(db.cardEvolutionCollectorRuns)
               ..where((row) => row.sessionId.equals(sessionId))
               ..where(
                 (row) => row.collectorOrdinal.isBetweenValues(
-                  boundary - 2,
+                  boundary - count + 1,
                   boundary,
                 ),
               )
               ..where((row) => row.status.equals('completed'))
               ..orderBy([(row) => OrderingTerm.asc(row.collectorOrdinal)]))
             .get();
-    if (rows.length != 3 ||
+    if (rows.length != count ||
         rows.indexed.any(
-          (entry) => entry.$2.collectorOrdinal != boundary - 2 + entry.$1,
+          (entry) =>
+              entry.$2.collectorOrdinal != boundary - count + 1 + entry.$1,
         )) {
       return const [];
     }
