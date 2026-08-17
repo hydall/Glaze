@@ -193,6 +193,11 @@ void main() {
       final result = parser.parse(raw);
       expect(result.export, isNull);
       expect(result.rejectionReason, contains('all ops rejected'));
+      // Which ops were dropped is the only way to tell a prompt-shape problem
+      // from a model regression, so the reasons must survive the parse.
+      expect(result.rejectedOps, hasLength(2));
+      expect(result.rejectedOps.join('\n'), contains('append_unique'));
+      expect(result.rejectedOps.join('\n'), contains('npc:Lucy.knowledge'));
     });
 
     test('legacy per-turn compatibility profile is parser-compatible', () {

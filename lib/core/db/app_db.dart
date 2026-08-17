@@ -51,6 +51,7 @@ part 'app_db.g.dart';
     LedgerReconciliationSuccessfulRuns,
     LedgerReconciliationRunInvalidations,
     LedgerReconciliationCursors,
+    LedgerDebugRuns,
     CardEvolutionClaims,
     CardEvolutionProposalRuns,
     CardEvolutionDebugRuns,
@@ -75,7 +76,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 119;
+  int get schemaVersion => 120;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2220,6 +2221,12 @@ class AppDatabase extends _$AppDatabase {
         // 'selection' diagnostic row. Rebuild the table so its CHECK accepts
         // that stage and stops requiring a model name for it.
         await m.alterTable(TableMigration(cardEvolutionDebugRuns));
+      }
+      if (from < 120) {
+        // Ledger parse rejections and the repair call they silently trigger
+        // were only ever visible in debug console output, so a failing turn
+        // left nothing behind to diagnose.
+        await m.createTable(ledgerDebugRuns);
       }
     },
   );

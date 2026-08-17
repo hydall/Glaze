@@ -14,6 +14,7 @@ import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_revision_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/ledger_debug_run_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/memory_book_repo.dart';
@@ -904,6 +905,64 @@ void main() {
       expect(result.status, 'aborted');
       expect(endpoint.requests(), 1);
       expect(await trackers.get('session', 'world:time'), isNull);
+    });
+
+    test('a silent repair call is recorded with both responses', () async {
+      final endpoint = await _serveSequence([malformed, _repairResponse]);
+      addTearDown(endpoint.close);
+
+      expect((await run(endpoint.url)).status, 'ok');
+
+      final journal = await LedgerDebugRunRepo(
+        db,
+      ).recentForSession('session');
+      expect(journal, hasLength(1));
+      final row = journal.single;
+      expect(row.kind, 'normal');
+      expect(row.messageId, 'a1');
+      expect(row.status, 'ok');
+      // The whole point: a healthy-looking turn that silently cost two calls.
+      expect(row.repairAttempted, isTrue);
+      expect(row.parseFailure, 'incompleteJson');
+      expect(row.rejectionReason, isNotNull);
+      expect(row.responseText, contains('"ops"'));
+      expect(row.repairResponseText, contains('01:00'));
+      expect(jsonDecode(row.attemptsJson), hasLength(2));
+    });
+
+    test('a rejected export keeps the raw response for inspection', () async {
+      final endpoint = await _serveSequence([semanticInvalid]);
+      addTearDown(endpoint.close);
+
+      expect((await run(endpoint.url)).status, 'error');
+
+      final row = (await LedgerDebugRunRepo(
+        db,
+      ).recentForSession('session')).single;
+      expect(row.status, 'error');
+      expect(row.repairAttempted, isFalse);
+      expect(row.parseFailure, 'semanticSchema');
+      // Without the rejected op text there is no way to tell whether the model
+      // regressed or the prompt drifted.
+      expect(jsonDecode(row.rejectedOpsJson), hasLength(1));
+      expect(row.rejectedOpsJson, contains('world:time'));
+      expect(row.responseText, contains('explode'));
+    });
+
+    test('a run that never reaches the model writes no journal row', () async {
+      final result = await service.run(
+        sessionId: 'session',
+        settings: const PipelineSettings(),
+        config: _config('http://127.0.0.1:1'),
+        finalAssistantText: '   ',
+        recentHistoryText: 'Start',
+        messageId: 'a1',
+        swipeId: 0,
+        agentSwipeId: 0,
+      );
+
+      expect(result.status, 'skipped');
+      expect(await LedgerDebugRunRepo(db).recentForSession('session'), isEmpty);
     });
   });
 }

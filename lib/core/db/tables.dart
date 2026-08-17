@@ -1103,6 +1103,68 @@ class CardEvolutionProposalRuns extends Table {
   ];
 }
 
+/// Rolling journal of Studio Ledger model exchanges kept for diagnosis.
+///
+/// A Ledger turn can silently spend a second model call: when the first
+/// response fails to parse in a repairable way the service issues a repair
+/// call. Nothing about that decision used to outlive the process, so a user
+/// seeing two provider requests had no way to learn why. Each row therefore
+/// records the raw response, the parser verdict that rejected it, whether a
+/// repair call followed, and the final outcome.
+///
+/// The journal is intentionally bounded: only recent rows are retained and
+/// stored payloads are truncated, because this is diagnostic state rather
+/// than canon provenance.
+@DataClassName('LedgerDebugRunRow')
+class LedgerDebugRuns extends Table {
+  @override
+  String get tableName => 'ledger_debug_runs';
+  TextColumn get id => text()();
+  TextColumn get sessionId => text()();
+
+  /// `normal` for the per-turn Ledger, `reconciliation` for range review.
+  TextColumn get kind => text()();
+  TextColumn get messageId => text().withDefault(const Constant(''))();
+  IntColumn get swipeId => integer().withDefault(const Constant(0))();
+  IntColumn get agentSwipeId => integer().withDefault(const Constant(0))();
+
+  /// Terminal [LedgerRunResult.status] for the run.
+  TextColumn get status => text()();
+  TextColumn get model => text().withDefault(const Constant(''))();
+
+  /// Parser failure class for the first response, e.g. `malformedJson`.
+  TextColumn get parseFailure => text().withDefault(const Constant('none'))();
+
+  /// Human-readable parser rejection text, when the response was rejected.
+  TextColumn get rejectionReason => text().nullable()();
+
+  /// Operations dropped by semantic validation, as a JSON array of strings.
+  TextColumn get rejectedOpsJson =>
+      text().withDefault(const Constant('[]'))();
+  BoolColumn get repairAttempted =>
+      boolean().withDefault(const Constant(false))();
+
+  /// Parser failure class after the repair response, when one was requested.
+  TextColumn get repairFailure => text().nullable()();
+  TextColumn get responseText => text().nullable()();
+  TextColumn get repairResponseText => text().nullable()();
+  TextColumn get attemptsJson => text().withDefault(const Constant('[]'))();
+  TextColumn get error => text().nullable()();
+  IntColumn get opsApplied => integer().withDefault(const Constant(0))();
+  IntColumn get elapsedMs => integer().withDefault(const Constant(0))();
+  IntColumn get promptChars => integer().withDefault(const Constant(0))();
+  IntColumn get responseChars => integer().withDefault(const Constant(0))();
+  IntColumn get createdAt => integer()();
+  @override
+  Set<Column> get primaryKey => {id};
+  @override
+  List<String> get customConstraints => [
+    "CHECK (id <> '' AND session_id <> '' "
+        "AND kind IN ('normal', 'reconciliation') "
+        "AND status <> '' AND attempts_json <> '' AND rejected_ops_json <> '')",
+  ];
+}
+
 /// Latest raw writer result retained per session and writer stage for Card
 /// Rewriter debugging. This is intentionally replaceable diagnostic state,
 /// unlike reviewable proposal provenance which remains immutable once

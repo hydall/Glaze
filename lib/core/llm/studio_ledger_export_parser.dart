@@ -67,11 +67,17 @@ class LedgerParseResult {
   /// single formatting repair is safe. Semantic rejections are never retried.
   final LedgerParseFailure failure;
 
+  /// Operations dropped by validation, as `key: reason` entries. Populated
+  /// even when the surviving export is returned, so a partially discarded
+  /// response can be diagnosed after the fact.
+  final List<String> rejectedOps;
+
   const LedgerParseResult({
     this.export,
     required this.visibleLedger,
     this.rejectionReason,
     this.failure = LedgerParseFailure.none,
+    this.rejectedOps = const [],
   });
 
   bool get hasExport => export != null;
@@ -167,7 +173,9 @@ class StudioLedgerExportParser {
     for (final op in export.ops) {
       final reason = _validateOp(op, focalUserName: focalUserName);
       if (reason != null) {
-        rejectedOps.add('${op.key}: $reason');
+        // Keep the verb: the same key can be legal for `set` and illegal for
+        // `append_unique`, so the key alone does not identify the mistake.
+        rejectedOps.add('${op.op} ${op.key}: $reason');
         debugPrint('[StudioLedger] rejected op ${op.op} ${op.key}: $reason');
       } else {
         validatedOps.add(op);
@@ -197,6 +205,7 @@ class StudioLedgerExportParser {
         failure: rejectedOps.isNotEmpty
             ? LedgerParseFailure.semanticSchema
             : LedgerParseFailure.emptyExport,
+        rejectedOps: rejectedOps,
       );
     }
 
@@ -207,6 +216,7 @@ class StudioLedgerExportParser {
     return LedgerParseResult(
       export: validatedExport,
       visibleLedger: visibleLedger,
+      rejectedOps: rejectedOps,
     );
   }
 

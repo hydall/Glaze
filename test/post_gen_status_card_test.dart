@@ -77,4 +77,105 @@ void main() {
     expect(find.text('Card Rewriter running...'), findsOneWidget);
     expect(find.byType(GlazeSpinner), findsOneWidget);
   });
+
+  testWidgets('a running badge can always be dismissed by hand', (
+    tester,
+  ) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container
+        .read(postGenStatusProvider.notifier)
+        .state = const PostGenStatusState.running(
+      sessionId: 'session-1',
+      task: PostGenTask.ledger,
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(body: PostGenStatusCard(sessionId: 'session-1')),
+        ),
+      ),
+    );
+    expect(find.text('Ledger running...'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pump();
+
+    // A stage whose ref went away can no longer clear the badge, so the user
+    // must be able to. The pipeline keeps running; only the indicator goes.
+    expect(container.read(postGenStatusProvider).phase, PostGenTaskPhase.idle);
+    expect(find.text('Ledger running...'), findsNothing);
+  });
+
+  testWidgets('a stranded running badge is cleared by the watchdog', (
+    tester,
+  ) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container
+        .read(postGenStatusProvider.notifier)
+        .state = const PostGenStatusState.running(
+      sessionId: 'session-1',
+      task: PostGenTask.ledger,
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(body: PostGenStatusCard(sessionId: 'session-1')),
+        ),
+      ),
+    );
+    expect(find.text('Ledger running...'), findsOneWidget);
+
+    await tester.pump(kPostGenRunningWatchdog + const Duration(seconds: 1));
+    await tester.pump();
+
+    expect(container.read(postGenStatusProvider).phase, PostGenTaskPhase.idle);
+    expect(find.text('Ledger running...'), findsNothing);
+  });
+
+  testWidgets('the watchdog leaves a newer running task alone', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container
+        .read(postGenStatusProvider.notifier)
+        .state = const PostGenStatusState.running(
+      sessionId: 'session-1',
+      task: PostGenTask.ledger,
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(body: PostGenStatusCard(sessionId: 'session-1')),
+        ),
+      ),
+    );
+
+    // A later task takes over the slot just before the first watchdog fires.
+    await tester.pump(kPostGenRunningWatchdog - const Duration(seconds: 1));
+    container
+        .read(postGenStatusProvider.notifier)
+        .state = const PostGenStatusState.running(
+      sessionId: 'session-1',
+      task: PostGenTask.cardRewriter,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 5));
+
+    // The first task's deadline must not cut short the task that replaced it.
+    expect(
+      container.read(postGenStatusProvider).task,
+      PostGenTask.cardRewriter,
+    );
+    expect(find.text('Card Rewriter running...'), findsOneWidget);
+
+    // Drain the rescheduled timer so the test does not end with one pending.
+    await tester.pump(kPostGenRunningWatchdog);
+  });
 }

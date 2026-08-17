@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../db/repositories/character_knowledge_fact_repo.dart';
 import '../db/repositories/character_repo.dart';
 import '../db/repositories/chat_repo.dart';
+import '../db/repositories/ledger_debug_run_repo.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import '../db/repositories/ledger_reconciliation_run_repo.dart';
 import '../db/repositories/memory_book_repo.dart';
@@ -135,6 +136,7 @@ class StudioLedgerService {
   final StudioLedgerExportParser _parser;
   final StudioLedgerPrompt _promptBuilder;
   final LedgerOpApplier _opApplier;
+  final LedgerDebugRunRepo _debugRunRepo;
 
   StudioLedgerService({
     required this._llm,
@@ -147,9 +149,11 @@ class StudioLedgerService {
     required this._characterRepo,
     required this._chatRepo,
     required this._canonContextLoader,
+    LedgerDebugRunRepo? debugRunRepo,
   }) : _parser = const StudioLedgerExportParser(),
        _promptBuilder = const StudioLedgerPrompt(),
-       _opApplier = const LedgerOpApplier();
+       _opApplier = const LedgerOpApplier(),
+       _debugRunRepo = debugRunRepo ?? LedgerDebugRunRepo(_trackerRepo.db);
 
   Future<LedgerRunResult> reconcile({
     required String sessionId,
@@ -204,6 +208,39 @@ class StudioLedgerService {
   }
 
   Future<LedgerRunResult> _reconcileUnshared({
+    required String sessionId,
+    required PipelineSettings settings,
+    required AuxApiConfig config,
+    required LedgerReconciliationPlan plan,
+    List<StudioPresetBlock> ledgerBlocks = const [],
+    MacroContext? macroCtx,
+    FutureOr<bool> Function()? isStillCurrent,
+    CancelToken? cancelToken,
+  }) async {
+    final trace = _LedgerRunTrace(
+      sessionId: sessionId,
+      kind: LedgerDebugRunKind.reconciliation,
+      messageId: plan.endMessage.id,
+      swipeId: plan.endMessage.swipeId,
+      agentSwipeId: plan.endMessage.agentSwipeId,
+    );
+    final result = await _reconcileTraced(
+      trace: trace,
+      sessionId: sessionId,
+      settings: settings,
+      config: config,
+      plan: plan,
+      ledgerBlocks: ledgerBlocks,
+      macroCtx: macroCtx,
+      isStillCurrent: isStillCurrent,
+      cancelToken: cancelToken,
+    );
+    await _recordDebugRun(trace, result);
+    return result;
+  }
+
+  Future<LedgerRunResult> _reconcileTraced({
+    required _LedgerRunTrace trace,
     required String sessionId,
     required PipelineSettings settings,
     required AuxApiConfig config,
@@ -317,6 +354,11 @@ class StudioLedgerService {
         responseText,
         focalUserName: macroCtx?.userName ?? '',
       );
+      trace.recordFirstResponse(
+        model: config.model,
+        responseText: responseText,
+        parsed: parsed,
+      );
       final originalFailure = parsed.failure;
       final originalVisibleLedger = parsed.visibleLedger;
       var attempts = outcome.attempts;
@@ -336,6 +378,9 @@ class StudioLedgerService {
           return LedgerRunResult.aborted;
         }
         repairAttempted = true;
+        trace.recordRepairRequested(
+          exportRepair: needsExportRepair,
+        );
         if (_isOversizedRepairInput(responseText)) {
           return LedgerRunResult(
             status: 'error',
@@ -389,6 +434,10 @@ class StudioLedgerService {
             repairedText,
             focalUserName: macroCtx?.userName ?? '',
           );
+          trace.recordRepairResponse(
+            responseText: repairedText,
+            parsed: repaired,
+          );
           if (repaired.export != null &&
               !_repairPreservesStructuredEvidence(
                 responseText,
@@ -438,6 +487,7 @@ class StudioLedgerService {
           // The export was already valid. A cleanup-only repair must never
           // replace or reinterpret the authoritative tracker export.
           cleanupResponseText = repair.text!;
+          trace.recordRepairResponse(responseText: cleanupResponseText);
           final repairedCleanup = cleanupParser.parse(
             output: cleanupResponseText,
             offeredFacts: offeredFacts,
@@ -837,6 +887,53 @@ class StudioLedgerService {
     bool commitSnapshot = false,
     StudioLedgerEngine engine = StudioLedgerEngine.currentReconciled,
   }) async {
+    final trace = _LedgerRunTrace(
+      sessionId: sessionId,
+      kind: LedgerDebugRunKind.normal,
+      messageId: messageId,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+    );
+    final result = await _runTraced(
+      trace: trace,
+      sessionId: sessionId,
+      settings: settings,
+      config: config,
+      finalAssistantText: finalAssistantText,
+      recentHistoryText: recentHistoryText,
+      messageId: messageId,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+      forceEnabled: forceEnabled,
+      isStillCurrent: isStillCurrent,
+      cancelToken: cancelToken,
+      ledgerBlocks: ledgerBlocks,
+      macroCtx: macroCtx,
+      commitSnapshot: commitSnapshot,
+      engine: engine,
+    );
+    await _recordDebugRun(trace, result);
+    return result;
+  }
+
+  Future<LedgerRunResult> _runTraced({
+    required _LedgerRunTrace trace,
+    required String sessionId,
+    required PipelineSettings settings,
+    required AuxApiConfig config,
+    required String finalAssistantText,
+    required String recentHistoryText,
+    required String messageId,
+    required int swipeId,
+    required int agentSwipeId,
+    bool forceEnabled = false,
+    FutureOr<bool> Function()? isStillCurrent,
+    CancelToken? cancelToken,
+    List<StudioPresetBlock> ledgerBlocks = const [],
+    MacroContext? macroCtx,
+    bool commitSnapshot = false,
+    StudioLedgerEngine engine = StudioLedgerEngine.currentReconciled,
+  }) async {
     // Studio Ledger is always-on when Studio is enabled. forceEnabled is
     // still respected for manual triggers.
 
@@ -957,6 +1054,11 @@ class StudioLedgerService {
         effectiveResponse,
         focalUserName: macroCtx?.userName ?? '',
       );
+      trace.recordFirstResponse(
+        model: config.model,
+        responseText: rawResponse,
+        parsed: parseResult,
+      );
       final originalFailure = parseResult.failure;
       final originalVisibleLedger = parseResult.visibleLedger;
       var attempts = outcome.attempts;
@@ -986,6 +1088,7 @@ class StudioLedgerService {
           );
         }
         repairAttempted = true;
+        trace.recordRepairRequested(exportRepair: true);
         final repairPrompt = _buildRepairPrompt(effectiveResponse);
         totalPromptChars += repairPrompt.length;
         final repair = await _llm.callOnceWithLog(
@@ -1023,6 +1126,10 @@ class StudioLedgerService {
         parseResult = _parser.parse(
           effectiveResponse,
           focalUserName: macroCtx?.userName ?? '',
+        );
+        trace.recordRepairResponse(
+          responseText: effectiveResponse,
+          parsed: parseResult,
         );
         if (parseResult.export != null &&
             !_repairPreservesStructuredEvidence(
@@ -1515,6 +1622,43 @@ UNTRUSTED_INPUT_BASE64_END''';
     return true;
   }
 
+  /// Persists what the model returned and how the parser judged it.
+  ///
+  /// Skipped for runs that never reached the model (disabled, empty text) so
+  /// the journal stays a record of actual model exchanges. Recording a
+  /// successful run is deliberate: a silent second provider call is only
+  /// explainable when the healthy case is visible for comparison.
+  Future<void> _recordDebugRun(
+    _LedgerRunTrace trace,
+    LedgerRunResult result,
+  ) async {
+    if (!trace.reachedModel) return;
+    await _debugRunRepo.record(
+      LedgerDebugRun(
+        sessionId: trace.sessionId,
+        kind: trace.kind,
+        status: result.status,
+        messageId: trace.messageId,
+        swipeId: trace.swipeId,
+        agentSwipeId: trace.agentSwipeId,
+        model: result.model ?? trace.model,
+        parseFailure: trace.parseFailure,
+        rejectionReason: trace.rejectionReason,
+        rejectedOps: trace.rejectedOps,
+        repairAttempted: trace.repairAttempted || result.repairAttempted,
+        repairFailure: trace.repairFailure,
+        responseText: trace.responseText,
+        repairResponseText: trace.repairResponseText,
+        attempts: result.attempts,
+        error: result.error,
+        opsApplied: result.opsApplied,
+        elapsedMs: result.elapsedMs,
+        promptChars: result.promptChars,
+        responseChars: result.responseChars,
+      ),
+    );
+  }
+
   List<AgentOperationAttempt> _combineAttempts(
     List<AgentOperationAttempt> first,
     List<AgentOperationAttempt> second,
@@ -1701,6 +1845,68 @@ UNTRUSTED_INPUT_BASE64_END''';
     KnowledgeCleanupOpType.renameEntity =>
       'cleanup:rename:${op.fromKey}:${op.toKey}:${op.canonicalName}',
   };
+}
+
+/// Mutable notes gathered while a Ledger run executes.
+///
+/// The run itself has many early returns; collecting the diagnostic facts as
+/// they become known keeps a single write site at the end instead of one per
+/// exit path.
+class _LedgerRunTrace {
+  _LedgerRunTrace({
+    required this.sessionId,
+    required this.kind,
+    required this.messageId,
+    required this.swipeId,
+    required this.agentSwipeId,
+  });
+
+  final String sessionId;
+  final LedgerDebugRunKind kind;
+  final String messageId;
+  final int swipeId;
+  final int agentSwipeId;
+
+  bool reachedModel = false;
+  String model = '';
+  String parseFailure = 'none';
+  String? rejectionReason;
+  List<String> rejectedOps = const [];
+  bool repairAttempted = false;
+  String? repairFailure;
+  String? responseText;
+  String? repairResponseText;
+
+  void recordFirstResponse({
+    required String model,
+    required String responseText,
+    required LedgerParseResult parsed,
+  }) {
+    reachedModel = true;
+    this.model = model;
+    this.responseText = responseText;
+    parseFailure = parsed.failure.name;
+    rejectionReason = parsed.rejectionReason;
+    rejectedOps = parsed.rejectedOps;
+  }
+
+  void recordRepairRequested({required bool exportRepair}) {
+    repairAttempted = true;
+    if (!exportRepair) {
+      // The export parsed cleanly; only the cleanup block needed another pass.
+      repairFailure = 'cleanupBlockMissing';
+    }
+  }
+
+  void recordRepairResponse({
+    required String responseText,
+    LedgerParseResult? parsed,
+  }) {
+    repairResponseText = responseText;
+    if (parsed == null) return;
+    repairFailure = parsed.failure.name;
+    if (parsed.rejectedOps.isNotEmpty) rejectedOps = parsed.rejectedOps;
+  }
 }
 
 class _LedgerCanonContext {

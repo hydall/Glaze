@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 119);
+      expect(version, 120);
     });
 
     test(
@@ -232,7 +232,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 119);
+        expect(version.first.read<int>('user_version'), 120);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
     });
 
     test(
@@ -611,7 +611,7 @@ void main() {
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -723,7 +723,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
     });
 
     test(
@@ -833,7 +833,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -873,7 +873,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -907,7 +907,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -981,7 +981,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1433,7 +1433,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1638,7 +1638,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1754,7 +1754,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -2418,7 +2418,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
     });
 
     test(
@@ -2515,7 +2515,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
     });
 
     test('v118 adds prompt post-processing with none for every config', () async {
@@ -2707,7 +2707,93 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 119);
+      expect(version.read<int>('user_version'), 120);
+    });
+
+    test('v120 adds the ledger debug journal to an older database', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_ledger_debug_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      // A v119 database predates the journal entirely.
+      await seeded.customStatement('DROP TABLE ledger_debug_runs');
+      await seeded.customStatement('PRAGMA user_version = 119');
+      await seeded.close();
+
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() async => upgraded.close());
+
+      await upgraded.customStatement(
+        'INSERT INTO ledger_debug_runs (id, session_id, kind, message_id, '
+        'swipe_id, agent_swipe_id, status, model, parse_failure, '
+        'rejection_reason, rejected_ops_json, repair_attempted, '
+        'repair_failure, response_text, repair_response_text, attempts_json, '
+        'error, ops_applied, elapsed_ms, prompt_chars, response_chars, '
+        'created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '
+        '?, ?, ?, ?, ?, ?)',
+        [
+          'ledger-debug-1',
+          'session',
+          'normal',
+          'message',
+          0,
+          0,
+          'error',
+          'model-a',
+          'malformedJson',
+          'malformed JSON: unexpected end of input',
+          '["op[0] rejected"]',
+          1,
+          'none',
+          'raw',
+          'repaired',
+          '[]',
+          'parse failed',
+          0,
+          1200,
+          900,
+          400,
+          10,
+        ],
+      );
+      final rows = await upgraded
+          .customSelect(
+            'SELECT kind, parse_failure, repair_attempted, rejected_ops_json '
+            'FROM ledger_debug_runs',
+          )
+          .get();
+      expect(rows, hasLength(1));
+      expect(rows.single.read<String>('kind'), 'normal');
+      expect(rows.single.read<String>('parse_failure'), 'malformedJson');
+      expect(rows.single.read<int>('repair_attempted'), 1);
+      expect(
+        rows.single.read<String>('rejected_ops_json'),
+        '["op[0] rejected"]',
+      );
+
+      // Only the two real Ledger call sites may write to the journal.
+      await expectLater(
+        upgraded.customStatement(
+          'INSERT INTO ledger_debug_runs (id, session_id, kind, status, '
+          'created_at) VALUES (?, ?, ?, ?, ?)',
+          ['ledger-debug-2', 'session', 'bogus', 'ok', 20],
+        ),
+        throwsA(anything),
+      );
+
+      final version = await upgraded
+          .customSelect('PRAGMA user_version')
+          .getSingle();
+      expect(version.read<int>('user_version'), 120);
     });
 
     test('v111 resolves the retired session_id_mode default', () async {
