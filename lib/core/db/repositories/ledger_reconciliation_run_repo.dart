@@ -163,6 +163,18 @@ class LedgerReconciliationRunRepo {
   Future<bool> anchorsMatchSession(LedgerReconciliationRun run) =>
       _anchorsMatchSession(run);
 
+  /// Content hashes bind a run to its session, but legacy branch copies could
+  /// move the content-derived global id to another session. Keep the compact
+  /// historical id when available and deterministically namespace collisions.
+  Future<String> allocateId(String sessionId, String contentHash) async {
+    final contentId = 'reconciliation-$contentHash';
+    final occupied = await (_db.select(
+      _db.ledgerReconciliationSuccessfulRuns,
+    )..where((row) => row.id.equals(contentId))).getSingleOrNull();
+    if (occupied == null || occupied.sessionId == sessionId) return contentId;
+    return 'reconciliation-${computeHash('$sessionId\u001f$contentHash')}';
+  }
+
   /// Caller owns the transaction. This method never opens a nested transaction.
   Future<ReconciliationRunIntegrity> append(LedgerReconciliationRun run) async {
     final valid = await _validate(run);
@@ -240,7 +252,9 @@ class LedgerReconciliationRunRepo {
     final head = existing ?? await _physicalHead(candidate.sessionId);
     final replay = existing != null;
     final allocated = LedgerReconciliationRun(
-      id: candidate.id,
+      id: replay
+          ? existing.id
+          : await allocateId(candidate.sessionId, candidate.contentHash),
       sessionId: candidate.sessionId,
       ordinal: replay ? head!.ordinal : (head == null ? 1 : head.ordinal + 1),
       anchors: candidate.anchors,
@@ -404,57 +418,68 @@ class LedgerReconciliationRunRepo {
     return affectedIds.toList(growable: false);
   }
 
-  /// Copies all reconciliation runs from [fromSessionId] to [toSessionId],
-  /// preserving the ordinal chain. Only runs whose endpoint message falls
-  /// within the branched slice ([messageIds]) are copied. The chain hashes
-  /// remain valid because ordinals are preserved and the physical order is
-  /// unchanged. Used by `branchSession` so the cadence gate continues from
-  /// the parent's reconciliation count instead of resetting to zero.
+  /// Rebuilds the transferable reconciliation prefix for a branched session.
+  /// Run identities and hashes bind the session id, so source rows must never
+  /// be copied directly. Runs with accepted lorebook refs remain fail-closed
+  /// until their complete source provenance can be re-keyed for the branch.
   Future<void> copyForSessionBranch({
     required String fromSessionId,
     required String toSessionId,
     required Set<String> messageIds,
   }) async {
     if (messageIds.isEmpty) return;
-    final rows =
-        await (_db.select(_db.ledgerReconciliationSuccessfulRuns)
-              ..where((r) => r.sessionId.equals(fromSessionId))
-              ..where((r) => r.endMessageId.isIn(messageIds))
-              ..orderBy([(r) => OrderingTerm.asc(r.ordinal)]))
-            .get();
+    final rows = await readSession(fromSessionId);
     if (rows.isEmpty) return;
-    await _db.batch((batch) {
-      for (final row in rows) {
-        batch.insert(
-          _db.ledgerReconciliationSuccessfulRuns,
-          LedgerReconciliationSuccessfulRunsCompanion.insert(
-            id: row.id,
-            sessionId: toSessionId,
-            ordinal: row.ordinal,
-            startMessageId: row.startMessageId,
-            startSwipeId: row.startSwipeId,
-            startAgentSwipeId: row.startAgentSwipeId,
-            endMessageId: row.endMessageId,
-            endSwipeId: row.endSwipeId,
-            endAgentSwipeId: row.endAgentSwipeId,
-            anchorsJson: row.anchorsJson,
-            rangeHash: row.rangeHash,
-            acceptedManifestRefsJson: row.acceptedManifestRefsJson,
-            effectiveCanonStamp: row.effectiveCanonStamp,
-            effectiveCanonRevision: row.effectiveCanonRevision,
-            effectiveCanonHash: row.effectiveCanonHash,
-            canonicalResultJson: row.canonicalResultJson,
-            contentHash: row.contentHash,
-            predecessorChainHash: row.predecessorChainHash,
-            chainHash: row.chainHash,
-            contractVersion: row.contractVersion,
-            opsAppliedJson: row.opsAppliedJson,
-            createdAt: row.createdAt,
-          ),
-          mode: InsertMode.insertOrReplace,
-        );
+    var predecessor = '';
+    var ordinal = 1;
+    for (final row in rows) {
+      final anchors = _decodeAnchors(row.anchorsJson);
+      final refs = _decodeRefs(row.acceptedManifestRefsJson);
+      if (!anchors.every((anchor) => messageIds.contains(anchor.messageId)) ||
+          refs.isNotEmpty) {
+        break;
       }
-    });
+      final result = jsonDecode(row.canonicalResultJson);
+      final ops = jsonDecode(row.opsAppliedJson);
+      if (result is! Map<Object?, Object?> || ops is! List) break;
+      var run = LedgerReconciliationRun(
+        id: '',
+        sessionId: toSessionId,
+        ordinal: ordinal,
+        anchors: anchors,
+        acceptedManifestRefs: const [],
+        effectiveCanonStamp: row.effectiveCanonStamp,
+        effectiveCanonRevision: row.effectiveCanonRevision,
+        effectiveCanonHash: row.effectiveCanonHash,
+        canonicalResult: Map<String, dynamic>.from(result),
+        predecessorChainHash: predecessor,
+        contractVersion: row.contractVersion,
+        opsApplied: List<String>.from(ops),
+        createdAt: row.createdAt,
+      );
+      run = LedgerReconciliationRun(
+        id: await allocateId(toSessionId, run.contentHash),
+        sessionId: run.sessionId,
+        ordinal: run.ordinal,
+        anchors: run.anchors,
+        acceptedManifestRefs: run.acceptedManifestRefs,
+        effectiveCanonStamp: run.effectiveCanonStamp,
+        effectiveCanonRevision: run.effectiveCanonRevision,
+        effectiveCanonHash: run.effectiveCanonHash,
+        canonicalResult: run.canonicalResult,
+        predecessorChainHash: run.predecessorChainHash,
+        contractVersion: run.contractVersion,
+        opsApplied: run.opsApplied,
+        createdAt: run.createdAt,
+      );
+      final appended = await append(run);
+      if (appended is! ReconciliationRunAppended &&
+          appended is! ReconciliationRunIdempotent) {
+        break;
+      }
+      predecessor = run.chainHash;
+      ordinal++;
+    }
   }
 
   /// A head is authoritative only if the whole durable chain is canonical and

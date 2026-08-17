@@ -633,23 +633,30 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       throw const FormatException('Invalid reconciliation sync payload');
     }
     await _db.transaction(() async {
-      final runDecision = await _resolveRunMerge(
+      final normalized = await _normalizeIncomingRuns(
         sessionId,
         _maps(data['runs']),
         _maps(data['invalidations']),
+      );
+      final runDecision = await _resolveRunMerge(
+        sessionId,
+        normalized.runs,
+        normalized.invalidations,
       );
       if (runDecision == _RunMergeDecision.keepLocal) return;
       if (runDecision == _RunMergeDecision.replaceLocal) {
         await _clearReconciliationLane(sessionId);
       }
       await _mergeSourceRows(sessionId, data);
-      final importedComplete = await _mergeRuns(sessionId, _maps(data['runs']));
+      final importedComplete = await _mergeRuns(sessionId, normalized.runs);
       await _mergeInvalidations(
         sessionId,
-        _maps(data['invalidations']),
+        normalized.invalidations,
         ignoreUnknown: !importedComplete,
       );
-      final collectors = _maps(data['collectors']);
+      final collectors = normalized.identitiesChanged
+          ? <Map<String, dynamic>>[]
+          : _maps(data['collectors']);
       final resetDerivedLane = await _resetDerivedLaneForInvalidations(
         sessionId,
         collectors,
@@ -657,15 +664,111 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       if (importedComplete && !resetDerivedLane) {
         final collectorsValid = await _mergeCollectors(sessionId, collectors);
         if (collectorsValid) {
-          await _mergeObservations(sessionId, _maps(data['observations']));
-          await _mergeCompletedClaims(
-            sessionId,
-            _maps(data['completedClaims']),
-          );
+          if (!normalized.identitiesChanged) {
+            await _mergeObservations(sessionId, _maps(data['observations']));
+            await _mergeCompletedClaims(
+              sessionId,
+              _maps(data['completedClaims']),
+            );
+          }
         }
       }
     });
     return await getBySessionId(sessionId) ?? _emptyPayload(sessionId);
+  }
+
+  Future<_NormalizedReconciliationPayload> _normalizeIncomingRuns(
+    String sessionId,
+    List<Map<String, dynamic>> incoming,
+    List<Map<String, dynamic>> invalidations,
+  ) async {
+    incoming.sort(
+      (a, b) => (a['ordinal'] as int).compareTo(b['ordinal'] as int),
+    );
+    final normalized = <Map<String, dynamic>>[];
+    final idMap = <String, String>{};
+    var predecessor = '';
+    var changed = false;
+    for (var index = 0; index < incoming.length; index++) {
+      final row = LedgerReconciliationSuccessfulRunRow.fromJson(
+        incoming[index],
+      );
+      _requireSession(sessionId, row.sessionId);
+      final decoded = _runFromRow(row);
+      final occupied = await (_db.select(
+        _db.ledgerReconciliationSuccessfulRuns,
+      )..where((item) => item.id.equals(row.id))).getSingleOrNull();
+      final canonical = LedgerReconciliationRun(
+        id: '',
+        sessionId: sessionId,
+        ordinal: index + 1,
+        anchors: decoded.anchors,
+        acceptedManifestRefs: decoded.acceptedManifestRefs,
+        effectiveCanonStamp: decoded.effectiveCanonStamp,
+        effectiveCanonRevision: decoded.effectiveCanonRevision,
+        effectiveCanonHash: decoded.effectiveCanonHash,
+        canonicalResult: decoded.canonicalResult,
+        predecessorChainHash: predecessor,
+        contractVersion: decoded.contractVersion,
+        opsApplied: decoded.opsApplied,
+        createdAt: decoded.createdAt,
+      );
+      final canonicalId = await LedgerReconciliationRunRepo(
+        _db,
+      ).allocateId(sessionId, canonical.contentHash);
+      final storedCanonical =
+          row.ordinal != canonical.ordinal ||
+          row.contentHash != canonical.contentHash ||
+          row.predecessorChainHash != canonical.predecessorChainHash ||
+          row.chainHash != canonical.chainHash;
+      final foreignIdentity =
+          occupied != null && occupied.sessionId != sessionId;
+      final legacyBranchCopy =
+          foreignIdentity &&
+          row.contentHash == occupied.contentHash &&
+          row.predecessorChainHash == occupied.predecessorChainHash &&
+          row.chainHash == occupied.chainHash;
+      if (storedCanonical && !legacyBranchCopy) {
+        changed = true;
+        break;
+      }
+      final needsNormalization = storedCanonical || foreignIdentity;
+      final outputId = needsNormalization ? canonicalId : row.id;
+      if (needsNormalization && canonical.acceptedManifestRefs.isNotEmpty) {
+        changed = true;
+        break;
+      }
+      final output = needsNormalization
+          ? {
+              ...row.toJson(),
+              'id': outputId,
+              'ordinal': canonical.ordinal,
+              'contentHash': canonical.contentHash,
+              'predecessorChainHash': canonical.predecessorChainHash,
+              'chainHash': canonical.chainHash,
+            }
+          : row.toJson();
+      normalized.add(output);
+      idMap[row.id] = output['id'] as String;
+      predecessor = output['chainHash'] as String;
+      changed = changed || needsNormalization;
+    }
+    final remappedInvalidations = <Map<String, dynamic>>[];
+    for (final invalidation in invalidations) {
+      final oldId = invalidation['runId'] as String;
+      final newId = idMap[oldId];
+      if (newId == null) {
+        changed = true;
+        continue;
+      }
+      remappedInvalidations.add({...invalidation, 'runId': newId});
+      changed = changed || newId != oldId;
+    }
+    return _NormalizedReconciliationPayload(
+      runs: normalized,
+      invalidations: remappedInvalidations,
+      identitiesChanged: changed,
+    );
   }
 
   Future<_RunMergeDecision> _resolveRunMerge(
@@ -1291,3 +1394,15 @@ String _integrityReason(ReconciliationRunIntegrity integrity) =>
     };
 
 enum _RunMergeDecision { merge, keepLocal, replaceLocal }
+
+final class _NormalizedReconciliationPayload {
+  const _NormalizedReconciliationPayload({
+    required this.runs,
+    required this.invalidations,
+    required this.identitiesChanged,
+  });
+
+  final List<Map<String, dynamic>> runs;
+  final List<Map<String, dynamic>> invalidations;
+  final bool identitiesChanged;
+}

@@ -34,6 +34,49 @@ void main() {
     expect((await repo.getHead('session'))!.id, 'run-2');
   });
 
+  test('candidate replay keeps the stored legacy identity', () async {
+    await _seedSession(db);
+    final stored = _run(id: 'legacy-id');
+    expect(await repo.append(stored), isA<ReconciliationRunAppended>());
+
+    expect(
+      await repo.appendCandidate(_run(id: 'new-draft-id')),
+      isA<ReconciliationRunIdempotent>(),
+    );
+    expect((await repo.getHead('session'))!.id, 'legacy-id');
+  });
+
+  test(
+    'branch copy rebuilds session-bound identities without replacing source',
+    () async {
+      await _seedSession(db);
+      await db.customStatement(
+        "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) "
+        "SELECT 'branch', character_id, 1, messages_json FROM chat_sessions WHERE session_id = 'session'",
+      );
+      final source = _run();
+      expect(await repo.append(source), isA<ReconciliationRunAppended>());
+
+      await repo.copyForSessionBranch(
+        fromSessionId: 'session',
+        toSessionId: 'branch',
+        messageIds: {'message', 'user'},
+      );
+
+      final sourceRows = await repo.readSession('session');
+      final branchRows = await repo.readSession('branch');
+      expect(sourceRows.single.id, source.id);
+      expect(branchRows, hasLength(1));
+      expect(branchRows.single.id, isNot(source.id));
+      expect(
+        branchRows.single.id,
+        'reconciliation-${branchRows.single.contentHash}',
+      );
+      expect(branchRows.single.sessionId, 'branch');
+      expect(await repo.validateChain('branch'), isA<ReconciliationRunValid>());
+    },
+  );
+
   test(
     'rejects anchor mutations and immutable content-hash collisions',
     () async {
@@ -307,7 +350,9 @@ void main() {
         isA<ReconciliationRunAppended>(),
       );
       final rows = await db.select(db.ledgerReconciliationSuccessfulRuns).get();
-      final second = rows.singleWhere((row) => row.id == 'run-2');
+      final second = rows.singleWhere(
+        (row) => row.contentHash == candidate.contentHash,
+      );
       expect(second.ordinal, 2);
       expect(second.predecessorChainHash, first.chainHash);
     },

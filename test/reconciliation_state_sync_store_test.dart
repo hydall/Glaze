@@ -43,6 +43,134 @@ void main() {
   });
 
   test(
+    'legacy global run id collision is re-keyed without replacing parent',
+    () async {
+      final incoming = (await _appendChain(sourceDb, 1)).single;
+      await targetDb.customStatement(
+        'INSERT INTO chat_sessions '
+        '(session_id, character_id, session_index, messages_json) '
+        'VALUES (?, ?, 1, ?)',
+        ['parent', 'character', jsonEncode(_messages)],
+      );
+      var parent = LedgerReconciliationRun(
+        id: '',
+        sessionId: 'parent',
+        ordinal: 1,
+        anchors: incoming.anchors,
+        acceptedManifestRefs: const [],
+        effectiveCanonStamp: incoming.effectiveCanonStamp,
+        effectiveCanonRevision: incoming.effectiveCanonRevision,
+        effectiveCanonHash: incoming.effectiveCanonHash,
+        canonicalResult: incoming.canonicalResult,
+        predecessorChainHash: '',
+        contractVersion: incoming.contractVersion,
+        opsApplied: incoming.opsApplied,
+        createdAt: incoming.createdAt,
+      );
+      parent = LedgerReconciliationRun(
+        id: 'reconciliation-${parent.contentHash}',
+        sessionId: parent.sessionId,
+        ordinal: parent.ordinal,
+        anchors: parent.anchors,
+        acceptedManifestRefs: parent.acceptedManifestRefs,
+        effectiveCanonStamp: parent.effectiveCanonStamp,
+        effectiveCanonRevision: parent.effectiveCanonRevision,
+        effectiveCanonHash: parent.effectiveCanonHash,
+        canonicalResult: parent.canonicalResult,
+        predecessorChainHash: parent.predecessorChainHash,
+        contractVersion: parent.contractVersion,
+        opsApplied: parent.opsApplied,
+        createdAt: parent.createdAt,
+      );
+      expect(
+        await LedgerReconciliationRunRepo(targetDb).append(parent),
+        isA<ReconciliationRunAppended>(),
+      );
+
+      final payload = (await sourceStore.getBySessionId('session'))!;
+      final legacyRun = Map<String, dynamic>.from(
+        (payload['runs'] as List).single as Map,
+      );
+      legacyRun
+        ..['id'] = parent.id
+        ..['contentHash'] = parent.contentHash
+        ..['predecessorChainHash'] = parent.predecessorChainHash
+        ..['chainHash'] = parent.chainHash;
+      final legacyPayload = {
+        ...payload,
+        'runs': [legacyRun],
+      };
+      final firstMerge = await targetStore.mergeBySessionId(
+        'session',
+        legacyPayload,
+      );
+      final secondMerge = await targetStore.mergeBySessionId(
+        'session',
+        legacyPayload,
+      );
+
+      final parentRows = await LedgerReconciliationRunRepo(
+        targetDb,
+      ).readSession('parent');
+      final importedRows = await LedgerReconciliationRunRepo(
+        targetDb,
+      ).readSession('session');
+      expect(parentRows.single.id, parent.id);
+      expect(importedRows, hasLength(1));
+      expect(importedRows.single.id, isNot(parent.id));
+      expect(
+        importedRows.single.id,
+        'reconciliation-${importedRows.single.contentHash}',
+      );
+      expect(secondMerge, firstMerge);
+    },
+  );
+
+  test(
+    'canonical cloud id is namespaced when a legacy foreign row occupies it',
+    () async {
+      await _appendChain(sourceDb, 1);
+      final payload = (await sourceStore.getBySessionId('session'))!;
+      final cloudJson = Map<String, dynamic>.from(
+        (payload['runs'] as List).single as Map,
+      );
+      final canonicalId = 'reconciliation-${cloudJson['contentHash']}';
+      cloudJson['id'] = canonicalId;
+      payload['runs'] = [cloudJson];
+
+      await targetDb.customStatement(
+        'INSERT INTO chat_sessions '
+        '(session_id, character_id, session_index, messages_json) '
+        'VALUES (?, ?, 1, ?)',
+        ['legacy-owner', 'character', jsonEncode(_messages)],
+      );
+      await targetDb
+          .into(targetDb.ledgerReconciliationSuccessfulRuns)
+          .insert(
+            LedgerReconciliationSuccessfulRunRow.fromJson({
+              ...cloudJson,
+              'sessionId': 'legacy-owner',
+            }),
+          );
+
+      await targetStore.mergeBySessionId('session', payload);
+
+      final imported = await LedgerReconciliationRunRepo(
+        targetDb,
+      ).readSession('session');
+      expect(imported, hasLength(1));
+      expect(
+        imported.single.id,
+        'reconciliation-${computeHash('session\u001f${imported.single.contentHash}')}',
+      );
+      final occupied = await (targetDb.select(
+        targetDb.ledgerReconciliationSuccessfulRuns,
+      )..where((row) => row.id.equals(canonicalId))).getSingle();
+      expect(occupied.sessionId, 'legacy-owner');
+    },
+  );
+
+  test(
     'a stale shorter incoming chain never truncates local history',
     () async {
       await _appendChain(sourceDb, 2);
