@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 118);
+      expect(version, 119);
     });
 
     test(
@@ -232,7 +232,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 118);
+        expect(version.first.read<int>('user_version'), 119);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
     });
 
     test(
@@ -611,7 +611,7 @@ void main() {
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -723,7 +723,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
     });
 
     test(
@@ -833,7 +833,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -873,7 +873,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -907,7 +907,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -981,7 +981,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1433,7 +1433,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1638,7 +1638,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1754,7 +1754,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -2418,7 +2418,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
     });
 
     test(
@@ -2515,7 +2515,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 118);
+      expect(version.read<int>('user_version'), 119);
     });
 
     test('v118 adds prompt post-processing with none for every config', () async {
@@ -2617,6 +2617,97 @@ void main() {
         'custom': 'single',
         'anthropic': 'none',
       });
+    });
+
+    test('v119 lets card rewriter debug runs record a selection bail', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_selection_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      await seeded.customStatement('DROP TABLE card_evolution_debug_runs');
+      // v118-shaped table: only model-backed stages, model always required.
+      await seeded.customStatement('''
+        CREATE TABLE card_evolution_debug_runs (
+          session_id TEXT NOT NULL, stage TEXT NOT NULL,
+          status TEXT NOT NULL, model TEXT NOT NULL, output TEXT NULL,
+          attempts_json TEXT NOT NULL, updated_at INTEGER NOT NULL,
+          PRIMARY KEY (session_id, stage),
+          CHECK (session_id <> '' AND stage IN ('card', 'lorebook')
+            AND status <> '' AND model <> '' AND attempts_json <> ''))
+      ''');
+      await seeded.customStatement(
+        'INSERT INTO card_evolution_debug_runs (session_id, stage, status, '
+        'model, output, attempts_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ['session', 'card', 'ok', 'model-a', 'out', '[]', 10],
+      );
+      await expectLater(
+        seeded.customStatement(
+          'INSERT INTO card_evolution_debug_runs (session_id, stage, status, '
+          'model, output, attempts_json, updated_at) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?)',
+          ['session', 'selection', 'notEligible', '', null, '[]', 20],
+        ),
+        throwsA(anything),
+      );
+      await seeded.customStatement('PRAGMA user_version = 118');
+      await seeded.close();
+
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() async => upgraded.close());
+
+      // A writer that bails before resolving a model has no model name.
+      await upgraded.customStatement(
+        'INSERT INTO card_evolution_debug_runs (session_id, stage, status, '
+        'model, output, attempts_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ['session', 'selection', 'notEligible', '', null, '[{"a":1}]', 20],
+      );
+      final rows = await upgraded
+          .customSelect(
+            'SELECT stage, status, model FROM card_evolution_debug_runs '
+            'ORDER BY stage',
+          )
+          .get();
+      expect(rows.map((row) => row.read<String>('stage')).toList(), [
+        'card',
+        'selection',
+      ]);
+      // The pre-existing model diagnostic survives the table rebuild.
+      expect(rows.first.read<String>('model'), 'model-a');
+      expect(rows.last.read<String>('status'), 'notEligible');
+
+      // Model stages still require a model name, and unknown stages stay out.
+      await expectLater(
+        upgraded.customStatement(
+          'INSERT INTO card_evolution_debug_runs (session_id, stage, status, '
+          'model, output, attempts_json, updated_at) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?)',
+          ['other', 'lorebook', 'ok', '', null, '[]', 30],
+        ),
+        throwsA(anything),
+      );
+      await expectLater(
+        upgraded.customStatement(
+          'INSERT INTO card_evolution_debug_runs (session_id, stage, status, '
+          'model, output, attempts_json, updated_at) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?)',
+          ['other', 'bogus', 'ok', 'model-a', null, '[]', 30],
+        ),
+        throwsA(anything),
+      );
+
+      final version = await upgraded
+          .customSelect('PRAGMA user_version')
+          .getSingle();
+      expect(version.read<int>('user_version'), 119);
     });
 
     test('v111 resolves the retired session_id_mode default', () async {

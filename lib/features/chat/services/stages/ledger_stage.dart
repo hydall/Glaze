@@ -313,6 +313,11 @@ class LedgerStage {
                       );
                     },
                   );
+              debugPrint(
+                '[StudioLedger] card rewriter session=$sessionId '
+                'kind=${rewriteOutcome.kind} '
+                'detail=${rewriteOutcome.detail ?? '-'}',
+              );
               emitAutomaticRewriteReviewIntent(
                 ctx.ref,
                 outcome: rewriteOutcome,

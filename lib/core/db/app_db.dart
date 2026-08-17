@@ -75,7 +75,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 118;
+  int get schemaVersion => 119;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2214,6 +2214,12 @@ class AppDatabase extends _$AppDatabase {
         if (!names.contains('prompt_post_processing')) {
           await m.addColumn(apiConfigs, apiConfigs.promptPostProcessing);
         }
+      }
+      if (from < 119) {
+        // Card Rewriter runs that bail before resolving a model now record a
+        // 'selection' diagnostic row. Rebuild the table so its CHECK accepts
+        // that stage and stops requiring a model name for it.
+        await m.alterTable(TableMigration(cardEvolutionDebugRuns));
       }
     },
   );

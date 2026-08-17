@@ -107,6 +107,14 @@ void main() {
       ],
     );
 
+    final outcome = await evolution.readPromptSnapshotOutcome(
+      claimId: claim.row.id,
+      ownerId: 'owner',
+      now: 11,
+    );
+
+    expect(outcome.snapshot, isNull);
+    expect(outcome.reason, 'inputHashMismatch');
     expect(
       await evolution.readPromptSnapshot(
         claimId: claim.row.id,
@@ -115,6 +123,76 @@ void main() {
       ),
       isNull,
     );
+  });
+
+  test('an unknown session is attributed instead of silently ignored', () async {
+    expect(
+      await evolution.selectionFailure('missing'),
+      CardEvolutionSelectionFailure.sessionMissing,
+    );
+
+    final claim = await evolution.claim(
+      sessionId: 'missing',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    );
+
+    expect(claim.kind, 'notEligible');
+    expect(claim.detail, 'sessionMissing');
+  });
+
+  test('a malformed message list is attributed', () async {
+    await db.customStatement(
+      'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+      ['{}', 'session'],
+    );
+
+    expect(
+      await evolution.selectionFailure('session'),
+      CardEvolutionSelectionFailure.messagesMalformed,
+    );
+  });
+
+  test('a single-turn history is attributed as too short', () async {
+    await db.customStatement(
+      'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+      [
+        jsonEncode([_messages.first]),
+        'session',
+      ],
+    );
+
+    expect(
+      await evolution.selectionFailure('session'),
+      CardEvolutionSelectionFailure.historyTooShort,
+    );
+    expect(await evolution.isEligible('session'), isFalse);
+  });
+
+  test('a character without revisions is attributed as canon unavailable', () async {
+    await db.customStatement(
+      'DELETE FROM character_revision_rows WHERE character_id = ?',
+      ['character'],
+    );
+
+    expect(
+      await evolution.selectionFailure('session'),
+      CardEvolutionSelectionFailure.canonUnavailable,
+    );
+  });
+
+  test('a claim asking for unknown reconciliation runs is attributed', () async {
+    final claim = await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+      reconciliationRunIds: const ['missing-run'],
+    );
+
+    expect(claim.kind, 'notEligible');
+    expect(claim.detail, 'reconciliationRunsMissing');
   });
 
   test('expired claim is replaced using a fresh chat snapshot', () async {

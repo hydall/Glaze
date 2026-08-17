@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../db/repositories/card_evolution_observation_repo.dart';
 import '../../db/repositories/card_evolution_collector_run_repo.dart';
@@ -208,17 +209,44 @@ class AutomatedCardEvolutionService {
           [for (final run in collectorBoundaryRuns) run.reconciliationRunId],
     );
     final claim = claimed.claim;
-    if (claim == null) return CardEvolutionFinalizeOutcome(claimed.kind);
+    if (claim == null) {
+      await _saveSelectionBail(
+        sessionId: sessionId,
+        outcome: claimed.kind,
+        reason: claimed.detail,
+        throughCollectorOrdinal: throughCollectorOrdinal,
+        reconciliationRunIds:
+            reconciliationRunIds ??
+            [for (final run in collectorBoundaryRuns) run.reconciliationRunId],
+      );
+      return CardEvolutionFinalizeOutcome(claimed.kind, null, claimed.detail);
+    }
     CancelToken? token;
     var finalized = false;
     try {
-      final snapshot = await repo.readPromptSnapshot(
+      final snapshotOutcome = await repo.readPromptSnapshotOutcome(
         claimId: claim.row.id,
         ownerId: owner,
         now: currentTimestampSeconds(),
       );
+      final snapshot = snapshotOutcome.snapshot;
       if (snapshot == null) {
-        return const CardEvolutionFinalizeOutcome('snapshotUnavailable');
+        await _saveSelectionBail(
+          sessionId: sessionId,
+          outcome: 'snapshotUnavailable',
+          reason: snapshotOutcome.reason,
+          throughCollectorOrdinal: throughCollectorOrdinal,
+          reconciliationRunIds:
+              reconciliationRunIds ??
+              [
+                for (final run in collectorBoundaryRuns) run.reconciliationRunId,
+              ],
+        );
+        return CardEvolutionFinalizeOutcome(
+          'snapshotUnavailable',
+          null,
+          snapshotOutcome.reason,
+        );
       }
       final config = await resolveModel();
       token = CancelToken();
@@ -982,6 +1010,47 @@ class AutomatedCardEvolutionService {
     ]),
     updatedAt: currentTimestampSeconds(),
   );
+
+  /// Records a writer run that ended before any model call. Without this the
+  /// only trace of a refused claim or an unavailable prompt snapshot is a
+  /// transient toast, which makes the cause unrecoverable after the fact.
+  Future<void> _saveSelectionBail({
+    required String sessionId,
+    required String outcome,
+    required String? reason,
+    required int throughCollectorOrdinal,
+    required List<String> reconciliationRunIds,
+  }) async {
+    final detail = reason == null || reason.isEmpty ? 'unattributed' : reason;
+    debugPrint(
+      '[CardRewriter] writer bailed before model session=$sessionId '
+      'outcome=$outcome reason=$detail '
+      'collectorBoundary=$throughCollectorOrdinal '
+      'runs=${reconciliationRunIds.length}',
+    );
+    try {
+      await repo.saveDebugRun(
+        sessionId: sessionId,
+        stage: 'selection',
+        status: outcome,
+        model: '',
+        output: null,
+        attemptsJson: jsonEncode([
+          {
+            'outcome': outcome,
+            'reason': detail,
+            'collectorBoundary': throughCollectorOrdinal,
+            'reconciliationRunIds': reconciliationRunIds,
+            'at': currentTimestampSeconds(),
+          },
+        ]),
+        updatedAt: currentTimestampSeconds(),
+      );
+    } catch (error) {
+      // Diagnostics must never break the pipeline.
+      debugPrint('[CardRewriter] failed to persist selection bail: $error');
+    }
+  }
 }
 
 final class _PreparedWriterContext {

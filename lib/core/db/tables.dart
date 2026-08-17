@@ -1107,6 +1107,10 @@ class CardEvolutionProposalRuns extends Table {
 /// Rewriter debugging. This is intentionally replaceable diagnostic state,
 /// unlike reviewable proposal provenance which remains immutable once
 /// persisted.
+///
+/// The `selection` stage records writer runs that bailed before a model was
+/// resolved (claim refused, prompt snapshot unavailable). It therefore has no
+/// model name, which is why the model check is scoped to the model stages.
 @DataClassName('CardEvolutionDebugRunRow')
 class CardEvolutionDebugRuns extends Table {
   @override
@@ -1122,8 +1126,9 @@ class CardEvolutionDebugRuns extends Table {
   Set<Column> get primaryKey => {sessionId, stage};
   @override
   List<String> get customConstraints => [
-    "CHECK (session_id <> '' AND stage IN ('card', 'lorebook') "
-        "AND status <> '' AND model <> '' AND attempts_json <> '')",
+    "CHECK (session_id <> '' AND stage IN ('card', 'lorebook', 'selection') "
+        "AND status <> '' AND attempts_json <> '' "
+        "AND (stage = 'selection' OR model <> ''))",
   ];
 }
 

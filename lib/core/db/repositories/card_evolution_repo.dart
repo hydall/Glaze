@@ -22,6 +22,41 @@ const _maxCanonValueCharacters = 2000;
 const _maxLorebookEntryCharacters = 20000;
 const _maxLorebookTotalCharacters = 40000;
 
+/// Why the canonical writer/collector input could not be selected. Every bail
+/// point in [CardEvolutionRepo._selectInput] maps to exactly one value so a
+/// silent `notEligible` can be attributed without re-deriving the state.
+enum CardEvolutionSelectionFailure {
+  sessionMissing,
+  messagesMalformed,
+  canonUnavailable,
+  baselineDecisionRequired,
+  reconciliationRunsMissing,
+  historyUnresolved,
+  historyTooShort,
+  historyRolesIncomplete,
+  lorebookEvidenceUnavailable,
+  collectorRunsUnresolved,
+  inputHashMismatch,
+  claimEvidenceMismatch,
+  unexpectedError,
+}
+
+/// Either the canonical selected input or the reason it is unavailable.
+final class CardEvolutionSelection {
+  const CardEvolutionSelection.selected(String this.json) : failure = null;
+  const CardEvolutionSelection.failed(
+    CardEvolutionSelectionFailure this.failure,
+  ) : json = null;
+
+  final String? json;
+  final CardEvolutionSelectionFailure? failure;
+
+  bool get isSelected => json != null;
+
+  /// Stable diagnostic label; empty when the selection succeeded.
+  String get failureName => failure?.name ?? '';
+}
+
 final class CardEvolutionClaim {
   const CardEvolutionClaim({
     required this.row,
@@ -32,9 +67,14 @@ final class CardEvolutionClaim {
 }
 
 final class CardEvolutionClaimOutcome {
-  const CardEvolutionClaimOutcome(this.kind, [this.claim]);
+  const CardEvolutionClaimOutcome(this.kind, [this.claim, this.detail]);
   final String kind;
   final CardEvolutionClaim? claim;
+
+  /// Diagnostic attribution for the non-claiming kinds. Never user-facing
+  /// copy: it carries a [CardEvolutionSelectionFailure] name when the claim
+  /// failed while selecting evidence.
+  final String? detail;
   bool get isClaimed => kind == 'claimed' || kind == 'existing';
 }
 
@@ -48,6 +88,20 @@ final class CardEvolutionPromptSnapshot {
   final CardEvolutionClaimRow claim;
   final Character character;
   final String selectedInputJson;
+}
+
+/// Either the prompt snapshot for a live lease or the reason it is
+/// unavailable. The reason is diagnostic only and is never shown verbatim to
+/// the user.
+final class CardEvolutionPromptSnapshotOutcome {
+  const CardEvolutionPromptSnapshotOutcome.ready(
+    CardEvolutionPromptSnapshot this.snapshot,
+  ) : reason = null;
+  const CardEvolutionPromptSnapshotOutcome.unavailable(String this.reason)
+    : snapshot = null;
+
+  final CardEvolutionPromptSnapshot? snapshot;
+  final String? reason;
 }
 
 final class CardEvolutionFinalizeOutcome {
@@ -92,8 +146,17 @@ class CardEvolutionRepo {
   final SessionLorebookEvolutionRepo lorebookEvolutionRepo;
   final Future<void> Function()? beforeCursorInsert;
 
-  Future<bool> isEligible(String sessionId) =>
-      db.transaction<bool>(() async => (await _selectInput(sessionId)) != null);
+  Future<bool> isEligible(String sessionId) => db.transaction<bool>(
+    () async => (await _selectInput(sessionId)).isSelected,
+  );
+
+  /// Diagnostic variant of [isEligible]: reports why the session cannot be
+  /// selected instead of collapsing every cause into `false`.
+  @visibleForTesting
+  Future<CardEvolutionSelectionFailure?> selectionFailure(String sessionId) =>
+      db.transaction<CardEvolutionSelectionFailure?>(
+        () async => (await _selectInput(sessionId)).failure,
+      );
 
   Future<CardEvolutionClaimOutcome> claim({
     required String sessionId,
@@ -116,9 +179,10 @@ class CardEvolutionRepo {
       if (existing.ownerId != ownerId) {
         return const CardEvolutionClaimOutcome('busy');
       }
-      final selected = await _selectedInputForClaim(existing);
+      final selection = await _selectedInputForClaim(existing);
+      final selected = selection.json;
       return selected == null
-          ? const CardEvolutionClaimOutcome('stale')
+          ? CardEvolutionClaimOutcome('stale', null, selection.failureName)
           : CardEvolutionClaimOutcome(
               'existing',
               CardEvolutionClaim(row: existing, selectedInputJson: selected),
@@ -138,12 +202,17 @@ class CardEvolutionRepo {
         return const CardEvolutionClaimOutcome('busy');
       }
     }
-    final selected = await _selectInput(
+    final selection = await _selectInput(
       sessionId,
       reconciliationRunIds: reconciliationRunIds,
     );
+    final selected = selection.json;
     if (selected == null) {
-      return const CardEvolutionClaimOutcome('notEligible');
+      return CardEvolutionClaimOutcome(
+        'notEligible',
+        null,
+        selection.failureName,
+      );
     }
     final session = await (db.select(
       db.chatSessions,
@@ -194,29 +263,68 @@ class CardEvolutionRepo {
     required String claimId,
     required String ownerId,
     required int now,
+  }) async => (await readPromptSnapshotOutcome(
+    claimId: claimId,
+    ownerId: ownerId,
+    now: now,
+  )).snapshot;
+
+  /// Same contract as [readPromptSnapshot] but keeps the reason the snapshot
+  /// could not be produced, so an early writer bail stays attributable.
+  Future<CardEvolutionPromptSnapshotOutcome> readPromptSnapshotOutcome({
+    required String claimId,
+    required String ownerId,
+    required int now,
   }) => db.transaction(() async {
     final claim = await (db.select(
       db.cardEvolutionClaims,
     )..where((row) => row.id.equals(claimId))).getSingleOrNull();
-    if (claim == null ||
-        claim.status != 'claimed' ||
-        claim.ownerId != ownerId ||
-        claim.leaseExpiresAt <= now) {
-      return null;
+    if (claim == null) {
+      return const CardEvolutionPromptSnapshotOutcome.unavailable(
+        'claimMissing',
+      );
     }
-    final selected = await _selectedInputForClaim(claim);
-    if (selected == null || computeHash(selected) != claim.inputHash) {
-      return null;
+    if (claim.status != 'claimed') {
+      return const CardEvolutionPromptSnapshotOutcome.unavailable(
+        'claimNotClaimed',
+      );
+    }
+    if (claim.ownerId != ownerId) {
+      return const CardEvolutionPromptSnapshotOutcome.unavailable('claimOwner');
+    }
+    if (claim.leaseExpiresAt <= now) {
+      return const CardEvolutionPromptSnapshotOutcome.unavailable('leaseLost');
+    }
+    final selection = await _selectedInputForClaim(claim);
+    final selected = selection.json;
+    if (selected == null) {
+      return CardEvolutionPromptSnapshotOutcome.unavailable(
+        selection.failureName,
+      );
+    }
+    if (computeHash(selected) != claim.inputHash) {
+      return const CardEvolutionPromptSnapshotOutcome.unavailable(
+        'inputHashMismatch',
+      );
     }
     final assembled = await _assemble(claim.sessionId, claim.characterId);
-    if (assembled == null || assembled.$2.requiresBaselineDecision) {
-      return null;
+    if (assembled == null) {
+      return const CardEvolutionPromptSnapshotOutcome.unavailable(
+        'canonUnavailable',
+      );
+    }
+    if (assembled.$2.requiresBaselineDecision) {
+      return const CardEvolutionPromptSnapshotOutcome.unavailable(
+        'baselineDecisionRequired',
+      );
     }
     final assembly = assembled.$2;
-    return CardEvolutionPromptSnapshot(
-      claim: claim,
-      character: assembly.character,
-      selectedInputJson: selected,
+    return CardEvolutionPromptSnapshotOutcome.ready(
+      CardEvolutionPromptSnapshot(
+        claim: claim,
+        character: assembly.character,
+        selectedInputJson: selected,
+      ),
     );
   });
 
@@ -244,9 +352,21 @@ class CardEvolutionRepo {
     if (claim.ownerId != ownerId || claim.leaseExpiresAt <= now) {
       return const CardEvolutionFinalizeOutcome('leaseLost');
     }
-    final selected = await _selectedInputForClaim(claim);
-    if (selected == null || computeHash(selected) != claim.inputHash) {
-      return const CardEvolutionFinalizeOutcome('staleEvidence');
+    final selection = await _selectedInputForClaim(claim);
+    final selected = selection.json;
+    if (selected == null) {
+      return CardEvolutionFinalizeOutcome(
+        'staleEvidence',
+        null,
+        selection.failureName,
+      );
+    }
+    if (computeHash(selected) != claim.inputHash) {
+      return const CardEvolutionFinalizeOutcome(
+        'staleEvidence',
+        null,
+        'inputHashMismatch',
+      );
     }
     final assembled = await _assemble(claim.sessionId, claim.characterId);
     if (assembled == null || assembled.$2.requiresBaselineDecision) {
@@ -489,7 +609,7 @@ class CardEvolutionRepo {
   Future<CardEvolutionObservationSnapshot?> buildObservationSnapshot(
     String sessionId,
   ) => db.transaction(() async {
-    final selected = await _selectInput(sessionId);
+    final selected = (await _selectInput(sessionId)).json;
     if (selected == null) return null;
     final session = await (db.select(
       db.chatSessions,
@@ -511,7 +631,8 @@ class CardEvolutionRepo {
   Future<CardEvolutionObservationSnapshot?> buildObservationSnapshotForRun(
     LedgerReconciliationSuccessfulRunRow run,
   ) => db.transaction(() async {
-    final selected = await _selectInput(run.sessionId, reconciliationRun: run);
+    final selected =
+        (await _selectInput(run.sessionId, reconciliationRun: run)).json;
     if (selected == null) return null;
     final session = await (db.select(
       db.chatSessions,
@@ -532,10 +653,10 @@ class CardEvolutionRepo {
   ) => db.transaction(() async {
     if (runs.length != 2 || runs[0].sessionId != runs[1].sessionId) return null;
     final sessionId = runs.first.sessionId;
-    final selected = await _selectInput(
+    final selected = (await _selectInput(
       sessionId,
       reconciliationRunIds: [for (final run in runs) run.id],
-    );
+    )).json;
     if (selected == null) return null;
     final session = await (db.select(
       db.chatSessions,
@@ -579,27 +700,37 @@ class CardEvolutionRepo {
             ),
           );
 
-  Future<String?> _selectedInputForClaim(CardEvolutionClaimRow claim) async {
+  Future<CardEvolutionSelection> _selectedInputForClaim(
+    CardEvolutionClaimRow claim,
+  ) async {
     final runIds = await _reconciliationRunIdsForClaim(claim);
     if (claim.predecessorRunOrdinal > 0 &&
         runIds.length != _writerReconciliationRunCount) {
-      return null;
+      return const CardEvolutionSelection.failed(
+        CardEvolutionSelectionFailure.collectorRunsUnresolved,
+      );
     }
-    final selected = await _selectInput(
+    final selection = await _selectInput(
       claim.sessionId,
       reconciliationRunIds: runIds,
     );
-    if (selected == null || computeHash(selected) != claim.inputHash) {
-      return null;
+    final selected = selection.json;
+    if (selected == null) return selection;
+    if (computeHash(selected) != claim.inputHash) {
+      return const CardEvolutionSelection.failed(
+        CardEvolutionSelectionFailure.inputHashMismatch,
+      );
     }
     final snapshot = jsonDecode(selected) as Map<String, dynamic>;
     return snapshot['chatHistoryHash'] == claim.chatHistoryHash &&
             snapshot['effectiveCanonIdentity'] == claim.effectiveCanonIdentity
-        ? selected
-        : null;
+        ? selection
+        : const CardEvolutionSelection.failed(
+            CardEvolutionSelectionFailure.claimEvidenceMismatch,
+          );
   }
 
-  Future<String?> _selectInput(
+  Future<CardEvolutionSelection> _selectInput(
     String sessionId, {
     LedgerReconciliationSuccessfulRunRow? reconciliationRun,
     List<String> reconciliationRunIds = const [],
@@ -608,19 +739,38 @@ class CardEvolutionRepo {
       final session = await (db.select(
         db.chatSessions,
       )..where((row) => row.sessionId.equals(sessionId))).getSingleOrNull();
-      if (session == null) return null;
+      if (session == null) {
+        return const CardEvolutionSelection.failed(
+          CardEvolutionSelectionFailure.sessionMissing,
+        );
+      }
       final messages = jsonDecode(session.messagesJson);
-      if (messages is! List) return null;
+      if (messages is! List) {
+        return const CardEvolutionSelection.failed(
+          CardEvolutionSelectionFailure.messagesMalformed,
+        );
+      }
       final assembled = await _assemble(sessionId, session.characterId);
-      if (assembled == null || assembled.$2.requiresBaselineDecision) {
-        return null;
+      if (assembled == null) {
+        return const CardEvolutionSelection.failed(
+          CardEvolutionSelectionFailure.canonUnavailable,
+        );
+      }
+      if (assembled.$2.requiresBaselineDecision) {
+        return const CardEvolutionSelection.failed(
+          CardEvolutionSelectionFailure.baselineDecisionRequired,
+        );
       }
       final boundaryRuns = reconciliationRunIds.isEmpty
           ? <LedgerReconciliationSuccessfulRunRow>[]
           : await (db.select(
               db.ledgerReconciliationSuccessfulRuns,
             )..where((row) => row.id.isIn(reconciliationRunIds))).get();
-      if (boundaryRuns.length != reconciliationRunIds.length) return null;
+      if (boundaryRuns.length != reconciliationRunIds.length) {
+        return const CardEvolutionSelection.failed(
+          CardEvolutionSelectionFailure.reconciliationRunsMissing,
+        );
+      }
       boundaryRuns.sort(
         (a, b) => reconciliationRunIds
             .indexOf(a.id)
@@ -637,8 +787,15 @@ class CardEvolutionRepo {
               runs: boundaryRuns,
             )
           : _selectChatHistory(messages: messages);
-      if (history == null || history.length < 2) {
-        return null;
+      if (history == null) {
+        return const CardEvolutionSelection.failed(
+          CardEvolutionSelectionFailure.historyUnresolved,
+        );
+      }
+      if (history.length < 2) {
+        return const CardEvolutionSelection.failed(
+          CardEvolutionSelectionFailure.historyTooShort,
+        );
       }
       final hasUser = history.any(
         (message) => message is Map && message['role'] == 'user',
@@ -647,13 +804,19 @@ class CardEvolutionRepo {
         (message) => message is Map && message['role'] == 'assistant',
       );
       if (!hasUser || !hasAssistant) {
-        return null;
+        return const CardEvolutionSelection.failed(
+          CardEvolutionSelectionFailure.historyRolesIncomplete,
+        );
       }
       final lorebookEntries = await _selectInjectedLorebookEntries(
         sessionId: sessionId,
         history: history,
       );
-      if (lorebookEntries == null) return null;
+      if (lorebookEntries == null) {
+        return const CardEvolutionSelection.failed(
+          CardEvolutionSelectionFailure.lorebookEvidenceUnavailable,
+        );
+      }
       final historyJson = _canonicalJson(history);
       final canonEvidence = _canonEvidence(assembled.$1, assembled.$2, history);
       final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(
@@ -718,9 +881,11 @@ class CardEvolutionRepo {
         'availableObservationRetrievalTargets': availableRetrievalTargets,
         'accumulatedObservations': compactObservations,
       });
-      return selected;
+      return CardEvolutionSelection.selected(selected);
     } catch (_) {
-      return null;
+      return const CardEvolutionSelection.failed(
+        CardEvolutionSelectionFailure.unexpectedError,
+      );
     }
   }
 
