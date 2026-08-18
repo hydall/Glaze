@@ -189,6 +189,101 @@ void main() {
     expect(restored.blocks.last.isStatic, isTrue);
   });
 
+  test('insertionMode and depth survive canonicalization and round-trip', () {
+    const source = StudioPreset(
+      id: 'depth-preset',
+      agents: [],
+      blocks: [
+        StudioPresetBlock(
+          id: 'author_note',
+          injectionPoint: 'final',
+          mode: 'direct',
+          insertionMode: 'depth',
+          depth: 4,
+        ),
+        StudioPresetBlock(
+          id: 'relative_note',
+          injectionPoint: 'final',
+          mode: 'direct',
+        ),
+      ],
+    );
+
+    final restored = StudioPresetCodec.decodePreset(
+      Map<String, dynamic>.from(jsonDecode(jsonEncode(source.toJson())) as Map),
+    ).preset;
+
+    expect(restored.blocks[0].insertionMode, 'depth');
+    expect(restored.blocks[0].depth, 4);
+    expect(restored.blocks[1].insertionMode, 'relative');
+    expect(restored.blocks[1].depth, isNull);
+  });
+
+  test(
+    'insertionMode and depth default to relative/null when absent from JSON',
+    () {
+      final block = StudioPresetCodec.canonicalizeBlock({
+        'id': 'no_depth_fields',
+        'type': 'instruction',
+        'injectionPoint': 'final',
+        'mode': 'direct',
+      }).block;
+
+      expect(block.insertionMode, 'relative');
+      expect(block.depth, isNull);
+    },
+  );
+
+  test('canonicalizeBlock preserves an explicit depth insertion mode', () {
+    final block = StudioPresetCodec.canonicalizeBlock({
+      'id': 'depth_block',
+      'type': 'instruction',
+      'injectionPoint': 'final',
+      'mode': 'direct',
+      'insertionMode': 'depth',
+      'depth': 7,
+    }).block;
+
+    expect(block.insertionMode, 'depth');
+    expect(block.depth, 7);
+  });
+
+  test('non-numeric depth in JSON falls back to null', () {
+    final block = StudioPresetCodec.canonicalizeBlock({
+      'id': 'malformed_depth',
+      'type': 'instruction',
+      'injectionPoint': 'final',
+      'mode': 'direct',
+      'insertionMode': 'depth',
+      'depth': 'not-a-number',
+    }).block;
+
+    expect(block.depth, isNull);
+  });
+
+  test(
+    'canonicalizePresetJson preserves insertionMode and depth across a preset',
+    () {
+      final canonical = StudioPresetCodec.canonicalizePresetJson({
+        'id': 'depth-json',
+        'blocks': [
+          {
+            'id': 'depth_block',
+            'type': 'instruction',
+            'injectionPoint': 'final',
+            'mode': 'direct',
+            'insertionMode': 'depth',
+            'depth': 2,
+          },
+        ],
+      });
+
+      final block = (canonical['blocks'] as List).single as Map<String, dynamic>;
+      expect(block['insertionMode'], 'depth');
+      expect(block['depth'], 2);
+    },
+  );
+
   test('canonical injection point does not require a legacy section', () {
     final block = StudioPresetCodec.canonicalizeBlock({
       'id': 'ledger_reconciliation_prompt',

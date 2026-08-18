@@ -398,6 +398,8 @@ abstract final class StudioPresetCodec {
     injectionPoint: _string(json['injectionPoint'], 'pregen'),
     sourceAgentId: _string(json['sourceAgentId']),
     groupBoundary: _string(json['groupBoundary'], 'none'),
+    insertionMode: _string(json['insertionMode'], 'relative'),
+    depth: json['depth'] is num ? (json['depth'] as num).toInt() : null,
   );
 
   static String? _resolveLegacyTarget(String id, String title) {

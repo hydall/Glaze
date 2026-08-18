@@ -71,6 +71,18 @@ abstract class StudioPresetBlock with _$StudioPresetBlock {
     @Default('pregen') String injectionPoint,
     @Default('') String sourceAgentId,
     @Default('none') String groupBoundary,
+
+    /// `'relative'` (default): the block is concatenated in `order` sequence
+    /// within its `injectionPoint` bucket, before/after the whole chat-history
+    /// splice. `'depth'`: the block is instead interleaved INSIDE the chat
+    /// history array at [depth] messages counted from the end (0 = right
+    /// before generation, matching the classic (non-Studio) preset pipeline's
+    /// `insertionMode`/`depth` fields — see `PresetBlock` in `preset.dart`
+    /// and `interleaveDepthWithHistory` in `history_assembler.dart`). Only
+    /// meaningful for `type: instruction` blocks; ignored on `history`
+    /// blocks themselves.
+    @Default('relative') String insertionMode,
+    int? depth,
   }) = _StudioPresetBlock;
 
   factory StudioPresetBlock.fromJson(Map<String, dynamic> json) =>

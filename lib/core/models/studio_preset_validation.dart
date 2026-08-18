@@ -26,6 +26,8 @@ abstract final class StudioPresetValidator {
 
   static const supportedRoles = <String>{'system', 'user', 'assistant'};
 
+  static const supportedInsertionModes = <String>{'relative', 'depth'};
+
   static const targetAgentIds = <String>{
     'continuity',
     'agency',
@@ -56,6 +58,30 @@ abstract final class StudioPresetValidator {
         // stores and exports impossible to import back.
         issues.add(
           _warning(block, 'Unsupported Studio section "${block.section}".'),
+        );
+      }
+
+      if (!supportedInsertionModes.contains(block.insertionMode)) {
+        issues.add(_warning(block, 'Unsupported insertion mode.'));
+      } else if (block.insertionMode == 'depth' && block.depth == null) {
+        issues.add(
+          _warning(block, 'Depth insertion mode is set without a depth.'),
+        );
+      } else if (block.insertionMode != 'depth' && block.depth != null) {
+        issues.add(
+          _warning(block, 'Depth is set but insertion mode is not "depth".'),
+        );
+      }
+      if (block.insertionMode == 'depth' &&
+          block.type != StudioBlockType.instruction) {
+        // Depth-based interleaving only makes sense for instructions being
+        // inserted into the chat-history array. A `history` block is the
+        // array being interleaved into, and `context`/`priorBriefs` blocks
+        // are spliced individually elsewhere in the pipeline — depth on
+        // those types is ignored at runtime, so flag it rather than silently
+        // dropping the author's intent.
+        issues.add(
+          _warning(block, 'Depth insertion only applies to instructions.'),
         );
       }
 

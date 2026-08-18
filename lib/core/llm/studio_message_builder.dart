@@ -59,7 +59,33 @@ class StudioMessageBuilder {
             })
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
-    final blocks = resolveEnabledStudioPresetBlocks(routedBlocks);
+    final resolvedBlocks = resolveEnabledStudioPresetBlocks(routedBlocks);
+    // Depth-anchored instructions (insertionMode: 'depth') are not part of the
+    // ordinary order-sequenced concatenation below — they are interleaved
+    // INSIDE the chat-history array at a specific depth from the end, the
+    // same way the classic (non-Studio) preset pipeline handles Author's Note
+    // / `insertionMode: 'depth'` blocks (see `interleaveDepthWithHistory` in
+    // `history_assembler.dart`). Pull them out here, after group-boundary
+    // resolution (so folded group wrappers are already applied) and before
+    // the main loop, so they aren't also emitted as ordinary messages.
+    final depthBlocks = resolvedBlocks
+        .where(
+          (b) =>
+              b.type == StudioBlockType.instruction &&
+              b.insertionMode == 'depth',
+        )
+        .toList();
+    final blocks = depthBlocks.isEmpty
+        ? resolvedBlocks
+        : resolvedBlocks.where((b) => !depthBlocks.contains(b)).toList();
+    final depthMessages = depthBlocks.isEmpty
+        ? const <PromptMessage>[]
+        : _resolveDepthMessages(
+            depthBlocks,
+            context: context,
+            priorBriefs: priorBriefs,
+            studioPreset: studioPreset,
+          );
     final hasExplicitBriefMacros =
         isFinalResponse &&
         blocks.any(
@@ -94,10 +120,19 @@ class StudioMessageBuilder {
         if (isFinalResponse &&
             (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
           messages.addAll(
-            _historyWithReasoning(history, reasoningHistoryCount),
+            _historyWithReasoning(
+              history,
+              reasoningHistoryCount,
+              depthMessages: depthMessages,
+            ),
           );
         } else {
-          messages.addAll(history.map((m) => m.toApiMap()));
+          messages.addAll(
+            interleaveDepthWithHistory(
+              history,
+              depthMessages,
+            ).map((m) => m.toApiMap()),
+          );
         }
         continue;
       }
@@ -157,10 +192,19 @@ class StudioMessageBuilder {
           if (isFinalResponse &&
               (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
             messages.addAll(
-              _historyWithReasoning(history, reasoningHistoryCount),
+              _historyWithReasoning(
+                history,
+                reasoningHistoryCount,
+                depthMessages: depthMessages,
+              ),
             );
           } else {
-            messages.addAll(history.map((m) => m.toApiMap()));
+            messages.addAll(
+              interleaveDepthWithHistory(
+                history,
+                depthMessages,
+              ).map((m) => m.toApiMap()),
+            );
           }
         } else if (blockId == 'dynamic_context') {
           messages.addAll(context.dynamicContext.map((m) => m.toApiMap()));
@@ -337,11 +381,15 @@ class StudioMessageBuilder {
 
   List<Map<String, dynamic>> _historyWithReasoning(
     List<PromptMessage> history,
-    int reasoningHistoryCount,
-  ) {
-    final messages = history
-        .map<Map<String, dynamic>>((message) => message.toApiMap())
-        .toList();
+    int reasoningHistoryCount, {
+    List<PromptMessage> depthMessages = const [],
+  }) {
+    // Reasoning selection must run on the raw (unshifted) history so "last N
+    // assistant turns" still means the same thing once depth-anchored blocks
+    // get interleaved in below — depth insertion changes each message's
+    // resulting list index, but not which of the ORIGINAL history messages
+    // are the most recent assistant turns.
+    final reasoningByMessage = <PromptMessage, String>{};
     final includeAll = reasoningHistoryCount == -1;
     var remaining = reasoningHistoryCount;
     for (
@@ -353,11 +401,51 @@ class StudioMessageBuilder {
       if (message.role != 'assistant') continue;
       final reasoning = message.reasoningContent?.trim();
       if (reasoning?.isNotEmpty == true) {
-        messages[i]['reasoning_content'] = reasoning;
+        reasoningByMessage[message] = reasoning!;
         if (!includeAll) remaining--;
       }
     }
-    return messages;
+    final interleaved = interleaveDepthWithHistory(history, depthMessages);
+    return interleaved.map<Map<String, dynamic>>((message) {
+      final apiMap = message.toApiMap();
+      final reasoning = reasoningByMessage[message];
+      if (reasoning != null) apiMap['reasoning_content'] = reasoning;
+      return apiMap;
+    }).toList();
+  }
+
+  /// Resolves depth-anchored instruction blocks the same way an ordinary
+  /// `direct`-mode instruction is resolved (macro expansion + role
+  /// normalization), turning each into a [PromptMessage] ready for
+  /// [interleaveDepthWithHistory].
+  List<PromptMessage> _resolveDepthMessages(
+    List<StudioPresetBlock> depthBlocks, {
+    required StudioContext context,
+    required List<StudioStageBrief> priorBriefs,
+    required StudioPreset studioPreset,
+  }) {
+    final result = <PromptMessage>[];
+    for (final block in depthBlocks) {
+      final content = _blockExpander
+          .expandStudioBlockContent(
+            block.content,
+            context: context,
+            priorBriefs: priorBriefs,
+            preset: studioPreset,
+          )
+          .trim();
+      if (content.isEmpty) continue;
+      result.add(
+        PromptMessage(
+          role: _blockExpander.normalizeInstructionRole(block.role),
+          content: content,
+          blockId: block.id,
+          depth: block.depth ?? 0,
+          isDepth: true,
+        ),
+      );
+    }
+    return result;
   }
 
   /// Shared messages for a batch: `static_context` + `dynamic_context` +

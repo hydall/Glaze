@@ -313,6 +313,12 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       blockJson['name'] = blockName;
       blockJson['role'] = _normalizeImportedRole(pm['role']);
       blockJson['content'] = isMarker ? '' : (pm['content'] ?? '');
+      // This prompt is not a member of the active character's prompt_order,
+      // so real SillyTavern would never assemble/send it regardless of its
+      // own `enabled` flag. Force it disabled on import instead of trusting
+      // that flag, so it lands inert (formerly the "Stash" bucket's role)
+      // rather than silently active in the imported preset.
+      blockJson['enabled'] = false;
 
       if (pm['injection_position'] == 1) {
         blockJson['insertionMode'] = 'depth';

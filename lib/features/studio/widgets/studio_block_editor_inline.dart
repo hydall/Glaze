@@ -101,6 +101,32 @@ class StudioBlockEditorInline extends StatelessWidget {
         showIf: (item) =>
             item['mode'] != 'pregenBrief' && item['mode'] != 'agentResponse',
       ),
+      // Depth placement: interleave this block INSIDE the chat-history array
+      // instead of concatenating it before/after the whole history via
+      // `order` — same concept as the classic (non-Studio) preset editor's
+      // Author's Note depth field. Only meaningful for direct instructions
+      // that aren't targeting a specific pre-gen agent's brief pipeline.
+      GenericEditorField(
+        key: 'insertionMode',
+        label: 'label_insertion'.tr(),
+        type: 'select',
+        options: const [
+          {'label': 'Relative', 'value': 'relative'},
+          {'label': 'Depth', 'value': 'depth'},
+        ],
+        showIf: (item) => item['mode'] == 'direct',
+      ),
+      GenericEditorField(
+        key: 'depth',
+        label: 'label_depth'.tr(),
+        type: 'select',
+        options: List.generate(
+          20,
+          (i) => {'label': '${i + 1}', 'value': i + 1},
+        ),
+        showIf: (item) =>
+            item['mode'] == 'direct' && item['insertionMode'] == 'depth',
+      ),
     ];
     if (headerPrompt) {
       fields

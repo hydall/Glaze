@@ -114,6 +114,118 @@ void main() {
     );
   });
 
+  test('warns on an unsupported insertion mode string', () {
+    const preset = StudioPreset(
+      id: 'bad-insertion-mode',
+      blocks: [
+        StudioPresetBlock(
+          id: 'weird',
+          content: 'Rules',
+          insertionMode: 'unsupported-mode',
+        ),
+      ],
+    );
+
+    final issues = StudioPresetValidator.validate(preset);
+
+    expect(
+      issues.map((issue) => issue.message),
+      contains('Unsupported insertion mode.'),
+    );
+  });
+
+  test('warns when insertionMode is depth but depth is null', () {
+    const preset = StudioPreset(
+      id: 'depth-missing',
+      blocks: [
+        StudioPresetBlock(
+          id: 'depth-block',
+          content: 'Rules',
+          insertionMode: 'depth',
+        ),
+      ],
+    );
+
+    final issues = StudioPresetValidator.validate(preset);
+
+    expect(
+      issues.map((issue) => issue.message),
+      contains('Depth insertion mode is set without a depth.'),
+    );
+  });
+
+  test('warns when depth is set but insertionMode is not depth', () {
+    const preset = StudioPreset(
+      id: 'depth-without-mode',
+      blocks: [
+        StudioPresetBlock(id: 'depth-block', content: 'Rules', depth: 3),
+      ],
+    );
+
+    final issues = StudioPresetValidator.validate(preset);
+
+    expect(
+      issues.map((issue) => issue.message),
+      contains('Depth is set but insertion mode is not "depth".'),
+    );
+  });
+
+  test(
+    'warns when insertionMode is depth on a non-instruction block type',
+    () {
+      const preset = StudioPreset(
+        id: 'depth-on-history',
+        blocks: [
+          StudioPresetBlock(
+            id: 'history',
+            type: StudioBlockType.history,
+            insertionMode: 'depth',
+            depth: 1,
+          ),
+        ],
+      );
+
+      final issues = StudioPresetValidator.validate(preset);
+
+      expect(
+        issues.map((issue) => issue.message),
+        contains('Depth insertion only applies to instructions.'),
+      );
+    },
+  );
+
+  test(
+    'a well-formed depth instruction block produces no depth-related warnings',
+    () {
+      const preset = StudioPreset(
+        id: 'depth-ok',
+        blocks: [
+          StudioPresetBlock(
+            id: 'depth-block',
+            content: 'Rules',
+            insertionMode: 'depth',
+            depth: 5,
+          ),
+        ],
+      );
+
+      final issues = StudioPresetValidator.validate(preset);
+
+      expect(
+        issues.map((issue) => issue.message),
+        isNot(
+          anyElement(
+            anyOf(
+              contains('insertion mode'),
+              contains('Depth insertion'),
+              contains('Depth is set'),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
   test('reports duplicate ids and ignored source-block content', () {
     const preset = StudioPreset(
       id: 'warnings',
