@@ -58,9 +58,25 @@ class StudioRuntimeBlockExpander {
 
 
   /// Normalize the role of a preset/shard INSTRUCTION block (not a chat
-  /// history message). Instruction blocks are always forced to `system` so
-  /// the model treats them as authoritative directives, not user dialogue.
+  /// history message).
+  ///
+  /// Historically this forced every instruction block to `system` so a
+  /// preset could not smuggle a `user`/`assistant` turn into the middle of
+  /// the conversation (see git history: `a22353c4`, `05fa1bb3`, `5f5a23d5`).
+  /// That protected against *legacy* presets that carried `role: 'user'` on
+  /// every block by accident (e.g. Shino). Author-controlled `user`/
+  /// `assistant` roles are now passed through unchanged so a preset can
+  /// place a deliberate fake prior turn (e.g. a pre-agreed assistant
+  /// response followed by a user confirmation) via block `order`, matching
+  /// what SillyTavern-style presets already do. Only an empty/unsupported
+  /// role falls back to `system`.
   String normalizeInstructionRole(String role) {
-    return 'system';
+    switch (role) {
+      case 'user':
+      case 'assistant':
+        return role;
+      default:
+        return 'system';
+    }
   }
 }
