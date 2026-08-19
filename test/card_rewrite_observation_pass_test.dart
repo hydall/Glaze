@@ -580,7 +580,7 @@ void main() {
   test('one oversized history message fails with an explicit size', () async {
     final messages = [
       {'id': 'a0', 'role': 'assistant', 'content': 'opening'},
-      {'id': 'u1', 'role': 'user', 'content': 'x' * 201000},
+      {'id': 'u1', 'role': 'user', 'content': 'x' * 601000},
       {'id': 'a1', 'role': 'assistant', 'content': 'accepted'},
     ];
     final service = fixture.service((_, prompt) async {
@@ -601,7 +601,7 @@ void main() {
 
     expect(outcome?.kind, 'snapshotTooLarge');
     expect(outcome?.detail, contains('history message 2'));
-    expect(outcome?.detail, contains('200000'));
+    expect(outcome?.detail, contains('600000'));
   });
 
   test(

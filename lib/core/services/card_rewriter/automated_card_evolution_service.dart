@@ -23,7 +23,7 @@ import 'manual_rewrite_service.dart';
 
 const _writerMaxTokens = 20000;
 const _writerCollectorBatchSize = 2;
-const _writerSnapshotCharacterLimit = 200000;
+const _writerSnapshotCharacterLimit = 600000;
 const _writerContextCharacterLimit = 180000;
 const _historyConsolidationInstruction =
     'Consolidate this next immutable Card Rewriter evidence segment into a '
