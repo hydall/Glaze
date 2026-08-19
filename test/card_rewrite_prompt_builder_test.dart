@@ -99,6 +99,9 @@ void main() {
     expect(prompt, contains('smallest exact anchors, not the fewest patches'));
     expect(prompt, contains('every directly conflicting fragment'));
     expect(prompt, contains('obsolete state as current canon'));
+    expect(prompt, contains('every supplied writable field'));
+    expect(prompt, contains('one operation per affected field'));
+    expect(prompt, contains('timeline, scenario, appearance, motivation'));
   });
 
   test('evolution prompt keeps one-off events in Ledger', () {

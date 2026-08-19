@@ -75,6 +75,15 @@ abstract final class CardRewriterPromptBuilder {
         'the obsolete state as current canon.',
       )
       ..writeln(
+        'Audit every supplied writable field for the same contradiction. When '
+        'a durable change invalidates current assertions in more than one field, '
+        'emit one operation per affected field and patch every directly '
+        'conflicting fragment. For a relationship-status transition, preserve '
+        'historical facts such as when a proposal occurred, but rewrite any '
+        'timeline, scenario, appearance, motivation, or relationship sentence '
+        'that still presents the obsolete status as current.',
+      )
+      ..writeln(
         'The card is a long-term character reference, not an event log. Keep '
         'one-off actions, recent scene beats, invitations, travel, meals, and '
         'temporary relationship moods or scene-level dynamics in Ledger. Do not '

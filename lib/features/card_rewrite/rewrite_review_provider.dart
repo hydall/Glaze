@@ -331,17 +331,17 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
     }
     state = state.copyWith(busy: true);
     try {
-      final deleted = await ref
-          .read(cardEvolutionRepoProvider)
-          .deleteReplaceableProposal(job.id);
+      // Capture dependencies before deleting the watched job. Its removal can
+      // unmount the review body and dispose this family controller mid-await.
+      final evolutionRepo = ref.read(cardEvolutionRepoProvider);
+      final evolutionService = ref.read(automatedCardEvolutionServiceProvider);
+      final deleted = await evolutionRepo.deleteReplaceableProposal(job.id);
       if (!deleted.isDeleted) {
         return CardEvolutionFinalizeOutcome(deleted.kind);
       }
-      return await ref
-          .read(automatedCardEvolutionServiceProvider)
-          .runOneBatch(job.chatSessionId);
+      return await evolutionService.runOneBatch(job.chatSessionId);
     } finally {
-      state = state.copyWith(busy: false);
+      if (ref.mounted) state = state.copyWith(busy: false);
     }
   }
 
