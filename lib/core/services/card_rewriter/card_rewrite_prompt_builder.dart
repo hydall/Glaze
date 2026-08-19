@@ -101,7 +101,13 @@ abstract final class CardRewriterPromptBuilder {
         'canonical card field you are patching.',
       )
       ..writeln(
-        '- Preserve every {{...}} macro token byte-for-byte in a replacement.',
+        '- Preserve every {{...}} macro token byte-for-byte in a replacement. '
+        'Never replace {{user}} with a character name or persona name.',
+      )
+      ..writeln(
+        '- Strict character boundary: a patch modifying one character\'s profile '
+        'MUST NOT insert description or background for other characters, the user, '
+        'or third parties. Each character\'s section must remain strictly about that character.',
       )
       ..writeln(
         '- Treat the immutable chat history and Ledger facts as evidence for '
