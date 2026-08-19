@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
@@ -311,7 +312,7 @@ void main() {
     final job = finalized.job!;
     await evolution.jobRepo.cancel(jobId: job.id, expectedVersion: job.version);
 
-    final outcome = await evolution.deleteClosedProposal(job.id);
+    final outcome = await evolution.deleteReplaceableProposal(job.id);
 
     expect(outcome.kind, 'deleted');
     expect(await db.select(db.rewriteJobs).get(), isEmpty);
@@ -331,7 +332,7 @@ void main() {
     );
   });
 
-  test('refuses to delete an active automated proposal', () async {
+  test('deletes a pending automated proposal before review apply', () async {
     final claim = (await evolution.claim(
       sessionId: 'session',
       ownerId: 'owner',
@@ -346,12 +347,41 @@ void main() {
       operations: _operations(),
     );
 
-    expect(
-      (await evolution.deleteClosedProposal(finalized.job!.id)).kind,
-      'invalidState',
+    final outcome = await evolution.deleteReplaceableProposal(finalized.job!.id);
+
+    expect(outcome.kind, 'deleted');
+    expect(await db.select(db.rewriteJobs).get(), isEmpty);
+    expect(await db.select(db.rewriteOperations).get(), isEmpty);
+    expect(await db.select(db.rewriteOperationRevisions).get(), isEmpty);
+    expect(await db.select(db.rewriteEvidenceRows).get(), isEmpty);
+    expect(await db.select(db.cardEvolutionProposalRuns).get(), isEmpty);
+    expect(await db.select(db.cardEvolutionClaims).get(), isEmpty);
+  });
+
+  test('refuses to delete an applied automated proposal', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+    final finalized = await evolution.finalize(
+      claimId: claim.row.id,
+      ownerId: 'owner',
+      now: 11,
+      modelOutput: '["raw"]',
+      operations: _operations(),
     );
+    await (db.update(db.rewriteJobs)
+          ..where((row) => row.id.equals(finalized.job!.id)))
+        .write(const RewriteJobsCompanion(status: Value('applied')));
+
+    final outcome = await evolution.deleteReplaceableProposal(finalized.job!.id);
+
+    expect(outcome.kind, 'invalidState');
     expect(await db.select(db.rewriteJobs).get(), hasLength(1));
     expect(await db.select(db.cardEvolutionProposalRuns).get(), hasLength(1));
+    expect(await db.select(db.cardEvolutionClaims).get(), hasLength(1));
   });
 
   test('finalize reports the exact rejected card patch validation', () async {

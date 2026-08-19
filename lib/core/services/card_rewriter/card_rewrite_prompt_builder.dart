@@ -67,6 +67,14 @@ abstract final class CardRewriterPromptBuilder {
         'compact while allowing it to grow gradually when necessary.',
       )
       ..writeln(
+        'Minimal means the smallest exact anchors, not the fewest patches. When '
+        'one durable change makes multiple fragments in the same writable field '
+        'outdated or mutually contradictory, include a separate minimal patch '
+        'for every directly conflicting fragment in that field. Do not update '
+        'only the first occurrence while leaving the rest of the card describing '
+        'the obsolete state as current canon.',
+      )
+      ..writeln(
         'The card is a long-term character reference, not an event log. Keep '
         'one-off actions, recent scene beats, invitations, travel, meals, and '
         'temporary relationship moods or scene-level dynamics in Ledger. Do not '

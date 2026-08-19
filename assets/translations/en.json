@@ -2112,6 +2112,7 @@
   "rewrite_status_reason": "Reason: {reason}",
   "rewrite_generating_hint": "The proposal is being generated. You can cancel it.",
   "rewrite_failed_hint": "Generation stopped. Retry the saved request or cancel it.",
+  "rewrite_regenerate_hint": "Discard this unapplied proposal and generate a fresh one from the current evidence.",
   "rewrite_retry": "Retry",
   "rewrite_cancel": "Cancel",
   "rewrite_cancel_requested": "Cancellation requested. Waiting for the saved job status.",

@@ -157,16 +157,18 @@ class CardEvolutionRepo {
     () async => (await _selectInput(sessionId)).isSelected,
   );
 
-  /// Deletes one closed automated proposal and its complete review provenance.
+  /// Deletes one replaceable automated proposal and its complete review
+  /// provenance. Pending review proposals are replaceable because none of their
+  /// patches have been applied to the card yet.
   /// The completed claim is removed as well so the same immutable input may be
   /// explicitly regenerated instead of being blocked by idempotency.
-  Future<CardEvolutionDeleteOutcome> deleteClosedProposal(String jobId) =>
+  Future<CardEvolutionDeleteOutcome> deleteReplaceableProposal(String jobId) =>
       db.transaction(() async {
         final job = await (db.select(
           db.rewriteJobs,
         )..where((row) => row.id.equals(jobId))).getSingleOrNull();
         if (job == null) return const CardEvolutionDeleteOutcome('notFound');
-        if (job.status != 'failed' && job.status != 'cancelled') {
+        if (!const {'pending', 'failed', 'cancelled'}.contains(job.status)) {
           return const CardEvolutionDeleteOutcome('invalidState');
         }
         final proposal = await (db.select(

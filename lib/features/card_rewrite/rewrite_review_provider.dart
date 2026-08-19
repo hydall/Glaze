@@ -317,7 +317,7 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
     try {
       return await ref
           .read(cardEvolutionRepoProvider)
-          .deleteClosedProposal(job.id);
+          .deleteReplaceableProposal(job.id);
     } finally {
       state = state.copyWith(busy: false);
     }
@@ -333,7 +333,7 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
     try {
       final deleted = await ref
           .read(cardEvolutionRepoProvider)
-          .deleteClosedProposal(job.id);
+          .deleteReplaceableProposal(job.id);
       if (!deleted.isDeleted) {
         return CardEvolutionFinalizeOutcome(deleted.kind);
       }

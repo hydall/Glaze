@@ -96,6 +96,9 @@ void main() {
 
     expect(prompt, contains('Prefer replacing or refining an existing outdated'));
     expect(prompt, contains('Append only when no existing fragment'));
+    expect(prompt, contains('smallest exact anchors, not the fewest patches'));
+    expect(prompt, contains('every directly conflicting fragment'));
+    expect(prompt, contains('obsolete state as current canon'));
   });
 
   test('evolution prompt keeps one-off events in Ledger', () {

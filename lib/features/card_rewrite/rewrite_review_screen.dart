@@ -623,10 +623,11 @@ class _JobActions extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final generating = job.status == 'generating';
+    final pending = job.status == 'pending';
     final failed = job.status == 'failed';
     final cancelled = job.status == 'cancelled';
     final automated = isAutomatedEvolutionJob(job);
-    final canReplaceAutomated = automated && (failed || cancelled);
+    final canReplaceAutomated = automated && (pending || failed || cancelled);
     if (!generating && !failed && !canReplaceAutomated) {
       return const SizedBox.shrink();
     }
@@ -644,6 +645,8 @@ class _JobActions extends ConsumerWidget {
               Text(
                 generating
                     ? 'rewrite_generating_hint'.tr()
+                    : pending
+                    ? 'rewrite_regenerate_hint'.tr()
                     : 'rewrite_failed_hint'.tr(),
                 style: TextStyle(
                   fontSize: 12,
