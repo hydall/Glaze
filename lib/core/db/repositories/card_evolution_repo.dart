@@ -112,6 +112,13 @@ final class CardEvolutionFinalizeOutcome {
   bool get isPersisted => kind == 'persisted' || kind == 'alreadyCompleted';
 }
 
+final class CardEvolutionDeleteOutcome {
+  const CardEvolutionDeleteOutcome(this.kind);
+
+  final String kind;
+  bool get isDeleted => kind == 'deleted';
+}
+
 /// Read-only context for the observation pass: the character and the canonical
 /// selected input (chat history, card snapshot, effective canon). Unlike
 /// [CardEvolutionPromptSnapshot] this does not require a live claim lease.
@@ -149,6 +156,51 @@ class CardEvolutionRepo {
   Future<bool> isEligible(String sessionId) => db.transaction<bool>(
     () async => (await _selectInput(sessionId)).isSelected,
   );
+
+  /// Deletes one closed automated proposal and its complete review provenance.
+  /// The completed claim is removed as well so the same immutable input may be
+  /// explicitly regenerated instead of being blocked by idempotency.
+  Future<CardEvolutionDeleteOutcome> deleteClosedProposal(String jobId) =>
+      db.transaction(() async {
+        final job = await (db.select(
+          db.rewriteJobs,
+        )..where((row) => row.id.equals(jobId))).getSingleOrNull();
+        if (job == null) return const CardEvolutionDeleteOutcome('notFound');
+        if (job.status != 'failed' && job.status != 'cancelled') {
+          return const CardEvolutionDeleteOutcome('invalidState');
+        }
+        final proposal = await (db.select(
+          db.cardEvolutionProposalRuns,
+        )..where((row) => row.rewriteJobId.equals(jobId))).getSingleOrNull();
+        if (proposal == null) {
+          return const CardEvolutionDeleteOutcome('notAutomatedEvolution');
+        }
+        final operations = await (db.select(
+          db.rewriteOperations,
+        )..where((row) => row.rewriteJobId.equals(jobId))).get();
+        final operationIds = operations.map((row) => row.id).toList();
+        if (operationIds.isNotEmpty) {
+          await (db.delete(
+            db.rewriteOperationRevisions,
+          )..where((row) => row.rewriteOperationId.isIn(operationIds))).go();
+          await (db.delete(
+            db.rewriteEvidenceRows,
+          )..where((row) => row.rewriteOperationId.isIn(operationIds))).go();
+          await (db.delete(
+            db.rewriteOperations,
+          )..where((row) => row.id.isIn(operationIds))).go();
+        }
+        await (db.delete(
+          db.cardEvolutionProposalRuns,
+        )..where((row) => row.id.equals(proposal.id))).go();
+        await (db.delete(
+          db.rewriteJobs,
+        )..where((row) => row.id.equals(jobId))).go();
+        await (db.delete(
+          db.cardEvolutionClaims,
+        )..where((row) => row.id.equals(proposal.claimId))).go();
+        return const CardEvolutionDeleteOutcome('deleted');
+      });
 
   /// Diagnostic variant of [isEligible]: reports why the session cannot be
   /// selected instead of collapsing every cause into `false`.
@@ -631,8 +683,10 @@ class CardEvolutionRepo {
   Future<CardEvolutionObservationSnapshot?> buildObservationSnapshotForRun(
     LedgerReconciliationSuccessfulRunRow run,
   ) => db.transaction(() async {
-    final selected =
-        (await _selectInput(run.sessionId, reconciliationRun: run)).json;
+    final selected = (await _selectInput(
+      run.sessionId,
+      reconciliationRun: run,
+    )).json;
     if (selected == null) return null;
     final session = await (db.select(
       db.chatSessions,

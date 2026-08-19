@@ -29,6 +29,7 @@ class RewriteOperationCard extends StatelessWidget {
     this.onApprove,
     this.onReject,
     this.onEdit,
+    this.onDeletePatch,
   });
 
   final int index;
@@ -50,6 +51,7 @@ class RewriteOperationCard extends StatelessWidget {
   final VoidCallback? onApprove;
   final VoidCallback? onReject;
   final VoidCallback? onEdit;
+  final void Function(int patchIndex)? onDeletePatch;
 
   bool get _invalid =>
       view.operation.validationStatus == 'invalid' || violations.isNotEmpty;
@@ -95,154 +97,163 @@ class RewriteOperationCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-          Row(
-            children: [
-              Text(
-                '#${index + 1}',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: cs.onSurface,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    color: cs.primary.withValues(alpha: 0.08),
-                    border: Border.all(
-                      color: cs.primary.withValues(alpha: 0.25),
-                    ),
-                  ),
-                  child: Text(
-                    snapshot?.transition.scopeKey ?? '—',
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                      color: cs.primary,
-                    ),
-                  ),
-                ),
-              ),
-              if (edited) ...[
-                const SizedBox(width: 6),
-                _Badge(
-                  icon: Icons.edit_note_rounded,
-                  label: 'rewrite_badge_edited'.tr(),
-                  color: cs.tertiary,
-                ),
-              ],
-              if (!reviewable) ...[
-                const SizedBox(width: 6),
-                _Badge(
-                  icon: op.status == 'applied'
-                      ? Icons.check_circle_outline_rounded
-                      : Icons.pause_circle_outline_rounded,
-                  label: op.status,
-                  color: op.status == 'applied' ? cs.primary : cs.outline,
-                ),
-              ],
-              const SizedBox(width: 8),
-              if (interactionsEnabled && reviewable)
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: _DecisionButtons(
-                      decision: decisionBound ? op.decision : 'pending',
-                      canApprove: approveBlock == null,
-                      onApprove: onApprove,
-                      onReject: onReject,
-                    ),
-                  ),
-                )
-              else if (decisionBound && op.decision != 'pending')
-                _Badge(
-                  icon: op.decision == 'approved'
-                      ? Icons.check_circle_outline_rounded
-                      : Icons.cancel_outlined,
-                  label: op.decision == 'approved'
-                      ? 'rewrite_decision_approved'.tr()
-                      : 'rewrite_decision_rejected'.tr(),
-                  color: op.decision == 'approved' ? cs.primary : cs.error,
-                ),
-            ],
-          ),
-          if (approveBlock != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Row(
+              Row(
                 children: [
-                  Icon(
-                    Icons.info_outline_rounded,
-                    size: 13,
-                    color: cs.onSurfaceVariant,
+                  Text(
+                    '#${index + 1}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: cs.onSurface,
+                    ),
                   ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      approveBlock,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: cs.onSurfaceVariant,
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        color: cs.primary.withValues(alpha: 0.08),
+                        border: Border.all(
+                          color: cs.primary.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Text(
+                        snapshot?.transition.scopeKey ?? '—',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          color: cs.primary,
+                        ),
                       ),
                     ),
                   ),
+                  if (edited) ...[
+                    const SizedBox(width: 6),
+                    _Badge(
+                      icon: Icons.edit_note_rounded,
+                      label: 'rewrite_badge_edited'.tr(),
+                      color: cs.tertiary,
+                    ),
+                  ],
+                  if (!reviewable) ...[
+                    const SizedBox(width: 6),
+                    _Badge(
+                      icon: op.status == 'applied'
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.pause_circle_outline_rounded,
+                      label: op.status,
+                      color: op.status == 'applied' ? cs.primary : cs.outline,
+                    ),
+                  ],
+                  const SizedBox(width: 8),
+                  if (interactionsEnabled && reviewable)
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: _DecisionButtons(
+                          decision: decisionBound ? op.decision : 'pending',
+                          canApprove: approveBlock == null,
+                          onApprove: onApprove,
+                          onReject: onReject,
+                        ),
+                      ),
+                    )
+                  else if (decisionBound && op.decision != 'pending')
+                    _Badge(
+                      icon: op.decision == 'approved'
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.cancel_outlined,
+                      label: op.decision == 'approved'
+                          ? 'rewrite_decision_approved'.tr()
+                          : 'rewrite_decision_rejected'.tr(),
+                      color: op.decision == 'approved' ? cs.primary : cs.error,
+                    ),
                 ],
               ),
-            ),
-          if (snapshot == null)
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: _InvalidSnapshotNotice(),
-            )
-          else ...[
-            if (violations.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 10, bottom: 2),
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final violation in violations.toSet())
-                      _ViolationChip(violation: violation),
-                  ],
+              if (approveBlock != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 13,
+                        color: cs.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          approveBlock,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            const SizedBox(height: 10),
-            for (final patch in snapshot!.patches) ...[
-              RewriteAnchoredDiffPane(patch: patch, fieldValue: fieldValue),
-              const SizedBox(height: 8),
-            ],
-            Row(
-              children: [
-                if (editPermitted(interactionsEnabled, reviewable))
-                  TextButton.icon(
-                    onPressed: onEdit,
-                    icon: const Icon(Icons.edit_outlined, size: 16),
-                    label: Text(
-                      'rewrite_btn_edit'.tr(),
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      foregroundColor: cs.primary,
+              if (snapshot == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: _InvalidSnapshotNotice(),
+                )
+              else ...[
+                if (violations.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10, bottom: 2),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final violation in violations.toSet())
+                          _ViolationChip(violation: violation),
+                      ],
                     ),
                   ),
-                const Spacer(),
+                const SizedBox(height: 10),
+                for (final (patchIndex, patch)
+                    in snapshot!.patches.indexed) ...[
+                  RewriteAnchoredDiffPane(
+                    patch: patch,
+                    fieldValue: fieldValue,
+                    onDelete:
+                        editPermitted(interactionsEnabled, reviewable) &&
+                            snapshot!.patches.length > 1
+                        ? () => onDeletePatch?.call(patchIndex)
+                        : null,
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Row(
+                  children: [
+                    if (editPermitted(interactionsEnabled, reviewable))
+                      TextButton.icon(
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_outlined, size: 16),
+                        label: Text(
+                          'rewrite_btn_edit'.tr(),
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          foregroundColor: cs.primary,
+                        ),
+                      ),
+                    const Spacer(),
+                  ],
+                ),
+                RewriteEvidenceAccordion(
+                  snapshot: snapshot!,
+                  evidenceCount: view.evidenceCount,
+                  lockedKeys: lockedKeys,
+                ),
               ],
-            ),
-            RewriteEvidenceAccordion(
-              snapshot: snapshot!,
-              evidenceCount: view.evidenceCount,
-              lockedKeys: lockedKeys,
-            ),
-          ],
             ],
           ),
         ),

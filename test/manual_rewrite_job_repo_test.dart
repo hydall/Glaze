@@ -22,9 +22,9 @@ void main() {
       db: db,
       rawTrackerStateReader: LedgerRawTrackerStateReader(db),
     );
-    await CharacterRepo(db).put(
-      Character(id: 'c', name: 'Card', description: 'old text'),
-    );
+    await CharacterRepo(
+      db,
+    ).put(Character(id: 'c', name: 'Card', description: 'old text'));
   });
   tearDown(() => db.close());
 
@@ -53,18 +53,16 @@ void main() {
     },
   });
 
-  Future<String> createJob({String? requestKey}) async => (await repo
-          .createOrGet(
-            requestKey: requestKey,
-            chatSessionId: 's',
-            characterId: 'c',
-            requestJson: '{"instruction":"rewrite"}',
-            canonStamp: 'stamp-1',
-            basisRevision: 3,
-            basisRevisionHash: 'basis-hash',
-          ))
-      .job
-      .id;
+  Future<String> createJob({String? requestKey}) async =>
+      (await repo.createOrGet(
+        requestKey: requestKey,
+        chatSessionId: 's',
+        characterId: 'c',
+        requestJson: '{"instruction":"rewrite"}',
+        canonStamp: 'stamp-1',
+        basisRevision: 3,
+        basisRevisionHash: 'basis-hash',
+      )).job.id;
 
   Future<RewriteJobRow> job(String id) =>
       (db.select(db.rewriteJobs)..where((t) => t.id.equals(id))).getSingle();
@@ -177,21 +175,14 @@ void main() {
       'invalidState',
     );
     expect(
-      () => repo.markFailed(
-        jobId: id,
-        expectedVersion: 2,
-        statusReason: '  ',
-      ),
+      () => repo.markFailed(jobId: id, expectedVersion: 2, statusReason: '  '),
       throwsArgumentError,
     );
     expect(
       (await repo.cancel(jobId: 'missing', expectedVersion: 1)).kind,
       'jobNotFound',
     );
-    expect(
-      (await repo.cancel(jobId: id, expectedVersion: 2)).kind,
-      'updated',
-    );
+    expect((await repo.cancel(jobId: id, expectedVersion: 2)).kind, 'updated');
     row = await job(id);
     expect(row.status, 'cancelled');
     expect(row.statusReason, 'userCancelled');
@@ -222,8 +213,10 @@ void main() {
     expect(row.status, 'generating');
     expect(row.statusReason, isNull);
     expect(row.version, 3);
-    expect((await repo.retry(jobId: id, expectedVersion: 3)).kind,
-        'invalidState');
+    expect(
+      (await repo.retry(jobId: id, expectedVersion: 3)).kind,
+      'invalidState',
+    );
   });
 
   test(
@@ -282,35 +275,38 @@ void main() {
     },
   );
 
-  test('live exact canon lock or override marks a persisted op invalid', () async {
-    final id = await createJob();
-    await TrackerRepo(db).upsert(
-      const Tracker(
-        sessionId: 's',
-        name: 'canon_lock:npc:alice.status',
-        value: 'locked',
-        scope: 'ledger',
-        updatedAt: 1,
-      ),
-    );
-    final outcome = await repo.persistGenerationResult(
-      id,
-      expectedVersion: 1,
-      operations: [
-        ManualRewriteOperationDraft(
-          id: 'op-locked',
-          snapshotJson: snapshotFor(affected: ['npc:alice.status']),
+  test(
+    'live exact canon lock or override marks a persisted op invalid',
+    () async {
+      final id = await createJob();
+      await TrackerRepo(db).upsert(
+        const Tracker(
+          sessionId: 's',
+          name: 'canon_lock:npc:alice.status',
+          value: 'locked',
+          scope: 'ledger',
+          updatedAt: 1,
         ),
-        ManualRewriteOperationDraft(
-          id: 'op-free',
-          snapshotJson: snapshotFor(affected: ['npc:bob.status']),
-        ),
-      ],
-    );
-    expect(outcome.kind, 'persisted');
-    expect((await operation('op-locked')).validationStatus, 'invalid');
-    expect((await operation('op-free')).validationStatus, 'valid');
-  });
+      );
+      final outcome = await repo.persistGenerationResult(
+        id,
+        expectedVersion: 1,
+        operations: [
+          ManualRewriteOperationDraft(
+            id: 'op-locked',
+            snapshotJson: snapshotFor(affected: ['npc:alice.status']),
+          ),
+          ManualRewriteOperationDraft(
+            id: 'op-free',
+            snapshotJson: snapshotFor(affected: ['npc:bob.status']),
+          ),
+        ],
+      );
+      expect(outcome.kind, 'persisted');
+      expect((await operation('op-locked')).validationStatus, 'invalid');
+      expect((await operation('op-free')).validationStatus, 'valid');
+    },
+  );
 
   test(
     'a concurrent cancel discards the parsed result with zero rows persisted',
@@ -421,11 +417,8 @@ void main() {
         )).kind,
         'operationNotFound',
       );
-      await (db.update(
-        db.rewriteOperations,
-      )..where((t) => t.id.equals('op'))).write(
-        const RewriteOperationsCompanion(status: Value('applied')),
-      );
+      await (db.update(db.rewriteOperations)..where((t) => t.id.equals('op')))
+          .write(const RewriteOperationsCompanion(status: Value('applied')));
       expect(
         (await repo.setDecision(
           operationId: 'op',
@@ -461,10 +454,9 @@ void main() {
           ManualRewriteOperationDraft(id: 'op', snapshotJson: snapshotFor()),
         ],
       );
-      final original =
-          (await (db.select(
-            db.rewriteOperationRevisions,
-          )..where((t) => t.rewriteOperationId.equals('op'))).get()).single;
+      final original = (await (db.select(
+        db.rewriteOperationRevisions,
+      )..where((t) => t.rewriteOperationId.equals('op'))).get()).single;
 
       final edited = snapshotFor(value: 'edited text');
       final outcome = await repo.editAndRevalidate(
@@ -484,11 +476,11 @@ void main() {
       expect(op.validationStatus, 'valid');
       expect((await job(id)).version, 3);
 
-      final revisions = await ((db.select(
-        db.rewriteOperationRevisions,
-      )..where((t) => t.rewriteOperationId.equals('op')))
-            ..orderBy([(t) => OrderingTerm.asc(t.revision)]))
-          .get();
+      final revisions =
+          await ((db.select(db.rewriteOperationRevisions)
+                  ..where((t) => t.rewriteOperationId.equals('op')))
+                ..orderBy([(t) => OrderingTerm.asc(t.revision)]))
+              .get();
       expect(revisions, hasLength(2));
       // The original revision is immutable: it was never updated in place.
       expect(
@@ -531,56 +523,130 @@ void main() {
     },
   );
 
-  test('watchJob streams the joined job/operation/evidence aggregate', () async {
-    final id = await createJob();
-    final stream = repo.watchJob(id);
+  test(
+    'edit can preserve three patches after dropping one bad patch',
+    () async {
+      final id = await createJob();
+      final patches = [
+        for (var index = 0; index < 4; index++)
+          {
+            'scopeKey': 'npc:person-$index',
+            'anchor': 'old text',
+            'anchorSha256': CardCanonicalizer.scalarSha256('old text'),
+            'value': 'new text $index',
+          },
+      ];
+      final original = jsonEncode({
+        'field': 'description',
+        'patches': patches,
+        'transition': {
+          'id': 'transition',
+          'scopeKey': 'npc:alice',
+          'canonicalClaim': 'updated',
+          'promotionDestination': 'card',
+          'affectedTrackerKeys': <String>[],
+          'factIds': <String>[],
+          'chatSessionId': null,
+        },
+      });
+      await repo.persistGenerationResult(
+        id,
+        expectedVersion: 1,
+        operations: [
+          ManualRewriteOperationDraft(id: 'op', snapshotJson: original),
+        ],
+      );
+      final decoded =
+          RewriteOperationSnapshotCodec.tryDecode(jsonDecode(original))!
+              as CardRewriteOperationSnapshot;
+      final withoutRichard = CardRewriteOperationSnapshot(
+        field: decoded.field,
+        patches: [decoded.patches[0], decoded.patches[2], decoded.patches[3]],
+        transition: decoded.transition,
+      );
 
-    expect(await repo.watchJob('missing').first, isNull);
-
-    await repo.persistGenerationResult(
-      id,
-      expectedVersion: 1,
-      operations: [
-        ManualRewriteOperationDraft(
-          id: 'op',
-          snapshotJson: snapshotFor(),
-          evidence: const [
-            ManualRewriteEvidenceDraft(id: 'ev-1', evidenceJson: '{}'),
-            ManualRewriteEvidenceDraft(id: 'ev-2', evidenceJson: '{}'),
-          ],
+      final outcome = await repo.editAndRevalidate(
+        operationId: 'op',
+        expectedCurrentRevision: 1,
+        newSnapshotJson: ManualRewriteOperationSnapshotCodec.encode(
+          withoutRichard,
         ),
-      ],
-    );
-    final snapshot = await stream.firstWhere(
-      (value) =>
-          value != null && value.job.status == 'pending',
-    );
-    expect(snapshot, isNotNull);
-    expect(snapshot!.job.id, id);
-    expect(snapshot.operations, hasLength(1));
-    final view = snapshot.operations.single;
-    expect(view.operation.id, 'op');
-    expect(view.operation.currentRevision, 1);
-    expect(view.currentSnapshotJson, view.operation.operationJson);
-    expect(view.evidenceCount, 2);
+      );
 
-    await repo.cancel(jobId: id, expectedVersion: 2);
-    final cancelled = await stream.firstWhere(
-      (value) => value != null && value.job.status == 'cancelled',
-    );
-    expect(cancelled!.job.statusReason, 'userCancelled');
-  });
+      expect(outcome.kind, 'updated');
+      expect(outcome.operation!.currentRevision, 2);
+      final revision =
+          await (db.select(db.rewriteOperationRevisions)
+                ..where((row) => row.rewriteOperationId.equals('op'))
+                ..where((row) => row.revision.equals(2)))
+              .getSingle();
+      final saved =
+          RewriteOperationSnapshotCodec.tryDecode(
+                jsonDecode(revision.snapshotJson),
+              )!
+              as CardRewriteOperationSnapshot;
+      expect(saved.patches, hasLength(3));
+      expect(
+        saved.patches.map((patch) => patch.scopeKey),
+        isNot(contains('npc:person-1')),
+      );
+    },
+  );
 
-  test('watchJobsBySessionId orders a session history by latest update',
-      () async {
-    final first = await createJob(requestKey: 'history-first');
-    await repo.cancel(jobId: first, expectedVersion: 1);
-    await (db.update(db.rewriteJobs)..where((row) => row.id.equals(first)))
-        .write(const RewriteJobsCompanion(updatedAt: Value(1)));
-    final second = await createJob(requestKey: 'history-second');
+  test(
+    'watchJob streams the joined job/operation/evidence aggregate',
+    () async {
+      final id = await createJob();
+      final stream = repo.watchJob(id);
 
-    final history = await repo.watchJobsBySessionId('s').first;
+      expect(await repo.watchJob('missing').first, isNull);
 
-    expect(history.map((job) => job.id), [second, first]);
-  });
+      await repo.persistGenerationResult(
+        id,
+        expectedVersion: 1,
+        operations: [
+          ManualRewriteOperationDraft(
+            id: 'op',
+            snapshotJson: snapshotFor(),
+            evidence: const [
+              ManualRewriteEvidenceDraft(id: 'ev-1', evidenceJson: '{}'),
+              ManualRewriteEvidenceDraft(id: 'ev-2', evidenceJson: '{}'),
+            ],
+          ),
+        ],
+      );
+      final snapshot = await stream.firstWhere(
+        (value) => value != null && value.job.status == 'pending',
+      );
+      expect(snapshot, isNotNull);
+      expect(snapshot!.job.id, id);
+      expect(snapshot.operations, hasLength(1));
+      final view = snapshot.operations.single;
+      expect(view.operation.id, 'op');
+      expect(view.operation.currentRevision, 1);
+      expect(view.currentSnapshotJson, view.operation.operationJson);
+      expect(view.evidenceCount, 2);
+
+      await repo.cancel(jobId: id, expectedVersion: 2);
+      final cancelled = await stream.firstWhere(
+        (value) => value != null && value.job.status == 'cancelled',
+      );
+      expect(cancelled!.job.statusReason, 'userCancelled');
+    },
+  );
+
+  test(
+    'watchJobsBySessionId orders a session history by latest update',
+    () async {
+      final first = await createJob(requestKey: 'history-first');
+      await repo.cancel(jobId: first, expectedVersion: 1);
+      await (db.update(db.rewriteJobs)..where((row) => row.id.equals(first)))
+          .write(const RewriteJobsCompanion(updatedAt: Value(1)));
+      final second = await createJob(requestKey: 'history-second');
+
+      final history = await repo.watchJobsBySessionId('s').first;
+
+      expect(history.map((job) => job.id), [second, first]);
+    },
+  );
 }

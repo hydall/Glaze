@@ -20,6 +20,7 @@ final class ManualRewriteEvidenceDraft {
   final String id;
   final String evidenceJson;
 }
+
 /// One parsed generation operation awaiting durable persistence.
 /// [snapshotJson] must already be in the canonical durable request shape
 /// (`{field, patches, transition}`); parsing/serialization of that shape is
@@ -174,8 +175,8 @@ class ManualRewriteJobRepo {
   }) : _db = db,
        _rawTrackerStateReader = rawTrackerStateReader,
        _characters = CharacterRepo(db),
-       _lorebookEvolutionRepo = lorebookEvolutionRepo ??
-           SessionLorebookEvolutionRepo(db) {
+       _lorebookEvolutionRepo =
+           lorebookEvolutionRepo ?? SessionLorebookEvolutionRepo(db) {
     if (!identical(rawTrackerStateReader.db, db)) {
       throw ArgumentError.value(
         rawTrackerStateReader,
@@ -737,7 +738,8 @@ class ManualRewriteJobRepo {
         sessionId: job.chatSessionId,
         targets: [(lore.lorebookId, lore.entryId)],
       );
-      final current = overlays['${lore.lorebookId}\u0000${lore.entryId}']?.content ??
+      final current =
+          overlays['${lore.lorebookId}\u0000${lore.entryId}']?.content ??
           lore.baseContent;
       if (CardCanonicalizer.scalarSha256(current) != lore.expectedContentHash) {
         return 'invalid';

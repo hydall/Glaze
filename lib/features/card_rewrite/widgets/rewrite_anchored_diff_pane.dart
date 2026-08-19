@@ -17,18 +17,21 @@ class RewriteAnchoredDiffPane extends StatelessWidget {
     super.key,
     required this.patch,
     required this.fieldValue,
+    this.onDelete,
   });
 
   final AnchoredScalarPatch patch;
 
   /// Current value of the operation's target field; null while loading.
   final String? fieldValue;
+  final VoidCallback? onDelete;
 
   RewriteAnchoredDiffPane.lorebook({
     super.key,
     required LorebookAnchoredPatch patch,
     required this.fieldValue,
-  }) : patch = AnchoredScalarPatch(
+  }) : onDelete = null,
+       patch = AnchoredScalarPatch(
          scopeKey: 'world:lorebook',
          field: CardRewriteField.description,
          anchor: patch.anchor,
@@ -44,7 +47,10 @@ class RewriteAnchoredDiffPane extends StatelessWidget {
 
     final occurrences = _occurrences(current, patch.anchor);
     if (occurrences != 1) {
-      return _AnchorMissingPane(anchor: patch.anchor, ambiguous: occurrences > 1);
+      return _AnchorMissingPane(
+        anchor: patch.anchor,
+        ambiguous: occurrences > 1,
+      );
     }
     final start = current.indexOf(patch.anchor);
     final end = start + patch.anchor.length;
@@ -75,6 +81,7 @@ class RewriteAnchoredDiffPane extends StatelessWidget {
             label: 'rewrite_diff_proposed'.tr(),
             accent: cs.primary,
             lines: diff.rightLines,
+            onDelete: onDelete,
           ),
         ],
       ),
@@ -146,11 +153,17 @@ class _Window {
 }
 
 class _Half extends StatelessWidget {
-  const _Half({required this.label, required this.accent, required this.lines});
+  const _Half({
+    required this.label,
+    required this.accent,
+    required this.lines,
+    this.onDelete,
+  });
 
   final String label;
   final Color accent;
   final List<DiffLine> lines;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -172,6 +185,20 @@ class _Half extends StatelessWidget {
                   letterSpacing: 0.4,
                 ),
               ),
+              if (onDelete != null) ...[
+                const Spacer(),
+                IconButton(
+                  key: const Key('rewrite-delete-patch-button'),
+                  tooltip: 'rewrite_delete_patch'.tr(),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onDelete,
+                  icon: Icon(
+                    Icons.delete_outline_rounded,
+                    size: 17,
+                    color: context.cs.error,
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 6),
@@ -227,7 +254,12 @@ class _DiffLineView extends StatelessWidget {
       for (var i = 0; i < words.length; i++) {
         final word = words[i];
         if (i > 0 && word.text.isNotEmpty) {
-          spans.add(TextSpan(text: ' ', style: TextStyle(color: fg)));
+          spans.add(
+            TextSpan(
+              text: ' ',
+              style: TextStyle(color: fg),
+            ),
+          );
         }
         spans.add(
           TextSpan(
@@ -240,7 +272,12 @@ class _DiffLineView extends StatelessWidget {
         );
       }
     } else {
-      spans.add(TextSpan(text: line.text, style: TextStyle(color: fg)));
+      spans.add(
+        TextSpan(
+          text: line.text,
+          style: TextStyle(color: fg),
+        ),
+      );
     }
     return Container(
       width: double.infinity,

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/db/app_db.dart';
 import '../../core/db/repositories/manual_rewrite_apply_repo.dart';
+import '../../core/db/repositories/card_evolution_repo.dart';
 import '../../core/db/repositories/manual_rewrite_job_repo.dart';
 import '../../core/models/character.dart';
 import '../../core/services/card_rewriter/card_rewriter_contracts.dart';
@@ -37,15 +38,13 @@ final rewriteSessionIndexProvider = FutureProvider.family<int?, String>(
 /// Raw names of the session's manual canon controls (`canon_lock:<key>` /
 /// `canon_override:<key>`). Advisory only — guarded apply re-checks these
 /// transactionally.
-final rewriteManualControlsProvider = FutureProvider.family<Set<String>, String>((
-  ref,
-  sessionId,
-) async {
-  final raw = await ref
-      .watch(ledgerRawTrackerStateReaderProvider)
-      .read(sessionId);
-  return raw.manualControls.map((t) => t.name).toSet();
-});
+final rewriteManualControlsProvider =
+    FutureProvider.family<Set<String>, String>((ref, sessionId) async {
+      final raw = await ref
+          .watch(ledgerRawTrackerStateReaderProvider)
+          .read(sessionId);
+      return raw.manualControls.map((t) => t.name).toSet();
+    });
 
 /// Read-side canon reader composed from the context loader's own parts
 /// (mirrors the db_provider wiring; this file may not edit that file).
@@ -148,7 +147,10 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
   }
 
   /// Returns the typed conflict kind (`updated`, `staleRevision`, …).
-  Future<String> decide(ManualRewriteOperationView view, String decision) async {
+  Future<String> decide(
+    ManualRewriteOperationView view,
+    String decision,
+  ) async {
     final op = view.operation;
     final outcome = await ref
         .read(manualRewriteJobRepoProvider)
@@ -175,9 +177,7 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
           op.validationStatus != 'valid') {
         continue;
       }
-      final snapshot = decodeRewriteOperationSnapshot(
-        view.currentSnapshotJson,
-      );
+      final snapshot = decodeRewriteOperationSnapshot(view.currentSnapshotJson);
       if (snapshot == null) continue;
       if (snapshot is CardRewriteOperationSnapshot &&
           lockOverlap(snapshot, manualControlNames).isNotEmpty) {
@@ -240,6 +240,37 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
     return outcome.kind;
   }
 
+  /// Removes one bad patch while preserving the operation's other patches.
+  /// This is stored as a new immutable operation revision and revalidated.
+  Future<String> deletePatch(
+    ManualRewriteOperationView view,
+    int patchIndex,
+  ) async {
+    final snapshot = decodeOperationSnapshot(view.currentSnapshotJson);
+    if (snapshot == null ||
+        patchIndex < 0 ||
+        patchIndex >= snapshot.patches.length) {
+      return 'invalidSnapshot';
+    }
+    if (snapshot.patches.length == 1) return 'lastPatch';
+    final updated = CardRewriteOperationSnapshot(
+      field: snapshot.field,
+      patches: [
+        for (var index = 0; index < snapshot.patches.length; index++)
+          if (index != patchIndex) snapshot.patches[index],
+      ],
+      transition: snapshot.transition,
+    );
+    final outcome = await ref
+        .read(manualRewriteJobRepoProvider)
+        .editAndRevalidate(
+          operationId: view.operation.id,
+          expectedCurrentRevision: view.operation.currentRevision,
+          newSnapshotJson: ManualRewriteOperationSnapshotCodec.encode(updated),
+        );
+    return outcome.kind;
+  }
+
   /// Atomic apply of all approved operations. The expected canon stamp is re-
   /// derived from a FRESH read-side assembly right before the call (Oracle
   /// contract), never reused from the stored job stamp.
@@ -276,6 +307,42 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
 
   Future<void> cancelJob(String jobId) async {
     await ref.read(manualRewriteServiceProvider).cancelJob(jobId);
+  }
+
+  Future<CardEvolutionDeleteOutcome> deleteAutomatedProposal(
+    RewriteJobRow job,
+  ) async {
+    if (state.busy) return const CardEvolutionDeleteOutcome('uiBusy');
+    state = state.copyWith(busy: true);
+    try {
+      return await ref
+          .read(cardEvolutionRepoProvider)
+          .deleteClosedProposal(job.id);
+    } finally {
+      state = state.copyWith(busy: false);
+    }
+  }
+
+  Future<CardEvolutionFinalizeOutcome> regenerateAutomatedProposal(
+    RewriteJobRow job,
+  ) async {
+    if (state.busy) {
+      return const CardEvolutionFinalizeOutcome('uiBusy');
+    }
+    state = state.copyWith(busy: true);
+    try {
+      final deleted = await ref
+          .read(cardEvolutionRepoProvider)
+          .deleteClosedProposal(job.id);
+      if (!deleted.isDeleted) {
+        return CardEvolutionFinalizeOutcome(deleted.kind);
+      }
+      return await ref
+          .read(automatedCardEvolutionServiceProvider)
+          .runOneBatch(job.chatSessionId);
+    } finally {
+      state = state.copyWith(busy: false);
+    }
   }
 
   /// `failed → generating` retry, then re-attaches the writer lane using the
@@ -329,9 +396,21 @@ RewriteJobRequest? parseRewriteJobRequest(String requestJson) {
       if (candidate.wireName == wireName) field = candidate;
     }
     if (field == null) return null;
-    return (field: field, instruction: instruction is String ? instruction : '');
+    return (
+      field: field,
+      instruction: instruction is String ? instruction : '',
+    );
   } catch (_) {
     return null;
+  }
+}
+
+bool isAutomatedEvolutionJob(RewriteJobRow job) {
+  try {
+    final request = jsonDecode(job.requestJson);
+    return request is Map && request['provenance'] == 'automatedEvolution';
+  } catch (_) {
+    return false;
   }
 }
 
@@ -342,9 +421,7 @@ CardRewriteOperationSnapshot? decodeOperationSnapshot(String snapshotJson) {
 
 RewriteOperationSnapshot? decodeRewriteOperationSnapshot(String snapshotJson) {
   try {
-    return RewriteOperationSnapshotCodec.tryDecode(
-      jsonDecode(snapshotJson),
-    );
+    return RewriteOperationSnapshotCodec.tryDecode(jsonDecode(snapshotJson));
   } catch (_) {
     return null;
   }
@@ -376,7 +453,8 @@ List<CardPatchViolation> advisoryViolations(
 }
 
 Map<CardRewriteField, String?> rewriteFieldValues(Character c) => {
-  for (final field in CardRewriteField.values) field: rewrittenFieldValue(c, field),
+  for (final field in CardRewriteField.values)
+    field: rewrittenFieldValue(c, field),
 };
 
 String rewrittenFieldValue(Character c, CardRewriteField field) =>

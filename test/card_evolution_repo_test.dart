@@ -125,22 +125,25 @@ void main() {
     );
   });
 
-  test('an unknown session is attributed instead of silently ignored', () async {
-    expect(
-      await evolution.selectionFailure('missing'),
-      CardEvolutionSelectionFailure.sessionMissing,
-    );
+  test(
+    'an unknown session is attributed instead of silently ignored',
+    () async {
+      expect(
+        await evolution.selectionFailure('missing'),
+        CardEvolutionSelectionFailure.sessionMissing,
+      );
 
-    final claim = await evolution.claim(
-      sessionId: 'missing',
-      ownerId: 'owner',
-      now: 10,
-      leaseSeconds: 30,
-    );
+      final claim = await evolution.claim(
+        sessionId: 'missing',
+        ownerId: 'owner',
+        now: 10,
+        leaseSeconds: 30,
+      );
 
-    expect(claim.kind, 'notEligible');
-    expect(claim.detail, 'sessionMissing');
-  });
+      expect(claim.kind, 'notEligible');
+      expect(claim.detail, 'sessionMissing');
+    },
+  );
 
   test('a malformed message list is attributed', () async {
     await db.customStatement(
@@ -170,30 +173,36 @@ void main() {
     expect(await evolution.isEligible('session'), isFalse);
   });
 
-  test('a character without revisions is attributed as canon unavailable', () async {
-    await db.customStatement(
-      'DELETE FROM character_revision_rows WHERE character_id = ?',
-      ['character'],
-    );
+  test(
+    'a character without revisions is attributed as canon unavailable',
+    () async {
+      await db.customStatement(
+        'DELETE FROM character_revision_rows WHERE character_id = ?',
+        ['character'],
+      );
 
-    expect(
-      await evolution.selectionFailure('session'),
-      CardEvolutionSelectionFailure.canonUnavailable,
-    );
-  });
+      expect(
+        await evolution.selectionFailure('session'),
+        CardEvolutionSelectionFailure.canonUnavailable,
+      );
+    },
+  );
 
-  test('a claim asking for unknown reconciliation runs is attributed', () async {
-    final claim = await evolution.claim(
-      sessionId: 'session',
-      ownerId: 'owner',
-      now: 10,
-      leaseSeconds: 30,
-      reconciliationRunIds: const ['missing-run'],
-    );
+  test(
+    'a claim asking for unknown reconciliation runs is attributed',
+    () async {
+      final claim = await evolution.claim(
+        sessionId: 'session',
+        ownerId: 'owner',
+        now: 10,
+        leaseSeconds: 30,
+        reconciliationRunIds: const ['missing-run'],
+      );
 
-    expect(claim.kind, 'notEligible');
-    expect(claim.detail, 'reconciliationRunsMissing');
-  });
+      expect(claim.kind, 'notEligible');
+      expect(claim.detail, 'reconciliationRunsMissing');
+    },
+  );
 
   test('expired claim is replaced using a fresh chat snapshot', () async {
     final first = (await evolution.claim(
@@ -283,6 +292,66 @@ void main() {
     expect(await db.select(db.rewriteEvidenceRows).get(), hasLength(1));
     expect(await db.select(db.cardEvolutionProposalRuns).get(), hasLength(1));
     expect(await db.select(db.ledgerReconciliationCursors).get(), isEmpty);
+  });
+
+  test('deletes a cancelled proposal and all of its provenance', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+    final finalized = await evolution.finalize(
+      claimId: claim.row.id,
+      ownerId: 'owner',
+      now: 11,
+      modelOutput: '["raw"]',
+      operations: _operations(),
+    );
+    final job = finalized.job!;
+    await evolution.jobRepo.cancel(jobId: job.id, expectedVersion: job.version);
+
+    final outcome = await evolution.deleteClosedProposal(job.id);
+
+    expect(outcome.kind, 'deleted');
+    expect(await db.select(db.rewriteJobs).get(), isEmpty);
+    expect(await db.select(db.rewriteOperations).get(), isEmpty);
+    expect(await db.select(db.rewriteOperationRevisions).get(), isEmpty);
+    expect(await db.select(db.rewriteEvidenceRows).get(), isEmpty);
+    expect(await db.select(db.cardEvolutionProposalRuns).get(), isEmpty);
+    expect(await db.select(db.cardEvolutionClaims).get(), isEmpty);
+    expect(
+      (await evolution.claim(
+        sessionId: 'session',
+        ownerId: 'replacement',
+        now: 12,
+        leaseSeconds: 30,
+      )).kind,
+      'claimed',
+    );
+  });
+
+  test('refuses to delete an active automated proposal', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+    final finalized = await evolution.finalize(
+      claimId: claim.row.id,
+      ownerId: 'owner',
+      now: 11,
+      modelOutput: '["raw"]',
+      operations: _operations(),
+    );
+
+    expect(
+      (await evolution.deleteClosedProposal(finalized.job!.id)).kind,
+      'invalidState',
+    );
+    expect(await db.select(db.rewriteJobs).get(), hasLength(1));
+    expect(await db.select(db.cardEvolutionProposalRuns).get(), hasLength(1));
   });
 
   test('finalize reports the exact rejected card patch validation', () async {
