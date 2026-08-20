@@ -170,6 +170,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       final isMarker = _isMarkerBlock(normalizedId, pm);
       final isCanonical = _canonicalBlockIds.contains(normalizedId);
       final isEnabled = pm['enabled'] as bool? ?? true;
+      final isStashed = pm['isStashed'] as bool? ?? false;
 
       final rawMode = pm['insertion_mode'] as String?;
       final String insertionMode;
@@ -190,6 +191,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
           role: _normalizeImportedRole(pm['role']),
           content: isMarker ? '' : _rawBlockContent(pm),
           enabled: isEnabled,
+          isStashed: isStashed,
           isStatic: _staticBlockIds.contains(normalizedId),
           insertionMode: insertionMode,
           depth: depth,
@@ -285,6 +287,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
           role: _normalizeImportedRole(p['role']),
           content: isMarker ? '' : _rawBlockContent(p),
           enabled: isEnabled,
+          isStashed: false,
           isStatic: _staticBlockIds.contains(normalizedId),
           insertionMode: insertionMode,
           depth: depth,
@@ -313,12 +316,8 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       blockJson['name'] = blockName;
       blockJson['role'] = _normalizeImportedRole(pm['role']);
       blockJson['content'] = isMarker ? '' : (pm['content'] ?? '');
-      // This prompt is not a member of the active character's prompt_order,
-      // so real SillyTavern would never assemble/send it regardless of its
-      // own `enabled` flag. Force it disabled on import instead of trusting
-      // that flag, so it lands inert (formerly the "Stash" bucket's role)
-      // rather than silently active in the imported preset.
-      blockJson['enabled'] = false;
+      // Absence from prompt_order is ordering membership, not enabled state.
+      blockJson['isStashed'] = true;
 
       if (pm['injection_position'] == 1) {
         blockJson['insertionMode'] = 'depth';

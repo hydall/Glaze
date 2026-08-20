@@ -11,7 +11,6 @@ import '../models/memory_book.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
 import '../models/tracker.dart';
-import '../models/ledger_prompt_injection_mode.dart';
 import '../models/ledger_prompt_injection_policy.dart';
 import '../state/active_selection_provider.dart';
 import '../state/db_provider.dart';
@@ -125,7 +124,7 @@ class PromptPayloadBuilder {
     return PromptPayload.fromGenerationContext(
       inputs,
       preset: preset,
-      ledgerPromptInjectionPolicy: _ordinaryLedgerPolicy(preset),
+      ledgerPromptInjectionPolicy: disabledLedgerPromptInjectionPolicy,
     );
   }
 
@@ -137,7 +136,7 @@ class PromptPayloadBuilder {
     return PromptPayload.fromGenerationContext(
       inputs,
       preset: preset,
-      ledgerPromptInjectionPolicy: _ordinaryLedgerPolicy(preset),
+      ledgerPromptInjectionPolicy: disabledLedgerPromptInjectionPolicy,
     );
   }
 
@@ -149,6 +148,7 @@ class PromptPayloadBuilder {
     ApiConfig? apiConfigOverride,
     String? guidanceText,
     bool skipVectorSearch = false,
+    bool includeEffectiveCanon = false,
     bool Function()? shouldAbort,
     CancelToken? cancelToken,
   }) async {
@@ -169,7 +169,7 @@ class PromptPayloadBuilder {
     if (sourceCharacter == null) {
       throw StateError('Character not found: $effectiveCharId');
     }
-    final effectiveContext = session == null
+    final effectiveContext = session == null || !includeEffectiveCanon
         ? null
         : await _ref
               .read(effectiveCanonContextLoaderProvider)
@@ -545,30 +545,12 @@ class PromptPayloadBuilder {
         : presets.firstOrNull;
   }
 
-  LedgerPromptInjectionPolicy _ordinaryLedgerPolicy(Preset? preset) =>
-      preset == null
-      ? const LedgerPromptInjectionPolicy(
-          presetOptIn: true,
-          mode: LedgerPromptInjectionMode.legacy,
-        )
-      : deriveLedgerPromptInjectionPolicyFromRaw(
-          presetId: preset.id,
-          rawBlocks: preset.blocks
-              .map(
-                (block) => <String, Object?>{
-                  'id': block.id,
-                  'name': block.name,
-                  'enabled': block.enabled,
-                },
-              )
-              .toList(growable: false),
-        );
-
   Future<PromptPayload> buildFromPreFetched({
     required String charId,
     required ChatSession? session,
     required Character character,
     EffectiveCanonContext? effectiveCanonContext,
+    bool includeEffectiveCanon = false,
     required ApiConfig chatApi,
     required Preset? preset,
     required Persona? persona,
@@ -584,13 +566,14 @@ class PromptPayloadBuilder {
     List<RuntimePromptBlock> runtimePromptBlocks = const [],
     String? recalledMessagesContent,
   }) async {
-    final resolvedContext =
-        effectiveCanonContext ??
-        (session != null
-            ? await _ref
-                  .read(effectiveCanonContextLoaderProvider)
-                  .load(sessionId: session.id, sourceCharacter: character)
-            : null);
+    final resolvedContext = !includeEffectiveCanon
+        ? null
+        : effectiveCanonContext ??
+              (session != null
+                  ? await _ref
+                        .read(effectiveCanonContextLoaderProvider)
+                        .load(sessionId: session.id, sourceCharacter: character)
+                  : null);
     final projection = resolvedContext == null
         ? null
         : EffectiveCanonPromptProjection.fromContext(resolvedContext);
@@ -637,7 +620,7 @@ class PromptPayloadBuilder {
           .getBySessionId(session.id);
       memoryGraphEnabled = memoryBook?.settings.enabled ?? true;
     }
-    final policy = _ordinaryLedgerPolicy(preset);
+    const policy = disabledLedgerPromptInjectionPolicy;
     final materialized = projection == null || session == null
         ? null
         : EffectiveCanonPromptMaterializer.materializeSafely(

@@ -19,6 +19,8 @@ class PresetBlockRow extends StatelessWidget {
   final bool isLast;
   final VoidCallback onEdit;
   final ValueChanged<bool> onToggle;
+  final VoidCallback? onStash;
+  final bool draggable;
 
   const PresetBlockRow({
     super.key,
@@ -27,6 +29,8 @@ class PresetBlockRow extends StatelessWidget {
     required this.isLast,
     required this.onEdit,
     required this.onToggle,
+    this.onStash,
+    this.draggable = true,
   });
 
   @override
@@ -44,22 +48,27 @@ class PresetBlockRow extends StatelessWidget {
         opacity: block.enabled ? 1.0 : 0.5,
         child: Row(
           children: [
-            ReorderableDragStartListener(
-              index: index,
-              child: SizedBox(
-                width: 30,
-                height: 44,
-                child: Center(
-                  child: Text(
-                    '≡',
-                    style: TextStyle(
-                      fontSize: 20,
-                      color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+            if (draggable)
+              ReorderableDragStartListener(
+                index: index,
+                child: SizedBox(
+                  width: 30,
+                  height: 44,
+                  child: Center(
+                    child: Text(
+                      '≡',
+                      style: TextStyle(
+                        fontSize: 20,
+                        color: context.cs.onSurfaceVariant.withValues(
+                          alpha: 0.5,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
+              )
+            else
+              const SizedBox(width: 30, height: 44),
             Icon(
               presetBlockRoleIcon(block.role),
               size: 16,
@@ -92,7 +101,9 @@ class PresetBlockRow extends StatelessWidget {
                       const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 2),
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(8),
@@ -133,6 +144,24 @@ class PresetBlockRow extends StatelessWidget {
               )
             else
               const SizedBox(width: 36),
+            if (onStash != null)
+              SizedBox(
+                width: 36,
+                height: 44,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onStash,
+                    child: Icon(
+                      block.isStashed
+                          ? Icons.unarchive_outlined
+                          : Icons.archive_outlined,
+                      size: 20,
+                      color: context.cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Transform.scale(

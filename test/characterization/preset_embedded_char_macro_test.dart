@@ -11,39 +11,48 @@ import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 
 void main() {
-  test('{{personality}} in preset: chrome in preset row, field in macroTokens', () {
-    final preset = Preset(
-      id: 'p1',
-      name: 'test',
-      blocks: [
-        const PresetBlock(
-          id: 'custom',
-          name: 'Form',
-          role: 'system',
-          content: 'Cast: {{personality}}',
-          enabled: true,
+  test(
+    '{{personality}} in preset: chrome in preset row, field in macroTokens',
+    () {
+      final preset = Preset(
+        id: 'p1',
+        name: 'test',
+        blocks: [
+          const PresetBlock(
+            id: 'custom',
+            name: 'Form',
+            role: 'system',
+            content: 'Cast: {{personality}}',
+            enabled: true,
+          ),
+        ],
+      );
+      final char = Character(id: 'c1', name: 'A', personality: 'P' * 400);
+      final result = buildPrompt(
+        PromptPayload(
+          character: char,
+          preset: preset,
+          history: const [],
+          apiConfig: const ApiConfig(
+            id: 'a',
+            name: 'a',
+            contextSize: 10000,
+            maxTokens: 100,
+          ),
         ),
-      ],
-    );
-    final char = Character(
-      id: 'c1',
-      name: 'A',
-      personality: 'P' * 400,
-    );
-    final result = buildPrompt(PromptPayload(
-      character: char,
-      preset: preset,
-      history: const [],
-      apiConfig: const ApiConfig(id: 'a', name: 'a', contextSize: 10000, maxTokens: 100),
-    ));
+      );
 
-    expect(
-      result.breakdown.macroTokens['personality'],
-      estimateTokens('P' * 400),
-    );
-    expect(result.breakdown.sourceTokens['preset'], lessThan(100));
-    expect(result.breakdown.presetNetTokens, result.breakdown.sourceTokens['preset']);
-  });
+      expect(
+        result.breakdown.macroTokens['personality'],
+        estimateTokens('P' * 400),
+      );
+      expect(result.breakdown.sourceTokens['preset'], lessThan(100));
+      expect(
+        result.breakdown.presetNetTokens,
+        result.breakdown.sourceTokens['preset'],
+      );
+    },
+  );
 
   test('contentForAccounting blanks {{personality}}', () {
     final result = resolveBlockContent(
@@ -107,17 +116,38 @@ void main() {
     expect(only, lessThan(raw));
   });
 
-  test('presetNetTokens matches preset gross when lorebooks in macroTokens', () {
-    final bd = TokenBreakdown(
-      sourceTokens: {'preset': 16939, 'lorebook': 0},
-      macroTokens: {'lorebooks': 2487, 'personality': 5318},
-      staticTotal: 16939,
-      historyBudget: 0,
-      historyTokens: 0,
-      totalTokens: 16939,
-      cutoffIndex: 0,
-      trimmedHistory: const [],
+  test('presetOnlyTokenCount excludes enabled stashed blocks', () {
+    const preset = Preset(
+      id: 'p1',
+      name: 'test',
+      blocks: [
+        PresetBlock(
+          id: 'stashed',
+          name: 'Stashed',
+          role: 'system',
+          content: 'This content must not count.',
+          isStashed: true,
+        ),
+      ],
     );
-    expect(bd.presetNetTokens, 16939);
+
+    expect(presetOnlyTokenCount(preset), 0);
   });
+
+  test(
+    'presetNetTokens matches preset gross when lorebooks in macroTokens',
+    () {
+      final bd = TokenBreakdown(
+        sourceTokens: {'preset': 16939, 'lorebook': 0},
+        macroTokens: {'lorebooks': 2487, 'personality': 5318},
+        staticTotal: 16939,
+        historyBudget: 0,
+        historyTokens: 0,
+        totalTokens: 16939,
+        cutoffIndex: 0,
+        trimmedHistory: const [],
+      );
+      expect(bd.presetNetTokens, 16939);
+    },
+  );
 }

@@ -36,6 +36,7 @@ Future<String> savePresetJson(Preset preset) async {
             'role': b.role,
             'content': b.content,
             'enabled': b.enabled,
+            if (b.isStashed) 'isStashed': true,
             'insertion_mode': b.insertionMode,
             if (b.depth != null) 'depth': b.depth,
             if (b.appendToLastMessage) 'appendToLastMessage': true,

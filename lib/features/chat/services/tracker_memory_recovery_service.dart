@@ -135,6 +135,7 @@ class TrackerMemoryRecoveryService {
                 charId: charId,
                 session: sliced,
                 apiConfigOverride: turnConfig?.activeApiConfig,
+                includeEffectiveCanon: true,
                 shouldAbort: () => token.isCancelled,
                 cancelToken: token,
               );

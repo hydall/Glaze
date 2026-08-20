@@ -11,6 +11,7 @@ abstract class PresetBlock with _$PresetBlock {
     required String role,
     required String content,
     @Default(true) bool enabled,
+    @Default(false) bool isStashed,
     @Default(false) bool isStatic,
     @Default('relative') String insertionMode,
     int? depth,
@@ -103,6 +104,7 @@ const _staticBlockIds = <String>{
 Map<String, dynamic> _normalizeBlock(Map<String, dynamic> json) {
   final n = Map<String, dynamic>.from(json);
   n['enabled'] = _coerceBool(n['enabled'], true);
+  n['isStashed'] = _coerceBool(n['isStashed'], false);
   // Auto-promote known system block ids to isStatic=true so existing presets
   // created before this field was introduced are handled correctly.
   final id = n['id'] as String?;

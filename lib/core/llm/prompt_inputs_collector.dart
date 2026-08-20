@@ -10,10 +10,7 @@ import '../state/memory_settings_provider.dart';
 import '../state/summary_providers.dart';
 import 'prompt_builder.dart';
 import 'prompt_inputs.dart';
-import 'prompt/effective_canon_prompt_formatter.dart';
-import '../models/ledger_prompt_injection_mode.dart';
 import '../models/ledger_prompt_injection_policy.dart';
-import 'prompt/prompt_build_stale_exception.dart';
 
 typedef ApiConfigInitializer = Future<void> Function();
 typedef ActiveApiConfigReader = ApiConfig? Function();
@@ -70,12 +67,7 @@ class PromptInputsCollector {
     if (sourceCharacter == null) {
       throw StateError('Character not found: $charId');
     }
-    final effectiveContext = session == null
-        ? null
-        : await _ref
-              .read(effectiveCanonContextLoaderProvider)
-              .load(sessionId: session.id, sourceCharacter: sourceCharacter);
-    final character = effectiveContext?.character ?? sourceCharacter;
+    final character = sourceCharacter;
 
     await _initializeApiConfigs();
     final chatApi = _readActiveApiConfig();
@@ -136,21 +128,6 @@ class PromptInputsCollector {
       runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
     }
 
-    if (effectiveContext != null) {
-      final current = await charRepo.getById(charId);
-      if (current == null ||
-          !await _ref
-              .read(effectiveCanonContextLoaderProvider)
-              .isStillCurrentReadOnly(
-                sessionId: session!.id,
-                sourceCharacter: current,
-                stamp: effectiveContext.stamp,
-              )) {
-        throw const PromptBuildStaleException(
-          'Effective canon changed while collecting prompt inputs.',
-        );
-      }
-    }
     return PromptInputs(
       character: character,
       persona: persona,
@@ -211,30 +188,12 @@ class PromptInputsCollector {
       memoryQueryMaxChars: memoryBook?.settings.queryMaxChars ?? 1500,
       memoryContextBudgetTokens: chatApi.contextSize,
       runtimePromptBlocks: runtimePromptBlocks,
-      effectiveCanonProjection: effectiveContext == null
-          ? null
-          : EffectiveCanonPromptProjection.fromContext(effectiveContext),
-      ledgerPromptInjectionPolicy: preset == null
-          ? const LedgerPromptInjectionPolicy(
-              presetOptIn: true,
-              mode: LedgerPromptInjectionMode.legacy,
-            )
-          : deriveLedgerPromptInjectionPolicyFromRaw(
-              presetId: preset.id,
-              rawBlocks: preset.blocks
-                  .map(
-                    (block) => <String, Object?>{
-                      'id': block.id,
-                      'name': block.name,
-                      'enabled': block.enabled,
-                    },
-                  )
-                  .toList(growable: false),
-            ),
+      effectiveCanonProjection: null,
+      ledgerPromptInjectionPolicy: disabledLedgerPromptInjectionPolicy,
       // The read-only stamp comparison above proves that this projection did
       // not change while its history snapshot was collected. buildPrompt will
       // still suppress only against messages that survive final token trim.
-      ledgerProjectionFreshnessProvenCurrent: effectiveContext != null,
+      ledgerProjectionFreshnessProvenCurrent: false,
     );
   }
 }

@@ -324,7 +324,9 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       imagePath: _imagePath,
     );
 
-    final tokens = _blocks
+    final activeBlocks = _blocks.where((b) => !b.isStashed).toList();
+    final stashedCount = _blocks.length - activeBlocks.length;
+    final tokens = activeBlocks
         .where((b) => b.enabled && b.content.isNotEmpty)
         .fold(0, (sum, b) => sum + estimateTokens(b.content));
 
@@ -338,6 +340,12 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       onTitleTap: _showRenameDialog,
       onMenuTap: _showOptionsMenu,
       utilsLeading: [
+        PresetUtilButton(
+          icon: Icons.archive_outlined,
+          count: stashedCount,
+          onTap: _showStashSheet,
+          onCover: onCover,
+        ),
         PresetUtilButton(
           icon: Icons.code,
           count: _regexes.length,
@@ -354,63 +362,66 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       ],
       // Add block row position follows the app setting (top or bottom).
       addBlockAtTop: addBlockAtTop,
-      blockList: _blocks.isNotEmpty ? _buildBlockList() : null,
+      blockList: activeBlocks.isNotEmpty ? _buildBlockList(activeBlocks) : null,
       onAddBlock: _addBlock,
     );
   }
 
-  Widget _buildBlockList() {
+  Widget _buildBlockList(List<PresetBlock> activeBlocks) {
     return ReorderableListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
       buildDefaultDragHandles: false,
-      itemCount: _blocks.length,
+      itemCount: activeBlocks.length,
       // TODO: migrate to onReorderItem (newIndex semantics differ — see Flutter changelog).
       // ignore: deprecated_member_use
       onReorder: (oldIndex, newIndex) {
         setState(() {
           if (newIndex > oldIndex) newIndex -= 1;
-          final item = _blocks.removeAt(oldIndex);
-          _blocks.insert(newIndex, item);
-          if (_expandedBlockIndex == oldIndex) {
-            _expandedBlockIndex = newIndex;
-          } else if (_expandedBlockIndex != null) {
-            if (oldIndex < _expandedBlockIndex! &&
-                newIndex >= _expandedBlockIndex!) {
-              _expandedBlockIndex = _expandedBlockIndex! - 1;
-            } else if (oldIndex > _expandedBlockIndex! &&
-                newIndex <= _expandedBlockIndex!) {
-              _expandedBlockIndex = _expandedBlockIndex! + 1;
+          final reordered = List<PresetBlock>.from(activeBlocks);
+          final item = reordered.removeAt(oldIndex);
+          reordered.insert(newIndex, item);
+          var activeIndex = 0;
+          for (var i = 0; i < _blocks.length; i++) {
+            if (!_blocks[i].isStashed) {
+              _blocks[i] = reordered[activeIndex++];
             }
           }
         });
         _scheduleSave();
       },
-      itemBuilder: (_, i) => PresetBlockRow(
-        key: ValueKey(_blocks[i].id),
-        block: _blocks[i],
-        index: i,
-        isLast: i == _blocks.length - 1,
-        onEdit: () {
-          _saveScrollOffset();
-          setState(() {
-            _expandedBlockIndex = i;
-          });
-          widget.onEditingBlockChanged?.call(true);
-        },
-        onToggle: (v) {
-          setState(() => _blocks[i] = _blocks[i].copyWith(enabled: v));
-          _scheduleSave();
-          // Author's Note enable is one entity for the chat — mirror it onto
-          // the session note and every other preset's block.
-          if (_blocks[i].id == 'authors_note') {
-            syncAuthorsNoteEnabled(ref, charId: widget.charId, enabled: v);
-          } else if (_blocks[i].id == 'summary') {
-            syncSummaryEnabled(ref, charId: widget.charId, enabled: v);
-          }
-        },
-      ),
+      itemBuilder: (_, i) {
+        final block = activeBlocks[i];
+        final sourceIndex = _blocks.indexWhere((b) => b.id == block.id);
+        return PresetBlockRow(
+          key: ValueKey(block.id),
+          block: block,
+          index: i,
+          isLast: i == activeBlocks.length - 1,
+          onEdit: () {
+            _saveScrollOffset();
+            setState(() {
+              _expandedBlockIndex = sourceIndex;
+            });
+            widget.onEditingBlockChanged?.call(true);
+          },
+          onToggle: (v) {
+            setState(() {
+              _blocks[sourceIndex] = _blocks[sourceIndex].copyWith(enabled: v);
+            });
+            _scheduleSave();
+            // Author's Note enable is one entity for the chat — mirror it onto
+            // the session note and every other preset's block.
+            if (block.id == 'authors_note') {
+              syncAuthorsNoteEnabled(ref, charId: widget.charId, enabled: v);
+            } else if (block.id == 'summary') {
+              syncSummaryEnabled(ref, charId: widget.charId, enabled: v);
+            }
+          },
+          onStash: block.isStatic ? null : () => _stashBlock(block.id),
+        );
+      },
     );
   }
 
@@ -559,6 +570,81 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
 
   // ─── Actions ─────────────────────────────────────────────────────────────
 
+  void _stashBlock(String blockId) {
+    final index = _blocks.indexWhere((b) => b.id == blockId);
+    if (index == -1 || _blocks[index].isStatic) return;
+    setState(() {
+      _blocks[index] = _blocks[index].copyWith(isStashed: true);
+    });
+    _scheduleSave();
+  }
+
+  void _unstashBlock(String blockId) {
+    final index = _blocks.indexWhere((b) => b.id == blockId);
+    if (index == -1) return;
+    final atTop = ref.read(appSettingsProvider).value?.addBlockAtTop ?? false;
+    setState(() {
+      final block = _blocks.removeAt(index).copyWith(isStashed: false);
+      if (atTop) {
+        _blocks.insert(0, block);
+      } else {
+        _blocks.add(block);
+      }
+    });
+    _scheduleSave();
+  }
+
+  void _showStashSheet() {
+    final stashed = _blocks.where((b) => b.isStashed).toList();
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'stash'.tr(),
+      items: stashed.isEmpty
+          ? [
+              BottomSheetItem(
+                label: 'stash_empty'.tr(),
+                centered: true,
+                onTap: () => Navigator.of(context, rootNavigator: true).pop(),
+              ),
+            ]
+          : [
+              for (final block in stashed)
+                BottomSheetItem(
+                  icon: presetBlockRoleIcon(block.role),
+                  label: block.name,
+                  hint: block.enabled ? null : 'Disabled',
+                  onTap: () {
+                    Navigator.of(context, rootNavigator: true).pop();
+                    final index = _blocks.indexWhere((b) => b.id == block.id);
+                    if (index == -1) return;
+                    setState(() => _expandedBlockIndex = index);
+                    widget.onEditingBlockChanged?.call(true);
+                  },
+                  actions: [
+                    BottomSheetAction(
+                      icon: Icons.unarchive_outlined,
+                      onTap: () {
+                        Navigator.of(context, rootNavigator: true).pop();
+                        _unstashBlock(block.id);
+                      },
+                    ),
+                    BottomSheetAction(
+                      icon: Icons.delete_outline,
+                      color: context.cs.error,
+                      onTap: () {
+                        Navigator.of(context, rootNavigator: true).pop();
+                        setState(
+                          () => _blocks.removeWhere((b) => b.id == block.id),
+                        );
+                        _scheduleSave();
+                      },
+                    ),
+                  ],
+                ),
+            ],
+    );
+  }
+
   void _addBlock() {
     final hasMemoryBlock = _blocks.any((b) => b.id == 'memory');
     GlazeBottomSheet.show<void>(
@@ -657,7 +743,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   /// edited, use the live in-memory blocks so unsaved edits are reflected.
   List<PresetBlock> _copyableBlocks(Preset preset) {
     final source = preset.id == _currentId ? _blocks : preset.blocks;
-    return source.toList();
+    return source.where((block) => !block.isStashed).toList();
   }
 
   void _copyBlockFromPreset(PresetBlock block) {
@@ -668,6 +754,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       id: generateId(),
       name: '${block.name} (copy)',
       isStatic: false,
+      isStashed: false,
     );
     setState(() {
       if (atTop) {

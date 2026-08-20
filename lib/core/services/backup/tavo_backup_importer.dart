@@ -515,6 +515,16 @@ class TavoBackupImporter {
         final s = pre.structured;
         String name = (s['name'] as String?) ?? 'Tavo Preset';
         List<dynamic>? promptsJson;
+        Map<String, dynamic> formatJson = {};
+        final formatStr = s['format_json'] as String?;
+        if (formatStr != null) {
+          try {
+            final decoded = jsonDecode(formatStr);
+            if (decoded is Map) {
+              formatJson = Map<String, dynamic>.from(decoded);
+            }
+          } catch (_) {}
+        }
         final promptsStr = s['prompts_json'] as String?;
         if (promptsStr != null) {
           try {
@@ -545,6 +555,7 @@ class TavoBackupImporter {
         if (promptsJson == null) continue;
 
         final preset = parseSillyTavernPreset({
+          ...formatJson,
           'name': name,
           'prompts': promptsJson,
         }, name);

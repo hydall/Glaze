@@ -107,6 +107,7 @@ class StreamGenerationService {
         session: session,
         apiConfigOverride: turnConfig.activeApiConfig,
         guidanceText: guidanceText,
+        includeEffectiveCanon: turnConfig.enabled,
         shouldAbort: _isAborted,
         cancelToken: cancelToken,
       );

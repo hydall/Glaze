@@ -18,6 +18,7 @@ import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/cleaner_settings.dart';
+import 'package:glaze_flutter/core/services/generation_notification_service.dart';
 import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/models/tracker_snapshot.dart';
@@ -86,8 +87,8 @@ void main() {
       readActiveApiConfig: () => activeApi,
       readPipelineSettings: () => pipeline,
       loadActivePresetId: () async => 'preset',
-      onForegroundStarted: () async {},
-      onForegroundFinished: () async {},
+      acquireForegroundLease: () =>
+          GenerationNotificationService.instance.acquirePostGenerationLease(),
     );
   }
 

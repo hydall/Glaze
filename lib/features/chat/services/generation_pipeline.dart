@@ -100,8 +100,13 @@ class GenerationPipeline {
     ctx.abortHandler.clearStreaming();
 
     final notifService = GenerationNotificationService.instance;
+    GenerationForegroundLease? notificationLease;
 
     try {
+      notificationLease = await notifService.acquireGenerationLease('Glaze');
+      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+        return null;
+      }
       final studioTurnConfig = await ctx.ref
           .read(studioTurnConfigResolverProvider)
           .resolve(session.id);
@@ -113,11 +118,6 @@ class GenerationPipeline {
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
         return null;
       }
-      await notifService.onGenerationStarted(character?.name ?? 'Unknown');
-      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
-        return null;
-      }
-
       final service = ctx.ref.read(chatGenerationServiceProvider);
       var result = await service.generate(
         session: session,
@@ -148,7 +148,6 @@ class GenerationPipeline {
         await _handlePipelineError(
           StateError('Generation completed without a chat session'),
           genId,
-          notifService,
         );
         return null;
       }
@@ -161,7 +160,6 @@ class GenerationPipeline {
             result.mainModelContextSnapshot?.promptResult.exactLorebookManifest,
       );
       if (durableSession == null) {
-        await notifService.onGenerationAborted();
         return null;
       }
       result = result.copyWith(session: durableSession);
@@ -182,7 +180,6 @@ class GenerationPipeline {
           isPostGenRunning: false,
         );
         ctx.setState(AsyncData(settled));
-        await notifService.onGenerationAborted();
         return GenerationOutcome(state: settled, clearRestorationMessage: null);
       }
 
@@ -236,7 +233,7 @@ class GenerationPipeline {
             }
           }
         } else {
-          await notifService.onGenerationAborted();
+          // The owning pipeline releases its foreground lease in finally.
         }
         return regenOutcome;
       }
@@ -268,7 +265,6 @@ class GenerationPipeline {
           return null;
         }
         if (restoredSession == null) {
-          await notifService.onGenerationAborted();
           return null;
         }
         ChatSessionService.updateCache(restoredSession);
@@ -329,8 +325,10 @@ class GenerationPipeline {
         clearRestorationMessage: null,
       );
     } catch (e) {
-      await _handlePipelineError(e, genId, notifService);
+      await _handlePipelineError(e, genId);
       return null;
+    } finally {
+      await notificationLease?.release();
     }
   }
 
@@ -388,16 +386,9 @@ class GenerationPipeline {
     await _cleanerStage.rerun(sessionId: sessionId, messageId: messageId);
   }
 
-  Future<void> _handlePipelineError(
-    Object e,
-    int genId,
-    GenerationNotificationService notifService,
-  ) async {
+  Future<void> _handlePipelineError(Object e, int genId) async {
     if (!ctx.ref.mounted) return;
-    if (!ctx.abortHandler.isCurrentGen(genId)) {
-      await notifService.onGenerationAborted();
-      return;
-    }
+    if (!ctx.abortHandler.isCurrentGen(genId)) return;
     final current = ctx.getState().value;
     if (current != null && (current.isGenerating || current.isPostGenRunning)) {
       final restoration = ctx.abortHandler.restorationMessage;
@@ -471,7 +462,6 @@ class GenerationPipeline {
       }
       ctx.abortHandler.restorationMessage = null;
     }
-    await notifService.onGenerationAborted();
   }
 
   static ChatSession? _restoreAfterError({

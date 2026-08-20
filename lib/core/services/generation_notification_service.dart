@@ -39,6 +39,34 @@ class ActiveChatContext {
   final int revision;
 }
 
+class GenerationForegroundLease {
+  GenerationForegroundLease._(this._service, this._foregroundAcquired);
+
+  final GenerationNotificationService _service;
+  final bool _foregroundAcquired;
+  bool _released = false;
+
+  Future<void> release() async {
+    if (_released) return;
+    _released = true;
+    await _service._releaseGenerationLease(_foregroundAcquired);
+  }
+}
+
+class PostGenerationForegroundLease {
+  PostGenerationForegroundLease._(this._service, this._foregroundAcquired);
+
+  final GenerationNotificationService _service;
+  final bool _foregroundAcquired;
+  bool _released = false;
+
+  Future<void> release() async {
+    if (_released) return;
+    _released = true;
+    if (_foregroundAcquired) await _service._releaseForeground();
+  }
+}
+
 class GenerationNotificationService {
   GenerationNotificationService._();
   static final GenerationNotificationService instance =
@@ -59,9 +87,10 @@ class GenerationNotificationService {
   final StreamController<void> _activeContextChanges =
       StreamController<void>.broadcast();
 
-  bool _isGenerating = false;
   bool _initialized = false;
   int _foregroundHoldCount = 0;
+  int _generationLeaseCount = 0;
+  Future<void> _foregroundTransition = Future<void>.value();
   AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
   NotificationNavigationData? _pendingNotificationData;
   String? _activeCharId;
@@ -170,6 +199,7 @@ class GenerationNotificationService {
           foregroundTaskOptions: ForegroundTaskOptions(
             eventAction: ForegroundTaskEventAction.nothing(),
             allowWakeLock: true,
+            allowWifiLock: true,
           ),
         );
       }
@@ -228,8 +258,10 @@ class GenerationNotificationService {
     final charId = _activeCharId;
     final sessionId = _activeSessionId;
     if (_lifecycleState != AppLifecycleState.resumed ||
-        charId == null || charId.isEmpty ||
-        sessionId == null || sessionId.isEmpty) {
+        charId == null ||
+        charId.isEmpty ||
+        sessionId == null ||
+        sessionId.isEmpty) {
       return null;
     }
     return ActiveChatContext(
@@ -241,7 +273,8 @@ class GenerationNotificationService {
 
   bool isCurrentActiveChatContext(ActiveChatContext context) {
     final current = activeChatContext;
-    return current != null && current.charId == context.charId &&
+    return current != null &&
+        current.charId == context.charId &&
         current.sessionId == context.sessionId &&
         current.revision == context.revision;
   }
@@ -266,12 +299,20 @@ class GenerationNotificationService {
     _activeContextChanges.add(null);
   }
 
-  Future<void> onGenerationStarted(String charName) async {
-    _isGenerating = true;
-    await _acquireForeground(
+  Future<GenerationForegroundLease> acquireGenerationLease(
+    String charName,
+  ) async {
+    _generationLeaseCount++;
+    final acquired = await _acquireForeground(
       notificationTitle: charName,
       notificationText: 'notification_generating'.tr(),
     );
+    return GenerationForegroundLease._(this, acquired);
+  }
+
+  Future<void> _releaseGenerationLease(bool foregroundAcquired) async {
+    if (_generationLeaseCount > 0) _generationLeaseCount--;
+    if (foregroundAcquired) await _releaseForeground();
   }
 
   Future<void> onGenerationCompleted(
@@ -282,9 +323,6 @@ class GenerationNotificationService {
     String? msgId,
     String? avatarPath,
   }) async {
-    _isGenerating = false;
-    await _releaseForeground();
-
     // Buzz the moment the bot's reply lands, whether the app is foregrounded
     // (user watching the chat) or backgrounded (paired with the notification
     // below). Gated by the user's incoming-message vibration toggle.
@@ -302,27 +340,14 @@ class GenerationNotificationService {
     }
   }
 
-  Future<void> onGenerationAborted() async {
-    _isGenerating = false;
-    await _releaseForeground();
-  }
-
-  /// Acquire an additional foreground hold for post-generation tasks
-  /// (post-cleaner, Ledger, extension blocks, image tags). These run
-  /// fire-and-forget AFTER [onGenerationCompleted] releases the generation
-  /// hold. Without this, the OS may suspend the app mid-task when the screen
-  /// turns off, causing crashes.
-  Future<void> onPostGenStarted() async {
-    await _acquireForeground(
+  /// Acquire an additional foreground hold for detached post-generation work.
+  /// The main pipeline keeps its original hold through awaited post-gen phases.
+  Future<PostGenerationForegroundLease> acquirePostGenerationLease() async {
+    final acquired = await _acquireForeground(
       notificationTitle: 'Glaze',
       notificationText: 'Processing response...',
     );
-  }
-
-  /// Release the post-generation foreground hold. Must be called exactly once
-  /// for each [onPostGenStarted] call, after ALL post-gen tasks complete.
-  Future<void> onPostGenFinished() async {
-    await _releaseForeground();
+    return PostGenerationForegroundLease._(this, acquired);
   }
 
   Future<void> onSyncStarted() async {
@@ -336,7 +361,7 @@ class GenerationNotificationService {
     await _releaseForeground();
   }
 
-  bool get isGenerating => _isGenerating;
+  bool get isGenerating => _generationLeaseCount > 0;
 
   /// Shows a message notification. Suppressed while the app is foregrounded
   /// and the user is viewing the same charId+sessionId (mirrors Vue.js
@@ -444,39 +469,60 @@ class GenerationNotificationService {
     return data;
   }
 
-  Future<void> _acquireForeground({
+  Future<bool> _acquireForeground({
     required String notificationTitle,
     required String notificationText,
   }) async {
-    if (!_isMobile) return;
-    _foregroundHoldCount++;
-    if (_foregroundHoldCount > 1) return;
-    try {
-      if (!await FlutterForegroundTask.isRunningService) {
-        await FlutterForegroundTask.startService(
-          // Must match android:foregroundServiceType="dataSync" in the manifest
-          // (mirrors Vue's dataSync foreground service for background generation).
-          serviceTypes: const [ForegroundServiceTypes.dataSync],
-          notificationTitle: notificationTitle,
-          notificationText: notificationText,
-          notificationIcon: const NotificationIcon(
-            metaDataName: 'com.hydall.glaze.ic_generation',
-          ),
-          callback: _foregroundTaskCallback,
-        );
+    return _serializeForegroundTransition(() async {
+      if (!_isMobile) return true;
+      _foregroundHoldCount++;
+      if (_foregroundHoldCount > 1) return true;
+      try {
+        if (!await FlutterForegroundTask.isRunningService) {
+          await FlutterForegroundTask.startService(
+            // Must match android:foregroundServiceType="dataSync" in the manifest
+            // (mirrors Vue's dataSync foreground service for background generation).
+            serviceTypes: const [ForegroundServiceTypes.dataSync],
+            notificationTitle: notificationTitle,
+            notificationText: notificationText,
+            notificationIcon: const NotificationIcon(
+              metaDataName: 'com.hydall.glaze.ic_generation',
+            ),
+            callback: _foregroundTaskCallback,
+          );
+        }
+      } catch (e) {
+        _foregroundHoldCount--;
+        debugPrint('NOTIF: foreground task start failed: $e');
+        return false;
       }
-    } catch (e) {
-      debugPrint('NOTIF: foreground task start failed: $e');
-    }
-    await _startSilentAudio();
+      await _startSilentAudio();
+      return true;
+    });
   }
 
   Future<void> _releaseForeground() async {
-    if (!_isMobile) return;
-    if (_foregroundHoldCount <= 0) return;
-    _foregroundHoldCount--;
-    if (_foregroundHoldCount > 0) return;
-    await _stopForegroundTask();
+    await _serializeForegroundTransition(() async {
+      if (!_isMobile) return;
+      if (_foregroundHoldCount <= 0) return;
+      _foregroundHoldCount--;
+      if (_foregroundHoldCount > 0) return;
+      await _stopForegroundTask();
+    });
+  }
+
+  Future<T> _serializeForegroundTransition<T>(
+    Future<T> Function() action,
+  ) async {
+    final previous = _foregroundTransition;
+    final completer = Completer<void>();
+    _foregroundTransition = completer.future;
+    await previous;
+    try {
+      return await action();
+    } finally {
+      completer.complete();
+    }
   }
 
   Future<void> _stopForegroundTask() async {

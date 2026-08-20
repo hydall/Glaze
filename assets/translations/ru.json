@@ -802,6 +802,8 @@
   "section_advanced_settings": "Дополнительные настройки",
   "label_summary_prompt": "Промпт саммари",
   "action_stash": "Спрятать в тайник",
+  "action_unstash": "Вернуть из тайника",
+  "stash_empty": "В тайнике нет блоков",
   "label_none": "По умолчанию / Нет",
   "action_select": "Выбрать",
   "action_reset": "Сбросить по умолчанию",

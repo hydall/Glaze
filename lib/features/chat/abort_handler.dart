@@ -2,7 +2,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/chat_message.dart';
-import '../../core/services/generation_notification_service.dart';
 import '../../core/state/card_rewriter_providers.dart';
 import '../../core/utils/id_generator.dart';
 import '../extensions/services/extension_post_gen_service.dart';
@@ -181,8 +180,6 @@ class AbortHandler {
       _setState(AsyncData(current.copyWith(isGeneratingImage: false)));
     }
     _restorationMessage = null;
-
-    await GenerationNotificationService.instance.onGenerationAborted();
   }
 
   /// Stop pressed while `continueMessage()` was streaming. The partial text

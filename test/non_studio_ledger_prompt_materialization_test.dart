@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/generation_context_inputs.dart';
-import 'package:glaze_flutter/core/llm/prompt/prompt_payload.dart';
 import 'package:glaze_flutter/core/llm/prompt/effective_canon_prompt_formatter.dart';
+import 'package:glaze_flutter/core/llm/prompt/prompt_payload.dart';
 import 'package:glaze_flutter/core/llm/prompt_inputs.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
@@ -65,7 +65,7 @@ void main() {
     expect(payload.characterKnowledgeContent, isNull);
   });
 
-  test('legacy materialization preserves combined transition placement', () {
+  test('classic disabled policy suppresses an effective canon projection', () {
     final projection = EffectiveCanonPromptProjection(
       facts: const [],
       trackers: const [
@@ -81,12 +81,6 @@ void main() {
       revisionHash: 'revision',
       cacheIdentity: 'canon',
     );
-    final expected = EffectiveCanonPromptFormatter.format(
-      projection,
-      sessionId: 's',
-      latestUserText: '',
-      latestAssistantText: '',
-    );
     final payload = PromptPayload.fromGenerationContext(
       GenerationContextInputs(
         character: const Character(id: 'c', name: 'Character'),
@@ -96,15 +90,12 @@ void main() {
         effectiveCanonProjection: projection,
       ),
       preset: null,
+      ledgerPromptInjectionPolicy: disabled,
     );
 
-    expect(payload.studioSessionStateContent, expected.sessionState);
-    expect(
-      payload.studioSessionStateContent,
-      contains('<effective_canon_transitions>'),
-    );
+    expect(payload.studioSessionStateContent, isNull);
+    expect(payload.characterKnowledgeContent, isNull);
     expect(payload.arcContent, isNull);
-    expect(payload.ledgerInjectionCacheIdentity, isNotEmpty);
   });
 
   test('raw-input codec defaults absent policy to legacy', () {

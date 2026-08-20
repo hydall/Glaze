@@ -17,7 +17,6 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/services/generation_notification_service.dart';
-import '../../../core/services/post_gen_foreground_guard.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
@@ -40,10 +39,8 @@ final manualStudioLedgerServiceProvider = Provider<ManualStudioLedgerService>((
     readActiveApiConfig: () => ref.read(activeApiConfigProvider),
     readPipelineSettings: () => ref.read(pipelineSettingsProvider),
     loadActivePresetId: () => ref.read(activeStudioPresetProvider.future),
-    onForegroundStarted:
-        GenerationNotificationService.instance.onPostGenStarted,
-    onForegroundFinished:
-        GenerationNotificationService.instance.onPostGenFinished,
+    acquireForegroundLease:
+        GenerationNotificationService.instance.acquirePostGenerationLease,
   );
 });
 
@@ -164,8 +161,7 @@ class ManualStudioLedgerService {
     required this.readActiveApiConfig,
     required this.readPipelineSettings,
     required this.loadActivePresetId,
-    required this.onForegroundStarted,
-    required this.onForegroundFinished,
+    required this.acquireForegroundLease,
   });
 
   final ChatRepo chatRepo;
@@ -178,8 +174,7 @@ class ManualStudioLedgerService {
   final ApiConfig? Function() readActiveApiConfig;
   final PipelineSettings Function() readPipelineSettings;
   final Future<String> Function() loadActivePresetId;
-  final Future<void> Function() onForegroundStarted;
-  final Future<void> Function() onForegroundFinished;
+  final Future<PostGenerationForegroundLease> Function() acquireForegroundLease;
 
   Future<ManualStudioLedgerResult> rerun({
     required String sessionId,
@@ -361,12 +356,13 @@ class ManualStudioLedgerService {
 
   Future<LedgerRunResult> _runForeground(
     Future<LedgerRunResult> Function() action,
-  ) {
-    return runWithPostGenForeground(
-      onStarted: onForegroundStarted,
-      action: action,
-      onFinished: onForegroundFinished,
-    );
+  ) async {
+    final lease = await acquireForegroundLease();
+    try {
+      return await action();
+    } finally {
+      await lease.release();
+    }
   }
 
   FutureOr<bool> Function() _targetOwnershipGuard(

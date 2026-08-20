@@ -43,7 +43,7 @@ int presetOnlyTokenCount(Preset preset) {
 
   var total = 0;
   for (final block in preset.blocks) {
-    if (!block.enabled || block.content.isEmpty) continue;
+    if (!block.enabled || block.isStashed || block.content.isEmpty) continue;
 
     final resolved = resolveBlockContent(
       id: block.id,

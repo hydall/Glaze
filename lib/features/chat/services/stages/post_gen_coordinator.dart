@@ -66,15 +66,24 @@ class PostGenCoordinator {
         ledger: LedgerStage(ctx),
       );
 
-  void _runInBackground(Future<void> task, String label) {
-    unawaited(
-      task.catchError((Object error, StackTrace stackTrace) {
+  void _runInBackground(
+    Future<void> Function() task,
+    String label,
+    GenerationNotificationService notifService,
+  ) {
+    unawaited(() async {
+      final lease = await notifService.acquirePostGenerationLease();
+      try {
+        await task();
+      } catch (error, stackTrace) {
         debugPrint(
           '[PostGenCoordinator] background $label failed: '
           '$error\n$stackTrace',
         );
-      }),
-    );
+      } finally {
+        await lease.release();
+      }
+    }());
   }
 
   bool _beginForegroundPostGen({
@@ -108,16 +117,18 @@ class PostGenCoordinator {
     required ChatSession session,
     required Character? character,
     required MainModelContextSnapshot? mainModelContextSnapshot,
+    required GenerationNotificationService notifService,
   }) {
     if (character == null) return;
     _runInBackground(
-      extBlocksStage.launchForSwipe(
+      () => extBlocksStage.launchForSwipe(
         session: session,
         character: character,
         agentSwipeId: -1,
         mainModelContextSnapshot: mainModelContextSnapshot,
       ),
       'extension blocks',
+      notifService,
     );
   }
 
@@ -148,17 +159,23 @@ class PostGenCoordinator {
     // changes the visible assistant turn nor needs to own the Send/Stop lock.
     // Keep errors observable without letting a stalled auxiliary task block chat.
     _runInBackground(
-      embedStage.run(
+      () => embedStage.run(
         sessionId: sessionId,
         messages: result.session!.messages,
         genId: genId,
       ),
       'chat embedding',
+      notifService,
     );
-    _runInBackground(draftStage.run(result.session), 'memory auto-draft');
     _runInBackground(
-      autoSummaryStage.run(result.session),
+      () => draftStage.run(result.session),
+      'memory auto-draft',
+      notifService,
+    );
+    _runInBackground(
+      () => autoSummaryStage.run(result.session),
       'auto-summary',
+      notifService,
     );
 
     // Determine Studio status before acquiring the foreground post-gen hold.
@@ -174,67 +191,58 @@ class PostGenCoordinator {
         session: result.session!,
         character: character,
         mainModelContextSnapshot: result.mainModelContextSnapshot,
+        notifService: notifService,
       );
       if (!_hasForegroundImageWork(result.session!)) return;
       if (!_beginForegroundPostGen(sessionId: sessionId, genId: genId)) return;
 
-      await notifService.onPostGenStarted();
-      try {
-        await imageTagStage.run(result: result, genId: genId, service: service);
-      } finally {
-        await notifService.onPostGenFinished();
-      }
+      await imageTagStage.run(result: result, genId: genId, service: service);
       return;
     }
 
     // Studio foreground work (cleaner and canonical image work) retains the
     // post-gen hold. Always release it, including errors.
     if (!_beginForegroundPostGen(sessionId: sessionId, genId: genId)) return;
-    await notifService.onPostGenStarted();
-    try {
-      final postGenFutures = <Future<void>>[];
+    final postGenFutures = <Future<void>>[];
 
-      // Studio ON: cleaner runs first, then image tags on canonical text.
-      // Ledger runs inside CleanerStage. Ext blocks are launched from its
-      // branches and bind to the swipe the user will see.
-      final cleanerTask = cleanerStage.run(
-        sessionId: sessionId,
-        messages: result.session!.messages,
-        genId: genId,
-        promptPayload: result.promptPayload,
-        mainModelContextSnapshot: result.mainModelContextSnapshot,
-        character: character,
-        studioTurnConfig: studioTurnConfig,
-      );
-      postGenFutures.add(cleanerTask);
+    // Studio ON: cleaner runs first, then image tags on canonical text.
+    // Ledger runs inside CleanerStage. Ext blocks are launched from its
+    // branches and bind to the swipe the user will see.
+    final cleanerTask = cleanerStage.run(
+      sessionId: sessionId,
+      messages: result.session!.messages,
+      genId: genId,
+      promptPayload: result.promptPayload,
+      mainModelContextSnapshot: result.mainModelContextSnapshot,
+      character: character,
+      studioTurnConfig: studioTurnConfig,
+    );
+    postGenFutures.add(cleanerTask);
 
-      // Stage 5: Image tags — on canonical text, after cleaner. Re-read
-      // the session from DB so image tags bind to the cleaned swipe.
-      postGenFutures.add(
-        cleanerTask.then((_) async {
-          if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
-            return;
-          }
-          final refreshed = await ctx.ref
-              .read(chatRepoProvider)
-              .getById(sessionId);
-          if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
-            return;
-          }
-          if (refreshed == null) {
-            return;
-          }
-          await imageTagStage.run(
-            result: ChatState(session: refreshed),
-            genId: genId,
-            service: service,
-          );
-        }),
-      );
+    // Stage 5: Image tags — on canonical text, after cleaner. Re-read
+    // the session from DB so image tags bind to the cleaned swipe.
+    postGenFutures.add(
+      cleanerTask.then((_) async {
+        if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+          return;
+        }
+        final refreshed = await ctx.ref
+            .read(chatRepoProvider)
+            .getById(sessionId);
+        if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+          return;
+        }
+        if (refreshed == null) {
+          return;
+        }
+        await imageTagStage.run(
+          result: ChatState(session: refreshed),
+          genId: genId,
+          service: service,
+        );
+      }),
+    );
 
-      await Future.wait(postGenFutures);
-    } finally {
-      await notifService.onPostGenFinished();
-    }
+    await Future.wait(postGenFutures);
   }
 }

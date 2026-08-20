@@ -6,6 +6,11 @@ const ledgerPromptInjectionHeaderId = 'loom_ledger_context_group_v1';
 const ledgerPromptInjectionHeaderTitle = '━📒 Ledger Context';
 const ledgerPromptInjectionAlgorithmVersion = 'ledger-gap-filler-v1';
 
+const disabledLedgerPromptInjectionPolicy = LedgerPromptInjectionPolicy(
+  presetOptIn: false,
+  mode: LedgerPromptInjectionMode.disabled,
+);
+
 const ledgerGapFillerTargetPresetIds = <String>{
   'loom_adapt_v1_direct_lite_native_ru_baseline',
   'loom_adapt_v1_direct_lite_anime_ru_test',
@@ -64,7 +69,7 @@ abstract final class LedgerPromptInjectionPolicyJsonCodec {
     final version = json['algorithmVersion'];
     final depth = json['reverseScanDepth'];
     if (!optedIn || mode == LedgerPromptInjectionMode.disabled) {
-      return _disabledPolicy;
+      return disabledLedgerPromptInjectionPolicy;
     }
     if (mode == null || version != ledgerPromptInjectionAlgorithmVersion) {
       return _legacyPolicy(presetOptIn: true);
@@ -113,7 +118,7 @@ LedgerPromptInjectionPolicy deriveLedgerPromptInjectionPolicyFromRaw({
       .toList(growable: false);
 
   if (candidates.isEmpty) return _legacyPolicy(presetOptIn: true);
-  if (candidates.length != 1) return _disabledPolicy;
+  if (candidates.length != 1) return disabledLedgerPromptInjectionPolicy;
 
   final candidate = candidates.single;
   late final String? id;
@@ -133,10 +138,10 @@ LedgerPromptInjectionPolicy deriveLedgerPromptInjectionPolicyFromRaw({
   if (id != ledgerPromptInjectionHeaderId ||
       title != ledgerPromptInjectionHeaderTitle ||
       (enabled != null && enabled is! bool)) {
-    return _disabledPolicy;
+    return disabledLedgerPromptInjectionPolicy;
   }
   if (enabled == false || requestedMode == LedgerPromptInjectionMode.disabled) {
-    return _disabledPolicy;
+    return disabledLedgerPromptInjectionPolicy;
   }
 
   final targetDefault =
@@ -153,11 +158,6 @@ LedgerPromptInjectionPolicy deriveLedgerPromptInjectionPolicyFromRaw({
   }
   return LedgerPromptInjectionPolicy(presetOptIn: true, mode: mode);
 }
-
-const _disabledPolicy = LedgerPromptInjectionPolicy(
-  presetOptIn: false,
-  mode: LedgerPromptInjectionMode.disabled,
-);
 
 LedgerPromptInjectionPolicy _legacyPolicy({required bool presetOptIn}) =>
     LedgerPromptInjectionPolicy(

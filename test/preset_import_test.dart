@@ -384,11 +384,59 @@ void main() {
     final preset = parseSillyTavernPreset(json, 'disabled.json');
     final nsfw = preset.blocks.firstWhere((b) => b.id == 'nsfw');
     expect(nsfw.enabled, isFalse);
+    expect(nsfw.isStashed, isFalse);
     expect(
       nsfw.content,
       equals('NSFW prompt'),
       reason: 'nsfw is ST\'s "Auxiliary Prompt" — ordinary text, preserved',
     );
+  });
+
+  test('prompts omitted from prompt_order are stashed without disabling', () {
+    final json = makeStPreset(
+      name: 'Stash Test',
+      prompts: [
+        makePrompt(identifier: 'main', content: 'Active'),
+        makePrompt(identifier: 'orphan', content: 'Latent', enabled: true),
+        makePrompt(identifier: 'disabledOrphan', enabled: false),
+        makePrompt(identifier: 'chatHistory'),
+      ],
+      promptOrder: [
+        {'identifier': 'main', 'enabled': true},
+        {'identifier': 'chatHistory', 'enabled': true},
+      ],
+    );
+
+    final preset = parseSillyTavernPreset(json, 'stash.json');
+    final orphan = preset.blocks.firstWhere((b) => b.id == 'orphan');
+    final disabledOrphan = preset.blocks.firstWhere(
+      (b) => b.id == 'disabledOrphan',
+    );
+
+    expect(orphan.enabled, isTrue);
+    expect(orphan.isStashed, isTrue);
+    expect(disabledOrphan.enabled, isFalse);
+    expect(disabledOrphan.isStashed, isTrue);
+  });
+
+  test('Glaze format preserves independent stash and enabled state', () {
+    final preset = parseSillyTavernPreset({
+      'name': 'Glaze Stash',
+      'prompts': [
+        {
+          'name': 'Latent',
+          'role': 'system',
+          'content': 'Hidden',
+          'enabled': true,
+          'isStashed': true,
+          'insertion_mode': 'relative',
+        },
+      ],
+    }, 'glaze-stash.json');
+
+    final block = preset.blocks.firstWhere((b) => b.name == 'Latent');
+    expect(block.enabled, isTrue);
+    expect(block.isStashed, isTrue);
   });
 
   test('nsfw slot carrying a custom jailbreak keeps its content', () {

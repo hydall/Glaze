@@ -934,13 +934,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
 
     final notifService = GenerationNotificationService.instance;
-    var notificationStarted = false;
+    GenerationForegroundLease? notificationLease;
     try {
+      notificationLease = await notifService.acquireGenerationLease('Glaze');
+      if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
       final charRepo = ref.read(characterRepoProvider);
       final character = await charRepo.getById(arg);
-      if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
-      notificationStarted = true;
-      await notifService.onGenerationStarted(character?.name ?? 'Unknown');
       if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
 
       final service = ref.read(chatGenerationServiceProvider);
@@ -1046,7 +1045,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           );
         }
       }
-      if (notificationStarted) await notifService.onGenerationAborted();
+    } finally {
+      await notificationLease?.release();
     }
   }
 
