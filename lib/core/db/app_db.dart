@@ -31,6 +31,9 @@ part 'app_db.g.dart';
     Personas,
     Lorebooks,
     SessionLorebookEvolutionRows,
+    SessionCanonCheckpointRows,
+    SessionLorebookRevisionRows,
+    SessionLorebookEmbeddingJobRows,
     LorebookUseManifests,
     LorebookUseManifestEntries,
     LorebookUseAcceptanceRecords,
@@ -76,7 +79,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 120;
+  int get schemaVersion => 121;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -104,6 +107,7 @@ class AppDatabase extends _$AppDatabase {
       await _createLorebookUseManifestIntegrityTriggers();
       await _createLedgerReconciliationImmutabilityTriggers();
       await _createCardEvolutionIntegrity();
+      await _createSessionCanonIntegrity();
     },
     onUpgrade: (Migrator m, int from, int to) async {
       if (from < 2) {
@@ -2228,6 +2232,12 @@ class AppDatabase extends _$AppDatabase {
         // left nothing behind to diagnose.
         await m.createTable(ledgerDebugRuns);
       }
+      if (from < 121) {
+        await m.createTable(sessionCanonCheckpointRows);
+        await m.createTable(sessionLorebookRevisionRows);
+        await m.createTable(sessionLorebookEmbeddingJobRows);
+        await _createSessionCanonIntegrity();
+      }
     },
   );
 
@@ -2759,6 +2769,26 @@ class AppDatabase extends _$AppDatabase {
       'CREATE TRIGGER IF NOT EXISTS card_evolution_proposal_runs_no_update '
       'BEFORE UPDATE ON card_evolution_proposal_runs BEGIN '
       "SELECT RAISE(ABORT, 'card_evolution_proposal_runs is immutable'); END",
+    );
+  }
+
+  Future<void> _createSessionCanonIntegrity() async {
+    for (final table in const [
+      'session_canon_checkpoint_rows',
+      'session_lorebook_revision_rows',
+    ]) {
+      await customStatement(
+        'CREATE TRIGGER IF NOT EXISTS ${table}_no_update '
+        'BEFORE UPDATE ON $table BEGIN '
+        "SELECT RAISE(ABORT, '$table is immutable'); END",
+      );
+    }
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS '
+      'idx_session_lorebook_embedding_job_active '
+      'ON session_lorebook_embedding_job_rows '
+      '(chat_session_id, lorebook_id, entry_id) '
+      "WHERE status IN ('pending', 'running')",
     );
   }
 

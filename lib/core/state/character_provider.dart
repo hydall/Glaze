@@ -106,9 +106,10 @@ final characterVariantsProvider = StreamProvider.autoDispose
 /// variation badge and to reflect a favorite that lives on a non-cover
 /// variation. Watch it with `.select()` on the single group a widget cares
 /// about — the map identity changes on every character write.
-final variantGroupStatsProvider = StreamProvider<Map<String, VariantGroupStats>>(
-  (ref) => ref.read(characterRepoProvider).watchVariantGroupStats(),
-);
+final variantGroupStatsProvider =
+    StreamProvider<Map<String, VariantGroupStats>>(
+      (ref) => ref.read(characterRepoProvider).watchVariantGroupStats(),
+    );
 
 /// [VariantGroupStats] for one group, falling back to a lone unfavorited
 /// character while the stream is still loading.
@@ -121,9 +122,10 @@ VariantGroupStats variantGroupStatsOf(WidgetRef ref, String groupId) =>
 
 /// Chat-session counts per character id — the "N chats" line that tells two
 /// otherwise identical variations apart in the variations sheet.
-final characterSessionCountsProvider = StreamProvider.autoDispose<Map<String, int>>(
-  (ref) => ref.read(chatRepoProvider).watchSessionCountsByCharacter(),
-);
+final characterSessionCountsProvider =
+    StreamProvider.autoDispose<Map<String, int>>(
+      (ref) => ref.read(chatRepoProvider).watchSessionCountsByCharacter(),
+    );
 
 final infiniteCharactersProvider =
     AsyncNotifierProvider.family<
@@ -370,6 +372,7 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
       variantOrder: order,
       avatarPath: avatarPath,
       gallery: const [],
+      currentSessionIndex: 0,
       fav: false,
       createdAt: now,
       updatedAt: now,
@@ -487,15 +490,19 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
   Future<void> _cleanupFiles(Character character) async {
     try {
       if (character.avatarPath != null && character.avatarPath!.isNotEmpty) {
-        final resolved =
-            resolveGlazeFilePath(character.avatarPath!) ??
-            character.avatarPath!;
-        final avatar = File(resolved);
-        if (await avatar.exists()) await avatar.delete();
-        final name = p.basenameWithoutExtension(resolved);
-        final dir = p.dirname(p.dirname(resolved));
-        final thumb = File(p.join(dir, 'thumbnails', '$name.jpg'));
-        if (await thumb.exists()) await thumb.delete();
+        final stillReferenced = (await ref.read(characterRepoProvider).getAll())
+            .any((item) => item.avatarPath == character.avatarPath);
+        if (!stillReferenced) {
+          final resolved =
+              resolveGlazeFilePath(character.avatarPath!) ??
+              character.avatarPath!;
+          final avatar = File(resolved);
+          if (await avatar.exists()) await avatar.delete();
+          final name = p.basenameWithoutExtension(resolved);
+          final dir = p.dirname(p.dirname(resolved));
+          final thumb = File(p.join(dir, 'thumbnails', '$name.jpg'));
+          if (await thumb.exists()) await thumb.delete();
+        }
       }
       if (character.gallery.isNotEmpty) {
         final avatarDir = character.avatarPath != null

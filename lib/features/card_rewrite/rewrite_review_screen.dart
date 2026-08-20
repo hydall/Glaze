@@ -7,6 +7,10 @@ import '../../core/db/repositories/manual_rewrite_job_repo.dart';
 import '../../core/db/app_db.dart' show RewriteJobRow;
 import '../../core/models/character.dart';
 import '../../core/services/card_rewriter/card_rewriter_contracts.dart';
+import '../../core/state/db_provider.dart';
+import '../chat/chat_provider.dart';
+import '../chat/chat_session_service.dart';
+import '../chat_history/chat_history_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -549,6 +553,20 @@ class _ApplyFooter extends ConsumerWidget {
                 context,
                 'rewrite_apply_result'.tr(namedArgs: {'result': outcome.kind}),
               );
+              if (outcome.isApplied) {
+                final session = await ref
+                    .read(chatRepoProvider)
+                    .getById(snapshot.job.chatSessionId);
+                if (session != null && context.mounted) {
+                  ChatSessionService.clearCache();
+                  ref.invalidate(chatProvider(snapshot.job.characterId));
+                  ref.invalidate(chatProvider(session.characterId));
+                  ref.invalidate(chatHistoryProvider);
+                  context.go(
+                    '/chat/${session.characterId}?session=${session.sessionIndex}',
+                  );
+                }
+              }
             }
           },
         ),

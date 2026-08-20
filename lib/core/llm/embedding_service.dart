@@ -42,7 +42,8 @@ String resolveEmbeddingEndpoint(String endpoint) {
 String embeddingModelSignature(EmbeddingConfig config) {
   final endpoint = config.endpoint.trim();
   final model = config.model.trim();
-  return '${endpoint.isEmpty ? '<endpoint>' : endpoint}|${model.isEmpty ? '<model>' : model}';
+  return '${endpoint.isEmpty ? '<endpoint>' : endpoint}|'
+      '${model.isEmpty ? '<model>' : model}|chunks:${config.maxChunkTokens}';
 }
 
 Map<String, dynamic> embeddingMetadataForConfig(

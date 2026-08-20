@@ -8,6 +8,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/utils/time_helpers.dart';
 import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../chat_history/chat_history_provider.dart';
@@ -338,15 +339,30 @@ class GenerationPipeline {
     required ChatSession generatedSession,
     required String? regenTargetId,
     required ExactLorebookManifest? manifest,
-  }) {
-    return ctx.ref
+  }) async {
+    var wakeLoreEmbeddingWorker = false;
+    final committed = await ctx.ref
         .read(chatRepoProvider)
         .commitGenerationResult(
           baseSession: baseSession,
           generatedSession: generatedSession,
           regenTargetId: regenTargetId,
           manifest: manifest,
+          beforeWrite: (_, after) async {
+            final canonRollback = await ctx.ref
+                .read(sessionCanonRollbackRepoProvider)
+                .reconcileInTransaction(
+                  sessionId: after.id,
+                  survivingMessages: after.messages,
+                );
+            wakeLoreEmbeddingWorker =
+                canonRollback.shouldWakeLoreEmbeddingWorker;
+          },
         );
+    if (wakeLoreEmbeddingWorker) {
+      unawaited(ctx.ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+    }
+    return committed;
   }
 
   static bool _sameGenerationAnchor(ChatMessage expected, ChatMessage current) {

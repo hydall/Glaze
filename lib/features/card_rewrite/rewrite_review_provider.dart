@@ -13,6 +13,7 @@ import '../../core/services/card_rewriter/effective_canon_assembler.dart';
 import '../../core/services/card_rewriter/effective_canon_read_repository.dart';
 import '../../core/state/card_rewriter_providers.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/lorebook_embedding_provider.dart';
 
 /// Durable review aggregate for one job: job row + operations joined with
 /// their current immutable revision snapshots and evidence counts.
@@ -293,13 +294,17 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
       if (stamp == null) {
         return const ManualRewriteApplyOutcome.blocked('invalidCanonContext');
       }
-      return await ref
+      final outcome = await ref
           .read(manualRewriteApplyRepoProvider)
           .applyApproved(
             jobId: snap.job.id,
             expectedCanonStamp: stamp,
             expectedJobVersion: snap.job.version,
           );
+      if (outcome.isApplied) {
+        unawaited(ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+      }
+      return outcome;
     } finally {
       state = state.copyWith(busy: false);
     }

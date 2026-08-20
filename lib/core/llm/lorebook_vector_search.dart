@@ -2,6 +2,7 @@ import '../models/character.dart';
 import '../models/lorebook.dart';
 import '../db/app_db.dart';
 import '../db/repositories/embedding_repo.dart';
+import '../db/repositories/session_lorebook_evolution_repo.dart';
 import '../utils/cast_helpers.dart';
 import 'package:dio/dio.dart';
 import 'embedding_service.dart';
@@ -38,6 +39,7 @@ class LorebookVectorSearch {
     Character? character,
     LorebookActivations? activations,
     String? chatId,
+    Set<SessionLorebookTarget> sessionOverlayTargets = const {},
     int? overrideTopK,
     CancelToken? cancelToken,
   }) async {
@@ -108,19 +110,27 @@ class LorebookVectorSearch {
       for (final (_, lorebookId) in vectorEntries) lorebookId,
       for (final (_, lorebookId) in fallbackEntries) lorebookId,
     };
-    final embeddingRows = await _repo.getBySourceIds(
-      'lorebook_entry',
-      relevantLorebookIds,
-    );
+    final rowGroups = await Future.wait([
+      _repo.getBySourceIds('lorebook_entry', relevantLorebookIds),
+      if (chatId != null && sessionOverlayTargets.isNotEmpty)
+        _repo.getBySource('session_lorebook_entry', chatId)
+      else
+        Future.value(const <EmbeddingRow>[]),
+    ]);
 
     final embeddingMap = <String, EmbeddingRow>{};
-    for (final row in embeddingRows) {
+    for (final row in rowGroups.expand((rows) => rows)) {
       embeddingMap[row.entryId] = row;
     }
 
     final candidates = <VectorCandidate>[];
     for (final (entry, lbId) in vectorEntries) {
-      final namespacedId = '${lbId}_${entry.id}';
+      final namespacedId = _embeddingId(
+        chatId: chatId,
+        lorebookId: lbId,
+        entryId: entry.id,
+        sessionOverlayTargets: sessionOverlayTargets,
+      );
       final row = embeddingMap[namespacedId];
       if (row == null || row.vectorsBlob == null) continue;
 
@@ -131,6 +141,10 @@ class LorebookVectorSearch {
       );
       final currentHash = computeHash(fingerprint);
       if (row.textHash != currentHash) continue;
+      if (_repo.decodeMetadata(row)?['embeddingSignature'] !=
+          embeddingModelSignature(config)) {
+        continue;
+      }
 
       final vectors = _repo.decodeVectors(row);
       if (vectors == null || vectors.isEmpty) continue;
@@ -153,7 +167,12 @@ class LorebookVectorSearch {
     // Separate candidate pool for fallback (keyless) entries.
     final fallbackCandidates = <VectorCandidate>[];
     for (final (entry, lbId) in fallbackEntries) {
-      final namespacedId = '${lbId}_${entry.id}';
+      final namespacedId = _embeddingId(
+        chatId: chatId,
+        lorebookId: lbId,
+        entryId: entry.id,
+        sessionOverlayTargets: sessionOverlayTargets,
+      );
       final row = embeddingMap[namespacedId];
       if (row == null || row.vectorsBlob == null) continue;
 
@@ -164,6 +183,10 @@ class LorebookVectorSearch {
       );
       final currentHash = computeHash(fingerprint);
       if (row.textHash != currentHash) continue;
+      if (_repo.decodeMetadata(row)?['embeddingSignature'] !=
+          embeddingModelSignature(config)) {
+        continue;
+      }
 
       final vectors = _repo.decodeVectors(row);
       if (vectors == null || vectors.isEmpty) continue;
@@ -447,6 +470,22 @@ class LorebookVectorSearch {
       return entry.keys.join(', ');
     }
     return entry.content;
+  }
+
+  String _embeddingId({
+    required String? chatId,
+    required String lorebookId,
+    required String entryId,
+    required Set<SessionLorebookTarget> sessionOverlayTargets,
+  }) {
+    final isOverlay = sessionOverlayTargets.contains((
+      lorebookId: lorebookId,
+      entryId: entryId,
+    ));
+    if (isOverlay) {
+      return '$chatId:$lorebookId:$entryId';
+    }
+    return '${lorebookId}_$entryId';
   }
 
   bool _isFilteredByCharacter(LorebookEntry entry, Character? character) {

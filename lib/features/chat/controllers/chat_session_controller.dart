@@ -65,21 +65,18 @@ class ChatSessionController {
 
   Future<List<ChatSession>> getSessions() => _sessionSvc.getSessions(_charId);
 
-  Future<void> branchSession(int index) async {
+  Future<ChatSession?> branchSession(int index) async {
     final epoch = ++_switchEpoch;
     final current = _getState().value;
-    if (current == null || current.session == null) return;
-    if (index < 0 || index >= current.messages.length) return;
+    if (current == null || current.session == null) return null;
+    if (index < 0 || index >= current.messages.length) return null;
     final session = await _sessionSvc.branchSession(
       _charId,
       current.session!,
       index,
     );
-    if (!_ref.mounted || epoch != _switchEpoch) return;
+    if (!_ref.mounted || epoch != _switchEpoch) return null;
     _invalidateHistory();
-    final start = session.messages.length > ChatState.initialPageSize
-        ? session.messages.length - ChatState.initialPageSize
-        : 0;
-    _setState(AsyncData(ChatState(session: session, visibleStartIndex: start)));
+    return session;
   }
 }

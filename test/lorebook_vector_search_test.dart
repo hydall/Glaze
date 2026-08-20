@@ -77,20 +77,30 @@ class _RecordingEmbeddingRepo extends EmbeddingRepo {
 Future<void> _indexEntry(
   EmbeddingRepo repo,
   String lorebookId,
-  LorebookEntry entry,
-) async {
+  LorebookEntry entry, {
+  String? sessionId,
+  EmbeddingConfig config = const EmbeddingConfig(
+    endpoint: 'test',
+    model: 'test',
+  ),
+}) async {
   final fingerprint = LorebookEmbeddingService.buildEmbeddingFingerprint(
     entry,
     entry.content,
   );
   await repo.putEmbeddingVector(
-    entryId: '${lorebookId}_${entry.id}',
-    sourceType: 'lorebook_entry',
-    sourceId: lorebookId,
+    entryId: sessionId == null
+        ? '${lorebookId}_${entry.id}'
+        : '$sessionId:$lorebookId:${entry.id}',
+    sourceType: sessionId == null ? 'lorebook_entry' : 'session_lorebook_entry',
+    sourceId: sessionId ?? lorebookId,
     vectors: const [
       [1, 0],
     ],
     textHash: computeHash(fingerprint),
+    retrievalMetadata: embeddingMetadataForConfig(config, const [
+      [1, 0],
+    ]),
   );
 }
 
@@ -133,6 +143,12 @@ void main() {
           [1, 0],
         ],
         textHash: computeHash(fingerprint),
+        retrievalMetadata: embeddingMetadataForConfig(
+          const EmbeddingConfig(endpoint: 'test', model: 'test'),
+          const [
+            [1, 0],
+          ],
+        ),
       );
     }
 
@@ -241,5 +257,83 @@ void main() {
       ),
       isTrue,
     );
+  });
+
+  test('overlay target never falls back to a global vector', () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final repo = EmbeddingRepo(db);
+    final embeddings = _RecordingEmbeddingService();
+    final search = LorebookVectorSearch(repo, embeddings);
+    const globalEntry = LorebookEntry(
+      id: 'entry',
+      content: 'global content',
+      vectorSearch: true,
+    );
+    const effectiveEntry = LorebookEntry(
+      id: 'entry',
+      content: 'session content',
+      vectorSearch: true,
+    );
+    await _indexEntry(repo, 'book', globalEntry);
+
+    final withoutSessionVector = await search.search(
+      const [],
+      'query',
+      const [
+        Lorebook(id: 'book', name: 'Book', entries: [effectiveEntry]),
+      ],
+      const LorebookGlobalSettings(searchType: 'vector', vectorThreshold: 0),
+      const EmbeddingConfig(endpoint: 'test', model: 'test'),
+      chatId: 'session',
+      sessionOverlayTargets: const {(lorebookId: 'book', entryId: 'entry')},
+    );
+    expect(withoutSessionVector, isEmpty);
+    expect(embeddings.queries, isEmpty);
+
+    await _indexEntry(repo, 'book', effectiveEntry, sessionId: 'session');
+    final withSessionVector = await search.search(
+      const [],
+      'query',
+      const [
+        Lorebook(id: 'book', name: 'Book', entries: [effectiveEntry]),
+      ],
+      const LorebookGlobalSettings(searchType: 'vector', vectorThreshold: 0),
+      const EmbeddingConfig(endpoint: 'test', model: 'test'),
+      chatId: 'session',
+      sessionOverlayTargets: const {(lorebookId: 'book', entryId: 'entry')},
+    );
+    expect(withSessionVector.single.entryId, 'entry');
+  });
+
+  test('rejects vectors from a different embedding signature', () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final repo = EmbeddingRepo(db);
+    final embeddings = _RecordingEmbeddingService();
+    final search = LorebookVectorSearch(repo, embeddings);
+    const entry = LorebookEntry(
+      id: 'entry',
+      content: 'content',
+      vectorSearch: true,
+    );
+    await _indexEntry(
+      repo,
+      'book',
+      entry,
+      config: const EmbeddingConfig(endpoint: 'old', model: 'model'),
+    );
+
+    final results = await search.search(
+      const [],
+      'query',
+      const [
+        Lorebook(id: 'book', name: 'Book', entries: [entry]),
+      ],
+      const LorebookGlobalSettings(searchType: 'vector', vectorThreshold: 0),
+      const EmbeddingConfig(endpoint: 'new', model: 'model'),
+    );
+    expect(results, isEmpty);
+    expect(embeddings.queries, isEmpty);
   });
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
@@ -90,9 +91,14 @@ void showMessageContextMenu({
         BottomSheetItem(
           icon: Icons.call_split,
           label: 'Branch',
-          onTap: () {
+          onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
-            ref.read(chatProvider(charId).notifier).branchSession(messageIndex);
+            final branch = await ref
+                .read(chatProvider(charId).notifier)
+                .branchSession(messageIndex);
+            if (branch != null && context.mounted) {
+              context.go('/chat/${branch.characterId}?session=0');
+            }
           },
         ),
       BottomSheetItem(

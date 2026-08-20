@@ -485,6 +485,7 @@ class ChatRepo implements SyncChatStore {
     required ChatSession generatedSession,
     required String? regenTargetId,
     ExactLorebookManifest? manifest,
+    Future<void> Function(ChatSession before, ChatSession after)? beforeWrite,
   }) async {
     return _db.transaction(() async {
       final row =
@@ -537,6 +538,7 @@ class ChatRepo implements SyncChatStore {
           generatedSession.sessionVars,
         ),
       );
+      if (beforeWrite != null) await beforeWrite(latest, updated);
       final messagesJson = jsonEncode(
         updated.messages.map((e) => e.toJson()).toList(),
       );

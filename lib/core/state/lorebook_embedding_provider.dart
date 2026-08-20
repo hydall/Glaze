@@ -8,6 +8,7 @@ import '../llm/embedding_request_gate.dart';
 import '../llm/embedding_service.dart';
 import '../llm/lorebook_embedding_service.dart';
 import '../llm/lorebook_vector_search.dart';
+import '../llm/session_lorebook_embedding_worker.dart';
 import '../models/api_config.dart';
 import 'db_provider.dart';
 
@@ -57,3 +58,16 @@ final lorebookEmbeddingServiceProvider = Provider<LorebookEmbeddingService>((
     EmbeddingService(),
   );
 });
+
+final sessionLorebookEmbeddingWorkerProvider =
+    Provider<SessionLorebookEmbeddingWorker>((ref) {
+      return SessionLorebookEmbeddingWorker(
+        db: ref.watch(appDbProvider),
+        jobRepo: ref.watch(sessionLorebookEmbeddingJobRepoProvider),
+        evolutionRepo: ref.watch(sessionLorebookEvolutionRepoProvider),
+        lorebookRepo: ref.watch(lorebookRepoProvider),
+        embeddingRepo: ref.watch(embeddingRepoProvider),
+        embeddingService: EmbeddingService(),
+        readConfig: () => ref.read(embeddingConfigProvider),
+      );
+    });

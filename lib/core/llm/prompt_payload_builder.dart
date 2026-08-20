@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 
 import '../models/api_config.dart';
+import '../db/repositories/session_lorebook_evolution_repo.dart';
 import '../models/character.dart';
 import '../models/chat_message.dart';
 import '../utils/cast_helpers.dart';
@@ -162,10 +163,11 @@ class PromptPayloadBuilder {
     final personaRepo = _ref.read(personaRepoProvider);
     final lorebookRepo = _ref.read(lorebookRepoProvider);
 
-    final sourceCharacter = await charRepo.getById(charId);
+    final effectiveCharId = session?.characterId ?? charId;
+    final sourceCharacter = await charRepo.getById(effectiveCharId);
     throwIfAborted();
     if (sourceCharacter == null) {
-      throw StateError('Character not found: $charId');
+      throw StateError('Character not found: $effectiveCharId');
     }
     final effectiveContext = session == null
         ? null
@@ -192,18 +194,25 @@ class PromptPayloadBuilder {
 
     final persona = getEffectivePersona(
       personas,
-      charId,
+      effectiveCharId,
       sessionId,
       activePersonaId,
       connections,
     );
 
     final sourceLorebooks = await lorebookRepo.getAll();
-    final lorebooks = session == null
-        ? sourceLorebooks
+    final effectiveLorebooks = session == null
+        ? EffectiveSessionLorebooks(
+            lorebooks: sourceLorebooks,
+            overlayTargets: const {},
+          )
         : await _ref
               .read(sessionLorebookEvolutionRepoProvider)
-              .applyOverlays(sessionId: session.id, lorebooks: sourceLorebooks);
+              .resolveEffectiveLorebooks(
+                sessionId: session.id,
+                lorebooks: sourceLorebooks,
+              );
+    final lorebooks = effectiveLorebooks.lorebooks;
     throwIfAborted();
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
@@ -266,6 +275,8 @@ class PromptPayloadBuilder {
                   currentText,
                   character.world,
                   character,
+                  lorebooks: lorebooks,
+                  sessionOverlayTargets: effectiveLorebooks.overlayTargets,
                   chatId: session.id,
                   cancelToken: cancelToken,
                 )
@@ -470,7 +481,7 @@ class PromptPayloadBuilder {
     }
 
     await _ensureEffectiveCanonCurrent(
-      charId: charId,
+      charId: effectiveCharId,
       session: session,
       context: effectiveContext,
     );
@@ -587,11 +598,18 @@ class PromptPayloadBuilder {
     final effectiveCharacter = resolvedContext?.character ?? character;
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
-    final effectiveLorebooks = session == null
-        ? lorebooks
+    final effectiveLorebookSet = session == null
+        ? EffectiveSessionLorebooks(
+            lorebooks: lorebooks,
+            overlayTargets: const {},
+          )
         : await _ref
               .read(sessionLorebookEvolutionRepoProvider)
-              .applyOverlays(sessionId: session.id, lorebooks: lorebooks);
+              .resolveEffectiveLorebooks(
+                sessionId: session.id,
+                lorebooks: lorebooks,
+              );
+    final effectiveLorebooks = effectiveLorebookSet.lorebooks;
 
     List<LorebookEntry> vectorEntries = [];
     List<ChatMessage> history = session?.messages ?? [];
@@ -604,6 +622,8 @@ class PromptPayloadBuilder {
         history.lastOrNull?.content ?? '',
         effectiveCharacter.world,
         effectiveCharacter,
+        lorebooks: effectiveLorebooks,
+        sessionOverlayTargets: effectiveLorebookSet.overlayTargets,
         chatId: session.id,
       );
     }

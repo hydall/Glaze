@@ -358,8 +358,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   Future<List<ChatSession>> getSessions() => _sessionCtrl.getSessions();
 
-  Future<void> branchSession(int index) =>
-      _runSessionChange(() => _sessionCtrl.branchSession(index));
+  Future<ChatSession?> branchSession(int index) async {
+    _sessionChangesInFlight++;
+    try {
+      return await _sessionCtrl.branchSession(index);
+    } finally {
+      _sessionChangesInFlight--;
+    }
+  }
 
   Future<void> newSession() => _runSessionChange(_sessionCtrl.createNewSession);
 

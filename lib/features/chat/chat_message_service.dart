@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +8,7 @@ import '../../core/models/chat_message.dart';
 import '../../core/models/tracker_snapshot.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/db/repositories/lorebook_use_manifest_repo.dart';
 import '../extensions/providers/info_blocks_provider.dart';
 import 'chat_session_service.dart';
@@ -183,6 +186,7 @@ class ChatMessageService {
     final chatRepo = _ref.read(chatRepoProvider);
     final updated = plan.session;
     final invalidatedMessageIds = plan.invalidatedMessageIds;
+    var wakeLoreEmbeddingWorker = false;
 
     // Select the rollback base by chat order. Snapshot timestamps have
     // second-level precision and cannot reliably order adjacent turns.
@@ -232,7 +236,18 @@ class ChatMessageService {
         fallbackSnapshot?.trackers ?? const [],
       );
       await chatRepo.put(updated);
+      final canonRollback = await _ref
+          .read(sessionCanonRollbackRepoProvider)
+          .reconcileInTransaction(
+            sessionId: session.id,
+            survivingMessages: updated.messages,
+          );
+      wakeLoreEmbeddingWorker = canonRollback.shouldWakeLoreEmbeddingWorker;
     });
+
+    if (wakeLoreEmbeddingWorker) {
+      unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+    }
 
     // Current chunk indices no longer map to the same message ranges. Drop the
     // session index now; post-generation indexing will rebuild current chunks.
@@ -514,6 +529,7 @@ class ChatMessageService {
     final manifests = _ref.read(lorebookUseManifestRepoProvider);
     late ChatSession updatedSession;
     late ChatMessage updatedMessage;
+    var wakeLoreEmbeddingWorker = false;
 
     await chatRepo.transaction(() async {
       final latest = await chatRepo.getById(session.id);
@@ -628,7 +644,18 @@ class ChatMessageService {
           .read(embeddingRepoProvider)
           .deleteBySource('chat_message', session.id);
       await chatRepo.put(updatedSession);
+      final canonRollback = await _ref
+          .read(sessionCanonRollbackRepoProvider)
+          .reconcileInTransaction(
+            sessionId: updatedSession.id,
+            survivingMessages: updatedSession.messages,
+          );
+      wakeLoreEmbeddingWorker = canonRollback.shouldWakeLoreEmbeddingWorker;
     });
+
+    if (wakeLoreEmbeddingWorker) {
+      unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+    }
 
     final activeSnapshot = await snapshots.getByAnchor(
       sessionId: session.id,
@@ -1044,6 +1071,7 @@ class ChatMessageService {
     }
     final messageId = snapshot.messages[messageIndex].id;
     final repo = _ref.read(chatRepoProvider);
+    var wakeLoreEmbeddingWorker = false;
     final durable = await repo.mutateMessagesWithBeforeWrite(
       sessionId: snapshot.id,
       updatedAt: currentTimestampSeconds(),
@@ -1053,9 +1081,21 @@ class ChatMessageService {
         final latest = snapshot.copyWith(messages: messages);
         return mutate(latest, latestIndex).messages;
       },
-      beforeWrite: _invalidateChangedReconciliationAnchors,
+      beforeWrite: (before, after) async {
+        await _invalidateChangedReconciliationAnchors(before, after);
+        final canonRollback = await _ref
+            .read(sessionCanonRollbackRepoProvider)
+            .reconcileInTransaction(
+              sessionId: after.id,
+              survivingMessages: after.messages,
+            );
+        wakeLoreEmbeddingWorker = canonRollback.shouldWakeLoreEmbeddingWorker;
+      },
     );
     if (durable == null) return snapshot;
+    if (wakeLoreEmbeddingWorker) {
+      unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+    }
     ChatSessionService.updateCache(durable);
     return durable;
   }

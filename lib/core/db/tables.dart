@@ -902,6 +902,130 @@ class SessionLorebookEvolutionRows extends Table {
   ];
 }
 
+/// Append-only points on a session's complete canon timeline. Each non-root
+/// checkpoint is anchored to the accepted chat variation that caused it.
+@DataClassName('SessionCanonCheckpointRow')
+@TableIndex(
+  name: 'idx_session_canon_checkpoint_sequence',
+  columns: {#chatSessionId, #sequence},
+  unique: true,
+)
+@TableIndex(
+  name: 'idx_session_canon_checkpoint_anchor',
+  columns: {#chatSessionId, #anchorMessageId},
+)
+@TableIndex(
+  name: 'idx_session_canon_checkpoint_job',
+  columns: {#rewriteJobId},
+  unique: true,
+)
+class SessionCanonCheckpointRows extends Table {
+  @override
+  String get tableName => 'session_canon_checkpoint_rows';
+
+  TextColumn get id => text()();
+  TextColumn get chatSessionId => text()();
+  IntColumn get sequence => integer()();
+  TextColumn get parentCheckpointId => text().withDefault(const Constant(''))();
+  TextColumn get characterId => text()();
+  IntColumn get characterRevision => integer()();
+  TextColumn get characterRevisionHash => text()();
+  TextColumn get rewriteJobId => text().nullable()();
+  TextColumn get anchorMessageId => text().withDefault(const Constant(''))();
+  IntColumn get anchorSwipeId => integer().withDefault(const Constant(0))();
+  IntColumn get anchorAgentSwipeId =>
+      integer().withDefault(const Constant(0))();
+  IntColumn get createdAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (id <> '' AND chat_session_id <> '' AND character_id <> '' "
+        "AND character_revision >= 1 AND character_revision_hash <> '' "
+        'AND sequence >= 0)',
+    "CHECK ((sequence = 0 AND parent_checkpoint_id = '') OR "
+        "(sequence > 0 AND parent_checkpoint_id <> '' "
+        "AND anchor_message_id <> ''))",
+  ];
+}
+
+/// Immutable lorebook changes attached to a complete session canon checkpoint.
+@DataClassName('SessionLorebookRevisionRow')
+@TableIndex(
+  name: 'idx_session_lorebook_revision_target',
+  columns: {#chatSessionId, #lorebookId, #entryId, #createdAt},
+)
+class SessionLorebookRevisionRows extends Table {
+  @override
+  String get tableName => 'session_lorebook_revision_rows';
+
+  TextColumn get checkpointId => text()();
+  TextColumn get chatSessionId => text()();
+  TextColumn get lorebookId => text()();
+  TextColumn get entryId => text()();
+  TextColumn get baseContentHash => text()();
+  TextColumn get previousContentHash => text()();
+  TextColumn get content => text()();
+  TextColumn get contentHash => text()();
+  TextColumn get rewriteOperationId => text()();
+  IntColumn get createdAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {checkpointId, lorebookId, entryId};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (checkpoint_id <> '' AND chat_session_id <> '' "
+        "AND lorebook_id <> '' AND entry_id <> '' "
+        "AND base_content_hash <> '' AND previous_content_hash <> '' "
+        "AND content_hash <> '' AND rewrite_operation_id <> '')",
+  ];
+}
+
+/// Durable post-commit work for session-scoped lorebook embeddings.
+@DataClassName('SessionLorebookEmbeddingJobRow')
+@TableIndex(
+  name: 'idx_session_lorebook_embedding_job_status',
+  columns: {#status, #updatedAt},
+)
+@TableIndex(
+  name: 'idx_session_lorebook_embedding_job_target',
+  columns: {#chatSessionId, #lorebookId, #entryId},
+)
+class SessionLorebookEmbeddingJobRows extends Table {
+  @override
+  String get tableName => 'session_lorebook_embedding_job_rows';
+
+  TextColumn get id => text()();
+  TextColumn get chatSessionId => text()();
+  TextColumn get checkpointId => text()();
+  TextColumn get lorebookId => text()();
+  TextColumn get entryId => text()();
+  TextColumn get expectedContentHash => text()();
+  TextColumn get operation => text()();
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+  IntColumn get attemptCount => integer().withDefault(const Constant(0))();
+  TextColumn get lastError => text().nullable()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (id <> '' AND chat_session_id <> '' AND checkpoint_id <> '' "
+        "AND lorebook_id <> '' AND entry_id <> '' "
+        "AND expected_content_hash <> '')",
+    "CHECK (operation IN ('reindex', 'delete'))",
+    "CHECK (status IN ('pending', 'running', 'succeeded', 'failed', "
+        "'superseded'))",
+    'CHECK (attempt_count >= 0)',
+  ];
+}
+
 /// Immutable successful reconciliation evidence.  The JSON columns are
 /// canonical codec payloads; their hashes are verified by the repository.
 @DataClassName('LedgerReconciliationSuccessfulRunRow')
@@ -1139,8 +1263,7 @@ class LedgerDebugRuns extends Table {
   TextColumn get rejectionReason => text().nullable()();
 
   /// Operations dropped by semantic validation, as a JSON array of strings.
-  TextColumn get rejectedOpsJson =>
-      text().withDefault(const Constant('[]'))();
+  TextColumn get rejectedOpsJson => text().withDefault(const Constant('[]'))();
   BoolColumn get repairAttempted =>
       boolean().withDefault(const Constant(false))();
 

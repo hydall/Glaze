@@ -7,6 +7,7 @@ import '../../core/models/chat_message.dart';
 import '../../core/models/persona.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/lorebook_provider.dart';
+import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/utils/sync_deletion_tracker.dart';
@@ -240,33 +241,52 @@ class ChatSessionService {
     int messageIndex,
   ) async {
     final repo = _ref.read(chatRepoProvider);
+    final selectedMessage = current.messages[messageIndex];
     final session = await repo.transaction(() async {
-      final nextIndex = await _nextSessionIndex(charId);
-      final branch = ChatSession(
-        id: '${charId}_$nextIndex',
-        characterId: charId,
-        sessionIndex: nextIndex,
-        messages: current.messages.sublist(0, messageIndex + 1),
-        sessionVars: {
-          ...current.sessionVars,
-          'branchedAt': DateTime.now().millisecondsSinceEpoch.toString(),
-        },
-        authorsNote: current.authorsNote,
-        updatedAt: currentTimestampSeconds(),
+      final durableSource = await repo.getById(current.id);
+      if (durableSource == null) {
+        throw StateError('Session ${current.id} not found');
+      }
+      final durableIndex = durableSource.messages.indexWhere(
+        (message) => message.id == selectedMessage.id,
       );
+      if (durableIndex < 0 ||
+          durableSource.messages[durableIndex].swipeId !=
+              selectedMessage.swipeId ||
+          durableSource.messages[durableIndex].agentSwipeId !=
+              selectedMessage.agentSwipeId) {
+        throw StateError('Branch message selection is stale');
+      }
+      final character = await _ref
+          .read(characterRepoProvider)
+          .getById(durableSource.characterId);
+      if (character == null) {
+        throw StateError('Character ${durableSource.characterId} not found');
+      }
+      final branchResult = await _ref
+          .read(chatSessionBranchRepoProvider)
+          .createInTransaction(
+            sourceCharacter: character,
+            sourceSession: durableSource,
+            retainedMessages: durableSource.messages.sublist(
+              0,
+              durableIndex + 1,
+            ),
+            sessionVars: {
+              ...current.sessionVars,
+              'branchedAt': DateTime.now().millisecondsSinceEpoch.toString(),
+            },
+          );
+      final branch = branchResult.session;
       final messageIds = branch.messages.map((message) => message.id).toSet();
-      await repo.put(branch);
       await _ref
           .read(characterSessionBaselineRepoProvider)
           .copyForSessionBranch(
             fromSessionId: current.id,
             toSessionId: branch.id,
-          );
-      await _ref
-          .read(sessionLorebookEvolutionRepoProvider)
-          .copyForSessionBranch(
-            fromSessionId: current.id,
-            toSessionId: branch.id,
+            characterId: branch.characterId,
+            baselineCardJson: branchResult.rootSnapshotJson,
+            baselineHash: branchResult.rootRevisionHash,
           );
       await _ref
           .read(memoryBookRepoProvider)
@@ -303,6 +323,18 @@ class ChatSessionService {
             toSessionId: branch.id,
             messageIds: messageIds,
           );
+      final root = await _ref
+          .read(sessionCanonCheckpointRepoProvider)
+          .getLatest(branch.id);
+      await _ref
+          .read(chatSessionBranchRepoProvider)
+          .copyCanonTransitionsInTransaction(
+            sourceSessionId: current.id,
+            branchSessionId: branch.id,
+            branchCharacterId: branch.characterId,
+            branchRevisionHash: root!.characterRevisionHash,
+            sourceCheckpointSequence: branchResult.sourceCheckpointSequence,
+          );
       await _ref
           .read(ledgerReconciliationCheckpointRepoProvider)
           .copyForSessionBranch(
@@ -330,13 +362,6 @@ class ChatSessionService {
             fromSessionId: current.id,
             toSessionId: branch.id,
           );
-      final character = await _ref.read(characterRepoProvider).getById(charId);
-      if (character == null) {
-        throw StateError('Character $charId not found');
-      }
-      await _ref
-          .read(characterRepoProvider)
-          .put(character.copyWith(currentSessionIndex: nextIndex));
       return (await repo.getById(branch.id))!;
     });
 
@@ -348,6 +373,7 @@ class ChatSessionService {
       debugPrint('[ChatSessionService] branch preference copy error: $error');
     }
     updateCache(session);
+    unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
     return session;
   }
 

@@ -192,6 +192,7 @@ pubget.txt
 
 # Agent session artifacts (plans / scratch scripts, per-machine)
 .hermes/
+docs/untracked/
 
 # Browser-Claude chat output (patches / PR drafts, not committed as-is)
 docs/chatoutput/

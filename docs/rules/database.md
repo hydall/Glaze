@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **114**
+Current version: **121**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -199,6 +199,13 @@ Migration history:
 - v114: rebuilt `character_revision_rows` so revision hashes are non-unique.
   Returning to earlier card content now appends a valid lineage entry; a
   non-unique `(character_id, revision_hash)` index retains lookup performance.
+- v121: added append-only `session_canon_checkpoint_rows`, append-only
+  `session_lorebook_revision_rows`, and durable
+  `session_lorebook_embedding_job_rows` for branch-scoped Card Rewriter state.
+  Message deletion rolls invalidated canon forward by appending a rollback
+  checkpoint and restoration history; it never updates immutable rows. Because
+  v121 has no lore tombstone, an overlay target absent at the selected
+  checkpoint is restored to its recorded source/base content.
 
 ---
 

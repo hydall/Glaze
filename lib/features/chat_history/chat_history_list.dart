@@ -17,6 +17,7 @@ import '../../core/state/character_provider.dart'
         characterSessionCountsProvider,
         charactersProvider,
         revealHiddenCharactersProvider;
+import '../../core/state/chat_session_ops_provider.dart';
 import '../../shared/utils/variant_label.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/variation_chip.dart';
@@ -86,8 +87,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
     final settingsAsync = ref.watch(appSettingsProvider);
 
     return sessionsAsync.when(
-      loading: () =>
-          Center(child: GlazeSpinner(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
       data: (list) {
         _precacheAvatars(list);
@@ -1066,9 +1066,13 @@ class _GroupHeader extends ConsumerWidget {
       variants,
     );
     if (charId == null || !context.mounted) return;
-    await ref.read(chatProvider(charId).notifier).createNewSession();
+    final hasSessions =
+        (await ref
+                .read(chatSessionOpsProvider.notifier)
+                .getSessionMetadataByCharacter(charId))
+            .isNotEmpty;
     if (!context.mounted) return;
-    context.go('/chat/$charId');
+    context.go(hasSessions ? '/chat/$charId?new=1' : '/chat/$charId');
   }
 
   /// The character a new session should be created for: the group's only
@@ -1250,4 +1254,3 @@ class _StatusBadge extends StatelessWidget {
     );
   }
 }
-

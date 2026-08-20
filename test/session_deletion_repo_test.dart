@@ -27,6 +27,10 @@ const _sessionTables = <(String, String)>[
   ('ledger_reconciliation_cursors', 'session_id'),
   ('character_knowledge_fact_rows', 'chat_session_id'),
   ('character_session_baseline_rows', 'chat_session_id'),
+  ('session_lorebook_evolution_rows', 'chat_session_id'),
+  ('session_canon_checkpoint_rows', 'chat_session_id'),
+  ('session_lorebook_revision_rows', 'chat_session_id'),
+  ('session_lorebook_embedding_job_rows', 'chat_session_id'),
   ('studio_config_rows', 'session_id'),
   ('chat_summaries', 'session_id'),
   ('info_blocks', 'session_id'),
@@ -226,12 +230,17 @@ Future<void> _seedSession(AppDatabase db, String sessionId) async {
     "INSERT INTO rewrite_operation_revisions (rewrite_operation_id, revision, snapshot_json) VALUES ('operation_$id', '1', '{}')",
     "INSERT INTO rewrite_evidence_rows (id, rewrite_operation_id, evidence_json) VALUES ('evidence_$id', 'operation_$id', '{}')",
     "INSERT INTO character_session_baseline_rows (chat_session_id, character_id, baseline_card_json, baseline_hash) VALUES ('$sessionId', 'char_$id', '{}', 'hash')",
+    "INSERT INTO session_lorebook_evolution_rows (chat_session_id, lorebook_id, entry_id, base_content, base_content_hash, content, content_hash, created_at, updated_at) VALUES ('$sessionId', 'source_book_$id', 'entry_$id', 'base', 'base_hash', 'evolved', 'evolved_hash', 1, 1)",
+    "INSERT INTO session_canon_checkpoint_rows (id, chat_session_id, sequence, character_id, character_revision, character_revision_hash, created_at) VALUES ('checkpoint_$id', '$sessionId', 0, 'char_$id', 1, 'card_hash', 1)",
+    "INSERT INTO session_lorebook_revision_rows (checkpoint_id, chat_session_id, lorebook_id, entry_id, base_content_hash, previous_content_hash, content, content_hash, rewrite_operation_id, created_at) VALUES ('checkpoint_$id', '$sessionId', 'source_book_$id', 'entry_$id', 'base_hash', 'base_hash', 'evolved', 'evolved_hash', 'operation_$id', 1)",
+    "INSERT INTO session_lorebook_embedding_job_rows (id, chat_session_id, checkpoint_id, lorebook_id, entry_id, expected_content_hash, operation, created_at, updated_at) VALUES ('embedding_job_$id', '$sessionId', 'checkpoint_$id', 'source_book_$id', 'entry_$id', 'evolved_hash', 'reindex', 1, 1)",
     "INSERT INTO studio_config_rows (session_id) VALUES ('$sessionId')",
     "INSERT INTO chat_summaries (session_id, content) VALUES ('$sessionId', 'summary')",
     "INSERT INTO info_blocks (id, session_id, message_id, block_id, block_name, block_type, content) VALUES ('block_$id', '$sessionId', 'message', 'block', 'Block', 'info', 'content')",
     "INSERT INTO embeddings (entry_id, source_type, source_id) VALUES ('embedding_$id', 'chat_message', '$sessionId')",
     "INSERT INTO embeddings (entry_id, source_type, source_id) VALUES ('memory_embedding_$id', 'memory_entry', 'memorybook_char_${id}_$sessionId')",
     "INSERT INTO embeddings (entry_id, source_type, source_id) VALUES ('lorebook_embedding_$id', 'lorebook_entry', 'lorebook_$id')",
+    "INSERT INTO embeddings (entry_id, source_type, source_id) VALUES ('session_lorebook_embedding_$id', 'session_lorebook_entry', '$sessionId')",
     "INSERT INTO lorebooks (lorebook_id, name, activation_scope, activation_target_id, entries_json) VALUES ('lorebook_$id', 'Lorebook', 'chat', '$sessionId', '[]')",
   ];
   for (final statement in statements) {
@@ -327,6 +336,10 @@ Future<void> _expectClearGroups(AppDatabase db, String sessionId) async {
     ('character_session_baseline_rows', 'chat_session_id'),
     ('studio_config_rows', 'session_id'),
     ('lorebooks', 'activation_target_id'),
+    ('session_lorebook_evolution_rows', 'chat_session_id'),
+    ('session_canon_checkpoint_rows', 'chat_session_id'),
+    ('session_lorebook_revision_rows', 'chat_session_id'),
+    ('session_lorebook_embedding_job_rows', 'chat_session_id'),
   ]) {
     final count = await _count(db, table, '$column = ?', sessionId);
     expect(count, 1, reason: table);

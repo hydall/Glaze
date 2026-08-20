@@ -63,4 +63,41 @@ void main() {
       ),
     );
   });
+
+  test('matching text with a stale model signature is reindexed', () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final repo = EmbeddingRepo(db);
+    final embeddingService = _FakeEmbeddingService();
+    final service = LorebookEmbeddingService(repo, embeddingService);
+    const entry = LorebookEntry(
+      id: 'entry',
+      content: 'content',
+      vectorSearch: true,
+    );
+    final hash = computeHash(
+      LorebookEmbeddingService.buildEmbeddingFingerprint(entry, entry.content),
+    );
+    await repo.putEmbeddingVector(
+      entryId: 'book_entry',
+      sourceType: 'lorebook_entry',
+      sourceId: 'book',
+      vectors: const [
+        [1, 0],
+      ],
+      textHash: hash,
+      retrievalMetadata: embeddingMetadataForConfig(
+        const EmbeddingConfig(endpoint: 'old', model: 'model'),
+        const [
+          [1, 0],
+        ],
+      ),
+    );
+
+    final result = await service.indexLorebookEntries('book', const [
+      entry,
+    ], const EmbeddingConfig(endpoint: 'new', model: 'model'));
+    expect(result.indexed, 1);
+    expect(embeddingService.requestedTexts, ['content']);
+  });
 }

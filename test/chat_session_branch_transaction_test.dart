@@ -11,6 +11,8 @@ import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_checkpo
 import 'package:glaze_flutter/core/db/repositories/lorebook_use_manifest_repo.dart';
 import 'package:glaze_flutter/core/llm/prompt/exact_lorebook_manifest.dart';
 import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/character_revision_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/session_canon_checkpoint_repo.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/character_knowledge_fact.dart';
 import 'package:glaze_flutter/core/models/character_session_baseline.dart';
@@ -25,6 +27,7 @@ import 'package:glaze_flutter/core/models/tracker_snapshot.dart';
 import 'package:glaze_flutter/core/state/active_selection_provider.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/shared_prefs_provider.dart';
+import 'package:glaze_flutter/core/services/card_rewriter/card_rewriter_contracts.dart';
 import 'package:glaze_flutter/features/chat/chat_session_service.dart';
 import 'package:glaze_flutter/features/extensions/models/block_run_status.dart';
 import 'package:glaze_flutter/features/extensions/models/info_block.dart';
@@ -38,6 +41,9 @@ class _FailingBaselineRepo extends CharacterSessionBaselineRepo {
   Future<void> copyForSessionBranch({
     required String fromSessionId,
     required String toSessionId,
+    String? characterId,
+    String? baselineCardJson,
+    String? baselineHash,
   }) => throw StateError('injected branch failure');
 }
 
@@ -112,16 +118,14 @@ void main() {
       throwsStateError,
     );
 
-    expect(await container.read(chatRepoProvider).getById('c1_1'), isNull);
+    expect(await container.read(chatRepoProvider).getAllSessions(), [current]);
+    expect(await container.read(characterRepoProvider).getAll(), hasLength(1));
     expect(
       (await container.read(characterRepoProvider).getById('c1'))!
           .currentSessionIndex,
       0,
     );
-    expect(
-      failing.read(personaConnectionsProvider).chat.containsKey('c1_1'),
-      isFalse,
-    );
+    expect(failing.read(personaConnectionsProvider).chat.keys, ['c1_0']);
   });
 
   test(
@@ -304,16 +308,18 @@ void main() {
           .read(_serviceProvider)
           .branchSession('c1', current, 1);
 
-      expect(branch.id, 'c1_2');
+      expect(branch.id, '${branch.characterId}_0');
+      expect(branch.characterId, isNot('c1'));
+      expect(branch.sessionIndex, 0);
       expect(branch.messages.map((message) => message.id), ['m0', 'm1']);
       expect(
-        (await container.read(chatRepoProvider).getById('c1_2'))?.id,
-        'c1_2',
+        (await container.read(chatRepoProvider).getById(branch.id))?.id,
+        branch.id,
       );
       expect(
         (await container.read(characterRepoProvider).getById('c1'))!
             .currentSessionIndex,
-        2,
+        0,
       );
       expect(
         (await container.read(chatRepoProvider).getById('c1_1'))!
@@ -325,83 +331,96 @@ void main() {
 
       final baseline = await container
           .read(characterSessionBaselineRepoProvider)
-          .getBySessionId('c1_2');
-      expect(baseline?.baselineHash, 'baseline-hash');
+          .getBySessionId(branch.id);
+      final branchRoot =
+          (await container
+                  .read(characterRevisionRepoProvider)
+                  .getForCharacter(branch.characterId))
+              .single;
+      expect(baseline?.baselineHash, branchRoot.revisionHash);
+      expect(baseline?.baselineCardJson, branchRoot.snapshotJson);
+      expect(baseline?.characterId, branch.characterId);
       expect(
         baseline?.cardUpdatePolicy,
         CharacterCardUpdatePolicy.pinnedBaseline,
       );
       final studio = await container
           .read(studioConfigRepoProvider)
-          .getBySessionId('c1_2');
+          .getBySessionId(branch.id);
       expect(studio?.enabled, isTrue);
-      expect(studio?.sessionId, 'c1_2');
+      expect(studio?.sessionId, branch.id);
 
       final memory = await container
           .read(memoryBookRepoProvider)
-          .getBySessionId('c1_2');
-      expect(memory?.entries.map((entry) => entry.id), ['kept@c1_2']);
+          .getBySessionId(branch.id);
+      expect(memory?.entries.map((entry) => entry.id), ['kept@${branch.id}']);
       expect(memory?.pendingDrafts.map((draft) => draft.id), [
-        'kept-draft@c1_2',
+        'kept-draft@${branch.id}',
       ]);
       expect(memory?.settings.enabled, isFalse);
       expect(memory?.settings.batchSize, 9);
       expect(memory?.lastProcessedMessageCount, 0);
 
       expect(
-        (await snapshots.getBySessionId('c1_2')).map((item) => item.messageId),
+        (await snapshots.getBySessionId(
+          branch.id,
+        )).map((item) => item.messageId),
         ['m1'],
       );
       expect(
-        (await container.read(trackerRepoProvider).get('c1_2', 'location'))
+        (await container.read(trackerRepoProvider).get(branch.id, 'location'))
             ?.value,
         'kept',
       );
       expect(
-        (await container.read(trackerRepoProvider).get('c1_2', 'location'))
+        (await container.read(trackerRepoProvider).get(branch.id, 'location'))
             ?.sessionId,
-        'c1_2',
+        branch.id,
       );
       expect(
-        (await facts.getReviewableForSession('c1_2')).map((fact) => fact.id),
-        ['kept-fact@c1_2'],
+        (await facts.getReviewableForSession(branch.id)).map((fact) => fact.id),
+        ['kept-fact@${branch.id}'],
       );
       final checkpoint = await container
           .read(ledgerReconciliationCheckpointRepoProvider)
-          .get('c1_2');
+          .get(branch.id);
       expect(checkpoint?.rangeHash, 'retained-range');
       final journals = await (db.select(
         db.ledgerReconciliationCleanupJournals,
-      )..where((row) => row.sessionId.equals('c1_2'))).get();
+      )..where((row) => row.sessionId.equals(branch.id))).get();
       expect(journals, hasLength(1));
-      expect(journals.single.beforeImagesJson, contains('kept-fact@c1_2'));
+      expect(
+        journals.single.beforeImagesJson,
+        contains('kept-fact@${branch.id}'),
+      );
       expect(journals.single.beforeImagesJson, isNot(contains('future-fact')));
       expect(
-        (await container.read(infoBlocksRepoProvider).getBySessionId('c1_2'))
+        (await container.read(infoBlocksRepoProvider).getBySessionId(branch.id))
             .map((block) => block.content),
         ['kept'],
       );
-      final summary = await container.read(summaryRepoProvider).get('c1_2');
+      final summary = await container.read(summaryRepoProvider).get(branch.id);
       expect(summary?.content, isEmpty);
       expect(summary?.messageCount, 0);
       expect(summary?.enabled, isFalse);
       expect(summary?.prompt, 'custom prompt');
 
-      final cadence = await db
-          .customSelect(
-            "SELECT * FROM memory_cadence_rows WHERE chat_session_id = 'c1_2'",
-          )
-          .get();
-      final branchEmbeddings = await db
-          .customSelect("SELECT * FROM embeddings WHERE entry_id LIKE '%@c1_2'")
-          .get();
+      final cadence = await (db.select(
+        db.memoryCadenceRows,
+      )..where((row) => row.chatSessionId.equals(branch.id))).get();
+      final branchEmbeddings = await (db.select(
+        db.embeddings,
+      )..where((row) => row.sourceId.equals(branch.id))).get();
       expect(cadence, isEmpty);
       expect(branchEmbeddings, isEmpty);
       expect(
-        container.read(personaConnectionsProvider).chat['c1_2'],
+        container.read(personaConnectionsProvider).chat[branch.id],
         'persona',
       );
-      expect(container.read(presetConnectionsProvider).chat['c1_2'], 'preset');
+      expect(
+        container.read(presetConnectionsProvider).chat[branch.id],
+        'preset',
+      );
     },
   );
 
@@ -473,18 +492,185 @@ void main() {
       acceptedAt: 21,
     );
 
-    await container.read(_serviceProvider).branchSession('c1', current, 1);
+    final branch = await container
+        .read(_serviceProvider)
+        .branchSession('c1', current, 1);
 
     final branchManifests = await (db.select(
       db.lorebookUseManifests,
-    )..where((row) => row.sessionId.equals('c1_1'))).get();
+    )..where((row) => row.sessionId.equals(branch.id))).get();
     expect(branchManifests, isEmpty);
-    expect(await manifests.getVariationAcceptances('c1_1'), isEmpty);
+    expect(await manifests.getVariationAcceptances(branch.id), isEmpty);
     final sourceManifests = await (db.select(
       db.lorebookUseManifests,
     )..where((row) => row.sessionId.equals('c1_0'))).get();
     expect(sourceManifests, hasLength(4));
     expect(await manifests.getVariationAcceptances('c1_0'), hasLength(2));
+  });
+
+  test('branch roots card and lore at latest surviving checkpoint', () async {
+    final revision0 = const Character(
+      id: 'c1',
+      name: 'Character',
+      description: 'root',
+      avatarPath: 'shared.png',
+      currentSessionIndex: 0,
+    );
+    final revision1 = revision0.copyWith(description: 'after checkpoint 1');
+    final revision2 = revision0.copyWith(description: 'after checkpoint 2');
+    await container.read(characterRepoProvider).put(revision2);
+    final revisions = container.read(characterRevisionRepoProvider);
+    Future<void> insertRevision(Character character, int revision) =>
+        revisions.insert(
+          CharacterRevisionRecord(
+            characterId: 'c1',
+            revision: revision,
+            revisionHash: CardCanonicalizer.sha256(character),
+            parentRevisionHash: revision == 1
+                ? ''
+                : CardCanonicalizer.sha256(
+                    revision == 2 ? revision0 : revision1,
+                  ),
+            snapshotJson: jsonEncode(character.toJson()),
+            createdAt: revision,
+          ),
+        );
+    await insertRevision(revision0, 1);
+    await insertRevision(revision1, 2);
+    await insertRevision(revision2, 3);
+
+    final current = ChatSession(
+      id: 'c1_0',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: [
+        _message('m0'),
+        _message('m1').copyWith(role: 'user'),
+        _message('m2'),
+        _message('m3').copyWith(role: 'user'),
+      ],
+    );
+    await container.read(chatRepoProvider).put(current);
+    final checkpoints = container.read(sessionCanonCheckpointRepoProvider);
+    final root = await checkpoints.appendRootInTransaction(
+      sessionId: current.id,
+      characterId: 'c1',
+      characterRevision: 1,
+      characterRevisionHash: CardCanonicalizer.sha256(revision0),
+    );
+    final checkpoint1 = await checkpoints.appendInTransaction(
+      sessionId: current.id,
+      expectedParentCheckpointId: root.id,
+      characterId: 'c1',
+      characterRevision: 2,
+      characterRevisionHash: CardCanonicalizer.sha256(revision1),
+      rewriteJobId: 'job-1',
+      anchor: const SessionCanonCheckpointAnchor(
+        messageId: 'm0',
+        swipeId: 0,
+        agentSwipeId: 0,
+      ),
+    );
+    final checkpoint2 = await checkpoints.appendInTransaction(
+      sessionId: current.id,
+      expectedParentCheckpointId: checkpoint1.id,
+      characterId: 'c1',
+      characterRevision: 3,
+      characterRevisionHash: CardCanonicalizer.sha256(revision2),
+      rewriteJobId: 'job-2',
+      anchor: const SessionCanonCheckpointAnchor(
+        messageId: 'm2',
+        swipeId: 0,
+        agentSwipeId: 0,
+      ),
+    );
+    final lore1Hash = CardCanonicalizer.scalarSha256('lore one');
+    final lore2Hash = CardCanonicalizer.scalarSha256('lore two');
+    final loreHistory = container.read(sessionLorebookRevisionRepoProvider);
+    await loreHistory.appendInTransaction(
+      checkpointId: checkpoint1.id,
+      sessionId: current.id,
+      lorebookId: 'book',
+      entryId: 'entry',
+      baseContentHash: CardCanonicalizer.scalarSha256('base'),
+      expectedPreviousContentHash: CardCanonicalizer.scalarSha256('base'),
+      content: 'lore one',
+      contentHash: lore1Hash,
+      rewriteOperationId: 'lore-op-1',
+    );
+    await loreHistory.appendInTransaction(
+      checkpointId: checkpoint2.id,
+      sessionId: current.id,
+      lorebookId: 'book',
+      entryId: 'entry',
+      baseContentHash: CardCanonicalizer.scalarSha256('base'),
+      expectedPreviousContentHash: lore1Hash,
+      content: 'lore two',
+      contentHash: lore2Hash,
+      rewriteOperationId: 'lore-op-2',
+    );
+    await db
+        .into(db.sessionLorebookEvolutionRows)
+        .insert(
+          SessionLorebookEvolutionRowsCompanion.insert(
+            chatSessionId: current.id,
+            lorebookId: 'book',
+            entryId: 'entry',
+            baseContent: 'base',
+            baseContentHash: CardCanonicalizer.scalarSha256('base'),
+            content: 'lore two',
+            contentHash: lore2Hash,
+            createdAt: 1,
+            updatedAt: 2,
+          ),
+        );
+
+    final branch = await container
+        .read(_serviceProvider)
+        .branchSession('c1', current, 1);
+
+    final branchCharacter = await container
+        .read(characterRepoProvider)
+        .getById(branch.characterId);
+    expect(branchCharacter?.description, 'after checkpoint 1');
+    expect(branchCharacter?.avatarPath, 'shared.png');
+    expect(branchCharacter?.gallery, isEmpty);
+    expect(branchCharacter?.fav, isFalse);
+    expect(branchCharacter?.currentSessionIndex, 0);
+    expect(branch.sessionIndex, 0);
+    expect(branch.messages.map((message) => message.id), ['m0', 'm1']);
+
+    final branchRevisions = await revisions.getForCharacter(branch.characterId);
+    expect(branchRevisions, hasLength(1));
+    expect(branchRevisions.single.revision, 1);
+    final branchCheckpoints = await checkpoints.getForSession(branch.id);
+    expect(branchCheckpoints, hasLength(1));
+    expect(branchCheckpoints.single.sequence, 0);
+    expect(branchCheckpoints.single.characterId, branch.characterId);
+    final overlay = await container
+        .read(sessionLorebookEvolutionRepoProvider)
+        .getByTarget(
+          sessionId: branch.id,
+          lorebookId: 'book',
+          entryId: 'entry',
+        );
+    expect(overlay?.content, 'lore one');
+    final branchHistory = await loreHistory.getForSession(branch.id);
+    expect(branchHistory.single.checkpointId, branchCheckpoints.single.id);
+    expect(branchHistory.single.content, 'lore one');
+    final jobs = await (db.select(
+      db.sessionLorebookEmbeddingJobRows,
+    )..where((row) => row.chatSessionId.equals(branch.id))).get();
+    expect(jobs, hasLength(1));
+    expect(jobs.single.status, 'pending');
+    expect(jobs.single.expectedContentHash, lore1Hash);
+
+    expect(
+      (await container.read(characterRepoProvider).getById('c1'))?.description,
+      'after checkpoint 2',
+    );
+    expect(await container.read(chatRepoProvider).getById('c1_0'), current);
+    expect(await checkpoints.getForSession('c1_0'), hasLength(3));
   });
 }
 

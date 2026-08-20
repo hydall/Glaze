@@ -70,6 +70,23 @@ void main() {
         createdAt: 1,
       ),
     );
+    await db
+        .into(db.chatSessions)
+        .insert(
+          ChatSessionsCompanion.insert(
+            sessionId: 's',
+            characterId: 'c',
+            sessionIndex: 0,
+            messagesJson: jsonEncode([
+              {
+                'id': 'assistant-accepted',
+                'role': 'assistant',
+                'content': 'Accepted response',
+              },
+              {'id': 'user-acceptance', 'role': 'user', 'content': 'Continue'},
+            ]),
+          ),
+        );
     final input = await reader.readInTransaction(
       sessionId: 's',
       characterId: 'c',
@@ -186,7 +203,7 @@ void main() {
             revision: 1,
             snapshotJson: snapshot,
           ),
-    );
+        );
   }
 
   Future<void> addApprovedLorebookOperation({
@@ -246,14 +263,29 @@ void main() {
         )).kind,
         'applied',
       );
-      final card = await characters.getById('c');
+      final original = await characters.getById('c');
+      expect(original!.description, 'old text');
+      final session = await db.select(db.chatSessions).getSingle();
+      expect(session.characterId, isNot('c'));
+      final card = await characters.getById(session.characterId);
       expect(card!.description, 'new text');
       expect(card.personality, 'untouched');
       expect(card.extensions, {
         'opaque': {'preserved': true},
       });
       expect(card.updatedAt, greaterThan(0));
-      expect(await revisions.getForCharacter('c'), hasLength(2));
+      expect(await revisions.getForCharacter('c'), hasLength(1));
+      expect(
+        await revisions.getForCharacter(session.characterId),
+        hasLength(2),
+      );
+      expect(
+        await db.select(db.sessionCanonCheckpointRows).get(),
+        hasLength(2),
+      );
+      final checkpoint =
+          (await db.select(db.sessionCanonCheckpointRows).get()).last;
+      expect(checkpoint.anchorMessageId, 'assistant-accepted');
       expect(
         (await repo.applyApproved(
           jobId: 'job',
@@ -290,11 +322,16 @@ void main() {
           );
 
       expect(outcome.kind, 'applied');
-      final card = (await characters.getById('c'))!;
+      final session = await db.select(db.chatSessions).getSingle();
+      final card = (await characters.getById(session.characterId))!;
       expect(card.description, 'new text');
       expect(card.personality, 'decisive');
       expect(card.scenario, 'Night City');
-      expect(await revisions.getForCharacter('c'), hasLength(2));
+      expect(await revisions.getForCharacter('c'), hasLength(1));
+      expect(
+        await revisions.getForCharacter(session.characterId),
+        hasLength(2),
+      );
       expect(
         await db.select(db.appliedCanonTransitionRows).get(),
         hasLength(3),
@@ -324,13 +361,30 @@ void main() {
     expect(outcome.kind, 'applied');
     expect((await characters.getById('c'))!.description, 'old text');
     expect(await revisions.getForCharacter('c'), hasLength(1));
-    final overlay = await db.select(db.sessionLorebookEvolutionRows).getSingle();
+    final overlay = await db
+        .select(db.sessionLorebookEvolutionRows)
+        .getSingle();
     expect(overlay.chatSessionId, 's');
     expect(overlay.baseContent, 'The district is dangerous.');
     expect(overlay.content, 'The district is dangerous but lively.');
     final job = await db.select(db.rewriteJobs).getSingle();
     expect(job.appliedCharacterRevision, 0);
     expect(job.appliedCharacterRevisionHash, isEmpty);
+    final checkpoints = await db.select(db.sessionCanonCheckpointRows).get();
+    expect(checkpoints, hasLength(2));
+    expect(checkpoints.last.rewriteJobId, 'job');
+    final history = await db.select(db.sessionLorebookRevisionRows).getSingle();
+    expect(history.checkpointId, checkpoints.last.id);
+    expect(
+      history.previousContentHash,
+      CardCanonicalizer.scalarSha256('The district is dangerous.'),
+    );
+    expect(history.contentHash, overlay.contentHash);
+    final embeddingJob = await db
+        .select(db.sessionLorebookEmbeddingJobRows)
+        .getSingle();
+    expect(embeddingJob.checkpointId, checkpoints.last.id);
+    expect(embeddingJob.expectedContentHash, overlay.contentHash);
   });
 
   test('stale lorebook operation rolls card writes back atomically', () async {
@@ -349,6 +403,9 @@ void main() {
     expect((await characters.getById('c'))!.description, 'old text');
     expect(await revisions.getForCharacter('c'), hasLength(1));
     expect(await db.select(db.sessionLorebookEvolutionRows).get(), isEmpty);
+    expect(await db.select(db.sessionCanonCheckpointRows).get(), isEmpty);
+    expect(await db.select(db.sessionLorebookRevisionRows).get(), isEmpty);
+    expect(await db.select(db.sessionLorebookEmbeddingJobRows).get(), isEmpty);
     expect(
       (await db.select(db.rewriteOperations).get()).map((row) => row.status),
       everyElement('reviewable'),

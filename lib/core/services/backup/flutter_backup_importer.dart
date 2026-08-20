@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../db/app_db.dart';
+import '../../db/repositories/session_lorebook_embedding_job_repo.dart';
 import '../../models/studio_agent_codec.dart';
 import '../../models/studio_preset_codec.dart';
 import '../image_storage_service.dart';
@@ -15,6 +16,7 @@ import 'backup_helpers.dart';
 
 class FlutterBackupImporter extends BackupHelpers {
   static const int _batchSize = 500;
+  static const int _maxSchemaVersion = 11;
 
   @override
   final AppDatabase db;
@@ -85,6 +87,11 @@ class FlutterBackupImporter extends BackupHelpers {
         'Glaze backup schema is too old. Please re-export from the source app.',
       );
     }
+    if (schemaVersion > _maxSchemaVersion) {
+      throw const FormatException(
+        'Glaze backup was created by a newer app version.',
+      );
+    }
 
     final tableFiles = archive.files
         .where(
@@ -115,9 +122,35 @@ class FlutterBackupImporter extends BackupHelpers {
       existingColumns[tName] = cols.map((c) => c.read<String>('name')).toSet();
     }
 
-    // Sort by name to make order deterministic. tables/characters.jsonl
-    // must be imported before tables/chat_sessions.jsonl because of FK.
-    tableFiles.sort((a, b) => a.name.compareTo(b.name));
+    const importOrder = [
+      'characters',
+      'character_revision_rows',
+      'chat_sessions',
+      'character_knowledge_fact_rows',
+      'character_session_baseline_rows',
+      'rewrite_jobs',
+      'rewrite_operations',
+      'rewrite_operation_revisions',
+      'rewrite_evidence_rows',
+      'card_evolution_proposal_runs',
+      'applied_canon_transition_rows',
+      'canon_transition_fact_refs',
+      'session_canon_checkpoint_rows',
+      'session_lorebook_evolution_rows',
+      'session_lorebook_revision_rows',
+    ];
+    int rank(ArchiveFile file) {
+      final table = file.name
+          .substring('tables/'.length)
+          .replaceAll(RegExp(r'\.jsonl$'), '');
+      final index = importOrder.indexOf(table);
+      return index < 0 ? importOrder.length : index;
+    }
+
+    tableFiles.sort((a, b) {
+      final byRank = rank(a).compareTo(rank(b));
+      return byRank != 0 ? byRank : a.name.compareTo(b.name);
+    });
 
     onProgress?.call('Importing tables...');
     await db.customStatement('PRAGMA foreign_keys = OFF');
@@ -136,6 +169,7 @@ class FlutterBackupImporter extends BackupHelpers {
         await db.customStatement('PRAGMA wal_checkpoint(TRUNCATE)');
       }
       await db.applyLegacyStudioRuntimePayloads(_legacyStudioRuntimeRows);
+      if (schemaVersion >= 11) await _rebuildSessionLorebookEmbeddingQueue();
     } finally {
       await db.customStatement('PRAGMA foreign_keys = ON');
     }
@@ -201,12 +235,12 @@ class FlutterBackupImporter extends BackupHelpers {
     String tableName,
     Set<String> knownCols,
   ) async {
-    final bytes = file.readBytes();
-    if (bytes == null || bytes.isEmpty) return;
-
     try {
       await db.customStatement('DELETE FROM $tableName');
     } catch (_) {}
+
+    final bytes = file.readBytes();
+    if (bytes == null || bytes.isEmpty) return;
 
     final lines = utf8
         .decode(bytes, allowMalformed: true)
@@ -249,6 +283,35 @@ class FlutterBackupImporter extends BackupHelpers {
       });
     });
     buffer.clear();
+  }
+
+  Future<void> _rebuildSessionLorebookEmbeddingQueue() async {
+    await db.transaction(() async {
+      await db.customStatement(
+        "DELETE FROM embeddings WHERE source_type = 'session_lorebook_entry'",
+      );
+      await db.delete(db.sessionLorebookEmbeddingJobRows).go();
+      final overlays = await db.select(db.sessionLorebookEvolutionRows).get();
+      final jobs = SessionLorebookEmbeddingJobRepo(db);
+      for (final overlay in overlays) {
+        final checkpoint =
+            await (db.select(db.sessionCanonCheckpointRows)
+                  ..where(
+                    (row) => row.chatSessionId.equals(overlay.chatSessionId),
+                  )
+                  ..orderBy([(row) => OrderingTerm.desc(row.sequence)])
+                  ..limit(1))
+                .getSingleOrNull();
+        if (checkpoint == null) continue;
+        await jobs.enqueueInTransaction(
+          sessionId: overlay.chatSessionId,
+          checkpointId: checkpoint.id,
+          lorebookId: overlay.lorebookId,
+          entryId: overlay.entryId,
+          expectedContentHash: overlay.contentHash,
+        );
+      }
+    });
   }
 
   Future<void> _importTablesFromJson(

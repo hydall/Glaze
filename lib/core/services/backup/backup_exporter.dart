@@ -27,7 +27,8 @@ class BackupExporter {
   //   8 — added tracker_rows (live Tracker Values) alongside snapshots.
   //   9 — added studio_preset_rows (DB-backed Studio prompt block presets).
   //  10 — added atomic character facts and immutable session baselines.
-  static const int _schemaVersion = 10;
+  //  11 — added complete Card Rewriter/session-canon provenance.
+  static const int _schemaVersion = 11;
 
   final AppDatabase _db;
   final ImageStorageService _imageStorage;
@@ -75,6 +76,7 @@ class BackupExporter {
       '_source': 'flutter',
       'schemaVersion': _schemaVersion,
       'exportedAt': DateTime.now().toIso8601String(),
+      'tables': _knownTableNames(),
     };
     final manifestBytes = utf8.encode(jsonEncode(manifest));
     encoder.addArchiveFile(ArchiveFile.bytes('manifest.json', manifestBytes));
@@ -82,7 +84,6 @@ class BackupExporter {
     // 2. tables/<name>.jsonl — streamed per row.
     for (final tableName in _knownTableNames()) {
       final bytes = await _streamTableAsNdjson(tableName);
-      if (bytes.isEmpty) continue;
       encoder.addArchiveFile(
         ArchiveFile.bytes('tables/$tableName.jsonl', bytes),
       );
@@ -204,6 +205,17 @@ class BackupExporter {
       'memory_consolidation_rows',
       'character_knowledge_fact_rows',
       'character_session_baseline_rows',
+      'character_revision_rows',
+      'rewrite_jobs',
+      'rewrite_operations',
+      'rewrite_operation_revisions',
+      'rewrite_evidence_rows',
+      'card_evolution_proposal_runs',
+      'applied_canon_transition_rows',
+      'canon_transition_fact_refs',
+      'session_canon_checkpoint_rows',
+      'session_lorebook_evolution_rows',
+      'session_lorebook_revision_rows',
     ];
   }
 }

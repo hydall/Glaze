@@ -18,6 +18,7 @@ import 'features/chat/bridge/chat_webview_environment.dart';
 import 'core/state/active_selection_provider.dart';
 import 'core/state/character_provider.dart';
 import 'core/state/lorebook_provider.dart';
+import 'core/state/lorebook_embedding_provider.dart';
 import 'core/services/preset_seeder.dart';
 import 'features/chat_history/chat_history_provider.dart';
 import 'features/settings/api_list_provider.dart';
@@ -140,6 +141,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     if (!_startupReady) return;
     GenerationNotificationService.instance.updateLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
+      unawaited(ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
       final service = ref.read(syncServiceProvider).value;
       if (service != null && service.status != SyncStatus.syncing) {
         ref.read(syncStatusProvider.notifier).state = service.status;
@@ -203,6 +205,9 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     checkAndShowOnboarding(context);
     _listenNotificationNavigation();
     _handleColdStartNotification();
+    unawaited(
+      ref.read(sessionLorebookEmbeddingWorkerProvider).recoverAndDrain(),
+    );
     unawaited(checkAndShowUpdateOnStartup());
   }
 

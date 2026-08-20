@@ -979,6 +979,53 @@ void main() {
       return path;
     }
 
+    Future<void> importArchive(Archive archive) async {
+      final bytes = ZipEncoder().encode(archive);
+      final path =
+          '${Directory.systemTemp.path}/glz_schema_test_${DateTime.now().microsecondsSinceEpoch}.glz';
+      File(path).writeAsBytesSync(bytes);
+      try {
+        await FlutterBackupImporter(db, imageStorage).importFromZipFile(path);
+      } finally {
+        try {
+          File(path).deleteSync();
+        } catch (_) {}
+      }
+    }
+
+    test('rejects backups from a newer schema version', () async {
+      final archive = Archive()
+        ..addFile(
+          ArchiveFile.bytes(
+            'manifest.json',
+            utf8.encode(jsonEncode({'schemaVersion': 12})),
+          ),
+        );
+
+      await expectLater(
+        importArchive(archive),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('v11 empty authoritative table clears existing rows', () async {
+      await db.customStatement(
+        "INSERT INTO rewrite_jobs (id, chat_session_id, character_id) VALUES ('stale', 's1', 'c1')",
+      );
+      final archive = Archive()
+        ..addFile(
+          ArchiveFile.bytes(
+            'manifest.json',
+            utf8.encode(jsonEncode({'schemaVersion': 11})),
+          ),
+        )
+        ..addFile(ArchiveFile.bytes('tables/rewrite_jobs.jsonl', const []));
+
+      await importArchive(archive);
+
+      expect(await db.select(db.rewriteJobs).get(), isEmpty);
+    });
+
     test('restores all supported types from preferences.json', () async {
       final prefs = {
         'theme_presets': '[{"id":"p1"}]',
@@ -1115,48 +1162,54 @@ void main() {
       expect(row.read<String>('cheap_api_config_id'), 'legacy-api');
       expect(row.read<String>('cleaner_api_config_id'), 'legacy-api');
       expect(row.read<int>('max_final_history_messages'), 19);
-      final restoredBlocks = jsonDecode(row.read<String>('blocks_json')) as List;
+      final restoredBlocks =
+          jsonDecode(row.read<String>('blocks_json')) as List;
       expect(restoredBlocks.single['id'], 'custom');
       expect(restoredBlocks.single['content'], 'keep custom blocks');
       expect(row.read<String>('agent_enabled_json'), '{"final":true}');
       expect(row.read<String>('execution_mode'), 'direct');
     });
 
-    test('legacy JSON table import stages Studio runtime after any map order', () async {
-      final preset = {
-        'preset_id': 'legacy-custom',
-        'name': 'Legacy Custom',
-        'blocks_json': '[]',
-        'agent_enabled_json': '{}',
-        'execution_mode': 'assisted',
-        'updated_at': 5,
-      };
-      final config = {
-        'session_id': 'profile',
-        'profile_id': 'profile',
-        'agents_json': jsonEncode([
-          {'id': 'final', 'controllerId': 'final'},
-        ]),
-        'run_api_config_id': 'legacy-api',
-        'max_final_history_messages': 11,
-        'updated_at': 9,
-      };
+    test(
+      'legacy JSON table import stages Studio runtime after any map order',
+      () async {
+        final preset = {
+          'preset_id': 'legacy-custom',
+          'name': 'Legacy Custom',
+          'blocks_json': '[]',
+          'agent_enabled_json': '{}',
+          'execution_mode': 'assisted',
+          'updated_at': 5,
+        };
+        final config = {
+          'session_id': 'profile',
+          'profile_id': 'profile',
+          'agents_json': jsonEncode([
+            {'id': 'final', 'controllerId': 'final'},
+          ]),
+          'run_api_config_id': 'legacy-api',
+          'max_final_history_messages': 11,
+          'updated_at': 9,
+        };
 
-      await FlutterBackupImporter(db, imageStorage).importFromLegacyJson({
-        'tables': {
-          'studio_preset_rows': [preset],
-          'studio_config_rows': [config],
-        },
-      });
+        await FlutterBackupImporter(db, imageStorage).importFromLegacyJson({
+          'tables': {
+            'studio_preset_rows': [preset],
+            'studio_config_rows': [config],
+          },
+        });
 
-      final row = await db.customSelect(
-        "SELECT agents_json, expensive_api_config_id, max_final_history_messages "
-        "FROM studio_preset_rows WHERE preset_id = 'legacy-custom'",
-      ).getSingle();
-      expect(jsonDecode(row.read<String>('agents_json')), hasLength(1));
-      expect(row.read<String>('expensive_api_config_id'), 'legacy-api');
-      expect(row.read<int>('max_final_history_messages'), 11);
-    });
+        final row = await db
+            .customSelect(
+              "SELECT agents_json, expensive_api_config_id, max_final_history_messages "
+              "FROM studio_preset_rows WHERE preset_id = 'legacy-custom'",
+            )
+            .getSingle();
+        expect(jsonDecode(row.read<String>('agents_json')), hasLength(1));
+        expect(row.read<String>('expensive_api_config_id'), 'legacy-api');
+        expect(row.read<int>('max_final_history_messages'), 11);
+      },
+    );
 
     test('restores info blocks with the reserved order column', () async {
       final archive = buildGlzArchive();

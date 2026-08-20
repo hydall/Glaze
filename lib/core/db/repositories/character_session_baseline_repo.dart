@@ -80,12 +80,19 @@ class CharacterSessionBaselineRepo {
   Future<void> copyForSessionBranch({
     required String fromSessionId,
     required String toSessionId,
+    String? characterId,
+    String? baselineCardJson,
+    String? baselineHash,
   }) async {
     final source = await getBySessionId(fromSessionId);
     if (source == null) return;
     await ensureBaseline(
       source.copyWith(
         chatSessionId: toSessionId,
+        characterId: characterId ?? source.characterId,
+        baselineCardJson: baselineCardJson ?? source.baselineCardJson,
+        baselineHash: baselineHash ?? source.baselineHash,
+        sourceHashLastSeen: baselineHash ?? source.sourceHashLastSeen,
         createdAt: currentTimestampSeconds(),
         updatedAt: currentTimestampSeconds(),
       ),

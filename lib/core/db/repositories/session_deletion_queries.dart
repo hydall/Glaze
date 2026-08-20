@@ -122,6 +122,15 @@ class SessionDeletionQueries {
     // Child-first ordering keeps this safe when foreign keys are enabled.
     await _deleteRewriteProvenance(sessionId);
     await (_db.delete(
+      _db.sessionLorebookEmbeddingJobRows,
+    )..where((row) => row.chatSessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.sessionLorebookRevisionRows,
+    )..where((row) => row.chatSessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.sessionCanonCheckpointRows,
+    )..where((row) => row.chatSessionId.equals(sessionId))).go();
+    await (_db.delete(
       _db.characterSessionBaselineRows,
     )..where((row) => row.chatSessionId.equals(sessionId))).go();
     await (_db.delete(
@@ -130,6 +139,12 @@ class SessionDeletionQueries {
     await (_db.delete(
       _db.studioConfigRows,
     )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(_db.embeddings)..where(
+          (row) =>
+              row.sourceType.equals('session_lorebook_entry') &
+              row.sourceId.equals(sessionId),
+        ))
+        .go();
     if (chatLorebookIds.isNotEmpty) {
       await (_db.delete(_db.embeddings)..where(
             (row) =>

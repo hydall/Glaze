@@ -3,12 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../db/app_db.dart';
 import '../db/repositories/character_repo.dart';
 import '../db/repositories/chat_repo.dart';
+import '../db/repositories/chat_session_branch_repo.dart';
 import '../db/repositories/preset_repo.dart';
 import '../models/preset.dart';
 import '../db/repositories/api_config_repo.dart';
 import '../db/repositories/persona_repo.dart';
 import '../db/repositories/lorebook_repo.dart';
 import '../db/repositories/session_lorebook_evolution_repo.dart';
+import '../db/repositories/session_canon_checkpoint_repo.dart';
+import '../db/repositories/session_canon_rollback_repo.dart';
+import '../db/repositories/session_lorebook_revision_repo.dart';
+import '../db/repositories/session_lorebook_embedding_job_repo.dart';
 import '../db/repositories/lorebook_use_manifest_repo.dart';
 import '../db/repositories/embedding_repo.dart';
 import '../db/repositories/summary_repo.dart';
@@ -91,6 +96,10 @@ final chatRepoProvider = Provider<ChatRepo>((ref) {
   return ChatRepo(ref.watch(appDbProvider));
 });
 
+final chatSessionBranchRepoProvider = Provider<ChatSessionBranchRepo>((ref) {
+  return ChatSessionBranchRepo(ref.watch(appDbProvider));
+});
+
 final sessionDeletionRepoProvider = Provider<SessionDeletionRepo>((ref) {
   return SessionDeletionRepo(ref.watch(appDbProvider));
 });
@@ -122,6 +131,28 @@ final lorebookRepoProvider = Provider<LorebookRepo>((ref) {
 final sessionLorebookEvolutionRepoProvider =
     Provider<SessionLorebookEvolutionRepo>((ref) {
       return SessionLorebookEvolutionRepo(ref.watch(appDbProvider));
+    });
+
+final sessionCanonCheckpointRepoProvider = Provider<SessionCanonCheckpointRepo>(
+  (ref) {
+    return SessionCanonCheckpointRepo(ref.watch(appDbProvider));
+  },
+);
+
+final sessionCanonRollbackRepoProvider = Provider<SessionCanonRollbackRepo>((
+  ref,
+) {
+  return SessionCanonRollbackRepo(ref.watch(appDbProvider));
+});
+
+final sessionLorebookRevisionRepoProvider =
+    Provider<SessionLorebookRevisionRepo>((ref) {
+      return SessionLorebookRevisionRepo(ref.watch(appDbProvider));
+    });
+
+final sessionLorebookEmbeddingJobRepoProvider =
+    Provider<SessionLorebookEmbeddingJobRepo>((ref) {
+      return SessionLorebookEmbeddingJobRepo(ref.watch(appDbProvider));
     });
 
 final lorebookUseManifestRepoProvider = Provider<LorebookUseManifestRepo>((
@@ -265,6 +296,10 @@ final memoryBookProvider = FutureProvider.family<MemoryBook?, String>((
 final manualRewriteApplyRepoProvider = Provider<ManualRewriteApplyRepo>((ref) {
   return ManualRewriteApplyRepo(
     db: ref.watch(appDbProvider),
+    lorebookEvolutionRepo: ref.watch(sessionLorebookEvolutionRepoProvider),
+    checkpointRepo: ref.watch(sessionCanonCheckpointRepoProvider),
+    lorebookRevisionRepo: ref.watch(sessionLorebookRevisionRepoProvider),
+    embeddingJobRepo: ref.watch(sessionLorebookEmbeddingJobRepoProvider),
     canonReader: EffectiveCanonReadRepository(
       db: ref.watch(appDbProvider),
       characterRepo: ref.watch(characterRepoProvider),
