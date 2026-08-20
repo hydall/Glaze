@@ -426,7 +426,10 @@ void main() {
       expect(body, contains("isInstanceOf(rule, 'CSSKeyframesRule')"));
       expect(body, contains("isInstanceOf(rule, 'CSSGroupingRule')"));
       // Everything else (@import, @font-face, @page, @namespace) is dropped.
-      expect(body.trimRight(), endsWith("return '';\n}"));
+      expect(
+        body.replaceAll('\r\n', '\n').trimRight(),
+        endsWith("return '';\n}"),
+      );
     });
 
     test('ExtBlock selectors are scoped, selector lists stay intact', () {
