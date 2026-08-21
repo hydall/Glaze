@@ -1047,6 +1047,32 @@ Consequences:
 - A block containing only `{{setvar::...}}`, `{{memory}}`, or another macro that resolves empty does not create an accidental blank message. Setvar accounting remains as described in INV-PS5.
 - Two places stay trim-based on purpose, because neither emits a block as its own message: `applyAppendToLastMessage` (INV-PS9) joins block text into an existing user message, where whitespace would only add blank lines; and lorebook attribution reporting, which maps rendered entries back to snapshots.
 
+### INV-PS11: Preset folders are a flat-list convention, resolved once
+
+A chat preset block whose `name` starts with `━` is a **folder header**: it owns
+every block that follows it until the next header. This is the same authoring
+convention agentic presets use, so nothing extra is persisted — the flat block
+order stays authoritative, an imported SillyTavern preset that already uses
+divider prompts opens its folders on import, and a preset written by an older
+build still loads unchanged.
+
+Rules (`lib/core/models/preset_block_groups.dart`):
+
+1. `isPresetGroupHeader()` is the only detector: a non-stashed block whose name
+   starts with `━`. A stashed block never opens a folder — it is not in the
+   visible list and is already out of the prompt.
+2. A disabled folder header takes its blocks out of the prompt.
+   `applyPresetFolderEnablement()` resolves that into the blocks' own `enabled`
+   flags **once**, at the top of `_buildPromptOnce()`
+   (`lib/core/llm/prompt_builder.dart`) and in `presetOnlyTokenCount()`
+   (`lib/core/llm/preset_macro_attribution.dart`). Nothing downstream of those
+   two points knows folders exist.
+3. Toggling a folder writes the header only, never its children, so re-enabling
+   a folder restores the per-block selection it had.
+4. Folders never nest: a header dragged onto a folder is refused, and deleting a
+   folder drops the header alone — its blocks stay in the preset as standalone
+   rows.
+
 ---
 
 ## 6. Stream vs Non-Stream Parity

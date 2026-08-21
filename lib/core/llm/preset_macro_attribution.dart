@@ -1,5 +1,6 @@
 import '../models/character.dart';
 import '../models/preset.dart';
+import '../models/preset_block_groups.dart';
 import 'macro_engine.dart';
 import 'prompt_block_resolver.dart';
 import 'tokenizer.dart';
@@ -42,7 +43,8 @@ int presetOnlyTokenCount(Preset preset) {
   ).forPresetAccounting();
 
   var total = 0;
-  for (final block in preset.blocks) {
+  // Blocks inside a disabled folder are not sent, so they must not be counted.
+  for (final block in applyPresetFolderEnablement(preset.blocks)) {
     if (!block.enabled || block.isStashed || block.content.isEmpty) continue;
 
     final resolved = resolveBlockContent(

@@ -7,6 +7,7 @@ import '../utils/cast_helpers.dart';
 import '../models/character.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
+import '../models/preset_block_groups.dart';
 import '../models/chat_message.dart';
 import '../models/lorebook.dart';
 import 'macro_engine.dart';
@@ -158,7 +159,12 @@ String _latestLedgerText(List<ChatMessage> history, String role) => history
 PromptResult _buildPromptOnce(PromptPayload payload) {
   if (payload.preset == null) return buildFallbackPrompt(payload);
 
-  final preset = payload.preset!;
+  // Folders are a flat-list convention: a disabled folder header owns every
+  // block below it, so resolve that into the blocks' own enabled flags once,
+  // up front, and the rest of assembly needs to know nothing about folders.
+  final preset = payload.preset!.copyWith(
+    blocks: applyPresetFolderEnablement(payload.preset!.blocks),
+  );
   final char = payload.character;
   final persona = payload.persona;
 
