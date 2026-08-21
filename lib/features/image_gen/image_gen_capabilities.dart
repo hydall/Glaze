@@ -246,9 +246,9 @@ int providerMaxReferences(ImageGenSettings settings) {
     case ImageGenApiType.openrouter:
       return openRouterCapabilities(settings.openrouter.model).maxReferences;
     case ImageGenApiType.naistera:
-      return NaisteraConstants.noRefModels.contains(settings.naisteraModel)
-          ? 0
-          : maxGenerationReferenceImages;
+      return NaisteraConstants.supportsReferences(settings.naisteraModel)
+          ? maxGenerationReferenceImages
+          : 0;
     case ImageGenApiType.routmy:
     case ImageGenApiType.ruRoutmy:
       return routmyMaxInjectedReferenceImages;

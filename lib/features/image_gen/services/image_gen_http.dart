@@ -79,6 +79,27 @@ class ImageGenHttp {
     return await extract(json);
   }
 
+  /// Plain JSON GET (job polling, model listings).
+  Future<Map<String, dynamic>> getJson({
+    required String url,
+    String? apiKey,
+    Map<String, String>? extraHeaders,
+    CancelToken? cancelToken,
+  }) async {
+    final headers = <String, String>{
+      'Accept': 'application/json',
+      if (apiKey != null && apiKey.isNotEmpty)
+        'Authorization': 'Bearer $apiKey',
+      ...?extraHeaders,
+    };
+    final response = await _dio.get<Map<String, dynamic>>(
+      url,
+      options: Options(headers: headers),
+      cancelToken: cancelToken,
+    );
+    return response.data ?? {};
+  }
+
   /// Downloads raw bytes from a URL (for endpoints that return `url` instead
   /// of `b64_json`).
   static Future<Uint8List> downloadImage(

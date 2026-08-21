@@ -22,21 +22,21 @@ List<Widget> buildNaisteraModelFields(
   ValueChanged<ImageGenSettings> onUpdate,
   ShowOptionsCallback showOptions,
 ) {
+  // Settings written by older builds can still hold a retired model label
+  // ('nano banana'), so the selector matches on the normalized id.
+  final model = NaisteraConstants.normalizeModel(s.naisteraModel);
   return [
     MenuSelectorItem(
       label: 'Model',
       currentValue: NaisteraConstants.models
-          .firstWhere(
-            (e) => e.$1 == s.naisteraModel,
-            orElse: () => (s.naisteraModel, s.naisteraModel),
-          )
+          .firstWhere((e) => e.$1 == model, orElse: () => (model, model))
           .$2,
       onTap: () => showOptions<String>(
         title: 'Model',
         items: NaisteraConstants.models.map((e) => e.$1).toList(),
         labelBuilder: (v) =>
             NaisteraConstants.models.firstWhere((e) => e.$1 == v).$2,
-        isSelected: (v) => s.naisteraModel == v,
+        isSelected: (v) => model == v,
         onSelected: (v) => onUpdate(s.copyWith(naisteraModel: v)),
       ),
     ),

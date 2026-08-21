@@ -256,7 +256,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
               ],
             ),
             if (s.apiType == ImageGenApiType.naistera &&
-                NaisteraConstants.noRefModels.contains(s.naisteraModel))
+                !NaisteraConstants.supportsReferences(s.naisteraModel))
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 padding: const EdgeInsets.all(12),

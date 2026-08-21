@@ -43,7 +43,7 @@ class ImageGenConnectionService {
         if (settings.naisteraApiKey.trim().isEmpty) {
           throw StateError('Naistera API key not configured');
         }
-        await _get('https://naistera.org', null);
+        await _get(NaisteraConstants.baseUrl, null);
       case ImageGenApiType.routmy:
         if (settings.routmyApiKey.trim().isEmpty) {
           throw StateError('rout.my API key not configured');

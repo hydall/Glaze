@@ -79,7 +79,7 @@ class ImageGenDispatcher {
             NaisteraConstants.aspectRatios,
             settings.naisteraAspectRatio,
           ),
-          references: _naisteraRefs(references),
+          references: references.isEmpty ? null : references,
           cancelToken: cancelToken,
         );
       case ImageGenApiType.routmy:
@@ -284,24 +284,6 @@ class ImageGenDispatcher {
       return null;
     }
     return openAiAspectRatioToSize(aspect, classifyOpenAiImageModel(model));
-  }
-
-  /// Naistera's payload only knows `name`, `image` and `description` — the
-  /// collector's bookkeeping keys must not leak into the request body.
-  static List<Map<String, String>>? _naisteraRefs(
-    List<Map<String, String>> references,
-  ) {
-    if (references.isEmpty) return null;
-    return references
-        .map(
-          (ref) => {
-            'name': ref['name'] ?? '',
-            'image': ref['image'] ?? '',
-            if ((ref['description'] ?? '').isNotEmpty)
-              'description': ref['description']!,
-          },
-        )
-        .toList();
   }
 
   static List<String>? _imagesOf(List<Map<String, String>> references) {

@@ -72,16 +72,48 @@ class RuRoutMyConstants {
 }
 
 class NaisteraConstants {
+  /// Base of the public API. The generation route is `/api/generate`; the
+  /// legacy `/prompt/api/img` route answers 405 Method Not Allowed.
+  static const String baseUrl = 'https://naistera.org';
+
   static const models = [
     ('grok', 'Grok'),
     ('grok-pro', 'Grok Pro'),
-    ('nano banana', 'Nano Banana'),
+    ('nano banana 2', 'Nano Banana 2'),
     ('novelai', 'NovelAI'),
   ];
 
   static const aspectRatios = ['1:1', '16:9', '9:16', '3:2', '2:3'];
 
   static const noRefModels = {'grok-pro', 'novelai'};
+
+  /// Maps stored and retired model labels onto the ids the API accepts today,
+  /// so a settings blob written by an older build keeps generating.
+  static String normalizeModel(String? model) {
+    final raw = (model ?? '').trim().toLowerCase();
+    if (raw.isEmpty) return 'grok';
+    switch (raw) {
+      case 'grok pro':
+      case 'grok-pro':
+      case 'grok-imagine-pro':
+      case 'imagine-pro':
+        return 'grok-pro';
+      case 'nano-banana':
+      case 'nano banana':
+      case 'nano banana pro':
+      case 'nano-banana-pro':
+      case 'nano-banana-2':
+      case 'nano banana 2':
+        return 'nano banana 2';
+      case 'novel ai':
+      case 'novelai':
+        return 'novelai';
+    }
+    return models.any((m) => m.$1 == raw) ? raw : 'grok';
+  }
+
+  static bool supportsReferences(String? model) =>
+      !noRefModels.contains(normalizeModel(model));
 }
 
 class OpenAIConstants {
