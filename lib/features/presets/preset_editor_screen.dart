@@ -197,6 +197,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   late String _author = widget.preset?.author ?? '';
   late String? _imagePath = widget.preset?.imagePath;
   late List<PresetBlock> _blocks;
+  late List<PresetBlockFolder> _blockFolders;
   late List<PresetRegex> _regexes;
   late bool _parseInlineReasoning = widget.preset?.reasoningEnabled ?? false;
   // Read from the preset on every save before, which is the same thing as
@@ -235,6 +236,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   void initState() {
     super.initState();
     _blocks = List.from(widget.preset?.blocks ?? defaultPresetBlocks());
+    _blockFolders = List.from(widget.preset?.blockFolders ?? const []);
     _regexes = List.from(widget.preset?.regexes ?? []);
     _reconcileAuthorsNoteEnabled();
     _reconcileSummaryEnabled();
@@ -288,6 +290,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       author: _author.trim().isEmpty ? null : _author.trim(),
       imagePath: _imagePath,
       blocks: _blocks,
+      blockFolders: _blockFolders,
       regexes: _regexes,
       reasoningEnabled: _parseInlineReasoning,
       reasoningStart: _parseInlineReasoning ? _reasoningStartCtrl.text : null,
@@ -487,7 +490,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     final stashedCount = _blocks.length - activeBlocks.length;
     // A disabled folder takes its blocks out of the prompt, so they must not
     // be counted either.
-    final tokens = applyPresetFolderEnablement(activeBlocks)
+    final tokens = applyPresetFolderEnablement(activeBlocks, _blockFolders)
         .where((b) => b.enabled && b.content.isNotEmpty)
         .fold(0, (sum, b) => sum + estimateTokens(b.content));
 
@@ -529,12 +532,13 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   }
 
   Widget _buildBlockList(List<PresetBlock> activeBlocks) {
-    final rows = groupPresetBlocks(activeBlocks);
+    final rows = groupPresetBlocks(activeBlocks, _blockFolders);
     // The outer target catches a block dragged off its folder: dropping it
     // anywhere but on another folder takes it out of the one it is in.
     return DragTarget<String>(
       onWillAcceptWithDetails: (details) =>
-          findPresetGroupForBlock(activeBlocks, details.data) != null,
+          findPresetFolderForBlock(activeBlocks, _blockFolders, details.data) !=
+          null,
       onAcceptWithDetails: (details) => _moveBlockOutOfFolder(details.data),
       builder: (context, candidates, _) => ReorderableListView.builder(
         shrinkWrap: true,
@@ -559,17 +563,21 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     final row = rows[index];
     final isLast = index == rows.length - 1;
     if (row.isFolder) {
+      final folder = row.folder!;
       return PresetBlockGroupRow(
-        key: ValueKey('folder_${row.header!.id}'),
+        key: ValueKey('folder_${folder.id}'),
         group: row,
-        dragIndex: index,
+        // An empty folder is drawn after the block rows and owns no slot in
+        // the block order, so there is nothing to drag it through.
+        dragIndex: row.children.isEmpty ? null : index,
         isLast: isLast,
-        onToggleFolder: (enabled) => _toggleFolder(row, enabled),
-        onDelete: () => _deleteFolder(row),
+        onToggleFolder: (enabled) => _toggleFolder(folder, enabled),
+        onRename: () => _renameFolder(folder),
+        onDelete: () => _deleteFolder(folder),
         onEdit: _openBlockEditor,
         onToggleBlock: _setBlockEnabled,
         onStash: (block) => _stashBlock(block.id),
-        onMoveBlockIn: (blockId) => _moveBlockIntoFolder(blockId, row),
+        onMoveBlockIn: (blockId) => _moveBlockIntoFolder(blockId, folder),
       );
     }
     final block = row.standalone!;
@@ -578,7 +586,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       block: block,
       index: index,
       isLast: isLast,
-      moveDragData: block.id,
+      moveDragData: _blockFolders.isEmpty ? null : block.id,
       onEdit: () => _openBlockEditor(block),
       onToggle: (enabled) => _setBlockEnabled(block, enabled),
       onStash: block.isStatic ? null : () => _stashBlock(block.id),
@@ -627,41 +635,66 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     }
   }
 
-  void _toggleFolder(PresetBlockGroup group, bool enabled) {
-    _writeActiveBlocks(
-      togglePresetBlockGroup(_activeBlocks, group, enabled),
-    );
+  void _toggleFolder(PresetBlockFolder folder, bool enabled) {
+    setState(() {
+      _blockFolders = togglePresetBlockFolder(
+        _blockFolders,
+        folder.id,
+        enabled,
+      );
+    });
+    _scheduleSave();
   }
 
-  void _moveBlockIntoFolder(String blockId, PresetBlockGroup group) {
+  void _moveBlockIntoFolder(String blockId, PresetBlockFolder folder) {
     _writeActiveBlocks(
-      movePresetBlockIntoGroup(
+      movePresetBlockIntoFolder(
         blocks: _activeBlocks,
         blockId: blockId,
-        target: group,
+        folderId: folder.id,
       ),
     );
   }
 
   void _moveBlockOutOfFolder(String blockId) {
     _writeActiveBlocks(
-      movePresetBlockOutOfGroups(blocks: _activeBlocks, blockId: blockId),
+      movePresetBlockOutOfFolder(blocks: _activeBlocks, blockId: blockId),
     );
   }
 
-  Future<void> _deleteFolder(PresetBlockGroup group) async {
-    final header = group.header;
-    if (header == null) return;
+  void _renameFolder(PresetBlockFolder folder) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'folder_rename_title'.tr(),
+      child: FolderNameDialog(
+        initialName: folder.name,
+        confirmLabel: 'action_rename'.tr(),
+        onSubmit: (name) {
+          setState(() {
+            _blockFolders = renamePresetBlockFolder(
+              _blockFolders,
+              folder.id,
+              name,
+            );
+          });
+          _scheduleSave();
+        },
+      ),
+    );
+  }
+
+  Future<void> _deleteFolder(PresetBlockFolder folder) async {
     final confirmed = await confirmStudioDelete(
       context,
-      title: 'studio_delete_folder'.tr(),
-      description: 'studio_confirm_delete_folder'.tr(
-        args: [presetGroupTitle(header)],
-      ),
+      title: 'folder_delete_title'.tr(),
+      description: 'preset_block_folder_delete_confirm'.tr(args: [folder.name]),
     );
     if (!confirmed || !mounted) return;
     setState(() {
-      _blocks = dissolvePresetBlockGroup(blocks: _blocks, group: group);
+      _blocks = clearPresetFolderMembership(_blocks, folder.id);
+      _blockFolders = _blockFolders
+          .where((f) => f.id != folder.id)
+          .toList(growable: false);
     });
     _scheduleSave();
   }
@@ -669,26 +702,23 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   void _nameAndCreateFolder() {
     GlazeBottomSheet.show<void>(
       context,
-      title: 'studio_add_folder'.tr(),
+      title: 'folder_create_title'.tr(),
       child: FolderNameDialog(
-        confirmLabel: 'studio_create'.tr(),
+        confirmLabel: 'action_create'.tr(),
         onSubmit: _createFolder,
       ),
     );
   }
 
-  /// A new folder is always appended: a header takes ownership of every block
-  /// below it, so creating one at the top would swallow the whole preset.
+  /// A folder is metadata on the preset, not a block: creating one adds no
+  /// prompt text and changes nothing about what is sent until blocks are
+  /// dragged into it.
   void _createFolder(String name) {
     setState(() {
-      _blocks.add(
-        PresetBlock(
-          id: generateId(),
-          name: presetGroupHeaderName(name),
-          role: 'system',
-          content: '',
-        ),
-      );
+      _blockFolders = [
+        ..._blockFolders,
+        PresetBlockFolder(id: generateId(), name: name.trim()),
+      ];
     });
     _scheduleSave();
   }
@@ -936,7 +966,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         ),
         BottomSheetItem(
           icon: Icons.create_new_folder_outlined,
-          label: 'studio_add_folder'.tr(),
+          label: 'folder_new'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _nameAndCreateFolder();
@@ -1143,6 +1173,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       author: _author.trim().isEmpty ? null : _author.trim(),
       imagePath: _imagePath,
       blocks: _blocks,
+      blockFolders: _blockFolders,
       regexes: _regexes,
       reasoningEnabled: _parseInlineReasoning,
       reasoningStart: _parseInlineReasoning ? _reasoningStartCtrl.text : null,

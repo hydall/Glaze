@@ -149,6 +149,12 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
   final regexes = <PresetRegex>[];
 
   final promptsList = json['prompts'] as List<dynamic>? ?? [];
+  // Folders come only from the file's own `block_folders` list and a prompt's
+  // explicit `folder` reference. Nothing is ever inferred from a block's name
+  // or content, so a preset from another frontend imports as the flat list it
+  // is, and a file that declares no folders never grows any.
+  final blockFolders = _parseBlockFolders(json);
+  final folderIds = {for (final folder in blockFolders) folder.id};
 
   // Detect format: Glaze export uses name/role/content/insertion_mode without
   // `identifier`. SillyTavern native uses `identifier` + `prompt_order`.
@@ -197,6 +203,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
           depth: depth,
           appendToLastMessage: pm['appendToLastMessage'] as bool? ?? false,
           sendEmptyBlock: pm['sendEmptyBlock'] as bool? ?? false,
+          folderId: _declaredFolderRef(pm, folderIds),
         ),
       );
     }
@@ -292,6 +299,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
           insertionMode: insertionMode,
           depth: depth,
           sendEmptyBlock: p['sendEmptyBlock'] as bool? ?? false,
+          folderId: _declaredFolderRef(p, folderIds),
         ),
       );
     }
@@ -318,6 +326,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       blockJson['content'] = isMarker ? '' : (pm['content'] ?? '');
       // Absence from prompt_order is ordering membership, not enabled state.
       blockJson['isStashed'] = true;
+      blockJson['folderId'] = _declaredFolderRef(pm, folderIds);
 
       if (pm['injection_position'] == 1) {
         blockJson['insertionMode'] = 'depth';
@@ -354,6 +363,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       id: generateId(),
       name: (json['name'] as String?) ?? fileName.replaceAll('.json', ''),
       blocks: blocks,
+      blockFolders: blockFolders,
       regexes: regexes,
       reasoningEnabled:
           json['reasoning'] as bool? ??
@@ -362,4 +372,36 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       createdAt: currentTimestampSeconds(),
     ),
   );
+}
+
+/// Reads the preset's declared folders. Anything without a usable id is
+/// skipped, and duplicates collapse to the first entry.
+List<PresetBlockFolder> _parseBlockFolders(Map<String, dynamic> json) {
+  final raw = json['block_folders'];
+  if (raw is! List) return const [];
+  final folders = <PresetBlockFolder>[];
+  final seen = <String>{};
+  for (final entry in raw) {
+    if (entry is! Map) continue;
+    final map = Map<String, dynamic>.from(entry);
+    final id = map['id'];
+    if (id is! String || id.isEmpty || !seen.add(id)) continue;
+    final name = map['name'];
+    final enabled = map['enabled'];
+    folders.add(
+      PresetBlockFolder(
+        id: id,
+        name: name is String && name.trim().isNotEmpty ? name.trim() : id,
+        enabled: enabled is bool ? enabled : true,
+      ),
+    );
+  }
+  return folders;
+}
+
+/// A prompt's folder reference, kept only when the preset actually declares
+/// that folder — a dangling reference imports as a top-level block.
+String? _declaredFolderRef(Map<String, dynamic> prompt, Set<String> declared) {
+  final id = prompt['folder'];
+  return id is String && declared.contains(id) ? id : null;
 }

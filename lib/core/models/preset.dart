@@ -27,10 +27,37 @@ abstract class PresetBlock with _$PresetBlock {
     /// Emits this block as an API message even when macro expansion leaves no
     /// visible content. Disabled by default to avoid accidental blank turns.
     @Default(false) bool sendEmptyBlock,
+
+    /// Id of the [PresetBlockFolder] this block belongs to, or null when it
+    /// sits at the top level. Membership is always explicit — it is never
+    /// inferred from the block's name or content. A reference to a folder the
+    /// preset does not declare is ignored, and the block renders top-level.
+    String? folderId,
   }) = _PresetBlock;
 
   factory PresetBlock.fromJson(Map<String, dynamic> json) =>
       _$PresetBlockFromJson(_normalizeBlock(json));
+}
+
+/// A user-created folder grouping blocks inside one preset.
+///
+/// Folders are declared data, never parsed out of block names or content: a
+/// preset has exactly the folders its JSON lists, so a preset written by
+/// another frontend never grows folders on import, and a Glaze preset opened
+/// elsewhere is still a plain block list.
+@freezed
+abstract class PresetBlockFolder with _$PresetBlockFolder {
+  const factory PresetBlockFolder({
+    required String id,
+    required String name,
+
+    /// Disabling a folder takes every block in it out of the prompt, without
+    /// touching the blocks' own switches.
+    @Default(true) bool enabled,
+  }) = _PresetBlockFolder;
+
+  factory PresetBlockFolder.fromJson(Map<String, dynamic> json) =>
+      _$PresetBlockFolderFromJson(json);
 }
 
 @freezed
@@ -71,6 +98,10 @@ abstract class Preset with _$Preset {
     /// featured presets resolve theirs from their fixed id instead.
     String? imagePath,
     @Default([]) List<PresetBlock> blocks,
+
+    /// Folders the blocks may reference by [PresetBlock.folderId]. Empty for
+    /// every preset that does not declare any.
+    @Default([]) List<PresetBlockFolder> blockFolders,
     @Default([]) List<PresetRegex> regexes,
     @Default(false) bool reasoningEnabled,
     String? reasoningStart,

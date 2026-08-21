@@ -159,12 +159,10 @@ String _latestLedgerText(List<ChatMessage> history, String role) => history
 PromptResult _buildPromptOnce(PromptPayload payload) {
   if (payload.preset == null) return buildFallbackPrompt(payload);
 
-  // Folders are a flat-list convention: a disabled folder header owns every
-  // block below it, so resolve that into the blocks' own enabled flags once,
-  // up front, and the rest of assembly needs to know nothing about folders.
-  final preset = payload.preset!.copyWith(
-    blocks: applyPresetFolderEnablement(payload.preset!.blocks),
-  );
+  // A disabled folder takes its blocks out of the prompt. Resolve that into
+  // the blocks' own enabled flags once, up front, and the rest of assembly
+  // needs to know nothing about folders.
+  final preset = resolvePresetFolders(payload.preset!);
   final char = payload.character;
   final persona = payload.persona;
 

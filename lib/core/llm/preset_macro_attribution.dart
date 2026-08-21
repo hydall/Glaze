@@ -44,7 +44,10 @@ int presetOnlyTokenCount(Preset preset) {
 
   var total = 0;
   // Blocks inside a disabled folder are not sent, so they must not be counted.
-  for (final block in applyPresetFolderEnablement(preset.blocks)) {
+  for (final block in applyPresetFolderEnablement(
+    preset.blocks,
+    preset.blockFolders,
+  )) {
     if (!block.enabled || block.isStashed || block.content.isEmpty) continue;
 
     final resolved = resolveBlockContent(

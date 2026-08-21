@@ -1,40 +1,28 @@
-/// Folders for chat presets, authored exactly the way an agentic preset
-/// authors them: a block whose name starts with `━` opens a folder and owns
-/// every block that follows it until the next header.
+/// Folders inside one chat preset.
 ///
-/// Nothing extra is persisted — the flat block order stays authoritative — so
-/// an imported SillyTavern preset that already uses divider prompts gets its
-/// folders for free, and a preset saved by an older build still loads.
+/// A folder is declared data — `Preset.blockFolders` lists them and a block
+/// joins one by carrying its id in `PresetBlock.folderId`. Nothing is ever
+/// inferred from a block's name or content, so a preset imported from another
+/// frontend never grows folders on its own, and a Glaze preset read by another
+/// frontend is still an ordinary flat block list with two keys it can ignore.
+///
+/// The flat block order stays authoritative for placement: a folder is drawn
+/// where its first block sits, and a folder with no blocks yet is drawn after
+/// the block rows.
 library;
 
 import 'preset.dart';
 
-final _headerOrnament = RegExp(r'^━[^\p{L}\p{N}]*', unicode: true);
-
-/// Whether [block] opens a folder. Stashed blocks are not part of the visible
-/// list, so they never open one.
-bool isPresetGroupHeader(PresetBlock block) =>
-    !block.isStashed && block.name.trimLeft().startsWith('━');
-
-/// The folder's display name — the header's name without its `━…` ornament.
-String presetGroupTitle(PresetBlock header) {
-  final title = header.name.replaceFirst(_headerOrnament, '').trim();
-  return title.isEmpty ? header.name.trim() : title;
-}
-
-/// The header block name a folder named [name] is stored under.
-String presetGroupHeaderName(String name) => '━ ${name.trim()}';
-
 /// One row of the preset editor's block list: either a standalone block or a
-/// folder header with the blocks it owns.
+/// folder with the blocks that belong to it.
 class PresetBlockGroup {
   final PresetBlock? standalone;
-  final PresetBlock? header;
+  final PresetBlockFolder? folder;
   final List<PresetBlock> children;
 
   const PresetBlockGroup._({
     this.standalone,
-    this.header,
+    this.folder,
     this.children = const [],
   });
 
@@ -42,163 +30,167 @@ class PresetBlockGroup {
     : this._(standalone: block);
 
   const PresetBlockGroup.folder({
-    required PresetBlock header,
+    required PresetBlockFolder folder,
     required List<PresetBlock> children,
-  }) : this._(header: header, children: children);
+  }) : this._(folder: folder, children: children);
 
-  bool get isFolder => header != null;
+  bool get isFolder => folder != null;
 
   /// Every block the row owns, in emission order.
-  List<PresetBlock> get blocks => header == null
-      ? [standalone!]
-      : [header!, ...children];
+  List<PresetBlock> get blocks => folder == null ? [standalone!] : children;
 }
 
 /// Splits the editor's block list into rows. [blocks] is the list as shown —
 /// the caller filters stashed blocks out first.
-List<PresetBlockGroup> groupPresetBlocks(List<PresetBlock> blocks) {
-  final rows = <PresetBlockGroup>[];
-  PresetBlock? header;
-  var children = <PresetBlock>[];
-
-  void flush() {
-    final current = header;
-    if (current == null) return;
-    rows.add(
-      PresetBlockGroup.folder(
-        header: current,
-        children: List.unmodifiable(children),
-      ),
-    );
-    header = null;
-    children = <PresetBlock>[];
+///
+/// A block whose `folderId` names a folder the preset does not declare is
+/// treated as top-level, so a hand-edited or partially imported JSON degrades
+/// to a plain list instead of hiding blocks.
+List<PresetBlockGroup> groupPresetBlocks(
+  List<PresetBlock> blocks,
+  List<PresetBlockFolder> folders,
+) {
+  if (folders.isEmpty) {
+    return [for (final block in blocks) PresetBlockGroup.standalone(block)];
   }
+  final byId = {for (final folder in folders) folder.id: folder};
+  final rows = <PresetBlockGroup>[];
+  final placed = <String>{};
 
   for (final block in blocks) {
-    if (isPresetGroupHeader(block)) {
-      flush();
-      header = block;
-    } else if (header != null) {
-      children.add(block);
-    } else {
+    final folder = byId[block.folderId];
+    if (folder == null) {
       rows.add(PresetBlockGroup.standalone(block));
+      continue;
     }
+    // The folder is drawn once, at its first block, and owns every block that
+    // names it — even if a hand-written JSON interleaves them with others.
+    if (!placed.add(folder.id)) continue;
+    rows.add(
+      PresetBlockGroup.folder(
+        folder: folder,
+        children: List.unmodifiable(
+          blocks.where((b) => b.folderId == folder.id),
+        ),
+      ),
+    );
   }
-  flush();
+
+  // Folders that hold nothing yet have no place in the block order; they are
+  // drawn after it, in declaration order, so a folder just created is visible.
+  for (final folder in folders) {
+    if (placed.contains(folder.id)) continue;
+    rows.add(PresetBlockGroup.folder(folder: folder, children: const []));
+  }
   return rows;
 }
 
-/// Flattens rows back into the block order they describe.
+/// Flattens rows back into the block order they describe. A folder's blocks
+/// come out contiguously, at the position the folder is drawn.
 List<PresetBlock> flattenPresetBlockGroups(List<PresetBlockGroup> rows) => [
   for (final row in rows) ...row.blocks,
 ];
 
-/// The folder [blockId] currently sits in, or null when it is a standalone row
-/// or a folder header itself.
-PresetBlockGroup? findPresetGroupForBlock(
+/// The folder [blockId] belongs to, or null when it is top-level.
+PresetBlockFolder? findPresetFolderForBlock(
   List<PresetBlock> blocks,
+  List<PresetBlockFolder> folders,
   String blockId,
 ) {
-  for (final row in groupPresetBlocks(blocks)) {
-    if (row.children.any((block) => block.id == blockId)) return row;
-  }
-  return null;
+  final block = blocks.where((b) => b.id == blockId).firstOrNull;
+  final folderId = block?.folderId;
+  if (folderId == null) return null;
+  return folders.where((f) => f.id == folderId).firstOrNull;
 }
 
-/// Enables or disables a whole folder by flipping its header. Child switches
-/// keep their own state, so re-enabling the folder restores the selection.
-List<PresetBlock> togglePresetBlockGroup(
-  List<PresetBlock> blocks,
-  PresetBlockGroup group,
+/// Enables or disables a folder. Block switches are left alone, so re-enabling
+/// the folder restores the selection it had.
+List<PresetBlockFolder> togglePresetBlockFolder(
+  List<PresetBlockFolder> folders,
+  String folderId,
   bool enabled,
-) {
-  final headerId = group.header?.id;
-  if (headerId == null) return blocks;
-  return [
-    for (final block in blocks)
-      block.id == headerId ? block.copyWith(enabled: enabled) : block,
-  ];
-}
+) => [
+  for (final folder in folders)
+    folder.id == folderId ? folder.copyWith(enabled: enabled) : folder,
+];
 
-/// Moves one ordinary block to the end of [target]'s children. Headers never
-/// move into a folder — nesting folders is not supported.
-List<PresetBlock> movePresetBlockIntoGroup({
+/// Renames a folder.
+List<PresetBlockFolder> renamePresetBlockFolder(
+  List<PresetBlockFolder> folders,
+  String folderId,
+  String name,
+) => [
+  for (final folder in folders)
+    folder.id == folderId ? folder.copyWith(name: name.trim()) : folder,
+];
+
+/// Moves one block into [folderId], placing it after the folder's last block
+/// (or at the end of the list while the folder is still empty).
+List<PresetBlock> movePresetBlockIntoFolder({
   required List<PresetBlock> blocks,
   required String blockId,
-  required PresetBlockGroup target,
+  required String folderId,
 }) {
-  final header = target.header;
-  if (header == null || header.id == blockId) return blocks;
   final source = blocks.where((block) => block.id == blockId).firstOrNull;
-  if (source == null || isPresetGroupHeader(source)) return blocks;
-  if (target.children.any((block) => block.id == blockId)) return blocks;
+  if (source == null || source.folderId == folderId) return blocks;
 
   final next = [...blocks]..removeWhere((block) => block.id == blockId);
-  var insertAt = next.indexWhere((block) => block.id == header.id);
-  if (insertAt < 0) return blocks;
-  insertAt++;
-  while (insertAt < next.length && !isPresetGroupHeader(next[insertAt])) {
-    insertAt++;
-  }
-  next.insert(insertAt, source);
+  final lastMember = next.lastIndexWhere((block) => block.folderId == folderId);
+  final insertAt = lastMember == -1 ? next.length : lastMember + 1;
+  next.insert(insertAt, source.copyWith(folderId: folderId));
   return next;
 }
 
-/// Takes one block out of its folder and appends it to the list as a
-/// standalone row. A block that is not in a folder is left where it is.
-List<PresetBlock> movePresetBlockOutOfGroups({
+/// Takes one block out of its folder. It keeps its place in the list, so the
+/// row simply steps out of the folder it was drawn in.
+List<PresetBlock> movePresetBlockOutOfFolder({
   required List<PresetBlock> blocks,
   required String blockId,
 }) {
   final source = blocks.where((block) => block.id == blockId).firstOrNull;
-  if (source == null || isPresetGroupHeader(source)) return blocks;
-  if (findPresetGroupForBlock(blocks, blockId) == null) return blocks;
-  return [
-    ...blocks.where((block) => block.id != blockId),
-    source,
-  ];
-}
-
-/// Removes a folder while keeping its blocks: only the header is dropped, so
-/// the children stay in place as standalone rows.
-List<PresetBlock> dissolvePresetBlockGroup({
-  required List<PresetBlock> blocks,
-  required PresetBlockGroup group,
-}) {
-  final headerId = group.header?.id;
-  if (headerId == null) return blocks;
+  if (source == null || source.folderId == null) return blocks;
   return [
     for (final block in blocks)
-      if (block.id != headerId) block,
+      block.id == blockId ? block.copyWith(folderId: null) : block,
   ];
 }
 
-/// Applies folder enablement to a flat block list: every block owned by a
-/// disabled folder is reported as disabled, so prompt assembly and token
-/// accounting skip it without the folder state having to be threaded through
-/// them. Stashed blocks are passed through untouched — they are already out of
-/// the prompt, and a stashed block never opens a folder.
-List<PresetBlock> applyPresetFolderEnablement(List<PresetBlock> blocks) {
-  final resolved = <PresetBlock>[];
-  var inFolder = false;
-  var folderEnabled = true;
+/// Drops a folder's membership: its blocks stay where they are and become
+/// top-level rows.
+List<PresetBlock> clearPresetFolderMembership(
+  List<PresetBlock> blocks,
+  String folderId,
+) => [
+  for (final block in blocks)
+    block.folderId == folderId ? block.copyWith(folderId: null) : block,
+];
 
-  for (final block in blocks) {
-    if (block.isStashed) {
-      resolved.add(block);
-      continue;
-    }
-    if (isPresetGroupHeader(block)) {
-      inFolder = true;
-      folderEnabled = block.enabled;
-      resolved.add(block);
-      continue;
-    }
-    resolved.add(
-      inFolder && !folderEnabled && block.enabled
+/// Applies folder enablement to a flat block list: every block in a disabled
+/// folder is reported as disabled, so prompt assembly and token accounting skip
+/// it without folders having to be threaded through them. A block naming a
+/// folder the preset does not declare is left alone.
+List<PresetBlock> applyPresetFolderEnablement(
+  List<PresetBlock> blocks,
+  List<PresetBlockFolder> folders,
+) {
+  final disabled = {
+    for (final folder in folders)
+      if (!folder.enabled) folder.id,
+  };
+  if (disabled.isEmpty) return blocks;
+  return [
+    for (final block in blocks)
+      block.enabled && disabled.contains(block.folderId)
           ? block.copyWith(enabled: false)
           : block,
-    );
-  }
-  return resolved;
+  ];
+}
+
+/// The preset as prompt assembly sees it: folder enablement resolved into the
+/// blocks' own `enabled` flags.
+Preset resolvePresetFolders(Preset preset) {
+  if (preset.blockFolders.isEmpty) return preset;
+  return preset.copyWith(
+    blocks: applyPresetFolderEnablement(preset.blocks, preset.blockFolders),
+  );
 }

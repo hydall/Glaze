@@ -9,34 +9,34 @@ import 'preset_block_row.dart';
 /// One folder in the preset editor's block list — the agentic editor's folder
 /// row applied to a chat preset.
 ///
-/// The row folds its blocks away, toggles them as a unit through the header's
-/// own enabled flag, and accepts a block dragged onto it. Expanded, it shows
-/// the header prompt first (so the folder's own text stays editable), then the
-/// blocks it owns.
+/// The row folds its blocks away, toggles them as a unit through the folder's
+/// own enabled flag, renames, and accepts a block dragged onto it. The folder
+/// itself carries no prompt text: it is metadata on the preset, not a block.
 class PresetBlockGroupRow extends StatefulWidget {
   final PresetBlockGroup group;
 
   /// Index inside the enclosing [ReorderableListView] — dragging the handle
-  /// moves the whole folder.
-  final int dragIndex;
+  /// moves the whole folder. Null for a folder that holds no blocks yet: it has
+  /// no place in the block order to move to.
+  final int? dragIndex;
   final bool isLast;
 
   /// Toggles the folder: its blocks stop being sent, keeping their own
   /// switches for when it is turned back on.
   final ValueChanged<bool> onToggleFolder;
 
+  final VoidCallback onRename;
+
   /// Drops the folder while keeping its blocks.
   final VoidCallback onDelete;
 
-  /// Opens a block (the header prompt included) in the block editor.
   final ValueChanged<PresetBlock> onEdit;
-
   final void Function(PresetBlock block, bool enabled) onToggleBlock;
 
   /// Null hides the stash button on the folder's blocks.
   final ValueChanged<PresetBlock>? onStash;
 
-  /// A block dragged onto the folder header, by id.
+  /// A block dragged onto the folder, by id.
   final ValueChanged<String> onMoveBlockIn;
 
   const PresetBlockGroupRow({
@@ -45,6 +45,7 @@ class PresetBlockGroupRow extends StatefulWidget {
     required this.dragIndex,
     required this.isLast,
     required this.onToggleFolder,
+    required this.onRename,
     required this.onDelete,
     required this.onEdit,
     required this.onToggleBlock,
@@ -62,13 +63,12 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
   @override
   Widget build(BuildContext context) {
     final group = widget.group;
-    final header = group.header!;
-    final title = presetGroupTitle(header);
+    final folder = group.folder!;
+    final dragIndex = widget.dragIndex;
     final enabledCount = group.children.where((b) => b.enabled).length;
 
     return DragTarget<String>(
       onWillAcceptWithDetails: (details) =>
-          details.data != header.id &&
           !group.children.any((block) => block.id == details.data),
       onAcceptWithDetails: (details) => widget.onMoveBlockIn(details.data),
       builder: (context, candidates, _) => Container(
@@ -87,29 +87,32 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Opacity(
-              opacity: header.enabled ? 1.0 : 0.5,
+              opacity: folder.enabled ? 1.0 : 0.5,
               child: InkWell(
                 onTap: () => setState(() => _expanded = !_expanded),
                 child: Row(
                   children: [
-                    ReorderableDragStartListener(
-                      index: widget.dragIndex,
-                      child: SizedBox(
-                        width: 30,
-                        height: 44,
-                        child: Center(
-                          child: Text(
-                            '≡',
-                            style: TextStyle(
-                              fontSize: 20,
-                              color: context.cs.onSurfaceVariant.withValues(
-                                alpha: 0.5,
+                    if (dragIndex != null)
+                      ReorderableDragStartListener(
+                        index: dragIndex,
+                        child: SizedBox(
+                          width: 30,
+                          height: 44,
+                          child: Center(
+                            child: Text(
+                              '≡',
+                              style: TextStyle(
+                                fontSize: 20,
+                                color: context.cs.onSurfaceVariant.withValues(
+                                  alpha: 0.5,
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
+                      )
+                    else
+                      const SizedBox(width: 30, height: 44),
                     Icon(
                       Icons.folder_outlined,
                       size: 16,
@@ -123,7 +126,7 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              title,
+                              folder.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -150,27 +153,21 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
                         ),
                       ),
                     ),
-                    SizedBox(
-                      width: 36,
-                      height: 44,
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: widget.onDelete,
-                          borderRadius: BorderRadius.circular(20),
-                          child: Icon(
-                            Icons.delete_outline,
-                            size: 20,
-                            color: context.cs.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
+                    _iconButton(
+                      context,
+                      icon: Icons.edit_outlined,
+                      onTap: widget.onRename,
+                    ),
+                    _iconButton(
+                      context,
+                      icon: Icons.delete_outline,
+                      onTap: widget.onDelete,
                     ),
                     Transform.scale(
                       scale: 0.8,
                       alignment: Alignment.centerRight,
                       child: Switch(
-                        value: header.enabled,
+                        value: folder.enabled,
                         onChanged: widget.onToggleFolder,
                         activeThumbColor: context.cs.primary,
                       ),
@@ -191,23 +188,23 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
                 ),
               ),
             ),
-            if (_expanded) ...[
-              PresetBlockRow(
-                key: ValueKey('preset_group_prompt_${header.id}'),
-                block: header.copyWith(
-                  name: 'studio_group_header_prompt'.tr(),
+            if (_expanded && group.children.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(62, 4, 16, 12),
+                child: Text(
+                  'preset_folder_empty_blocks'.tr(),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: context.cs.onSurfaceVariant,
+                  ),
                 ),
-                index: widget.dragIndex,
-                isLast: group.children.isEmpty,
-                draggable: false,
-                indent: 16,
-                onEdit: () => widget.onEdit(header),
               ),
+            if (_expanded)
               for (var i = 0; i < group.children.length; i++)
                 PresetBlockRow(
                   key: ValueKey(group.children[i].id),
                   block: group.children[i],
-                  index: widget.dragIndex,
+                  index: dragIndex ?? 0,
                   isLast: i == group.children.length - 1,
                   draggable: false,
                   indent: 16,
@@ -219,10 +216,26 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
                       ? null
                       : () => widget.onStash!(group.children[i]),
                 ),
-            ],
           ],
         ),
       ),
     );
   }
+
+  Widget _iconButton(
+    BuildContext context, {
+    required IconData icon,
+    required VoidCallback onTap,
+  }) => SizedBox(
+    width: 36,
+    height: 44,
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Icon(icon, size: 20, color: context.cs.onSurfaceVariant),
+      ),
+    ),
+  );
 }
