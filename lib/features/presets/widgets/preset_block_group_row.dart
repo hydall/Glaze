@@ -10,8 +10,11 @@ import 'preset_block_row.dart';
 /// row applied to a chat preset.
 ///
 /// The row folds its blocks away, toggles them as a unit through the folder's
-/// own enabled flag, renames, and accepts a block dragged onto it. The folder
-/// itself carries no prompt text: it is metadata on the preset, not a block.
+/// own enabled flag, and accepts a block dragged onto it. The folder itself
+/// carries no prompt text: it is metadata on the preset, not a block.
+///
+/// A checklist folder gives every block its own switch; a pick-one folder
+/// (`exclusive`) gives them radio buttons and keeps exactly one enabled.
 class PresetBlockGroupRow extends StatefulWidget {
   final PresetBlockGroup group;
 
@@ -25,13 +28,14 @@ class PresetBlockGroupRow extends StatefulWidget {
   /// switches for when it is turned back on.
   final ValueChanged<bool> onToggleFolder;
 
-  final VoidCallback onRename;
-
-  /// Drops the folder while keeping its blocks.
-  final VoidCallback onDelete;
+  /// Opens the folder's options — rename, selection mode, delete.
+  final VoidCallback onOptions;
 
   final ValueChanged<PresetBlock> onEdit;
   final void Function(PresetBlock block, bool enabled) onToggleBlock;
+
+  /// Picks one block of a pick-one folder, by id.
+  final ValueChanged<String> onSelectBlock;
 
   /// Null hides the stash button on the folder's blocks.
   final ValueChanged<PresetBlock>? onStash;
@@ -45,10 +49,10 @@ class PresetBlockGroupRow extends StatefulWidget {
     required this.dragIndex,
     required this.isLast,
     required this.onToggleFolder,
-    required this.onRename,
-    required this.onDelete,
+    required this.onOptions,
     required this.onEdit,
     required this.onToggleBlock,
+    required this.onSelectBlock,
     required this.onMoveBlockIn,
     this.onStash,
   });
@@ -66,6 +70,12 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
     final folder = group.folder!;
     final dragIndex = widget.dragIndex;
     final enabledCount = group.children.where((b) => b.enabled).length;
+    final selected = group.selected;
+    final subtitle = folder.exclusive
+        ? (selected == null ? 'studio_group_none'.tr() : selected.name)
+        : 'studio_group_enabled'.tr(
+            args: ['$enabledCount', '${group.children.length}'],
+          );
 
     return DragTarget<String>(
       onWillAcceptWithDetails: (details) =>
@@ -114,11 +124,17 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
                     else
                       const SizedBox(width: 30, height: 44),
                     Icon(
-                      Icons.folder_outlined,
+                      folder.exclusive
+                          ? Icons.radio_button_checked
+                          : Icons.folder_outlined,
                       size: 16,
                       color: context.cs.primary.withValues(alpha: 0.8),
                     ),
                     const SizedBox(width: 8),
+                    if (folder.exclusive) ...[
+                      _pickOneBadge(context),
+                      const SizedBox(width: 6),
+                    ],
                     Expanded(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -136,12 +152,7 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
                               ),
                             ),
                             Text(
-                              'studio_group_enabled'.tr(
-                                args: [
-                                  '$enabledCount',
-                                  '${group.children.length}',
-                                ],
-                              ),
+                              subtitle,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -155,13 +166,8 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
                     ),
                     _iconButton(
                       context,
-                      icon: Icons.edit_outlined,
-                      onTap: widget.onRename,
-                    ),
-                    _iconButton(
-                      context,
-                      icon: Icons.delete_outline,
-                      onTap: widget.onDelete,
+                      icon: Icons.more_horiz,
+                      onTap: widget.onOptions,
                     ),
                     Transform.scale(
                       scale: 0.8,
@@ -210,8 +216,13 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
                   indent: 16,
                   moveDragData: group.children[i].id,
                   onEdit: () => widget.onEdit(group.children[i]),
-                  onToggle: (enabled) =>
-                      widget.onToggleBlock(group.children[i], enabled),
+                  onToggle: folder.exclusive
+                      ? null
+                      : (enabled) =>
+                            widget.onToggleBlock(group.children[i], enabled),
+                  trailing: folder.exclusive
+                      ? _radio(context, group.children[i])
+                      : null,
                   onStash: widget.onStash == null || group.children[i].isStatic
                       ? null
                       : () => widget.onStash!(group.children[i]),
@@ -221,6 +232,36 @@ class _PresetBlockGroupRowState extends State<PresetBlockGroupRow> {
       ),
     );
   }
+
+  /// Radio glyph for a pick-one folder's block. The picked one is inert —
+  /// unpicking without picking something else would empty the folder.
+  Widget _radio(BuildContext context, PresetBlock block) => IconButton(
+    padding: EdgeInsets.zero,
+    constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+    onPressed: block.enabled ? null : () => widget.onSelectBlock(block.id),
+    icon: Icon(
+      block.enabled ? Icons.radio_button_checked : Icons.radio_button_off,
+      size: 20,
+      color: block.enabled ? context.cs.primary : context.cs.onSurfaceVariant,
+    ),
+  );
+
+  Widget _pickOneBadge(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: context.cs.primary.withValues(alpha: 0.18),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      'studio_badge_pick_one'.tr(),
+      style: TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.w700,
+        color: context.cs.primary,
+        letterSpacing: 0.2,
+      ),
+    ),
+  );
 
   Widget _iconButton(
     BuildContext context, {

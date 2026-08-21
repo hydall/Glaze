@@ -6,6 +6,10 @@
 /// frontend never grows folders on its own, and a Glaze preset read by another
 /// frontend is still an ordinary flat block list with two keys it can ignore.
 ///
+/// A folder comes in two kinds, declared the same way: the default checklist,
+/// where every block toggles on its own, and the pick-one folder
+/// (`exclusive`), where at most one of its blocks is enabled.
+///
 /// The flat block order stays authoritative for placement: a folder is drawn
 /// where its first block sits, and a folder with no blocks yet is drawn after
 /// the block rows.
@@ -35,6 +39,10 @@ class PresetBlockGroup {
   }) : this._(folder: folder, children: children);
 
   bool get isFolder => folder != null;
+
+  /// The enabled block of a pick-one folder, or null when nothing is picked.
+  PresetBlock? get selected =>
+      children.where((block) => block.enabled).firstOrNull;
 
   /// Every block the row owns, in emission order.
   List<PresetBlock> get blocks => folder == null ? [standalone!] : children;
@@ -124,21 +132,80 @@ List<PresetBlockFolder> renamePresetBlockFolder(
     folder.id == folderId ? folder.copyWith(name: name.trim()) : folder,
 ];
 
-/// Moves one block into [folderId], placing it after the folder's last block
-/// (or at the end of the list while the folder is still empty).
+/// Moves one block into [folder], placing it after the folder's last block (or
+/// at the end of the list while the folder is still empty).
+///
+/// Joining a pick-one folder that already has its pick arrives disabled — the
+/// one-enabled rule holds however a block gets in.
 List<PresetBlock> movePresetBlockIntoFolder({
   required List<PresetBlock> blocks,
   required String blockId,
-  required String folderId,
+  required PresetBlockFolder folder,
 }) {
   final source = blocks.where((block) => block.id == blockId).firstOrNull;
-  if (source == null || source.folderId == folderId) return blocks;
+  if (source == null || source.folderId == folder.id) return blocks;
 
+  final takesThePick =
+      folder.exclusive &&
+      blocks.any(
+        (block) =>
+            block.folderId == folder.id && block.enabled && block.id != blockId,
+      );
   final next = [...blocks]..removeWhere((block) => block.id == blockId);
-  final lastMember = next.lastIndexWhere((block) => block.folderId == folderId);
+  final lastMember = next.lastIndexWhere(
+    (block) => block.folderId == folder.id,
+  );
   final insertAt = lastMember == -1 ? next.length : lastMember + 1;
-  next.insert(insertAt, source.copyWith(folderId: folderId));
+  next.insert(
+    insertAt,
+    source.copyWith(
+      folderId: folder.id,
+      enabled: takesThePick ? false : source.enabled,
+    ),
+  );
   return next;
+}
+
+/// Enables [blockId] and disables every other block of its pick-one folder.
+List<PresetBlock> selectExclusivePresetBlock({
+  required List<PresetBlock> blocks,
+  required String folderId,
+  required String blockId,
+}) => [
+  for (final block in blocks)
+    block.folderId == folderId
+        ? block.copyWith(enabled: block.id == blockId)
+        : block,
+];
+
+/// Switches a folder between checklist and pick-one. Turning pick-one on keeps
+/// the first enabled block as the pick and disables the rest, so the folder is
+/// never left with two.
+({List<PresetBlockFolder> folders, List<PresetBlock> blocks})
+setPresetFolderExclusive({
+  required List<PresetBlockFolder> folders,
+  required List<PresetBlock> blocks,
+  required String folderId,
+  required bool exclusive,
+}) {
+  final nextFolders = [
+    for (final folder in folders)
+      folder.id == folderId ? folder.copyWith(exclusive: exclusive) : folder,
+  ];
+  if (!exclusive) return (folders: nextFolders, blocks: blocks);
+
+  final pick = blocks
+      .where((block) => block.folderId == folderId && block.enabled)
+      .firstOrNull;
+  if (pick == null) return (folders: nextFolders, blocks: blocks);
+  return (
+    folders: nextFolders,
+    blocks: selectExclusivePresetBlock(
+      blocks: blocks,
+      folderId: folderId,
+      blockId: pick.id,
+    ),
+  );
 }
 
 /// Takes one block out of its folder. It keeps its place in the list, so the

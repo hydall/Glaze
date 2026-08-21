@@ -388,11 +388,13 @@ List<PresetBlockFolder> _parseBlockFolders(Map<String, dynamic> json) {
     if (id is! String || id.isEmpty || !seen.add(id)) continue;
     final name = map['name'];
     final enabled = map['enabled'];
+    final exclusive = map['exclusive'];
     folders.add(
       PresetBlockFolder(
         id: id,
         name: name is String && name.trim().isNotEmpty ? name.trim() : id,
         enabled: enabled is bool ? enabled : true,
+        exclusive: exclusive is bool ? exclusive : false,
       ),
     );
   }

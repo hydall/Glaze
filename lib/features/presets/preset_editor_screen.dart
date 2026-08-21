@@ -572,10 +572,10 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         dragIndex: row.children.isEmpty ? null : index,
         isLast: isLast,
         onToggleFolder: (enabled) => _toggleFolder(folder, enabled),
-        onRename: () => _renameFolder(folder),
-        onDelete: () => _deleteFolder(folder),
+        onOptions: () => _showFolderOptions(folder),
         onEdit: _openBlockEditor,
         onToggleBlock: _setBlockEnabled,
+        onSelectBlock: (blockId) => _selectFolderBlock(folder, blockId),
         onStash: (block) => _stashBlock(block.id),
         onMoveBlockIn: (blockId) => _moveBlockIntoFolder(blockId, folder),
       );
@@ -651,9 +651,73 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       movePresetBlockIntoFolder(
         blocks: _activeBlocks,
         blockId: blockId,
-        folderId: folder.id,
+        folder: folder,
       ),
     );
+  }
+
+  void _selectFolderBlock(PresetBlockFolder folder, String blockId) {
+    _writeActiveBlocks(
+      selectExclusivePresetBlock(
+        blocks: _activeBlocks,
+        folderId: folder.id,
+        blockId: blockId,
+      ),
+    );
+  }
+
+  /// Rename, selection mode and delete for one folder.
+  void _showFolderOptions(PresetBlockFolder folder) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: folder.name,
+      items: [
+        BottomSheetItem(
+          icon: Icons.edit_outlined,
+          label: 'action_rename'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _renameFolder(folder);
+          },
+        ),
+        BottomSheetItem(
+          icon: folder.exclusive ? Icons.checklist : Icons.radio_button_checked,
+          label: folder.exclusive
+              ? 'preset_folder_mode_checklist'.tr()
+              : 'preset_folder_mode_pick_one'.tr(),
+          hint: folder.exclusive
+              ? null
+              : 'preset_folder_mode_pick_one_hint'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _setFolderExclusive(folder, !folder.exclusive);
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.delete_outline,
+          label: 'action_delete'.tr(),
+          isDestructive: true,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            unawaited(_deleteFolder(folder));
+          },
+        ),
+      ],
+    );
+  }
+
+  void _setFolderExclusive(PresetBlockFolder folder, bool exclusive) {
+    final next = setPresetFolderExclusive(
+      folders: _blockFolders,
+      blocks: _blocks,
+      folderId: folder.id,
+      exclusive: exclusive,
+    );
+    setState(() {
+      _blockFolders = next.folders;
+      _blocks = List.of(next.blocks);
+    });
+    _scheduleSave();
   }
 
   void _moveBlockOutOfFolder(String blockId) {
@@ -699,13 +763,42 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     _scheduleSave();
   }
 
-  void _nameAndCreateFolder() {
+  /// Which kind of folder to create — the two the agentic editor has: a
+  /// checklist, or a pick-one where the blocks become radio options.
+  void _chooseFolderKind() {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'folder_create_title'.tr(),
+      items: [
+        BottomSheetItem(
+          icon: Icons.checklist,
+          label: 'preset_folder_mode_checklist'.tr(),
+          hint: 'preset_folder_mode_checklist_hint'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _nameAndCreateFolder(exclusive: false);
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.radio_button_checked,
+          label: 'preset_folder_mode_pick_one'.tr(),
+          hint: 'preset_folder_mode_pick_one_hint'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _nameAndCreateFolder(exclusive: true);
+          },
+        ),
+      ],
+    );
+  }
+
+  void _nameAndCreateFolder({required bool exclusive}) {
     GlazeBottomSheet.show<void>(
       context,
       title: 'folder_create_title'.tr(),
       child: FolderNameDialog(
         confirmLabel: 'action_create'.tr(),
-        onSubmit: _createFolder,
+        onSubmit: (name) => _createFolder(name, exclusive: exclusive),
       ),
     );
   }
@@ -713,11 +806,15 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   /// A folder is metadata on the preset, not a block: creating one adds no
   /// prompt text and changes nothing about what is sent until blocks are
   /// dragged into it.
-  void _createFolder(String name) {
+  void _createFolder(String name, {required bool exclusive}) {
     setState(() {
       _blockFolders = [
         ..._blockFolders,
-        PresetBlockFolder(id: generateId(), name: name.trim()),
+        PresetBlockFolder(
+          id: generateId(),
+          name: name.trim(),
+          exclusive: exclusive,
+        ),
       ];
     });
     _scheduleSave();
@@ -969,7 +1066,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           label: 'folder_new'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _nameAndCreateFolder();
+            _chooseFolderKind();
           },
         ),
         BottomSheetItem(

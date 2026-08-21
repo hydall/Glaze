@@ -88,6 +88,7 @@ Map<String, dynamic> presetExportJson(Preset preset) {
               'id': f.id,
               'name': f.name,
               'enabled': f.enabled,
+              'exclusive': f.exclusive,
             },
           )
           .toList(),

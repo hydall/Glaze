@@ -54,6 +54,11 @@ abstract class PresetBlockFolder with _$PresetBlockFolder {
     /// Disabling a folder takes every block in it out of the prompt, without
     /// touching the blocks' own switches.
     @Default(true) bool enabled,
+
+    /// Pick-one folder: at most one of its blocks is enabled, and the editor
+    /// offers radio buttons instead of switches. Default is the checklist
+    /// folder, where every block toggles on its own.
+    @Default(false) bool exclusive,
   }) = _PresetBlockFolder;
 
   factory PresetBlockFolder.fromJson(Map<String, dynamic> json) =>

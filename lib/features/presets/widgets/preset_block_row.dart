@@ -32,6 +32,9 @@ class PresetBlockRow extends StatelessWidget {
   /// a long-press drag handle for moving the block in or out of a folder.
   final String? moveDragData;
 
+  /// Replaces the switch entirely — a pick-one folder passes its radio glyph.
+  final Widget? trailing;
+
   const PresetBlockRow({
     super.key,
     required this.block,
@@ -43,6 +46,7 @@ class PresetBlockRow extends StatelessWidget {
     this.draggable = true,
     this.indent = 0,
     this.moveDragData,
+    this.trailing,
   });
 
   @override
@@ -161,17 +165,19 @@ class PresetBlockRow extends StatelessWidget {
               const SizedBox(width: 36),
             Padding(
               padding: const EdgeInsets.only(right: 12),
-              child: onToggle == null
-                  ? const SizedBox(width: 40, height: 44)
-                  : Transform.scale(
-                      scale: 0.8,
-                      alignment: Alignment.centerRight,
-                      child: Switch(
-                        value: block.enabled,
-                        onChanged: onToggle,
-                        activeThumbColor: context.cs.primary,
-                      ),
-                    ),
+              child:
+                  trailing ??
+                  (onToggle == null
+                      ? const SizedBox(width: 40, height: 44)
+                      : Transform.scale(
+                          scale: 0.8,
+                          alignment: Alignment.centerRight,
+                          child: Switch(
+                            value: block.enabled,
+                            onChanged: onToggle,
+                            activeThumbColor: context.cs.primary,
+                          ),
+                        )),
             ),
           ],
         ),

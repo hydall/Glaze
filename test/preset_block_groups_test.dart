@@ -159,7 +159,7 @@ void main() {
       final moved = movePresetBlockIntoFolder(
         blocks: blocks,
         blockId: 'intro',
-        folderId: 'f_styles',
+        folder: styles,
       );
 
       expect(_ids(moved), [
@@ -176,7 +176,7 @@ void main() {
       final moved = movePresetBlockIntoFolder(
         blocks: blocks,
         blockId: 'intro',
-        folderId: 'f_empty',
+        folder: const PresetBlockFolder(id: 'f_empty', name: 'Empty'),
       );
 
       expect(_ids(moved).last, 'intro');
@@ -188,7 +188,7 @@ void main() {
         movePresetBlockIntoFolder(
           blocks: blocks,
           blockId: 'ao3',
-          folderId: 'f_styles',
+          folder: styles,
         ),
         same(blocks),
       );
@@ -220,6 +220,102 @@ void main() {
       expect(
         renamePresetBlockFolder(folders, 'f_pov', '  Camera  ').last.name,
         'Camera',
+      );
+    });
+
+    test('joining a pick-one folder that has its pick arrives disabled', () {
+      const pickOne = PresetBlockFolder(
+        id: 'f_styles',
+        name: 'Narrative Styles',
+        exclusive: true,
+      );
+
+      final moved = movePresetBlockIntoFolder(
+        blocks: blocks,
+        blockId: 'intro',
+        folder: pickOne,
+      );
+
+      expect(moved.firstWhere((b) => b.id == 'intro').enabled, isFalse);
+      // Joining a checklist folder keeps the block's own switch.
+      expect(
+        movePresetBlockIntoFolder(
+          blocks: blocks,
+          blockId: 'intro',
+          folder: styles,
+        ).firstWhere((b) => b.id == 'intro').enabled,
+        isTrue,
+      );
+    });
+
+    test('picking one block of a folder disables its siblings', () {
+      final picked = selectExclusivePresetBlock(
+        blocks: blocks,
+        folderId: 'f_styles',
+        blockId: 'ao3',
+      );
+
+      expect(
+        {
+          for (final b in picked)
+            if (b.folderId == 'f_styles') b.id: b.enabled,
+        },
+        {'roleplay': false, 'ao3': true},
+      );
+      // Blocks outside the folder are untouched.
+      expect(picked.firstWhere((b) => b.id == 'third_person').enabled, isTrue);
+    });
+
+    test('turning pick-one on keeps the first enabled block as the pick', () {
+      final next = setPresetFolderExclusive(
+        folders: folders,
+        blocks: blocks,
+        folderId: 'f_styles',
+        exclusive: true,
+      );
+
+      expect(next.folders.first.exclusive, isTrue);
+      expect(
+        {
+          for (final b in next.blocks)
+            if (b.folderId == 'f_styles') b.id: b.enabled,
+        },
+        {'roleplay': true, 'ao3': false},
+      );
+
+      // Turning it back off leaves the blocks exactly as they are.
+      final back = setPresetFolderExclusive(
+        folders: next.folders,
+        blocks: next.blocks,
+        folderId: 'f_styles',
+        exclusive: false,
+      );
+      expect(back.folders.first.exclusive, isFalse);
+      expect(back.blocks, same(next.blocks));
+    });
+
+    test('a pick-one row reports the block that is picked', () {
+      const pickOne = PresetBlockFolder(
+        id: 'f_styles',
+        name: 'Narrative Styles',
+        exclusive: true,
+      );
+      final row = groupPresetBlocks(blocks, [
+        pickOne,
+        pov,
+      ]).firstWhere((r) => r.folder?.id == 'f_styles');
+
+      expect(row.selected?.id, 'roleplay');
+      expect(
+        groupPresetBlocks(
+          selectExclusivePresetBlock(
+            blocks: blocks,
+            folderId: 'f_styles',
+            blockId: 'ao3',
+          ),
+          [pickOne, pov],
+        ).firstWhere((r) => r.folder?.id == 'f_styles').selected?.id,
+        'ao3',
       );
     });
 

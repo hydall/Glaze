@@ -1050,8 +1050,8 @@ Consequences:
 ### INV-PS11: Preset folders are declared, never inferred
 
 A chat preset's folders are data the preset carries: `Preset.blockFolders`
-lists them (`id`, `name`, `enabled`) and a block joins one by naming it in
-`PresetBlock.folderId`. Folders are **never** derived from a block's name or
+lists them (`id`, `name`, `enabled`, `exclusive`) and a block joins one by
+naming it in `PresetBlock.folderId`. Folders are **never** derived from a block's name or
 content — no marker, prefix, or divider prompt creates one — so a preset
 imported from another frontend stays the flat block list it is, and no import
 path invents grouping.
@@ -1074,7 +1074,17 @@ Rules (`lib/core/models/preset_block_groups.dart`):
 4. Toggling a folder writes the folder only, never its blocks, so re-enabling
    it restores the per-block selection it had. Deleting a folder drops the
    declaration and clears the references; the blocks stay in the preset.
-5. On the wire (`savePresetJson` / `parseSillyTavernPreset`) folders are a
+5. `exclusive` is the folder's kind, and it is the only difference between the
+   two: a checklist folder toggles each block on its own, a pick-one folder
+   holds at most one enabled block and offers radios. The one-enabled rule is
+   kept wherever membership or the kind changes —
+   `selectExclusivePresetBlock()` when the pick moves,
+   `movePresetBlockIntoFolder()` when a block joins a folder that already has
+   its pick (it arrives disabled), and `setPresetFolderExclusive()` when a
+   checklist becomes pick-one (the first enabled block stays picked). Nothing
+   in prompt assembly special-cases it: exclusivity is an editing rule over the
+   same per-block `enabled` flags.
+6. On the wire (`savePresetJson` / `parseSillyTavernPreset`) folders are a
    separate top-level `block_folders` list plus a `folder` id on a prompt
    entry. Both are additive: a frontend that ignores them reads the same
    prompts it always did, and an importer that skips `block_folders` gets a

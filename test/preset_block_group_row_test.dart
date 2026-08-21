@@ -26,21 +26,22 @@ void main() {
   ];
 
   Widget row({
+    PresetBlockFolder kind = folder,
     ValueChanged<bool>? onToggleFolder,
-    VoidCallback? onRename,
-    VoidCallback? onDelete,
+    VoidCallback? onOptions,
     ValueChanged<PresetBlock>? onEdit,
     void Function(PresetBlock, bool)? onToggleBlock,
+    ValueChanged<String>? onSelectBlock,
     ValueChanged<String>? onMoveBlockIn,
   }) => PresetBlockGroupRow(
-    group: groupPresetBlocks(blocks, const [folder]).single,
+    group: groupPresetBlocks(blocks, [kind]).single,
     dragIndex: 0,
     isLast: true,
     onToggleFolder: onToggleFolder ?? (_) {},
-    onRename: onRename ?? () {},
-    onDelete: onDelete ?? () {},
+    onOptions: onOptions ?? () {},
     onEdit: onEdit ?? (_) {},
     onToggleBlock: onToggleBlock ?? (_, _) {},
+    onSelectBlock: onSelectBlock ?? (_) {},
     onMoveBlockIn: onMoveBlockIn ?? (_) {},
   );
 
@@ -68,23 +69,56 @@ void main() {
     expect(toggled, isFalse);
   });
 
-  testWidgets('renames and deletes from the folder row', (tester) async {
-    var renamed = false;
-    var deleted = false;
+  testWidgets('opens the folder options', (tester) async {
+    var opened = false;
+    await tester.pumpWidget(_host(row(onOptions: () => opened = true)));
+
+    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.pumpAndSettle();
+    expect(opened, isTrue);
+  });
+
+  testWidgets('a checklist folder gives every block a switch', (tester) async {
+    PresetBlock? toggled;
     await tester.pumpWidget(
-      _host(
-        row(onRename: () => renamed = true, onDelete: () => deleted = true),
-      ),
+      _host(row(onToggleBlock: (block, _) => toggled = block)),
     );
 
-    // Collapsed, the folder row owns the only pencil.
-    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.tap(find.text('Narrative Styles'));
     await tester.pumpAndSettle();
-    expect(renamed, isTrue);
 
-    await tester.tap(find.byIcon(Icons.delete_outline));
+    // The folder's own switch plus one per block.
+    expect(find.byType(Switch), findsNWidgets(3));
+    expect(find.byIcon(Icons.radio_button_off), findsNothing);
+
+    await tester.tap(find.byType(Switch).last);
     await tester.pumpAndSettle();
-    expect(deleted, isTrue);
+    expect(toggled?.id, 'ao3');
+  });
+
+  testWidgets('a pick-one folder gives them radios instead', (tester) async {
+    const pickOne = PresetBlockFolder(
+      id: 'f_styles',
+      name: 'Narrative Styles',
+      exclusive: true,
+    );
+    String? picked;
+    await tester.pumpWidget(
+      _host(row(kind: pickOne, onSelectBlock: (id) => picked = id)),
+    );
+
+    // Collapsed, the subtitle names the pick instead of counting.
+    expect(find.text('roleplay'), findsOneWidget);
+    expect(find.text('studio_badge_pick_one'), findsOneWidget);
+
+    await tester.tap(find.text('Narrative Styles'));
+    await tester.pumpAndSettle();
+
+    // Only the folder keeps a switch; the blocks are radios.
+    expect(find.byType(Switch), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.radio_button_off));
+    await tester.pumpAndSettle();
+    expect(picked, 'ao3');
   });
 
   testWidgets('edits a block inside the folder', (tester) async {
@@ -107,10 +141,10 @@ void main() {
           dragIndex: null,
           isLast: true,
           onToggleFolder: (_) {},
-          onRename: () {},
-          onDelete: () {},
+          onOptions: () {},
           onEdit: (_) {},
           onToggleBlock: (_, _) {},
+          onSelectBlock: (_) {},
           onMoveBlockIn: (_) {},
         ),
       ),

@@ -118,7 +118,12 @@ void main() {
       final prompts = (json['prompts'] as List).cast<Map<String, dynamic>>();
 
       expect(json['block_folders'], [
-        {'id': 'f_styles', 'name': 'Narrative Styles', 'enabled': true},
+        {
+          'id': 'f_styles',
+          'name': 'Narrative Styles',
+          'enabled': true,
+          'exclusive': false,
+        },
       ]);
       expect(prompts.first.containsKey('folder'), isFalse);
       expect(prompts.last['folder'], 'f_styles');
@@ -166,6 +171,7 @@ void main() {
             id: 'f_styles',
             name: 'Narrative Styles',
             enabled: false,
+            exclusive: true,
           ),
         ],
       );
@@ -177,6 +183,7 @@ void main() {
 
       expect(reimported.blockFolders.single.name, 'Narrative Styles');
       expect(reimported.blockFolders.single.enabled, isFalse);
+      expect(reimported.blockFolders.single.exclusive, isTrue);
       expect(
         reimported.blocks.firstWhere((b) => b.name == 'Roleplay').folderId,
         'f_styles',
