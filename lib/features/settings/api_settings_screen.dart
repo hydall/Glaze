@@ -63,6 +63,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   final _embApiKeyCtrl = TextEditingController();
   final _embModelCtrl = TextEditingController();
   final _embChunkTokensCtrl = TextEditingController();
+  final _embRequestsPerMinuteCtrl = TextEditingController();
 
   // Non-text form state
   double _temperature = 0.7;
@@ -126,6 +127,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _embApiKeyCtrl,
     _embModelCtrl,
     _embChunkTokensCtrl,
+    _embRequestsPerMinuteCtrl,
   ];
 
   @override
@@ -228,6 +230,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _embApiKeyCtrl.text = draft.embeddingApiKey;
     _embModelCtrl.text = draft.embeddingModel;
     _embChunkTokensCtrl.text = draft.embeddingMaxChunkTokens;
+    _embRequestsPerMinuteCtrl.text = draft.embeddingRequestsPerMinute;
 
     setState(() {
       _temperature = values.temperature;
@@ -309,6 +312,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       embeddingApiKey: _embApiKeyCtrl.text,
       embeddingModel: _embModelCtrl.text,
       embeddingMaxChunkTokens: _embChunkTokensCtrl.text,
+      embeddingRequestsPerMinute: _embRequestsPerMinuteCtrl.text,
     );
     await _ref.read(apiListProvider.notifier).put(draft.toConfig(config));
   }
@@ -1062,6 +1066,12 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   label: 'settings_max_tokens_chunk'.tr(),
                   controller: _embChunkTokensCtrl,
                   placeholder: '512',
+                  keyboardType: TextInputType.number,
+                ),
+                MenuFieldItem(
+                  label: 'settings_embedding_requests_per_minute'.tr(),
+                  controller: _embRequestsPerMinuteCtrl,
+                  placeholder: '50',
                   keyboardType: TextInputType.number,
                 ),
               ],

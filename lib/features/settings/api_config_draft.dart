@@ -19,6 +19,7 @@ class ApiConfigDraft {
     required this.embeddingApiKey,
     required this.embeddingModel,
     required this.embeddingMaxChunkTokens,
+    required this.embeddingRequestsPerMinute,
   });
 
   factory ApiConfigDraft.fromConfig(ApiConfig config) {
@@ -41,6 +42,7 @@ class ApiConfigDraft {
       embeddingApiKey: values.embeddingApiKey,
       embeddingModel: values.embeddingModel,
       embeddingMaxChunkTokens: values.embeddingMaxChunkTokens.toString(),
+      embeddingRequestsPerMinute: values.embeddingRequestsPerMinute.toString(),
     );
   }
 
@@ -57,6 +59,7 @@ class ApiConfigDraft {
   final String embeddingApiKey;
   final String embeddingModel;
   final String embeddingMaxChunkTokens;
+  final String embeddingRequestsPerMinute;
 
   static ApiConfig normalizeValues(ApiConfig values) {
     final protocol = LlmProtocol.isValid(values.protocol)
@@ -138,6 +141,9 @@ class ApiConfigDraft {
     final normalized = normalizeValues(values);
     final parsedReasoningHistoryCount =
         int.tryParse(reasoningHistoryCount) ?? 0;
+    final parsedEmbeddingRequestsPerMinute = int.tryParse(
+      embeddingRequestsPerMinute,
+    );
     return base.copyWith(
       name: name.trim(),
       endpoint: endpoint.trim(),
@@ -180,6 +186,11 @@ class ApiConfigDraft {
       embeddingModel: embeddingModel.trim(),
       embeddingMaxChunkTokens:
           int.tryParse(embeddingMaxChunkTokens) ?? base.embeddingMaxChunkTokens,
+      embeddingRequestsPerMinute:
+          parsedEmbeddingRequestsPerMinute != null &&
+              parsedEmbeddingRequestsPerMinute > 0
+          ? parsedEmbeddingRequestsPerMinute
+          : base.embeddingRequestsPerMinute,
       extraRequestParameters: normalized.extraRequestParameters,
     );
   }

@@ -10,12 +10,14 @@ class EmbeddingConfig {
   final String apiKey;
   final String model;
   final int maxChunkTokens;
+  final int requestsPerMinute;
 
   const EmbeddingConfig({
     required this.endpoint,
     this.apiKey = '',
     this.model = '',
     this.maxChunkTokens = 8192,
+    this.requestsPerMinute = 50,
   });
 }
 
@@ -292,6 +294,10 @@ class EmbeddingService {
       if (requestToken.isCancelled) {
         throw requestToken.cancelError!;
       }
+      await EmbeddingRequestRateLimiter.acquire(
+        config.requestsPerMinute,
+        requestToken,
+      );
       final response = await _dio.post<Map<String, dynamic>>(
         url,
         data: {'model': config.model, 'input': texts},

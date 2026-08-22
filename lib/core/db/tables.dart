@@ -814,6 +814,8 @@ class ApiConfigs extends Table {
   TextColumn get embeddingModel => text().nullable()();
   IntColumn get embeddingMaxChunkTokens =>
       integer().withDefault(const Constant(512))();
+  IntColumn get embeddingRequestsPerMinute =>
+      integer().withDefault(const Constant(50))();
   TextColumn get cacheControlTtl => text().withDefault(const Constant('off'))();
   TextColumn get cacheBreakpointMode =>
       text().withDefault(const Constant('depth'))();

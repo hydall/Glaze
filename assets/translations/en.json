@@ -1657,6 +1657,7 @@
   "settings_embedding_endpoint": "Embedding Endpoint",
   "settings_embedding_model": "Embedding Model",
   "settings_max_tokens_chunk": "Max Tokens Per Chunk",
+  "settings_embedding_requests_per_minute": "Embedding Requests Per Minute",
   "settings_test_connection": "Test Connection",
   "conn_status_tap_to_check": "Tap to Check",
   "conn_status_connecting": "Connecting…",

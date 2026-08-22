@@ -1668,6 +1668,7 @@
   "settings_embedding_endpoint": "Эндпоинт эмбеддингов",
   "settings_embedding_model": "Модель эмбеддингов",
   "settings_max_tokens_chunk": "Макс. токенов в чанке",
+  "settings_embedding_requests_per_minute": "Запросов эмбеддингов в минуту",
   "settings_test_connection": "Проверить подключение",
   "conn_status_tap_to_check": "Проверить",
   "conn_status_connecting": "Подключение…",

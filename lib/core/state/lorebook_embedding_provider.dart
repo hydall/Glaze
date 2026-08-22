@@ -32,6 +32,7 @@ EmbeddingConfig resolveEmbeddingConfig(ApiConfig? chatConfig) {
           ? chatConfig.embeddingModel
           : chatConfig.model,
       maxChunkTokens: chatConfig.embeddingMaxChunkTokens,
+      requestsPerMinute: chatConfig.embeddingRequestsPerMinute,
     );
   } else {
     return EmbeddingConfig(
@@ -39,6 +40,7 @@ EmbeddingConfig resolveEmbeddingConfig(ApiConfig? chatConfig) {
       apiKey: chatConfig.embeddingApiKey,
       model: chatConfig.embeddingModel,
       maxChunkTokens: chatConfig.embeddingMaxChunkTokens,
+      requestsPerMinute: chatConfig.embeddingRequestsPerMinute,
     );
   }
 }

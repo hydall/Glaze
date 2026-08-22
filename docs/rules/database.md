@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **121**
+Current version: **122**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -206,6 +206,8 @@ Migration history:
   checkpoint and restoration history; it never updates immutable rows. Because
   v121 has no lore tombstone, an overlay target absent at the selected
   checkpoint is restored to its recorded source/base content.
+- v122: added `api_configs.embedding_requests_per_minute` INTEGER NOT NULL
+  DEFAULT 50 for the process-wide embedding request rate limit.
 
 ---
 

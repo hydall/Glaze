@@ -44,6 +44,7 @@ void main() {
       embeddingApiKey: 'embedding-secret',
       embeddingModel: 'embedding-model',
       embeddingMaxChunkTokens: 789,
+      embeddingRequestsPerMinute: 25,
       cacheControlTtl: 'off',
       cacheBreakpointMode: 'stable_prefix',
       sessionIdMode: 'always',
@@ -79,6 +80,7 @@ void main() {
       embeddingApiKey: '  embedding key  ',
       embeddingModel: '  embedding model  ',
       embeddingMaxChunkTokens: 'invalid',
+      embeddingRequestsPerMinute: 'invalid',
     );
 
     final mapped = draft.toConfig(config);
@@ -95,6 +97,7 @@ void main() {
     expect(mapped.embeddingApiKey, 'embedding key');
     expect(mapped.embeddingModel, 'embedding model');
     expect(mapped.embeddingMaxChunkTokens, 789);
+    expect(mapped.embeddingRequestsPerMinute, 50);
   });
 
   test('the official Responses protocol derives the opt-in flag', () {

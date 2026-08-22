@@ -30,6 +30,7 @@ void main() {
         embeddingUseSame: true,
         embeddingModel: 'embedding-model',
         embeddingMaxChunkTokens: 256,
+        embeddingRequestsPerMinute: 40,
       );
 
       final config = resolveEmbeddingConfig(api);
@@ -38,11 +39,15 @@ void main() {
       expect(config.apiKey, api.apiKey);
       expect(config.model, api.embeddingModel);
       expect(config.maxChunkTokens, 256);
+      expect(config.requestsPerMinute, 40);
     });
   });
 
   group('EmbeddingRequestGate', () {
-    tearDown(() => EmbeddingRequestGate.setEnabled(true));
+    tearDown(() {
+      EmbeddingRequestGate.setEnabled(true);
+      EmbeddingRequestRateLimiter.resetForTesting();
+    });
 
     test('rejects requests immediately after embeddings are disabled', () {
       EmbeddingRequestGate.setEnabled(false);
@@ -58,6 +63,34 @@ void main() {
       EmbeddingRequestGate.setEnabled(false);
 
       expect(token.isCancelled, isTrue);
+    });
+
+    test('rate limiter spaces concurrent request starts', () async {
+      final first = EmbeddingRequestGate.beginRequest(null);
+      final second = EmbeddingRequestGate.beginRequest(null);
+      final stopwatch = Stopwatch()..start();
+
+      await Future.wait([
+        EmbeddingRequestRateLimiter.acquire(600, first),
+        EmbeddingRequestRateLimiter.acquire(600, second),
+      ]);
+
+      expect(stopwatch.elapsedMilliseconds, greaterThanOrEqualTo(80));
+      EmbeddingRequestGate.endRequest(first);
+      EmbeddingRequestGate.endRequest(second);
+    });
+
+    test('rate limiter wait is cancellable', () async {
+      final first = EmbeddingRequestGate.beginRequest(null);
+      final second = EmbeddingRequestGate.beginRequest(null);
+      await EmbeddingRequestRateLimiter.acquire(60, first);
+
+      final waiting = EmbeddingRequestRateLimiter.acquire(60, second);
+      second.cancel('cancelled');
+
+      await expectLater(waiting, throwsA(isA<Object>()));
+      EmbeddingRequestGate.endRequest(first);
+      EmbeddingRequestGate.endRequest(second);
     });
   });
 }

@@ -46,6 +46,7 @@ abstract class ApiConfig with _$ApiConfig {
     @Default('') String embeddingApiKey,
     @Default('') String embeddingModel,
     @Default(512) int embeddingMaxChunkTokens,
+    @Default(50) int embeddingRequestsPerMinute,
     @Default('off') String cacheControlTtl,
     @Default('depth') String cacheBreakpointMode,
     @Default('openrouter') String sessionIdMode,

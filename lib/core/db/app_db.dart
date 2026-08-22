@@ -79,7 +79,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 121;
+  int get schemaVersion => 122;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2237,6 +2237,17 @@ class AppDatabase extends _$AppDatabase {
         await m.createTable(sessionLorebookRevisionRows);
         await m.createTable(sessionLorebookEmbeddingJobRows);
         await _createSessionCanonIntegrity();
+      }
+      if (from < 122) {
+        final columns = await customSelect(
+          "PRAGMA table_info('api_configs')",
+        ).get();
+        final names = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (!names.contains('embedding_requests_per_minute')) {
+          await m.addColumn(apiConfigs, apiConfigs.embeddingRequestsPerMinute);
+        }
       }
     },
   );
