@@ -180,7 +180,7 @@ abstract final class StudioPresetCodec {
         ledgerApiConfigId: _string(json['ledgerApiConfigId']),
         maxFinalHistoryMessages: _integer(
           json['maxFinalHistoryMessages'],
-          fallback: 30,
+          fallback: 50,
         ),
         agentEnabled: enabled,
         agentBlockRestoreState: restoreState,

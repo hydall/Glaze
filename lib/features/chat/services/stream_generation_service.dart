@@ -10,6 +10,7 @@ import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/llm/studio/studio_stream_interceptor.dart';
+import '../../../core/llm/studio/studio_history_limiter.dart';
 import '../../../core/llm/studio/studio_context.dart';
 import '../../../core/llm/studio/studio_context_preparer.dart';
 import '../../../core/llm/prompt/prompt_payload.dart';
@@ -137,6 +138,8 @@ class StreamGenerationService {
               excludeReasoningFromContextBudget: pipelineSettings
                   .studioAgent
                   .studioFinalExcludeReasoningFromContextBudget,
+              historyWindowStartMessageId: inputs
+                  .sessionVars[StudioHistoryLimiter.historyWindowStartVar],
             );
       final payload = studioConfig == null
           ? await builder.buildOrdinaryFromGenerationContext(
@@ -170,8 +173,7 @@ class StreamGenerationService {
               consumerPath: 'studio-final',
               reasoningTagStartOverride:
                   studioPreset?.runtime.reasoningTagStart,
-              reasoningTagEndOverride:
-                  studioPreset?.runtime.reasoningTagEnd,
+              reasoningTagEndOverride: studioPreset?.runtime.reasoningTagEnd,
             );
       final promptResult = studioConfig == null
           ? await buildPromptInIsolate(finalPayload)
@@ -254,16 +256,15 @@ class StreamGenerationService {
             setEquals(trackerVisibleMessageIds, studioFinalVisibleMessageIds)
             ? finalStudioContext!
             : const StudioContextPreparer().prepare(
-                 inputs: inputs,
-                 visibleMessageIds: trackerVisibleMessageIds,
-                 ledgerPromptInjectionPolicy:
-                     turnConfig.ledgerPromptInjectionPolicy,
-                 consumerPath: 'studio-tracker',
-                 reasoningTagStartOverride:
-                     studioPreset?.runtime.reasoningTagStart,
-                 reasoningTagEndOverride:
-                     studioPreset?.runtime.reasoningTagEnd,
-               );
+                inputs: inputs,
+                visibleMessageIds: trackerVisibleMessageIds,
+                ledgerPromptInjectionPolicy:
+                    turnConfig.ledgerPromptInjectionPolicy,
+                consumerPath: 'studio-tracker',
+                reasoningTagStartOverride:
+                    studioPreset?.runtime.reasoningTagStart,
+                reasoningTagEndOverride: studioPreset?.runtime.reasoningTagEnd,
+              );
         if (_isAborted()) {
           return ChatState(
             session: saveSession ?? session,
@@ -797,11 +798,13 @@ class StreamGenerationService {
     int finalContextSize, {
     int reasoningHistoryCount = 0,
     bool excludeReasoningFromContextBudget = false,
+    String? historyWindowStartMessageId,
   }) => StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
     history,
     finalContextSize,
     reasoningHistoryCount: reasoningHistoryCount,
     excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    historyWindowStartMessageId: historyWindowStartMessageId,
   );
 
   static String? _lastAssistantId(ChatSession session, String? regenTargetId) {

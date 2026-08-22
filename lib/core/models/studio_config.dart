@@ -113,7 +113,7 @@ abstract class StudioPreset with _$StudioPreset {
 
     /// Maximum trailing messages sent to the final generator. Trackers use
     /// their own [StudioAgent.contextSize]. 0 disables the message-count cap.
-    @Default(30) int maxFinalHistoryMessages,
+    @Default(50) int maxFinalHistoryMessages,
 
     /// Per-agent on/off overrides keyed by controller spec id
     /// (e.g. `'continuity'`, `'narrative'`, `'final'`).

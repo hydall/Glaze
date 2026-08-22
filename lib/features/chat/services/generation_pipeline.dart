@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
+import '../../../core/llm/studio/studio_history_limiter.dart';
+import '../../../core/llm/studio/studio_stream_interceptor.dart';
+import '../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
@@ -16,6 +19,7 @@ import '../abort_handler.dart';
 import '../chat_generation_service.dart';
 import '../chat_session_service.dart';
 import '../chat_state.dart';
+import '../state/studio_history_rotation_provider.dart';
 import 'stages/cleaner_stage.dart';
 import 'stages/ext_blocks_stage.dart';
 import 'stages/ledger_stage.dart';
@@ -158,6 +162,7 @@ class GenerationPipeline {
         regenTargetId: regenTargetId,
         manifest:
             result.mainModelContextSnapshot?.promptResult.exactLorebookManifest,
+        studioTurnConfig: studioTurnConfig,
       );
       if (durableSession == null) {
         return null;
@@ -337,13 +342,42 @@ class GenerationPipeline {
     required ChatSession generatedSession,
     required String? regenTargetId,
     required ExactLorebookManifest? manifest,
+    required StudioTurnConfigSnapshot studioTurnConfig,
   }) async {
+    var sessionToCommit = generatedSession;
+    StudioHistoryWindowPlan? rotation;
+    if (regenTargetId == null &&
+        studioTurnConfig.enabled &&
+        generatedSession.messages.lastOrNull?.isError != true) {
+      final settings = studioTurnConfig.pipelineSettings.studioAgent;
+      final finalContextSize = settings.studioFinalContextSize > 0
+          ? settings.studioFinalContextSize
+          : studioTurnConfig.preset!.maxFinalHistoryMessages;
+      rotation = StudioStreamInterceptor.planCompletedHistoryWindow(
+        generatedSession.messages,
+        finalContextSize: finalContextSize,
+        historyWindowStartMessageId:
+            baseSession.sessionVars[StudioHistoryLimiter.historyWindowStartVar],
+        reasoningHistoryCount: settings.studioFinalReasoningHistoryCount,
+        excludeReasoningFromContextBudget:
+            settings.studioFinalExcludeReasoningFromContextBudget,
+      );
+      final startId = rotation.startMessageId;
+      if (rotation.didRotate && startId != null) {
+        sessionToCommit = generatedSession.copyWith(
+          sessionVars: {
+            ...generatedSession.sessionVars,
+            StudioHistoryLimiter.historyWindowStartVar: startId,
+          },
+        );
+      }
+    }
     var wakeLoreEmbeddingWorker = false;
     final committed = await ctx.ref
         .read(chatRepoProvider)
         .commitGenerationResult(
           baseSession: baseSession,
-          generatedSession: generatedSession,
+          generatedSession: sessionToCommit,
           regenTargetId: regenTargetId,
           manifest: manifest,
           beforeWrite: (_, after) async {
@@ -359,6 +393,14 @@ class GenerationPipeline {
         );
     if (wakeLoreEmbeddingWorker) {
       unawaited(ctx.ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
+    }
+    if (committed != null && rotation?.didRotate == true && ctx.ref.mounted) {
+      ctx.ref
+          .read(studioHistoryRotationProvider(ctx.charId).notifier)
+          .state = StudioHistoryRotationNotice(
+        sessionId: committed.id,
+        droppedMessageCount: rotation!.droppedMessageCount,
+      );
     }
     return committed;
   }

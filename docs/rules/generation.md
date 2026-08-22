@@ -183,9 +183,11 @@ Studio Mode (tracker-around-generator, Phase 5+):
   individual fallback from a failed batch.
 - Trackers receive `StudioAgent.contextSize` (default 5, hard-cap 200) last
   messages via `_limitTrackerHistory` + `truncateAgentText` (head 40% + tail
-  60%) + `stripHtmlTags`. The generator uses `maxFinalHistoryMessages`
-  (default 30) with a 60K token budget (whichever limit is hit first) instead.
-  trimmed — only `chat_history` is. See INV-ST1, INV-ST2.
+  60%) + `stripHtmlTags`. The generator uses a stable history window with
+  `maxFinalHistoryMessages` (default 50) and a 70K-token high-water mark. After
+  a completed assistant turn crosses either threshold, the boundary advances
+  by roughly half the current window on a complete chunk boundary. Only
+  `chat_history` rotates. See INV-ST1, INV-ST2.
 - Studio presets are reusable prompt/agent configurations stored in
   `studio_preset_rows` and selected globally via `activeStudioPresetId`.
   Per-session state is limited to an on/off toggle in `studio_config_rows`.

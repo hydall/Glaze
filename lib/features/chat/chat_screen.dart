@@ -53,12 +53,15 @@ import 'chat_search_delegate.dart';
 import 'chat_state.dart';
 import 'state/chat_body_selectors.dart';
 import 'state/memory_activity_provider.dart';
+import 'state/studio_history_rotation_provider.dart';
 import 'bridge/chat_overlay_blur_region.dart';
 import 'widgets/chat_blur_region_tracker.dart';
 import 'widgets/chat_header.dart';
 import 'widgets/chat_input_bar.dart';
 import 'widgets/magic_drawer.dart';
 import 'widgets/memory_activity_card.dart';
+import 'widgets/memory_sheet.dart';
+import 'widgets/studio_history_rotation_sheet.dart';
 import 'widgets/post_cleaner_status_card.dart';
 import 'widgets/post_gen_status_card.dart';
 import 'widgets/studio_status_card.dart';
@@ -576,6 +579,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   final _selectionCtrl = ChatMessageSelectionController();
   bool _showScrollToBottom = false;
   bool _showMemoryActivity = false;
+  bool _showingHistoryRotation = false;
   final GlobalKey<ChatWebViewWidgetState> _webViewStateKey = GlobalKey();
 
   /// Rects of the glass overlays (header + input bar elements) measured in
@@ -1048,6 +1052,36 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         }
       }
     });
+    ref.listen<StudioHistoryRotationNotice?>(
+      studioHistoryRotationProvider(widget.charId),
+      (previous, notice) {
+        if (notice == null ||
+            notice.sessionId != widget.state.session?.id ||
+            _showingHistoryRotation) {
+          return;
+        }
+        ref.read(studioHistoryRotationProvider(widget.charId).notifier).state =
+            null;
+        _showingHistoryRotation = true;
+        unawaited(
+          showStudioHistoryRotationSheet(
+            context,
+            droppedMessageCount: notice.droppedMessageCount,
+          ).then((action) async {
+            if (!mounted) return;
+            _showingHistoryRotation = false;
+            if (action == StudioHistoryRotationAction.memory) {
+              if (!context.mounted) return;
+              await showMemorySheet(
+                context,
+                widget.charId,
+                initialTab: MemoryTab.books,
+              );
+            }
+          }),
+        );
+      },
+    );
     ref.listen<bool>(impersonationNeedsConfigProvider(widget.charId), (
       prev,
       next,

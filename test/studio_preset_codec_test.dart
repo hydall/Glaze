@@ -278,7 +278,8 @@ void main() {
         ],
       });
 
-      final block = (canonical['blocks'] as List).single as Map<String, dynamic>;
+      final block =
+          (canonical['blocks'] as List).single as Map<String, dynamic>;
       expect(block['insertionMode'], 'depth');
       expect(block['depth'], 2);
     },
@@ -307,7 +308,7 @@ void main() {
 
     expect(decoded.preset.agents[0].controllerId, 'continuity');
     expect(decoded.preset.agents[1].enabled, isFalse);
-    expect(decoded.preset.maxFinalHistoryMessages, 30);
+    expect(decoded.preset.maxFinalHistoryMessages, 50);
     expect(decoded.preset.expensiveApiConfigId, isEmpty);
     final canonical = StudioPresetCodec.canonicalizePresetJson({
       'id': 'imported',

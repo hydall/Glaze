@@ -642,9 +642,10 @@ At generation time `MemoryStudioService.runTrackerCycle` runs:
    re-request the whole batch twice. If it still cannot be parsed, Studio
    returns a hard error asking the user to restart generation.
 5. **Final generator** (`_runFinalGenerator`): runs after all pre-generation
-   trackers settle, using `maxFinalHistoryMessages` (default 30) for the
-   trimmed history; trackers receive their own `contextSize` (default 5,
-   hard-cap 200) via `_limitTrackerHistory` + `truncateAgentText`
+    trackers settle, using a stable history window with
+    `maxFinalHistoryMessages` (default 50) and a 70K-token high-water mark;
+    trackers receive their own `contextSize` (default 5, hard-cap 200) via
+    `_limitTrackerHistory` + `truncateAgentText`
    (head 40% + tail 60%) + `stripHtmlTags`.
 6. **Studio post-processing agents:** due agents run in `order`, respecting
    `runInterval` and activation keywords. Each receives the current

@@ -108,6 +108,8 @@ class StudioMessageBuilder {
                 reasoningHistoryCount: reasoningHistoryCount,
                 excludeReasoningFromContextBudget:
                     excludeReasoningFromContextBudget,
+                historyWindowStartMessageId: context
+                    .sessionVars[StudioHistoryLimiter.historyWindowStartVar],
               )
             : StudioHistoryLimiter.limitTrackerHistory(
                 context.history,
@@ -180,6 +182,8 @@ class StudioMessageBuilder {
                   reasoningHistoryCount: reasoningHistoryCount,
                   excludeReasoningFromContextBudget:
                       excludeReasoningFromContextBudget,
+                  historyWindowStartMessageId: context
+                      .sessionVars[StudioHistoryLimiter.historyWindowStartVar],
                 )
               : StudioHistoryLimiter.limitTrackerHistory(
                   context.history,

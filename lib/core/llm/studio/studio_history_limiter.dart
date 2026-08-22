@@ -8,12 +8,15 @@ class StudioHistoryLimiter {
   /// Hard cap on tracker context size (Marinara MAX_AGENT_CONTEXT_MESSAGES).
   static const maxTrackerContextSize = 200;
 
-  /// Token budget for the final generator's chat history. After slicing to
-  /// [maxFinalHistoryMessages], messages are trimmed from the oldest end
-  /// until the total token count (estimated via o200k_base) fits this budget.
-  /// 60K tokens ≈ 240K chars — enough for ~30 messages of typical RP length
-  /// while preventing context overflow on very long messages.
-  static const finalHistoryTokenBudget = 60000;
+  /// High-water mark for the final generator's chat history.
+  /// 70K tokens keeps a generous history window while leaving room for the
+  /// preset's static and dynamic blocks.
+  static const finalHistoryTokenBudget = 70000;
+
+  /// Session variable storing the first chat message in the stable Studio
+  /// history window. The boundary advances only after a completed assistant
+  /// turn, so adding a user message never invalidates the cached prefix.
+  static const historyWindowStartVar = '__studioHistoryWindowStart';
 
   static final _htmlTagRegex = RegExp(r'</?[a-zA-Z][^>]*>');
   static final _multiNewlineRegex = RegExp(r'\n{3,}');
@@ -21,68 +24,134 @@ class StudioHistoryLimiter {
 
   /// Cap how many trailing chat messages reach the FINAL responder.
   ///
-  /// Two limits, whichever is hit first:
+  /// Two high-water marks, whichever is hit first:
   /// 1. **Message count** — at most [StudioPreset.maxFinalHistoryMessages]
-  ///    (default 30) trailing messages.
-  /// 2. **Token budget** — at most [finalHistoryTokenBudget] (60K) estimated
+  ///    (default 50) trailing messages.
+  /// 2. **Token budget** — at most [finalHistoryTokenBudget] (70K) estimated
   ///    tokens across the selected messages.
   ///
-  /// We walk backwards from the end of [history], accumulating messages until
-  /// either limit is reached. The current user turn (last message) is always
-  /// included. 0 (or negative) message count means no message-count limit
-  /// (token budget still applies). Each message has `<font>` tags stripped.
+  /// A persisted window boundary is stable between rotations. Rotation happens
+  /// after a completed assistant reply, drops roughly half the old window on a
+  /// chunk boundary, and never runs merely because a user message was added.
+  /// Each returned message has `<font>` tags stripped.
   static List<PromptMessage> limitFinalHistory(
     List<PromptMessage> history,
     StudioPreset preset, {
     int pipelineOverride = 0,
     int reasoningHistoryCount = 0,
     bool excludeReasoningFromContextBudget = false,
+    String? historyWindowStartMessageId,
   }) {
-    final msgLimit = pipelineOverride > 0
-        ? pipelineOverride
-        : preset.maxFinalHistoryMessages;
-
     if (history.isEmpty) return const [];
 
-    // Walk backwards from the end, stop at msgLimit or tokenBudget.
-    final selected = <PromptMessage>[];
-    var totalTokens = 0;
+    final cleanedHistory = history.map(_cleanMessage).toList(growable: false);
+    final persistedStart = cleanedHistory.indexWhere(
+      (message) => message.sourceMessageId == historyWindowStartMessageId,
+    );
+    if (persistedStart >= 0) {
+      return cleanedHistory.sublist(persistedStart);
+    }
+
+    // A boundary is created only after the assistant reply is committed. Until
+    // then an uninitialized session keeps its full history; a trailing user
+    // turn must never trigger prompt rotation before it receives an answer.
+    return cleanedHistory;
+  }
+
+  /// Advances a stable history window after a complete user-assistant chunk.
+  /// When either high-water mark is crossed, whole chunks are discarded until
+  /// roughly half the configured message capacity remains.
+  static StudioHistoryWindowPlan planCompletedWindow(
+    List<PromptMessage> history, {
+    required int maxMessages,
+    int reasoningHistoryCount = 0,
+    bool excludeReasoningFromContextBudget = false,
+  }) {
+    if (history.isEmpty || history.last.role != 'assistant') {
+      return StudioHistoryWindowPlan(messages: history);
+    }
+
+    var selected = history;
+    var dropped = 0;
+    while (_exceedsWindow(
+      selected,
+      maxMessages: maxMessages,
+      reasoningHistoryCount: reasoningHistoryCount,
+      excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    )) {
+      final targetCount = (selected.length / 2).ceil();
+      final idealStart = (selected.length - targetCount).clamp(
+        1,
+        selected.length - 1,
+      );
+      final nextStart = _nextChunkStart(selected, idealStart);
+      if (nextStart <= 0 || nextStart >= selected.length) break;
+      dropped += nextStart;
+      selected = selected.sublist(nextStart);
+    }
+
+    return StudioHistoryWindowPlan(
+      messages: selected,
+      droppedMessageCount: dropped,
+      didRotate: dropped > 0,
+    );
+  }
+
+  static bool _exceedsWindow(
+    List<PromptMessage> history, {
+    required int maxMessages,
+    required int reasoningHistoryCount,
+    required bool excludeReasoningFromContextBudget,
+  }) {
+    if (maxMessages > 0 && history.length > maxMessages) return true;
+    return _historyTokens(
+          history,
+          reasoningHistoryCount: reasoningHistoryCount,
+          excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+        ) >
+        finalHistoryTokenBudget;
+  }
+
+  static int _nextChunkStart(List<PromptMessage> history, int from) {
+    for (var i = from; i < history.length; i++) {
+      if (history[i].role == 'user' && history[i - 1].role == 'assistant') {
+        return i;
+      }
+    }
+    return 0;
+  }
+
+  static int _historyTokens(
+    List<PromptMessage> history, {
+    required int reasoningHistoryCount,
+    required bool excludeReasoningFromContextBudget,
+  }) {
+    var total = 0;
     final includeAllReasoning = reasoningHistoryCount == -1;
     var remainingReasoning = reasoningHistoryCount;
     for (var i = history.length - 1; i >= 0; i--) {
-      final m = history[i];
-      final cleaned = stripFontTags(m.content);
-      var tokens = estimateTokens(cleaned);
-      final reasoning = m.reasoningContent?.trim();
+      final message = history[i];
+      total += estimateTokens(message.content);
+      final reasoning = message.reasoningContent?.trim();
       if ((includeAllReasoning || remainingReasoning > 0) &&
-          m.role == 'assistant' &&
+          message.role == 'assistant' &&
           reasoning?.isNotEmpty == true) {
         if (!excludeReasoningFromContextBudget) {
-          tokens += estimateTokens(reasoning!);
+          total += estimateTokens(reasoning!);
         }
         if (!includeAllReasoning) remainingReasoning--;
       }
-      // Always keep at least the last message.
-      if (selected.isNotEmpty &&
-          totalTokens + tokens > finalHistoryTokenBudget) {
-        break;
-      }
-      selected.insert(
-        0,
-        PromptMessage(
-          role: m.role,
-          content: cleaned,
-          sourceMessageId: m.sourceMessageId,
-          reasoningContent: m.reasoningContent,
-          imagePath: m.imagePath,
-        ),
-      );
-      totalTokens += tokens;
-      if (msgLimit > 0 && selected.length >= msgLimit) break;
     }
-
-    return selected;
+    return total;
   }
+
+  static PromptMessage _cleanMessage(PromptMessage message) => PromptMessage(
+    role: message.role,
+    content: stripFontTags(message.content),
+    sourceMessageId: message.sourceMessageId,
+    reasoningContent: message.reasoningContent,
+    imagePath: message.imagePath,
+  );
 
   /// Trim trailing chat history for a tracker (intermediate agent).
   ///
@@ -136,4 +205,19 @@ class StudioHistoryLimiter {
   static String stripFontTags(String text) {
     return text.replaceAll(_fontTagRegex, '');
   }
+}
+
+class StudioHistoryWindowPlan {
+  final List<PromptMessage> messages;
+  final int droppedMessageCount;
+  final bool didRotate;
+
+  const StudioHistoryWindowPlan({
+    required this.messages,
+    this.droppedMessageCount = 0,
+    this.didRotate = false,
+  });
+
+  String? get startMessageId =>
+      messages.isEmpty ? null : messages.first.sourceMessageId;
 }

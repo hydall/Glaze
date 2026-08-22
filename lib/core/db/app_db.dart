@@ -79,7 +79,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 122;
+  int get schemaVersion => 123;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2248,6 +2248,12 @@ class AppDatabase extends _$AppDatabase {
         if (!names.contains('embedding_requests_per_minute')) {
           await m.addColumn(apiConfigs, apiConfigs.embeddingRequestsPerMinute);
         }
+      }
+      if (from < 123) {
+        await customStatement(
+          'UPDATE studio_preset_rows SET max_final_history_messages = 50 '
+          'WHERE max_final_history_messages = 30',
+        );
       }
     },
   );

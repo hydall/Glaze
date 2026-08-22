@@ -60,7 +60,7 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     @Default(true) bool studioFinalPresencePenaltyOverride,
     // Chat history messages override for the final generator. When > 0,
     // overrides StudioPreset.maxFinalHistoryMessages. 0 = use preset
-    // StudioConfig default (30).
+    // StudioConfig default (50).
     @Default(0) int studioFinalContextSize,
     // Temperature for the final generator. When >= 0, overrides the per-agent
     // default (0.8). Negative = use the agent's own temperature.

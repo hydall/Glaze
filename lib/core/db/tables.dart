@@ -693,7 +693,7 @@ class StudioPresetRows extends Table {
   TextColumn get cleanerApiConfigId => text().withDefault(const Constant(''))();
   TextColumn get ledgerApiConfigId => text().withDefault(const Constant(''))();
   IntColumn get maxFinalHistoryMessages =>
-      integer().withDefault(const Constant(30))();
+      integer().withDefault(const Constant(50))();
   TextColumn get agentEnabledJson => text().withDefault(const Constant('{}'))();
   TextColumn get executionMode =>
       text().withDefault(const Constant('legacy'))();

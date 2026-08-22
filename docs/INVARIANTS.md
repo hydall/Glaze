@@ -278,19 +278,19 @@ rune-counted) and `_stripHtmlTags` (conservative tag regex preserving `==...==`
 markers and code fences). `StudioAgent.contextSize` default 5, hard-cap 200.
 
 The final generator does NOT use this trim — it uses
-`StudioPreset.maxFinalHistoryMessages` (default 30). MemoryBook injection
+`StudioPreset.maxFinalHistoryMessages` (default 50). MemoryBook injection
 (`dynamic_context` block: memory, summary, worldInfo) is NOT trimmed — only
 the `chat_history` block is. Users without rolling summary keep long-term memory
 via MemoryBook (static `dynamic_context` injection), not via chat history.
 
 ### INV-ST2: maxFinalHistoryMessages applies to the generator ✅ ENFORCED
 
-`_limitFinalHistory` trims `chat_history` to the last
-`StudioPreset.maxFinalHistoryMessages` (default 30) messages for the final
-generator only (`_runFinalGenerator` → `_buildAgentMessages(isFinalResponse:
-true)`). An additional token budget of 60K (estimated via o200k_base) is
-enforced: messages are accumulated from the end of history until either the
-message count or the token budget is reached, whichever comes first. Trackers are governed by INV-ST1 instead.
+`StudioHistoryLimiter` keeps a persisted, stable `chat_history` suffix for the
+final generator. After a completed assistant turn crosses either
+`StudioPreset.maxFinalHistoryMessages` (default 50) or the 70K estimated token
+high-water mark, it advances the boundary by roughly half the current window
+on a complete user-assistant chunk boundary. A trailing user message never
+rotates the window. Trackers are governed by INV-ST1 instead.
 
 ### INV-ST3: Same-(provider, model) trackers batch into one LLM request ✅ ENFORCED (Phase 5)
 

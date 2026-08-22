@@ -152,7 +152,7 @@ void main() {
       expect(ids, {'m1', 'm2', 'm3'});
     });
 
-    test('returns last N non-hidden message ids', () {
+    test('uses the persisted stable-window boundary', () {
       final history = [
         _msg('m1'),
         _msg('m2'),
@@ -163,11 +163,12 @@ void main() {
       final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
         history,
         3,
+        historyWindowStartMessageId: 'm3',
       );
       expect(ids, {'m3', 'm4', 'm5'});
     });
 
-    test('skips hidden messages and counts only non-hidden', () {
+    test('skips hidden messages before applying the boundary', () {
       final history = [
         _msg('m1'),
         _msg('h1', isHidden: true),
@@ -178,6 +179,7 @@ void main() {
       final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
         history,
         2,
+        historyWindowStartMessageId: 'm2',
       );
       expect(ids, {'m2', 'm3'});
     });
@@ -198,7 +200,7 @@ void main() {
       expect(ids, {'only'});
     });
 
-    test('matches final limiter token cap including reasoning', () {
+    test('does not rotate an uninitialized window before commit', () {
       final huge = List.filled(250000, 'x').join();
       final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
         [
@@ -215,7 +217,7 @@ void main() {
         reasoningHistoryCount: 1,
       );
 
-      expect(ids, {'latest'});
+      expect(ids, {'old', 'reasoning-heavy', 'latest'});
     });
   });
 }
