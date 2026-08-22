@@ -622,4 +622,43 @@ class ResolvedAgentConfig {
       reasoningTagEnd: reasoningTagEnd,
     );
   }
+
+  /// Override only the reasoning tag pair. Used by [AgentConfigResolver]
+  /// when a Studio preset's `runtime.reasoningTagStart/End` are set and
+  /// should take priority over the API config's values.
+  ResolvedAgentConfig copyWithReasoningTags({
+    String? reasoningTagStart,
+    String? reasoningTagEnd,
+  }) {
+    return ResolvedAgentConfig(
+      endpoint: endpoint,
+      apiKey: apiKey,
+      model: model,
+      protocol: protocol,
+      topP: topP,
+      topK: topK,
+      frequencyPenalty: frequencyPenalty,
+      presencePenalty: presencePenalty,
+      omitTemperature: omitTemperature,
+      omitTopP: omitTopP,
+      omitTopK: omitTopK,
+      omitFrequencyPenalty: omitFrequencyPenalty,
+      omitPresencePenalty: omitPresencePenalty,
+      requestReasoning: requestReasoning,
+      showNativeReasoning: showNativeReasoning,
+      useResponsesApi: useResponsesApi,
+      reasoningEffort: reasoningEffort,
+      omitReasoning: omitReasoning,
+      omitReasoningEffort: omitReasoningEffort,
+      stream: stream,
+      cacheControlTtl: cacheControlTtl,
+      cacheBreakpointMode: cacheBreakpointMode,
+      sessionIdMode: sessionIdMode,
+      promptPostProcessing: promptPostProcessing,
+      contextSize: contextSize,
+      extraRequestParameters: extraRequestParameters,
+      reasoningTagStart: reasoningTagStart ?? this.reasoningTagStart,
+      reasoningTagEnd: reasoningTagEnd ?? this.reasoningTagEnd,
+    );
+  }
 }

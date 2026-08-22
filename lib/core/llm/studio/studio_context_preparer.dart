@@ -25,6 +25,12 @@ final class StudioContextPreparer {
         ),
     String consumerPath = 'studio',
     bool disableSourceWindowExclusion = false,
+
+    /// When non-empty, overrides `inputs.apiConfig.reasoningTagStart/End` in
+    /// the [MacroContext]. Passed from the Studio preset's
+    /// `runtime.reasoningTagStart/End`.
+    String? reasoningTagStartOverride,
+    String? reasoningTagEndOverride,
   }) {
     final visibleLedgerMessages = inputs.history
         .where(
@@ -74,8 +80,12 @@ final class StudioContextPreparer {
       charMesExample: inputs.character.mesExample,
       userName: inputs.persona?.name ?? 'User',
       personaPrompt: inputs.persona?.prompt,
-      reasoningStart: inputs.apiConfig.reasoningTagStart,
-      reasoningEnd: inputs.apiConfig.reasoningTagEnd,
+      reasoningStart: (reasoningTagStartOverride?.isNotEmpty == true)
+          ? reasoningTagStartOverride
+          : inputs.apiConfig.reasoningTagStart,
+      reasoningEnd: (reasoningTagEndOverride?.isNotEmpty == true)
+          ? reasoningTagEndOverride
+          : inputs.apiConfig.reasoningTagEnd,
       sessionVars: inputs.sessionVars,
       globalVars: inputs.globalVars,
       charId: inputs.character.id,

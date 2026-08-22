@@ -41,7 +41,7 @@ String? resolveGlazeFilePath(String? path) {
   if (base == null) return path;
 
   if (!p.isAbsolute(path)) {
-    return p.join(base, path);
+    return p.joinAll([base, ...path.split(RegExp(r'[/\\]'))]);
   }
   // Absolute: first prefer the matching file in this build channel's data
   // root. A copied/imported database can still contain paths from another

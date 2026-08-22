@@ -74,7 +74,8 @@ class AgentConfigResolver {
       sampling = _SlotSampling.controller(pipeline);
     }
 
-    return resolver
+    final presetTags = turnConfig?.preset?.runtime;
+    final resolved = resolver
         .resolveAgentConfig(current, selectedApiConfigId, modelOverride)
         .copyWithSampling(
           topP: sampling.topP,
@@ -91,6 +92,18 @@ class AgentConfigResolver {
             sampling.extraRequestParameters,
           ),
         );
+
+    // Studio preset runtime tags override the API config's tags when set.
+    final startTag = presetTags?.reasoningTagStart;
+    final endTag = presetTags?.reasoningTagEnd;
+    if ((startTag != null && startTag.isNotEmpty) ||
+        (endTag != null && endTag.isNotEmpty)) {
+      return resolved.copyWithReasoningTags(
+        reasoningTagStart: startTag,
+        reasoningTagEnd: endTag,
+      );
+    }
+    return resolved;
   }
 }
 

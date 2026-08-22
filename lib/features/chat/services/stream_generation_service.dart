@@ -168,6 +168,10 @@ class StreamGenerationService {
               ledgerPromptInjectionPolicy:
                   turnConfig.ledgerPromptInjectionPolicy,
               consumerPath: 'studio-final',
+              reasoningTagStartOverride:
+                  studioPreset?.runtime.reasoningTagStart,
+              reasoningTagEndOverride:
+                  studioPreset?.runtime.reasoningTagEnd,
             );
       final promptResult = studioConfig == null
           ? await buildPromptInIsolate(finalPayload)
@@ -250,12 +254,16 @@ class StreamGenerationService {
             setEquals(trackerVisibleMessageIds, studioFinalVisibleMessageIds)
             ? finalStudioContext!
             : const StudioContextPreparer().prepare(
-                inputs: inputs,
-                visibleMessageIds: trackerVisibleMessageIds,
-                ledgerPromptInjectionPolicy:
-                    turnConfig.ledgerPromptInjectionPolicy,
-                consumerPath: 'studio-tracker',
-              );
+                 inputs: inputs,
+                 visibleMessageIds: trackerVisibleMessageIds,
+                 ledgerPromptInjectionPolicy:
+                     turnConfig.ledgerPromptInjectionPolicy,
+                 consumerPath: 'studio-tracker',
+                 reasoningTagStartOverride:
+                     studioPreset?.runtime.reasoningTagStart,
+                 reasoningTagEndOverride:
+                     studioPreset?.runtime.reasoningTagEnd,
+               );
         if (_isAborted()) {
           return ChatState(
             session: saveSession ?? session,

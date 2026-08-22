@@ -66,6 +66,9 @@ class StudioPresetEditorBodyState
   final ScrollController _scrollController = ScrollController();
   double? _savedScrollOffset;
 
+  TextEditingController? _reasoningStartCtrl;
+  TextEditingController? _reasoningEndCtrl;
+
   /// `(injectionPoint, label)` pairs in the order the sections are rendered:
   /// the pipeline order a turn actually runs in (§5). Blocks for a specific
   /// agent are fed in during pre-generation, so they sit right after it.
@@ -91,6 +94,8 @@ class StudioPresetEditorBodyState
   void dispose() {
     _flushSave();
     _scrollController.dispose();
+    _reasoningStartCtrl?.dispose();
+    _reasoningEndCtrl?.dispose();
     super.dispose();
   }
 
@@ -102,6 +107,12 @@ class StudioPresetEditorBodyState
     setState(() {
       _preset = preset;
       _loading = false;
+      _reasoningStartCtrl ??= TextEditingController(
+        text: preset?.runtime.reasoningTagStart ?? '',
+      );
+      _reasoningEndCtrl ??= TextEditingController(
+        text: preset?.runtime.reasoningTagEnd ?? '',
+      );
     });
   }
 
@@ -466,6 +477,102 @@ class StudioPresetEditorBodyState
     unawaited(_persistNow(preset.copyWith(blocks: blocks)));
   }
 
+  // ── Runtime settings ─────────────────────────────────────────────────────
+
+  void _updateReasoningTags({String? start, String? end}) {
+    final preset = _preset;
+    if (preset == null) return;
+    final runtime = preset.runtime;
+    unawaited(
+      _persistNow(
+        preset.copyWith(
+          runtime: runtime.copyWith(
+            reasoningTagStart: start ?? runtime.reasoningTagStart,
+            reasoningTagEnd: end ?? runtime.reasoningTagEnd,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRuntimeSettingsCard(StudioPreset preset) {
+    return PresetCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text(
+              'studio_reasoning_tags'.tr(),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: context.cs.onSurface,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(
+              'studio_reasoning_tags_desc'.tr(),
+              style: TextStyle(
+                fontSize: 12,
+                color: context.cs.onSurfaceVariant,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _reasoningStartCtrl,
+                    style: TextStyle(color: context.cs.onSurface),
+                    decoration: _tagInputDecoration('start tag'),
+                    onChanged: (v) => _updateReasoningTags(start: v),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _reasoningEndCtrl,
+                    style: TextStyle(color: context.cs.onSurface),
+                    decoration: _tagInputDecoration('end tag'),
+                    onChanged: (v) => _updateReasoningTags(end: v),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _tagInputDecoration(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(
+        color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+      ),
+      filled: true,
+      fillColor: Colors.white.withValues(alpha: 0.04),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: context.cs.outline),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: context.cs.outline),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: context.cs.primary),
+      ),
+    );
+  }
+
   // ── Preset-level actions ───────────────────────────────────────────────────
 
   void _showRenameDialog() {
@@ -563,6 +670,7 @@ class StudioPresetEditorBodyState
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildDashboard(preset),
+          _buildRuntimeSettingsCard(preset),
           _buildBlocksCard(preset),
           const SizedBox(height: 60),
         ],

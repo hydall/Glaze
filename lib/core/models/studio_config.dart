@@ -28,6 +28,13 @@ abstract class StudioRuntimeSettings with _$StudioRuntimeSettings {
     StudioLedgerEngine ledgerEngine,
     LedgerPromptInjectionMode? requestedLedgerPromptInjectionMode,
     String? requestedLedgerPromptInjectionAlgorithmVersion,
+
+    /// Optional override of the reasoning tags used by the agent pipeline.
+    /// When non-empty, takes priority over the API config's
+    /// `reasoningTagStart`/`reasoningTagEnd`. Empty/null falls back to the API
+    /// config, then to the built-in `ⵎ`/`</antml:thinking>` defaults.
+    String? reasoningTagStart,
+    String? reasoningTagEnd,
   }) = _StudioRuntimeSettings;
 
   factory StudioRuntimeSettings.fromJson(Map<String, dynamic> json) =>
