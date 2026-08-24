@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **128**
+Current version: **129**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -218,6 +218,8 @@ Migration history:
   metadata for safe recovery instead of deleting failed attempts.
 - v128: automatic Card Rewriter claims retain exact selected input and failure
   state; `card_evolution_writer_calls` checkpoints each restartable model stage.
+- v129: enforces one active rewrite job per session/character and makes rewrite
+  operation revisions, rewrite evidence, and LLM request captures update-immutable.
 
 ---
 

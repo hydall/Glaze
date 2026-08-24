@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/repositories/character_repo.dart';
@@ -503,7 +504,7 @@ class ManualStudioLedgerService {
     required LedgerReconciliationPlan plan,
     required LedgerRunResult result,
     String action = 'run',
-  }) {
+  }) async {
     final attempts = result.attempts.isEmpty
         ? 'none'
         : result.attempts
@@ -514,20 +515,24 @@ class ManualStudioLedgerService {
                     '${attempt.error == null ? '' : '/error=${attempt.error}'}',
               )
               .join(',');
-    return trackerRepo.upsertValue(
-      sessionId,
-      '_ledger_diag:studio_ledger_reconciliation',
-      'trigger=${trigger.id} \u2022 range=${plan.startMessageId}..${plan.endMessage.id} '
-          '\u2022 status=${result.status} \u2022 ops=${result.opsApplied} '
-          '\u2022 elapsedMs=${result.elapsedMs} \u2022 model=${result.model ?? 'unknown'} '
-          '\u2022 attempts=$attempts \u2022 action=$action \u2022 manual=1'
-          '${result.error == null ? '' : ' \u2022 error=${result.error}'}',
-      scope: 'ledger_diagnostic',
-      provenance:
-          'message=${trigger.id}|swipe=${trigger.swipeId}|'
-          'agentSwipe=${trigger.agentSwipeId}|range=${plan.startMessageId}..'
-          '${plan.endMessage.id}|action=$action|manual=1',
-    );
+    try {
+      await trackerRepo.upsertValue(
+        sessionId,
+        '_ledger_diag:studio_ledger_reconciliation',
+        'trigger=${trigger.id} \u2022 range=${plan.startMessageId}..${plan.endMessage.id} '
+            '\u2022 status=${result.status} \u2022 ops=${result.opsApplied} '
+            '\u2022 elapsedMs=${result.elapsedMs} \u2022 model=${result.model ?? 'unknown'} '
+            '\u2022 attempts=$attempts \u2022 action=$action \u2022 manual=1'
+            '${result.error == null ? '' : ' \u2022 error=${result.error}'}',
+        scope: 'ledger_diagnostic',
+        provenance:
+            'message=${trigger.id}|swipe=${trigger.swipeId}|'
+            'agentSwipe=${trigger.agentSwipeId}|range=${plan.startMessageId}..'
+            '${plan.endMessage.id}|action=$action|manual=1',
+      );
+    } catch (error) {
+      debugPrint('[StudioLedger] manual diagnostic write failed: $error');
+    }
   }
 }
 

@@ -1,8 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
-import 'package:drift/drift.dart' show Variable;
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -78,7 +77,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 128);
+      expect(version, 129);
     });
 
     test(
@@ -232,7 +231,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 128);
+        expect(version.first.read<int>('user_version'), 129);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -262,7 +261,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test(
@@ -611,7 +610,7 @@ void main() {
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -723,7 +722,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test(
@@ -833,7 +832,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -873,7 +872,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -907,7 +906,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -981,7 +980,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1324,18 +1323,18 @@ void main() {
       for (final id in ['null-a', 'null-b']) {
         await db.customStatement(
           "INSERT INTO rewrite_jobs (id, chat_session_id, character_id, status) "
-          "VALUES (?, 's', 'c', 'pending')",
-          [id],
+          "VALUES (?, 's', ?, 'pending')",
+          [id, id],
         );
       }
       await db.customStatement(
         "INSERT INTO rewrite_jobs (id, chat_session_id, character_id, request_key) "
-        "VALUES ('keyed-a', 's', 'c', 'rk')",
+        "VALUES ('keyed-a', 's', 'keyed-a', 'rk')",
       );
       await expectLater(
         db.customStatement(
           "INSERT INTO rewrite_jobs (id, chat_session_id, character_id, request_key) "
-          "VALUES ('keyed-b', 's', 'c', 'rk')",
+          "VALUES ('keyed-b', 's', 'keyed-b', 'rk')",
         ),
         throwsA(anything),
       );
@@ -1343,7 +1342,7 @@ void main() {
       // Fresh-schema status CHECKs reject out-of-domain values under direct SQL.
       for (final statement in [
         "INSERT INTO rewrite_jobs (id, chat_session_id, character_id, status) "
-            "VALUES ('bad-job-status', 's', 'c', 'unknown')",
+            "VALUES ('bad-job-status', 's', 'bad-job', 'unknown')",
         "INSERT INTO rewrite_operations (id, rewrite_job_id, chat_session_id, status) "
             "VALUES ('bad-op-status', 'null-a', 's', 'unknown')",
       ]) {
@@ -1352,7 +1351,7 @@ void main() {
       // Elegant statuses pass on both tables.
       await db.customStatement(
         "INSERT INTO rewrite_jobs (id, chat_session_id, character_id, status) "
-        "VALUES ('generating-job', 's', 'c', 'generating')",
+        "VALUES ('generating-job', 's', 'generating', 'generating')",
       );
       await db.customStatement(
         "INSERT INTO rewrite_operations (id, rewrite_job_id, chat_session_id, status) "
@@ -1433,7 +1432,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1509,18 +1508,18 @@ void main() {
       // Duplicate non-null request keys conflict; NULL keys stay distinct.
       await upgraded.customStatement(
         "INSERT INTO rewrite_jobs (id, chat_session_id, character_id, request_key) "
-        "VALUES ('keyed-a', 's', 'c', 'dup')",
+        "VALUES ('keyed-a', 's', 'keyed-a', 'dup')",
       );
       await expectLater(
         upgraded.customStatement(
           "INSERT INTO rewrite_jobs (id, chat_session_id, character_id, request_key) "
-          "VALUES ('keyed-b', 's', 'c', 'dup')",
+          "VALUES ('keyed-b', 's', 'keyed-b', 'dup')",
         ),
         throwsA(anything),
       );
       await upgraded.customStatement(
         "INSERT INTO rewrite_jobs (id, chat_session_id, character_id, status) "
-        "VALUES ('another-null-key', 's', 'c', 'pending')",
+        "VALUES ('another-null-key', 's', 'another', 'pending')",
       );
     });
 
@@ -1638,7 +1637,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1754,7 +1753,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -2418,7 +2417,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test(
@@ -2515,7 +2514,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v118 adds prompt post-processing with none for every config', () async {
@@ -2707,7 +2706,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v120 adds the ledger debug journal to an older database', () async {
@@ -2793,7 +2792,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v121 adds the session canon timeline foundation', () async {
@@ -2853,7 +2852,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v122 adds the embedding request rate limit', () async {
@@ -2892,7 +2891,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v123 raises only the legacy Studio final history limit', () async {
@@ -2944,7 +2943,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v124 and v125 add LLM capture history and linkage', () async {
@@ -3018,7 +3017,7 @@ void main() {
           'idx_llm_call_event_call_attempt',
         ]),
       );
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v125 upgrades an existing v124 request capture table', () async {
@@ -3076,7 +3075,7 @@ void main() {
         contains('call_id'),
       );
       expect(eventColumns, isNotEmpty);
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test('v126 adds immutable reconciliation effects', () async {
@@ -3127,7 +3126,7 @@ void main() {
         indexes.map((row) => row.read<String>('name')),
         contains('idx_reconciliation_effect_session_created'),
       );
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
     });
 
     test(
@@ -3205,7 +3204,7 @@ INSERT INTO card_evolution_collector_runs VALUES
         expect(row.id, 'collector');
         expect(row.status, 'claimed');
         expect(row.failureCode, isNull);
-        expect(version.read<int>('user_version'), 128);
+        expect(version.read<int>('user_version'), 129);
       },
     );
 
@@ -3297,7 +3296,59 @@ INSERT INTO card_evolution_claims VALUES
         writerIndexes.map((row) => row.read<String>('name')),
         contains('idx_card_evolution_writer_call_session_updated'),
       );
-      expect(version.read<int>('user_version'), 128);
+      expect(version.read<int>('user_version'), 129);
+    });
+
+    test('v129 adds active job and immutable audit guards', () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      await db.customSelect('SELECT 1').get();
+
+      final index = await db
+          .customSelect(
+            "SELECT name FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'idx_rewrite_job_one_active'",
+          )
+          .getSingleOrNull();
+      expect(index, isNotNull);
+      for (final triggerName in const [
+        'rewrite_operation_revisions_no_update',
+        'rewrite_evidence_rows_no_update',
+        'llm_request_capture_rows_no_update',
+      ]) {
+        final trigger = await db
+            .customSelect(
+              "SELECT name FROM sqlite_master WHERE type = 'trigger' "
+              'AND name = ?',
+              variables: [Variable.withString(triggerName)],
+            )
+            .getSingleOrNull();
+        expect(trigger, isNotNull, reason: triggerName);
+      }
+
+      await db
+          .into(db.rewriteJobs)
+          .insert(
+            RewriteJobsCompanion.insert(
+              id: 'first',
+              chatSessionId: 'session',
+              characterId: 'character',
+              status: const Value('pending'),
+            ),
+          );
+      await expectLater(
+        db
+            .into(db.rewriteJobs)
+            .insert(
+              RewriteJobsCompanion.insert(
+                id: 'second',
+                chatSessionId: 'session',
+                characterId: 'character',
+                status: const Value('generating'),
+              ),
+            ),
+        throwsA(isA<Exception>()),
+      );
     });
 
     test('v111 resolves the retired session_id_mode default', () async {

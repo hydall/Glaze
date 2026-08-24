@@ -2084,17 +2084,23 @@ class AutomatedCardEvolutionService {
     required String stage,
     required String model,
     required AuxCallOutcome outcome,
-  }) => repo.saveDebugRun(
-    sessionId: sessionId,
-    stage: stage,
-    status: outcome.status.name,
-    model: model,
-    output: outcome.text,
-    attemptsJson: jsonEncode([
-      for (final attempt in outcome.attempts) attempt.toJson(),
-    ]),
-    updatedAt: currentTimestampSeconds(),
-  );
+  }) async {
+    try {
+      await repo.saveDebugRun(
+        sessionId: sessionId,
+        stage: stage,
+        status: outcome.status.name,
+        model: model,
+        output: outcome.text,
+        attemptsJson: jsonEncode([
+          for (final attempt in outcome.attempts) attempt.toJson(),
+        ]),
+        updatedAt: currentTimestampSeconds(),
+      );
+    } catch (error) {
+      debugPrint('[CardRewriter] failed to persist model diagnostics: $error');
+    }
+  }
 
   /// Records a writer run that ended before any model call. Without this the
   /// only trace of a refused claim or an unavailable prompt snapshot is a

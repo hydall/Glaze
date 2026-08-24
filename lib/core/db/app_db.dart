@@ -83,7 +83,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 128;
+  int get schemaVersion => 129;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -111,6 +111,7 @@ class AppDatabase extends _$AppDatabase {
       await _createLorebookUseManifestIntegrityTriggers();
       await _createLedgerReconciliationImmutabilityTriggers();
       await _createCardEvolutionIntegrity();
+      await _createRewriteAuditIntegrity();
       await _createSessionCanonIntegrity();
       await _createLlmCallEventImmutabilityTrigger();
     },
@@ -2378,6 +2379,10 @@ class AppDatabase extends _$AppDatabase {
         );
         await _createCardEvolutionIntegrity();
       }
+      if (from < 129) {
+        await _normalizeDuplicateActiveRewriteJobs();
+        await _createRewriteAuditIntegrity();
+      }
     },
   );
 
@@ -2917,6 +2922,46 @@ class AppDatabase extends _$AppDatabase {
       "WHEN OLD.status = 'completed' BEGIN "
       "SELECT RAISE(ABORT, 'completed card_evolution_writer_calls are immutable'); END",
     );
+  }
+
+  Future<void> _normalizeDuplicateActiveRewriteJobs() async {
+    final active = await customSelect(
+      "SELECT id, chat_session_id, character_id FROM rewrite_jobs "
+      "WHERE status IN ('generating', 'pending') "
+      'ORDER BY chat_session_id, character_id, created_at, id',
+    ).get();
+    final retained = <String>{};
+    for (final row in active) {
+      final key =
+          '${row.read<String>('chat_session_id')}\u001f'
+          '${row.read<String>('character_id')}';
+      if (retained.add(key)) continue;
+      await customStatement(
+        "UPDATE rewrite_jobs SET status = 'cancelled', "
+        "status_reason = 'duplicateActiveJobMigrated', version = version + 1 "
+        'WHERE id = ?',
+        [row.read<String>('id')],
+      );
+    }
+  }
+
+  Future<void> _createRewriteAuditIntegrity() async {
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_rewrite_job_one_active '
+      'ON rewrite_jobs (chat_session_id, character_id) '
+      "WHERE status IN ('generating', 'pending')",
+    );
+    for (final table in const [
+      'rewrite_operation_revisions',
+      'rewrite_evidence_rows',
+      'llm_request_capture_rows',
+    ]) {
+      await customStatement(
+        'CREATE TRIGGER IF NOT EXISTS ${table}_no_update '
+        'BEFORE UPDATE ON $table BEGIN '
+        "SELECT RAISE(ABORT, '$table is immutable'); END",
+      );
+    }
   }
 
   Future<void> _createLlmCallEventImmutabilityTrigger() async {
