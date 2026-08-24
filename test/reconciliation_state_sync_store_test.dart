@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
@@ -40,6 +40,81 @@ void main() {
     final head = await LedgerReconciliationRunRepo(targetDb).getHead('session');
     expect(head?.id, sourceRuns.last.id);
     expect(head?.chainHash, sourceRuns.last.chainHash);
+  });
+
+  test('round-trips exact reconciliation effects in payload v2', () async {
+    final sourceRun = (await _appendChain(sourceDb, 1)).single;
+    final sourceRepo = LedgerReconciliationRunRepo(sourceDb);
+    final state = await sourceRepo.captureState('session');
+    await sourceRepo.recordEffect(
+      runId: sourceRun.id,
+      sessionId: 'session',
+      before: state,
+      after: state,
+      createdAt: 1,
+    );
+
+    final payload = (await sourceStore.getBySessionId('session'))!;
+    expect(payload['schemaVersion'], 2);
+    expect(payload['effects'], hasLength(1));
+
+    await targetStore.mergeBySessionId('session', payload);
+    final imported = await LedgerReconciliationRunRepo(
+      targetDb,
+    ).readEffect(sourceRun.id);
+    expect(imported, isNotNull);
+    expect(imported!.beforeStateHash, state.hash);
+    expect(
+      await LedgerReconciliationRunRepo(
+        targetDb,
+      ).validateEffect(await _storedRun(targetDb, sourceRun.id)),
+      isA<ReconciliationEffectValid>(),
+    );
+  });
+
+  test('accepts legacy payload v1 without exact effects', () async {
+    await _appendChain(sourceDb, 1);
+    final payload = (await sourceStore.getBySessionId('session'))!
+      ..['schemaVersion'] = 1
+      ..remove('effects');
+
+    await targetStore.mergeBySessionId('session', payload);
+
+    expect(
+      await targetDb.select(targetDb.ledgerReconciliationEffects).get(),
+      isEmpty,
+    );
+  });
+
+  test('rejects tampered effects atomically', () async {
+    final sourceRun = (await _appendChain(sourceDb, 1)).single;
+    final repo = LedgerReconciliationRunRepo(sourceDb);
+    final state = await repo.captureState('session');
+    await repo.recordEffect(
+      runId: sourceRun.id,
+      sessionId: 'session',
+      before: state,
+      after: state,
+      createdAt: 1,
+    );
+    final payload = (await sourceStore.getBySessionId('session'))!;
+    final effect = Map<String, dynamic>.from(
+      (payload['effects'] as List).single as Map,
+    )..['afterStateHash'] = 'tampered';
+    payload['effects'] = [effect];
+
+    await expectLater(
+      targetStore.mergeBySessionId('session', payload),
+      throwsStateError,
+    );
+    expect(
+      await targetDb.select(targetDb.ledgerReconciliationSuccessfulRuns).get(),
+      isEmpty,
+    );
+    expect(
+      await targetDb.select(targetDb.ledgerReconciliationEffects).get(),
+      isEmpty,
+    );
   });
 
   test(
@@ -515,7 +590,7 @@ void main() {
     expect(await targetStore.getBySessionId('session'), equals(before));
   });
 
-  test('observation merge is commutative and convergent', () async {
+  test('newer observation lifecycle wins and converges', () async {
     await _appendChain(sourceDb, 2);
     await _appendChain(targetDb, 2);
     await _insertObservation(
@@ -559,18 +634,16 @@ void main() {
     expect(target['observations'], equals(source['observations']));
     final observation = (target['observations'] as List).single as Map;
     expect(jsonDecode(observation['evidenceClustersJson'] as String), [
-      ['message-1'],
-      ['message-2', 'message-3'],
+      ['message-3', 'message-2'],
     ]);
     expect(jsonDecode(observation['retrievalKeysJson'] as String), [
-      'arc:alliance',
       'npc:Alice',
       'trait:trust',
     ]);
     expect(observation, containsPair('confidence', 0.8));
-    expect(observation, containsPair('firstSeenRun', 1));
+    expect(observation, containsPair('firstSeenRun', 2));
     expect(observation, containsPair('lastConfirmedRun', 5));
-    expect(observation, containsPair('status', 'consumed'));
+    expect(observation, containsPair('status', 'promoted'));
   });
 
   test('synced invalidation clears derived lane without deleting claims or '

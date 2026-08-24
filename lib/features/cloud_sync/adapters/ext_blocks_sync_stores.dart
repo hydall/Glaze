@@ -565,6 +565,15 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       final message = a.causeMessageId.compareTo(b.causeMessageId);
       return message != 0 ? message : a.reason.compareTo(b.reason);
     });
+    final runRepo = LedgerReconciliationRunRepo(_db);
+    final effects = <LedgerReconciliationEffectRow>[];
+    for (final run in runs) {
+      final validation = await runRepo.validateEffect(run);
+      if (validation is ReconciliationEffectValid) {
+        final effect = await runRepo.readEffect(run.id);
+        if (effect != null) effects.add(effect);
+      }
+    }
     final manifests = await (_db.select(
       _db.lorebookUseManifests,
     )..where((row) => row.sessionId.equals(sessionId))).get();
@@ -609,9 +618,10 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
     claims.sort((a, b) => a.inputHash.compareTo(b.inputHash));
     return {
       '__reconciliationState': true,
-      'schemaVersion': 1,
+      'schemaVersion': 2,
       'sessionId': sessionId,
       'runs': runs.map((row) => row.toJson()).toList(),
+      'effects': effects.map((row) => row.toJson()).toList(),
       'invalidations': invalidations.map(_invalidationForSync).toList(),
       'manifests': manifests.map((row) => row.toJson()).toList(),
       'manifestEntries': manifestEntries.map((row) => row.toJson()).toList(),
@@ -627,8 +637,9 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
     String sessionId,
     Map<String, dynamic> data,
   ) async {
+    final schemaVersion = data['schemaVersion'];
     if (data['__reconciliationState'] != true ||
-        data['schemaVersion'] != 1 ||
+        (schemaVersion != 1 && schemaVersion != 2) ||
         data['sessionId'] != sessionId) {
       throw const FormatException('Invalid reconciliation sync payload');
     }
@@ -649,6 +660,13 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       }
       await _mergeSourceRows(sessionId, data);
       final importedComplete = await _mergeRuns(sessionId, normalized.runs);
+      if (importedComplete) {
+        await _mergeEffects(
+          sessionId,
+          schemaVersion == 2 ? _maps(data['effects']) : const [],
+          normalized.idMap,
+        );
+      }
       await _mergeInvalidations(
         sessionId,
         normalized.invalidations,
@@ -767,6 +785,7 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
     return _NormalizedReconciliationPayload(
       runs: normalized,
       invalidations: remappedInvalidations,
+      idMap: idMap,
       identitiesChanged: changed,
     );
   }
@@ -871,10 +890,16 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       _db.cardEvolutionObservations,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(
+      _db.cardEvolutionWriterCalls,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
       _db.cardEvolutionClaims,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(
       _db.ledgerReconciliationRunInvalidations,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.ledgerReconciliationEffects,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(
       _db.ledgerReconciliationSuccessfulRuns,
@@ -980,6 +1005,41 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       }
     }
     return true;
+  }
+
+  Future<void> _mergeEffects(
+    String sessionId,
+    List<Map<String, dynamic>> incoming,
+    Map<String, String> runIdMap,
+  ) async {
+    final runs = {
+      for (final run in await (_db.select(
+        _db.ledgerReconciliationSuccessfulRuns,
+      )..where((row) => row.sessionId.equals(sessionId))).get())
+        run.id: run,
+    };
+    for (final json in incoming) {
+      final original = LedgerReconciliationEffectRow.fromJson(json);
+      _requireSession(sessionId, original.sessionId);
+      final mappedRunId = runIdMap[original.runId];
+      if (mappedRunId == null || !runs.containsKey(mappedRunId)) {
+        throw StateError('Reconciliation effect references an unknown run');
+      }
+      final row = original.copyWith(runId: mappedRunId);
+      final existing = await (_db.select(
+        _db.ledgerReconciliationEffects,
+      )..where((table) => table.runId.equals(mappedRunId))).getSingleOrNull();
+      _requireExact(existing, row);
+      if (existing == null) {
+        await _db.into(_db.ledgerReconciliationEffects).insert(row);
+      }
+      final validation = await LedgerReconciliationRunRepo(
+        _db,
+      ).validateEffect(runs[mappedRunId]!);
+      if (validation is! ReconciliationEffectValid) {
+        throw StateError('Invalid reconciliation effect payload');
+      }
+    }
   }
 
   Future<void> _mergeInvalidations(
@@ -1116,6 +1176,34 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
             );
         continue;
       }
+      if (cloud.firstSeenRun != local.firstSeenRun) {
+        if (cloud.firstSeenRun > local.firstSeenRun) {
+          await (_db.update(
+            _db.cardEvolutionObservations,
+          )..where((row) => row.id.equals(local.id))).write(
+            CardEvolutionObservationsCompanion(
+              characterId: Value(cloud.characterId),
+              runOrdinal: Value(cloud.runOrdinal),
+              semanticScopeKey: Value(cloud.semanticScopeKey),
+              observedChange: Value(cloud.observedChange),
+              canonicalClaim: Value(cloud.canonicalClaim),
+              evidenceMessageIds: Value(cloud.evidenceMessageIds),
+              evidenceClustersJson: Value(cloud.evidenceClustersJson),
+              retrievalKeysJson: Value(cloud.retrievalKeysJson),
+              targetKind: Value(cloud.targetKind),
+              cardFieldPath: Value(cloud.cardFieldPath),
+              lorebookEntryId: Value(cloud.lorebookEntryId),
+              confidence: Value(cloud.confidence),
+              status: Value(cloud.status),
+              firstSeenRun: Value(cloud.firstSeenRun),
+              repeatCount: Value(cloud.repeatCount),
+              lastConfirmedRun: Value(cloud.lastConfirmedRun),
+              updatedAt: Value(cloud.updatedAt),
+            ),
+          );
+        }
+        continue;
+      }
       if (local.characterId != cloud.characterId ||
           local.targetKind != cloud.targetKind ||
           local.cardFieldPath != cloud.cardFieldPath ||
@@ -1146,11 +1234,7 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
                 : cloud.runOrdinal,
           ),
           repeatCount: Value(clusters.length),
-          firstSeenRun: Value(
-            local.firstSeenRun < cloud.firstSeenRun
-                ? local.firstSeenRun
-                : cloud.firstSeenRun,
-          ),
+          firstSeenRun: Value(local.firstSeenRun),
           lastConfirmedRun: Value(
             _maxNullable(local.lastConfirmedRun, cloud.lastConfirmedRun),
           ),
@@ -1384,9 +1468,10 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
 
 Map<String, dynamic> _emptyPayload(String sessionId) => {
   '__reconciliationState': true,
-  'schemaVersion': 1,
+  'schemaVersion': 2,
   'sessionId': sessionId,
   'runs': <dynamic>[],
+  'effects': <dynamic>[],
   'invalidations': <dynamic>[],
   'manifests': <dynamic>[],
   'manifestEntries': <dynamic>[],
@@ -1411,10 +1496,12 @@ final class _NormalizedReconciliationPayload {
   const _NormalizedReconciliationPayload({
     required this.runs,
     required this.invalidations,
+    required this.idMap,
     required this.identitiesChanged,
   });
 
   final List<Map<String, dynamic>> runs;
   final List<Map<String, dynamic>> invalidations;
+  final Map<String, String> idMap;
   final bool identitiesChanged;
 }

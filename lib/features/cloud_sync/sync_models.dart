@@ -108,7 +108,8 @@ class SyncManifest {
   ///   9 — added `local_storage` singleton for global PipelineSettings.
   ///  11 — added `character_knowledge` (atomic facts + session baseline).
   ///  12 — added merge-only `reconciliation_state` provenance.
-  static const int currentVersion = 12;
+  ///  13 — added immutable reconciliation effects to reconciliation state.
+  static const int currentVersion = 13;
 
   final int version;
   final String deviceId;
