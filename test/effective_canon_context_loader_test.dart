@@ -110,6 +110,16 @@ void main() {
     },
   );
 
+  test('read-only load models initial lineage without persisting it', () async {
+    final context = await loader.loadReadOnly(
+      sessionId: 's',
+      sourceCharacter: _character('one'),
+    );
+
+    expect(context.effectiveRevision.number, 1);
+    expect(await revisions.getForCharacter('c'), isEmpty);
+  });
+
   test(
     'follow, pinned, ask, and unmappable baseline policies fail safely',
     () async {

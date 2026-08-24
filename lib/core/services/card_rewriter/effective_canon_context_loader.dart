@@ -97,6 +97,17 @@ class EffectiveCanonContextLoader {
     reconcile: true,
   );
 
+  /// Builds the current effective canon without reconciling or persisting a
+  /// source revision. Intended for diagnostics and freshness checks.
+  Future<EffectiveCanonContext> loadReadOnly({
+    required String sessionId,
+    required Character sourceCharacter,
+  }) async => _load(
+    sourceCharacter: sourceCharacter,
+    sessionId: sessionId,
+    reconcile: false,
+  );
+
   /// Read-only freshness check. Unlike [load], this never reconciles source
   /// revisions or writes a baseline/revision row.
   Future<bool> isStillCurrentReadOnly({

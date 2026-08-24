@@ -66,7 +66,10 @@ class _AgenticOperationsLogDialogState
           ]
         : <Widget>[
             _visited.contains(0)
-                ? AgenticReconcilerTab(sessionId: sessionId)
+                ? AgenticReconcilerTab(
+                    sessionId: sessionId,
+                    characterId: widget.characterId,
+                  )
                 : const SizedBox.shrink(),
             _visited.contains(1)
                 ? AgenticCollectorTab(sessionId: sessionId)

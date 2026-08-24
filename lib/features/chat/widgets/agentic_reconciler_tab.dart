@@ -11,11 +11,17 @@ import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../services/manual_studio_ledger_service.dart';
 import '../services/reconciler_view_service.dart';
+import 'current_ledger_injection_preview.dart';
 
 class AgenticReconcilerTab extends ConsumerStatefulWidget {
-  const AgenticReconcilerTab({super.key, required this.sessionId});
+  const AgenticReconcilerTab({
+    super.key,
+    required this.sessionId,
+    this.characterId,
+  });
 
   final String sessionId;
+  final String? characterId;
 
   @override
   ConsumerState<AgenticReconcilerTab> createState() =>
@@ -196,6 +202,11 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                   ],
                 ),
               ),
+            ),
+            const SizedBox(height: 14),
+            CurrentLedgerInjectionPreviewCard(
+              sessionId: widget.sessionId,
+              characterId: widget.characterId,
             ),
             const SizedBox(height: 14),
             Text('Commits', style: Theme.of(context).textTheme.titleSmall),
