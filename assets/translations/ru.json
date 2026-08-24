@@ -2454,6 +2454,8 @@
   "agent_ops_status_consumed": "Использовано",
   "agent_ops_status_active": "Активно",
   "agent_ops_snapshot_count": "Снимков: {count}",
+  "agent_ops_snapshot_message": "Сообщение {number}",
+  "agent_ops_snapshot_range": "Сообщения {start}–{end}",
   "agent_ops_reload": "Перезагрузить",
   "agent_ops_snapshots_empty": "Для этой сессии пока нет снимков.\n\nКаждый запуск Ledger сохраняет снимок состояния Studio Ledger для сообщения. Подтверждённые снимки служат принятой базой следующей генерации, а предварительные ожидают следующего хода пользователя. Этот экран доступен только для чтения; коммиты сверки и перегенерация находятся на вкладке «Сверка».",
   "agent_ops_snapshot_committed": "подтверждён",

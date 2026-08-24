@@ -7,6 +7,7 @@ import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/studio_preset_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_snapshot_repo.dart';
@@ -34,6 +35,7 @@ void main() {
   late TrackerSnapshotRepo snapshotRepo;
   late CharacterRepo characterRepo;
   late LedgerReconciliationRunRepo reconciliationRunRepo;
+  late LedgerReconciliationCheckpointRepo reconciliationCheckpointRepo;
   late _FakeLedgerExecutor ledger;
   late PipelineSettings pipeline;
   late ApiConfig activeApi;
@@ -51,6 +53,7 @@ void main() {
     snapshotRepo = TrackerSnapshotRepo(db);
     characterRepo = CharacterRepo(db);
     reconciliationRunRepo = LedgerReconciliationRunRepo(db);
+    reconciliationCheckpointRepo = LedgerReconciliationCheckpointRepo(db);
     ledger = _FakeLedgerExecutor();
     pipeline = const PipelineSettings(
       cleaner: CleanerSettings(postCleanerModel: 'snapshot-model'),
@@ -87,6 +90,7 @@ void main() {
       presetRepo: presetRepo,
       characterRepo: characterRepo,
       reconciliationRunRepo: reconciliationRunRepo,
+      reconciliationCheckpointRepo: reconciliationCheckpointRepo,
       ledger: ledger,
       loadApiConfigs: loadApiConfigs,
       readActiveApiConfig: () => activeApi,
@@ -124,6 +128,14 @@ void main() {
       ),
     );
   }
+
+  List<ChatMessage> reconciliationMessages() => [
+    assistant1,
+    for (var i = 2; i <= 7; i++) ...[
+      ChatMessage(id: 'u$i', role: 'user', content: 'User $i'),
+      ChatMessage(id: 'a$i', role: 'assistant', content: 'Assistant $i'),
+    ],
+  ];
 
   test('rerun succeeds with one consistent fresh config snapshot', () async {
     await putSession('session');
@@ -200,14 +212,27 @@ void main() {
   test(
     'reconciliation selects the latest committed visible endpoint',
     () async {
-      await putSession('session');
-      await commit('session', assistant1, 1);
-      await commit('session', assistant2, 2);
+      final messages = reconciliationMessages();
+      await putSession('session', messages: messages);
+      await commit('session', messages[10], 1);
 
       final outcome = await createService().reconcile('session');
 
-      expect(outcome.target.id, 'a2');
-      expect(ledger.lastPlan?.endMessage.id, 'a2');
+      expect(outcome.target.id, 'a6');
+      expect(ledger.lastPlan?.endMessage.id, 'a6');
+      expect(ledger.lastPlan?.messageIds, [
+        'a1',
+        'u2',
+        'a2',
+        'u3',
+        'a3',
+        'u4',
+        'a4',
+        'u5',
+        'a5',
+        'u6',
+        'a6',
+      ]);
       expect(ledger.reconcileCalls, 1);
     },
   );
@@ -221,7 +246,7 @@ void main() {
         isA<StateError>().having(
           (error) => error.message,
           'message',
-          'No committed Ledger snapshot to reconcile',
+          'No batch of five committed Ledger ranges is due',
         ),
       ),
     );
@@ -229,8 +254,9 @@ void main() {
   });
 
   test('disabled Ledger preset blocks manual reconciliation', () async {
-    await putSession('session');
-    await commit('session', assistant2, 2);
+    final messages = reconciliationMessages();
+    await putSession('session', messages: messages);
+    await commit('session', messages[10], 2);
     await presetRepo.put(
       const StudioPreset(id: 'preset', agentEnabled: {'ledger': false}),
     );
@@ -286,9 +312,10 @@ void main() {
   });
 
   test('diagnostic writes remain isolated to the requested session', () async {
-    await putSession('session');
+    final messages = reconciliationMessages();
+    await putSession('session', messages: messages);
     await putSession('other');
-    await commit('session', assistant2, 1);
+    await commit('session', messages[10], 1);
     await trackerRepo.upsertValue(
       'other',
       '_ledger_diag:studio_ledger_reconciliation',
@@ -305,7 +332,7 @@ void main() {
       'other',
       '_ledger_diag:studio_ledger_reconciliation',
     );
-    expect(targetDiagnostic?.value, contains('trigger=a2'));
+    expect(targetDiagnostic?.value, contains('trigger=a6'));
     expect(targetDiagnostic?.value, contains('status=ok'));
     expect(targetDiagnostic?.value, contains('manual=1'));
     expect(otherDiagnostic?.value, 'other diagnostic');
@@ -343,21 +370,16 @@ void main() {
   test(
     'reconciliation writes nothing when its endpoint changes while awaiting',
     () async {
-      await putSession('session');
-      await commit('session', assistant1, 1);
-      await commit('session', assistant2, 2);
+      final messages = reconciliationMessages();
+      await putSession('session', messages: messages);
+      await commit('session', messages[10], 1);
       final gate = Completer<void>();
       ledger.beforeReconcileComplete = () => gate.future;
       final result = createService().reconcile('session');
       await ledger.reconcileStarted.future;
-      await putSession(
-        'session',
-        messages: const [
-          assistant1,
-          user2,
-          ChatMessage(id: 'a2', role: 'assistant', content: 'Changed'),
-        ],
-      );
+      final changed = [...messages];
+      changed[10] = changed[10].copyWith(content: 'Changed');
+      await putSession('session', messages: changed);
       gate.complete();
 
       expect((await result).result.status, 'aborted');

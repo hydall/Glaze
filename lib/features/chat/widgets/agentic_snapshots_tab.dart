@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/tracker.dart';
-import '../../../core/models/tracker_snapshot.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../services/agentic_snapshots_service.dart';
@@ -18,7 +17,7 @@ class AgenticSnapshotsTab extends ConsumerStatefulWidget {
 }
 
 class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
-  List<TrackerSnapshot>? _snapshots;
+  List<AgenticSnapshotView>? _snapshots;
   bool _loaded = false;
   bool _didLoad = false;
 
@@ -59,7 +58,7 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
     if (!_loaded) {
       return const Center(child: GlazeSpinner());
     }
-    final snapshots = _snapshots ?? const <TrackerSnapshot>[];
+    final snapshots = _snapshots ?? const <AgenticSnapshotView>[];
     return Column(
       children: [
         if (snapshots.isNotEmpty)
@@ -110,7 +109,7 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                   separatorBuilder: (_, _) =>
                       const Divider(height: 1, indent: 12, endIndent: 12),
                   itemBuilder: (context, i) =>
-                      _SnapshotTile(snapshot: snapshots[i]),
+                      _SnapshotTile(view: snapshots[i]),
                 ),
         ),
       ],
@@ -119,14 +118,15 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
 }
 
 class _SnapshotTile extends ConsumerWidget {
-  final TrackerSnapshot snapshot;
+  final AgenticSnapshotView view;
 
-  const _SnapshotTile({required this.snapshot});
+  const _SnapshotTile({required this.view});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cs = context.cs;
     final tt = Theme.of(context).textTheme;
+    final snapshot = view.snapshot;
     final trackers = snapshot.trackers;
     return ExpansionTile(
       dense: true,
@@ -140,7 +140,18 @@ class _SnapshotTile extends ConsumerWidget {
         children: [
           Flexible(
             child: Text(
-              snapshot.messageId,
+              view.endMessageNumber == null
+                  ? snapshot.messageId
+                  : view.startMessageNumber == view.endMessageNumber
+                  ? 'agent_ops_snapshot_message'.tr(
+                      namedArgs: {'number': '${view.endMessageNumber}'},
+                    )
+                  : 'agent_ops_snapshot_range'.tr(
+                      namedArgs: {
+                        'start': '${view.startMessageNumber}',
+                        'end': '${view.endMessageNumber}',
+                      },
+                    ),
               style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
               overflow: TextOverflow.ellipsis,
             ),

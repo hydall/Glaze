@@ -49,13 +49,11 @@ class LedgerReconciliationPlanner {
   /// first `assistant-user-assistant` chunk; later chunks are `user-assistant`.
   /// The next turn is only the acceptance trigger and is never reviewed.
   static const acceptedChunksPerRun = 5;
-  static const maxMessages = 20;
-
   const LedgerReconciliationPlanner();
 
   /// Builds an on-demand review ending at an explicitly accepted assistant
-  /// turn. Unlike [plan], this does not apply the six-turn cadence or
-  /// checkpoint deduplication.
+  /// turn. Unlike [plan], this does not apply trigger cadence or checkpoint
+  /// deduplication, but still returns no more than five complete Ledger chunks.
   LedgerReconciliationPlan? planForEndpoint({
     required List<ChatMessage> messages,
     required String endAssistantMessageId,
@@ -67,7 +65,10 @@ class LedgerReconciliationPlanner {
     final chunks = _parseCompletedChunks(messages.take(endIndex + 1));
     if (chunks == null || chunks.isEmpty) return null;
     if (chunks.last.endAssistant.id != endAssistantMessageId) return null;
-    return _buildPlan(chunks: chunks, mandatoryStart: chunks.length - 1);
+    final start = chunks.length > acceptedChunksPerRun
+        ? chunks.length - acceptedChunksPerRun
+        : 0;
+    return _buildPlan(chunks: chunks, start: start);
   }
 
   LedgerReconciliationPlan? plan({
@@ -106,7 +107,7 @@ class LedgerReconciliationPlanner {
     final mandatoryEnd = firstUnprocessed + acceptedChunksPerRun;
     final plan = _buildPlan(
       chunks: chunks.sublist(0, mandatoryEnd),
-      mandatoryStart: firstUnprocessed,
+      start: firstUnprocessed,
     );
     if (plan == null) return null;
     final end = plan.endMessage;
@@ -122,23 +123,10 @@ class LedgerReconciliationPlanner {
 
   LedgerReconciliationPlan? _buildPlan({
     required List<_LedgerReviewChunk> chunks,
-    required int mandatoryStart,
+    required int start,
   }) {
-    if (chunks.isEmpty ||
-        mandatoryStart < 0 ||
-        mandatoryStart >= chunks.length) {
+    if (chunks.isEmpty || start < 0 || start >= chunks.length) {
       return null;
-    }
-    var start = mandatoryStart;
-    var count = chunks
-        .skip(mandatoryStart)
-        .fold<int>(0, (sum, chunk) => sum + chunk.messages.length);
-    if (count > maxMessages) return null;
-    while (start > 0) {
-      final older = chunks[start - 1];
-      if (count + older.messages.length > maxMessages) break;
-      start--;
-      count += older.messages.length;
     }
     final range = chunks
         .sublist(start)

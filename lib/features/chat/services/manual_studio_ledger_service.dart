@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/db/repositories/character_repo.dart';
 import '../../../core/db/repositories/chat_repo.dart';
 import '../../../core/db/repositories/ledger_reconciliation_run_repo.dart';
+import '../../../core/db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import '../../../core/db/repositories/studio_preset_repo.dart';
 import '../../../core/db/repositories/tracker_repo.dart';
 import '../../../core/db/repositories/tracker_snapshot_repo.dart';
@@ -34,6 +35,9 @@ final manualStudioLedgerServiceProvider = Provider<ManualStudioLedgerService>((
     presetRepo: ref.watch(studioPresetRepoProvider),
     characterRepo: ref.watch(characterRepoProvider),
     reconciliationRunRepo: ref.watch(ledgerReconciliationRunRepoProvider),
+    reconciliationCheckpointRepo: ref.watch(
+      ledgerReconciliationCheckpointRepoProvider,
+    ),
     ledger: DefaultStudioLedgerExecutor(ref.watch(studioLedgerServiceProvider)),
     loadApiConfigs: () async {
       await ref.read(apiListProvider.future);
@@ -190,6 +194,7 @@ class ManualStudioLedgerService {
     required this.presetRepo,
     required this.characterRepo,
     required this.reconciliationRunRepo,
+    required this.reconciliationCheckpointRepo,
     required this.ledger,
     required this.loadApiConfigs,
     required this.readActiveApiConfig,
@@ -204,6 +209,7 @@ class ManualStudioLedgerService {
   final StudioPresetRepo presetRepo;
   final CharacterRepo characterRepo;
   final LedgerReconciliationRunRepo reconciliationRunRepo;
+  final LedgerReconciliationCheckpointRepo reconciliationCheckpointRepo;
   final StudioLedgerExecutor ledger;
   final Future<List<ApiConfig>> Function() loadApiConfigs;
   final ApiConfig? Function() readActiveApiConfig;
@@ -280,34 +286,36 @@ class ManualStudioLedgerService {
     if (session == null) throw StateError('Session not found');
     final turnConfig = await turnConfigFuture;
     _requireLedgerEnabled(turnConfig);
-    final snapshots = await snapshotRepo.getBySessionId(sessionId);
-    final committedAnchors = snapshots
-        .where((snapshot) => snapshot.committed)
-        .map(
-          (snapshot) =>
-              '${snapshot.messageId}\u001f${snapshot.swipeId}\u001f'
-              '${snapshot.agentSwipeId}',
-        )
-        .toSet();
-    final endpoint = session.messages.reversed.where((message) {
-      final anchor =
-          '${message.id}\u001f${message.swipeId}\u001f${message.agentSwipeId}';
+    final trigger = session.messages.reversed.where((message) {
       return message.role == 'assistant' &&
           !message.isError &&
           !message.isTyping &&
           !message.isHidden &&
-          message.content.trim().isNotEmpty &&
-          committedAnchors.contains(anchor);
+          message.content.trim().isNotEmpty;
     }).firstOrNull;
-    if (endpoint == null) {
-      throw StateError('No committed Ledger snapshot to reconcile');
+    if (trigger == null) {
+      throw StateError('No assistant turn can trigger reconciliation');
     }
-    final plan = const LedgerReconciliationPlanner().planForEndpoint(
+    final checkpoint = await reconciliationCheckpointRepo.get(sessionId);
+    final previousHead = await reconciliationRunRepo.getHead(sessionId);
+    final plan = const LedgerReconciliationPlanner().plan(
       messages: session.messages,
-      endAssistantMessageId: endpoint.id,
+      currentAssistantMessageId: trigger.id,
+      checkpoint: checkpoint,
+      previousEndMessageId: previousHead?.endMessageId,
     );
     if (plan == null) {
-      throw StateError('No reviewable messages end at the committed snapshot');
+      throw StateError('No batch of five committed Ledger ranges is due');
+    }
+    final endpoint = plan.endMessage;
+    final endpointSnapshot = await snapshotRepo.getByAnchor(
+      sessionId: sessionId,
+      messageId: endpoint.id,
+      swipeId: endpoint.swipeId,
+      agentSwipeId: endpoint.agentSwipeId,
+    );
+    if (endpointSnapshot?.committed != true) {
+      throw StateError('The reconciliation endpoint is not committed');
     }
 
     final ledgerConfig = turnConfig.resolveLedgerConfig(

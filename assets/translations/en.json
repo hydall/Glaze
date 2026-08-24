@@ -2425,6 +2425,8 @@
   "agent_ops_status_consumed": "Consumed",
   "agent_ops_status_active": "Active",
   "agent_ops_snapshot_count": "{count} snapshots",
+  "agent_ops_snapshot_message": "Message {number}",
+  "agent_ops_snapshot_range": "Messages {start}–{end}",
   "agent_ops_reload": "Reload",
   "agent_ops_snapshots_empty": "No snapshots recorded yet for this session.\n\nEach ledger run writes a per-message snapshot of the Studio Ledger state. Committed snapshots are the accepted base for the next generation; tentative ones are pending the next user turn. This view is read-only; reconciliation commits and regeneration live in the Reconciler tab.",
   "agent_ops_snapshot_committed": "committed",
