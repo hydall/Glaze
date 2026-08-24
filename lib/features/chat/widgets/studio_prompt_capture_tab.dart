@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/db/app_db.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_filter_chip_bar.dart';
@@ -11,7 +12,7 @@ import '../../../shared/widgets/list_controls.dart';
 import '../chat_provider.dart';
 import '../services/prompt_capture_view_service.dart';
 
-enum _CaptureViewMode { messages, raw, metadata }
+enum _CaptureViewMode { messages, response, raw, metadata }
 
 class StudioPromptCaptureTab extends ConsumerStatefulWidget {
   const StudioPromptCaptureTab({super.key, required this.charId});
@@ -106,6 +107,7 @@ class _StudioPromptCaptureTabState
             options: _CaptureViewMode.values,
             labelBuilder: (mode) => switch (mode) {
               _CaptureViewMode.messages => 'Messages',
+              _CaptureViewMode.response => 'Response',
               _CaptureViewMode.raw => 'Raw request',
               _CaptureViewMode.metadata => 'Metadata',
             },
@@ -134,6 +136,8 @@ class _StudioPromptCaptureTabState
               _MessageCard(message: message),
         if (_mode == _CaptureViewMode.raw)
           _CodeCard(text: selected.formattedJson),
+        if (_mode == _CaptureViewMode.response)
+          _ResponsePanel(capture: selected),
         if (_mode == _CaptureViewMode.metadata) ...[
           _MetadataCard(capture: selected),
           const SizedBox(height: 10),
@@ -177,6 +181,7 @@ class _StudioPromptCaptureTabState
           )
           .join('\n\n'),
     _CaptureViewMode.raw => selected.formattedJson,
+    _CaptureViewMode.response => _responseText(selected),
     _CaptureViewMode.metadata => _metadataText(selected),
   };
 
@@ -195,12 +200,28 @@ class _StudioPromptCaptureTabState
     if (item.row.messageId != null) 'Message: ${item.row.messageId}',
     if (item.row.pipelineRunId != null)
       'Pipeline run: ${item.row.pipelineRunId}',
+    if (item.row.callId != null) 'Call: ${item.row.callId}',
     if (item.row.logicalCallId != null)
       'Logical call: ${item.row.logicalCallId}',
     if (item.row.agentId != null) 'Agent: ${item.row.agentId}',
     if (item.row.stageOrdinal != null)
       'Stage ordinal: ${item.row.stageOrdinal}',
     if (item.row.attempt != null) 'Attempt: ${item.row.attempt}',
+  ].join('\n');
+
+  static String _responseText(PromptCaptureView item) {
+    if (item.callEvents.isEmpty) return 'No linked outcome is available.';
+    return item.callEvents.map(_callEventText).join('\n\n');
+  }
+
+  static String _callEventText(LlmCallEventRow event) => <String>[
+    '${event.kind} · attempt ${event.attempt ?? '-'}',
+    if (event.status != null) 'Status: ${event.status}',
+    if (event.responseText != null) event.responseText!,
+    if (event.error != null) 'Error: ${event.error}',
+    if (event.parserName != null) 'Parser: ${event.parserName}',
+    if (event.parserCode != null) 'Verdict: ${event.parserCode}',
+    if (event.parserDetail != null) 'Detail: ${event.parserDetail}',
   ].join('\n');
 
   static IconData _stageIcon(String? stage) {
@@ -212,6 +233,34 @@ class _StudioPromptCaptureTabState
       return Icons.cleaning_services_outlined;
     }
     return Icons.data_object_rounded;
+  }
+}
+
+class _ResponsePanel extends StatelessWidget {
+  const _ResponsePanel({required this.capture});
+
+  final PromptCaptureView capture;
+
+  @override
+  Widget build(BuildContext context) {
+    if (capture.row.callId == null) {
+      return const _InfoCard(
+        text: 'This legacy capture has no stable call identity.',
+      );
+    }
+    if (capture.callEvents.isEmpty) {
+      return const _InfoCard(
+        text: 'No linked response or parser verdict is available.',
+      );
+    }
+    return Column(
+      children: [
+        for (final event in capture.callEvents) ...[
+          _CodeCard(text: _StudioPromptCaptureTabState._callEventText(event)),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
   }
 }
 
