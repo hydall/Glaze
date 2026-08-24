@@ -182,15 +182,18 @@ class _CardRewriterStudioSheetState
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Enabled'),
-            subtitle: const Text(
-              'Collects Card Rewriter observations from successful Ledger reconciliation runs. Ledger and reconciliation are controlled by the active Studio preset.',
+          Material(
+            type: MaterialType.transparency,
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Enabled'),
+              subtitle: const Text(
+                'Collects Card Rewriter observations from successful Ledger reconciliation runs. Ledger and reconciliation are controlled by the active Studio preset.',
+              ),
+              value: settings.enabled,
+              onChanged: (enabled) =>
+                  _save((value) => value.copyWith(enabled: enabled)),
             ),
-            value: settings.enabled,
-            onChanged: (enabled) =>
-                _save((value) => value.copyWith(enabled: enabled)),
           ),
           if (!ledgerEnabled) ...[
             Container(
@@ -220,19 +223,22 @@ class _CardRewriterStudioSheetState
             ),
             const SizedBox(height: 8),
           ],
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Rewrite injected lorebook entries'),
-            subtitle: const Text(
-              'Uses a separate model call only for lorebook entries injected into this session. Turn this off when you do not use lorebooks.',
+          Material(
+            type: MaterialType.transparency,
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Rewrite injected lorebook entries'),
+              subtitle: const Text(
+                'Uses a separate model call only for lorebook entries injected into this session. Turn this off when you do not use lorebooks.',
+              ),
+              value: settings.lorebookEvolutionEnabled,
+              onChanged: settings.enabled
+                  ? (enabled) => _save(
+                      (value) =>
+                          value.copyWith(lorebookEvolutionEnabled: enabled),
+                    )
+                  : null,
             ),
-            value: settings.lorebookEvolutionEnabled,
-            onChanged: settings.enabled
-                ? (enabled) => _save(
-                    (value) =>
-                        value.copyWith(lorebookEvolutionEnabled: enabled),
-                  )
-                : null,
           ),
           const SizedBox(height: 8),
           TextFormField(
@@ -389,18 +395,21 @@ class _CardRewriterStudioSheetState
               return Column(
                 children: [
                   for (final job in automated)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.compare_arrows_outlined),
-                      title: Text(_statusLabel(job.status)),
-                      subtitle: Text(
-                        formatRelativeTimeFromSeconds(job.updatedAt),
+                    Material(
+                      type: MaterialType.transparency,
+                      child: ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.compare_arrows_outlined),
+                        title: Text(_statusLabel(job.status)),
+                        subtitle: Text(
+                          formatRelativeTimeFromSeconds(job.updatedAt),
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(
+                          context,
+                          rootNavigator: true,
+                        ).pop('/character/${widget.charId}/rewrite/${job.id}'),
                       ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(
-                        context,
-                        rootNavigator: true,
-                      ).pop('/character/${widget.charId}/rewrite/${job.id}'),
                     ),
                 ],
               );

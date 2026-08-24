@@ -132,7 +132,12 @@ class _AgenticOperationsLogDialogState
               activeIndex: _activeIndex,
               onChanged: _selectTab,
             ),
-      body: body,
+      body: Builder(
+        builder: (context) => Padding(
+          padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
+          child: body,
+        ),
+      ),
     );
   }
 }

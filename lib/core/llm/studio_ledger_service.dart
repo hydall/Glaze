@@ -682,7 +682,14 @@ class StudioLedgerService {
           return;
         }
         if (append is! ReconciliationRunAppended) {
-          throw StateError('Unable to append reconciliation run: $append');
+          final reason = switch (append) {
+            ReconciliationRunMalformed(:final reason) => reason,
+            ReconciliationRunChainGap(:final reason) => reason,
+            ReconciliationRunConcurrencyConflict(:final reason) => reason,
+            ReconciliationRunConflict(:final reason) => reason,
+            _ => append.runtimeType.toString(),
+          };
+          throw StateError('Unable to append reconciliation run: $reason');
         }
         await _trackerRepo.replaceLedgerState(
           sessionId,
