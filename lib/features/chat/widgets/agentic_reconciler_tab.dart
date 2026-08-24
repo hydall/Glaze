@@ -11,6 +11,7 @@ import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../services/current_ledger_injection_preview_service.dart';
 import '../services/manual_studio_ledger_service.dart';
 import '../services/reconciler_view_service.dart';
 import 'current_ledger_injection_preview.dart';
@@ -36,8 +37,16 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
   String? _regeneratingRunId;
 
   Future<void> _refresh() async {
+    final previewKey = (
+      sessionId: widget.sessionId,
+      characterId: widget.characterId,
+    );
     ref.invalidate(reconcilerViewProvider(widget.sessionId));
-    await ref.read(reconcilerViewProvider(widget.sessionId).future);
+    ref.invalidate(currentLedgerInjectionPreviewProvider(previewKey));
+    await Future.wait([
+      ref.read(reconcilerViewProvider(widget.sessionId).future),
+      ref.read(currentLedgerInjectionPreviewProvider(previewKey).future),
+    ]);
   }
 
   Future<ChatMessage?> _latestAssistant() async {
