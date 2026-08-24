@@ -4,11 +4,13 @@ import 'package:dio/dio.dart';
 
 import '../models/pipeline_settings.dart';
 import '../models/extra_request_parameter.dart';
+import '../utils/id_generator.dart';
 import 'aux_retry_runner.dart';
 import 'idle_timeout_guard.dart';
 import 'transport/chat_transport.dart';
 import 'transport/chat_transport_request.dart';
 import 'transport/llm_capture_context.dart';
+import 'transport/llm_call_event.dart';
 import 'transport/transport_factory.dart';
 
 typedef AuxTransportPicker = ChatTransport Function(String protocol);
@@ -154,8 +156,19 @@ class AuxLlmClient {
       throw Exception('Aux API not configured');
     }
     final runner = AuxRetryRunner(policy: retryPolicy);
+    final identifiedContext = _identifiedContext(captureContext);
     return runner.run(
       cancelToken: cancelToken,
+      captureContext: identifiedContext,
+      onAttemptComplete: identifiedContext == null
+          ? null
+          : (attempt, responseText) => LlmCallEventCapture.record(
+              LlmCallEvent.transport(
+                context: identifiedContext,
+                attempt: attempt,
+                responseText: responseText,
+              ),
+            ),
       attemptWithCancelToken: (i, attemptCancelToken) => _callOnce(
         config: config,
         prompt: prompt,
@@ -166,7 +179,7 @@ class AuxLlmClient {
         omitReasoning: omitReasoning,
         omitReasoningEffort: omitReasoningEffort,
         requestReasoning: requestReasoning,
-        captureContext: captureContext?.withAttempt(i + 1),
+        captureContext: identifiedContext?.withAttempt(i + 1),
       ),
     );
   }
@@ -202,8 +215,19 @@ class AuxLlmClient {
       throw Exception('Aux API not configured');
     }
     final runner = AuxRetryRunner(policy: retryPolicy);
+    final identifiedContext = _identifiedContext(captureContext);
     return runner.run(
       cancelToken: cancelToken,
+      captureContext: identifiedContext,
+      onAttemptComplete: identifiedContext == null
+          ? null
+          : (attempt, responseText) => LlmCallEventCapture.record(
+              LlmCallEvent.transport(
+                context: identifiedContext,
+                attempt: attempt,
+                responseText: responseText,
+              ),
+            ),
       attemptWithCancelToken: (i, attemptCancelToken) => _callStream(
         config: config,
         prompt: prompt,
@@ -215,8 +239,16 @@ class AuxLlmClient {
         omitReasoning: omitReasoning,
         omitReasoningEffort: omitReasoningEffort,
         requestReasoning: requestReasoning,
-        captureContext: captureContext?.withAttempt(i + 1),
+        captureContext: identifiedContext?.withAttempt(i + 1),
       ),
+    );
+  }
+
+  static LlmCaptureContext? _identifiedContext(LlmCaptureContext? context) {
+    if (context == null) return null;
+    return context.withCallIdentity(
+      pipelineRunId: context.pipelineRunId ?? 'llm-pipeline-${generateId()}',
+      callId: context.callId ?? 'llm-call-${generateId()}',
     );
   }
 

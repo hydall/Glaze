@@ -27,6 +27,7 @@ import '../utils/id_generator.dart';
 import '../utils/cast_helpers.dart';
 import '../services/card_rewriter/effective_canon_context_loader.dart';
 import 'aux_llm_client.dart';
+import 'aux_retry_runner.dart';
 import 'ledger/ledger_op_applier.dart';
 import 'knowledge_cleanup_parser.dart';
 import 'json_repair.dart';
@@ -36,6 +37,7 @@ import 'studio_ledger_export_parser.dart';
 import 'studio_ledger_prompt.dart';
 import 'studio_ledger_reconciliation.dart';
 import 'transport/llm_capture_context.dart';
+import 'transport/llm_call_event.dart';
 
 export 'ledger/ledger_op_applier.dart';
 
@@ -363,6 +365,7 @@ class StudioLedgerService {
         responseText,
         focalUserName: macroCtx?.userName ?? '',
       );
+      await _recordLedgerParserVerdict(outcome, parsed);
       trace.recordFirstResponse(
         model: config.model,
         responseText: responseText,
@@ -449,6 +452,7 @@ class StudioLedgerService {
             repairedText,
             focalUserName: macroCtx?.userName ?? '',
           );
+          await _recordLedgerParserVerdict(repair, repaired);
           trace.recordRepairResponse(
             responseText: repairedText,
             parsed: repaired,
@@ -1077,6 +1081,7 @@ class StudioLedgerService {
         effectiveResponse,
         focalUserName: macroCtx?.userName ?? '',
       );
+      await _recordLedgerParserVerdict(outcome, parseResult);
       trace.recordFirstResponse(
         model: config.model,
         responseText: rawResponse,
@@ -1158,6 +1163,7 @@ class StudioLedgerService {
           effectiveResponse,
           focalUserName: macroCtx?.userName ?? '',
         );
+        await _recordLedgerParserVerdict(repair, parseResult);
         trace.recordRepairResponse(
           responseText: effectiveResponse,
           parsed: parseResult,
@@ -1876,6 +1882,27 @@ UNTRUSTED_INPUT_BASE64_END''';
     KnowledgeCleanupOpType.renameEntity =>
       'cleanup:rename:${op.fromKey}:${op.toKey}:${op.canonicalName}',
   };
+
+  static Future<void> _recordLedgerParserVerdict(
+    AuxCallOutcome outcome,
+    LedgerParseResult parsed,
+  ) {
+    final context = outcome.selectedCaptureContext;
+    if (context == null) return Future<void>.value();
+    return LlmCallEventCapture.record(
+      LlmCallEvent.parserVerdict(
+        context: context,
+        parserName: 'StudioLedgerExportParser',
+        accepted: parsed.export != null && !parsed.wasRejected,
+        code: parsed.failure.name,
+        detail: parsed.rejectionReason,
+        payload: {
+          'rejectedOps': parsed.rejectedOps,
+          'hasExport': parsed.hasExport,
+        },
+      ),
+    );
+  }
 }
 
 /// Mutable notes gathered while a Ledger run executes.

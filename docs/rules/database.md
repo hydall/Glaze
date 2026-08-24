@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **124**
+Current version: **125**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -210,6 +210,8 @@ Migration history:
   DEFAULT 50 for the process-wide embedding request rate limit.
 - v123: raised the default Studio final history limit from 30 to 50
 - v124: added bounded local `llm_request_capture_rows` diagnostics
+- v125: added stable call IDs to request captures and append-only
+  `llm_call_event_rows` for transport outcomes and parser verdicts
 
 ---
 

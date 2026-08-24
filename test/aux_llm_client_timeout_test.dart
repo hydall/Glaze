@@ -5,6 +5,7 @@ import 'package:glaze_flutter/core/llm/aux_retry_runner.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_call_event.dart';
 
 const _config = AuxApiConfig(
   endpoint: 'https://example.test',
@@ -49,7 +50,16 @@ class _FakeTransport implements ChatTransport {
   }) async => const [];
 }
 
+class _CallEventSink implements LlmCallEventSink {
+  final events = <LlmCallEvent>[];
+
+  @override
+  void recordCallEvent(LlmCallEvent event) => events.add(event);
+}
+
 void main() {
+  tearDown(() => LlmCallEventCapture.sink = null);
+
   group('AuxLlmClient attempt transport lifetime', () {
     test(
       'idle timeout cancels and drains before retry; late completion ignored',
@@ -217,6 +227,8 @@ void main() {
 
     test('capture context tracks individual retry attempts', () async {
       final contexts = <LlmCaptureContext?>[];
+      final sink = _CallEventSink();
+      LlmCallEventCapture.sink = sink;
       var starts = 0;
       final transport = _FakeTransport(({
         required request,
@@ -266,6 +278,14 @@ void main() {
         'card.writer',
         'card.writer',
       ]);
+      expect(contexts.map((context) => context?.callId).toSet(), hasLength(1));
+      expect(outcome.captureContext?.callId, contexts.first?.callId);
+      expect(sink.events.map((event) => event.kind), [
+        'transport_failed',
+        'transport_succeeded',
+      ]);
+      expect(sink.events.map((event) => event.context.attempt), [1, 2]);
+      expect(sink.events.last.responseText, 'ok');
     });
   });
 

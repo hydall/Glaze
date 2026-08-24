@@ -12,6 +12,7 @@ import '../../llm/card_rewrite_slot_resolver.dart';
 import '../../llm/aux_retry_runner.dart';
 import '../../llm/aux_llm_client.dart';
 import '../../llm/transport/llm_capture_context.dart';
+import '../../llm/transport/llm_call_event.dart';
 import '../../models/agent_operation_record.dart';
 import '../../models/card_evolution_observation.dart';
 import '../../utils/id_generator.dart';
@@ -324,6 +325,13 @@ class AutomatedCardEvolutionService {
                 allowedFields: allowedCardFields,
               )
             : _scopeAllowlistFailure(parsedCardOperations, cardContext);
+        await _recordParserVerdict(
+          cardOutcome,
+          parserName: 'CardRewriteOperationParser.evolutionBatch',
+          accepted: parseFailure == null,
+          code: parseFailure == null ? 'accepted' : 'invalidOutput',
+          detail: parseFailure,
+        );
         if (parseFailure != null) {
           final leaseRenewed = await repo.renewClaimLease(
             claimId: claim.row.id,
@@ -389,6 +397,13 @@ class AutomatedCardEvolutionService {
                   allowedFields: allowedCardFields,
                 )
               : _scopeAllowlistFailure(parsedCardOperations, cardContext);
+          await _recordParserVerdict(
+            repairOutcome,
+            parserName: 'CardRewriteOperationParser.evolutionBatch',
+            accepted: parseFailure == null,
+            code: parseFailure == null ? 'accepted' : 'invalidOutput',
+            detail: parseFailure,
+          );
         }
         await _saveDebugOutcome(
           sessionId: sessionId,
@@ -463,6 +478,12 @@ class AutomatedCardEvolutionService {
             CardRewriteOperationParser.parseLorebookEvolutionBatch(
               lorebookOutcome.text!,
             );
+        await _recordParserVerdict(
+          lorebookOutcome,
+          parserName: 'CardRewriteOperationParser.lorebookEvolutionBatch',
+          accepted: lorebookOperations != null,
+          code: lorebookOperations == null ? 'invalidOutput' : 'accepted',
+        );
         if (lorebookOperations == null) {
           return const CardEvolutionFinalizeOutcome('invalidLorebookOutput');
         }
@@ -1164,7 +1185,28 @@ class AutomatedCardEvolutionService {
     ],
     totalElapsedMs: first.totalElapsedMs + second.totalElapsedMs,
     lastError: second.lastError,
+    captureContext: second.captureContext,
   );
+
+  static Future<void> _recordParserVerdict(
+    AuxCallOutcome outcome, {
+    required String parserName,
+    required bool accepted,
+    required String code,
+    String? detail,
+  }) {
+    final context = outcome.selectedCaptureContext;
+    if (context == null) return Future<void>.value();
+    return LlmCallEventCapture.record(
+      LlmCallEvent.parserVerdict(
+        context: context,
+        parserName: parserName,
+        accepted: accepted,
+        code: code,
+        detail: detail,
+      ),
+    );
+  }
 
   static bool _isCardScopeTarget(String key) =>
       !key.contains('/') && CardRewriteScope.tryParse(key) != null;

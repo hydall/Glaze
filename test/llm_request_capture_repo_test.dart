@@ -1,12 +1,15 @@
 import 'dart:convert';
 
+import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/llm_request_capture_repo.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_call_event.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_request_capture.dart';
+import 'package:glaze_flutter/core/models/agent_operation_record.dart';
 
 LlmRequestCaptureEvent _event({
   required int sequence,
@@ -28,6 +31,8 @@ LlmRequestCaptureEvent _event({
       stage: stage,
       sessionId: sessionId,
       logicalCallId: 'call-$sequence',
+      pipelineRunId: 'pipeline-$sequence',
+      callId: 'call-$sequence',
       attempt: sequence,
     ),
   ),
@@ -116,5 +121,51 @@ void main() {
 
     expect(await repo.newestForSession('session'), isEmpty);
     expect(await repo.newestForSession('other'), hasLength(1));
+  });
+
+  test('links immutable transport and parser events by call id', () async {
+    const context = LlmCaptureContext(
+      stage: 'ledger.reconciliation',
+      sessionId: 'session',
+      pipelineRunId: 'pipeline-1',
+      callId: 'call-1',
+      logicalCallId: 'range-1',
+    );
+    await repo.recordCallEvent(
+      LlmCallEvent.transport(
+        context: context,
+        attempt: const AgentOperationAttempt(
+          attempt: 1,
+          statusCode: 200,
+          status: 'ok',
+          startedAtMs: 1,
+          elapsedMs: 2,
+        ),
+        responseText: '{"export":[]}',
+      ),
+    );
+    await repo.recordCallEvent(
+      LlmCallEvent.parserVerdict(
+        context: context.withAttempt(1),
+        parserName: 'StudioLedgerExportParser',
+        accepted: true,
+        code: 'accepted',
+      ),
+    );
+
+    final rows = await repo.callEvents('call-1');
+    expect(rows.map((row) => row.kind), [
+      'transport_succeeded',
+      'parser_accepted',
+    ]);
+    expect(rows.first.responseHash, isNotEmpty);
+    expect(rows.last.parserCode, 'accepted');
+
+    expect(
+      () => db
+          .update(db.llmCallEventRows)
+          .write(const LlmCallEventRowsCompanion(status: Value('changed'))),
+      throwsA(anything),
+    );
   });
 }

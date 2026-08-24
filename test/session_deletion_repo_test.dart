@@ -37,6 +37,7 @@ const _sessionTables = <(String, String)>[
   ('ledger_debug_runs', 'session_id'),
   ('card_evolution_debug_runs', 'session_id'),
   ('llm_request_capture_rows', 'session_id'),
+  ('llm_call_event_rows', 'session_id'),
 ];
 
 void main() {
@@ -243,6 +244,7 @@ Future<void> _seedSession(AppDatabase db, String sessionId) async {
     "INSERT INTO ledger_debug_runs (id, session_id, kind, status, created_at) VALUES ('ledger_debug_$id', '$sessionId', 'normal', 'ok', 1)",
     "INSERT INTO card_evolution_debug_runs (session_id, stage, status, model, output, attempts_json, updated_at) VALUES ('$sessionId', 'card', 'ok', 'model', 'output', '[]', 1)",
     "INSERT INTO llm_request_capture_rows (sequence, created_at_ms, session_id, stage, truncated, event_json) VALUES (1, 1, '$sessionId', 'studio.final', 0, '{}')",
+    "INSERT INTO llm_call_event_rows (id, created_at_ms, session_id, pipeline_run_id, call_id, stage, kind) VALUES ('event-$sessionId', 1, '$sessionId', 'pipeline-$sessionId', 'call-$sessionId', 'studio.final', 'transport_succeeded')",
     "INSERT INTO embeddings (entry_id, source_type, source_id) VALUES ('embedding_$id', 'chat_message', '$sessionId')",
     "INSERT INTO embeddings (entry_id, source_type, source_id) VALUES ('memory_embedding_$id', 'memory_entry', 'memorybook_char_${id}_$sessionId')",
     "INSERT INTO embeddings (entry_id, source_type, source_id) VALUES ('lorebook_embedding_$id', 'lorebook_entry', 'lorebook_$id')",
@@ -334,6 +336,7 @@ Future<void> _expectClearGroups(AppDatabase db, String sessionId) async {
     ('ledger_debug_runs', 'session_id'),
     ('card_evolution_debug_runs', 'session_id'),
     ('llm_request_capture_rows', 'session_id'),
+    ('llm_call_event_rows', 'session_id'),
   ];
   for (final (table, column) in deletedTables) {
     final count = await _count(db, table, '$column = ?', sessionId);

@@ -50,6 +50,7 @@ import '../db/repositories/session_deletion_repo.dart';
 import '../db/repositories/character_deletion_repo.dart';
 import '../models/memory_book.dart';
 import '../llm/transport/llm_request_capture.dart';
+import '../llm/transport/llm_call_event.dart';
 import '../services/character_importer.dart';
 import '../services/image_storage_service.dart';
 import '../services/migration_service.dart';
@@ -75,6 +76,9 @@ final appDbProvider = Provider<AppDatabase>((ref) {
     if (repo != null && identical(LlmRequestCapture.sink, repo)) {
       LlmRequestCapture.sink = null;
     }
+    if (repo != null && identical(LlmCallEventCapture.sink, repo)) {
+      LlmCallEventCapture.sink = null;
+    }
     unawaited((repo?.close() ?? Future<void>.value()).whenComplete(db.close));
   });
   return db;
@@ -89,9 +93,13 @@ final llmRequestCaptureInstallationProvider = Provider<void>((ref) {
   final repo = ref.watch(llmRequestCaptureRepoProvider);
   _captureRepos[repo.db] = repo;
   LlmRequestCapture.sink = repo;
+  LlmCallEventCapture.sink = repo;
   ref.onDispose(() {
     if (identical(LlmRequestCapture.sink, repo)) {
       LlmRequestCapture.sink = null;
+    }
+    if (identical(LlmCallEventCapture.sink, repo)) {
+      LlmCallEventCapture.sink = null;
     }
   });
 });

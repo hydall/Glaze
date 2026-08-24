@@ -8,6 +8,8 @@ final class LlmCaptureContext {
     this.sessionId,
     this.messageId,
     this.pipelineRunId,
+    this.callId,
+    this.parentCallId,
     this.logicalCallId,
     this.relatedArtifactId,
     this.agentId,
@@ -19,6 +21,8 @@ final class LlmCaptureContext {
   final String? sessionId;
   final String? messageId;
   final String? pipelineRunId;
+  final String? callId;
+  final String? parentCallId;
   final String? logicalCallId;
   final String? relatedArtifactId;
   final String? agentId;
@@ -30,6 +34,8 @@ final class LlmCaptureContext {
     sessionId: sessionId,
     messageId: messageId,
     pipelineRunId: pipelineRunId,
+    callId: callId,
+    parentCallId: parentCallId,
     logicalCallId: logicalCallId,
     relatedArtifactId: relatedArtifactId,
     agentId: agentId,
@@ -42,10 +48,29 @@ final class LlmCaptureContext {
     if (sessionId != null) 'sessionId': sessionId,
     if (messageId != null) 'messageId': messageId,
     if (pipelineRunId != null) 'pipelineRunId': pipelineRunId,
+    if (callId != null) 'callId': callId,
+    if (parentCallId != null) 'parentCallId': parentCallId,
     if (logicalCallId != null) 'logicalCallId': logicalCallId,
     if (relatedArtifactId != null) 'relatedArtifactId': relatedArtifactId,
     if (agentId != null) 'agentId': agentId,
     if (stageOrdinal != null) 'stageOrdinal': stageOrdinal,
     if (attempt != null) 'attempt': attempt,
   };
+
+  LlmCaptureContext withCallIdentity({
+    required String pipelineRunId,
+    required String callId,
+  }) => LlmCaptureContext(
+    stage: stage,
+    sessionId: sessionId,
+    messageId: messageId,
+    pipelineRunId: pipelineRunId,
+    callId: callId,
+    parentCallId: parentCallId,
+    logicalCallId: logicalCallId,
+    relatedArtifactId: relatedArtifactId,
+    agentId: agentId,
+    stageOrdinal: stageOrdinal,
+    attempt: attempt,
+  );
 }

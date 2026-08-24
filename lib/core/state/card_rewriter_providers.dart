@@ -86,6 +86,7 @@ final automatedCardEvolutionServiceProvider =
               required temperature,
               required timeoutMs,
               cancelToken,
+              captureContext,
             }) => const AuxLlmClient().callOnceWithLog(
               config: config,
               prompt: prompt,
@@ -93,6 +94,7 @@ final automatedCardEvolutionServiceProvider =
               temperature: temperature,
               timeoutMs: timeoutMs,
               cancelToken: cancelToken,
+              captureContext: captureContext,
             ),
       );
       ref.onDispose(service.dispose);

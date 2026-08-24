@@ -1298,6 +1298,7 @@ class LedgerDebugRuns extends Table {
   columns: {#sessionId, #stage, #createdAtMs},
 )
 @TableIndex(name: 'idx_llm_request_capture_created', columns: {#createdAtMs})
+@TableIndex(name: 'idx_llm_request_capture_call', columns: {#callId})
 class LlmRequestCaptureRows extends Table {
   @override
   String get tableName => 'llm_request_capture_rows';
@@ -1309,6 +1310,7 @@ class LlmRequestCaptureRows extends Table {
   TextColumn get stage => text().nullable()();
   TextColumn get messageId => text().nullable()();
   TextColumn get pipelineRunId => text().nullable()();
+  TextColumn get callId => text().nullable()();
   TextColumn get logicalCallId => text().nullable()();
   TextColumn get relatedArtifactId => text().nullable()();
   TextColumn get agentId => text().nullable()();
@@ -1317,6 +1319,55 @@ class LlmRequestCaptureRows extends Table {
   TextColumn get protocol => text().nullable()();
   BoolColumn get truncated => boolean()();
   TextColumn get eventJson => text()();
+}
+
+/// Append-only transport and parser outcomes linked to request captures by
+/// stable orchestration-owned call identity.
+@DataClassName('LlmCallEventRow')
+@TableIndex(
+  name: 'idx_llm_call_event_session_created',
+  columns: {#sessionId, #createdAtMs},
+)
+@TableIndex(
+  name: 'idx_llm_call_event_call_attempt',
+  columns: {#callId, #attempt},
+)
+class LlmCallEventRows extends Table {
+  @override
+  String get tableName => 'llm_call_event_rows';
+
+  TextColumn get id => text()();
+  IntColumn get createdAtMs => integer()();
+  TextColumn get sessionId => text().nullable()();
+  TextColumn get pipelineRunId => text()();
+  TextColumn get callId => text()();
+  TextColumn get parentCallId => text().nullable()();
+  TextColumn get stage => text()();
+  IntColumn get stageOrdinal => integer().nullable()();
+  IntColumn get attempt => integer().nullable()();
+  TextColumn get relatedArtifactId => text().nullable()();
+  TextColumn get kind => text()();
+  TextColumn get status => text().nullable()();
+  IntColumn get statusCode => integer().nullable()();
+  TextColumn get responseText => text().nullable()();
+  TextColumn get responseHash => text().nullable()();
+  TextColumn get error => text().nullable()();
+  TextColumn get parserName => text().nullable()();
+  TextColumn get parserCode => text().nullable()();
+  TextColumn get parserDetail => text().nullable()();
+  TextColumn get payloadJson => text().withDefault(const Constant('{}'))();
+  BoolColumn get truncated => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (id <> '' AND pipeline_run_id <> '' AND call_id <> '' "
+        "AND stage <> '' AND kind IN ('transport_succeeded', "
+        "'transport_failed', 'parser_accepted', 'parser_rejected', "
+        "'result_selected', 'pipeline_completed', 'pipeline_failed'))",
+  ];
 }
 
 /// Latest raw writer result retained per session and writer stage for Card

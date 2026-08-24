@@ -12,6 +12,7 @@ import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
 import 'package:glaze_flutter/core/llm/aux_retry_runner.dart';
 import 'package:glaze_flutter/core/llm/card_rewrite_slot_resolver.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_call_event.dart';
 import 'package:glaze_flutter/core/models/agent_operation_record.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewrite_operation_parser.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewrite_prompt_builder.dart';
@@ -434,6 +435,18 @@ class ManualRewriteService {
         outcome.text!,
         expectedField: field,
       );
+      final parserContext = outcome.selectedCaptureContext;
+      if (parserContext != null) {
+        await LlmCallEventCapture.record(
+          LlmCallEvent.parserVerdict(
+            context: parserContext,
+            parserName: 'CardRewriteOperationParser',
+            accepted: parsed.snapshot != null,
+            code: parsed.rejection?.name ?? 'accepted',
+            detail: parsed.detail,
+          ),
+        );
+      }
       final snapshot = parsed.snapshot;
       if (snapshot == null) {
         // The parser rejects empty patch lists (`emptyPatches`), so it never

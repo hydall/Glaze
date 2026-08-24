@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/agent_operation_record.dart';
+import 'transport/llm_capture_context.dart';
 
 /// Outcome of a retried auxiliary LLM call. Carries the final text result (when
 /// successful) plus the per-attempt log so callers can record it in the
@@ -31,15 +32,25 @@ class AuxCallOutcome {
   /// Null when the call succeeded or was cancelled before any attempt ran.
   final Object? lastError;
 
+  /// Stable diagnostic identity shared by every retry attempt in this call.
+  final LlmCaptureContext? captureContext;
+
   const AuxCallOutcome({
     required this.status,
     this.text,
     this.attempts = const [],
     this.totalElapsedMs = 0,
     this.lastError,
+    this.captureContext,
   });
 
   bool get isOk => status == AgentOperationStatus.ok;
+
+  LlmCaptureContext? get selectedCaptureContext {
+    final context = captureContext;
+    if (context == null || attempts.isEmpty) return context;
+    return context.withAttempt(attempts.last.attempt);
+  }
 }
 
 /// Retry policy for [AuxRetryRunner]. Default: 3 attempts, 1s/2s/4s
@@ -103,6 +114,12 @@ class AuxRetryRunner {
     Future<String> Function(int attempt, CancelToken cancelToken)?
     attemptWithCancelToken,
     CancelToken? cancelToken,
+    FutureOr<void> Function(
+      AgentOperationAttempt attempt,
+      String? responseText,
+    )?
+    onAttemptComplete,
+    LlmCaptureContext? captureContext,
   }) async {
     if ((attempt == null) == (attemptWithCancelToken == null)) {
       throw ArgumentError('Provide exactly one attempt callback');
@@ -117,6 +134,7 @@ class AuxRetryRunner {
           AgentOperationStatus.aborted,
           attemptsLog,
           sw.elapsedMilliseconds,
+          captureContext: captureContext,
         );
       }
       final delay = policy.delayBefore(i);
@@ -133,6 +151,7 @@ class AuxRetryRunner {
             AgentOperationStatus.aborted,
             attemptsLog,
             sw.elapsedMilliseconds,
+            captureContext: captureContext,
           );
         }
         if (cancelToken?.isCancelled ?? false) {
@@ -141,6 +160,7 @@ class AuxRetryRunner {
             AgentOperationStatus.aborted,
             attemptsLog,
             sw.elapsedMilliseconds,
+            captureContext: captureContext,
           );
         }
       }
@@ -165,28 +185,39 @@ class AuxRetryRunner {
             ? await attemptWithCancelToken(i, attemptCancelToken)
             : await attempt!(i);
         attemptSw.stop();
-        attemptsLog.add(
-          AgentOperationAttempt(
-            attempt: i + 1,
-            statusCode: 200,
-            status: 'ok',
-            startedAtMs: attemptStartedAtMs,
-            elapsedMs: attemptSw.elapsedMilliseconds,
-          ),
+        final loggedAttempt = AgentOperationAttempt(
+          attempt: i + 1,
+          statusCode: 200,
+          status: 'ok',
+          startedAtMs: attemptStartedAtMs,
+          elapsedMs: attemptSw.elapsedMilliseconds,
         );
-        return _finishOk(text, attemptsLog, sw.elapsedMilliseconds);
+        attemptsLog.add(loggedAttempt);
+        await _notifyAttempt(onAttemptComplete, loggedAttempt, text);
+        return _finishOk(
+          text,
+          attemptsLog,
+          sw.elapsedMilliseconds,
+          captureContext: captureContext,
+        );
       } catch (e) {
         attemptSw.stop();
         lastError = e;
-        attemptsLog.add(
-          _logError(i, e, attemptStartedAtMs, attemptSw.elapsedMilliseconds),
+        final loggedAttempt = _logError(
+          i,
+          e,
+          attemptStartedAtMs,
+          attemptSw.elapsedMilliseconds,
         );
+        attemptsLog.add(loggedAttempt);
+        await _notifyAttempt(onAttemptComplete, loggedAttempt, null);
         if (cancelToken?.isCancelled ?? false) {
           return _finish(
             AgentOperationStatus.aborted,
             attemptsLog,
             sw.elapsedMilliseconds,
             lastError: e,
+            captureContext: captureContext,
           );
         }
         if (!policy.shouldRetry(e, i)) {
@@ -195,6 +226,7 @@ class AuxRetryRunner {
             attemptsLog,
             sw.elapsedMilliseconds,
             lastError: e,
+            captureContext: captureContext,
           );
         }
       }
@@ -204,19 +236,22 @@ class AuxRetryRunner {
       attemptsLog,
       sw.elapsedMilliseconds,
       lastError: lastError,
+      captureContext: captureContext,
     );
   }
 
   static AuxCallOutcome _finishOk(
     String text,
     List<AgentOperationAttempt> attempts,
-    int totalMs,
-  ) {
+    int totalMs, {
+    LlmCaptureContext? captureContext,
+  }) {
     return AuxCallOutcome(
       status: AgentOperationStatus.ok,
       text: text,
       attempts: List.unmodifiable(attempts),
       totalElapsedMs: totalMs,
+      captureContext: captureContext,
     );
   }
 
@@ -225,13 +260,32 @@ class AuxRetryRunner {
     List<AgentOperationAttempt> attempts,
     int totalMs, {
     Object? lastError,
+    LlmCaptureContext? captureContext,
   }) {
     return AuxCallOutcome(
       status: status,
       attempts: List.unmodifiable(attempts),
       totalElapsedMs: totalMs,
       lastError: lastError,
+      captureContext: captureContext,
     );
+  }
+
+  static Future<void> _notifyAttempt(
+    FutureOr<void> Function(
+      AgentOperationAttempt attempt,
+      String? responseText,
+    )?
+    callback,
+    AgentOperationAttempt attempt,
+    String? responseText,
+  ) async {
+    if (callback == null) return;
+    try {
+      await callback(attempt, responseText);
+    } catch (error) {
+      debugPrint('[AuxRetry] attempt diagnostic failed: $error');
+    }
   }
 
   static AgentOperationStatus _statusFor(Object error) {

@@ -56,6 +56,7 @@ part 'app_db.g.dart';
     LedgerReconciliationCursors,
     LedgerDebugRuns,
     LlmRequestCaptureRows,
+    LlmCallEventRows,
     CardEvolutionClaims,
     CardEvolutionProposalRuns,
     CardEvolutionDebugRuns,
@@ -80,7 +81,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 124;
+  int get schemaVersion => 125;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -109,6 +110,7 @@ class AppDatabase extends _$AppDatabase {
       await _createLedgerReconciliationImmutabilityTriggers();
       await _createCardEvolutionIntegrity();
       await _createSessionCanonIntegrity();
+      await _createLlmCallEventImmutabilityTrigger();
     },
     onUpgrade: (Migrator m, int from, int to) async {
       if (from < 2) {
@@ -2270,6 +2272,33 @@ class AppDatabase extends _$AppDatabase {
           'ON llm_request_capture_rows (created_at_ms)',
         );
       }
+      if (from < 125) {
+        final captureColumns = await customSelect(
+          "PRAGMA table_info('llm_request_capture_rows')",
+        ).get();
+        if (!captureColumns.any(
+          (column) => column.read<String>('name') == 'call_id',
+        )) {
+          await m.addColumn(
+            llmRequestCaptureRows,
+            llmRequestCaptureRows.callId,
+          );
+        }
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_llm_request_capture_call '
+          'ON llm_request_capture_rows (call_id)',
+        );
+        await m.createTable(llmCallEventRows);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_llm_call_event_session_created '
+          'ON llm_call_event_rows (session_id, created_at_ms)',
+        );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_llm_call_event_call_attempt '
+          'ON llm_call_event_rows (call_id, attempt)',
+        );
+        await _createLlmCallEventImmutabilityTrigger();
+      }
     },
   );
 
@@ -2801,6 +2830,14 @@ class AppDatabase extends _$AppDatabase {
       'CREATE TRIGGER IF NOT EXISTS card_evolution_proposal_runs_no_update '
       'BEFORE UPDATE ON card_evolution_proposal_runs BEGIN '
       "SELECT RAISE(ABORT, 'card_evolution_proposal_runs is immutable'); END",
+    );
+  }
+
+  Future<void> _createLlmCallEventImmutabilityTrigger() async {
+    await customStatement(
+      'CREATE TRIGGER IF NOT EXISTS llm_call_event_rows_no_update '
+      'BEFORE UPDATE ON llm_call_event_rows BEGIN '
+      "SELECT RAISE(ABORT, 'llm_call_event_rows is immutable'); END",
     );
   }
 
