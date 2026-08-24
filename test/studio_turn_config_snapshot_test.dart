@@ -531,4 +531,26 @@ void main() {
       expect(snapshot.pipelineSettings.cleaner.postCleanerEnabled, isTrue);
     },
   );
+
+  test('Ledger toggle is owned by the active Studio preset', () {
+    StudioTurnConfigSnapshot snapshot(StudioPreset? preset) =>
+        StudioTurnConfigSnapshot(
+          config: preset == null
+              ? null
+              : const StudioConfig(sessionId: 'session', enabled: true),
+          preset: preset,
+          pipelineSettings: const PipelineSettings(),
+          apiConfigs: const [],
+          activeApiConfig: null,
+        );
+
+    expect(snapshot(const StudioPreset(id: 'default')).ledgerEnabled, isTrue);
+    expect(
+      snapshot(
+        const StudioPreset(id: 'disabled', agentEnabled: {'ledger': false}),
+      ).ledgerEnabled,
+      isFalse,
+    );
+    expect(snapshot(null).ledgerEnabled, isFalse);
+  });
 }

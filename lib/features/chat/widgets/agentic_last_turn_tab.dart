@@ -6,6 +6,7 @@ import '../../../core/models/agent_operation_record.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/tracker.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
@@ -37,6 +38,9 @@ class _AgenticLastTurnTabState extends ConsumerState<AgenticLastTurnTab> {
       );
     }
     final state = ref.watch(agentOperationsLogProvider);
+    final preset = ref.watch(studioPresetProvider).value;
+    final ledgerEnabled =
+        preset != null && preset.agentEnabled['ledger'] != false;
     return FutureBuilder<ChatMessage?>(
       future: _latestAssistant(sessionId),
       builder: (context, snapshot) {
@@ -75,6 +79,7 @@ class _AgenticLastTurnTabState extends ConsumerState<AgenticLastTurnTab> {
                       FilledButton.tonalIcon(
                         onPressed:
                             last == null ||
+                                !ledgerEnabled ||
                                 _runningLedger ||
                                 _runningReconciliation
                             ? null
@@ -91,6 +96,7 @@ class _AgenticLastTurnTabState extends ConsumerState<AgenticLastTurnTab> {
                       FilledButton.icon(
                         onPressed:
                             last == null ||
+                                !ledgerEnabled ||
                                 _runningLedger ||
                                 _runningReconciliation
                             ? null

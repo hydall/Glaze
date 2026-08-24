@@ -11,6 +11,7 @@ import '../../core/llm/model_fetcher.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/card_rewriter_settings.dart';
 import '../../core/state/card_rewriter_providers.dart';
+import '../../core/state/active_studio_preset_provider.dart';
 import '../../core/state/pipeline_settings_provider.dart';
 import '../../shared/utils/time_formatter.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -169,6 +170,9 @@ class _CardRewriterStudioSheetState
     }.toList()..sort();
     final configured = settings.apiConfigId.isNotEmpty && config != null;
     final jobs = ref.watch(cardRewriteJobsBySessionProvider(widget.sessionId));
+    final studioPreset = ref.watch(studioPresetProvider).value;
+    final ledgerEnabled =
+        studioPreset != null && studioPreset.agentEnabled['ledger'] != false;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
@@ -180,12 +184,40 @@ class _CardRewriterStudioSheetState
             contentPadding: EdgeInsets.zero,
             title: const Text('Enabled'),
             subtitle: const Text(
-              'Runs periodic Ledger reconciliation and automatic Card Rewriter collection. Per-turn Ledger extraction stays enabled either way.',
+              'Collects Card Rewriter observations from successful Ledger reconciliation runs. Ledger and reconciliation are controlled by the active Studio preset.',
             ),
             value: settings.enabled,
             onChanged: (enabled) =>
                 _save((value) => value.copyWith(enabled: enabled)),
           ),
+          if (!ledgerEnabled) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: Theme.of(context).colorScheme.onErrorContainer,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Card Rewriter does not work without Studio Ledger and its reconciliation runs. Enable Ledger in the active Studio preset first.',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onErrorContainer,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Rewrite injected lorebook entries'),
@@ -271,7 +303,8 @@ class _CardRewriterStudioSheetState
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
-            onPressed: settings.enabled && configured && !_running
+            onPressed:
+                settings.enabled && ledgerEnabled && configured && !_running
                 ? () => _run(settings)
                 : null,
             icon: _running

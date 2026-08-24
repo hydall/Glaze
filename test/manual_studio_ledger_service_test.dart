@@ -173,6 +173,25 @@ void main() {
     expect(ledger.lastEngine, StudioLedgerEngine.currentReconciled);
   });
 
+  test('disabled Ledger preset blocks manual rerun', () async {
+    await putSession('session');
+    await presetRepo.put(
+      const StudioPreset(id: 'preset', agentEnabled: {'ledger': false}),
+    );
+
+    await expectLater(
+      createService().rerun(sessionId: 'session', target: assistant2),
+      throwsA(
+        isA<ManualStudioLedgerConfigException>().having(
+          (error) => error.toString(),
+          'message',
+          contains('disabled in the active preset'),
+        ),
+      ),
+    );
+    expect(ledger.runCalls, 0);
+  });
+
   test(
     'reconciliation selects the latest committed visible endpoint',
     () async {
@@ -200,6 +219,20 @@ void main() {
           'No committed Ledger snapshot to reconcile',
         ),
       ),
+    );
+    expect(ledger.reconcileCalls, 0);
+  });
+
+  test('disabled Ledger preset blocks manual reconciliation', () async {
+    await putSession('session');
+    await commit('session', assistant2, 2);
+    await presetRepo.put(
+      const StudioPreset(id: 'preset', agentEnabled: {'ledger': false}),
+    );
+
+    await expectLater(
+      createService().reconcile('session'),
+      throwsA(isA<ManualStudioLedgerConfigException>()),
     );
     expect(ledger.reconcileCalls, 0);
   });

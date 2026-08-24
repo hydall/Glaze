@@ -42,6 +42,8 @@ class StudioTurnConfigSnapshot {
 
   bool get enabled => config != null && preset != null;
 
+  bool get ledgerEnabled => enabled && preset!.agentEnabled['ledger'] != false;
+
   AuxApiConfig resolveCleanerConfig({
     required String errorLabel,
     bool? useResponsesApi,

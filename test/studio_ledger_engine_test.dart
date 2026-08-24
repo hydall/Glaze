@@ -2,17 +2,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/features/chat/services/stages/ledger_stage.dart';
 
 void main() {
-  test('Card Rewriter controls automatic reconciliation', () {
+  test('Studio Ledger controls automatic reconciliation', () {
     expect(
       shouldRunAutomaticLedgerReconciliation(
-        cardRewriterEnabled: false,
+        ledgerEnabled: false,
         isManualRerun: false,
       ),
       isFalse,
     );
     expect(
       shouldRunAutomaticLedgerReconciliation(
-        cardRewriterEnabled: true,
+        ledgerEnabled: true,
         isManualRerun: false,
       ),
       isTrue,
@@ -22,7 +22,7 @@ void main() {
   test('manual rerun never starts automatic reconciliation', () {
     expect(
       shouldRunAutomaticLedgerReconciliation(
-        cardRewriterEnabled: true,
+        ledgerEnabled: true,
         isManualRerun: true,
       ),
       isFalse,

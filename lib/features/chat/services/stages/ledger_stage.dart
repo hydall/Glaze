@@ -110,8 +110,6 @@ class LedgerStage {
               .resolve(sessionId);
       final pipeline = turnConfig.pipelineSettings;
 
-      // Ledger is always-on when Studio is enabled. We check
-      // StudioConfig.enabled to decide whether the ledger should run.
       final studioConfigEnabled = turnConfig.enabled;
       final studioPreset = turnConfig.preset;
       if (!studioConfigEnabled) {
@@ -122,9 +120,16 @@ class LedgerStage {
         );
         return;
       }
+      if (!turnConfig.ledgerEnabled) {
+        await _recordDiag(
+          sessionId: sessionId,
+          targetMessage: targetMessage,
+          reason: 'skipped, ledger disabled in active Studio preset',
+        );
+        return;
+      }
 
-      // Cadence (plan §Model Cadence). Studio Ledger is mandatory while Studio
-      // is enabled, so cadence only gates standalone Ledger outside Studio.
+      // Cadence only gates standalone Ledger outside Studio.
       final assistantTurnCount = messages
           .where((m) => m.role == 'assistant' && !m.isTyping)
           .length;
@@ -203,7 +208,7 @@ class LedgerStage {
 
       LedgerRunResult? reconciliationResult;
       if (shouldRunAutomaticLedgerReconciliation(
-        cardRewriterEnabled: pipeline.cardRewriter.enabled,
+        ledgerEnabled: turnConfig.ledgerEnabled,
         isManualRerun: isManualRerun,
       )) {
         final checkpointRepo = ctx.ref.read(
@@ -644,10 +649,10 @@ class LedgerStage {
   }
 }
 
-/// Reconciliation is the collection phase of automatic Card Rewriter. Per-turn
-/// Ledger extraction remains enabled independently while Studio is active.
+/// Automatic reconciliation belongs to the Studio Ledger. Card Rewriter may
+/// consume successful runs, but does not own their execution.
 @visibleForTesting
 bool shouldRunAutomaticLedgerReconciliation({
-  required bool cardRewriterEnabled,
+  required bool ledgerEnabled,
   required bool isManualRerun,
-}) => !isManualRerun && cardRewriterEnabled;
+}) => !isManualRerun && ledgerEnabled;

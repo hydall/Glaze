@@ -186,6 +186,7 @@ class ManualStudioLedgerService {
     final startedAt = DateTime.now().millisecondsSinceEpoch;
     final isTargetCurrent = _targetOwnershipGuard(sessionId, target);
     final turnConfig = await turnConfigFuture;
+    _requireLedgerEnabled(turnConfig);
     final AuxApiConfig ledgerConfig;
     try {
       ledgerConfig = turnConfig.resolveLedgerConfig(errorLabel: 'ledger-rerun');
@@ -239,8 +240,11 @@ class ManualStudioLedgerService {
   }
 
   Future<ManualStudioLedgerResult> reconcile(String sessionId) async {
+    final turnConfigFuture = _resolveTurnConfig(sessionId);
     final session = await chatRepo.getById(sessionId);
     if (session == null) throw StateError('Session not found');
+    final turnConfig = await turnConfigFuture;
+    _requireLedgerEnabled(turnConfig);
     final snapshots = await snapshotRepo.getBySessionId(sessionId);
     final committedAnchors = snapshots
         .where((snapshot) => snapshot.committed)
@@ -271,7 +275,6 @@ class ManualStudioLedgerService {
       throw StateError('No reviewable messages end at the committed snapshot');
     }
 
-    final turnConfig = await _resolveTurnConfig(sessionId);
     final ledgerConfig = turnConfig.resolveLedgerConfig(
       errorLabel: 'ledger-reconciliation-manual',
     );
@@ -325,6 +328,14 @@ class ManualStudioLedgerService {
       apiConfigs: apiConfigs,
       activeApiConfig: activeApiConfig,
     );
+  }
+
+  void _requireLedgerEnabled(StudioTurnConfigSnapshot turnConfig) {
+    if (!turnConfig.ledgerEnabled) {
+      throw const ManualStudioLedgerConfigException(
+        'Studio Ledger is disabled in the active preset',
+      );
+    }
   }
 
   Future<MacroContext> _macroContext(
