@@ -531,7 +531,7 @@ Code ref: `lib/core/db/repositories/tracker_snapshot_repo.dart:copyForSessionBra
 ### INV-TS7: Snapshots are covered by backup + cloud sync ✅ ENFORCED (Phase 8, 9)
 
 `tracker_snapshots` entered the backup format at v5 and remains in the current
-backup whitelist (`backup_exporter.dart`, backup schema v10). It has full cloud
+backup whitelist (`backup_exporter.dart`, backup schema v12). It has full cloud
 sync coverage via
 `SyncTrackerSnapshotStore` + `TrackerSnapshotSyncStore` adapter (Phase 9).
 Session deletes record `SyncDeletionTracker.record('tracker_snapshot',

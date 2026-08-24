@@ -2,8 +2,60 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/services/backup/backup_exporter.dart';
 
 void main() {
+  test('backup v12 includes Agent Ops authority but excludes diagnostics', () {
+    expect(BackupExporter.schemaVersion, 12);
+    expect(
+      BackupExporter.tableNames,
+      containsAll(const [
+        'reconciliation_successful_runs',
+        'ledger_reconciliation_effects',
+        'reconciliation_run_invalidations',
+        'ledger_reconciliation_checkpoints',
+        'ledger_reconciliation_cleanup_journals',
+        'ledger_reconciliation_cursors',
+        'lorebook_use_manifests',
+        'lorebook_use_manifest_entries',
+        'lorebook_use_acceptance_records',
+        'card_evolution_collector_runs',
+        'card_evolution_observations',
+        'card_evolution_claims',
+        'card_evolution_writer_calls',
+        'card_evolution_proposal_runs',
+        'rewrite_jobs',
+        'rewrite_operations',
+        'rewrite_operation_revisions',
+        'rewrite_evidence_rows',
+      ]),
+    );
+    expect(
+      BackupExporter.tableNames,
+      isNot(
+        containsAll(const [
+          'ledger_debug_runs',
+          'card_evolution_debug_runs',
+          'llm_request_capture_rows',
+          'llm_call_event_rows',
+          'session_lorebook_embedding_job_rows',
+        ]),
+      ),
+    );
+    expect(
+      BackupExporter.tableNames.indexOf('reconciliation_successful_runs'),
+      lessThan(
+        BackupExporter.tableNames.indexOf('ledger_reconciliation_effects'),
+      ),
+    );
+    expect(
+      BackupExporter.tableNames.indexOf('card_evolution_claims'),
+      lessThan(
+        BackupExporter.tableNames.indexOf('card_evolution_writer_calls'),
+      ),
+    );
+  });
+
   group('BackupExporter streaming JSON', () {
     late Directory tempDir;
 
@@ -45,7 +97,8 @@ void main() {
       sink.write('"_glazeVersion":1,');
       sink.write('"_source":"flutter",');
       sink.write(
-          '"exportedAt":${jsonEncode(DateTime.now().toIso8601String())},');
+        '"exportedAt":${jsonEncode(DateTime.now().toIso8601String())},',
+      );
       sink.write('"tables":${jsonEncode(tables)},');
       sink.write('"preferences":${jsonEncode(prefs ?? {})}');
 
@@ -133,10 +186,16 @@ void main() {
 
       final gallery = <String, List<Map<String, dynamic>>>{
         'c1': [
-          {'entry': {'imagePath': '/fake1.png'}, 'base64': 'aGVsbG8='},
+          {
+            'entry': {'imagePath': '/fake1.png'},
+            'base64': 'aGVsbG8=',
+          },
         ],
         'c2': [
-          {'entry': {'imagePath': '/fake2.png'}, 'base64': 'd29ybGQ='},
+          {
+            'entry': {'imagePath': '/fake2.png'},
+            'base64': 'd29ybGQ=',
+          },
         ],
       };
 
@@ -182,9 +241,11 @@ void main() {
     });
 
     test('Only character avatars, no persona avatars', () async {
-      final tables = makeTables(characters: [
-        {'char_id': 'c1'},
-      ]);
+      final tables = makeTables(
+        characters: [
+          {'char_id': 'c1'},
+        ],
+      );
 
       final file = await writeStreamedJson(
         tables: tables,
@@ -199,9 +260,11 @@ void main() {
     });
 
     test('Only persona avatars, no character avatars', () async {
-      final tables = makeTables(personas: [
-        {'persona_id': 'p1'},
-      ]);
+      final tables = makeTables(
+        personas: [
+          {'persona_id': 'p1'},
+        ],
+      );
 
       final file = await writeStreamedJson(
         tables: tables,
@@ -216,9 +279,11 @@ void main() {
     });
 
     test('No avatars section when no avatar data', () async {
-      final tables = makeTables(characters: [
-        {'char_id': 'c1'},
-      ]);
+      final tables = makeTables(
+        characters: [
+          {'char_id': 'c1'},
+        ],
+      );
 
       final file = await writeStreamedJson(tables: tables);
       final data =
@@ -228,9 +293,11 @@ void main() {
     });
 
     test('No gallery section when no gallery data', () async {
-      final tables = makeTables(characters: [
-        {'char_id': 'c1', 'gallery_json': null},
-      ]);
+      final tables = makeTables(
+        characters: [
+          {'char_id': 'c1', 'gallery_json': null},
+        ],
+      );
 
       final file = await writeStreamedJson(tables: tables);
       final data =
@@ -257,7 +324,10 @@ void main() {
 
       final gallery = <String, List<Map<String, dynamic>>>{
         'c1': [
-          {'entry': {'imagePath': '/img.png'}, 'base64': 'AQIDBAUG'},
+          {
+            'entry': {'imagePath': '/img.png'},
+            'base64': 'AQIDBAUG',
+          },
         ],
       };
 
@@ -308,31 +378,33 @@ void main() {
       expect(await file.exists(), isFalse);
     });
 
-    test('Large gallery: many characters with images — still valid JSON',
-        () async {
-      final chars = List.generate(
-        50,
-        (i) => {'char_id': 'c$i', 'name': 'Char $i', 'gallery_json': '[]'},
-      );
-      final tables = makeTables(characters: chars);
+    test(
+      'Large gallery: many characters with images — still valid JSON',
+      () async {
+        final chars = List.generate(
+          50,
+          (i) => {'char_id': 'c$i', 'name': 'Char $i', 'gallery_json': '[]'},
+        );
+        final tables = makeTables(characters: chars);
 
-      final gallery = <String, List<Map<String, dynamic>>>{};
-      for (int i = 0; i < 50; i++) {
-        gallery['c$i'] = [
-          {
-            'entry': {'imagePath': '/img_$i.png'},
-            'base64': base64Encode(List.generate(100, (j) => i + j)),
-          },
-        ];
-      }
+        final gallery = <String, List<Map<String, dynamic>>>{};
+        for (int i = 0; i < 50; i++) {
+          gallery['c$i'] = [
+            {
+              'entry': {'imagePath': '/img_$i.png'},
+              'base64': base64Encode(List.generate(100, (j) => i + j)),
+            },
+          ];
+        }
 
-      final file = await writeStreamedJson(tables: tables, gallery: gallery);
-      final data =
-          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        final file = await writeStreamedJson(tables: tables, gallery: gallery);
+        final data =
+            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
 
-      final gl = data['gallery'] as Map<String, dynamic>;
-      expect(gl.length, equals(50));
-    });
+        final gl = data['gallery'] as Map<String, dynamic>;
+        expect(gl.length, equals(50));
+      },
+    );
 
     test('Preferences with all value types are preserved', () async {
       final tables = makeTables();
@@ -356,8 +428,7 @@ void main() {
     });
 
     test('Empty tables map produces valid JSON', () async {
-      final file =
-          await writeStreamedJson(tables: <String, dynamic>{});
+      final file = await writeStreamedJson(tables: <String, dynamic>{});
       final data =
           jsonDecode(await file.readAsString()) as Map<String, dynamic>;
 

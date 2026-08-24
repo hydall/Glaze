@@ -413,7 +413,7 @@ fall back to `trackerRepoProvider.getBySessionId` when no snapshot exists
 ### Cloud sync coverage (Phase 9)
 
 `tracker_snapshots` entered the backup format at v5 and remains in the current
-backup whitelist (`backup_exporter.dart`, backup schema v10). It has full cloud
+backup whitelist (`backup_exporter.dart`, backup schema v12). It has full cloud
 sync coverage via
 `SyncTrackerSnapshotStore` + `TrackerSnapshotSyncStore` adapter. Sync
 follows the InfoBlock per-session collection pattern: one entry per

@@ -16,7 +16,7 @@ import 'backup_helpers.dart';
 
 class FlutterBackupImporter extends BackupHelpers {
   static const int _batchSize = 500;
-  static const int _maxSchemaVersion = 11;
+  static const int _maxSchemaVersion = 12;
 
   @override
   final AppDatabase db;
@@ -126,12 +126,26 @@ class FlutterBackupImporter extends BackupHelpers {
       'characters',
       'character_revision_rows',
       'chat_sessions',
+      'lorebooks',
+      'lorebook_use_manifests',
+      'lorebook_use_manifest_entries',
+      'lorebook_use_acceptance_records',
       'character_knowledge_fact_rows',
       'character_session_baseline_rows',
+      'reconciliation_successful_runs',
+      'ledger_reconciliation_effects',
+      'reconciliation_run_invalidations',
+      'ledger_reconciliation_checkpoints',
+      'ledger_reconciliation_cleanup_journals',
+      'card_evolution_collector_runs',
+      'card_evolution_observations',
+      'ledger_reconciliation_cursors',
       'rewrite_jobs',
       'rewrite_operations',
       'rewrite_operation_revisions',
       'rewrite_evidence_rows',
+      'card_evolution_claims',
+      'card_evolution_writer_calls',
       'card_evolution_proposal_runs',
       'applied_canon_transition_rows',
       'canon_transition_fact_refs',
@@ -155,6 +169,9 @@ class FlutterBackupImporter extends BackupHelpers {
     onProgress?.call('Importing tables...');
     await db.customStatement('PRAGMA foreign_keys = OFF');
     try {
+      if (schemaVersion < 12) {
+        await _clearAgentOpsStateMissingFromLegacyBackup();
+      }
       for (final f in tableFiles) {
         _cancel.check();
         // e.g. tables/characters.jsonl → characters
@@ -185,6 +202,27 @@ class FlutterBackupImporter extends BackupHelpers {
     onProgress?.call('Restoring settings...');
     await _restorePreferences(archive);
   }
+
+  Future<void> _clearAgentOpsStateMissingFromLegacyBackup() =>
+      db.transaction(() async {
+        for (final table in const [
+          'card_evolution_writer_calls',
+          'card_evolution_claims',
+          'card_evolution_observations',
+          'card_evolution_collector_runs',
+          'ledger_reconciliation_cursors',
+          'ledger_reconciliation_cleanup_journals',
+          'ledger_reconciliation_checkpoints',
+          'ledger_reconciliation_effects',
+          'reconciliation_run_invalidations',
+          'reconciliation_successful_runs',
+          'lorebook_use_acceptance_records',
+          'lorebook_use_manifest_entries',
+          'lorebook_use_manifests',
+        ]) {
+          await db.customStatement('DELETE FROM $table');
+        }
+      });
 
   /// Restores all SharedPreferences from [preferences.json] inside the ZIP.
   /// Keys are written as-is; missing file is silently ignored (v1 legacy or
@@ -242,10 +280,23 @@ class FlutterBackupImporter extends BackupHelpers {
     final bytes = file.readBytes();
     if (bytes == null || bytes.isEmpty) return;
 
-    final lines = utf8
+    var lines = utf8
         .decode(bytes, allowMalformed: true)
         .split('\n')
-        .where((l) => l.trim().isNotEmpty);
+        .where((l) => l.trim().isNotEmpty)
+        .toList();
+    if (tableName == 'lorebook_use_acceptance_records') {
+      int rank(String line) {
+        try {
+          final row = jsonDecode(line) as Map<String, dynamic>;
+          return row['acceptance_kind'] == 'variation' ? 0 : 1;
+        } catch (_) {
+          return 2;
+        }
+      }
+
+      lines.sort((a, b) => rank(a).compareTo(rank(b)));
+    }
 
     final buffer = <(String, List<dynamic>)>[];
     var totalInserted = 0;

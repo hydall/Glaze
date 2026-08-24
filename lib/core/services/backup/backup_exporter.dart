@@ -28,7 +28,59 @@ class BackupExporter {
   //   9 — added studio_preset_rows (DB-backed Studio prompt block presets).
   //  10 — added atomic character facts and immutable session baselines.
   //  11 — added complete Card Rewriter/session-canon provenance.
-  static const int _schemaVersion = 11;
+  //  12 — added complete Agent Ops reconciliation and recovery provenance.
+  static const int schemaVersion = 12;
+
+  static const List<String> tableNames = [
+    'characters',
+    'character_revision_rows',
+    'chat_sessions',
+    'presets',
+    'api_configs',
+    'personas',
+    'lorebooks',
+    'lorebook_use_manifests',
+    'lorebook_use_manifest_entries',
+    'lorebook_use_acceptance_records',
+    'embeddings',
+    'chat_summaries',
+    'memory_book_rows',
+    'extension_presets',
+    'info_blocks',
+    'studio_config_rows',
+    'studio_preset_rows',
+    'tracker_rows',
+    'tracker_snapshots',
+    'character_folders',
+    'character_folder_members',
+    'memory_catalog_rows',
+    'memory_entity_rows',
+    'memory_salience_rows',
+    'memory_cadence_rows',
+    'memory_consolidation_rows',
+    'character_knowledge_fact_rows',
+    'character_session_baseline_rows',
+    'reconciliation_successful_runs',
+    'ledger_reconciliation_effects',
+    'reconciliation_run_invalidations',
+    'ledger_reconciliation_checkpoints',
+    'ledger_reconciliation_cleanup_journals',
+    'card_evolution_collector_runs',
+    'card_evolution_observations',
+    'ledger_reconciliation_cursors',
+    'rewrite_jobs',
+    'rewrite_operations',
+    'rewrite_operation_revisions',
+    'rewrite_evidence_rows',
+    'card_evolution_claims',
+    'card_evolution_writer_calls',
+    'card_evolution_proposal_runs',
+    'applied_canon_transition_rows',
+    'canon_transition_fact_refs',
+    'session_canon_checkpoint_rows',
+    'session_lorebook_evolution_rows',
+    'session_lorebook_revision_rows',
+  ];
 
   final AppDatabase _db;
   final ImageStorageService _imageStorage;
@@ -72,17 +124,17 @@ class BackupExporter {
     // 1. manifest.json
     final manifest = <String, dynamic>{
       '_isGlazeBackup': true,
-      '_glazeVersion': _schemaVersion,
+      '_glazeVersion': schemaVersion,
       '_source': 'flutter',
-      'schemaVersion': _schemaVersion,
+      'schemaVersion': schemaVersion,
       'exportedAt': DateTime.now().toIso8601String(),
-      'tables': _knownTableNames(),
+      'tables': tableNames,
     };
     final manifestBytes = utf8.encode(jsonEncode(manifest));
     encoder.addArchiveFile(ArchiveFile.bytes('manifest.json', manifestBytes));
 
     // 2. tables/<name>.jsonl — streamed per row.
-    for (final tableName in _knownTableNames()) {
+    for (final tableName in tableNames) {
       final bytes = await _streamTableAsNdjson(tableName);
       encoder.addArchiveFile(
         ArchiveFile.bytes('tables/$tableName.jsonl', bytes),
@@ -166,7 +218,12 @@ class BackupExporter {
   /// the whole database.
   Future<List<int>> _streamTableAsNdjson(String tableName) async {
     final builder = BytesBuilder(copy: false);
-    final rows = await _db.customSelect('SELECT * FROM $tableName').get();
+    final orderBy = tableName == 'lorebook_use_acceptance_records'
+        ? " ORDER BY CASE acceptance_kind WHEN 'variation' THEN 0 ELSE 1 END, accepted_at, acceptance_id"
+        : '';
+    final rows = await _db
+        .customSelect('SELECT * FROM $tableName$orderBy')
+        .get();
     for (final row in rows) {
       try {
         final data = row.data;
@@ -177,45 +234,5 @@ class BackupExporter {
       }
     }
     return builder.takeBytes();
-  }
-
-  List<String> _knownTableNames() {
-    return const [
-      'characters',
-      'chat_sessions',
-      'presets',
-      'api_configs',
-      'personas',
-      'lorebooks',
-      'embeddings',
-      'chat_summaries',
-      'memory_book_rows',
-      'extension_presets',
-      'info_blocks',
-      'studio_config_rows',
-      'studio_preset_rows',
-      'tracker_rows',
-      'tracker_snapshots',
-      'character_folders',
-      'character_folder_members',
-      'memory_catalog_rows',
-      'memory_entity_rows',
-      'memory_salience_rows',
-      'memory_cadence_rows',
-      'memory_consolidation_rows',
-      'character_knowledge_fact_rows',
-      'character_session_baseline_rows',
-      'character_revision_rows',
-      'rewrite_jobs',
-      'rewrite_operations',
-      'rewrite_operation_revisions',
-      'rewrite_evidence_rows',
-      'card_evolution_proposal_runs',
-      'applied_canon_transition_rows',
-      'canon_transition_fact_refs',
-      'session_canon_checkpoint_rows',
-      'session_lorebook_evolution_rows',
-      'session_lorebook_revision_rows',
-    ];
   }
 }

@@ -998,7 +998,7 @@ void main() {
         ..addFile(
           ArchiveFile.bytes(
             'manifest.json',
-            utf8.encode(jsonEncode({'schemaVersion': 12})),
+            utf8.encode(jsonEncode({'schemaVersion': 13})),
           ),
         );
 
@@ -1024,6 +1024,44 @@ void main() {
       await importArchive(archive);
 
       expect(await db.select(db.rewriteJobs).get(), isEmpty);
+    });
+
+    test('v11 clears Agent Ops state absent from legacy archives', () async {
+      await db.customStatement(
+        "INSERT INTO ledger_reconciliation_checkpoints (session_id, start_message_id, end_message_id) VALUES ('stale-session', 'm1', 'm2')",
+      );
+      final archive = Archive()
+        ..addFile(
+          ArchiveFile.bytes(
+            'manifest.json',
+            utf8.encode(jsonEncode({'schemaVersion': 11})),
+          ),
+        );
+
+      await importArchive(archive);
+
+      expect(
+        await db.select(db.ledgerReconciliationCheckpoints).get(),
+        isEmpty,
+      );
+    });
+
+    test('accepts backup schema v12', () async {
+      final archive = Archive()
+        ..addFile(
+          ArchiveFile.bytes(
+            'manifest.json',
+            utf8.encode(jsonEncode({'schemaVersion': 12})),
+          ),
+        )
+        ..addFile(
+          ArchiveFile.bytes(
+            'tables/ledger_reconciliation_checkpoints.jsonl',
+            const [],
+          ),
+        );
+
+      await importArchive(archive);
     });
 
     test('restores all supported types from preferences.json', () async {
