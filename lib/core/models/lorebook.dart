@@ -5,6 +5,9 @@ part 'lorebook.g.dart';
 
 @freezed
 abstract class LorebookEntry with _$LorebookEntry {
+  // json_serializable applies this annotation to the generated implementation.
+  // ignore: invalid_annotation_target
+  @JsonSerializable(explicitToJson: true)
   const factory LorebookEntry({
     required String id,
     @Default('') String comment,
