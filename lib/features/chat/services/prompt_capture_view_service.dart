@@ -9,14 +9,12 @@ import '../../../core/state/db_provider.dart';
 final class PromptCaptureView {
   const PromptCaptureView({
     required this.row,
-    required this.label,
     required this.request,
     required this.event,
     required this.callEvents,
   });
 
   final LlmRequestCaptureRow row;
-  final String label;
   final Map<String, dynamic> request;
   final Map<String, dynamic> event;
   final List<LlmCallEventRow> callEvents;
@@ -59,7 +57,6 @@ final class PromptCaptureView {
       final event = Map<String, dynamic>.from(decoded);
       return PromptCaptureView(
         row: row,
-        label: _stageLabel(row.stage),
         request: event,
         event: event,
         callEvents: List.unmodifiable(callEvents),
@@ -67,29 +64,6 @@ final class PromptCaptureView {
     } catch (_) {
       return null;
     }
-  }
-
-  static String _stageLabel(String? stage) {
-    if (stage == null || stage.isEmpty) return 'Unclassified request';
-    const labels = <String, String>{
-      'studio.controller': 'Studio controller',
-      'studio.post_processing': 'Studio post-processor',
-      'studio.final': 'Studio final writer',
-      'cleaner.audit': 'Cleaner audit',
-      'cleaner.rewrite': 'POST-cleaner',
-      'ledger.turn': 'Ledger',
-      'ledger.turn_repair': 'Ledger repair',
-      'ledger.reconciliation': 'Reconciliation',
-      'ledger.reconciliation_repair': 'Reconciliation repair',
-      'card.collector': 'Collector',
-      'card.history_consolidation': 'History consolidation',
-      'card.writer': 'Card writer',
-      'card.writer_repair': 'Card writer repair',
-      'card.lorebook_writer': 'Lorebook writer',
-      'card.manual_writer': 'Manual card writer',
-      'summary': 'Summary',
-    };
-    return labels[stage] ?? stage;
   }
 }
 

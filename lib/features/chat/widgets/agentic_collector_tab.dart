@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -36,7 +37,12 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
       _refresh();
       GlazeToast.show(context, _recoveryMessage(outcome.kind, outcome.detail));
     } catch (error) {
-      if (mounted) GlazeToast.show(context, 'Collector retry failed: $error');
+      if (mounted) {
+        GlazeToast.show(
+          context,
+          'agent_ops_collector_retry_failed'.tr(namedArgs: {'error': '$error'}),
+        );
+      }
     } finally {
       if (mounted) setState(() => _recoveringRunId = null);
     }
@@ -48,16 +54,14 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
     String? response;
     await GlazeBottomSheet.show<void>(
       context,
-      title: 'Correct Collector response',
+      title: 'agent_ops_collector_correct_title'.tr(),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Edit the JSON response. It will be parsed and validated against the original immutable Collector input.',
-            ),
+            Text('agent_ops_collector_correct_body'.tr()),
             const SizedBox(height: 12),
             GlazeTextField(
               controller: controller,
@@ -70,7 +74,7 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                 response = controller.text.trim();
                 Navigator.of(context, rootNavigator: true).pop();
               },
-              child: const Text('Validate and apply'),
+              child: Text('agent_ops_validate_apply'.tr()),
             ),
           ],
         ),
@@ -88,7 +92,12 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
       GlazeToast.show(context, _recoveryMessage(outcome.kind, outcome.detail));
     } catch (error) {
       if (mounted) {
-        GlazeToast.show(context, 'Collector correction failed: $error');
+        GlazeToast.show(
+          context,
+          'agent_ops_collector_correction_failed'.tr(
+            namedArgs: {'error': '$error'},
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _recoveringRunId = null);
@@ -101,15 +110,16 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
   }
 
   static String _recoveryMessage(String kind, String? detail) => switch (kind) {
-    'collectorCompleted' => 'Collector recovery completed.',
-    'persisted' || 'alreadyCompleted' =>
-      'Collector recovered and Card Rewriter proposal is ready.',
-    'exactCaptureUnavailable' =>
-      'Exact prompt is unavailable or was truncated. Use response correction instead.',
-    'staleInput' || 'collectorEvidenceStale' =>
-      'Collector evidence changed; recovery was not applied.',
-    'parserRejected' => detail ?? 'Corrected response is still invalid.',
-    _ => detail ?? 'Collector recovery stopped: $kind',
+    'collectorCompleted' => 'agent_ops_collector_recovery_completed'.tr(),
+    'persisted' ||
+    'alreadyCompleted' => 'agent_ops_collector_proposal_ready'.tr(),
+    'exactCaptureUnavailable' => 'agent_ops_collector_exact_unavailable'.tr(),
+    'staleInput' ||
+    'collectorEvidenceStale' => 'agent_ops_collector_evidence_changed'.tr(),
+    'parserRejected' => detail ?? 'agent_ops_collector_response_invalid'.tr(),
+    _ =>
+      detail ??
+          'agent_ops_collector_recovery_stopped'.tr(namedArgs: {'kind': kind}),
   };
 
   @override
@@ -123,13 +133,17 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Could not load Collector: $error'),
+              Text(
+                'agent_ops_collector_load_failed'.tr(
+                  namedArgs: {'error': '$error'},
+                ),
+              ),
               const SizedBox(height: 8),
               TextButton.icon(
                 onPressed: () =>
                     ref.invalidate(collectorViewProvider(widget.sessionId)),
                 icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
+                label: Text('btn_retry'.tr()),
               ),
             ],
           ),
@@ -149,14 +163,17 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                 padding: const EdgeInsets.all(12),
                 child: Row(
                   children: [
-                    _SummaryValue(label: 'Runs', value: '${data.runs.length}'),
                     _SummaryValue(
-                      label: 'Completed',
+                      label: 'agent_ops_runs'.tr(),
+                      value: '${data.runs.length}',
+                    ),
+                    _SummaryValue(
+                      label: 'agent_ops_completed'.tr(),
                       value:
                           '${data.runs.where((run) => run.row.status == 'completed').length}',
                     ),
                     _SummaryValue(
-                      label: 'Observations',
+                      label: 'agent_ops_observations'.tr(),
                       value: '${data.observations.length}',
                     ),
                   ],
@@ -165,14 +182,12 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
             ),
             const SizedBox(height: 14),
             Text(
-              'Collector runs',
+              'agent_ops_collector_runs'.tr(),
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 6),
             if (data.runs.isEmpty)
-              const _CollectorEmpty(
-                text: 'No Collector runs recorded for this session.',
-              )
+              _CollectorEmpty(text: 'agent_ops_no_collector_runs'.tr())
             else
               for (final run in data.runs)
                 Card(
@@ -190,43 +205,57 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                         _ => Colors.orange,
                       },
                     ),
-                    title: Text(run.label),
-                    subtitle: Text(run.row.status),
+                    title: Text(_collectorRunLabel(run)),
+                    subtitle: Text(_collectorStatusLabel(run.row.status)),
                     childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                     expandedCrossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _Detail(label: 'Run ID', value: run.row.id),
                       _Detail(
-                        label: 'Reconciliation',
+                        label: 'agent_ops_run_id'.tr(),
+                        value: run.row.id,
+                      ),
+                      _Detail(
+                        label: 'agent_ops_reconciliation'.tr(),
                         value: run.row.reconciliationRunId,
                       ),
-                      _Detail(label: 'Range hash', value: run.row.rangeHash),
-                      _Detail(label: 'Input hash', value: run.row.inputHash),
                       _Detail(
-                        label: 'Output hash',
-                        value: run.row.modelOutputHash ?? 'Unavailable',
+                        label: 'agent_ops_range_hash'.tr(),
+                        value: run.row.rangeHash,
+                      ),
+                      _Detail(
+                        label: 'agent_ops_input_hash'.tr(),
+                        value: run.row.inputHash,
+                      ),
+                      _Detail(
+                        label: 'agent_ops_output_hash'.tr(),
+                        value:
+                            run.row.modelOutputHash ??
+                            'agent_ops_unavailable'.tr(),
                       ),
                       if (run.row.failureCode != null)
-                        _Detail(label: 'Failure', value: run.row.failureCode!),
+                        _Detail(
+                          label: 'agent_ops_failure'.tr(),
+                          value: run.row.failureCode!,
+                        ),
                       if (run.row.failureDetail != null)
                         _Detail(
-                          label: 'Failure detail',
+                          label: 'agent_ops_failure_detail'.tr(),
                           value: run.row.failureDetail!,
                         ),
                       if (run.latestResponse != null)
                         _Detail(
-                          label: 'Last response',
+                          label: 'agent_ops_last_response'.tr(),
                           value: run.latestResponse!,
                         ),
                       if (run.latestParserVerdict case final verdict?) ...[
                         _Detail(
-                          label: 'Parser verdict',
+                          label: 'agent_ops_parser_verdict'.tr(),
                           value:
-                              '${verdict.kind}: ${verdict.parserCode ?? 'unknown'}',
+                              '${verdict.kind}: ${verdict.parserCode ?? 'agent_ops_unknown'.tr()}',
                         ),
                         if (verdict.parserDetail != null)
                           _Detail(
-                            label: 'Parser detail',
+                            label: 'agent_ops_parser_detail'.tr(),
                             value: verdict.parserDetail!,
                           ),
                       ],
@@ -242,14 +271,14 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                                   ? () => _retryExact(run)
                                   : null,
                               icon: const Icon(Icons.refresh),
-                              label: const Text('Retry exact prompt'),
+                              label: Text('agent_ops_retry_exact_prompt'.tr()),
                             ),
                             FilledButton.icon(
                               onPressed: _recoveringRunId == null
                                   ? () => _correct(run)
                                   : null,
                               icon: const Icon(Icons.edit_outlined),
-                              label: const Text('Correct response'),
+                              label: Text('agent_ops_correct_response'.tr()),
                             ),
                           ],
                         ),
@@ -257,7 +286,7 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
-                              'Exact retry is unavailable because the original prompt was not retained intact.',
+                              'agent_ops_exact_retry_unavailable'.tr(),
                               style: TextStyle(
                                 color: context.cs.onSurfaceVariant,
                                 fontSize: 11,
@@ -266,7 +295,7 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                           ),
                       ] else if (run.callEvents.isEmpty)
                         Text(
-                          'Request and response details are unavailable for this legacy run.',
+                          'agent_ops_legacy_details_unavailable'.tr(),
                           style: TextStyle(
                             color: context.cs.onSurfaceVariant,
                             fontSize: 11,
@@ -276,12 +305,13 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                   ),
                 ),
             const SizedBox(height: 14),
-            Text('Observations', style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              'agent_ops_observations'.tr(),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
             const SizedBox(height: 6),
             if (data.observations.isEmpty)
-              const _CollectorEmpty(
-                text: 'No Collector observations recorded yet.',
-              )
+              _CollectorEmpty(text: 'agent_ops_no_observations'.tr())
             else
               for (final observation in data.observations)
                 _ObservationTile(observation: observation),
@@ -331,20 +361,32 @@ class _ObservationTile extends StatelessWidget {
         leading: Icon(Icons.auto_awesome_outlined, color: color),
         title: Text(observation.observedChange),
         subtitle: Text(
-          '${observation.status} · confidence ${(observation.confidence * 100).round()}% · ${observation.repeatCount} confirmations',
+          'agent_ops_observation_summary'.tr(
+            namedArgs: {
+              'status': _observationStatusLabel(observation.status),
+              'confidence': '${(observation.confidence * 100).round()}',
+              'count': '${observation.repeatCount}',
+            },
+          ),
         ),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _Detail(label: 'Scope', value: observation.semanticScopeKey),
           _Detail(
-            label: 'Target',
-            value: observation.targetKind ?? 'Unavailable',
+            label: 'agent_ops_scope'.tr(),
+            value: observation.semanticScopeKey,
+          ),
+          _Detail(
+            label: 'agent_ops_target'.tr(),
+            value: observation.targetKind ?? 'agent_ops_unavailable'.tr(),
           ),
           if (observation.canonicalClaim != null)
-            _Detail(label: 'Claim', value: observation.canonicalClaim!),
+            _Detail(
+              label: 'agent_ops_claim'.tr(),
+              value: observation.canonicalClaim!,
+            ),
           _Detail(
-            label: 'Evidence',
+            label: 'agent_ops_evidence'.tr(),
             value: observation.evidenceMessageIds.join(', '),
           ),
         ],
@@ -352,6 +394,36 @@ class _ObservationTile extends StatelessWidget {
     );
   }
 }
+
+String _collectorRunLabel(CollectorRunView run) {
+  final first = run.firstReconciliationOrdinal;
+  if (first == null) {
+    return 'agent_ops_collector_run'.tr(
+      namedArgs: {'ordinal': '${run.row.collectorOrdinal}'},
+    );
+  }
+  return 'agent_ops_collector_run_commits'.tr(
+    namedArgs: {
+      'ordinal': '${run.row.collectorOrdinal}',
+      'start': '$first',
+      'end': '${run.boundaryReconciliationOrdinal}',
+    },
+  );
+}
+
+String _collectorStatusLabel(String status) => switch (status) {
+  'completed' => 'agent_ops_status_completed'.tr(),
+  'failed' => 'agent_ops_status_failed'.tr(),
+  _ => 'agent_ops_status_pending'.tr(),
+};
+
+String _observationStatusLabel(String status) => switch (status) {
+  'promoted' => 'agent_ops_status_promoted'.tr(),
+  'expired' => 'agent_ops_status_expired'.tr(),
+  'consumed' => 'agent_ops_status_consumed'.tr(),
+  'active' => 'agent_ops_status_active'.tr(),
+  _ => status,
+};
 
 class _Detail extends StatelessWidget {
   const _Detail({required this.label, required this.value});

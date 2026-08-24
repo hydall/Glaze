@@ -81,7 +81,10 @@ class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
           GlazeTabItem(label: 'tab_context'.tr(), icon: Icons.segment),
           GlazeTabItem(label: 'tab_request'.tr(), icon: Icons.visibility),
           GlazeTabItem(label: 'tab_coverage'.tr(), icon: Icons.search),
-          const GlazeTabItem(label: 'Studio', icon: Icons.hub_outlined),
+          GlazeTabItem(
+            label: 'prompt_inspector_studio_tab'.tr(),
+            icon: Icons.hub_outlined,
+          ),
         ],
         activeIndex: _activeIndex,
         onChanged: (i) => setState(() {

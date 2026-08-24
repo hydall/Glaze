@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -35,16 +36,16 @@ class _StudioPromptCaptureTabState
       chatProvider(widget.charId).select((state) => state.value?.session?.id),
     );
     if (sessionId == null) {
-      return const Center(
-        child: Text('Open a chat to inspect Studio requests.'),
-      );
+      return Center(child: Text('prompt_inspector_studio_open_chat'.tr()));
     }
     final captures = ref.watch(promptCaptureViewsProvider(sessionId));
     return captures.when(
       loading: () => const Center(child: GlazeSpinner()),
       error: (error, _) => _EmptyState(
         icon: Icons.error_outline,
-        text: 'Could not load request captures: $error',
+        text: 'prompt_inspector_studio_load_failed'.tr(
+          namedArgs: {'error': '$error'},
+        ),
       ),
       data: (items) => _buildContent(context, sessionId, items),
     );
@@ -58,9 +59,7 @@ class _StudioPromptCaptureTabState
     if (items.isEmpty) {
       return _EmptyState(
         icon: Icons.manage_search,
-        text:
-            'No captured Studio requests yet. Run a Studio generation, '
-            'Ledger reconciliation, Collector, or Card Rewriter.',
+        text: 'prompt_inspector_studio_empty'.tr(),
         onRefresh: () => ref.invalidate(promptCaptureViewsProvider(sessionId)),
       );
     }
@@ -86,16 +85,16 @@ class _StudioPromptCaptureTabState
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Refresh',
+                  tooltip: 'action_refresh'.tr(),
                   onPressed: () =>
                       ref.invalidate(promptCaptureViewsProvider(sessionId)),
                   icon: const Icon(Icons.refresh_rounded),
                 ),
                 IconButton(
-                  tooltip: 'Copy',
+                  tooltip: 'action_copy'.tr(),
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: _copyText(selected)));
-                    GlazeToast.show(context, 'Copied');
+                    GlazeToast.show(context, 'chat_copied'.tr());
                   },
                   icon: const Icon(Icons.copy_rounded),
                 ),
@@ -106,10 +105,14 @@ class _StudioPromptCaptureTabState
             current: _mode,
             options: _CaptureViewMode.values,
             labelBuilder: (mode) => switch (mode) {
-              _CaptureViewMode.messages => 'Messages',
-              _CaptureViewMode.response => 'Response',
-              _CaptureViewMode.raw => 'Raw request',
-              _CaptureViewMode.metadata => 'Metadata',
+              _CaptureViewMode.messages =>
+                'prompt_inspector_studio_messages'.tr(),
+              _CaptureViewMode.response =>
+                'prompt_inspector_studio_response'.tr(),
+              _CaptureViewMode.raw =>
+                'prompt_inspector_studio_raw_request'.tr(),
+              _CaptureViewMode.metadata =>
+                'prompt_inspector_studio_metadata'.tr(),
             },
             onSelected: (mode) => setState(() => _mode = mode),
           ),
@@ -125,12 +128,12 @@ class _StudioPromptCaptureTabState
       children: [
         if (selected.row.truncated)
           _InfoCard(
-            text: 'This capture was truncated before storage.',
+            text: 'prompt_inspector_studio_truncated'.tr(),
             color: context.cs.tertiary,
           ),
         if (_mode == _CaptureViewMode.messages)
           if (selected.messages.isEmpty)
-            const _InfoCard(text: 'No message payload is available.')
+            _InfoCard(text: 'prompt_inspector_studio_no_messages'.tr())
           else
             for (final message in selected.messages)
               _MessageCard(message: message),
@@ -141,11 +144,7 @@ class _StudioPromptCaptureTabState
         if (_mode == _CaptureViewMode.metadata) ...[
           _MetadataCard(capture: selected),
           const SizedBox(height: 10),
-          const _InfoCard(
-            text:
-                'Wire JSON is not captured yet. This is the sanitized, '
-                'post-processed transport request observed before protocol encoding.',
-          ),
+          _InfoCard(text: 'prompt_inspector_studio_wire_json_note'.tr()),
         ],
       ],
     );
@@ -155,13 +154,13 @@ class _StudioPromptCaptureTabState
     final selectedId = _selectedId ?? items.first.row.id;
     showGlazePickerSheet(
       context,
-      title: 'Captured requests',
+      title: 'prompt_inspector_studio_captured_requests'.tr(),
       items: [
         for (final item in items)
           GlazePickerItem(
             label: _captureLabel(item),
             hint:
-                '${item.row.protocol ?? 'unknown protocol'} · '
+                '${item.row.protocol ?? 'prompt_inspector_studio_unknown_protocol'.tr()} · '
                 '${DateTime.fromMillisecondsSinceEpoch(item.row.createdAtMs).toLocal()}',
             value: item.row.id,
             isActive: item.row.id == selectedId,
@@ -188,41 +187,104 @@ class _StudioPromptCaptureTabState
   static String _captureLabel(PromptCaptureView item) {
     final suffix = item.row.attempt == null
         ? ''
-        : ' · attempt ${item.row.attempt}';
-    return '${item.label}$suffix';
+        : ' · ${'prompt_inspector_studio_attempt'.tr(namedArgs: {'attempt': '${item.row.attempt}'})}';
+    return '${_stageLabel(item.row.stage)}$suffix';
   }
 
   static String _metadataText(PromptCaptureView item) => [
-    'Stage: ${item.row.stage ?? 'unclassified'}',
-    'Model: ${item.request['model'] ?? 'unknown'}',
-    'Protocol: ${item.row.protocol ?? 'unknown'}',
-    'Created: ${DateTime.fromMillisecondsSinceEpoch(item.row.createdAtMs).toLocal()}',
-    if (item.row.messageId != null) 'Message: ${item.row.messageId}',
+    _field(
+      'prompt_inspector_studio_field_stage',
+      item.row.stage ?? 'unclassified',
+    ),
+    _field(
+      'prompt_inspector_studio_field_model',
+      item.request['model'] ?? 'unknown',
+    ),
+    _field(
+      'prompt_inspector_studio_field_protocol',
+      item.row.protocol ?? 'unknown',
+    ),
+    _field(
+      'prompt_inspector_studio_field_created',
+      DateTime.fromMillisecondsSinceEpoch(item.row.createdAtMs).toLocal(),
+    ),
+    if (item.row.messageId != null)
+      _field('prompt_inspector_studio_field_message', item.row.messageId),
     if (item.row.pipelineRunId != null)
-      'Pipeline run: ${item.row.pipelineRunId}',
-    if (item.row.callId != null) 'Call: ${item.row.callId}',
+      _field(
+        'prompt_inspector_studio_field_pipeline_run',
+        item.row.pipelineRunId,
+      ),
+    if (item.row.callId != null)
+      _field('prompt_inspector_studio_field_call', item.row.callId),
     if (item.row.logicalCallId != null)
-      'Logical call: ${item.row.logicalCallId}',
-    if (item.row.agentId != null) 'Agent: ${item.row.agentId}',
+      _field(
+        'prompt_inspector_studio_field_logical_call',
+        item.row.logicalCallId,
+      ),
+    if (item.row.agentId != null)
+      _field('prompt_inspector_studio_field_agent', item.row.agentId),
     if (item.row.stageOrdinal != null)
-      'Stage ordinal: ${item.row.stageOrdinal}',
-    if (item.row.attempt != null) 'Attempt: ${item.row.attempt}',
+      _field(
+        'prompt_inspector_studio_field_stage_ordinal',
+        item.row.stageOrdinal,
+      ),
+    if (item.row.attempt != null)
+      _field('prompt_inspector_studio_field_attempt', item.row.attempt),
   ].join('\n');
 
   static String _responseText(PromptCaptureView item) {
-    if (item.callEvents.isEmpty) return 'No linked outcome is available.';
+    if (item.callEvents.isEmpty) {
+      return 'prompt_inspector_studio_no_outcome'.tr();
+    }
     return item.callEvents.map(_callEventText).join('\n\n');
   }
 
   static String _callEventText(LlmCallEventRow event) => <String>[
-    '${event.kind} · attempt ${event.attempt ?? '-'}',
-    if (event.status != null) 'Status: ${event.status}',
+    '${event.kind} · ${'prompt_inspector_studio_attempt'.tr(namedArgs: {'attempt': '${event.attempt ?? '-'}'})}',
+    if (event.status != null)
+      _field('prompt_inspector_studio_field_status', event.status),
     if (event.responseText != null) event.responseText!,
-    if (event.error != null) 'Error: ${event.error}',
-    if (event.parserName != null) 'Parser: ${event.parserName}',
-    if (event.parserCode != null) 'Verdict: ${event.parserCode}',
-    if (event.parserDetail != null) 'Detail: ${event.parserDetail}',
+    if (event.error != null)
+      _field('prompt_inspector_studio_field_error', event.error),
+    if (event.parserName != null)
+      _field('prompt_inspector_studio_field_parser', event.parserName),
+    if (event.parserCode != null)
+      _field('prompt_inspector_studio_field_verdict', event.parserCode),
+    if (event.parserDetail != null)
+      _field('prompt_inspector_studio_field_detail', event.parserDetail),
   ].join('\n');
+
+  static String _field(String key, Object? value) =>
+      key.tr(namedArgs: {'value': '$value'});
+
+  static String _stageLabel(String? stage) => switch (stage) {
+    null || '' => 'prompt_inspector_studio_stage_unclassified'.tr(),
+    'studio.controller' => 'prompt_inspector_studio_stage_controller'.tr(),
+    'studio.post_processing' =>
+      'prompt_inspector_studio_stage_post_processor'.tr(),
+    'studio.final' => 'prompt_inspector_studio_stage_final_writer'.tr(),
+    'cleaner.audit' => 'prompt_inspector_studio_stage_cleaner_audit'.tr(),
+    'cleaner.rewrite' => 'prompt_inspector_studio_stage_post_cleaner'.tr(),
+    'ledger.turn' => 'prompt_inspector_studio_stage_ledger'.tr(),
+    'ledger.turn_repair' => 'prompt_inspector_studio_stage_ledger_repair'.tr(),
+    'ledger.reconciliation' =>
+      'prompt_inspector_studio_stage_reconciliation'.tr(),
+    'ledger.reconciliation_repair' =>
+      'prompt_inspector_studio_stage_reconciliation_repair'.tr(),
+    'card.collector' => 'prompt_inspector_studio_stage_collector'.tr(),
+    'card.history_consolidation' =>
+      'prompt_inspector_studio_stage_history_consolidation'.tr(),
+    'card.writer' => 'prompt_inspector_studio_stage_card_writer'.tr(),
+    'card.writer_repair' =>
+      'prompt_inspector_studio_stage_card_writer_repair'.tr(),
+    'card.lorebook_writer' =>
+      'prompt_inspector_studio_stage_lorebook_writer'.tr(),
+    'card.manual_writer' =>
+      'prompt_inspector_studio_stage_manual_card_writer'.tr(),
+    'summary' => 'prompt_inspector_studio_stage_summary'.tr(),
+    _ => stage,
+  };
 
   static IconData _stageIcon(String? stage) {
     if (stage?.startsWith('ledger.') == true) {
@@ -244,14 +306,10 @@ class _ResponsePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (capture.row.callId == null) {
-      return const _InfoCard(
-        text: 'This legacy capture has no stable call identity.',
-      );
+      return _InfoCard(text: 'prompt_inspector_studio_legacy_no_call_id'.tr());
     }
     if (capture.callEvents.isEmpty) {
-      return const _InfoCard(
-        text: 'No linked response or parser verdict is available.',
-      );
+      return _InfoCard(text: 'prompt_inspector_studio_no_response'.tr());
     }
     return Column(
       children: [
@@ -367,7 +425,7 @@ class _EmptyState extends StatelessWidget {
             TextButton.icon(
               onPressed: onRefresh,
               icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Refresh'),
+              label: Text('action_refresh'.tr()),
             ),
           ],
         ],

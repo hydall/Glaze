@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -65,8 +66,12 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
       GlazeToast.show(
         context,
         result.status == 'ok'
-            ? 'Ledger reconciliation completed: ${result.opsApplied} ops.'
-            : 'Ledger reconciliation failed: ${result.error ?? result.status}',
+            ? 'agent_ops_reconciliation_completed'.tr(
+                namedArgs: {'count': '${result.opsApplied}'},
+              )
+            : 'agent_ops_reconciliation_failed'.tr(
+                namedArgs: {'error': result.error ?? result.status},
+              ),
         isError: result.status != 'ok',
         position: ToastPosition.top,
       );
@@ -75,7 +80,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
       if (mounted) {
         GlazeToast.show(
           context,
-          'Ledger reconciliation failed: $error',
+          'agent_ops_reconciliation_failed'.tr(namedArgs: {'error': '$error'}),
           isError: true,
           position: ToastPosition.top,
         );
@@ -99,8 +104,12 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
       GlazeToast.show(
         context,
         result.status == 'ok'
-            ? 'Studio Ledger rerun completed: ${result.opsApplied} ops.'
-            : 'Studio Ledger rerun failed: ${result.error ?? result.status}',
+            ? 'agent_ops_ledger_rerun_completed'.tr(
+                namedArgs: {'count': '${result.opsApplied}'},
+              )
+            : 'agent_ops_ledger_rerun_failed'.tr(
+                namedArgs: {'error': result.error ?? result.status},
+              ),
         isError: result.status != 'ok',
         position: ToastPosition.top,
       );
@@ -109,7 +118,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
       if (mounted) {
         GlazeToast.show(
           context,
-          'Studio Ledger rerun failed: $error',
+          'agent_ops_ledger_rerun_failed'.tr(namedArgs: {'error': '$error'}),
           isError: true,
           position: ToastPosition.top,
         );
@@ -118,7 +127,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
       if (mounted) {
         GlazeToast.show(
           context,
-          'Studio Ledger rerun failed: $error',
+          'agent_ops_ledger_rerun_failed'.tr(namedArgs: {'error': '$error'}),
           isError: true,
           position: ToastPosition.top,
         );
@@ -132,28 +141,28 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
     if (_regeneratingRunId != null) return;
     final confirmed = await GlazeBottomSheet.show<bool>(
       context,
-      title: 'Regenerate latest commit?',
+      title: 'agent_ops_regenerate_title'.tr(),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'The exact saved before-state will be used to regenerate '
-              '${run.label}. The current commit is replaced only after the '
-              'new response passes every integrity check.',
+              'agent_ops_regenerate_body'.tr(
+                namedArgs: {'commit': _runLabel(run)},
+              ),
               style: TextStyle(color: context.cs.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
             FilledButton(
               onPressed: () =>
                   Navigator.of(context, rootNavigator: true).pop(true),
-              child: const Text('Regenerate'),
+              child: Text('agent_ops_regenerate'.tr()),
             ),
             TextButton(
               onPressed: () =>
                   Navigator.of(context, rootNavigator: true).pop(false),
-              child: const Text('Cancel'),
+              child: Text('btn_cancel'.tr()),
             ),
           ],
         ),
@@ -174,10 +183,13 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
         context,
         result.status == 'ok'
             ? result.opsApplied == 0
-                  ? 'The latest reconciliation is unchanged.'
-                  : 'Latest reconciliation regenerated: '
-                        '${result.opsApplied} ops.'
-            : 'Regeneration failed: ${result.error ?? result.status}',
+                  ? 'agent_ops_regeneration_unchanged'.tr()
+                  : 'agent_ops_regeneration_completed'.tr(
+                      namedArgs: {'count': '${result.opsApplied}'},
+                    )
+            : 'agent_ops_regeneration_failed'.tr(
+                namedArgs: {'error': result.error ?? result.status},
+              ),
         isError: result.status != 'ok',
         position: ToastPosition.top,
       );
@@ -186,7 +198,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
       if (mounted) {
         GlazeToast.show(
           context,
-          'Regeneration failed: $error',
+          'agent_ops_regeneration_failed'.tr(namedArgs: {'error': '$error'}),
           isError: true,
           position: ToastPosition.top,
         );
@@ -218,15 +230,26 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                   children: [
                     Text(
                       data.chainIsValid
-                          ? '${data.runs.where((run) => run.isCurrent).length} current commits'
-                          : 'Reconciliation chain integrity failure',
+                          ? 'agent_ops_current_commits'.tr(
+                              namedArgs: {
+                                'count':
+                                    '${data.runs.where((run) => run.isCurrent).length}',
+                              },
+                            )
+                          : 'agent_ops_chain_integrity_failure'.tr(),
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                     const SizedBox(height: 4),
                     Text(
                       data.checkpoint == null
-                          ? 'No reconciliation checkpoint yet.'
-                          : 'Checkpoint: ${data.checkpoint!.messageIds.length} messages, ending at ${data.checkpoint!.endMessageId}',
+                          ? 'agent_ops_no_checkpoint'.tr()
+                          : 'agent_ops_checkpoint'.tr(
+                              namedArgs: {
+                                'count':
+                                    '${data.checkpoint!.messageIds.length}',
+                                'messageId': data.checkpoint!.endMessageId,
+                              },
+                            ),
                       style: TextStyle(
                         color: context.cs.onSurfaceVariant,
                         fontSize: 12,
@@ -251,7 +274,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                                   child: GlazeSpinner(),
                                 )
                               : const Icon(Icons.rule_folder_outlined),
-                          label: const Text('Run reconciliation'),
+                          label: Text('agent_ops_run_reconciliation'.tr()),
                         ),
                         FilledButton.tonalIcon(
                           onPressed:
@@ -267,7 +290,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                                   child: GlazeSpinner(),
                                 )
                               : const Icon(Icons.replay_outlined),
-                          label: const Text('Rerun latest Ledger'),
+                          label: Text('agent_ops_rerun_ledger'.tr()),
                         ),
                       ],
                     ),
@@ -281,12 +304,13 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
               characterId: widget.characterId,
             ),
             const SizedBox(height: 14),
-            Text('Commits', style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              'agent_ops_commits'.tr(),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
             const SizedBox(height: 6),
             if (data.runs.isEmpty)
-              const _EmptyState(
-                text: 'No reconciliation commits recorded for this session.',
-              )
+              _EmptyState(text: 'agent_ops_no_commits'.tr())
             else
               for (final run in data.runs.reversed)
                 _RunTile(
@@ -309,14 +333,12 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                 ),
             const SizedBox(height: 14),
             Text(
-              'Parsing attempts',
+              'agent_ops_parsing_attempts'.tr(),
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 6),
             if (data.debugRuns.isEmpty)
-              const _EmptyState(
-                text: 'No durable reconciliation responses recorded yet.',
-              )
+              _EmptyState(text: 'agent_ops_no_responses'.tr())
             else
               for (final run in data.debugRuns) _DebugTile(row: run),
           ],
@@ -343,38 +365,54 @@ class _RunTile extends StatelessWidget {
       ReconciliationRunViewStatus.current => (
         Icons.check_circle_outline,
         context.cs.primary,
-        'Current',
+        'agent_ops_status_current'.tr(),
       ),
       ReconciliationRunViewStatus.invalidated => (
         Icons.block_outlined,
         context.cs.error,
-        'Invalidated',
+        'agent_ops_status_invalidated'.tr(),
       ),
       ReconciliationRunViewStatus.stale => (
         Icons.history_toggle_off,
         Colors.orange,
-        'Stale evidence',
+        'agent_ops_status_stale'.tr(),
       ),
       ReconciliationRunViewStatus.chainCorrupt => (
         Icons.warning_amber_rounded,
         context.cs.error,
-        'Chain corrupt',
+        'agent_ops_status_chain_corrupt'.tr(),
       ),
     };
     return Card(
       margin: const EdgeInsets.only(bottom: 6),
       child: ExpansionTile(
         leading: Icon(icon, color: color),
-        title: Text(run.label),
-        subtitle: Text('$status · ${run.approximateOperations.length} ops'),
+        title: Text(_runLabel(run)),
+        subtitle: Text(
+          'agent_ops_commit_summary'.tr(
+            namedArgs: {
+              'status': status,
+              'count': '${run.approximateOperations.length}',
+            },
+          ),
+        ),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _MonoDetail(label: 'Run ID', value: run.row.id),
-          _MonoDetail(label: 'Range hash', value: run.row.rangeHash),
-          _MonoDetail(label: 'Chain hash', value: run.row.chainHash),
+          _MonoDetail(label: 'agent_ops_run_id'.tr(), value: run.row.id),
+          _MonoDetail(
+            label: 'agent_ops_range_hash'.tr(),
+            value: run.row.rangeHash,
+          ),
+          _MonoDetail(
+            label: 'agent_ops_chain_hash'.tr(),
+            value: run.row.chainHash,
+          ),
           if (run.invalidation != null)
-            _MonoDetail(label: 'Invalidation', value: run.invalidation!.reason),
+            _MonoDetail(
+              label: 'agent_ops_invalidation'.tr(),
+              value: run.invalidation!.reason,
+            ),
           if (onRegenerate != null) ...[
             const SizedBox(height: 6),
             FilledButton.tonalIcon(
@@ -382,17 +420,17 @@ class _RunTile extends StatelessWidget {
               icon: regenerating
                   ? const SizedBox.square(dimension: 16, child: GlazeSpinner())
                   : const Icon(Icons.refresh_outlined),
-              label: const Text('Regenerate'),
+              label: Text('agent_ops_regenerate'.tr()),
             ),
           ],
           const SizedBox(height: 6),
           if (run.effect != null) ...[
             _MonoDetail(
-              label: 'Before state',
+              label: 'agent_ops_before_state'.tr(),
               value: run.effect!.beforeStateHash,
             ),
             _MonoDetail(
-              label: 'After state',
+              label: 'agent_ops_after_state'.tr(),
               value: run.effect!.afterStateHash,
             ),
             const SizedBox(height: 6),
@@ -407,8 +445,12 @@ class _RunTile extends StatelessWidget {
           ] else
             Text(
               run.approximateOperations.isEmpty
-                  ? 'Exact before/after diff is unavailable for this legacy commit.'
-                  : 'Approximate operations:\n${run.approximateOperations.join('\n')}',
+                  ? 'agent_ops_exact_diff_unavailable'.tr()
+                  : 'agent_ops_approximate_operations'.tr(
+                      namedArgs: {
+                        'operations': run.approximateOperations.join('\n'),
+                      },
+                    ),
               style: TextStyle(
                 color: context.cs.onSurfaceVariant,
                 fontFamily: 'monospace',
@@ -440,23 +482,23 @@ class _DebugTile extends StatelessWidget {
         subtitle: Text(
           failed
               ? row.rejectionReason ?? row.error ?? row.parseFailure
-              : 'Parsed',
+              : 'agent_ops_parsed'.tr(),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _MonoDetail(label: 'Endpoint', value: row.messageId),
-          _MonoDetail(label: 'Parse', value: row.parseFailure),
+          _MonoDetail(label: 'agent_ops_endpoint'.tr(), value: row.messageId),
+          _MonoDetail(label: 'agent_ops_parse'.tr(), value: row.parseFailure),
           const SizedBox(height: 6),
           SelectableText(
-            row.responseText ?? 'Raw response unavailable for this run.',
+            row.responseText ?? 'agent_ops_raw_response_unavailable'.tr(),
             style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
           ),
           if (row.repairResponseText != null) ...[
             const SizedBox(height: 10),
-            const Text('Repair response'),
+            Text('agent_ops_repair_response'.tr()),
             SelectableText(
               row.repairResponseText!,
               style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
@@ -520,17 +562,39 @@ class _ErrorState extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'Could not load Reconciler: $error',
+            'agent_ops_reconciler_load_failed'.tr(
+              namedArgs: {'error': '$error'},
+            ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           TextButton.icon(
             onPressed: onRetry,
             icon: const Icon(Icons.refresh),
-            label: const Text('Retry'),
+            label: Text('btn_retry'.tr()),
           ),
         ],
       ),
     ),
+  );
+}
+
+String _runLabel(ReconciliationRunView run) {
+  final first = run.firstMessageOrdinal;
+  final last = run.lastMessageOrdinal;
+  if (first == null || last == null) {
+    return 'agent_ops_commit_messages'.tr(
+      namedArgs: {
+        'ordinal': '${run.row.ordinal}',
+        'count': '${run.messageIds.length}',
+      },
+    );
+  }
+  return 'agent_ops_commit_range'.tr(
+    namedArgs: {
+      'ordinal': '${run.row.ordinal}',
+      'start': '$first',
+      'end': '$last',
+    },
   );
 }

@@ -93,7 +93,8 @@ void main() {
     final snapshot = await service.load('session');
 
     expect(snapshot.runs, hasLength(1));
-    expect(snapshot.runs.single.label, 'Collector #1 (commits 1-2)');
+    expect(snapshot.runs.single.firstReconciliationOrdinal, 1);
+    expect(snapshot.runs.single.boundaryReconciliationOrdinal, 2);
     expect(snapshot.observations.map((item) => item.status), [
       'expired',
       'active',

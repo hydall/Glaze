@@ -65,7 +65,7 @@ void main() {
   });
 
   test(
-    'loads newest captures with stage labels and decoded messages',
+    'loads newest captures with structured stages and decoded messages',
     () async {
       await repo.record(
         _event(
@@ -84,9 +84,9 @@ void main() {
 
       final captures = await service.load('session');
 
-      expect(captures.map((item) => item.label), [
-        'Card writer',
-        'Reconciliation',
+      expect(captures.map((item) => item.row.stage), [
+        'card.writer',
+        'ledger.reconciliation',
       ]);
       expect(captures.first.messages.single, {
         'role': 'user',

@@ -15,16 +15,18 @@ enum ReconciliationRunViewStatus { current, invalidated, stale, chainCorrupt }
 final class ReconciliationRunView {
   const ReconciliationRunView({
     required this.row,
-    required this.label,
     required this.messageIds,
+    required this.firstMessageOrdinal,
+    required this.lastMessageOrdinal,
     required this.status,
     required this.invalidation,
     required this.effect,
   });
 
   final LedgerReconciliationSuccessfulRunRow row;
-  final String label;
   final List<String> messageIds;
+  final int? firstMessageOrdinal;
+  final int? lastMessageOrdinal;
   final ReconciliationRunViewStatus status;
   final LedgerReconciliationRunInvalidationRow? invalidation;
   final LedgerReconciliationEffectRow? effect;
@@ -142,11 +144,8 @@ class ReconcilerViewService {
         .map((id) => messageOrdinals[id])
         .whereType<int>()
         .toList(growable: false);
-    final range = ordinals.length == messageIds.length && ordinals.isNotEmpty
-        ? ordinals.length == 1
-              ? '${ordinals.first}'
-              : '${ordinals.first}-${ordinals.last}'
-        : '${messageIds.length} messages';
+    final hasCompleteOrdinals =
+        ordinals.length == messageIds.length && ordinals.isNotEmpty;
     final status = !chainIsValid
         ? ReconciliationRunViewStatus.chainCorrupt
         : invalidation != null
@@ -156,8 +155,9 @@ class ReconcilerViewService {
         : ReconciliationRunViewStatus.stale;
     return ReconciliationRunView(
       row: row,
-      label: 'Commit #${row.ordinal} (messages $range)',
       messageIds: messageIds,
+      firstMessageOrdinal: hasCompleteOrdinals ? ordinals.first : null,
+      lastMessageOrdinal: hasCompleteOrdinals ? ordinals.last : null,
       status: status,
       invalidation: invalidation,
       effect: effect,

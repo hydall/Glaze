@@ -38,11 +38,6 @@ final class CollectorRunView {
     }
     return null;
   }
-
-  String get label => firstReconciliationOrdinal == null
-      ? 'Collector #${row.collectorOrdinal}'
-      : 'Collector #${row.collectorOrdinal} '
-            '(commits $firstReconciliationOrdinal-$boundaryReconciliationOrdinal)';
 }
 
 final class CollectorViewSnapshot {

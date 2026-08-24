@@ -683,7 +683,7 @@ class _JobActions extends ConsumerWidget {
                   key: const Key('rewrite-resume-button'),
                   onPressed: () => _resume(context, ref),
                   icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                  label: const Text('Resume'),
+                  label: Text('rewrite_resume'.tr()),
                 ),
               if (canReplaceAutomated) ...[
                 OutlinedButton.icon(
@@ -731,10 +731,9 @@ class _JobActions extends ConsumerWidget {
         .resumeGenerating(job);
     if (!context.mounted) return;
     GlazeToast.show(context, switch (kind) {
-      'started' => 'Manual rewrite resumed.',
-      'resumeUnavailable' =>
-        'This legacy job does not contain enough request data to resume.',
-      _ => 'Manual rewrite could not be resumed: $kind',
+      'started' => 'rewrite_resume_started'.tr(),
+      'resumeUnavailable' => 'rewrite_resume_unavailable'.tr(),
+      _ => 'rewrite_resume_failed'.tr(namedArgs: {'result': kind}),
     });
   }
 

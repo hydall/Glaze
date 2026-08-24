@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -58,9 +59,7 @@ class _AgenticOperationsLogDialogState
   Widget build(BuildContext context) {
     final sessionId = widget.sessionId;
     final children = sessionId == null || sessionId.isEmpty
-        ? const <Widget>[
-            Center(child: Text('Open Agent Ops from a chat session.')),
-          ]
+        ? <Widget>[Center(child: Text('agent_ops_open_from_chat'.tr()))]
         : <Widget>[
             _visited.contains(0)
                 ? AgenticReconcilerTab(
@@ -73,9 +72,9 @@ class _AgenticOperationsLogDialogState
                 : const SizedBox.shrink(),
             _visited.contains(2)
                 ? widget.characterId == null || widget.characterId!.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Text(
-                            'Card Rewriter is available when Agent Ops is opened from the chat drawer.',
+                            'agent_ops_card_rewriter_chat_only'.tr(),
                             textAlign: TextAlign.center,
                           ),
                         )
@@ -101,28 +100,28 @@ class _AgenticOperationsLogDialogState
             ),
           );
     return SheetView(
-      title: 'Agent Ops',
+      title: 'agent_ops_title'.tr(),
       showBack: true,
       startExpanded: true,
       onBack: () => Navigator.of(context).maybePop(),
       headerBottom: sessionId == null || sessionId.isEmpty
           ? null
           : GlazeTabBar(
-              tabs: const [
+              tabs: [
                 GlazeTabItem(
-                  label: 'Reconciler',
+                  label: 'agent_ops_tab_reconciler'.tr(),
                   icon: Icons.rule_folder_outlined,
                 ),
                 GlazeTabItem(
-                  label: 'Collector',
+                  label: 'agent_ops_tab_collector'.tr(),
                   icon: Icons.filter_alt_outlined,
                 ),
                 GlazeTabItem(
-                  label: 'Card Rewriter',
+                  label: 'agent_ops_tab_card_rewriter'.tr(),
                   icon: Icons.auto_fix_high_outlined,
                 ),
                 GlazeTabItem(
-                  label: 'Snapshots',
+                  label: 'agent_ops_tab_snapshots'.tr(),
                   icon: Icons.history_edu_outlined,
                 ),
               ],

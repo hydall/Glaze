@@ -82,7 +82,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   static final _allItems = <MagicDrawerItemDef>[
     MagicDrawerItemDef(
       id: 'inspector',
-      label: 'Prompt Inspector',
+      label: 'prompt_inspector_title'.tr(),
       icon: Icons.travel_explore,
       category: MagicDrawerCategory.tools,
     ),
@@ -160,7 +160,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     ),
     MagicDrawerItemDef(
       id: 'agent-ops',
-      label: 'Agentic Ops',
+      label: 'agent_ops_title'.tr(),
       icon: Icons.smart_toy_outlined,
       category: MagicDrawerCategory.tools,
     ),

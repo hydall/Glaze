@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -67,7 +68,9 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
             child: Row(
               children: [
                 Text(
-                  '${snapshots.length} snapshot${snapshots.length == 1 ? '' : 's'}',
+                  'agent_ops_snapshot_count'.tr(
+                    namedArgs: {'count': '${snapshots.length}'},
+                  ),
                   style: TextStyle(
                     color: context.cs.onSurfaceVariant,
                     fontSize: 12,
@@ -77,7 +80,7 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                 IconButton(
                   onPressed: _reload,
                   icon: const Icon(Icons.refresh, size: 18),
-                  tooltip: 'Reload',
+                  tooltip: 'agent_ops_reload'.tr(),
                   visualDensity: VisualDensity.compact,
                 ),
               ],
@@ -89,13 +92,7 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Text(
-                      'No snapshots recorded yet for this session.\n\n'
-                      'Each ledger run writes a per-message snapshot of the '
-                      'Studio Ledger state. Committed snapshots are the '
-                      'accepted base for the next generation; tentative ones '
-                      'are pending the next user turn. This view is read-only; '
-                      'reconciliation commits and regeneration live in the '
-                      'Reconciler tab.',
+                      'agent_ops_snapshots_empty'.tr(),
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: context.cs.onSurfaceVariant,
@@ -150,7 +147,9 @@ class _SnapshotTile extends ConsumerWidget {
           ),
           const SizedBox(width: 8),
           Text(
-            snapshot.committed ? 'committed' : 'tentative',
+            snapshot.committed
+                ? 'agent_ops_snapshot_committed'.tr()
+                : 'agent_ops_snapshot_tentative'.tr(),
             style: tt.labelSmall?.copyWith(
               color: snapshot.committed ? cs.primary : cs.onSurfaceVariant,
             ),
@@ -158,9 +157,16 @@ class _SnapshotTile extends ConsumerWidget {
         ],
       ),
       subtitle: Text(
-        'swipe ${snapshot.swipeId} · agent ${snapshot.agentSwipeId} · '
-        '${trackers.length} ledger values · '
-        '${DateTime.fromMillisecondsSinceEpoch(snapshot.createdAt * 1000).toIso8601String()}',
+        'agent_ops_snapshot_summary'.tr(
+          namedArgs: {
+            'swipeId': '${snapshot.swipeId}',
+            'agentSwipeId': '${snapshot.agentSwipeId}',
+            'count': '${trackers.length}',
+            'createdAt': DateTime.fromMillisecondsSinceEpoch(
+              snapshot.createdAt * 1000,
+            ).toIso8601String(),
+          },
+        ),
         style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant, fontSize: 11),
       ),
       children: [
@@ -168,7 +174,7 @@ class _SnapshotTile extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Text(
-              '(no ledger values in this snapshot)',
+              'agent_ops_snapshot_no_values'.tr(),
               style: tt.bodySmall?.copyWith(
                 color: cs.onSurfaceVariant,
                 fontStyle: FontStyle.italic,
@@ -223,7 +229,7 @@ class _SnapshotTrackerRow extends StatelessWidget {
           Expanded(
             flex: 7,
             child: SelectableText(
-              value.isEmpty ? '(empty)' : value,
+              value.isEmpty ? 'agent_ops_empty_value'.tr() : value,
               maxLines: 3,
               style: tt.bodySmall?.copyWith(color: cs.onSurface),
             ),

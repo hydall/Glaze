@@ -44,7 +44,8 @@ void main() {
 
       expect(snapshot.chainIsValid, isTrue);
       expect(snapshot.runs, hasLength(1));
-      expect(snapshot.runs.single.label, 'Commit #1 (messages 1-3)');
+      expect(snapshot.runs.single.firstMessageOrdinal, 1);
+      expect(snapshot.runs.single.lastMessageOrdinal, 3);
       expect(
         snapshot.runs.single.status,
         ReconciliationRunViewStatus.invalidated,
