@@ -35,6 +35,7 @@ import '../db/repositories/ledger_reconciliation_run_repo.dart';
 import '../db/repositories/ledger_debug_run_repo.dart';
 import '../db/repositories/llm_request_capture_repo.dart';
 import '../db/repositories/card_evolution_repo.dart';
+import '../db/repositories/card_evolution_proposal_run_repo.dart';
 import '../db/repositories/card_evolution_collector_run_repo.dart';
 import '../db/repositories/card_evolution_writer_call_repo.dart';
 import '../db/repositories/card_evolution_observation_repo.dart';
@@ -223,6 +224,11 @@ final cardEvolutionWriterCallRepoProvider =
 final cardEvolutionObservationRepoProvider =
     Provider<CardEvolutionObservationRepo>(
       (ref) => CardEvolutionObservationRepo(ref.watch(appDbProvider)),
+    );
+
+final cardEvolutionProposalRunRepoProvider =
+    Provider<CardEvolutionProposalRunRepo>(
+      (ref) => CardEvolutionProposalRunRepo(ref.watch(appDbProvider)),
     );
 
 final embeddingRepoProvider = Provider<EmbeddingRepo>((ref) {

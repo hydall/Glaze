@@ -206,6 +206,12 @@ class ChatMessageService {
     }
 
     await chatRepo.transaction(() async {
+      await _ref
+          .read(cardEvolutionProposalRunRepoProvider)
+          .cancelPendingForMessageMutationInTransaction(
+            sessionId: session.id,
+            messageIds: invalidatedMessageIds,
+          );
       await knowledgeRepo.rollbackReconciliationCleanupForMessages(
         session.id,
         invalidatedMessageIds,
@@ -555,6 +561,12 @@ class ChatMessageService {
           ..[messageIndex] = replacement,
         updatedAt: currentTimestampSeconds(),
       );
+      await _ref
+          .read(cardEvolutionProposalRunRepoProvider)
+          .cancelPendingForMessageMutationInTransaction(
+            sessionId: session.id,
+            messageIds: {messageId},
+          );
       await _ref
           .read(ledgerReconciliationRunRepoProvider)
           .invalidateForMessageMutation(
@@ -1144,6 +1156,12 @@ class ChatMessageService {
       }
     }
     if (changedIds.isEmpty) return;
+    await _ref
+        .read(cardEvolutionProposalRunRepoProvider)
+        .cancelPendingForMessageMutationInTransaction(
+          sessionId: before.id,
+          messageIds: changedIds,
+        );
     await _ref
         .read(ledgerReconciliationRunRepoProvider)
         .invalidateForMessageMutation(

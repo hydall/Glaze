@@ -10,6 +10,8 @@ import '../../models/character.dart';
 import '../../utils/id_generator.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
+import 'card_evolution_proposal_run_repo.dart';
+import 'card_evolution_selected_input_validator.dart';
 import 'session_canon_checkpoint_repo.dart';
 import 'session_lorebook_embedding_job_repo.dart';
 import 'session_lorebook_evolution_repo.dart';
@@ -104,6 +106,30 @@ class ManualRewriteApplyRepo {
           return const ManualRewriteApplyOutcome.blocked(
             'staleSessionCharacter',
           );
+        }
+
+        final proposal = await (_db.select(
+          _db.cardEvolutionProposalRuns,
+        )..where((row) => row.rewriteJobId.equals(jobId))).getSingleOrNull();
+        if (proposal != null) {
+          final evidence = CardEvolutionSelectedChatEvidence.tryParse(
+            proposal.selectedInputJson,
+          );
+          if (evidence == null ||
+              !evidence.validatesProposal(
+                proposal,
+                jobId: job.id,
+                sessionId: job.chatSessionId,
+                characterId: job.characterId,
+                messagesJson: session.messagesJson,
+              )) {
+            await CardEvolutionProposalRunRepo(
+              _db,
+            ).cancelPendingJobInTransaction(proposal: proposal);
+            return const ManualRewriteApplyOutcome.blocked(
+              'staleAutomatedEvidence',
+            );
+          }
         }
 
         final input = await _canonReader.readInTransaction(
@@ -461,9 +487,6 @@ class ManualRewriteApplyRepo {
         if (jobChanged != 1) {
           throw StateError('Job CAS changed inside apply transaction.');
         }
-        final proposal = await (_db.select(
-          _db.cardEvolutionProposalRuns,
-        )..where((row) => row.rewriteJobId.equals(jobId))).getSingleOrNull();
         if (proposal != null) {
           final observationIds = <String>{};
           try {

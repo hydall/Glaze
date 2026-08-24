@@ -15,6 +15,7 @@ import 'package:glaze_flutter/core/db/repositories/tracker_repo.dart';
 import 'package:glaze_flutter/core/llm/prompt/ledger_tracker_loader.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/tracker.dart';
+import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewriter_contracts.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/effective_canon_assembler.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/effective_canon_read_repository.dart';
@@ -250,6 +251,58 @@ void main() {
         );
   }
 
+  String canonicalJson(Object? value) {
+    Object? canonical(Object? item) {
+      if (item is Map) {
+        final keys = item.keys.map((key) => key.toString()).toList()..sort();
+        return {for (final key in keys) key: canonical(item[key])};
+      }
+      if (item is Iterable) return item.map(canonical).toList();
+      return item;
+    }
+
+    return jsonEncode(canonical(value));
+  }
+
+  Future<void> addAutomaticProposal() async {
+    final history = <Map<String, Object?>>[
+      {
+        'messageId': 'assistant-accepted',
+        'role': 'assistant',
+        'swipeId': 0,
+        'agentSwipeId': 0,
+        'content': 'Accepted response',
+        'contentHash': computeHash('Accepted response'),
+      },
+    ];
+    final selected = canonicalJson({
+      'contractVersion': 8,
+      'chatHistoryHash': computeHash(canonicalJson(history)),
+      'effectiveCanonIdentity': 'canon',
+      'chatHistory': history,
+      'accumulatedObservations': const <Object?>[],
+    });
+    await db
+        .into(db.cardEvolutionProposalRuns)
+        .insert(
+          CardEvolutionProposalRunsCompanion.insert(
+            id: 'proposal',
+            claimId: 'claim',
+            sessionId: 's',
+            characterId: 'c',
+            rewriteJobId: 'job',
+            chatHistoryHash: computeHash(canonicalJson(history)),
+            effectiveCanonIdentity: 'canon',
+            selectedInputJson: selected,
+            inputHash: computeHash(selected),
+            modelOutput: '{}',
+            modelOutputHash: computeHash('{}'),
+            operationSnapshotJson: '[]',
+            createdAt: 1,
+          ),
+        );
+  }
+
   test(
     'applies the durable approved set atomically and retries idempotently',
     () async {
@@ -296,6 +349,52 @@ void main() {
       );
     },
   );
+
+  test('valid automatic proposal evidence remains applyable', () async {
+    final stamp = await seed();
+    await addAutomaticProposal();
+
+    final outcome = await ManualRewriteApplyRepo(db: db, canonReader: reader)
+        .applyApproved(
+          jobId: 'job',
+          expectedCanonStamp: stamp,
+          expectedJobVersion: 1,
+        );
+
+    expect(outcome.kind, 'applied');
+  });
+
+  test('stale automatic evidence cancels job without card writes', () async {
+    final stamp = await seed();
+    await addAutomaticProposal();
+    final session = await db.select(db.chatSessions).getSingle();
+    final messages = jsonDecode(session.messagesJson) as List<dynamic>;
+    (messages.first as Map<String, dynamic>)['content'] = 'Changed response';
+    await db
+        .update(db.chatSessions)
+        .write(
+          ChatSessionsCompanion(messagesJson: Value(jsonEncode(messages))),
+        );
+
+    final outcome = await ManualRewriteApplyRepo(db: db, canonReader: reader)
+        .applyApproved(
+          jobId: 'job',
+          expectedCanonStamp: stamp,
+          expectedJobVersion: 1,
+        );
+
+    expect(outcome.kind, 'blocked');
+    expect(outcome.reason, 'staleAutomatedEvidence');
+    expect((await db.select(db.rewriteJobs).getSingle()).status, 'cancelled');
+    expect(
+      (await db.select(db.rewriteJobs).getSingle()).statusReason,
+      'chatEvidenceChanged',
+    );
+    expect((await characters.getById('c'))!.description, 'old text');
+    expect(await db.select(db.characterRevisionRows).get(), hasLength(1));
+    expect(await db.select(db.cardEvolutionProposalRuns).get(), hasLength(1));
+    expect(await db.select(db.rewriteOperationRevisions).get(), hasLength(1));
+  });
 
   test(
     'applies approved operations for multiple fields in one revision',
