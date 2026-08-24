@@ -13,6 +13,40 @@ class CharacterKnowledgeFactRepo {
 
   final AppDatabase db;
 
+  /// Restores every knowledge row for a session from an exact captured image.
+  /// The caller may include this operation in a wider transaction.
+  Future<void> restoreSessionRowsExact(
+    String sessionId,
+    String rowsJson,
+  ) async {
+    final decoded = jsonDecode(rowsJson);
+    if (decoded is! List) throw const FormatException('Expected fact rows');
+    final rows = decoded
+        .map((value) {
+          if (value is! Map<Object?, Object?>) {
+            throw const FormatException('Expected fact row');
+          }
+          return CharacterKnowledgeFactRow.fromJson(
+            Map<String, dynamic>.from(value),
+          );
+        })
+        .toList(growable: false);
+    if (rows.any((row) => row.chatSessionId != sessionId) ||
+        rows.map((row) => row.id).toSet().length != rows.length) {
+      throw ArgumentError('Exact knowledge rows do not belong to the session.');
+    }
+    await db.transaction(() async {
+      await (db.delete(
+        db.characterKnowledgeFactRows,
+      )..where((row) => row.chatSessionId.equals(sessionId))).go();
+      if (rows.isNotEmpty) {
+        await db.batch((batch) {
+          batch.insertAll(db.characterKnowledgeFactRows, rows);
+        });
+      }
+    });
+  }
+
   Future<void> insertTentative(CharacterKnowledgeFact fact) =>
       insertAllTentative([fact]);
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -208,6 +210,78 @@ void main() {
 
       expect((await repo.getBySessionId('s1')).length, 1);
       expect((await repo.getBySessionId('s2')).length, 1);
+    });
+  });
+
+  group('TrackerRepo.restoreLedgerRowsExact', () {
+    test('restores exact Ledger rows and preserves other scopes', () async {
+      await repo.upsert(
+        _tracker(
+          sessionId: 's1',
+          name: 'world:time',
+          value: 'before',
+          scope: 'ledger',
+        ),
+      );
+      await repo.upsert(
+        _tracker(sessionId: 's1', name: 'diagnostic', value: 'keep'),
+      );
+      final captured =
+          await (db.select(db.trackerRows)
+                ..where((row) => row.sessionId.equals('s1'))
+                ..where((row) => row.scope.equals('ledger')))
+              .get();
+      final rowsJson = jsonEncode(captured.map((row) => row.toJson()).toList());
+
+      await repo.upsert(
+        _tracker(
+          sessionId: 's1',
+          name: 'world:time',
+          value: 'after',
+          scope: 'ledger',
+        ),
+      );
+      await repo.upsert(
+        _tracker(
+          sessionId: 's1',
+          name: 'stale',
+          value: 'remove',
+          scope: 'ledger',
+        ),
+      );
+
+      await repo.restoreLedgerRowsExact('s1', rowsJson);
+
+      expect((await repo.get('s1', 'world:time'))!.value, 'before');
+      expect(await repo.get('s1', 'stale'), isNull);
+      expect((await repo.get('s1', 'diagnostic'))!.value, 'keep');
+    });
+
+    test('rejects foreign rows before changing current state', () async {
+      await repo.upsert(
+        _tracker(
+          sessionId: 's1',
+          name: 'world:time',
+          value: 'current',
+          scope: 'ledger',
+        ),
+      );
+      final foreign = TrackerRow(
+        sessionId: 's2',
+        name: 'world:time',
+        value: 'foreign',
+        scope: 'ledger',
+        provenance: '',
+        basisRevision: 0,
+        basisRevisionHash: '',
+        updatedAt: 1,
+      );
+
+      expect(
+        () => repo.restoreLedgerRowsExact('s1', jsonEncode([foreign.toJson()])),
+        throwsArgumentError,
+      );
+      expect((await repo.get('s1', 'world:time'))!.value, 'current');
     });
   });
 

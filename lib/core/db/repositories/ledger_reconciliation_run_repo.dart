@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
+import '../../models/chat_message.dart';
 import '../../utils/cast_helpers.dart';
 import '../app_db.dart';
 
@@ -134,6 +135,23 @@ final class ReconciliationStateSnapshot {
       'knowledge': jsonDecode(knowledgeJson),
     }),
   );
+}
+
+sealed class ReconciliationEffectValidation {
+  const ReconciliationEffectValidation();
+}
+
+final class ReconciliationEffectValid extends ReconciliationEffectValidation {
+  const ReconciliationEffectValid({required this.before, required this.after});
+
+  final ReconciliationStateSnapshot before;
+  final ReconciliationStateSnapshot after;
+}
+
+final class ReconciliationEffectInvalid extends ReconciliationEffectValidation {
+  const ReconciliationEffectInvalid(this.reason);
+
+  final String reason;
 }
 
 sealed class ReconciliationRunIntegrity {
@@ -546,6 +564,106 @@ class LedgerReconciliationRunRepo {
             ]))
           .get();
 
+  Future<ReconciliationEffectValidation> validateEffect(
+    LedgerReconciliationSuccessfulRunRow run,
+  ) async {
+    final effect = await readEffect(run.id);
+    if (effect == null) {
+      return const ReconciliationEffectInvalid('exact effect is unavailable');
+    }
+    if (effect.sessionId != run.sessionId || effect.runId != run.id) {
+      return const ReconciliationEffectInvalid(
+        'effect does not belong to the reconciliation run',
+      );
+    }
+    try {
+      final before = ReconciliationStateSnapshot(
+        ledgerJson: _validateCanonicalRowList(effect.beforeLedgerJson),
+        knowledgeJson: _validateCanonicalRowList(effect.beforeKnowledgeJson),
+      );
+      final after = ReconciliationStateSnapshot(
+        ledgerJson: _validateCanonicalRowList(effect.afterLedgerJson),
+        knowledgeJson: _validateCanonicalRowList(effect.afterKnowledgeJson),
+      );
+      final expectedEffects = _canonicalJson({
+        'ledger': _diffRows(
+          jsonDecode(before.ledgerJson) as List,
+          jsonDecode(after.ledgerJson) as List,
+          identityKey: 'name',
+        ),
+        'knowledge': _diffRows(
+          jsonDecode(before.knowledgeJson) as List,
+          jsonDecode(after.knowledgeJson) as List,
+          identityKey: 'id',
+        ),
+      });
+      if (before.hash != effect.beforeStateHash ||
+          after.hash != effect.afterStateHash ||
+          effect.actualEffectsJson != expectedEffects ||
+          effect.effectsHash != computeHash(expectedEffects)) {
+        return const ReconciliationEffectInvalid(
+          'effect integrity hashes do not match its state',
+        );
+      }
+      return ReconciliationEffectValid(before: before, after: after);
+    } catch (_) {
+      return const ReconciliationEffectInvalid(
+        'effect contains malformed state',
+      );
+    }
+  }
+
+  Future<bool> currentStateMatches(
+    String sessionId,
+    ReconciliationStateSnapshot expected,
+  ) async => (await captureState(sessionId)).hash == expected.hash;
+
+  /// Reconstructs the exact active message variations bound by [run].
+  /// Returns null if the transcript, ordering, or selected variation changed.
+  Future<List<ChatMessage>?> reconstructSelectedMessages(
+    LedgerReconciliationSuccessfulRunRow run,
+  ) async {
+    try {
+      final anchors = _decodeAnchors(run.anchorsJson);
+      final session = await (_db.select(
+        _db.chatSessions,
+      )..where((row) => row.sessionId.equals(run.sessionId))).getSingleOrNull();
+      if (session == null) return null;
+      final decoded = jsonDecode(session.messagesJson);
+      if (decoded is! List) return null;
+      final messages = decoded
+          .whereType<Map<Object?, Object?>>()
+          .map(
+            (value) => ChatMessage.fromJson(Map<String, dynamic>.from(value)),
+          )
+          .toList(growable: false);
+      final selected = <ChatMessage>[];
+      var previousIndex = -1;
+      for (final anchor in anchors) {
+        final index = messages.indexWhere(
+          (message) => message.id == anchor.messageId,
+        );
+        if (index <= previousIndex) return null;
+        previousIndex = index;
+        final message = messages[index];
+        if (message.role != anchor.role ||
+            message.swipeId != anchor.swipeId ||
+            message.agentSwipeId != anchor.agentSwipeId ||
+            computeHash(message.content) != anchor.contentHash ||
+            message.isHidden ||
+            message.isError ||
+            message.isTyping ||
+            message.content.trim().isEmpty) {
+          return null;
+        }
+        selected.add(message);
+      }
+      return List.unmodifiable(selected);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Captures the complete reconciliation-owned state in canonical order.
   /// Caller may invoke this inside the reconciliation transaction.
   Future<ReconciliationStateSnapshot> captureState(String sessionId) async {
@@ -719,25 +837,37 @@ class LedgerReconciliationRunRepo {
   Future<ReconciliationRunIntegrity> _validate(
     LedgerReconciliationRun run,
   ) async {
-    if (run.id.isEmpty ||
-        run.sessionId.isEmpty ||
-        run.ordinal <= 0 ||
-        run.contractVersion <= 0 ||
-        run.effectiveCanonStamp.isEmpty ||
-        run.effectiveCanonHash.isEmpty ||
-        run.anchors.isEmpty ||
-        !_validAnchors(run.anchors) ||
-        !_validRefs(run.sessionId, run.acceptedManifestRefs) ||
-        !_isJsonValue(run.canonicalResult) ||
-        run.opsApplied.any((v) => v.isEmpty)) {
+    final malformedReason = switch (run) {
+      LedgerReconciliationRun(id: '') => 'run ID is empty',
+      LedgerReconciliationRun(sessionId: '') => 'session ID is empty',
+      LedgerReconciliationRun(ordinal: <= 0) => 'ordinal is not positive',
+      LedgerReconciliationRun(contractVersion: <= 0) =>
+        'contract version is not positive',
+      LedgerReconciliationRun(effectiveCanonStamp: '') =>
+        'effective canon stamp is empty',
+      LedgerReconciliationRun(effectiveCanonHash: '') =>
+        'effective canon hash is empty',
+      LedgerReconciliationRun(anchors: []) => 'message anchors are empty',
+      _ when !_validAnchors(run.anchors) => 'message anchors are malformed',
+      _ when !_validRefs(run.sessionId, run.acceptedManifestRefs) =>
+        'accepted manifest references are malformed',
+      _ when !_isJsonValue(run.canonicalResult) =>
+        'canonical result is not JSON-safe',
+      _ when run.opsApplied.any((value) => value.isEmpty) =>
+        'applied operation metadata contains an empty value',
+      _ => null,
+    };
+    if (malformedReason != null) {
+      return ReconciliationRunMalformed(malformedReason);
+    }
+    if (!await _anchorsMatchSession(run)) {
       return const ReconciliationRunMalformed(
-        'missing or non-canonical reconciliation evidence',
+        'message anchors do not match the current transcript',
       );
     }
-    if (!await _anchorsMatchSession(run) ||
-        !await _refsMatchAcceptedManifests(run)) {
+    if (!await _refsMatchAcceptedManifests(run)) {
       return const ReconciliationRunMalformed(
-        'reconciliation evidence does not match durable canonical sources',
+        'accepted manifests do not match durable provenance',
       );
     }
     return const ReconciliationRunValid();
@@ -1101,6 +1231,20 @@ Map<String, dynamic> _diffRows(
     }
   }
   return {'added': added, 'removed': removed, 'changed': changed};
+}
+
+String _validateCanonicalRowList(String text) {
+  final decoded = jsonDecode(text);
+  if (decoded is! List ||
+      decoded.any((row) => row is! Map<Object?, Object?>) ||
+      !_isJsonValue(decoded)) {
+    throw const FormatException('Expected a JSON row list');
+  }
+  final canonical = _canonicalJson(decoded);
+  if (canonical != text) {
+    throw const FormatException('State snapshot is not canonical');
+  }
+  return canonical;
 }
 
 String _canonicalJson(Object? value) => jsonEncode(_canonical(value));

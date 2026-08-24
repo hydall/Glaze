@@ -443,6 +443,67 @@ void main() {
     );
   });
 
+  test('validates exact effects and reconstructs anchored messages', () async {
+    await _seedSession(db);
+    final run = _run();
+    expect(await repo.append(run), isA<ReconciliationRunAppended>());
+    final before = await repo.captureState('session');
+    await repo.recordEffect(
+      runId: run.id,
+      sessionId: run.sessionId,
+      before: before,
+      after: before,
+      createdAt: 1,
+    );
+
+    final validation = await repo.validateEffect(
+      (await repo.readPhysicalSession('session')).single,
+    );
+    expect(validation, isA<ReconciliationEffectValid>());
+    expect(await repo.currentStateMatches('session', before), isTrue);
+    final selected = await repo.reconstructSelectedMessages(
+      (await repo.readPhysicalSession('session')).single,
+    );
+    expect(selected, hasLength(1));
+    expect(selected!.single.id, 'message');
+    expect(selected.single.content, 'canonical');
+
+    await db.customStatement(
+      "UPDATE chat_sessions SET messages_json = '[{\"id\":\"message\",\"role\":\"assistant\",\"content\":\"changed\",\"swipes\":[\"changed\"],\"agentSwipes\":[]},{\"id\":\"user\",\"role\":\"user\",\"content\":\"accepted\"}]' WHERE session_id = 'session'",
+    );
+    expect(
+      await repo.reconstructSelectedMessages(
+        (await repo.readPhysicalSession('session')).single,
+      ),
+      isNull,
+    );
+  });
+
+  test('effect validation rejects tampered state hashes', () async {
+    await _seedSession(db);
+    final run = _run();
+    expect(await repo.append(run), isA<ReconciliationRunAppended>());
+    final state = await repo.captureState('session');
+    await repo.recordEffect(
+      runId: run.id,
+      sessionId: run.sessionId,
+      before: state,
+      after: state,
+      createdAt: 1,
+    );
+    await db.customStatement(
+      'DROP TRIGGER ledger_reconciliation_effects_no_update',
+    );
+    await db.customStatement(
+      "UPDATE ledger_reconciliation_effects SET after_state_hash = 'tampered' WHERE run_id = 'run-1'",
+    );
+
+    final validation = await repo.validateEffect(
+      (await repo.readPhysicalSession('session')).single,
+    );
+    expect(validation, isA<ReconciliationEffectInvalid>());
+  });
+
   test(
     'legacy stale evidence hides logical suffix without breaking chain',
     () async {

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
@@ -65,6 +67,37 @@ void main() {
     final stored = await repo.getById('fact-1');
     expect(stored!.basisRevisionNumber, 12);
     expect(stored.basisRevisionHash, 'card-hash');
+  });
+
+  test('restores exact session rows and rejects foreign snapshots', () async {
+    await repo.insertTentative(fact());
+    final captured = await (db.select(
+      db.characterKnowledgeFactRows,
+    )..where((row) => row.chatSessionId.equals('session-1'))).get();
+    final rowsJson = jsonEncode(captured.map((row) => row.toJson()).toList());
+
+    await repo.insertTentative(fact(id: 'fact-2', messageId: 'message-2'));
+    await repo.restoreSessionRowsExact('session-1', rowsJson);
+
+    final restored = await repo.getById('fact-1');
+    expect(restored!.id, captured.single.id);
+    expect(restored.object, captured.single.object);
+    expect(restored.lifecycle.name, captured.single.lifecycle);
+    expect(await repo.getById('fact-2'), isNull);
+
+    final foreign = CharacterKnowledgeFactRow.fromJson({
+      ...captured.single.toJson(),
+      'id': 'foreign',
+      'chatSessionId': 'session-2',
+    });
+    expect(
+      () => repo.restoreSessionRowsExact(
+        'session-1',
+        jsonEncode([foreign.toJson()]),
+      ),
+      throwsArgumentError,
+    );
+    expect(await repo.getById('fact-1'), isNotNull);
   });
 
   test('legacy facts default basis revision metadata', () {

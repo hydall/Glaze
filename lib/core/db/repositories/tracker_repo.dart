@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 
 import '../../models/tracker.dart';
@@ -159,6 +161,39 @@ class TrackerRepo {
       };
       for (final tracker in byName.values) {
         await upsert(tracker);
+      }
+    });
+  }
+
+  /// Restores model-owned Ledger rows from an exact captured database image.
+  /// Non-Ledger rows are preserved. The caller may include this in a wider
+  /// transaction.
+  Future<void> restoreLedgerRowsExact(String sessionId, String rowsJson) async {
+    final decoded = jsonDecode(rowsJson);
+    if (decoded is! List) throw const FormatException('Expected tracker rows');
+    final rows = decoded
+        .map((value) {
+          if (value is! Map<Object?, Object?>) {
+            throw const FormatException('Expected tracker row');
+          }
+          return TrackerRow.fromJson(Map<String, dynamic>.from(value));
+        })
+        .toList(growable: false);
+    if (rows.any(
+          (row) => row.sessionId != sessionId || row.scope != 'ledger',
+        ) ||
+        rows.map((row) => row.name).toSet().length != rows.length) {
+      throw ArgumentError('Exact Ledger rows do not belong to the session.');
+    }
+    await db.transaction(() async {
+      await (db.delete(db.trackerRows)
+            ..where((row) => row.sessionId.equals(sessionId))
+            ..where((row) => row.scope.equals('ledger')))
+          .go();
+      if (rows.isNotEmpty) {
+        await db.batch((batch) {
+          batch.insertAll(db.trackerRows, rows);
+        });
       }
     });
   }
