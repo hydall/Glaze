@@ -18,6 +18,7 @@ import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_rep
 import 'package:glaze_flutter/core/db/repositories/manual_rewrite_job_repo.dart';
 import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
 import 'package:glaze_flutter/core/llm/aux_retry_runner.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/agent_operation_record.dart';
 import 'package:glaze_flutter/core/models/card_evolution_observation.dart';
 import 'package:glaze_flutter/core/models/character.dart';
@@ -497,12 +498,13 @@ void main() {
     'automatic collector runs every second reconciliation and writer every second collector',
     () async {
       final prompts = <String>[];
+      final contexts = <LlmCaptureContext>[];
       final service = fixture.service((_, prompt) async {
         prompts.add(prompt);
         return prompt.contains('observation journal keeper')
             ? _ok('{"observations":[]}')
             : _ok('{"operations":[]}');
-      });
+      }, onCaptureContext: contexts.add);
       for (var ordinal = 1; ordinal <= 4; ordinal++) {
         final run = await fixture.seedReconciliationRun(ordinal: ordinal);
         final result = await service.runAfterReconciliation(run);
@@ -531,6 +533,14 @@ void main() {
       expect(claims.single.predecessorRunOrdinal, 2);
       expect(claims.single.status, 'completed');
       expect(claims.single.rewriteJobId, isNull);
+      final collectorContexts = contexts
+          .where((context) => context.stage == 'card.collector')
+          .toList();
+      expect(collectorContexts.map((context) => context.stageOrdinal), [1, 2]);
+      expect(
+        collectorContexts.every((context) => context.sessionId == 'session'),
+        isTrue,
+      );
     },
   );
 
@@ -547,6 +557,7 @@ void main() {
       });
       final starts = [0, 1, 21, 21];
       final prompts = <String>[];
+      final contexts = <LlmCaptureContext>[];
       final service = fixture.service((_, prompt) async {
         prompts.add(prompt);
         if (prompt.contains('observation journal keeper')) {
@@ -556,7 +567,7 @@ void main() {
           return _ok('complete history factual handoff');
         }
         return _ok('{"operations":[]}');
-      });
+      }, onCaptureContext: contexts.add);
       CardEvolutionFinalizeOutcome? outcome;
       for (var ordinal = 1; ordinal <= 4; ordinal++) {
         outcome = await service.runAfterReconciliation(
@@ -596,6 +607,18 @@ void main() {
       expect(writer, contains('complete history factual handoff'));
       expect(writer, isNot(contains('long-0')));
       expect(writer, isNot(contains('long-38')));
+      final consolidationContexts = contexts
+          .where((context) => context.stage == 'card.history_consolidation')
+          .toList();
+      expect(consolidationContexts, hasLength(consolidations.length));
+      expect(
+        consolidationContexts.map((context) => context.stageOrdinal),
+        List<int>.generate(consolidations.length, (index) => index + 1),
+      );
+      expect(
+        consolidationContexts.map((context) => context.pipelineRunId).toSet(),
+        hasLength(1),
+      );
     },
   );
 
@@ -1183,6 +1206,7 @@ final class _Fixture {
     Future<AuxCallOutcome> Function(CancelToken? token, String prompt)
     executor, {
     int Function()? observationExpiryRuns,
+    void Function(LlmCaptureContext context)? onCaptureContext,
   }) => AutomatedCardEvolutionService(
     repo: repo,
     observationRepo: observationRepo,
@@ -1200,7 +1224,11 @@ final class _Fixture {
           required temperature,
           required timeoutMs,
           cancelToken,
-        }) => executor(cancelToken, prompt),
+          captureContext,
+        }) {
+          if (captureContext != null) onCaptureContext?.call(captureContext);
+          return executor(cancelToken, prompt);
+        },
     observationPromotionThreshold: () => 3,
     observationMinConfidence: () => 0.7,
     observationExpiryRuns: observationExpiryRuns ?? () => 4,

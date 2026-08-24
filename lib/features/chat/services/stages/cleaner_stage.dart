@@ -531,6 +531,8 @@ class CleanerStage {
       auditStartedAt = DateTime.now().millisecondsSinceEpoch;
       auditFuture = cleanerService
           .runCharacterAudit(
+            sessionId: sessionId,
+            messageId: targetMessage.id,
             assistantText: assistantText,
             character: auditPayload.character,
             persona: auditPayload.persona,
@@ -662,6 +664,7 @@ class CleanerStage {
         : '';
     final result = await cleanerService.runCleaner(
       sessionId: sessionId,
+      messageId: targetMessage.id,
       settings: pipeline,
       config: cleanerConfig,
       assistantText: assistantText,

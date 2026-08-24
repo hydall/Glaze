@@ -17,6 +17,7 @@ import 'package:glaze_flutter/core/db/repositories/manual_rewrite_job_repo.dart'
 import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
 import 'package:glaze_flutter/core/llm/aux_retry_runner.dart';
 import 'package:glaze_flutter/core/llm/card_rewrite_slot_resolver.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/agent_operation_record.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
@@ -41,29 +42,27 @@ void main() {
 
   /// Builds one valid writer-lane response: a single anchored patch on the
   /// description field plus its global canon transition.
-  String validOutput({
-    String anchor = 'old text',
-    String value = 'new text',
-  }) => jsonEncode({
-    'field': 'description',
-    'patches': [
-      {
-        'scopeKey': 'npc:alice',
-        'anchor': anchor,
-        'anchorSha256': CardCanonicalizer.scalarSha256(anchor),
-        'value': value,
-      },
-    ],
-    'transition': {
-      'id': 'transition-1',
-      'scopeKey': 'npc:alice',
-      'canonicalClaim': value,
-      'promotionDestination': 'card',
-      'affectedTrackerKeys': <String>[],
-      'factIds': <String>[],
-      'chatSessionId': null,
-    },
-  });
+  String validOutput({String anchor = 'old text', String value = 'new text'}) =>
+      jsonEncode({
+        'field': 'description',
+        'patches': [
+          {
+            'scopeKey': 'npc:alice',
+            'anchor': anchor,
+            'anchorSha256': CardCanonicalizer.scalarSha256(anchor),
+            'value': value,
+          },
+        ],
+        'transition': {
+          'id': 'transition-1',
+          'scopeKey': 'npc:alice',
+          'canonicalClaim': value,
+          'promotionDestination': 'card',
+          'affectedTrackerKeys': <String>[],
+          'factIds': <String>[],
+          'chatSessionId': null,
+        },
+      });
 
   setUp(() async {
     db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -115,93 +114,105 @@ void main() {
   Future<RewriteJobRow> job(String id) =>
       (db.select(db.rewriteJobs)..where((t) => t.id.equals(id))).getSingle();
 
-  test('happy path: generating → pending with stamped basis and one op', () async {
-    final result = await service().run(
-      requestKey: 'rk-happy',
-      chatSessionId: 's',
-      characterId: 'c',
-      field: CardRewriteField.description,
-      instruction: 'Make it crisper',
-    );
+  test(
+    'happy path: generating → pending with stamped basis and one op',
+    () async {
+      final result = await service().run(
+        requestKey: 'rk-happy',
+        chatSessionId: 's',
+        characterId: 'c',
+        field: CardRewriteField.description,
+        instruction: 'Make it crisper',
+      );
 
-    // Job settled to pending; exactly one transport call happened.
-    expect(result.status, 'pending');
-    expect(result.version, 2);
-    expect(executor.calls, 1);
+      // Job settled to pending; exactly one transport call happened.
+      expect(result.status, 'pending');
+      expect(result.version, 2);
+      expect(executor.calls, 1);
 
-    // Prompt content sanity: target field, budgets, the literal instruction,
-    // and the canonical card snapshot containing the current field text.
-    final prompt = executor.lastPrompt!;
-    expect(prompt, contains('# Target field'));
-    expect(prompt, contains('- field: description'));
-    expect(prompt, contains('Make it crisper'));
-    expect(prompt, contains('# Canonical character card snapshot'));
-    expect(prompt, contains('old text'));
-    expect(executor.lastConfig?.model, 'rewrite-model');
-    expect(executor.lastCancelToken?.isCancelled, isFalse);
+      // Prompt content sanity: target field, budgets, the literal instruction,
+      // and the canonical card snapshot containing the current field text.
+      final prompt = executor.lastPrompt!;
+      expect(prompt, contains('# Target field'));
+      expect(prompt, contains('- field: description'));
+      expect(prompt, contains('Make it crisper'));
+      expect(prompt, contains('# Canonical character card snapshot'));
+      expect(prompt, contains('old text'));
+      expect(executor.lastConfig?.model, 'rewrite-model');
+      expect(executor.lastCancelToken?.isCancelled, isFalse);
+      expect(executor.lastCaptureContext?.stage, 'card.manual_writer');
+      expect(executor.lastCaptureContext?.sessionId, 's');
+      expect(executor.lastCaptureContext?.pipelineRunId, result.id);
+      expect(executor.lastCaptureContext?.logicalCallId, result.id);
 
-    // Basis revision/hash + canon stamp were written inside the verify txn.
-    final row = await job(result.id);
-    final context = await loader.load(
-      sessionId: 's',
-      sourceCharacter: character,
-    );
-    expect(row.basisRevision, 1);
-    expect(row.basisRevisionHash, CardCanonicalizer.sha256(character));
-    expect(row.canonStamp, context.stamp.identity);
-    expect(row.canonStamp, isNotEmpty);
+      // Basis revision/hash + canon stamp were written inside the verify txn.
+      final row = await job(result.id);
+      final context = await loader.load(
+        sessionId: 's',
+        sourceCharacter: character,
+      );
+      expect(row.basisRevision, 1);
+      expect(row.basisRevisionHash, CardCanonicalizer.sha256(character));
+      expect(row.canonStamp, context.stamp.identity);
+      expect(row.canonStamp, isNotEmpty);
 
-    // One reviewable operation, revision 1 snapshot, advisory-valid.
-    final ops = await db.select(db.rewriteOperations).get();
-    expect(ops, hasLength(1));
-    final op = ops.single;
-    expect(op.rewriteJobId, row.id);
-    expect(op.status, 'reviewable');
-    expect(op.decision, 'pending');
-    expect(op.validationStatus, 'valid');
-    expect(op.currentRevision, 1);
+      // One reviewable operation, revision 1 snapshot, advisory-valid.
+      final ops = await db.select(db.rewriteOperations).get();
+      expect(ops, hasLength(1));
+      final op = ops.single;
+      expect(op.rewriteJobId, row.id);
+      expect(op.status, 'reviewable');
+      expect(op.decision, 'pending');
+      expect(op.validationStatus, 'valid');
+      expect(op.currentRevision, 1);
 
-    final decoded = ManualRewriteOperationSnapshotCodec.tryDecode(
-      jsonDecode(op.operationJson),
-    );
-    expect(decoded, isNotNull);
-    expect(decoded!.field, CardRewriteField.description);
-    expect(decoded.patches.single.anchor, 'old text');
-    expect(decoded.patches.single.value, 'new text');
-    expect(decoded.transition.chatSessionId, isNull);
+      final decoded = ManualRewriteOperationSnapshotCodec.tryDecode(
+        jsonDecode(op.operationJson),
+      );
+      expect(decoded, isNotNull);
+      expect(decoded!.field, CardRewriteField.description);
+      expect(decoded.patches.single.anchor, 'old text');
+      expect(decoded.patches.single.value, 'new text');
+      expect(decoded.transition.chatSessionId, isNull);
 
-    final revisionRows = await db.select(db.rewriteOperationRevisions).get();
-    expect(revisionRows, hasLength(1));
-    expect(revisionRows.single.snapshotJson, op.operationJson);
+      final revisionRows = await db.select(db.rewriteOperationRevisions).get();
+      expect(revisionRows, hasLength(1));
+      expect(revisionRows.single.snapshotJson, op.operationJson);
 
-    // HARD: the writer lane never writes canon rows; the single character
-    // revision is the runtime loader's one permitted lineage reconcile, and
-    // the character itself is untouched.
-    expect((await characters.getById('c'))!.description, 'old text');
-    final lineage = await revisions.getForCharacter('c');
-    expect(lineage, hasLength(1));
-    expect(lineage.single.revisionHash, CardCanonicalizer.sha256(character));
-    expect(await db.select(db.appliedCanonTransitionRows).get(), isEmpty);
-    expect(await db.select(db.canonTransitionFactRefs).get(), isEmpty);
-    expect(await db.select(db.characterKnowledgeFactRows).get(), isEmpty);
-  });
+      // HARD: the writer lane never writes canon rows; the single character
+      // revision is the runtime loader's one permitted lineage reconcile, and
+      // the character itself is untouched.
+      expect((await characters.getById('c'))!.description, 'old text');
+      final lineage = await revisions.getForCharacter('c');
+      expect(lineage, hasLength(1));
+      expect(lineage.single.revisionHash, CardCanonicalizer.sha256(character));
+      expect(await db.select(db.appliedCanonTransitionRows).get(), isEmpty);
+      expect(await db.select(db.canonTransitionFactRefs).get(), isEmpty);
+      expect(await db.select(db.characterKnowledgeFactRows).get(), isEmpty);
+    },
+  );
 
   test('model not configured fails before any transport call', () async {
-    final result = await service(
-      modelResolver: () async => CardRewriteSlotResolver.resolve(
-        apiConfigs: const [
-          ApiConfig(id: 'active', endpoint: 'https://chat.example', model: 'm'),
-        ],
-        // No dedicated rewrite slot configured: nothing to resolve against,
-        // and NO silent fallback to the active chat config.
-        apiConfigId: '',
-      ),
-    ).run(
-      chatSessionId: 's',
-      characterId: 'c',
-      field: CardRewriteField.description,
-      instruction: 'rewrite',
-    );
+    final result =
+        await service(
+          modelResolver: () async => CardRewriteSlotResolver.resolve(
+            apiConfigs: const [
+              ApiConfig(
+                id: 'active',
+                endpoint: 'https://chat.example',
+                model: 'm',
+              ),
+            ],
+            // No dedicated rewrite slot configured: nothing to resolve against,
+            // and NO silent fallback to the active chat config.
+            apiConfigId: '',
+          ),
+        ).run(
+          chatSessionId: 's',
+          characterId: 'c',
+          field: CardRewriteField.description,
+          instruction: 'rewrite',
+        );
 
     expect(result.status, 'failed');
     expect(result.statusReason, ManualRewriteService.reasonModelNotConfigured);
@@ -210,58 +221,66 @@ void main() {
   });
 
   test('unmatched slot id fails explicitly, never falling back', () async {
-    final result = await service(
-      modelResolver: () async => CardRewriteSlotResolver.resolve(
-        apiConfigs: const [
-          ApiConfig(id: 'active', endpoint: 'https://chat.example', model: 'm'),
-        ],
-        apiConfigId: 'rewrite',
-      ),
-    ).run(
-      chatSessionId: 's',
-      characterId: 'c',
-      field: CardRewriteField.description,
-      instruction: 'rewrite',
-    );
+    final result =
+        await service(
+          modelResolver: () async => CardRewriteSlotResolver.resolve(
+            apiConfigs: const [
+              ApiConfig(
+                id: 'active',
+                endpoint: 'https://chat.example',
+                model: 'm',
+              ),
+            ],
+            apiConfigId: 'rewrite',
+          ),
+        ).run(
+          chatSessionId: 's',
+          characterId: 'c',
+          field: CardRewriteField.description,
+          instruction: 'rewrite',
+        );
 
     expect(result.status, 'failed');
     expect(result.statusReason, ManualRewriteService.reasonModelNotConfigured);
     expect(executor.calls, 0);
   });
 
-  test('baseline decision requirement fails before any transport call', () async {
-    // Two revisions: baseline pins/at rev1, source has moved to rev2 under
-    // the ask-on-change policy.
-    await loader.load(sessionId: 's', sourceCharacter: character);
-    final edited = character.copyWith(description: 'second draft');
-    await characters.put(edited);
-    await loader.load(sessionId: 's', sourceCharacter: edited);
-    await baselines.ensureBaseline(
-      CharacterSessionBaseline(
+  test(
+    'baseline decision requirement fails before any transport call',
+    () async {
+      // Two revisions: baseline pins/at rev1, source has moved to rev2 under
+      // the ask-on-change policy.
+      await loader.load(sessionId: 's', sourceCharacter: character);
+      final edited = character.copyWith(description: 'second draft');
+      await characters.put(edited);
+      await loader.load(sessionId: 's', sourceCharacter: edited);
+      await baselines.ensureBaseline(
+        CharacterSessionBaseline(
+          chatSessionId: 's',
+          characterId: 'c',
+          baselineCardJson: jsonEncode(character.toJson()),
+          baselineHash: CardCanonicalizer.sha256(character),
+          sourceHashLastSeen: CardCanonicalizer.sha256(character),
+          cardUpdatePolicy: CharacterCardUpdatePolicy.askOnChange,
+        ),
+      );
+
+      final result = await service().run(
         chatSessionId: 's',
         characterId: 'c',
-        baselineCardJson: jsonEncode(character.toJson()),
-        baselineHash: CardCanonicalizer.sha256(character),
-        sourceHashLastSeen: CardCanonicalizer.sha256(character),
-        cardUpdatePolicy: CharacterCardUpdatePolicy.askOnChange,
-      ),
-    );
+        field: CardRewriteField.description,
+        instruction: 'rewrite',
+      );
 
-    final result = await service().run(
-      chatSessionId: 's',
-      characterId: 'c',
-      field: CardRewriteField.description,
-      instruction: 'rewrite',
-    );
-
-    expect(result.status, 'failed');
-    expect(
-      result.statusReason,
-      ManualRewriteService.reasonBaselineDecisionRequired,
-    );
-    expect(executor.calls, 0);
-    expect(await db.select(db.rewriteOperations).get(), isEmpty);
-  });
+      expect(result.status, 'failed');
+      expect(
+        result.statusReason,
+        ManualRewriteService.reasonBaselineDecisionRequired,
+      );
+      expect(executor.calls, 0);
+      expect(await db.select(db.rewriteOperations).get(), isEmpty);
+    },
+  );
 
   test(
     'canon moved between load and stamp rebinds once and succeeds',
@@ -442,92 +461,101 @@ void main() {
     expect((await characters.getById('c'))!.description, 'old text');
   });
 
-  test('malformed LLM output fails invalidOutput with zero operations',
-      () async {
-    executor.impl =
-        ({
-          required config,
-          required prompt,
-          required maxTokens,
-          required temperature,
-          required timeoutMs,
-          cancelToken,
-        }) async => okOutcome('Sorry, I cannot rewrite that.');
+  test(
+    'malformed LLM output fails invalidOutput with zero operations',
+    () async {
+      executor.impl =
+          ({
+            required config,
+            required prompt,
+            required maxTokens,
+            required temperature,
+            required timeoutMs,
+            cancelToken,
+          }) async => okOutcome('Sorry, I cannot rewrite that.');
 
-    final result = await service().run(
-      chatSessionId: 's',
-      characterId: 'c',
-      field: CardRewriteField.description,
-      instruction: 'rewrite',
-    );
+      final result = await service().run(
+        chatSessionId: 's',
+        characterId: 'c',
+        field: CardRewriteField.description,
+        instruction: 'rewrite',
+      );
 
-    expect(result.status, 'failed');
-    expect(result.statusReason, startsWith('invalidOutput'));
-    expect(result.statusReason, contains('noJsonPayload'));
-    expect(await db.select(db.rewriteOperations).get(), isEmpty);
-  });
+      expect(result.status, 'failed');
+      expect(result.statusReason, startsWith('invalidOutput'));
+      expect(result.statusReason, contains('noJsonPayload'));
+      expect(await db.select(db.rewriteOperations).get(), isEmpty);
+    },
+  );
 
-  test('empty patch list is invalidOutput, never a zero-op pending job',
-      () async {
-    executor.impl =
-        ({
-          required config,
-          required prompt,
-          required maxTokens,
-          required temperature,
-          required timeoutMs,
-          cancelToken,
-        }) async => okOutcome(
-          jsonEncode({
-            'field': 'description',
-            'patches': <Object?>[],
-            'transition': {
-              'id': 'transition-1',
-              'scopeKey': 'npc:alice',
-              'canonicalClaim': 'noop',
-              'promotionDestination': 'card',
-              'affectedTrackerKeys': <String>[],
-              'factIds': <String>[],
-              'chatSessionId': null,
+  test(
+    'empty patch list is invalidOutput, never a zero-op pending job',
+    () async {
+      executor.impl =
+          ({
+            required config,
+            required prompt,
+            required maxTokens,
+            required temperature,
+            required timeoutMs,
+            cancelToken,
+          }) async => okOutcome(
+            jsonEncode({
+              'field': 'description',
+              'patches': <Object?>[],
+              'transition': {
+                'id': 'transition-1',
+                'scopeKey': 'npc:alice',
+                'canonicalClaim': 'noop',
+                'promotionDestination': 'card',
+                'affectedTrackerKeys': <String>[],
+                'factIds': <String>[],
+                'chatSessionId': null,
+              },
+            }),
+          );
+
+      final result = await service().run(
+        chatSessionId: 's',
+        characterId: 'c',
+        field: CardRewriteField.description,
+        instruction: 'rewrite',
+      );
+
+      expect(result.status, 'failed');
+      expect(result.statusReason, startsWith('invalidOutput'));
+      expect(result.statusReason, contains('emptyPatches'));
+      expect(await db.select(db.rewriteOperations).get(), isEmpty);
+    },
+  );
+
+  test(
+    'mutation between call and persist fails staleCanon with zero ops',
+    () async {
+      // The card is edited (but NOT reconciled) after the transport call
+      // returns and before the freshness gate runs.
+      final result =
+          await service(
+            beforePersistHook: () async {
+              await characters.put(
+                character.copyWith(description: 'moved text'),
+              );
             },
-          }),
-        );
+          ).run(
+            chatSessionId: 's',
+            characterId: 'c',
+            field: CardRewriteField.description,
+            instruction: 'rewrite',
+          );
 
-    final result = await service().run(
-      chatSessionId: 's',
-      characterId: 'c',
-      field: CardRewriteField.description,
-      instruction: 'rewrite',
-    );
-
-    expect(result.status, 'failed');
-    expect(result.statusReason, startsWith('invalidOutput'));
-    expect(result.statusReason, contains('emptyPatches'));
-    expect(await db.select(db.rewriteOperations).get(), isEmpty);
-  });
-
-  test('mutation between call and persist fails staleCanon with zero ops',
-      () async {
-    // The card is edited (but NOT reconciled) after the transport call
-    // returns and before the freshness gate runs.
-    final result = await service(
-      beforePersistHook: () async {
-        await characters.put(character.copyWith(description: 'moved text'));
-      },
-    ).run(
-      chatSessionId: 's',
-      characterId: 'c',
-      field: CardRewriteField.description,
-      instruction: 'rewrite',
-    );
-
-    expect(result.status, 'failed');
-    expect(result.statusReason, ManualRewriteService.reasonStaleCanon);
-    expect(executor.calls, 1);
-    expect(await db.select(db.rewriteOperations).get(), isEmpty);
-    expect(await db.select(db.rewriteOperationRevisions).get(), isEmpty);
-    expect(await revisions.getForCharacter('c'), hasLength(1));
-  });
+      expect(result.status, 'failed');
+      expect(result.statusReason, ManualRewriteService.reasonStaleCanon);
+      expect(executor.calls, 1);
+      expect(await db.select(db.rewriteOperations).get(), isEmpty);
+      expect(await db.select(db.rewriteOperationRevisions).get(), isEmpty);
+      expect(await revisions.getForCharacter('c'), hasLength(1));
+    },
+  );
 
   test('transport timeout maps to a trimmed failed reason', () async {
     executor.impl =
@@ -745,6 +773,7 @@ class _FakeExecutor {
   AuxApiConfig? lastConfig;
   String? lastPrompt;
   CancelToken? lastCancelToken;
+  LlmCaptureContext? lastCaptureContext;
 
   Future<AuxCallOutcome> Function({
     required AuxApiConfig config,
@@ -763,11 +792,13 @@ class _FakeExecutor {
     required double temperature,
     required int timeoutMs,
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) {
     calls++;
     lastConfig = config;
     lastPrompt = prompt;
     lastCancelToken = cancelToken;
+    lastCaptureContext = captureContext;
     final handler = impl;
     if (handler != null) {
       return handler(

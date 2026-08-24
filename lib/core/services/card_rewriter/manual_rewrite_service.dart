@@ -11,6 +11,7 @@ import 'package:glaze_flutter/core/db/repositories/manual_rewrite_job_repo.dart'
 import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
 import 'package:glaze_flutter/core/llm/aux_retry_runner.dart';
 import 'package:glaze_flutter/core/llm/card_rewrite_slot_resolver.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/agent_operation_record.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewrite_operation_parser.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewrite_prompt_builder.dart';
@@ -37,11 +38,16 @@ typedef CardRewriteLlmExecutor =
       required double temperature,
       required int timeoutMs,
       CancelToken? cancelToken,
+      LlmCaptureContext? captureContext,
     });
 
 /// Internal verify+stamp outcome kinds for [ManualRewriteService].
-typedef _VerifyStampOutcome =
-    ({String kind, RewriteJobRow? job, String? stamp, String? message});
+typedef _VerifyStampOutcome = ({
+  String kind,
+  RewriteJobRow? job,
+  String? stamp,
+  String? message,
+});
 
 /// Phase-4B writer lane: manual card-rewrite LLM orchestration.
 ///
@@ -121,6 +127,7 @@ class ManualRewriteService {
     required double temperature,
     required int timeoutMs,
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) => const AuxLlmClient().callOnceWithLog(
     config: config,
     prompt: prompt,
@@ -128,6 +135,7 @@ class ManualRewriteService {
     temperature: temperature,
     timeoutMs: timeoutMs,
     cancelToken: cancelToken,
+    captureContext: captureContext,
   );
 
   final AppDatabase db;
@@ -262,9 +270,11 @@ class ManualRewriteService {
       // Steps 2–4 with exactly one canon rebound (retry of step 2).
       String? prompt;
       String? canonStamp;
-      for (var verifyAttempt = 0;
-          verifyAttempt < 2 && prompt == null;
-          verifyAttempt++) {
+      for (
+        var verifyAttempt = 0;
+        verifyAttempt < 2 && prompt == null;
+        verifyAttempt++
+      ) {
         // 2. Runtime loader load — the single Phase-4 lineage reconcile point.
         final source = await characterRepo.getById(characterId);
         if (source == null) {
@@ -379,6 +389,13 @@ class ManualRewriteService {
         temperature: temperature,
         timeoutMs: timeoutMs,
         cancelToken: cancelToken,
+        captureContext: LlmCaptureContext(
+          stage: 'card.manual_writer',
+          sessionId: chatSessionId,
+          pipelineRunId: jobId,
+          logicalCallId: jobId,
+          relatedArtifactId: jobId,
+        ),
       );
 
       // Post-call, BEFORE any persistence: CAS re-read + freshness check.
@@ -449,7 +466,12 @@ class ManualRewriteService {
       return persisted.job ?? await _readJob(jobId) ?? job;
     } catch (error) {
       // Never throw past the job boundary without a durable status.
-      return _failDurably(jobId, dispatchVersion, _trimmed('error: $error'), job);
+      return _failDurably(
+        jobId,
+        dispatchVersion,
+        _trimmed('error: $error'),
+        job,
+      );
     } finally {
       if (cancelToken != null) _cancelTokens.remove(jobId);
     }
@@ -602,9 +624,7 @@ class ManualRewriteService {
         : outcome.attempts.last;
     final detail =
         last?.error ??
-        (last != null && last.statusCode != 0
-            ? 'HTTP ${last.statusCode}'
-            : '');
+        (last != null && last.statusCode != 0 ? 'HTTP ${last.statusCode}' : '');
     return _trimmed(detail.isEmpty ? label : '$label: $detail');
   }
 

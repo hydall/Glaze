@@ -11,6 +11,7 @@ import '../../db/app_db.dart';
 import '../../llm/card_rewrite_slot_resolver.dart';
 import '../../llm/aux_retry_runner.dart';
 import '../../llm/aux_llm_client.dart';
+import '../../llm/transport/llm_capture_context.dart';
 import '../../models/agent_operation_record.dart';
 import '../../models/card_evolution_observation.dart';
 import '../../utils/id_generator.dart';
@@ -254,6 +255,8 @@ class AutomatedCardEvolutionService {
       token = CancelToken();
       _tokens[sessionId] = token;
       final prepared = await _prepareWriterContext(
+        sessionId: sessionId,
+        pipelineRunId: claim.row.id,
         config: config,
         selectedInputJson: snapshot.selectedInputJson,
         cancelToken: token,
@@ -283,6 +286,13 @@ class AutomatedCardEvolutionService {
           temperature: 0.2,
           timeoutMs: timeoutMs,
           cancelToken: token,
+          captureContext: LlmCaptureContext(
+            stage: 'card.writer',
+            sessionId: sessionId,
+            pipelineRunId: claim.row.id,
+            logicalCallId: '${claim.row.id}:card',
+            relatedArtifactId: claim.row.id,
+          ),
         );
         if (token.isCancelled ||
             cardOutcome.status == AgentOperationStatus.aborted ||
@@ -341,6 +351,13 @@ class AutomatedCardEvolutionService {
             temperature: 0.2,
             timeoutMs: timeoutMs,
             cancelToken: token,
+            captureContext: LlmCaptureContext(
+              stage: 'card.writer_repair',
+              sessionId: sessionId,
+              pipelineRunId: claim.row.id,
+              logicalCallId: '${claim.row.id}:card-repair',
+              relatedArtifactId: claim.row.id,
+            ),
           );
           cardOutcome = _combineOutcomes(cardOutcome, repairOutcome);
           if (token.isCancelled ||
@@ -415,6 +432,13 @@ class AutomatedCardEvolutionService {
           temperature: 0.2,
           timeoutMs: timeoutMs,
           cancelToken: token,
+          captureContext: LlmCaptureContext(
+            stage: 'card.lorebook_writer',
+            sessionId: sessionId,
+            pipelineRunId: claim.row.id,
+            logicalCallId: '${claim.row.id}:lorebook',
+            relatedArtifactId: claim.row.id,
+          ),
         );
         await _saveDebugOutcome(
           sessionId: sessionId,
@@ -538,6 +562,7 @@ class AutomatedCardEvolutionService {
         sessionId,
         snapshot,
         claim.row!.collectorOrdinal,
+        pipelineRunId: claim.row!.id,
         finalize: (output, applyEffects) =>
             collectorRunRepo.completeWithEffects(
               id: claimId!,
@@ -573,6 +598,7 @@ class AutomatedCardEvolutionService {
     String sessionId,
     CardEvolutionObservationSnapshot snapshot,
     int runOrdinal, {
+    String? pipelineRunId,
     Future<bool> Function(String output, Future<void> Function() applyEffects)?
     finalize,
   }) async {
@@ -593,6 +619,14 @@ class AutomatedCardEvolutionService {
         temperature: 0.2,
         timeoutMs: timeoutMs,
         cancelToken: token,
+        captureContext: LlmCaptureContext(
+          stage: 'card.collector',
+          sessionId: sessionId,
+          pipelineRunId: pipelineRunId ?? 'collector:$runOrdinal',
+          logicalCallId: pipelineRunId ?? 'collector:$runOrdinal',
+          relatedArtifactId: pipelineRunId,
+          stageOrdinal: runOrdinal,
+        ),
       );
       if (token.isCancelled ||
           outcome.status == AgentOperationStatus.aborted ||
@@ -797,6 +831,8 @@ class AutomatedCardEvolutionService {
   }
 
   Future<_PreparedWriterContext> _prepareWriterContext({
+    required String sessionId,
+    required String pipelineRunId,
     required AuxApiConfig config,
     required String selectedInputJson,
     required CancelToken cancelToken,
@@ -828,6 +864,7 @@ class AutomatedCardEvolutionService {
     }
     String? handoff;
     var offset = 0;
+    var chunkOrdinal = 0;
     while (offset < history.length) {
       final chunk = <Object?>[];
       String? prompt;
@@ -862,6 +899,14 @@ class AutomatedCardEvolutionService {
         temperature: 0.2,
         timeoutMs: timeoutMs,
         cancelToken: cancelToken,
+        captureContext: LlmCaptureContext(
+          stage: 'card.history_consolidation',
+          sessionId: sessionId,
+          pipelineRunId: pipelineRunId,
+          logicalCallId: '$pipelineRunId:consolidation:$chunkOrdinal',
+          relatedArtifactId: pipelineRunId,
+          stageOrdinal: chunkOrdinal + 1,
+        ),
       );
       if (cancelToken.isCancelled ||
           outcome.status == AgentOperationStatus.aborted) {
@@ -880,6 +925,7 @@ class AutomatedCardEvolutionService {
       }
       handoff = outcome.text;
       offset += chunk.length;
+      chunkOrdinal++;
     }
     final finalContext = jsonEncode({
       ...common,

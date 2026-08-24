@@ -7,6 +7,7 @@ import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
 import 'package:glaze_flutter/core/llm/macro_engine.dart';
 import 'package:glaze_flutter/core/llm/summary_service.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 
@@ -22,6 +23,7 @@ class _RecordingAuxLlmClient extends AuxLlmClient {
   int? maxTokens;
   double? temperature;
   int? timeoutMs;
+  LlmCaptureContext? captureContext;
 
   @override
   Future<String> callOnce({
@@ -31,12 +33,14 @@ class _RecordingAuxLlmClient extends AuxLlmClient {
     required double temperature,
     required int timeoutMs,
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     this.config = config;
     this.prompt = prompt;
     this.maxTokens = maxTokens;
     this.temperature = temperature;
     this.timeoutMs = timeoutMs;
+    this.captureContext = captureContext;
     return response;
   }
 }
@@ -107,34 +111,39 @@ void main() {
       expect(await service.getSummaryContent('session'), 'generated summary');
       expect(await service.getSummaryMessageCount('session'), history.length);
       expect((await repo.get('session'))?.prompt, 'Context:\n{{history}}');
+      expect(llm.captureContext?.stage, 'summary');
+      expect(llm.captureContext?.sessionId, 'session');
     },
   );
 
-  test('routes the call through the config protocol, not always OpenAI', () async {
-    final llm = _RecordingAuxLlmClient();
-    final service = SummaryService(repo, llm: llm);
+  test(
+    'routes the call through the config protocol, not always OpenAI',
+    () async {
+      final llm = _RecordingAuxLlmClient();
+      final service = SummaryService(repo, llm: llm);
 
-    await service.generateSummary(
-      sessionId: 'session',
-      history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
-      apiConfig: const ApiConfig(
-        id: 'api',
-        endpoint: 'https://api.anthropic.com',
-        apiKey: 'secret',
-        model: 'claude-sonnet-4',
-        protocol: LlmProtocol.anthropic,
-        maxTokens: 4096,
-        firstChunkTimeoutMs: 12000,
-      ),
-    );
+      await service.generateSummary(
+        sessionId: 'session',
+        history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
+        apiConfig: const ApiConfig(
+          id: 'api',
+          endpoint: 'https://api.anthropic.com',
+          apiKey: 'secret',
+          model: 'claude-sonnet-4',
+          protocol: LlmProtocol.anthropic,
+          maxTokens: 4096,
+          firstChunkTimeoutMs: 12000,
+        ),
+      );
 
-    expect(llm.config?.protocol, LlmProtocol.anthropic);
-    expect(llm.config?.endpoint, 'https://api.anthropic.com');
-    expect(llm.config?.apiKey, 'secret');
-    expect(llm.config?.model, 'claude-sonnet-4');
-    expect(llm.maxTokens, 4096);
-    expect(llm.timeoutMs, 12000);
-  });
+      expect(llm.config?.protocol, LlmProtocol.anthropic);
+      expect(llm.config?.endpoint, 'https://api.anthropic.com');
+      expect(llm.config?.apiKey, 'secret');
+      expect(llm.config?.model, 'claude-sonnet-4');
+      expect(llm.maxTokens, 4096);
+      expect(llm.timeoutMs, 12000);
+    },
+  );
 
   test('expands macros in the prompt but never in the transcript', () async {
     final llm = _RecordingAuxLlmClient();

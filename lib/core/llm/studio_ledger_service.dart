@@ -35,6 +35,7 @@ import 'studio/studio_aux_prompt_assembler.dart';
 import 'studio_ledger_export_parser.dart';
 import 'studio_ledger_prompt.dart';
 import 'studio_ledger_reconciliation.dart';
+import 'transport/llm_capture_context.dart';
 
 export 'ledger/ledger_op_applier.dart';
 
@@ -330,6 +331,14 @@ class StudioLedgerService {
         timeoutMs: timeoutMs,
         cancelToken: token,
         omitReasoning: true,
+        captureContext: LlmCaptureContext(
+          stage: 'ledger.reconciliation',
+          sessionId: sessionId,
+          messageId: plan.endMessage.id,
+          pipelineRunId: plan.rangeHash,
+          logicalCallId: plan.rangeHash,
+          relatedArtifactId: plan.rangeHash,
+        ),
       );
       if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
         return LedgerRunResult.aborted;
@@ -378,9 +387,7 @@ class StudioLedgerService {
           return LedgerRunResult.aborted;
         }
         repairAttempted = true;
-        trace.recordRepairRequested(
-          exportRepair: needsExportRepair,
-        );
+        trace.recordRepairRequested(exportRepair: needsExportRepair);
         if (_isOversizedRepairInput(responseText)) {
           return LedgerRunResult(
             status: 'error',
@@ -408,6 +415,14 @@ class StudioLedgerService {
           timeoutMs: timeoutMs,
           cancelToken: token,
           omitReasoning: true,
+          captureContext: LlmCaptureContext(
+            stage: 'ledger.reconciliation_repair',
+            sessionId: sessionId,
+            messageId: plan.endMessage.id,
+            pipelineRunId: plan.rangeHash,
+            logicalCallId: '${plan.rangeHash}:repair',
+            relatedArtifactId: plan.rangeHash,
+          ),
         );
         attempts = _combineAttempts(attempts, repair.attempts);
         totalResponseChars += repair.text?.length ?? 0;
@@ -1015,6 +1030,14 @@ class StudioLedgerService {
         timeoutMs: timeoutMs,
         cancelToken: token,
         omitReasoning: true,
+        captureContext: LlmCaptureContext(
+          stage: 'ledger.turn',
+          sessionId: sessionId,
+          messageId: messageId,
+          pipelineRunId: 'ledger:$messageId:$swipeId:$agentSwipeId',
+          logicalCallId: 'ledger:$messageId:$swipeId:$agentSwipeId',
+          relatedArtifactId: messageId,
+        ),
       );
 
       if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
@@ -1099,6 +1122,14 @@ class StudioLedgerService {
           timeoutMs: timeoutMs,
           cancelToken: token,
           omitReasoning: true,
+          captureContext: LlmCaptureContext(
+            stage: 'ledger.turn_repair',
+            sessionId: sessionId,
+            messageId: messageId,
+            pipelineRunId: 'ledger:$messageId:$swipeId:$agentSwipeId',
+            logicalCallId: 'ledger:$messageId:$swipeId:$agentSwipeId:repair',
+            relatedArtifactId: messageId,
+          ),
         );
         attempts = _combineAttempts(attempts, repair.attempts);
         totalResponseChars += repair.text?.length ?? 0;

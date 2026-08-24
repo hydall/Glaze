@@ -6,6 +6,7 @@ import '../models/chat_message.dart';
 import 'aux_llm_client.dart';
 import 'macro_engine.dart';
 import 'transport/llm_protocol.dart';
+import 'transport/llm_capture_context.dart';
 
 /// Prompt used when a session has no custom summarization prompt. Exposed so
 /// the editor can show it as the placeholder for an empty field.
@@ -140,6 +141,12 @@ class SummaryService {
           ? apiConfig.firstChunkTimeoutMs
           : _fallbackTimeoutMs,
       cancelToken: cancelToken,
+      captureContext: LlmCaptureContext(
+        stage: 'summary',
+        sessionId: sessionId,
+        logicalCallId: 'summary:$sessionId',
+        relatedArtifactId: sessionId,
+      ),
     );
 
     final trimmed = content.trim();
@@ -188,7 +195,8 @@ class SummaryService {
   bool needsRegeneration(int currentMessageCount, int? savedCount) {
     if (savedCount == null || savedCount == 0) return true;
     final threshold = (savedCount * 0.3).ceil();
-    return currentMessageCount - savedCount >= threshold && currentMessageCount > 10;
+    return currentMessageCount - savedCount >= threshold &&
+        currentMessageCount > 10;
   }
 
   String _formatHistory(List<ChatMessage> messages) {

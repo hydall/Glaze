@@ -18,6 +18,7 @@ import 'package:glaze_flutter/core/db/repositories/manual_rewrite_job_repo.dart'
 import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
 import 'package:glaze_flutter/core/llm/aux_retry_runner.dart';
 import 'package:glaze_flutter/core/llm/prompt/exact_lorebook_manifest.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/agent_operation_record.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/lorebook.dart';
@@ -63,6 +64,7 @@ void main() {
             required temperature,
             required timeoutMs,
             cancelToken,
+            captureContext,
           }) async {
             calls++;
             return _ok(fixture.cardBatchOutput);
@@ -156,14 +158,21 @@ void main() {
 
   test('malformed parser output gets exactly one repair attempt', () async {
     var calls = 0;
+    final contexts = <LlmCaptureContext>[];
     final result = await fixture
         .service((_, _) async {
           calls++;
           return _ok('not json');
-        })
+        }, onCaptureContext: contexts.add)
         .runOneBatch('session');
     expect(result.kind, 'invalidCardOutput');
     expect(calls, 2);
+    expect(contexts.map((context) => context.stage), [
+      'card.writer',
+      'card.writer_repair',
+    ]);
+    expect(contexts.every((context) => context.sessionId == 'session'), isTrue);
+    expect(contexts[0].pipelineRunId, contexts[1].pipelineRunId);
     expect(
       (await fixture.db.select(fixture.db.cardEvolutionDebugRuns).getSingle())
           .output,
@@ -347,6 +356,7 @@ void main() {
     await _seedManifest(fixture.db, 'a1', 'entry one');
     var calls = 0;
     String? lorebookPrompt;
+    final contexts = <LlmCaptureContext>[];
     final result = await fixture
         .service((_, prompt) async {
           calls++;
@@ -355,10 +365,14 @@ void main() {
             return _ok(fixture.lorebookBatchOutput);
           }
           return _ok(fixture.cardBatchOutput);
-        })
+        }, onCaptureContext: contexts.add)
         .runOneBatch('session');
 
     expect(calls, 2);
+    expect(contexts.map((context) => context.stage), [
+      'card.writer',
+      'card.lorebook_writer',
+    ]);
     expect(result.kind, 'persisted');
     expect(lorebookPrompt, contains('"description":"Alice is cautious."'));
     expect(lorebookPrompt, contains('# Proposed card operations (read-only)'));
@@ -567,6 +581,7 @@ final class _Fixture {
     int timeoutMs = 180000,
     void Function(int timeoutMs)? onTimeout,
     void Function(int maxTokens)? onMaxTokens,
+    void Function(LlmCaptureContext context)? onCaptureContext,
   }) => AutomatedCardEvolutionService(
     repo: repo,
     resolveModel: () async => const AuxApiConfig(
@@ -583,9 +598,11 @@ final class _Fixture {
           required temperature,
           required timeoutMs,
           cancelToken,
+          captureContext,
         }) {
           onTimeout?.call(timeoutMs);
           onMaxTokens?.call(maxTokens);
+          if (captureContext != null) onCaptureContext?.call(captureContext);
           return executor(cancelToken, prompt);
         },
     isLorebookEvolutionEnabled: isLorebookEvolutionEnabled,
