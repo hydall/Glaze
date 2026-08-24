@@ -62,6 +62,60 @@ class CardEvolutionObservationRepo {
         ),
       );
 
+  /// Starts a new evidence cycle for a scope that was previously terminal.
+  /// Active/promoted rows remain authoritative and are never overwritten.
+  Future<ObservationActivationOutcome> insertOrReactivate(
+    CardEvolutionObservation observation,
+  ) => db.transaction(() async {
+    final existing =
+        await (db.select(db.cardEvolutionObservations)..where(
+              (row) =>
+                  row.sessionId.equals(observation.sessionId) &
+                  row.semanticScopeKey.equals(observation.semanticScopeKey),
+            ))
+            .getSingleOrNull();
+    if (existing == null) {
+      await insertObservation(observation);
+      return ObservationActivationOutcome.inserted;
+    }
+    if (existing.status == 'active' || existing.status == 'promoted') {
+      return ObservationActivationOutcome.alreadyCurrent;
+    }
+    final changed =
+        await (db.update(db.cardEvolutionObservations)..where(
+              (row) =>
+                  row.id.equals(existing.id) &
+                  row.status.isIn(const ['expired', 'consumed']),
+            ))
+            .write(
+              CardEvolutionObservationsCompanion(
+                characterId: Value(observation.characterId),
+                runOrdinal: Value(observation.runOrdinal),
+                observedChange: Value(observation.observedChange),
+                canonicalClaim: Value(observation.canonicalClaim),
+                evidenceMessageIds: Value(
+                  jsonEncode(observation.evidenceMessageIds),
+                ),
+                evidenceClustersJson: Value(
+                  jsonEncode(observation.evidenceClusters),
+                ),
+                retrievalKeysJson: Value(jsonEncode(observation.retrievalKeys)),
+                targetKind: Value(observation.targetKind),
+                cardFieldPath: Value(observation.cardFieldPath),
+                lorebookEntryId: Value(observation.lorebookEntryId),
+                confidence: Value(observation.confidence),
+                status: const Value('active'),
+                firstSeenRun: Value(observation.firstSeenRun),
+                repeatCount: Value(observation.repeatCount),
+                lastConfirmedRun: Value(observation.lastConfirmedRun),
+                updatedAt: Value(observation.updatedAt),
+              ),
+            );
+    return changed == 1
+        ? ObservationActivationOutcome.reactivated
+        : ObservationActivationOutcome.conflict;
+  });
+
   Future<ObservationConfirmationOutcome> confirmObservation({
     required String id,
     required int runOrdinal,
@@ -150,6 +204,33 @@ class CardEvolutionObservationRepo {
               updatedAt: Value(now),
             ),
           );
+
+  /// Expires active candidates that went [maxUnconfirmedRuns] Collector passes
+  /// without independent confirmation. Promoted observations are retained until
+  /// an approved operation consumes them or explicit evidence contradicts them.
+  Future<int> expireUnconfirmed({
+    required String sessionId,
+    required int currentRunOrdinal,
+    required int maxUnconfirmedRuns,
+    required int now,
+  }) {
+    if (maxUnconfirmedRuns <= 0) return Future<int>.value(0);
+    final lastEligibleRun = currentRunOrdinal - maxUnconfirmedRuns;
+    return (db.update(db.cardEvolutionObservations)..where(
+          (row) =>
+              row.sessionId.equals(sessionId) &
+              row.status.equals('active') &
+              row.runOrdinal.isSmallerOrEqualValue(lastEligibleRun) &
+              (row.lastConfirmedRun.isNull() |
+                  row.lastConfirmedRun.isSmallerOrEqualValue(lastEligibleRun)),
+        ))
+        .write(
+          CardEvolutionObservationsCompanion(
+            status: const Value('expired'),
+            updatedAt: Value(now),
+          ),
+        );
+  }
 
   Future<List<CardEvolutionObservation>> getActiveObservations(
     String sessionId,
@@ -269,4 +350,11 @@ enum ObservationConfirmationOutcome {
   noEvidence,
   overlap,
   sameRun,
+}
+
+enum ObservationActivationOutcome {
+  inserted,
+  reactivated,
+  alreadyCurrent,
+  conflict,
 }

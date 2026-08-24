@@ -1142,6 +1142,12 @@ class AutomatedCardEvolutionService {
         action: action,
       );
     }
+    await observationRepo.expireUnconfirmed(
+      sessionId: sessionId,
+      currentRunOrdinal: runOrdinal,
+      maxUnconfirmedRuns: observationExpiryRuns?.call() ?? 4,
+      now: now,
+    );
   }
 
   static Future<void> _recordCollectorParserVerdict({
@@ -1198,34 +1204,28 @@ class AutomatedCardEvolutionService {
         }
         break;
       case 'new':
-        final existing = await observationRepo.findByScopeKey(
-          sessionId,
-          action.scopeKey,
+        await observationRepo.insertOrReactivate(
+          CardEvolutionObservation(
+            id: 'observation-${generateId()}',
+            sessionId: sessionId,
+            characterId: characterId,
+            runOrdinal: runOrdinal,
+            semanticScopeKey: action.scopeKey,
+            observedChange: action.observedChange,
+            canonicalClaim: action.canonicalClaim,
+            evidenceClusters: [action.evidenceMessageIds],
+            retrievalKeys: action.retrievalKeys,
+            targetKind: action.targetKind,
+            cardFieldPath: action.cardFieldPath,
+            lorebookEntryId: action.lorebookEntryId,
+            confidence: action.confidence,
+            status: 'active',
+            firstSeenRun: runOrdinal,
+            lastConfirmedRun: runOrdinal,
+            createdAt: now,
+            updatedAt: now,
+          ),
         );
-        if (existing == null) {
-          await observationRepo.insertObservation(
-            CardEvolutionObservation(
-              id: 'observation-${generateId()}',
-              sessionId: sessionId,
-              characterId: characterId,
-              runOrdinal: runOrdinal,
-              semanticScopeKey: action.scopeKey,
-              observedChange: action.observedChange,
-              canonicalClaim: action.canonicalClaim,
-              evidenceClusters: [action.evidenceMessageIds],
-              retrievalKeys: action.retrievalKeys,
-              targetKind: action.targetKind,
-              cardFieldPath: action.cardFieldPath,
-              lorebookEntryId: action.lorebookEntryId,
-              confidence: action.confidence,
-              status: 'active',
-              firstSeenRun: runOrdinal,
-              lastConfirmedRun: runOrdinal,
-              createdAt: now,
-              updatedAt: now,
-            ),
-          );
-        }
         break;
       case 'no_evidence':
         break;

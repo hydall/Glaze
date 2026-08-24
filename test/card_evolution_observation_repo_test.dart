@@ -125,6 +125,67 @@ void main() {
     expect(await repo.getPromotedObservations('session'), isEmpty);
   });
 
+  test('terminal scope can reactivate as a fresh evidence cycle', () async {
+    await repo.insertObservation(_observation());
+    await repo.contradictObservation('obs-1', now: 20);
+
+    final outcome = await repo.insertOrReactivate(
+      _observation(
+        id: 'ignored-new-id',
+        repeatCount: 1,
+        confidence: 0.9,
+        lastConfirmedRun: 7,
+      ).copyWith(
+        runOrdinal: 7,
+        observedChange: 'Alice now consistently trusts Bob',
+        firstSeenRun: 7,
+        evidenceClusters: const [
+          ['msg:7'],
+        ],
+        updatedAt: 70,
+      ),
+    );
+
+    expect(outcome, ObservationActivationOutcome.reactivated);
+    final restored = await repo.findByScopeKey(
+      'session',
+      'character.preference.X',
+    );
+    expect(restored!.id, 'obs-1');
+    expect(restored.status, 'active');
+    expect(restored.runOrdinal, 7);
+    expect(restored.firstSeenRun, 7);
+    expect(restored.repeatCount, 1);
+    expect(restored.lastConfirmedRun, 7);
+    expect(restored.evidenceClusters, [
+      ['msg:7'],
+    ]);
+  });
+
+  test('expires only active candidates outside confirmation window', () async {
+    await repo.insertObservation(_observation(lastConfirmedRun: 1));
+    await repo.insertObservation(
+      _observation(
+        id: 'recent',
+        scopeKey: 'character.attitude.recent',
+        lastConfirmedRun: 4,
+      ),
+    );
+    await repo.promoteObservation('recent', now: 20);
+
+    expect(
+      await repo.expireUnconfirmed(
+        sessionId: 'session',
+        currentRunOrdinal: 5,
+        maxUnconfirmedRuns: 4,
+        now: 50,
+      ),
+      1,
+    );
+    expect((await repo.findById('obs-1'))!.status, 'expired');
+    expect((await repo.findById('recent'))!.status, 'promoted');
+  });
+
   test('getPromotable filters by repeat count and confidence', () async {
     await repo.insertObservation(_observation(repeatCount: 2, confidence: 0.6));
     await repo.insertObservation(

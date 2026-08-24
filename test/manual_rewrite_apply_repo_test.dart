@@ -207,6 +207,31 @@ void main() {
         );
   }
 
+  Future<void> replaceOperationSnapshot(String id, String snapshot) async {
+    final operation = await (db.select(
+      db.rewriteOperations,
+    )..where((row) => row.id.equals(id))).getSingle();
+    final revision = operation.currentRevision + 1;
+    await db
+        .into(db.rewriteOperationRevisions)
+        .insert(
+          RewriteOperationRevisionsCompanion.insert(
+            rewriteOperationId: id,
+            revision: revision,
+            snapshotJson: snapshot,
+          ),
+        );
+    await (db.update(
+      db.rewriteOperations,
+    )..where((row) => row.id.equals(id))).write(
+      RewriteOperationsCompanion(
+        operationJson: Value(snapshot),
+        currentRevision: Value(revision),
+        decisionRevision: Value(revision),
+      ),
+    );
+  }
+
   Future<void> addApprovedLorebookOperation({
     String expectedContent = 'The district is dangerous.',
   }) async {
@@ -264,7 +289,9 @@ void main() {
     return jsonEncode(canonical(value));
   }
 
-  Future<void> addAutomaticProposal() async {
+  Future<void> addAutomaticProposal({
+    List<Map<String, Object?>> observations = const [],
+  }) async {
     final history = <Map<String, Object?>>[
       {
         'messageId': 'assistant-accepted',
@@ -280,7 +307,7 @@ void main() {
       'chatHistoryHash': computeHash(canonicalJson(history)),
       'effectiveCanonIdentity': 'canon',
       'chatHistory': history,
-      'accumulatedObservations': const <Object?>[],
+      'accumulatedObservations': observations,
     });
     await db
         .into(db.cardEvolutionProposalRuns)
@@ -363,6 +390,89 @@ void main() {
 
     expect(outcome.kind, 'applied');
   });
+
+  test(
+    'apply consumes only promoted observations targeted by applied ops',
+    () async {
+      final stamp = await seed();
+      for (final entry in const [
+        ('used', 'npc:alice', 'description', 'promoted'),
+        ('wrong-field', 'stored:wrong-field', 'personality', 'promoted'),
+        ('active', 'stored:active', 'description', 'active'),
+        ('rejected', 'npc:bob', 'description', 'promoted'),
+      ]) {
+        await db
+            .into(db.cardEvolutionObservations)
+            .insert(
+              CardEvolutionObservationsCompanion.insert(
+                id: entry.$1,
+                sessionId: 's',
+                characterId: 'c',
+                runOrdinal: 1,
+                semanticScopeKey: entry.$2,
+                observedChange: entry.$1,
+                evidenceMessageIds: '[]',
+                confidence: 0.9,
+                status: entry.$4,
+                firstSeenRun: 1,
+                cardFieldPath: Value(entry.$3),
+                createdAt: 1,
+                updatedAt: 1,
+              ),
+            );
+      }
+      await addAutomaticProposal(
+        observations: const [
+          {
+            'id': 'used',
+            'status': 'promoted',
+            'targetKind': 'main_character_card',
+            'scopeKey': 'npc:alice',
+            'cardFieldPath': 'description',
+            'firstSeenRun': 1,
+          },
+          {
+            'id': 'wrong-field',
+            'status': 'promoted',
+            'targetKind': 'main_character_card',
+            'scopeKey': 'npc:alice',
+            'cardFieldPath': 'personality',
+            'firstSeenRun': 1,
+          },
+          {
+            'id': 'active',
+            'status': 'active',
+            'targetKind': 'main_character_card',
+            'scopeKey': 'npc:alice',
+            'cardFieldPath': 'description',
+            'firstSeenRun': 1,
+          },
+          {
+            'id': 'rejected',
+            'status': 'promoted',
+            'targetKind': 'main_character_card',
+            'scopeKey': 'npc:bob',
+            'cardFieldPath': 'description',
+            'firstSeenRun': 1,
+          },
+        ],
+      );
+
+      final outcome = await ManualRewriteApplyRepo(db: db, canonReader: reader)
+          .applyApproved(
+            jobId: 'job',
+            expectedCanonStamp: stamp,
+            expectedJobVersion: 1,
+          );
+      expect(outcome.kind, 'applied');
+      final rows = await db.select(db.cardEvolutionObservations).get();
+      final statuses = {for (final row in rows) row.id: row.status};
+      expect(statuses['used'], 'consumed');
+      expect(statuses['wrong-field'], 'promoted');
+      expect(statuses['active'], 'active');
+      expect(statuses['rejected'], 'promoted');
+    },
+  );
 
   test('stale automatic evidence cancels job without card writes', () async {
     final stamp = await seed();
@@ -675,13 +785,7 @@ void main() {
           jsonDecode(operation.operationJson) as Map<String, dynamic>;
       (decoded['transition'] as Map<String, dynamic>)['factIds'] = ['fact'];
       final snapshot = jsonEncode(decoded);
-      await (db.update(db.rewriteOperations)..where((t) => t.id.equals('op')))
-          .write(RewriteOperationsCompanion(operationJson: Value(snapshot)));
-      await (db.update(
-        db.rewriteOperationRevisions,
-      )..where((t) => t.rewriteOperationId.equals('op'))).write(
-        RewriteOperationRevisionsCompanion(snapshotJson: Value(snapshot)),
-      );
+      await replaceOperationSnapshot('op', snapshot);
       Future<void> putFact(String session, String scope) => db
           .into(db.characterKnowledgeFactRows)
           .insert(
@@ -763,13 +867,7 @@ void main() {
         'alice.status',
       ];
       final snapshot = jsonEncode(decoded);
-      await (db.update(db.rewriteOperations)..where((t) => t.id.equals('op')))
-          .write(RewriteOperationsCompanion(operationJson: Value(snapshot)));
-      await (db.update(
-        db.rewriteOperationRevisions,
-      )..where((t) => t.rewriteOperationId.equals('op'))).write(
-        RewriteOperationRevisionsCompanion(snapshotJson: Value(snapshot)),
-      );
+      await replaceOperationSnapshot('op', snapshot);
       final currentStamp = const EffectiveCanonAssembler()
           .assemble(
             await reader.readInTransaction(sessionId: 's', characterId: 'c'),
@@ -812,13 +910,7 @@ void main() {
         'npc:alice.status',
       ];
       final snapshot = jsonEncode(decoded);
-      await (db.update(db.rewriteOperations)..where((t) => t.id.equals('op')))
-          .write(RewriteOperationsCompanion(operationJson: Value(snapshot)));
-      await (db.update(
-        db.rewriteOperationRevisions,
-      )..where((t) => t.rewriteOperationId.equals('op'))).write(
-        RewriteOperationRevisionsCompanion(snapshotJson: Value(snapshot)),
-      );
+      await replaceOperationSnapshot('op', snapshot);
 
       final primaryReader = EffectiveCanonReadRepository(
         db: db,
@@ -884,13 +976,7 @@ void main() {
               CardCanonicalizer.scalarSha256('wrong');
         }
         final invalid = jsonEncode(decoded);
-        await (db.update(db.rewriteOperations)..where((t) => t.id.equals('op')))
-            .write(RewriteOperationsCompanion(operationJson: Value(invalid)));
-        await (db.update(
-          db.rewriteOperationRevisions,
-        )..where((t) => t.rewriteOperationId.equals('op'))).write(
-          RewriteOperationRevisionsCompanion(snapshotJson: Value(invalid)),
-        );
+        await replaceOperationSnapshot('op', invalid);
         expect(
           (await ManualRewriteApplyRepo(
                 db: db,
@@ -934,13 +1020,7 @@ void main() {
               as Map<String, dynamic>;
       (snapshot['transition'] as Map<String, dynamic>)['chatSessionId'] = 's';
       final invalid = jsonEncode(snapshot);
-      await (db.update(db.rewriteOperations)..where((t) => t.id.equals('op')))
-          .write(RewriteOperationsCompanion(operationJson: Value(invalid)));
-      await (db.update(
-        db.rewriteOperationRevisions,
-      )..where((t) => t.rewriteOperationId.equals('op'))).write(
-        RewriteOperationRevisionsCompanion(snapshotJson: Value(invalid)),
-      );
+      await replaceOperationSnapshot('op', invalid);
       final repo = ManualRewriteApplyRepo(db: db, canonReader: reader);
       expect(
         (await repo.applyApproved(
@@ -1054,13 +1134,7 @@ void main() {
         ),
       );
       final op = await db.select(db.rewriteOperations).getSingle();
-      await (db.update(
-        db.rewriteOperationRevisions,
-      )..where((t) => t.rewriteOperationId.equals('op'))).write(
-        RewriteOperationRevisionsCompanion(
-          snapshotJson: Value(op.operationJson),
-        ),
-      );
+      await replaceOperationSnapshot('op', op.operationJson);
       await addApprovedOperation(id: 'op2', anchor: 'second', value: 'SECOND');
       final currentStamp = const EffectiveCanonAssembler()
           .assemble(
