@@ -15,22 +15,28 @@ import '../models/lorebook.dart';
 List<Lorebook> activeLorebooksFor({
   required List<Lorebook> lorebooks,
   required String? charId,
+  String? charGroupId,
   required String? charWorld,
   required String? chatId,
   required LorebookActivations? activations,
 }) {
+  final characterTargets = <String>{
+    if (charId?.isNotEmpty == true) charId!,
+    if (charGroupId?.isNotEmpty == true) charGroupId!,
+  };
   return lorebooks.where((lb) {
     if (lb.enabled) return true;
-    if (charId != null &&
-        activations?.character[charId]?.contains(lb.id) == true) {
+    if (characterTargets.any(
+      (id) => activations?.character[id]?.contains(lb.id) == true,
+    )) {
       return true;
     }
     if (chatId != null && activations?.chat[chatId]?.contains(lb.id) == true) {
       return true;
     }
-    if (charId != null &&
+    if (characterTargets.isNotEmpty &&
         lb.activationScope == 'character' &&
-        lb.activationTargetId == charId) {
+        characterTargets.contains(lb.activationTargetId)) {
       return true;
     }
     if (chatId != null &&
@@ -53,6 +59,7 @@ List<Lorebook> activeLorebooksFor({
 int activeLorebookEntryCount({
   required List<Lorebook> lorebooks,
   required String? charId,
+  String? charGroupId,
   required String? charWorld,
   required String? chatId,
   required LorebookActivations? activations,
@@ -60,6 +67,7 @@ int activeLorebookEntryCount({
   final active = activeLorebooksFor(
     lorebooks: lorebooks,
     charId: charId,
+    charGroupId: charGroupId,
     charWorld: charWorld,
     chatId: chatId,
     activations: activations,

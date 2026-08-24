@@ -184,6 +184,7 @@ class MagicDrawerStatsService {
     final lorebookEntryCount = activeLorebookEntryCount(
       lorebooks: lorebooks,
       charId: charId,
+      charGroupId: character?.variantGroupId,
       charWorld: character?.world,
       chatId: sessionId,
       activations: activations,

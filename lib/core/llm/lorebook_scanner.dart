@@ -71,6 +71,7 @@ List<ScannedEntry> scanLorebooks({
   final activeLorebooks = activeLorebooksFor(
     lorebooks: lorebooks,
     charId: char?.id,
+    charGroupId: char?.variantGroupId,
     charWorld: char?.world,
     chatId: chatId,
     activations: activations,

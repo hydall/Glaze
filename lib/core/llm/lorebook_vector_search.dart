@@ -48,6 +48,7 @@ class LorebookVectorSearch {
     final activeLorebooks = activeLorebooksFor(
       lorebooks: lorebooks,
       charId: character?.id,
+      charGroupId: character?.variantGroupId,
       charWorld: charWorld,
       chatId: chatId,
       activations: activations,

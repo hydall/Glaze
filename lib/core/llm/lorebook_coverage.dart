@@ -2,6 +2,7 @@ import '../models/character.dart';
 import '../models/chat_message.dart';
 import '../models/lorebook.dart';
 import 'glaze_matcher.dart';
+import 'lorebook_activation.dart';
 
 class CoverageEntry {
   final String id;
@@ -108,19 +109,14 @@ CoverageResult computeLorebookCoverage({
     );
   }
 
-  final charId = char?.id;
-
-  final activeLorebooks = lorebooks.where((lb) {
-    if (lb.enabled) return true;
-    if (charId != null &&
-        activations.character[charId]?.contains(lb.id) == true) {
-      return true;
-    }
-    if (chatId != null && activations.chat[chatId]?.contains(lb.id) == true) {
-      return true;
-    }
-    return false;
-  }).toList();
+  final activeLorebooks = activeLorebooksFor(
+    lorebooks: lorebooks,
+    charId: char?.id,
+    charGroupId: char?.variantGroupId,
+    charWorld: char?.world,
+    chatId: chatId,
+    activations: activations,
+  );
 
   if (activeLorebooks.isEmpty) {
     return const CoverageResult(

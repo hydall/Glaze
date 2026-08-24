@@ -41,13 +41,34 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
         }
       }
 
-      final lorebooks =
-          await (_db.select(_db.lorebooks)..where(
-                (row) =>
-                    row.activationScope.equals('character') &
-                    row.activationTargetId.isIn(ids),
-              ))
-              .get();
+      final retainedVariantGroups = <String>{};
+      for (final row in characterRows) {
+        final groupId = row.variantGroupId.isEmpty
+            ? row.charId
+            : row.variantGroupId;
+        final sibling =
+            await (_db.select(_db.characters)
+                  ..where(
+                    (candidate) =>
+                        candidate.variantGroupId.equals(groupId) &
+                        candidate.charId.isNotIn(ids),
+                  )
+                  ..limit(1))
+                .getSingleOrNull();
+        if (sibling != null) retainedVariantGroups.add(groupId);
+      }
+      final deletedLorebookTargets = ids
+          .where((id) => !retainedVariantGroups.contains(id))
+          .toList();
+
+      final lorebooks = deletedLorebookTargets.isEmpty
+          ? const <LorebookRow>[]
+          : await (_db.select(_db.lorebooks)..where(
+                  (row) =>
+                      row.activationScope.equals('character') &
+                      row.activationTargetId.isIn(deletedLorebookTargets),
+                ))
+                .get();
       final lorebookIds = lorebooks.map((row) => row.lorebookId).toSet();
 
       final sessionDeletion = SessionDeletionQueries(_db);

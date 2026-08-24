@@ -89,6 +89,28 @@ void main() {
     expect(remaining.variantOrder, 0);
   });
 
+  test('deleting the group representative preserves a shared lorebook', () async {
+    await db.customStatement(
+      "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('cover', 'cover', 'cover', 0)",
+    );
+    await db.customStatement(
+      "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('variant', 'variant', 'cover', 1)",
+    );
+    await db.customStatement(
+      "INSERT INTO lorebooks (lorebook_id, name, activation_scope, activation_target_id, entries_json) VALUES ('shared', 'Shared', 'character', 'cover', '[]')",
+    );
+
+    final result = await repo.deleteCharacters({'cover'});
+
+    expect(result.lorebookIds, isEmpty);
+    expect(
+      await (db.select(
+        db.lorebooks,
+      )..where((row) => row.lorebookId.equals('shared'))).getSingleOrNull(),
+      isNot(equals(null)),
+    );
+  });
+
   test(
     'session deletion retains global transitions until character deletion',
     () async {
