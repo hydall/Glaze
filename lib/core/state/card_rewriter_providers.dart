@@ -58,6 +58,7 @@ final automatedCardEvolutionServiceProvider =
 
       final service = AutomatedCardEvolutionService(
         repo: ref.watch(cardEvolutionRepoProvider),
+        requestCaptureRepo: ref.watch(llmRequestCaptureRepoProvider),
         resolveModel: resolveModel,
         isEnabled: () =>
             ref.read(pipelineSettingsProvider).cardRewriter.enabled,

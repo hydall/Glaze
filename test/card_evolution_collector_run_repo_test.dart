@@ -15,7 +15,7 @@ void main() {
 
   tearDown(() => db.close());
 
-  test('failed claim remains durable and can be reclaimed', () async {
+  test('failed claim remains durable and requires explicit recovery', () async {
     final run = _run();
     final claim = await repo.claim(
       reconciliationRun: run,
@@ -44,7 +44,7 @@ void main() {
     expect(failed?.lastCallId, 'call-1');
     expect(await repo.latestCompletedOrdinal('session'), 0);
 
-    final reclaimed = await repo.claim(
+    final automatic = await repo.claim(
       reconciliationRun: run,
       characterId: 'character',
       inputHash: 'input',
@@ -52,7 +52,15 @@ void main() {
       now: 21,
       leaseSeconds: 60,
     );
-    expect(reclaimed.kind, 'existing');
+    expect(automatic.kind, 'failed');
+
+    final reclaimed = await repo.claimFailed(
+      id: claim.row!.id,
+      ownerId: 'owner-2',
+      now: 21,
+      leaseSeconds: 60,
+    );
+    expect(reclaimed.kind, 'claimed');
     expect(reclaimed.row?.id, claim.row?.id);
     expect(reclaimed.row?.collectorOrdinal, 1);
     expect(reclaimed.row?.status, 'claimed');

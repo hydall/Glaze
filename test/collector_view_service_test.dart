@@ -1,10 +1,17 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/card_evolution_collector_run_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/card_evolution_observation_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/llm_request_capture_repo.dart';
+import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_call_event.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_request_capture.dart';
 import 'package:glaze_flutter/core/models/card_evolution_observation.dart';
+import 'package:glaze_flutter/core/models/agent_operation_record.dart';
 import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 import 'package:glaze_flutter/features/chat/services/collector_view_service.dart';
 
@@ -14,16 +21,19 @@ void main() {
   late CardEvolutionCollectorRunRepo collectorRepo;
   late CardEvolutionObservationRepo observationRepo;
   late CollectorViewService service;
+  late LlmRequestCaptureRepo captureRepo;
 
   setUp(() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
     reconciliationRepo = LedgerReconciliationRunRepo(db);
     collectorRepo = CardEvolutionCollectorRunRepo(db);
     observationRepo = CardEvolutionObservationRepo(db);
+    captureRepo = LlmRequestCaptureRepo(db);
     service = CollectorViewService(
       collectorRepo: collectorRepo,
       observationRepo: observationRepo,
       reconciliationRepo: reconciliationRepo,
+      captureRepo: captureRepo,
     );
   });
 
@@ -88,6 +98,76 @@ void main() {
       'expired',
       'active',
     ]);
+  });
+
+  test('joins failed run with exact prompt and parser response', () async {
+    await db.customStatement(
+      "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES ('session', 'character', 0, '[]')",
+    );
+    await db
+        .into(db.cardEvolutionCollectorRuns)
+        .insert(
+          CardEvolutionCollectorRunsCompanion.insert(
+            id: 'collector-failed',
+            sessionId: 'session',
+            characterId: 'character',
+            collectorOrdinal: 1,
+            reconciliationRunId: 'run-2',
+            reconciliationRunOrdinal: 2,
+            reconciliationChainHash: 'chain',
+            rangeHash: 'range',
+            inputHash: 'input',
+            ownerId: 'owner',
+            status: 'failed',
+            leaseExpiresAt: 0,
+            lastCallId: const Value('call-1'),
+            failureCode: const Value('parserRejected'),
+            failedAt: const Value(10),
+            createdAt: 1,
+          ),
+        );
+    const context = LlmCaptureContext(
+      stage: 'card.collector',
+      sessionId: 'session',
+      pipelineRunId: 'collector-failed',
+      callId: 'call-1',
+      relatedArtifactId: 'collector-failed',
+      attempt: 1,
+    );
+    await captureRepo.record(
+      LlmRequestCapture.build(
+        ChatTransportRequest(
+          endpoint: 'https://example.test',
+          apiKey: 'secret',
+          model: 'model',
+          messages: const [
+            {'role': 'user', 'content': 'exact prompt'},
+          ],
+          maxTokens: 20,
+          temperature: 0.2,
+          topP: 1,
+          captureContext: context,
+        ),
+      ),
+    );
+    await captureRepo.recordCallEvent(
+      LlmCallEvent.transport(
+        context: context,
+        attempt: const AgentOperationAttempt(
+          attempt: 1,
+          statusCode: 200,
+          status: 'ok',
+          startedAtMs: 1,
+          elapsedMs: 1,
+        ),
+        responseText: 'bad response',
+      ),
+    );
+
+    final run = (await service.load('session')).runs.single;
+    expect(run.canRetryExact, isTrue);
+    expect(run.exactCapture?.prompt, 'exact prompt');
+    expect(run.latestResponse, 'bad response');
   });
 }
 

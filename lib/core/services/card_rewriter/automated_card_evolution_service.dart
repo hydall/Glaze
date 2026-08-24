@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../../db/repositories/card_evolution_observation_repo.dart';
 import '../../db/repositories/card_evolution_collector_run_repo.dart';
 import '../../db/repositories/card_evolution_repo.dart';
+import '../../db/repositories/llm_request_capture_repo.dart';
 import '../../db/app_db.dart';
 import '../../llm/card_rewrite_slot_resolver.dart';
 import '../../llm/aux_retry_runner.dart';
@@ -51,17 +52,21 @@ class AutomatedCardEvolutionService {
     this.leaseSeconds = _writerLeaseSeconds,
     CardEvolutionObservationRepo? observationRepo,
     CardEvolutionCollectorRunRepo? collectorRunRepo,
+    LlmRequestCaptureRepo? requestCaptureRepo,
     this.observationPromotionThreshold,
     this.observationMinConfidence,
     this.observationExpiryRuns,
   }) : observationRepo =
            observationRepo ?? CardEvolutionObservationRepo(repo.db),
        collectorRunRepo =
-           collectorRunRepo ?? CardEvolutionCollectorRunRepo(repo.db);
+           collectorRunRepo ?? CardEvolutionCollectorRunRepo(repo.db),
+       requestCaptureRepo =
+           requestCaptureRepo ?? LlmRequestCaptureRepo(repo.db);
 
   final CardEvolutionRepo repo;
   final CardEvolutionObservationRepo observationRepo;
   final CardEvolutionCollectorRunRepo collectorRunRepo;
+  final LlmRequestCaptureRepo requestCaptureRepo;
   final CardRewriteModelResolver resolveModel;
   final CardRewriteLlmExecutor _executor;
   final bool Function()? isEnabled;
@@ -140,6 +145,177 @@ class AutomatedCardEvolutionService {
     return future.whenComplete(() => _inFlight.remove(sessionId));
   }
 
+  Future<CardEvolutionFinalizeOutcome> retryFailedCollector(
+    String collectorRunId,
+  ) => _recoverFailedCollector(collectorRunId);
+
+  Future<CardEvolutionFinalizeOutcome> correctFailedCollector(
+    String collectorRunId, {
+    required String response,
+  }) => _recoverFailedCollector(collectorRunId, manualResponse: response);
+
+  Future<CardEvolutionFinalizeOutcome> _recoverFailedCollector(
+    String collectorRunId, {
+    String? manualResponse,
+  }) async {
+    final initial = await collectorRunRepo.getById(collectorRunId);
+    if (initial == null) {
+      return const CardEvolutionFinalizeOutcome('collectorNotFound');
+    }
+    if (initial.status != 'failed') {
+      return const CardEvolutionFinalizeOutcome('collectorNotFailed');
+    }
+    final active = _inFlight[initial.sessionId];
+    if (active != null) return active;
+    final future = _recoverFailedCollectorUnshared(
+      initial,
+      manualResponse: manualResponse,
+    );
+    _inFlight[initial.sessionId] = future;
+    return future.whenComplete(() => _inFlight.remove(initial.sessionId));
+  }
+
+  Future<CardEvolutionFinalizeOutcome> _recoverFailedCollectorUnshared(
+    CardEvolutionCollectorRunRow failed, {
+    String? manualResponse,
+  }) async {
+    final runs = await collectorRunRepo.runsForCollectors(failed.sessionId, [
+      failed,
+    ]);
+    if (runs.length != 2) {
+      return const CardEvolutionFinalizeOutcome('collectorEvidenceStale');
+    }
+    final pair = CardEvolutionCollectorPair(runs.first, runs.last);
+    final snapshot = await repo.buildObservationSnapshotForRuns(runs);
+    if (snapshot == null ||
+        computeHash(snapshot.selectedInputJson) != failed.inputHash) {
+      return const CardEvolutionFinalizeOutcome('staleInput');
+    }
+
+    String? prompt;
+    if (manualResponse == null) {
+      final failedCallId = failed.lastCallId;
+      if (failedCallId == null) {
+        return const CardEvolutionFinalizeOutcome('exactCaptureUnavailable');
+      }
+      final capture = await requestCaptureRepo.exactPromptForCall(
+        callId: failedCallId,
+        sessionId: failed.sessionId,
+        pipelineRunId: failed.id,
+        stage: 'card.collector',
+      );
+      if (capture == null) {
+        return const CardEvolutionFinalizeOutcome('exactCaptureUnavailable');
+      }
+      prompt = capture.prompt;
+    }
+
+    final ownerId = 'collector-recovery-${generateId()}';
+    final claim = await collectorRunRepo.claimFailed(
+      id: failed.id,
+      ownerId: ownerId,
+      now: currentTimestampSeconds(),
+      leaseSeconds: leaseSeconds,
+    );
+    if (!claim.canRun || claim.row == null) {
+      return CardEvolutionFinalizeOutcome(claim.kind);
+    }
+    final context = LlmCaptureContext(
+      stage: 'card.collector',
+      sessionId: failed.sessionId,
+      pipelineRunId: failed.id,
+      callId: manualResponse == null ? null : 'llm-call-${generateId()}',
+      parentCallId: failed.lastCallId,
+      logicalCallId:
+          '${failed.id}:${manualResponse == null ? 'retry' : 'manual'}',
+      relatedArtifactId: failed.id,
+      stageOrdinal: failed.collectorOrdinal,
+      attempt: manualResponse == null ? null : 1,
+    );
+    String? output = manualResponse;
+    LlmCaptureContext? selectedContext = context;
+    var completed = false;
+    try {
+      if (output == null) {
+        final config = await resolveModel();
+        final token = CancelToken();
+        _tokens['observation-${failed.sessionId}'] = token;
+        final outcome = await _executor(
+          config: config,
+          prompt: prompt!,
+          maxTokens: _writerMaxTokens,
+          temperature: 0.2,
+          timeoutMs: timeoutMs,
+          cancelToken: token,
+          captureContext: context,
+        );
+        selectedContext = outcome.selectedCaptureContext;
+        if (token.isCancelled || !outcome.isOk || outcome.text == null) {
+          await collectorRunRepo.markFailed(
+            id: failed.id,
+            ownerId: ownerId,
+            now: currentTimestampSeconds(),
+            code: outcome.status.name,
+            detail: outcome.lastError?.toString(),
+            callId: selectedContext?.callId ?? failed.lastCallId,
+          );
+          return CardEvolutionFinalizeOutcome(outcome.status.name);
+        }
+        output = outcome.text;
+      }
+
+      final finalized = await _finalizeCollectorOutput(
+        sessionId: failed.sessionId,
+        snapshot: snapshot,
+        runOrdinal: failed.collectorOrdinal,
+        pair: pair,
+        collectorId: failed.id,
+        ownerId: ownerId,
+        output: output!,
+        captureContext: selectedContext,
+        source: manualResponse == null ? 'exact_retry' : 'manual_correction',
+      );
+      if (!finalized.success) {
+        await collectorRunRepo.markFailed(
+          id: failed.id,
+          ownerId: ownerId,
+          now: currentTimestampSeconds(),
+          code: finalized.code,
+          detail: finalized.detail,
+          callId: manualResponse == null
+              ? selectedContext?.callId ?? failed.lastCallId
+              : failed.lastCallId,
+        );
+        return CardEvolutionFinalizeOutcome(
+          finalized.code,
+          null,
+          finalized.detail,
+        );
+      }
+      completed = true;
+      await _checkPromotions(failed.sessionId);
+      return _continueWriterAfterCollectors(failed.sessionId);
+    } catch (error) {
+      if (!completed) {
+        await collectorRunRepo.markFailed(
+          id: failed.id,
+          ownerId: ownerId,
+          now: currentTimestampSeconds(),
+          code: 'unexpectedFailure',
+          detail: error.toString(),
+          callId: selectedContext?.callId ?? failed.lastCallId,
+        );
+      }
+      return CardEvolutionFinalizeOutcome(
+        completed ? 'collectorCompleted' : 'unexpectedFailure',
+        null,
+        error.toString(),
+      );
+    } finally {
+      _tokens.remove('observation-${failed.sessionId}');
+    }
+  }
+
   Future<CardEvolutionFinalizeOutcome> _runAutomatic(
     LedgerReconciliationSuccessfulRunRow reconciliationRun, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
@@ -154,18 +330,26 @@ class AutomatedCardEvolutionService {
         return const CardEvolutionFinalizeOutcome('collectorUnavailable');
       }
     }
-    final delivered = await collectorRunRepo.latestDeliveredWriterBoundary(
+    return _continueWriterAfterCollectors(
       reconciliationRun.sessionId,
+      onStage: onStage,
+    );
+  }
+
+  Future<CardEvolutionFinalizeOutcome> _continueWriterAfterCollectors(
+    String sessionId, {
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
+  }) async {
+    final delivered = await collectorRunRepo.latestDeliveredWriterBoundary(
+      sessionId,
     );
     final dueBoundary = delivered + _writerCollectorBatchSize;
-    final latest = await collectorRunRepo.latestCompletedOrdinal(
-      reconciliationRun.sessionId,
-    );
+    final latest = await collectorRunRepo.latestCompletedOrdinal(sessionId);
     if (latest < dueBoundary) {
       return const CardEvolutionFinalizeOutcome('collectorCompleted');
     }
     final boundaryRuns = await collectorRunRepo.completedBoundary(
-      reconciliationRun.sessionId,
+      sessionId,
       dueBoundary,
       count: _writerCollectorBatchSize,
     );
@@ -173,14 +357,14 @@ class AutomatedCardEvolutionService {
       return const CardEvolutionFinalizeOutcome('collectorUnavailable');
     }
     final reconciliationRuns = await collectorRunRepo.runsForCollectors(
-      reconciliationRun.sessionId,
+      sessionId,
       boundaryRuns,
     );
     if (reconciliationRuns.length != _writerCollectorBatchSize * 2) {
       return const CardEvolutionFinalizeOutcome('collectorUnavailable');
     }
     return _runWriter(
-      reconciliationRun.sessionId,
+      sessionId,
       onStage: onStage,
       throughCollectorOrdinal: dueBoundary,
       collectorBoundaryHash: boundaryRuns.last.reconciliationChainHash,
@@ -612,11 +796,29 @@ class AutomatedCardEvolutionService {
               applyEffects: applyEffects,
             ),
       );
-      if (output == null) return false;
+      if (output == null) {
+        await collectorRunRepo.markFailed(
+          id: claimId,
+          ownerId: ownerId,
+          now: currentTimestampSeconds(),
+          code: 'collectorFailed',
+          detail: 'Collector did not produce a valid response',
+        );
+        return false;
+      }
       await _checkPromotions(sessionId);
       claimId = null;
       return true;
-    } catch (_) {
+    } catch (error) {
+      if (claimId != null && ownerId != null) {
+        await collectorRunRepo.markFailed(
+          id: claimId,
+          ownerId: ownerId,
+          now: currentTimestampSeconds(),
+          code: 'unexpectedFailure',
+          detail: error.toString(),
+        );
+      }
       return false;
     } finally {
       if (claimId != null && ownerId != null) {
@@ -678,6 +880,13 @@ class AutomatedCardEvolutionService {
       }
       final actions = _parseObservationResponse(outcome.text!);
       if (actions == null) {
+        await _recordCollectorParserVerdict(
+          context: outcome.selectedCaptureContext,
+          accepted: false,
+          code: 'invalidOutput',
+          detail: 'Collector response is not valid JSON',
+          source: 'model',
+        );
         await onFailure?.call(
           code: 'parserRejected',
           detail: 'Collector response is not valid JSON',
@@ -686,43 +895,38 @@ class AutomatedCardEvolutionService {
         return null;
       }
       final validEvidenceIds = _chatMessageIds(snapshot.selectedInputJson);
-      if (validEvidenceIds == null) return null;
+      if (validEvidenceIds == null) {
+        await onFailure?.call(
+          code: 'invalidSelectedInput',
+          detail: 'Collector input has no valid immutable chat history',
+          callId: outcome.selectedCaptureContext?.callId,
+        );
+        return null;
+      }
       final retrievalTargets = _retrievalTargets(snapshot.selectedInputJson);
-      if (retrievalTargets == null) return null;
+      if (retrievalTargets == null) {
+        await onFailure?.call(
+          code: 'invalidSelectedInput',
+          detail: 'Collector input has no valid retrieval targets',
+          callId: outcome.selectedCaptureContext?.callId,
+        );
+        return null;
+      }
+      await _recordCollectorParserVerdict(
+        context: outcome.selectedCaptureContext,
+        accepted: true,
+        code: 'accepted',
+        source: 'model',
+      );
       Future<void> applyEffects() async {
-        final now = currentTimestampSeconds();
-        for (final action in actions) {
-          if (!validEvidenceIds.containsAll(action.evidenceMessageIds)) {
-            continue;
-          }
-          if (!retrievalTargets.keys.toSet().containsAll(
-            action.retrievalKeys,
-          )) {
-            continue;
-          }
-          final loreIdentity = action.lorebookEntryId;
-          final hasExactLoreTarget =
-              loreIdentity != null &&
-              action.retrievalKeys.contains(loreIdentity) &&
-              retrievalTargets[loreIdentity] == 'injected_lorebook_entry';
-          if ((action.targetKind == 'injected_lorebook_entry' &&
-                  !hasExactLoreTarget) ||
-              (action.targetKind == 'main_character_card' &&
-                  (loreIdentity != null ||
-                      action.retrievalKeys.any(
-                        (key) =>
-                            retrievalTargets[key] == 'injected_lorebook_entry',
-                      )))) {
-            continue;
-          }
-          await _applyObservationAction(
-            sessionId: sessionId,
-            characterId: snapshot.character.id,
-            runOrdinal: runOrdinal,
-            now: now,
-            action: action,
-          );
-        }
+        await _applyCollectorActions(
+          sessionId: sessionId,
+          snapshot: snapshot,
+          runOrdinal: runOrdinal,
+          actions: actions,
+          validEvidenceIds: validEvidenceIds,
+          retrievalTargets: retrievalTargets,
+        );
       }
 
       if (finalize != null) {
@@ -736,6 +940,151 @@ class AutomatedCardEvolutionService {
         _tokens.remove('observation-$sessionId');
       }
     }
+  }
+
+  Future<_CollectorFinalizeResult> _finalizeCollectorOutput({
+    required String sessionId,
+    required CardEvolutionObservationSnapshot snapshot,
+    required int runOrdinal,
+    required CardEvolutionCollectorPair pair,
+    required String collectorId,
+    required String ownerId,
+    required String output,
+    required LlmCaptureContext? captureContext,
+    required String source,
+  }) async {
+    final actions = _parseObservationResponse(output);
+    if (actions == null) {
+      await _recordCollectorParserVerdict(
+        context: captureContext,
+        accepted: false,
+        code: 'invalidOutput',
+        detail: 'Collector response is not valid JSON',
+        responseText: source == 'manual_correction' ? output : null,
+        source: source,
+      );
+      return const _CollectorFinalizeResult.failure(
+        'parserRejected',
+        'Collector response is not valid JSON',
+      );
+    }
+    final validEvidenceIds = _chatMessageIds(snapshot.selectedInputJson);
+    final retrievalTargets = _retrievalTargets(snapshot.selectedInputJson);
+    if (validEvidenceIds == null || retrievalTargets == null) {
+      return const _CollectorFinalizeResult.failure(
+        'invalidSelectedInput',
+        'Collector input cannot be validated',
+      );
+    }
+    await _recordCollectorParserVerdict(
+      context: captureContext,
+      accepted: true,
+      code: 'accepted',
+      responseText: source == 'manual_correction' ? output : null,
+      source: source,
+    );
+    final completed = await collectorRunRepo.completeWithEffects(
+      id: collectorId,
+      ownerId: ownerId,
+      modelOutputHash: computeHash(output),
+      now: currentTimestampSeconds(),
+      lastCallId: captureContext?.callId,
+      validateEvidence: () async {
+        final collector = await collectorRunRepo.getById(collectorId);
+        if (collector == null) return false;
+        final logical = await collectorRunRepo.runsForCollectors(sessionId, [
+          collector,
+        ]);
+        if (logical.length != 2 ||
+            logical[0].id != pair.first.id ||
+            logical[1].id != pair.boundary.id) {
+          return false;
+        }
+        final currentSnapshot = await repo.buildObservationSnapshotForRuns(
+          logical,
+        );
+        return currentSnapshot != null &&
+            computeHash(currentSnapshot.selectedInputJson) ==
+                collector.inputHash &&
+            collector.inputHash == computeHash(snapshot.selectedInputJson);
+      },
+      applyEffects: () => _applyCollectorActions(
+        sessionId: sessionId,
+        snapshot: snapshot,
+        runOrdinal: runOrdinal,
+        actions: actions,
+        validEvidenceIds: validEvidenceIds,
+        retrievalTargets: retrievalTargets,
+      ),
+    );
+    return completed
+        ? const _CollectorFinalizeResult.success()
+        : const _CollectorFinalizeResult.failure(
+            'collectorEvidenceStale',
+            'Collector lease or reconciliation evidence changed',
+          );
+  }
+
+  Future<void> _applyCollectorActions({
+    required String sessionId,
+    required CardEvolutionObservationSnapshot snapshot,
+    required int runOrdinal,
+    required List<_ParsedObservationAction> actions,
+    required Set<String> validEvidenceIds,
+    required Map<String, String> retrievalTargets,
+  }) async {
+    final now = currentTimestampSeconds();
+    for (final action in actions) {
+      if (!validEvidenceIds.containsAll(action.evidenceMessageIds)) continue;
+      if (!retrievalTargets.keys.toSet().containsAll(action.retrievalKeys)) {
+        continue;
+      }
+      final loreIdentity = action.lorebookEntryId;
+      final hasExactLoreTarget =
+          loreIdentity != null &&
+          action.retrievalKeys.contains(loreIdentity) &&
+          retrievalTargets[loreIdentity] == 'injected_lorebook_entry';
+      if ((action.targetKind == 'injected_lorebook_entry' &&
+              !hasExactLoreTarget) ||
+          (action.targetKind == 'main_character_card' &&
+              (loreIdentity != null ||
+                  action.retrievalKeys.any(
+                    (key) => retrievalTargets[key] == 'injected_lorebook_entry',
+                  )))) {
+        continue;
+      }
+      await _applyObservationAction(
+        sessionId: sessionId,
+        characterId: snapshot.character.id,
+        runOrdinal: runOrdinal,
+        now: now,
+        action: action,
+      );
+    }
+  }
+
+  static Future<void> _recordCollectorParserVerdict({
+    required LlmCaptureContext? context,
+    required bool accepted,
+    required String code,
+    required String source,
+    String? detail,
+    String? responseText,
+  }) {
+    if (context?.callId == null || context?.pipelineRunId == null) {
+      return Future<void>.value();
+    }
+    return LlmCallEventCapture.record(
+      LlmCallEvent.parserVerdict(
+        context: context!,
+        parserName: 'AutomatedCardEvolutionService.collectorResponse',
+        accepted: accepted,
+        code: code,
+        detail: detail,
+        responseText: responseText,
+        payload: {'source': source},
+      ),
+    );
   }
 
   Future<void> _applyObservationAction({
@@ -1316,6 +1665,20 @@ final class _PreparedWriterContext {
 
   final String? context;
   final CardEvolutionFinalizeOutcome? failure;
+}
+
+final class _CollectorFinalizeResult {
+  const _CollectorFinalizeResult.success()
+    : success = true,
+      code = 'completed',
+      detail = null;
+
+  const _CollectorFinalizeResult.failure(this.code, this.detail)
+    : success = false;
+
+  final bool success;
+  final String code;
+  final String? detail;
 }
 
 final class _ParsedObservationAction {

@@ -16,6 +16,8 @@ LlmRequestCaptureEvent _event({
   String? sessionId = 'session',
   String stage = 'studio.final',
   String content = 'hello',
+  String? pipelineRunId,
+  String? callId,
 }) => LlmRequestCapture.build(
   ChatTransportRequest(
     endpoint: 'https://example.test',
@@ -31,8 +33,8 @@ LlmRequestCaptureEvent _event({
       stage: stage,
       sessionId: sessionId,
       logicalCallId: 'call-$sequence',
-      pipelineRunId: 'pipeline-$sequence',
-      callId: 'call-$sequence',
+      pipelineRunId: pipelineRunId ?? 'pipeline-$sequence',
+      callId: callId ?? 'call-$sequence',
       attempt: sequence,
     ),
   ),

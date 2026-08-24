@@ -80,9 +80,11 @@ final class LlmCallEvent {
     required bool accepted,
     required String code,
     String? detail,
+    String? responseText,
     Map<String, dynamic> payload = const {},
   }) {
     final boundedDetail = _boundedText(detail);
+    final boundedResponse = _boundedText(responseText);
     return LlmCallEvent(
       id: 'llm-event-${generateId()}',
       createdAt: DateTime.now().toUtc(),
@@ -91,8 +93,12 @@ final class LlmCallEvent {
       parserName: parserName,
       parserCode: code,
       parserDetail: boundedDetail.text,
+      responseText: boundedResponse.text,
+      responseHash: responseText == null
+          ? null
+          : sha256.convert(utf8.encode(responseText)).toString(),
       payload: Map.unmodifiable(payload),
-      truncated: boundedDetail.truncated,
+      truncated: boundedDetail.truncated || boundedResponse.truncated,
     );
   }
 

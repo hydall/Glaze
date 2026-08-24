@@ -8,6 +8,13 @@ import '../../llm/transport/llm_request_capture.dart';
 import '../../llm/transport/llm_call_event.dart';
 import '../app_db.dart';
 
+final class ExactLlmPromptCapture {
+  const ExactLlmPromptCapture({required this.row, required this.prompt});
+
+  final LlmRequestCaptureRow row;
+  final String prompt;
+}
+
 /// Local bounded persistence sink for sanitized transport request captures.
 final class LlmRequestCaptureRepo
     implements LlmRequestCaptureSink, LlmCallEventSink {
@@ -78,6 +85,44 @@ final class LlmRequestCaptureRepo
     return query.get();
   }
 
+  Future<ExactLlmPromptCapture?> exactPromptForCall({
+    required String callId,
+    required String sessionId,
+    required String pipelineRunId,
+    required String stage,
+  }) async {
+    final row =
+        await (db.select(db.llmRequestCaptureRows)
+              ..where((item) => item.callId.equals(callId))
+              ..where((item) => item.sessionId.equals(sessionId))
+              ..where((item) => item.pipelineRunId.equals(pipelineRunId))
+              ..where((item) => item.stage.equals(stage))
+              ..orderBy([
+                (item) => OrderingTerm.desc(item.attempt),
+                (item) => OrderingTerm.desc(item.createdAtMs),
+                (item) => OrderingTerm.desc(item.id),
+              ])
+              ..limit(1))
+            .getSingleOrNull();
+    if (row == null || row.truncated) return null;
+    try {
+      final event = jsonDecode(row.eventJson);
+      if (event is! Map || event['messages'] is! List) return null;
+      final messages = event['messages'] as List;
+      if (messages.length != 1 || messages.single is! Map) return null;
+      final message = messages.single as Map;
+      if (message['role'] != 'user' || message['content'] is! String) {
+        return null;
+      }
+      return ExactLlmPromptCapture(
+        row: row,
+        prompt: message['content'] as String,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> deleteBySessionId(String sessionId) => db.transaction(() async {
     await (db.delete(
       db.llmCallEventRows,
@@ -104,6 +149,23 @@ final class LlmRequestCaptureRepo
   Future<List<LlmCallEventRow>> callEvents(String callId) {
     final query = db.select(db.llmCallEventRows)
       ..where((row) => row.callId.equals(callId))
+      ..orderBy([
+        (row) => OrderingTerm.asc(row.createdAtMs),
+        (row) => OrderingTerm.asc(row.id),
+      ]);
+    return query.get();
+  }
+
+  Future<List<LlmCallEventRow>> callEventsForArtifact(
+    String sessionId,
+    String relatedArtifactId,
+  ) {
+    final query = db.select(db.llmCallEventRows)
+      ..where(
+        (row) =>
+            row.sessionId.equals(sessionId) &
+            row.relatedArtifactId.equals(relatedArtifactId),
+      )
       ..orderBy([
         (row) => OrderingTerm.asc(row.createdAtMs),
         (row) => OrderingTerm.asc(row.id),
