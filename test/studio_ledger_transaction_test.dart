@@ -58,6 +58,15 @@ const _reconciliationResponse = '''
 <glaze_knowledge_cleanup>{"ops":[]}</glaze_knowledge_cleanup>
 ''';
 
+String _reconciliationAt(String time) =>
+    '''
+<glaze_memory_export>
+{"ops":[{"op":"set","key":"world:time","value":"$time","evidence":"clock changed","eventState":"completed"}],"knowledgeFacts":[]}
+</glaze_memory_export>
+<studio_ledger>reviewed</studio_ledger>
+<glaze_knowledge_cleanup>{"ops":[]}</glaze_knowledge_cleanup>
+''';
+
 void main() {
   late AppDatabase db;
   late CharacterRepo characters;
@@ -677,6 +686,194 @@ void main() {
   );
 
   test(
+    'latest reconciliation replacement restores exact before-state',
+    () async {
+      await snapshots.upsert(
+        const TrackerSnapshot(
+          sessionId: 'session',
+          messageId: 'a1',
+          swipeId: 0,
+          agentSwipeId: 0,
+          trackers: [],
+          committed: true,
+        ),
+      );
+      final messages = const [
+        ChatMessage(id: 'u1', role: 'user', content: 'Start'),
+        assistant,
+      ];
+      final plan = LedgerReconciliationPlan(
+        messages: messages,
+        endMessage: assistant,
+        rangeHash: computeLedgerReconciliationRangeHash(messages),
+      );
+      final endpoint = await _serveSequence([
+        _reconciliationAt('01:00'),
+        _reconciliationAt('02:00'),
+      ]);
+      addTearDown(endpoint.close);
+
+      expect(
+        (await service.reconcile(
+          sessionId: 'session',
+          settings: const PipelineSettings(),
+          config: _config(endpoint.url),
+          plan: plan,
+        )).status,
+        'ok',
+      );
+      final oldHead = (await reconciliationRuns.readSession('session')).single;
+      final oldEffect = await reconciliationRuns.validateEffect(oldHead);
+      expect(oldEffect, isA<ReconciliationEffectValid>());
+      expect((await trackers.get('session', 'world:time'))?.value, '01:00');
+
+      final replacement = await service.replaceLatestReconciliation(
+        sessionId: 'session',
+        expectedRunId: oldHead.id,
+        settings: const PipelineSettings(),
+        config: _config(endpoint.url),
+      );
+
+      expect(replacement.status, 'ok');
+      final physical = await reconciliationRuns.readPhysicalSession('session');
+      final logical = await reconciliationRuns.readSession('session');
+      expect(physical.map((run) => run.ordinal), [1, 2]);
+      expect(logical, hasLength(1));
+      expect(logical.single.id, isNot(oldHead.id));
+      expect(logical.single.ordinal, 2);
+      final newEffect = await reconciliationRuns.validateEffect(logical.single);
+      expect(newEffect, isA<ReconciliationEffectValid>());
+      expect(
+        (newEffect as ReconciliationEffectValid).before.hash,
+        (oldEffect as ReconciliationEffectValid).before.hash,
+      );
+      expect((await trackers.get('session', 'world:time'))?.value, '02:00');
+      expect((await checkpoints.get('session'))?.rangeHash, plan.rangeHash);
+      expect(
+        (await snapshots.getByAnchor(
+          sessionId: 'session',
+          messageId: 'a1',
+          swipeId: 0,
+          agentSwipeId: 0,
+        ))?.trackers.singleWhere((item) => item.name == 'world:time').value,
+        '02:00',
+      );
+    },
+  );
+
+  test('identical latest reconciliation replacement is a no-op', () async {
+    await snapshots.upsert(
+      const TrackerSnapshot(
+        sessionId: 'session',
+        messageId: 'a1',
+        swipeId: 0,
+        agentSwipeId: 0,
+        trackers: [],
+        committed: true,
+      ),
+    );
+    final messages = const [
+      ChatMessage(id: 'u1', role: 'user', content: 'Start'),
+      assistant,
+    ];
+    final plan = LedgerReconciliationPlan(
+      messages: messages,
+      endMessage: assistant,
+      rangeHash: computeLedgerReconciliationRangeHash(messages),
+    );
+    final endpoint = await _serveTwice(_reconciliationResponse);
+    addTearDown(endpoint.close);
+    await service.reconcile(
+      sessionId: 'session',
+      settings: const PipelineSettings(),
+      config: _config(endpoint.url),
+      plan: plan,
+    );
+    final oldHead = (await reconciliationRuns.readSession('session')).single;
+
+    final replacement = await service.replaceLatestReconciliation(
+      sessionId: 'session',
+      expectedRunId: oldHead.id,
+      settings: const PipelineSettings(),
+      config: _config(endpoint.url),
+    );
+
+    expect(replacement.status, 'ok');
+    expect(replacement.opsApplied, 0);
+    expect(
+      await reconciliationRuns.readPhysicalSession('session'),
+      hasLength(1),
+    );
+    expect((await reconciliationRuns.getHead('session'))?.id, oldHead.id);
+    expect(await reconciliationRuns.readInvalidations('session'), isEmpty);
+  });
+
+  test(
+    'replacement aborts without writes when state changes during LLM',
+    () async {
+      await snapshots.upsert(
+        const TrackerSnapshot(
+          sessionId: 'session',
+          messageId: 'a1',
+          swipeId: 0,
+          agentSwipeId: 0,
+          trackers: [],
+          committed: true,
+        ),
+      );
+      final messages = const [
+        ChatMessage(id: 'u1', role: 'user', content: 'Start'),
+        assistant,
+      ];
+      final plan = LedgerReconciliationPlan(
+        messages: messages,
+        endMessage: assistant,
+        rangeHash: computeLedgerReconciliationRangeHash(messages),
+      );
+      final initial = await _serve(_reconciliationAt('01:00'));
+      addTearDown(initial.close);
+      await service.reconcile(
+        sessionId: 'session',
+        settings: const PipelineSettings(),
+        config: _config(initial.url),
+        plan: plan,
+      );
+      final oldHead = (await reconciliationRuns.getHead('session'))!;
+      final delayed = await _serveDelayed(_reconciliationAt('02:00'));
+      addTearDown(delayed.close);
+
+      final future = service.replaceLatestReconciliation(
+        sessionId: 'session',
+        expectedRunId: oldHead.id,
+        settings: const PipelineSettings(),
+        config: _config(delayed.url),
+      );
+      await delayed.requestReceived;
+      await trackers.upsertValue(
+        'session',
+        'manual-during-call',
+        'preserve me',
+        scope: 'ledger',
+      );
+      delayed.release();
+
+      final result = await future;
+      expect(result.status, 'aborted');
+      expect(
+        await reconciliationRuns.readPhysicalSession('session'),
+        hasLength(1),
+      );
+      expect((await reconciliationRuns.getHead('session'))?.id, oldHead.id);
+      expect(await reconciliationRuns.readInvalidations('session'), isEmpty);
+      expect((await trackers.get('session', 'world:time'))?.value, '01:00');
+      expect(
+        (await trackers.get('session', 'manual-during-call'))?.value,
+        'preserve me',
+      );
+    },
+  );
+
+  test(
     'canon changes after reconciliation LLM completion abort without writes',
     () async {
       await snapshots.upsert(
@@ -1135,6 +1332,44 @@ Future<({String url, Future<void> Function() close})> _serveTwice(
   });
   return (
     url: 'http://${server.address.host}:${server.port}',
+    close: () => server.close(force: true),
+  );
+}
+
+Future<
+  ({
+    String url,
+    Future<void> requestReceived,
+    void Function() release,
+    Future<void> Function() close,
+  })
+>
+_serveDelayed(String content) async {
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final requestReceived = Completer<void>();
+  final release = Completer<void>();
+  server.listen((request) async {
+    await utf8.decoder.bind(request).join();
+    if (!requestReceived.isCompleted) requestReceived.complete();
+    await release.future;
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(
+      jsonEncode({
+        'choices': [
+          {
+            'message': {'content': content},
+          },
+        ],
+      }),
+    );
+    await request.response.close();
+  });
+  return (
+    url: 'http://${server.address.host}:${server.port}',
+    requestReceived: requestReceived.future,
+    release: () {
+      if (!release.isCompleted) release.complete();
+    },
     close: () => server.close(force: true),
   );
 }

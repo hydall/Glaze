@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/studio_preset_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_snapshot_repo.dart';
@@ -22,6 +23,7 @@ import 'package:glaze_flutter/core/services/generation_notification_service.dart
 import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/models/tracker_snapshot.dart';
+import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 import 'package:glaze_flutter/features/chat/services/manual_studio_ledger_service.dart';
 
 void main() {
@@ -31,6 +33,7 @@ void main() {
   late TrackerRepo trackerRepo;
   late TrackerSnapshotRepo snapshotRepo;
   late CharacterRepo characterRepo;
+  late LedgerReconciliationRunRepo reconciliationRunRepo;
   late _FakeLedgerExecutor ledger;
   late PipelineSettings pipeline;
   late ApiConfig activeApi;
@@ -47,6 +50,7 @@ void main() {
     trackerRepo = TrackerRepo(db);
     snapshotRepo = TrackerSnapshotRepo(db);
     characterRepo = CharacterRepo(db);
+    reconciliationRunRepo = LedgerReconciliationRunRepo(db);
     ledger = _FakeLedgerExecutor();
     pipeline = const PipelineSettings(
       cleaner: CleanerSettings(postCleanerModel: 'snapshot-model'),
@@ -82,6 +86,7 @@ void main() {
       trackerRepo: trackerRepo,
       presetRepo: presetRepo,
       characterRepo: characterRepo,
+      reconciliationRunRepo: reconciliationRunRepo,
       ledger: ledger,
       loadApiConfigs: loadApiConfigs,
       readActiveApiConfig: () => activeApi,
@@ -237,6 +242,49 @@ void main() {
     expect(ledger.reconcileCalls, 0);
   });
 
+  test('regeneration targets the exact expected reconciliation head', () async {
+    await putSession('session');
+    await commit('session', assistant2, 2);
+    final run = LedgerReconciliationRun(
+      id: 'run',
+      sessionId: 'session',
+      ordinal: 1,
+      anchors: [
+        for (final message in const [assistant1, user2, assistant2])
+          ReconciliationAnchor(
+            messageId: message.id,
+            swipeId: message.swipeId,
+            agentSwipeId: message.agentSwipeId,
+            role: message.role,
+            contentHash: computeHash(message.content),
+          ),
+      ],
+      acceptedManifestRefs: const [],
+      effectiveCanonStamp: 'stamp',
+      effectiveCanonRevision: 1,
+      effectiveCanonHash: 'hash',
+      canonicalResult: const {'export': <String, dynamic>{}},
+      predecessorChainHash: '',
+      contractVersion: 1,
+      opsApplied: const [],
+      createdAt: 1,
+    );
+    expect(
+      await reconciliationRunRepo.appendCandidate(run),
+      isA<ReconciliationRunAppended>(),
+    );
+    final head = (await reconciliationRunRepo.getHead('session'))!;
+
+    final outcome = await createService().regenerateLatest(
+      sessionId: 'session',
+      expectedRunId: head.id,
+    );
+
+    expect(outcome.target.id, 'a2');
+    expect(ledger.replaceCalls, 1);
+    expect(ledger.lastExpectedRunId, head.id);
+  });
+
   test('diagnostic writes remain isolated to the requested session', () async {
     await putSession('session');
     await putSession('other');
@@ -327,12 +375,14 @@ void main() {
 class _FakeLedgerExecutor implements StudioLedgerExecutor {
   int runCalls = 0;
   int reconcileCalls = 0;
+  int replaceCalls = 0;
   StudioTurnConfigSnapshot? lastTurnConfig;
   AuxApiConfig? lastConfig;
   String? lastRecentHistory;
   MacroContext? lastMacroContext;
   LedgerReconciliationPlan? lastPlan;
   StudioLedgerEngine? lastEngine;
+  String? lastExpectedRunId;
   Future<void> Function()? beforeRunComplete;
   Future<void> Function()? beforeReconcileComplete;
   final runStarted = Completer<void>();
@@ -384,5 +434,23 @@ class _FakeLedgerExecutor implements StudioLedgerExecutor {
       opsApplied: 3,
       model: 'snapshot-model',
     );
+  }
+
+  @override
+  Future<LedgerRunResult> replaceLatestReconciliation({
+    required String sessionId,
+    required String expectedRunId,
+    required StudioTurnConfigSnapshot turnConfig,
+    required AuxApiConfig config,
+    required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
+  }) async {
+    replaceCalls++;
+    lastExpectedRunId = expectedRunId;
+    lastTurnConfig = turnConfig;
+    lastConfig = config;
+    lastMacroContext = macroCtx;
+    if (!await isStillCurrent()) return LedgerRunResult.aborted;
+    return const LedgerRunResult(status: 'ok', opsApplied: 4);
   }
 }

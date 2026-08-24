@@ -7,6 +7,7 @@ import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../services/manual_studio_ledger_service.dart';
@@ -31,6 +32,7 @@ class AgenticReconcilerTab extends ConsumerStatefulWidget {
 class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
   bool _runningLedger = false;
   bool _runningReconciliation = false;
+  String? _regeneratingRunId;
 
   Future<void> _refresh() async {
     ref.invalidate(reconcilerViewProvider(widget.sessionId));
@@ -126,6 +128,74 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
     }
   }
 
+  Future<void> _regenerate(ReconciliationRunView run) async {
+    if (_regeneratingRunId != null) return;
+    final confirmed = await GlazeBottomSheet.show<bool>(
+      context,
+      title: 'Regenerate latest commit?',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'The exact saved before-state will be used to regenerate '
+              '${run.label}. The current commit is replaced only after the '
+              'new response passes every integrity check.',
+              style: TextStyle(color: context.cs.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(context, rootNavigator: true).pop(true),
+              child: const Text('Regenerate'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(context, rootNavigator: true).pop(false),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _regeneratingRunId = run.row.id);
+    try {
+      final outcome = await ref
+          .read(manualStudioLedgerServiceProvider)
+          .regenerateLatest(
+            sessionId: widget.sessionId,
+            expectedRunId: run.row.id,
+          );
+      if (!mounted) return;
+      final result = outcome.result;
+      GlazeToast.show(
+        context,
+        result.status == 'ok'
+            ? result.opsApplied == 0
+                  ? 'The latest reconciliation is unchanged.'
+                  : 'Latest reconciliation regenerated: '
+                        '${result.opsApplied} ops.'
+            : 'Regeneration failed: ${result.error ?? result.status}',
+        isError: result.status != 'ok',
+        position: ToastPosition.top,
+      );
+      await _refresh();
+    } catch (error) {
+      if (mounted) {
+        GlazeToast.show(
+          context,
+          'Regeneration failed: $error',
+          isError: true,
+          position: ToastPosition.top,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _regeneratingRunId = null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ledgerEnabled =
@@ -171,7 +241,8 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                           onPressed:
                               ledgerEnabled &&
                                   !_runningLedger &&
-                                  !_runningReconciliation
+                                  !_runningReconciliation &&
+                                  _regeneratingRunId == null
                               ? _runReconciliation
                               : null,
                           icon: _runningReconciliation
@@ -186,7 +257,8 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                           onPressed:
                               ledgerEnabled &&
                                   !_runningLedger &&
-                                  !_runningReconciliation
+                                  !_runningReconciliation &&
+                                  _regeneratingRunId == null
                               ? _rerunLedger
                               : null,
                           icon: _runningLedger
@@ -216,7 +288,25 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                 text: 'No reconciliation commits recorded for this session.',
               )
             else
-              for (final run in data.runs.reversed) _RunTile(run: run),
+              for (final run in data.runs.reversed)
+                _RunTile(
+                  run: run,
+                  onRegenerate:
+                      data.chainIsValid &&
+                          run.isCurrent &&
+                          run.effect != null &&
+                          !_runningLedger &&
+                          !_runningReconciliation &&
+                          _regeneratingRunId == null &&
+                          run.row.id ==
+                              data.runs
+                                  .lastWhere((item) => item.isCurrent)
+                                  .row
+                                  .id
+                      ? () => _regenerate(run)
+                      : null,
+                  regenerating: _regeneratingRunId == run.row.id,
+                ),
             const SizedBox(height: 14),
             Text(
               'Parsing attempts',
@@ -237,9 +327,15 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
 }
 
 class _RunTile extends StatelessWidget {
-  const _RunTile({required this.run});
+  const _RunTile({
+    required this.run,
+    required this.onRegenerate,
+    required this.regenerating,
+  });
 
   final ReconciliationRunView run;
+  final VoidCallback? onRegenerate;
+  final bool regenerating;
 
   @override
   Widget build(BuildContext context) {
@@ -279,6 +375,16 @@ class _RunTile extends StatelessWidget {
           _MonoDetail(label: 'Chain hash', value: run.row.chainHash),
           if (run.invalidation != null)
             _MonoDetail(label: 'Invalidation', value: run.invalidation!.reason),
+          if (onRegenerate != null) ...[
+            const SizedBox(height: 6),
+            FilledButton.tonalIcon(
+              onPressed: regenerating ? null : onRegenerate,
+              icon: regenerating
+                  ? const SizedBox.square(dimension: 16, child: GlazeSpinner())
+                  : const Icon(Icons.refresh_outlined),
+              label: const Text('Regenerate'),
+            ),
+          ],
           const SizedBox(height: 6),
           if (run.effect != null) ...[
             _MonoDetail(
