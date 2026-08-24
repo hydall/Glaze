@@ -119,27 +119,30 @@ void main() {
     await fixture.expectCanonRowsUnchanged();
   });
 
-  test('model failure leaves no proposal', () async {
-    final result = await fixture
-        .service(
-          (_, _) async => const AuxCallOutcome(
-            status: AgentOperationStatus.httpError,
-            attempts: [
-              AgentOperationAttempt(
-                attempt: 1,
-                statusCode: 503,
-                status: 'http_5xx',
-                error: 'upstream unavailable',
-                startedAtMs: 1,
-                elapsedMs: 2,
-              ),
-            ],
+  test('model failure retains failed claim and call for resume', () async {
+    var fail = true;
+    var calls = 0;
+    final service = fixture.service((_, _) async {
+      calls++;
+      if (!fail) return _ok(fixture.cardBatchOutput);
+      return const AuxCallOutcome(
+        status: AgentOperationStatus.httpError,
+        attempts: [
+          AgentOperationAttempt(
+            attempt: 1,
+            statusCode: 503,
+            status: 'http_5xx',
+            error: 'upstream unavailable',
+            startedAtMs: 1,
+            elapsedMs: 2,
           ),
-        )
-        .runOneBatch('session');
-    expect(result.kind, 'cardModelFailed');
+        ],
+      );
+    });
+    final first = await service.runOneBatch('session');
+    expect(first.kind, 'cardModelFailed');
     expect(
-      result.detail,
+      first.detail,
       '1 attempt(s), http_5xx HTTP 503: upstream unavailable',
     );
     final debug = await fixture.db
@@ -150,9 +153,23 @@ void main() {
     expect(debug.output, isNull);
     expect(debug.attemptsJson, contains('upstream unavailable'));
     await fixture.expectNoProposalOrCanonWrites();
+    final claim = await fixture.db
+        .select(fixture.db.cardEvolutionClaims)
+        .getSingle();
+    final call = await fixture.db
+        .select(fixture.db.cardEvolutionWriterCalls)
+        .getSingle();
+    expect(claim.status, 'failed');
+    expect(call.status, 'failed');
+
+    fail = false;
+    final resumed = await service.resumeFailedWriter(claim.id);
+    expect(resumed.kind, 'persisted');
+    expect(calls, 2);
     expect(
-      await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
-      isEmpty,
+      (await fixture.db.select(fixture.db.cardEvolutionWriterCalls).getSingle())
+          .id,
+      call.id,
     );
   });
 
@@ -180,8 +197,9 @@ void main() {
     );
     await fixture.expectNoProposalOrCanonWrites();
     expect(
-      await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
-      isEmpty,
+      (await fixture.db.select(fixture.db.cardEvolutionClaims).getSingle())
+          .status,
+      'failed',
     );
   });
 
@@ -200,6 +218,91 @@ void main() {
     expect(calls, 2);
     expect(prompts.last, contains('no JSON object was found'));
     expect(prompts.last, contains('exactly one valid JSON object'));
+  });
+
+  test('failed repair resumes without repeating completed card call', () async {
+    var calls = 0;
+    var repairFails = true;
+    final service = fixture.service((_, _) async {
+      calls++;
+      if (calls == 1) return _ok('not json');
+      if (repairFails) {
+        return const AuxCallOutcome(status: AgentOperationStatus.httpError);
+      }
+      return _ok(fixture.cardBatchOutput);
+    });
+
+    expect((await service.runOneBatch('session')).kind, 'cardModelFailed');
+    final claim = await fixture.db
+        .select(fixture.db.cardEvolutionClaims)
+        .getSingle();
+    final before = await fixture.db
+        .select(fixture.db.cardEvolutionWriterCalls)
+        .get();
+    expect(before.map((row) => row.status), ['completed', 'failed']);
+
+    repairFails = false;
+    expect((await service.resumeFailedWriter(claim.id)).kind, 'persisted');
+    expect(calls, 3);
+    final after = await fixture.db
+        .select(fixture.db.cardEvolutionWriterCalls)
+        .get();
+    expect(after, hasLength(2));
+    expect(after.first.responseText, 'not json');
+  });
+
+  test(
+    'manual correction completes failed repair without a model call',
+    () async {
+      var calls = 0;
+      final service = fixture.service((_, _) async {
+        calls++;
+        return calls == 1
+            ? _ok('not json')
+            : const AuxCallOutcome(status: AgentOperationStatus.httpError);
+      });
+      expect((await service.runOneBatch('session')).kind, 'cardModelFailed');
+      final failedCall =
+          (await fixture.db.select(fixture.db.cardEvolutionWriterCalls).get())
+              .last;
+
+      final result = await service.correctFailedWriterCall(
+        failedCall.id,
+        response: fixture.cardBatchOutput,
+      );
+
+      expect(result.kind, 'persisted');
+      expect(calls, 2);
+      final rows = await fixture.db
+          .select(fixture.db.cardEvolutionWriterCalls)
+          .get();
+      expect(rows.last.source, 'manual_correction');
+    },
+  );
+
+  test('invalid manual correction remains failed', () async {
+    var calls = 0;
+    final service = fixture.service((_, _) async {
+      calls++;
+      return const AuxCallOutcome(status: AgentOperationStatus.httpError);
+    });
+    await service.runOneBatch('session');
+    final failedCall = await fixture.db
+        .select(fixture.db.cardEvolutionWriterCalls)
+        .getSingle();
+
+    final result = await service.correctFailedWriterCall(
+      failedCall.id,
+      response: 'still invalid',
+    );
+
+    expect(result.kind, 'invalidCardOutput');
+    expect(calls, 1);
+    expect(
+      (await fixture.db.select(fixture.db.cardEvolutionWriterCalls).getSingle())
+          .status,
+      'failed',
+    );
   });
 
   test('expired claim does not start a repair call', () async {
@@ -330,8 +433,9 @@ void main() {
     expect((await future).kind, 'cancelled');
     await fixture.expectNoProposalOrCanonWrites();
     expect(
-      await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
-      isEmpty,
+      (await fixture.db.select(fixture.db.cardEvolutionClaims).getSingle())
+          .status,
+      'failed',
     );
   });
 
@@ -392,6 +496,43 @@ void main() {
         .get();
     expect(debug.map((row) => row.stage), containsAll(['card', 'lorebook']));
   });
+
+  test(
+    'lorebook failure resumes lorebook without repeating card call',
+    () async {
+      await _seedManifest(fixture.db, 'a1', 'entry one');
+      var cardCalls = 0;
+      var lorebookCalls = 0;
+      var lorebookFails = true;
+      final service = fixture.service((_, prompt) async {
+        if (prompt.contains('Glaze lorebook rewriter')) {
+          lorebookCalls++;
+          return lorebookFails
+              ? const AuxCallOutcome(status: AgentOperationStatus.httpError)
+              : _ok(fixture.lorebookBatchOutput);
+        }
+        cardCalls++;
+        return _ok(fixture.cardBatchOutput);
+      });
+
+      expect(
+        (await service.runOneBatch('session')).kind,
+        'lorebookModelFailed',
+      );
+      final claim = await fixture.db
+          .select(fixture.db.cardEvolutionClaims)
+          .getSingle();
+      lorebookFails = false;
+
+      expect((await service.resumeFailedWriter(claim.id)).kind, 'persisted');
+      expect(cardCalls, 1);
+      expect(lorebookCalls, 2);
+      expect(
+        await fixture.db.select(fixture.db.cardEvolutionProposalRuns).get(),
+        hasLength(1),
+      );
+    },
+  );
 
   test('accepts injected lorebook entries up to 60000 characters', () async {
     final content = List.filled(59999, 'x').join();

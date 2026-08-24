@@ -153,6 +153,10 @@ class CardEvolutionRepo {
   final SessionLorebookEvolutionRepo lorebookEvolutionRepo;
   final Future<void> Function()? beforeCursorInsert;
 
+  Future<CardEvolutionClaimRow?> getClaimById(String claimId) => (db.select(
+    db.cardEvolutionClaims,
+  )..where((row) => row.id.equals(claimId))).getSingleOrNull();
+
   Future<bool> isEligible(String sessionId) => db.transaction<bool>(
     () async => (await _selectInput(sessionId)).isSelected,
   );
@@ -244,6 +248,41 @@ class CardEvolutionRepo {
             );
     }
     if (existing != null) {
+      final writerCall =
+          await (db.select(db.cardEvolutionWriterCalls)
+                ..where((row) => row.claimId.equals(existing.id))
+                ..limit(1))
+              .getSingleOrNull();
+      if (writerCall != null) {
+        await (db.update(db.cardEvolutionClaims)..where(
+              (row) =>
+                  row.id.equals(existing.id) &
+                  row.status.equals('claimed') &
+                  row.leaseExpiresAt.isSmallerOrEqualValue(now),
+            ))
+            .write(
+              CardEvolutionClaimsCompanion(
+                status: const Value('failed'),
+                leaseExpiresAt: const Value(0),
+                failureCode: const Value('recoveryRequired'),
+                failureDetail: const Value(
+                  'Writer lease expired with durable call checkpoints',
+                ),
+                failedAt: Value(now),
+              ),
+            );
+        final failed = await getClaimById(existing.id);
+        final selected = failed?.selectedInputJson;
+        return CardEvolutionClaimOutcome(
+          'failed',
+          failed == null ||
+                  selected == null ||
+                  computeHash(selected) != failed.inputHash
+              ? null
+              : CardEvolutionClaim(row: failed, selectedInputJson: selected),
+          'recoveryRequired',
+        );
+      }
       // An expired owner cannot finalize (finalize checks the same lease). Do
       // not reuse its snapshot: chat/canon may have advanced while the app was
       // closed, so drop the stale lease and create a fresh claim below.
@@ -734,6 +773,18 @@ class CardEvolutionRepo {
     required String claimId,
     required String ownerId,
   }) => db.transaction(() async {
+    final owned =
+        await (db.select(db.cardEvolutionClaims)..where(
+              (row) =>
+                  row.id.equals(claimId) &
+                  row.ownerId.equals(ownerId) &
+                  row.status.equals('claimed'),
+            ))
+            .getSingleOrNull();
+    if (owned == null) return;
+    await (db.delete(
+      db.cardEvolutionWriterCalls,
+    )..where((row) => row.claimId.equals(claimId))).go();
     await (db.delete(db.cardEvolutionClaims)
           ..where((row) => row.id.equals(claimId))
           ..where((row) => row.ownerId.equals(ownerId))
