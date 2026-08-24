@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../db/app_db.dart';
@@ -31,6 +33,7 @@ import '../db/repositories/ledger_raw_tracker_state_reader.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import '../db/repositories/ledger_reconciliation_run_repo.dart';
 import '../db/repositories/ledger_debug_run_repo.dart';
+import '../db/repositories/llm_request_capture_repo.dart';
 import '../db/repositories/card_evolution_repo.dart';
 import '../db/repositories/card_evolution_collector_run_repo.dart';
 import '../db/repositories/card_evolution_observation_repo.dart';
@@ -46,6 +49,7 @@ import '../db/repositories/info_blocks_repository.dart';
 import '../db/repositories/session_deletion_repo.dart';
 import '../db/repositories/character_deletion_repo.dart';
 import '../models/memory_book.dart';
+import '../llm/transport/llm_request_capture.dart';
 import '../services/character_importer.dart';
 import '../services/image_storage_service.dart';
 import '../services/migration_service.dart';
@@ -62,10 +66,34 @@ export 'pipeline_settings_provider.dart' show pipelineSettingsProvider;
 // (which already import db_provider) can gate Studio without extra imports.
 export 'studio_feature_provider.dart' show studioFeatureEnabledProvider;
 
+final _captureRepos = Expando<LlmRequestCaptureRepo>();
+
 final appDbProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
-  ref.onDispose(db.close);
+  ref.onDispose(() {
+    final repo = _captureRepos[db];
+    if (repo != null && identical(LlmRequestCapture.sink, repo)) {
+      LlmRequestCapture.sink = null;
+    }
+    unawaited((repo?.close() ?? Future<void>.value()).whenComplete(db.close));
+  });
   return db;
+});
+
+final llmRequestCaptureRepoProvider = Provider<LlmRequestCaptureRepo>((ref) {
+  return LlmRequestCaptureRepo(ref.watch(appDbProvider));
+});
+
+/// Installs the database-backed request sink for the lifetime of the app scope.
+final llmRequestCaptureInstallationProvider = Provider<void>((ref) {
+  final repo = ref.watch(llmRequestCaptureRepoProvider);
+  _captureRepos[repo.db] = repo;
+  LlmRequestCapture.sink = repo;
+  ref.onDispose(() {
+    if (identical(LlmRequestCapture.sink, repo)) {
+      LlmRequestCapture.sink = null;
+    }
+  });
 });
 
 final imageStorageProvider = FutureProvider<ImageStorageService>((ref) async {

@@ -87,6 +87,15 @@ class SessionDeletionQueries {
     await (_db.delete(
       _db.infoBlocks,
     )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.ledgerDebugRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.cardEvolutionDebugRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.llmRequestCaptureRows,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(_db.embeddings)..where((row) {
           final chatMessages =
               row.sourceType.equals('chat_message') &

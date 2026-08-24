@@ -17,6 +17,7 @@ import 'core/services/generation_notification_service.dart';
 import 'features/chat/bridge/chat_webview_environment.dart';
 import 'core/state/active_selection_provider.dart';
 import 'core/state/character_provider.dart';
+import 'core/state/db_provider.dart';
 import 'core/state/lorebook_provider.dart';
 import 'core/state/lorebook_embedding_provider.dart';
 import 'core/services/preset_seeder.dart';
@@ -73,6 +74,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         widget.skipStartup || const bool.fromEnvironment('FLUTTER_TEST');
     GlazeApp._restart = widget.restart;
     WidgetsBinding.instance.addObserver(this);
+    ref.read(llmRequestCaptureInstallationProvider);
     _initInBackground(loadActiveSelections(ref), 'active selections');
     _initInBackground(loadLorebookActivations(ref), 'lorebook activations');
     _initInBackground(loadLorebookSettings(ref), 'lorebook settings');

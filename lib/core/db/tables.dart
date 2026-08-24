@@ -1290,6 +1290,35 @@ class LedgerDebugRuns extends Table {
   ];
 }
 
+/// Bounded local history of sanitized requests observed immediately before
+/// provider transport. This diagnostic data is neither canon nor sync state.
+@DataClassName('LlmRequestCaptureRow')
+@TableIndex(
+  name: 'idx_llm_request_capture_session_stage_created',
+  columns: {#sessionId, #stage, #createdAtMs},
+)
+@TableIndex(name: 'idx_llm_request_capture_created', columns: {#createdAtMs})
+class LlmRequestCaptureRows extends Table {
+  @override
+  String get tableName => 'llm_request_capture_rows';
+
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get sequence => integer()();
+  IntColumn get createdAtMs => integer()();
+  TextColumn get sessionId => text().nullable()();
+  TextColumn get stage => text().nullable()();
+  TextColumn get messageId => text().nullable()();
+  TextColumn get pipelineRunId => text().nullable()();
+  TextColumn get logicalCallId => text().nullable()();
+  TextColumn get relatedArtifactId => text().nullable()();
+  TextColumn get agentId => text().nullable()();
+  IntColumn get stageOrdinal => integer().nullable()();
+  IntColumn get attempt => integer().nullable()();
+  TextColumn get protocol => text().nullable()();
+  BoolColumn get truncated => boolean()();
+  TextColumn get eventJson => text()();
+}
+
 /// Latest raw writer result retained per session and writer stage for Card
 /// Rewriter debugging. This is intentionally replaceable diagnostic state,
 /// unlike reviewable proposal provenance which remains immutable once

@@ -55,6 +55,7 @@ part 'app_db.g.dart';
     LedgerReconciliationRunInvalidations,
     LedgerReconciliationCursors,
     LedgerDebugRuns,
+    LlmRequestCaptureRows,
     CardEvolutionClaims,
     CardEvolutionProposalRuns,
     CardEvolutionDebugRuns,
@@ -79,7 +80,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 123;
+  int get schemaVersion => 124;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2253,6 +2254,20 @@ class AppDatabase extends _$AppDatabase {
         await customStatement(
           'UPDATE studio_preset_rows SET max_final_history_messages = 50 '
           'WHERE max_final_history_messages = 30',
+        );
+      }
+      if (from < 124) {
+        await m.createTable(llmRequestCaptureRows);
+        // Drift's createTable path creates indexes for a newly created table,
+        // but migration fixtures may already contain the table and indexes.
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS '
+          'idx_llm_request_capture_session_stage_created '
+          'ON llm_request_capture_rows (session_id, stage, created_at_ms)',
+        );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_llm_request_capture_created '
+          'ON llm_request_capture_rows (created_at_ms)',
         );
       }
     },
