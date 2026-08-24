@@ -18,6 +18,18 @@ class CardEvolutionWriterCallRepo {
 
   final AppDatabase db;
 
+  Future<List<CardEvolutionClaimRow>> readFailedClaims(String sessionId) =>
+      (db.select(db.cardEvolutionClaims)
+            ..where(
+              (row) =>
+                  row.sessionId.equals(sessionId) & row.status.equals('failed'),
+            )
+            ..orderBy([
+              (row) => OrderingTerm.desc(row.failedAt),
+              (row) => OrderingTerm.desc(row.createdAt),
+            ]))
+          .get();
+
   Future<List<CardEvolutionWriterCallRow>> readChain(String claimId) =>
       (db.select(db.cardEvolutionWriterCalls)
             ..where((row) => row.claimId.equals(claimId))

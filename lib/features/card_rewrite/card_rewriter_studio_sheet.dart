@@ -4,7 +4,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/db/app_db.dart' show RewriteJobRow;
+import '../../core/db/app_db.dart'
+    show CardEvolutionWriterCallRow, RewriteJobRow;
 import '../../core/db/repositories/card_evolution_repo.dart'
     show CardEvolutionFinalizeOutcome;
 import '../../core/llm/model_fetcher.dart';
@@ -13,11 +14,14 @@ import '../../core/models/card_rewriter_settings.dart';
 import '../../core/state/card_rewriter_providers.dart';
 import '../../core/state/active_studio_preset_provider.dart';
 import '../../core/state/pipeline_settings_provider.dart';
+import '../../shared/theme/app_colors.dart';
 import '../../shared/utils/time_formatter.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../settings/api_list_provider.dart';
+import 'card_rewriter_recovery_view_service.dart';
 
 /// Studio sub-screen for the review-only automated Card Rewriter.
 class CardRewriterStudioSheet extends ConsumerStatefulWidget {
@@ -52,6 +56,7 @@ class _CardRewriterStudioSheetState
   List<String> _models = const [];
   bool _loadingModels = false;
   bool _running = false;
+  String? _recoveringCallId;
 
   Future<void> _save(CardRewriterSettings Function(CardRewriterSettings) edit) {
     final pipeline = ref.read(pipelineSettingsProvider);
@@ -104,23 +109,125 @@ class _CardRewriterStudioSheetState
     }
   }
 
-  Future<void> _run(CardRewriterSettings settings) async {
-    if (!settings.enabled || settings.apiConfigId.isEmpty || _running) return;
-    setState(() => _running = true);
-    final outcome = await ref
-        .read(automatedCardEvolutionServiceProvider)
-        .runOneBatch(widget.sessionId);
-    if (!mounted) return;
-    setState(() => _running = false);
-    if (outcome.isPersisted && outcome.job != null) {
-      Navigator.of(
-        context,
-        rootNavigator: true,
-      ).pop('/character/${widget.charId}/rewrite/${outcome.job!.id}');
+  Future<void> _run(
+    CardRewriterSettings settings, {
+    CardRewriterRecoveryView? recovery,
+  }) async {
+    if (_running) return;
+    if (recovery == null &&
+        (!settings.enabled || settings.apiConfigId.isEmpty)) {
       return;
     }
+    setState(() => _running = true);
+    try {
+      final service = ref.read(automatedCardEvolutionServiceProvider);
+      final outcome = recovery == null
+          ? await service.runOneBatch(widget.sessionId)
+          : await service.resumeFailedWriter(recovery.claim.id);
+      if (!mounted) return;
+      _refreshRecovery();
+      if (outcome.isPersisted && outcome.job != null) {
+        Navigator.of(
+          context,
+          rootNavigator: true,
+        ).pop('/character/${widget.charId}/rewrite/${outcome.job!.id}');
+        return;
+      }
+      GlazeToast.show(
+        context,
+        _runMessage(outcome),
+        position: ToastPosition.top,
+      );
+    } catch (error) {
+      if (mounted) GlazeToast.show(context, 'Card Rewriter failed: $error');
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
+
+  Future<void> _retryWriterCall(CardEvolutionWriterCallRow call) async {
+    if (_running || _recoveringCallId != null) return;
+    setState(() => _recoveringCallId = call.id);
+    try {
+      final outcome = await ref
+          .read(automatedCardEvolutionServiceProvider)
+          .retryFailedWriterCall(call.id);
+      if (!mounted) return;
+      _refreshRecovery();
+      if (outcome.isPersisted && outcome.job != null) {
+        Navigator.of(
+          context,
+          rootNavigator: true,
+        ).pop('/character/${widget.charId}/rewrite/${outcome.job!.id}');
+        return;
+      }
+      GlazeToast.show(context, _runMessage(outcome));
+    } catch (error) {
+      if (mounted) GlazeToast.show(context, 'Writer retry failed: $error');
+    } finally {
+      if (mounted) setState(() => _recoveringCallId = null);
+    }
+  }
+
+  Future<void> _correctWriterCall(CardEvolutionWriterCallRow call) async {
+    if (_running || _recoveringCallId != null) return;
+    final controller = TextEditingController(text: call.responseText ?? '');
+    String? response;
+    await GlazeBottomSheet.show<void>(
+      context,
+      title: 'Correct ${_writerStageLabel(call.stage)} response',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Edit the response. It will pass through the same parser and validation before the chain continues.',
+            ),
+            const SizedBox(height: 12),
+            GlazeTextField(controller: controller, maxLines: 14),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () {
+                response = controller.text.trim();
+                Navigator.of(context, rootNavigator: true).pop();
+              },
+              child: const Text('Validate and continue'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (!mounted || response == null || response!.isEmpty) return;
+    setState(() => _recoveringCallId = call.id);
+    try {
+      final outcome = await ref
+          .read(automatedCardEvolutionServiceProvider)
+          .correctFailedWriterCall(call.id, response: response!);
+      if (!mounted) return;
+      _refreshRecovery();
+      if (outcome.isPersisted && outcome.job != null) {
+        Navigator.of(
+          context,
+          rootNavigator: true,
+        ).pop('/character/${widget.charId}/rewrite/${outcome.job!.id}');
+        return;
+      }
+      GlazeToast.show(context, _runMessage(outcome));
+    } catch (error) {
+      if (mounted) {
+        GlazeToast.show(context, 'Writer correction failed: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _recoveringCallId = null);
+    }
+  }
+
+  void _refreshRecovery() {
+    ref.invalidate(cardRewriterRecoveryViewsProvider(widget.sessionId));
     ref.invalidate(cardRewriteDebugRunsProvider(widget.sessionId));
-    GlazeToast.show(context, _runMessage(outcome), position: ToastPosition.top);
   }
 
   String _runMessage(
@@ -152,6 +259,14 @@ class _CardRewriterStudioSheetState
           'The Card Rewriter snapshot exceeds its safe size limit.',
     'disabled' => 'Enable Card Rewriter first.',
     'cancelled' => 'Card Rewriter was cancelled.',
+    'writerCallNotFound' => 'The interrupted request no longer exists.',
+    'writerCallNotFailed' ||
+    'writerNotFailed' => 'This writer chain is no longer waiting for recovery.',
+    'writerCallNotFrontier' =>
+      'Only the first unfinished request can be recovered.',
+    'writerCallRetryFailed' ||
+    'leaseLost' => 'The recovery lease changed. Refresh and try again.',
+    'claimMissing' => 'The interrupted writer chain no longer exists.',
     _ => 'Card Rewriter skipped: ${outcome.kind}',
   };
 
@@ -172,6 +287,11 @@ class _CardRewriterStudioSheetState
     final configured = settings.apiConfigId.isNotEmpty && config != null;
     final jobs = ref.watch(cardRewriteJobsBySessionProvider(widget.sessionId));
     final debugRuns = ref.watch(cardRewriteDebugRunsProvider(widget.sessionId));
+    final recoveryViews = ref.watch(
+      cardRewriterRecoveryViewsProvider(widget.sessionId),
+    );
+    final firstRecovery = recoveryViews.value?.firstOrNull;
+    final recoveryLoading = recoveryViews.isLoading;
     final studioPreset = ref.watch(studioPresetProvider).value;
     final ledgerEnabled =
         studioPreset != null && studioPreset.agentEnabled['ledger'] != false;
@@ -312,13 +432,55 @@ class _CardRewriterStudioSheetState
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed:
-                settings.enabled && ledgerEnabled && configured && !_running
-                ? () => _run(settings)
+                !_running &&
+                    !recoveryLoading &&
+                    (firstRecovery != null ||
+                        (settings.enabled && ledgerEnabled && configured))
+                ? () => _run(settings, recovery: firstRecovery)
                 : null,
             icon: _running
                 ? const SizedBox.square(dimension: 16, child: GlazeSpinner())
                 : const Icon(Icons.auto_fix_high_outlined),
-            label: Text(_running ? 'Preparing proposal...' : 'Run now'),
+            label: Text(
+              _running
+                  ? firstRecovery == null
+                        ? 'Preparing proposal...'
+                        : 'Continuing interrupted chain...'
+                  : firstRecovery == null
+                  ? 'Run now'
+                  : 'Continue interrupted chain',
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Interrupted writer chains',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 4),
+          recoveryViews.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.all(12),
+              child: Center(child: GlazeSpinner()),
+            ),
+            error: (_, _) =>
+                const Text('Could not load interrupted writer chains.'),
+            data: (items) => items.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text('No writer chain is waiting for recovery.'),
+                  )
+                : Column(
+                    children: [
+                      for (final recovery in items)
+                        _WriterRecoveryTile(
+                          recovery: recovery,
+                          busy: _running || _recoveringCallId != null,
+                          onContinue: () => _run(settings, recovery: recovery),
+                          onRetry: _retryWriterCall,
+                          onCorrect: _correctWriterCall,
+                        ),
+                    ],
+                  ),
           ),
           const SizedBox(height: 20),
           Text(
@@ -421,6 +583,152 @@ class _CardRewriterStudioSheetState
   }
 }
 
+class _WriterRecoveryTile extends StatelessWidget {
+  const _WriterRecoveryTile({
+    required this.recovery,
+    required this.busy,
+    required this.onContinue,
+    required this.onRetry,
+    required this.onCorrect,
+  });
+
+  final CardRewriterRecoveryView recovery;
+  final bool busy;
+  final VoidCallback onContinue;
+  final ValueChanged<CardEvolutionWriterCallRow> onRetry;
+  final ValueChanged<CardEvolutionWriterCallRow> onCorrect;
+
+  @override
+  Widget build(BuildContext context) {
+    final frontier = recovery.frontier;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ExpansionTile(
+        leading: Icon(Icons.pause_circle_outline, color: context.cs.error),
+        title: Text(
+          frontier == null
+              ? recovery.calls.isEmpty
+                    ? 'Resume interrupted chain'
+                    : 'Finalize completed chain'
+              : '${_writerStageLabel(frontier.stage)} failed',
+        ),
+        subtitle: Text(
+          '${recovery.completedCount}/${recovery.calls.length} requests completed',
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _RecoveryDetail(label: 'Claim', value: recovery.claim.id),
+          if (recovery.claim.failureCode != null)
+            _RecoveryDetail(
+              label: 'Failure',
+              value: recovery.claim.failureCode!,
+            ),
+          if (recovery.claim.failureDetail != null)
+            _RecoveryDetail(
+              label: 'Failure detail',
+              value: recovery.claim.failureDetail!,
+            ),
+          const SizedBox(height: 6),
+          for (final call in recovery.calls)
+            _WriterCallTile(call: call, isFrontier: call.id == frontier?.id),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: busy ? null : onContinue,
+                icon: const Icon(Icons.play_arrow_outlined),
+                label: const Text('Continue chain'),
+              ),
+              if (frontier?.status == 'failed') ...[
+                OutlinedButton.icon(
+                  onPressed: busy ? null : () => onRetry(frontier!),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry request'),
+                ),
+                FilledButton.icon(
+                  onPressed: busy ? null : () => onCorrect(frontier!),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Correct response'),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WriterCallTile extends StatelessWidget {
+  const _WriterCallTile({required this.call, required this.isFrontier});
+
+  final CardEvolutionWriterCallRow call;
+  final bool isFrontier;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (call.status) {
+      'completed' => context.cs.primary,
+      'failed' => context.cs.error,
+      _ => Colors.orange,
+    };
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 10),
+      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      leading: Icon(switch (call.status) {
+        'completed' => Icons.check_circle_outline,
+        'failed' => Icons.error_outline,
+        _ => Icons.hourglass_top,
+      }, color: color),
+      title: Text(
+        '${call.ordinal}. ${_writerStageLabel(call.stage)}'
+        '${call.stageOrdinal > 1 ? ' ${call.stageOrdinal}' : ''}',
+      ),
+      subtitle: Text('${call.status}${isFrontier ? ' · current' : ''}'),
+      children: [
+        _RecoveryDetail(label: 'Prompt hash', value: call.promptHash),
+        if (call.failureCode != null)
+          _RecoveryDetail(label: 'Failure', value: call.failureCode!),
+        if (call.failureDetail != null)
+          _RecoveryDetail(label: 'Failure detail', value: call.failureDetail!),
+        if (call.parserCode != null)
+          _RecoveryDetail(label: 'Parser', value: call.parserCode!),
+        if (call.parserDetail != null)
+          _RecoveryDetail(label: 'Parser detail', value: call.parserDetail!),
+        const SizedBox(height: 6),
+        const Text('Prompt', style: TextStyle(fontWeight: FontWeight.w600)),
+        SelectableText(
+          call.prompt,
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+        ),
+        const SizedBox(height: 8),
+        const Text('Response', style: TextStyle(fontWeight: FontWeight.w600)),
+        SelectableText(
+          call.responseText ?? 'No response was persisted for this request.',
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+        ),
+      ],
+    );
+  }
+}
+
+class _RecoveryDetail extends StatelessWidget {
+  const _RecoveryDetail({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: SelectableText('$label: $value'),
+  );
+}
+
 bool _isAutomated(RewriteJobRow job) {
   try {
     final request = jsonDecode(job.requestJson);
@@ -442,4 +750,12 @@ String _statusLabel(String status) => switch (status) {
   'failed' => 'Failed',
   'cancelled' => 'Cancelled',
   _ => 'Generating',
+};
+
+String _writerStageLabel(String stage) => switch (stage) {
+  'history_consolidation' => 'History consolidation',
+  'card_writer' => 'Card writer',
+  'card_repair' => 'Card repair',
+  'lorebook_writer' => 'Lorebook writer',
+  _ => stage,
 };
