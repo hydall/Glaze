@@ -1,10 +1,9 @@
-import 'dart:convert';
-
 import 'package:drift/drift.dart';
 
 import '../../models/tracker.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
+import 'reconciliation_state_codec.dart';
 
 class TrackerRepo {
   final AppDatabase db;
@@ -169,22 +168,11 @@ class TrackerRepo {
   /// Non-Ledger rows are preserved. The caller may include this in a wider
   /// transaction.
   Future<void> restoreLedgerRowsExact(String sessionId, String rowsJson) async {
-    final decoded = jsonDecode(rowsJson);
-    if (decoded is! List) throw const FormatException('Expected tracker rows');
-    final rows = decoded
-        .map((value) {
-          if (value is! Map<Object?, Object?>) {
-            throw const FormatException('Expected tracker row');
-          }
-          return TrackerRow.fromJson(Map<String, dynamic>.from(value));
-        })
-        .toList(growable: false);
-    if (rows.any(
-          (row) => row.sessionId != sessionId || row.scope != 'ledger',
-        ) ||
-        rows.map((row) => row.name).toSet().length != rows.length) {
-      throw ArgumentError('Exact Ledger rows do not belong to the session.');
-    }
+    final rows = ReconciliationStateCodec.decode(
+      sessionId: sessionId,
+      ledgerJson: rowsJson,
+      knowledgeJson: '[]',
+    ).trackerRows;
     await db.transaction(() async {
       await (db.delete(db.trackerRows)
             ..where((row) => row.sessionId.equals(sessionId))

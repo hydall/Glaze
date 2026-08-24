@@ -6,6 +6,7 @@ import '../../models/character_knowledge_fact.dart';
 import '../../models/knowledge_cleanup.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
+import 'reconciliation_state_codec.dart';
 
 /// Transactional lifecycle store for swipe-safe atomic character facts.
 class CharacterKnowledgeFactRepo {
@@ -19,22 +20,11 @@ class CharacterKnowledgeFactRepo {
     String sessionId,
     String rowsJson,
   ) async {
-    final decoded = jsonDecode(rowsJson);
-    if (decoded is! List) throw const FormatException('Expected fact rows');
-    final rows = decoded
-        .map((value) {
-          if (value is! Map<Object?, Object?>) {
-            throw const FormatException('Expected fact row');
-          }
-          return CharacterKnowledgeFactRow.fromJson(
-            Map<String, dynamic>.from(value),
-          );
-        })
-        .toList(growable: false);
-    if (rows.any((row) => row.chatSessionId != sessionId) ||
-        rows.map((row) => row.id).toSet().length != rows.length) {
-      throw ArgumentError('Exact knowledge rows do not belong to the session.');
-    }
+    final rows = ReconciliationStateCodec.decode(
+      sessionId: sessionId,
+      ledgerJson: '[]',
+      knowledgeJson: rowsJson,
+    ).knowledgeRows;
     await db.transaction(() async {
       await (db.delete(
         db.characterKnowledgeFactRows,

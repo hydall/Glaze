@@ -8,6 +8,7 @@ import 'package:glaze_flutter/core/db/repositories/character_revision_repo.dart'
 import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/models/character.dart';
+import 'package:glaze_flutter/core/models/character_knowledge_fact.dart';
 import 'package:glaze_flutter/core/models/ledger_raw_tracker_state.dart';
 import 'package:glaze_flutter/core/models/tracker.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewriter_contracts.dart';
@@ -107,6 +108,61 @@ class EffectiveCanonContextLoader {
     sessionId: sessionId,
     reconcile: false,
   );
+
+  /// Builds effective canon from an exact reconciliation state without
+  /// changing source lineage, baselines, or any session-owned rows.
+  Future<EffectiveCanonContext> loadReadOnlyFromReconciliationState({
+    required String sessionId,
+    required Character sourceCharacter,
+    required List<Tracker> ledgerTrackers,
+    required List<CharacterKnowledgeFact> knowledgeFacts,
+  }) async {
+    final source = await _readSource(sourceCharacter);
+    final current = await _readRepository.readFromSource(
+      sessionId: sessionId,
+      sourceCharacter: sourceCharacter,
+    );
+    final controls = ledgerTrackers
+        .where(
+          (tracker) =>
+              tracker.name.startsWith('canon_override:') ||
+              tracker.name.startsWith('canon_lock:'),
+        )
+        .toList(growable: false);
+    final committed = ledgerTrackers
+        .where((tracker) => !controls.contains(tracker))
+        .toList(growable: false);
+    final reviewableFacts = knowledgeFacts
+        .where(
+          (fact) =>
+              fact.lifecycle == CharacterKnowledgeFactLifecycle.active ||
+              fact.lifecycle == CharacterKnowledgeFactLifecycle.tentative,
+        )
+        .toList(growable: false);
+    final assembly = _assemble(
+      EffectiveCanonAssemblyInput(
+        sourceCharacter: current.sourceCharacter,
+        lineage: source.lineage,
+        baseline: current.baseline,
+        facts: reviewableFacts,
+        committedTrackers: committed,
+        manualControls: controls,
+        transitions: current.transitions,
+        transitionFactRefs: current.transitionFactRefs,
+      ),
+    );
+    return EffectiveCanonContext(
+      character: assembly.character,
+      effectiveRevision: assembly.effectiveRevision,
+      lineage: assembly.lineage,
+      resolution: assembly.resolution,
+      committedTrackers: committed,
+      manualControls: controls,
+      requiresBaselineDecision: assembly.requiresBaselineDecision,
+      cacheIdentity: assembly.identity,
+      stamp: EffectiveCanonContextStamp(assembly.identity),
+    );
+  }
 
   /// Read-only freshness check. Unlike [load], this never reconciles source
   /// revisions or writes a baseline/revision row.
