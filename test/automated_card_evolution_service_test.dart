@@ -292,6 +292,24 @@ void main() {
     expect(debug.map((row) => row.stage), containsAll(['card', 'lorebook']));
   });
 
+  test('accepts injected lorebook entries up to 60000 characters', () async {
+    final content = List.filled(59999, 'x').join();
+    await _seedManifest(fixture.db, 'a2', content);
+    String? lorebookPrompt;
+    final service = fixture.service((token, prompt) async {
+      if (prompt.contains('Glaze lorebook rewriter')) {
+        lorebookPrompt = prompt;
+        return _ok(fixture.lorebookBatchOutput);
+      }
+      return _ok(fixture.cardBatchOutput);
+    });
+
+    await service.runOneBatch('session');
+
+    expect(lorebookPrompt, isNotNull);
+    expect(lorebookPrompt, contains(content));
+  });
+
   test('uses the configured writer idle timeout', () async {
     int? receivedTimeout;
     final result = await fixture

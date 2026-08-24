@@ -19,8 +19,8 @@ const _maxChatHistoryMessages = 40;
 const _writerCollectorBatchSize = 2;
 const _writerReconciliationRunCount = _writerCollectorBatchSize * 2;
 const _maxCanonValueCharacters = 2000;
-const _maxLorebookEntryCharacters = 20000;
-const _maxLorebookTotalCharacters = 40000;
+const _maxLorebookEntryCharacters = 60000;
+const _maxLorebookTotalCharacters = 600000;
 
 /// Why the canonical writer/collector input could not be selected. Every bail
 /// point in [CardEvolutionRepo._selectInput] maps to exactly one value so a
