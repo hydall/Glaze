@@ -93,7 +93,9 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                       'Each ledger run writes a per-message snapshot of the '
                       'Studio Ledger state. Committed snapshots are the '
                       'accepted base for the next generation; tentative ones '
-                      'are pending the next user turn.',
+                      'are pending the next user turn. This view is read-only; '
+                      'reconciliation commits and regeneration live in the '
+                      'Reconciler tab.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: context.cs.onSurfaceVariant,
@@ -110,11 +112,8 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                   itemCount: snapshots.length,
                   separatorBuilder: (_, _) =>
                       const Divider(height: 1, indent: 12, endIndent: 12),
-                  itemBuilder: (context, i) => _SnapshotTile(
-                    snapshot: snapshots[i],
-                    sessionId: _sessionIdOf(context) ?? '',
-                    onChanged: _reload,
-                  ),
+                  itemBuilder: (context, i) =>
+                      _SnapshotTile(snapshot: snapshots[i]),
                 ),
         ),
       ],
@@ -124,75 +123,14 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
 
 class _SnapshotTile extends ConsumerWidget {
   final TrackerSnapshot snapshot;
-  final String sessionId;
-  final VoidCallback onChanged;
 
-  const _SnapshotTile({
-    required this.snapshot,
-    required this.sessionId,
-    required this.onChanged,
-  });
-
-  Future<void> _rollback(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Rollback to here?'),
-        content: Text(
-          'This deletes snapshots for message "${snapshot.messageId}" and '
-          'restores the live ledger rows from the previous committed '
-          'snapshot. The read path falls back to that snapshot as the '
-          'accepted base for the next generation.\n\n'
-          'The action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.tonal(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Rollback'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    final result = await ref
-        .read(agenticSnapshotsServiceProvider)
-        .rollback(sessionId: sessionId, messageId: snapshot.messageId);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            result.fallbackMessageId != null
-                ? 'Rolled back to ${result.fallbackMessageId}.'
-                : 'Deleted snapshot for ${result.deletedMessageId}. No earlier committed snapshot remains.',
-          ),
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
-    onChanged();
-  }
-
-  Future<void> _commit(WidgetRef ref) async {
-    await ref
-        .read(agenticSnapshotsServiceProvider)
-        .commitSnapshot(sessionId: sessionId, snapshot: snapshot);
-    onChanged();
-  }
+  const _SnapshotTile({required this.snapshot});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cs = context.cs;
     final tt = Theme.of(context).textTheme;
     final trackers = snapshot.trackers;
-    final menuItems = <PopupMenuEntry<String>>[
-      PopupMenuItem(value: 'rollback', child: const Text('Rollback to here')),
-      if (!snapshot.committed)
-        PopupMenuItem(value: 'commit', child: const Text('Commit')),
-    ];
     return ExpansionTile(
       dense: true,
       tilePadding: const EdgeInsets.symmetric(horizontal: 12),
@@ -221,22 +159,9 @@ class _SnapshotTile extends ConsumerWidget {
       ),
       subtitle: Text(
         'swipe ${snapshot.swipeId} · agent ${snapshot.agentSwipeId} · '
-         '${trackers.length} ledger values · '
+        '${trackers.length} ledger values · '
         '${DateTime.fromMillisecondsSinceEpoch(snapshot.createdAt * 1000).toIso8601String()}',
         style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant, fontSize: 11),
-      ),
-      trailing: PopupMenuButton<String>(
-        icon: const Icon(Icons.more_vert, size: 18),
-        padding: EdgeInsets.zero,
-        itemBuilder: (_) => menuItems,
-        onSelected: (action) {
-          switch (action) {
-            case 'rollback':
-              _rollback(context, ref);
-            case 'commit':
-              _commit(ref);
-          }
-        },
       ),
       children: [
         if (trackers.isEmpty)
