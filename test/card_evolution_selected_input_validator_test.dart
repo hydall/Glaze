@@ -114,7 +114,7 @@ void main() {
         RewriteJobsCompanion.insert(
           id: 'manual',
           chatSessionId: 's',
-          characterId: 'c',
+          characterId: 'manual-character',
         ),
       ]);
       batch.insert(
