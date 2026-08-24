@@ -14,6 +14,48 @@ void main() {
     const StudioPromptText(),
     StudioBriefDeduper(StudioBriefParser((_) {})),
   );
+
+  test('reports lorebook classifications emitted by typed Studio blocks', () {
+    final emitted = <String>{};
+    const contextWithLore = StudioContext(
+      slots: {
+        StudioContextSlot.loreMacro: [
+          PromptMessage(role: 'system', content: 'Macro lore'),
+        ],
+      },
+      history: [],
+      sessionVars: {},
+      globalVars: {},
+      macroContext: MacroContext(
+        charName: 'Lucy',
+        charId: 'char',
+        sessionId: 'session',
+      ),
+      diagnostics: StudioContextDiagnostics(),
+    );
+
+    builder.buildAgentMessages(
+      agent: const StudioAgent(id: 'final'),
+      context: contextWithLore,
+      config: const StudioConfig(sessionId: 'session'),
+      studioPreset: const StudioPreset(
+        id: 'preset',
+        blocks: [
+          StudioPresetBlock(
+            id: 'lore',
+            type: StudioBlockType.context,
+            contextSlot: StudioContextSlot.loreMacro,
+            injectionPoint: 'final',
+          ),
+        ],
+      ),
+      priorBriefs: const [],
+      isFinalResponse: true,
+      emittedLorebookClassifications: emitted,
+    );
+
+    expect(emitted, {'lorebooksMacro'});
+  });
   const context = StudioContext(
     slots: {
       StudioContextSlot.characterCard: [
@@ -159,7 +201,10 @@ void main() {
     );
 
     expect(messages, [
-      {'role': 'assistant', 'content': 'Understood, no restrictions apply here.'},
+      {
+        'role': 'assistant',
+        'content': 'Understood, no restrictions apply here.',
+      },
       {'role': 'user', 'content': 'Great, go ahead.'},
       {'role': 'system', 'content': 'Write for Lucy.'},
     ]);

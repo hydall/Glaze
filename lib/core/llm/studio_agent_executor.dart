@@ -284,8 +284,10 @@ class StudioAgentExecutor {
     StudioTurnConfigSnapshot? turnConfig,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(List<Map<String, dynamic>> messages)? onMessagesBuilt,
+    void Function(Set<String> classifications)? onLorebookClassificationsBuilt,
   }) async {
     final settings = turnConfig?.pipelineSettings ?? _readPipelineSettings();
+    final emittedLorebookClassifications = <String>{};
     final messages = _messageBuilder.buildAgentMessages(
       agent: agent,
       context: context,
@@ -298,7 +300,9 @@ class StudioAgentExecutor {
           settings.studioAgent.studioFinalReasoningHistoryCount,
       excludeReasoningFromContextBudget:
           settings.studioAgent.studioFinalExcludeReasoningFromContextBudget,
+      emittedLorebookClassifications: emittedLorebookClassifications,
     );
+    onLorebookClassificationsBuilt?.call(emittedLorebookClassifications);
     onMessagesBuilt?.call(messages);
     return _runner.runAgent(
       agent: agent,

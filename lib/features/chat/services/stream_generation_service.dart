@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
+import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
 import '../../../core/llm/studio/studio_stream_interceptor.dart';
 import '../../../core/llm/studio/studio_history_limiter.dart';
 import '../../../core/llm/studio/studio_context.dart';
@@ -22,6 +24,7 @@ import '../../../core/llm/idle_timeout_guard.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/utils/error_format.dart';
+import '../../../core/utils/cast_helpers.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../core/state/studio_turn_config_resolver.dart';
@@ -174,6 +177,7 @@ class StreamGenerationService {
               reasoningTagStartOverride:
                   studioPreset?.runtime.reasoningTagStart,
               reasoningTagEndOverride: studioPreset?.runtime.reasoningTagEnd,
+              studioPreset: studioPreset,
             );
       final promptResult = studioConfig == null
           ? await buildPromptInIsolate(finalPayload)
@@ -245,6 +249,7 @@ class StreamGenerationService {
 
       if (studioConfig != null) {
         List<Map<String, dynamic>>? studioFinalMessages;
+        Set<String>? studioLorebookClassifications;
         final trackerContextSize =
             pipelineSettings.studioAgent.studioControllerContextSize;
         final trackerVisibleMessageIds =
@@ -264,6 +269,7 @@ class StreamGenerationService {
                 reasoningTagStartOverride:
                     studioPreset?.runtime.reasoningTagStart,
                 reasoningTagEndOverride: studioPreset?.runtime.reasoningTagEnd,
+                studioPreset: studioPreset,
               );
         if (_isAborted()) {
           return ChatState(
@@ -352,6 +358,9 @@ class StreamGenerationService {
           onFinalMessagesBuilt: (messages) {
             studioFinalMessages = messages;
           },
+          onFinalLorebookClassificationsBuilt: (classifications) {
+            studioLorebookClassifications = classifications;
+          },
         );
         if (_isAborted() || studioResult.status == 'aborted') {
           _ref.read(studioCycleStateProvider.notifier).state =
@@ -411,6 +420,14 @@ class StreamGenerationService {
           pendingSessionVars,
         );
         final wrappedStudioText = wrapLumiaOocColors(beautyApplied.text);
+        final studioPromptResult = _studioCompatibilityResult(
+          finalStudioContext,
+          exactLorebookManifest: _finalizeStudioLorebookManifest(
+            finalStudioContext,
+            studioLorebookClassifications,
+            studioFinalMessages,
+          ),
+        );
         final finalState = _writer
             .writeAssistant(
               text: wrappedStudioText,
@@ -447,7 +464,7 @@ class StreamGenerationService {
                   ? null
                   : MainModelContextSnapshot(
                       providerMessages: studioFinalMessages!,
-                      promptResult: promptResult,
+                      promptResult: studioPromptResult,
                       promptPayload: finalPayload,
                       isStudioFinalWriter: true,
                     ),
@@ -751,7 +768,10 @@ class StreamGenerationService {
     }
   }
 
-  PromptResult _studioCompatibilityResult(StudioContext context) {
+  PromptResult _studioCompatibilityResult(
+    StudioContext context, {
+    ExactLorebookManifest? exactLorebookManifest,
+  }) {
     final messages = <PromptMessage>[
       ...context.staticContext,
       ...context.dynamicContext,
@@ -775,7 +795,24 @@ class StreamGenerationService {
       triggeredLorebooks: context.diagnostics.triggeredLorebooks,
       triggeredMemories: context.diagnostics.triggeredMemories,
       memoryCoverage: context.diagnostics.memoryCoverage,
+      exactLorebookManifest: exactLorebookManifest,
     );
+  }
+
+  ExactLorebookManifest? _finalizeStudioLorebookManifest(
+    StudioContext context,
+    Set<String>? classifications,
+    List<Map<String, dynamic>>? providerMessages,
+  ) {
+    final manifest = context.diagnostics.exactLorebookManifest;
+    if (manifest == null ||
+        classifications == null ||
+        providerMessages == null) {
+      return null;
+    }
+    return manifest
+        .confirmedForClassifications(classifications)
+        .withProviderMessagesHash(computeHash(jsonEncode(providerMessages)));
   }
 
   static void _rememberRequest(

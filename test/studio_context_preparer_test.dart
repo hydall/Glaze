@@ -17,9 +17,48 @@ import 'package:glaze_flutter/core/models/ledger_prompt_injection_policy.dart';
 import 'package:glaze_flutter/core/llm/prompt/effective_canon_prompt_formatter.dart';
 import 'package:glaze_flutter/core/llm/prompt/selective_ledger_projection_filter.dart';
 import 'package:glaze_flutter/core/models/tracker.dart';
+import 'package:glaze_flutter/core/models/studio_config.dart';
 
 void main() {
   const preparer = StudioContextPreparer();
+
+  test('builds exact Studio lorebook provenance from merged entries', () {
+    final context = preparer.prepare(
+      inputs: const GenerationContextInputs(
+        character: Character(id: 'char', name: 'Lucy'),
+        history: [ChatMessage(id: 'user', role: 'user', content: 'Key')],
+        sessionId: 'session',
+        apiConfig: ApiConfig(id: 'api'),
+        lorebooks: [
+          Lorebook(
+            id: 'book',
+            name: 'Book',
+            enabled: true,
+            entries: [
+              LorebookEntry(
+                id: 'entry',
+                lorebookId: 'book',
+                lorebookName: 'Book',
+                keys: ['Key'],
+                content: 'Lore for {{char}}',
+                position: 'lorebooksMacro',
+              ),
+            ],
+          ),
+        ],
+      ),
+      visibleMessageIds: const {'user'},
+      studioPreset: const StudioPreset(id: 'studio'),
+    );
+
+    final manifest = context.diagnostics.exactLorebookManifest!;
+    expect(manifest.entries, hasLength(1));
+    expect(manifest.entries.single.entryId, 'entry');
+    expect(manifest.entries.single.renderedContent, 'Lore for Lucy');
+    expect(manifest.entries.single.classification, 'lorebooksMacro');
+    expect(manifest.promptProvenance.sessionId, 'session');
+    expect(manifest.promptProvenance.presetSnapshotHash, isNotEmpty);
+  });
 
   test('prepares typed slots against the explicit Studio source window', () {
     const memory = MemoryEntry(

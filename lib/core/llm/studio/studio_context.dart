@@ -2,6 +2,7 @@ import '../../models/chat_message.dart';
 import '../history_assembler.dart';
 import '../macro_engine.dart';
 import '../prompt/selective_ledger_projection_filter.dart';
+import '../prompt/exact_lorebook_manifest.dart';
 
 enum StudioContextSlot {
   characterCard,
@@ -31,6 +32,7 @@ final class StudioContextDiagnostics {
   final Set<String> visibleMessageIds;
   final List<LedgerProjectionDiagnostic> ledgerProjectionDiagnostics;
   final String ledgerInjectionIdentity;
+  final ExactLorebookManifest? exactLorebookManifest;
 
   const StudioContextDiagnostics({
     this.triggeredLorebooks = const [],
@@ -40,6 +42,7 @@ final class StudioContextDiagnostics {
     this.visibleMessageIds = const {},
     this.ledgerProjectionDiagnostics = const [],
     this.ledgerInjectionIdentity = '',
+    this.exactLorebookManifest,
   });
 }
 

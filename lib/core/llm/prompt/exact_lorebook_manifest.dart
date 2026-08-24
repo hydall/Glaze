@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../../models/lorebook.dart';
+import '../macro_engine.dart';
 
 const _schemaVersion = 1;
 const _sources = {'constant', 'keyword', 'vector'};
@@ -220,6 +221,23 @@ final class ExactLorebookManifest {
     );
   }
 
+  ExactLorebookManifest confirmedForClassifications(
+    Set<String> classifications,
+  ) {
+    final confirmed = entries
+        .where((entry) => classifications.contains(entry.classification))
+        .toList(growable: false);
+    return ExactLorebookManifest(
+      entries: [
+        for (var index = 0; index < confirmed.length; index++)
+          confirmed[index].withInjectionIndex(index),
+      ],
+      promptProvenance: promptProvenance,
+      effectiveCanonProvenance: effectiveCanonProvenance,
+      providerMessagesHash: providerMessagesHash,
+    );
+  }
+
   Map<String, dynamic> get canonicalMap => _map({
     'effectiveCanonProvenance': effectiveCanonProvenance?.toJson(),
     'entries': entries.map((entry) => entry.toJson()).toList(growable: false),
@@ -289,6 +307,45 @@ final class ExactLorebookManifest {
     if (strict) _validateDurable(manifest, json);
     return manifest;
   }
+}
+
+ExactLorebookManifest buildExactLorebookManifest({
+  required List<LorebookEntry> entries,
+  required String characterId,
+  required String personaId,
+  required String sessionId,
+  required String presetSnapshotHash,
+  required MacroContext macroContext,
+  required Map<String, String> sourceByEntryKey,
+  required Map<String, String> classificationByEntryKey,
+  ExactLorebookEffectiveCanonProvenance? effectiveCanonProvenance,
+}) {
+  final manifestEntries = <ExactLorebookManifestEntry>[];
+  for (var index = 0; index < entries.length; index++) {
+    final entry = entries[index];
+    final key = '${entry.lorebookId}_${entry.id}';
+    manifestEntries.add(
+      ExactLorebookManifestEntry.fromMergedEntry(
+        entry: entry,
+        source: sourceByEntryKey[key] ?? 'unknown',
+        classification: classificationByEntryKey[key] ?? entry.position,
+        injectionIndex: index,
+        renderedContent: replaceMacros(entry.content, macroContext).text,
+      ),
+    );
+  }
+
+  return ExactLorebookManifest(
+    entries: manifestEntries,
+    promptProvenance: ExactLorebookPromptProvenance(
+      characterId: characterId,
+      personaId: personaId,
+      sessionId: sessionId,
+      presetSnapshotHash: presetSnapshotHash,
+    ),
+    effectiveCanonProvenance: effectiveCanonProvenance,
+    providerMessagesHash: '',
+  );
 }
 
 void _validateDurable(ExactLorebookManifest value, Map<String, dynamic> json) {

@@ -95,6 +95,37 @@ void main() {
     expect(confirmed.entries.single.entryId, 'entry-0');
   });
 
+  test('Studio classification confirmation retains only emitted slots', () {
+    final value = ExactLorebookManifest(
+      entries: [
+        entry(0),
+        ExactLorebookManifestEntry.fromMergedEntry(
+          entry: const LorebookEntry(
+            id: 'macro',
+            lorebookId: 'book',
+            content: 'macro lore',
+            position: 'lorebooksMacro',
+          ),
+          source: 'vector',
+          classification: 'lorebooksMacro',
+          injectionIndex: 1,
+          renderedContent: 'macro lore',
+        ),
+      ],
+      promptProvenance: const ExactLorebookPromptProvenance(
+        characterId: 'character',
+        presetSnapshotHash: 'preset-hash',
+      ),
+      providerMessagesHash: 'provider-hash',
+    );
+
+    final confirmed = value.confirmedForClassifications({'lorebooksMacro'});
+
+    expect(confirmed.entries, hasLength(1));
+    expect(confirmed.entries.single.entryId, 'macro');
+    expect(confirmed.entries.single.injectionIndex, 0);
+  });
+
   test('empty explicit report does not retain an entry', () {
     final value = manifest();
     final confirmed = value.confirmedBy([

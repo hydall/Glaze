@@ -94,6 +94,8 @@ class MemoryStudioService {
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function()? onFinalStart,
     void Function(List<Map<String, dynamic>> messages)? onFinalMessagesBuilt,
+    void Function(Set<String> classifications)?
+    onFinalLorebookClassificationsBuilt,
   }) async {
     final token = cancelToken ?? CancelToken();
     if (token.isCancelled) {
@@ -137,6 +139,7 @@ class MemoryStudioService {
       apiConfigId: studioPreset.expensiveApiConfigId,
       onFinalResponseUpdate: onFinalResponseUpdate,
       onMessagesBuilt: onFinalMessagesBuilt,
+      onLorebookClassificationsBuilt: onFinalLorebookClassificationsBuilt,
       turnConfig: turnConfig,
     );
     if (token.isCancelled) {
@@ -229,7 +232,6 @@ class MemoryStudioService {
       error: phaseResult.error,
     );
   }
-
 
   /// Static delegator — see [StudioActivationGate.splitAgentsByPhase]. Kept on
   /// this class because tests reference `MemoryStudioService.splitAgentsByPhase`.

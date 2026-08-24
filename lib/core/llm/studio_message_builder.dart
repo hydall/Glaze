@@ -41,6 +41,7 @@ class StudioMessageBuilder {
     int trackerContextOverride = 0,
     int reasoningHistoryCount = 0,
     bool excludeReasoningFromContextBudget = false,
+    Set<String>? emittedLorebookClassifications,
   }) {
     final point = _blockExpander.injectionPointForRun(agent, isFinalResponse);
     final spec = StudioControllerOntology.specForAgent(agent);
@@ -139,9 +140,14 @@ class StudioMessageBuilder {
         continue;
       }
       if (block.type == StudioBlockType.context && block.contextSlot != null) {
-        messages.addAll(
-          context.messagesFor(block.contextSlot!).map((m) => m.toApiMap()),
-        );
+        final slotMessages = context.messagesFor(block.contextSlot!);
+        if (slotMessages.isNotEmpty) {
+          _recordLorebookSlotClassifications(
+            block.contextSlot!,
+            emittedLorebookClassifications,
+          );
+          messages.addAll(slotMessages.map((m) => m.toApiMap()));
+        }
         continue;
       }
       if (block.type == StudioBlockType.priorBriefs) {
@@ -211,11 +217,22 @@ class StudioMessageBuilder {
             );
           }
         } else if (blockId == 'dynamic_context') {
+          _recordLorebookSlotClassifications(
+            StudioContextSlot.dynamicContext,
+            emittedLorebookClassifications,
+          );
           messages.addAll(context.dynamicContext.map((m) => m.toApiMap()));
         } else {
           final slot = _slotForBlockId(blockId);
           if (slot != null) {
-            messages.addAll(context.messagesFor(slot).map((m) => m.toApiMap()));
+            final slotMessages = context.messagesFor(slot);
+            if (slotMessages.isNotEmpty) {
+              _recordLorebookSlotClassifications(
+                slot,
+                emittedLorebookClassifications,
+              );
+              messages.addAll(slotMessages.map((m) => m.toApiMap()));
+            }
           } else {
             final content = _blockExpander
                 .expandStudioBlockContent(
@@ -226,6 +243,10 @@ class StudioMessageBuilder {
                 )
                 .trim();
             if (content.isNotEmpty) {
+              _recordLorebookMacroClassifications(
+                block.content,
+                emittedLorebookClassifications,
+              );
               _addInstructionMessage(messages, block.role, content);
             }
           }
@@ -234,6 +255,10 @@ class StudioMessageBuilder {
       }
       switch (block.mode) {
         case 'direct':
+          _recordLorebookMacroClassifications(
+            block.content,
+            emittedLorebookClassifications,
+          );
           final control = StringBuffer()
             ..writeln(
               _blockExpander
@@ -312,6 +337,61 @@ class StudioMessageBuilder {
       });
     }
     return messages;
+  }
+
+  void _recordLorebookSlotClassifications(
+    StudioContextSlot slot,
+    Set<String>? emitted,
+  ) {
+    if (emitted == null) return;
+    switch (slot) {
+      case StudioContextSlot.staticContext:
+        emitted.addAll(const {
+          'charDescription',
+          'charPersonality',
+          'charScenario',
+        });
+        break;
+      case StudioContextSlot.dynamicContext:
+        emitted.addAll(const {
+          'worldInfoBefore',
+          'worldInfoAfter',
+          'lorebooksMacro',
+        });
+        break;
+      case StudioContextSlot.loreBefore:
+        emitted.add('worldInfoBefore');
+        break;
+      case StudioContextSlot.loreAfter:
+        emitted.add('worldInfoAfter');
+        break;
+      case StudioContextSlot.loreMacro:
+        emitted.add('lorebooksMacro');
+        break;
+      case StudioContextSlot.characterCard:
+        emitted.add('charDescription');
+        break;
+      case StudioContextSlot.characterPersonality:
+        emitted.add('charPersonality');
+        break;
+      case StudioContextSlot.scenario:
+        emitted.add('charScenario');
+        break;
+      default:
+        break;
+    }
+  }
+
+  void _recordLorebookMacroClassifications(
+    String authoredContent,
+    Set<String>? emitted,
+  ) {
+    if (emitted == null) return;
+    final lower = authoredContent.toLowerCase();
+    if (lower.contains('{{lorebooks}}')) emitted.add('lorebooksMacro');
+    if (lower.contains('{{description}}')) emitted.add('charDescription');
+    if (lower.contains('{{personality}}')) emitted.add('charPersonality');
+    if (lower.contains('{{scenario}}')) emitted.add('charScenario');
   }
 
   void _addInstructionMessage(

@@ -458,12 +458,6 @@ ExactLorebookManifest _buildExactLorebookManifest({
   required Map<String, ScannedEntry> keywordEntries,
   required Map<String, LorebookEntry> vectorEntries,
 }) {
-  final promptProvenance = ExactLorebookPromptProvenance(
-    characterId: payload.character.id,
-    personaId: payload.persona?.id ?? '',
-    presetSnapshotHash: computeHash(jsonEncode(preset.toJson())),
-    sessionId: payload.sessionId ?? '',
-  );
   final canon =
       payload.effectiveCanonRevisionNumber == null &&
           payload.effectiveCanonRevisionHash == null &&
@@ -474,35 +468,31 @@ ExactLorebookManifest _buildExactLorebookManifest({
           revisionHash: payload.effectiveCanonRevisionHash ?? '',
           cacheIdentity: payload.effectiveCanonCacheIdentity,
         );
-  final manifestEntries = <ExactLorebookManifestEntry>[];
-  for (var index = 0; index < entries.length; index++) {
-    final entry = entries[index];
-    final key = '${entry.lorebookId}_${entry.id}';
-    final source = keywordEntries[key]?.constant == true
-        ? 'constant'
-        : keywordEntries.containsKey(key)
-        ? 'keyword'
-        : vectorEntries.containsKey(key)
-        ? 'vector'
-        : 'unknown';
-    final position = entry.position == 'matchGlobal'
-        ? payload.lorebookSettings.injectionPosition
-        : entry.position;
-    manifestEntries.add(
-      ExactLorebookManifestEntry.fromMergedEntry(
-        entry: entry,
-        source: source,
-        classification: position,
-        injectionIndex: index,
-        renderedContent: replaceMacros(entry.content, macroContext).text,
-      ),
-    );
-  }
-  return ExactLorebookManifest(
-    entries: manifestEntries,
-    promptProvenance: promptProvenance,
+  return buildExactLorebookManifest(
+    entries: entries,
+    characterId: payload.character.id,
+    personaId: payload.persona?.id ?? '',
+    sessionId: payload.sessionId ?? '',
+    presetSnapshotHash: computeHash(jsonEncode(preset.toJson())),
+    macroContext: macroContext,
+    sourceByEntryKey: {
+      for (final entry in entries)
+        '${entry.lorebookId}_${entry.id}':
+            keywordEntries['${entry.lorebookId}_${entry.id}']?.constant == true
+            ? 'constant'
+            : keywordEntries.containsKey('${entry.lorebookId}_${entry.id}')
+            ? 'keyword'
+            : vectorEntries.containsKey('${entry.lorebookId}_${entry.id}')
+            ? 'vector'
+            : 'unknown',
+    },
+    classificationByEntryKey: {
+      for (final entry in entries)
+        '${entry.lorebookId}_${entry.id}': entry.position == 'matchGlobal'
+            ? payload.lorebookSettings.injectionPosition
+            : entry.position,
+    },
     effectiveCanonProvenance: canon,
-    providerMessagesHash: '',
   );
 }
 
