@@ -1,5 +1,6 @@
 import '../../models/extra_request_parameter.dart';
 import '../../models/api_config.dart';
+import 'llm_capture_context.dart';
 
 /// Provider-neutral input for [ChatTransport.stream].
 ///
@@ -87,6 +88,9 @@ class ChatTransportRequest {
 
   final List<ExtraRequestParameter> extraRequestParameters;
 
+  /// Diagnostic-only identity. It is never serialized into a provider body.
+  final LlmCaptureContext? captureContext;
+
   /// Whether `session_id` belongs in the body for an OpenAI-shaped request.
   /// The setting is a toggle — `'always'` or `'off'`. `'openrouter'` is the
   /// retired default (send only to openrouter.ai, where it drives sticky
@@ -136,6 +140,7 @@ class ChatTransportRequest {
     this.toolChoice,
     this.useSystemInstruction = true,
     this.extraRequestParameters = const [],
+    this.captureContext,
   });
 
   /// Maps the request-level options from [apiConfig] while allowing callers to
@@ -152,6 +157,7 @@ class ChatTransportRequest {
     String? toolChoice,
     String? charName,
     String? userName,
+    LlmCaptureContext? captureContext,
   }) => ChatTransportRequest(
     endpoint: apiConfig.endpoint,
     apiKey: apiConfig.apiKey,
@@ -188,6 +194,7 @@ class ChatTransportRequest {
     toolChoice: toolChoice,
     useSystemInstruction: apiConfig.useSystemInstruction,
     extraRequestParameters: apiConfig.extraRequestParameters,
+    captureContext: captureContext,
   );
 
   /// Same request with a rewritten conversation. Every other option is carried
@@ -232,5 +239,6 @@ class ChatTransportRequest {
     toolChoice: toolChoice,
     useSystemInstruction: useSystemInstruction,
     extraRequestParameters: extraRequestParameters,
+    captureContext: captureContext,
   );
 }

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
+import 'llm_request_capture.dart';
 
 /// Debug-only dump of every outgoing LLM request payload.
 ///
@@ -29,60 +30,24 @@ class LlmRequestDump {
       '${Directory.systemTemp.path}${Platform.pathSeparator}glaze_llm_dump.jsonl';
 
   static bool _truncatedThisSession = false;
-  static int _seq = 0;
 
   /// Serializes writes so concurrent calls don't interleave/corrupt lines.
   static Future<void> _chain = Future<void>.value();
 
   /// Records a single outgoing request. Best-effort: never throws, never
   /// blocks the caller (fire-and-forget chained write).
-  static void record(ChatTransportRequest r, {String? label}) {
+  static void record(LlmRequestCaptureEvent event) {
     if (!enabled) return;
-
-    final entry = <String, dynamic>{
-      'seq': _seq++,
-      'ts': DateTime.now().toIso8601String(),
-      'label': ?label,
-      'protocolEndpoint': r.endpoint,
-      'model': r.model,
-      'stream': r.stream,
-      'maxTokens': r.maxTokens,
-      'temperature': r.omitTemperature ? null : r.temperature,
-      'topP': r.omitTopP ? null : r.topP,
-      'topK': r.topK,
-      'frequencyPenalty': r.frequencyPenalty,
-      'presencePenalty': r.presencePenalty,
-      'requestReasoning': r.requestReasoning,
-      'useResponsesApi': r.useResponsesApi,
-      'omitReasoning': r.omitReasoning,
-      'reasoningEffort': r.omitReasoningEffort ? null : r.reasoningEffort,
-      'showNativeReasoning': r.showNativeReasoning,
-      'omitTopK': r.omitTopK,
-      'omitFrequencyPenalty': r.omitFrequencyPenalty,
-      'omitPresencePenalty': r.omitPresencePenalty,
-      'sessionId': r.sessionId,
-      'cacheControlTtl': r.cacheControlTtl,
-      'cacheBreakpointMode': r.cacheBreakpointMode,
-      'sessionIdMode': r.sessionIdMode,
-      'messageCount': r.messages.length,
-      'messages': r.messages,
-      if (r.tools != null) 'toolCount': r.tools!.length,
-      if (r.toolChoice != null) 'toolChoice': r.toolChoice,
-    };
 
     String line;
     try {
-      line = jsonEncode(entry);
+      line = jsonEncode(event.toJson());
     } catch (e) {
-      // Some message content may be non-encodable (e.g. exotic multimodal
-      // parts). Fall back to a stringified shape so we still capture it.
       line = jsonEncode(<String, dynamic>{
-        'seq': entry['seq'],
-        'ts': entry['ts'],
-        'label': ?label,
-        'model': r.model,
+        'seq': event.sequence,
+        'ts': event.createdAt.toIso8601String(),
+        'protocol': event.protocol,
         'encodeError': e.toString(),
-        'messages': r.messages.map((m) => m.toString()).toList(),
       });
     }
 
@@ -120,7 +85,11 @@ class LoggingChatTransport implements ChatTransport {
     ChatTransportOnComplete? onComplete,
     ChatTransportOnError? onError,
   }) {
-    LlmRequestDump.record(request, label: label);
+    if (LlmRequestDump.enabled || LlmRequestCapture.hasSink) {
+      final event = LlmRequestCapture.build(request, protocol: label);
+      LlmRequestDump.record(event);
+      LlmRequestCapture.dispatch(event);
+    }
     return _inner.stream(
       request: request,
       cancelToken: cancelToken,

@@ -8,6 +8,7 @@ import 'aux_retry_runner.dart';
 import 'idle_timeout_guard.dart';
 import 'transport/chat_transport.dart';
 import 'transport/chat_transport_request.dart';
+import 'transport/llm_capture_context.dart';
 import 'transport/transport_factory.dart';
 
 typedef AuxTransportPicker = ChatTransport Function(String protocol);
@@ -120,6 +121,7 @@ class AuxLlmClient {
     required double temperature,
     required int timeoutMs,
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     final outcome = await callOnceWithLog(
       config: config,
@@ -128,6 +130,7 @@ class AuxLlmClient {
       temperature: temperature,
       timeoutMs: timeoutMs,
       cancelToken: cancelToken,
+      captureContext: captureContext,
     );
     if (outcome.isOk && outcome.text != null) return outcome.text!;
     throw _descriptiveError(outcome);
@@ -145,6 +148,7 @@ class AuxLlmClient {
     bool omitReasoning = false,
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
+    LlmCaptureContext? captureContext,
   }) async {
     if (config.endpoint.isEmpty || config.model.isEmpty) {
       throw Exception('Aux API not configured');
@@ -162,6 +166,7 @@ class AuxLlmClient {
         omitReasoning: omitReasoning,
         omitReasoningEffort: omitReasoningEffort,
         requestReasoning: requestReasoning,
+        captureContext: captureContext?.withAttempt(i + 1),
       ),
     );
   }
@@ -191,6 +196,7 @@ class AuxLlmClient {
     bool omitReasoning = false,
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
+    LlmCaptureContext? captureContext,
   }) async {
     if (config.endpoint.isEmpty || config.model.isEmpty) {
       throw Exception('Aux API not configured');
@@ -209,6 +215,7 @@ class AuxLlmClient {
         omitReasoning: omitReasoning,
         omitReasoningEffort: omitReasoningEffort,
         requestReasoning: requestReasoning,
+        captureContext: captureContext?.withAttempt(i + 1),
       ),
     );
   }
@@ -253,6 +260,7 @@ class AuxLlmClient {
     bool omitReasoning = false,
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
+    LlmCaptureContext? captureContext,
   }) async {
     final transport = transportPicker(config.protocol);
     String? result;
@@ -298,6 +306,7 @@ class AuxLlmClient {
           omitReasoningEffort: omitReasoningEffort,
           extraRequestParameters: config.extraRequestParameters,
           receiveTimeoutMs: timeoutMs,
+          captureContext: captureContext,
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
@@ -350,6 +359,7 @@ class AuxLlmClient {
     bool omitReasoning = false,
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
+    LlmCaptureContext? captureContext,
   }) async {
     final transport = transportPicker(config.protocol);
     final accumulated = StringBuffer();
@@ -391,6 +401,7 @@ class AuxLlmClient {
           omitReasoningEffort: omitReasoningEffort,
           extraRequestParameters: config.extraRequestParameters,
           receiveTimeoutMs: timeoutMs,
+          captureContext: captureContext,
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {

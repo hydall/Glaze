@@ -75,6 +75,9 @@ void main() {
       expect(transport.request?.receiveTimeoutMs, 0);
       expect(transport.request?.charName, 'Character');
       expect(transport.request?.userName, 'User');
+      expect(transport.request?.captureContext?.stage, 'studio.final');
+      expect(transport.request?.captureContext?.sessionId, 'session');
+      expect(transport.request?.captureContext?.agentId, 'final');
     },
   );
 

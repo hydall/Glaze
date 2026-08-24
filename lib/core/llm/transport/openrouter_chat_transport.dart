@@ -111,6 +111,7 @@ class OpenRouterChatTransport implements ChatTransport {
       charName: input.charName,
       userName: input.userName,
       extraRequestParameters: input.extraRequestParameters,
+      captureContext: input.captureContext,
     );
   }
 

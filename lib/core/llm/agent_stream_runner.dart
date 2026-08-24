@@ -9,6 +9,7 @@ import 'reasoning_stripper.dart';
 import 'stream_accumulator.dart';
 import 'transport/chat_transport.dart';
 import 'transport/chat_transport_request.dart';
+import 'transport/llm_capture_context.dart';
 import 'studio_controller_ontology.dart';
 
 /// The streaming state machine for a single Studio agent run, extracted
@@ -117,6 +118,15 @@ class AgentStreamRunner {
       charName: charName,
       userName: userName,
       extraRequestParameters: resolved.extraRequestParameters,
+      captureContext: LlmCaptureContext(
+        stage: isFinalResponse
+            ? 'studio.final'
+            : agent.phase == 'post_processing'
+            ? 'studio.post_processing'
+            : 'studio.controller',
+        sessionId: sessionId,
+        agentId: agent.id,
+      ),
     );
     final transport = _pickTransport(resolved.protocol);
     final startedAt = DateTime.now();
