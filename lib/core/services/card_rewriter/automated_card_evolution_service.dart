@@ -313,10 +313,10 @@ class AutomatedCardEvolutionService {
                 allowedFields: allowedCardFields,
               )
             : _scopeAllowlistFailure(parsedCardOperations, cardContext);
-        if (parseFailure != null && _isScopeFailure(parseFailure)) {
+        if (parseFailure != null && _isRepairableCardFailure(parseFailure)) {
           final repairOutcome = await _executor(
             config: config,
-            prompt: _scopeRepairPrompt(
+            prompt: _cardRepairPrompt(
               originalPrompt: cardPrompt,
               failure: parseFailure,
               selectedInputJson: cardContext,
@@ -1057,9 +1057,10 @@ class AutomatedCardEvolutionService {
     return null;
   }
 
-  static bool _isScopeFailure(String failure) => failure.contains('scopeKey');
+  static bool _isRepairableCardFailure(String failure) =>
+      failure.contains('scopeKey') || failure.contains('macro-token multiset');
 
-  static String _scopeRepairPrompt({
+  static String _cardRepairPrompt({
     required String originalPrompt,
     required String failure,
     required String selectedInputJson,
@@ -1074,7 +1075,9 @@ class AutomatedCardEvolutionService {
         'Your previous response was rejected: $failure. Return a fresh complete '
         'response. Every patch and transition scopeKey MUST equal one of these '
         'exact available keys: ${jsonEncode(allowed)}. Do not shorten, combine, '
-        'translate, or derive a scope key.';
+        'translate, or derive a scope key. Every replacement value MUST preserve '
+        'the exact macro-token multiset from its anchor. Never add, remove, rename, '
+        'or substitute tokens such as {{user}}.';
   }
 
   static AuxCallOutcome _combineOutcomes(

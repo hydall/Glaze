@@ -217,6 +217,50 @@ void main() {
     await fixture.expectNoProposalOrCanonWrites();
   });
 
+  test('changed macro tokens get one constrained repair attempt', () async {
+    var calls = 0;
+    final prompts = <String>[];
+    final invalid = jsonDecode(fixture.cardBatchOutput) as Map<String, dynamic>;
+    final operation = (invalid['operations'] as List).single as Map;
+    final patch = (operation['patches'] as List).single as Map;
+    patch['value'] = '${patch['value']} {{user}}';
+
+    final result = await fixture
+        .service((_, prompt) async {
+          calls++;
+          prompts.add(prompt);
+          return _ok(
+            calls == 1 ? jsonEncode(invalid) : fixture.cardBatchOutput,
+          );
+        })
+        .runOneBatch('session');
+
+    expect(result.kind, 'persisted');
+    expect(calls, 2);
+    expect(prompts.last, contains('# Required correction'));
+    expect(prompts.last, contains('macro-token multiset'));
+    expect(prompts.last, contains('Never add, remove, rename'));
+  });
+
+  test('changed macro tokens are rejected after one repair attempt', () async {
+    var calls = 0;
+    final invalid = jsonDecode(fixture.cardBatchOutput) as Map<String, dynamic>;
+    final operation = (invalid['operations'] as List).single as Map;
+    final patch = (operation['patches'] as List).single as Map;
+    patch['value'] = '${patch['value']} {{user}}';
+
+    final result = await fixture
+        .service((_, _) async {
+          calls++;
+          return _ok(jsonEncode(invalid));
+        })
+        .runOneBatch('session');
+
+    expect(result.kind, 'invalidCardOutput');
+    expect(calls, 2);
+    await fixture.expectNoProposalOrCanonWrites();
+  });
+
   test('cancellation reaches dedicated token and leaves no proposal', () async {
     final started = Completer<CancelToken>();
     final release = Completer<AuxCallOutcome>();
