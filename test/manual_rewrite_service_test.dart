@@ -657,6 +657,33 @@ void main() {
     expect(await db.select(db.rewriteJobs).get(), hasLength(1));
   });
 
+  test('a new service instance adopts a stranded generating job', () async {
+    final created = await jobRepo.createOrGet(
+      requestKey: 'rk-restart-adopt',
+      chatSessionId: 's',
+      characterId: 'c',
+      requestJson: jsonEncode({
+        'field': CardRewriteField.description.wireName,
+        'instruction': 'rewrite after restart',
+      }),
+    );
+    expect(created.job.status, 'generating');
+
+    final result = await service().run(
+      requestKey: 'rk-restart-adopt',
+      chatSessionId: 's',
+      characterId: 'c',
+      field: CardRewriteField.description,
+      instruction: 'rewrite after restart',
+    );
+
+    expect(result.id, created.job.id);
+    expect(result.status, 'pending');
+    expect(executor.calls, 1);
+    expect(await db.select(db.rewriteJobs).get(), hasLength(1));
+    expect(await db.select(db.rewriteOperations).get(), hasLength(1));
+  });
+
   test('a concurrent in-flight run attaches instead of duplicating', () async {
     final started = Completer<void>();
     final release = Completer<void>();

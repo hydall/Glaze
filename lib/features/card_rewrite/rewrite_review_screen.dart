@@ -678,6 +678,13 @@ class _JobActions extends ConsumerWidget {
                   icon: const Icon(Icons.refresh_rounded, size: 18),
                   label: Text('rewrite_retry'.tr()),
                 ),
+              if (generating && !automated)
+                OutlinedButton.icon(
+                  key: const Key('rewrite-resume-button'),
+                  onPressed: () => _resume(context, ref),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                  label: const Text('Resume'),
+                ),
               if (canReplaceAutomated) ...[
                 OutlinedButton.icon(
                   key: const Key('rewrite-regenerate-button'),
@@ -716,6 +723,19 @@ class _JobActions extends ConsumerWidget {
     if (context.mounted) {
       GlazeToast.show(context, 'rewrite_cancel_requested'.tr());
     }
+  }
+
+  Future<void> _resume(BuildContext context, WidgetRef ref) async {
+    final kind = await ref
+        .read(rewriteReviewUiProvider(jobId).notifier)
+        .resumeGenerating(job);
+    if (!context.mounted) return;
+    GlazeToast.show(context, switch (kind) {
+      'started' => 'Manual rewrite resumed.',
+      'resumeUnavailable' =>
+        'This legacy job does not contain enough request data to resume.',
+      _ => 'Manual rewrite could not be resumed: $kind',
+    });
   }
 
   Future<void> _retry(BuildContext context, WidgetRef ref) async {

@@ -314,6 +314,32 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
     await ref.read(manualRewriteServiceProvider).cancelJob(jobId);
   }
 
+  /// Re-attaches a stranded `generating` manual job after process restart.
+  /// The service's request-key idempotency guarantees this joins a live run or
+  /// adopts the durable row without creating another job.
+  Future<String> resumeGenerating(RewriteJobRow job) async {
+    if (job.status != 'generating' || isAutomatedEvolutionJob(job)) {
+      return 'invalidState';
+    }
+    final request = parseRewriteJobRequest(job.requestJson);
+    final requestKey = job.requestKey;
+    if (request == null || requestKey == null || requestKey.isEmpty) {
+      return 'resumeUnavailable';
+    }
+    unawaited(
+      ref
+          .read(manualRewriteServiceProvider)
+          .run(
+            requestKey: requestKey,
+            chatSessionId: job.chatSessionId,
+            characterId: job.characterId,
+            field: request.field,
+            instruction: request.instruction,
+          ),
+    );
+    return 'started';
+  }
+
   Future<CardEvolutionDeleteOutcome> deleteAutomatedProposal(
     RewriteJobRow job,
   ) async {
