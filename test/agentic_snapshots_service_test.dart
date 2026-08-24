@@ -92,4 +92,71 @@ void main() {
     expect(snapshots.map((item) => item.startMessageNumber), everyElement(1));
     expect(snapshots.map((item) => item.endMessageNumber), everyElement(3));
   });
+
+  test('sorts by chat range and keeps endpoint variants adjacent', () async {
+    await chatRepo.put(
+      const ChatSession(
+        id: 'session',
+        characterId: 'character',
+        sessionIndex: 0,
+        messages: [
+          ChatMessage(id: 'a1', role: 'assistant', content: 'A1'),
+          ChatMessage(id: 'u2', role: 'user', content: 'U2'),
+          ChatMessage(id: 'a3', role: 'assistant', content: 'A3'),
+          ChatMessage(id: 'u4', role: 'user', content: 'U4'),
+          ChatMessage(id: 'a5', role: 'assistant', content: 'A5'),
+          ChatMessage(id: 'u6', role: 'user', content: 'U6'),
+          ChatMessage(id: 'a7', role: 'assistant', content: 'A7'),
+        ],
+      ),
+    );
+    await seedSnapshot(
+      sessionId: 'session',
+      messageId: 'a5',
+      createdAt: 100,
+      trackers: const [],
+    );
+    await seedSnapshot(
+      sessionId: 'session',
+      messageId: 'a7',
+      createdAt: 10,
+      trackers: const [],
+    );
+    await seedSnapshot(
+      sessionId: 'session',
+      messageId: 'a5',
+      createdAt: 200,
+      trackers: const [],
+      agentSwipeId: 1,
+      committed: false,
+    );
+    await seedSnapshot(
+      sessionId: 'session',
+      messageId: 'a3',
+      createdAt: 300,
+      trackers: const [],
+    );
+    await seedSnapshot(
+      sessionId: 'session',
+      messageId: 'deleted',
+      createdAt: 400,
+      trackers: const [],
+    );
+
+    final snapshots = await service.loadSnapshots('session');
+
+    expect(snapshots.map((item) => item.snapshot.messageId), [
+      'a7',
+      'a5',
+      'a5',
+      'a3',
+      'deleted',
+    ]);
+    expect(
+      snapshots
+          .where((item) => item.snapshot.messageId == 'a5')
+          .map((item) => item.snapshot.createdAt),
+      [200, 100],
+    );
+  });
 }

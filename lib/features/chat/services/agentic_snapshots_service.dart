@@ -42,9 +42,40 @@ class AgenticSnapshotsService {
     final positions = <String, int>{
       for (var i = 0; i < messages.length; i++) messages[i].id: i,
     };
-    return [
+    final views = [
       for (final snapshot in snapshots) _toView(snapshot, messages, positions),
     ];
+    views.sort(_compareViews);
+    return views;
+  }
+
+  int _compareViews(AgenticSnapshotView left, AgenticSnapshotView right) {
+    final leftEnd = left.endMessageNumber;
+    final rightEnd = right.endMessageNumber;
+    if (leftEnd != null && rightEnd != null) {
+      final byEnd = rightEnd.compareTo(leftEnd);
+      if (byEnd != 0) return byEnd;
+      final byStart = (right.startMessageNumber ?? rightEnd).compareTo(
+        left.startMessageNumber ?? leftEnd,
+      );
+      if (byStart != 0) return byStart;
+    } else if (leftEnd != null) {
+      return -1;
+    } else if (rightEnd != null) {
+      return 1;
+    }
+
+    final byCreatedAt = right.snapshot.createdAt.compareTo(
+      left.snapshot.createdAt,
+    );
+    if (byCreatedAt != 0) return byCreatedAt;
+    final bySwipe = right.snapshot.swipeId.compareTo(left.snapshot.swipeId);
+    if (bySwipe != 0) return bySwipe;
+    final byAgentSwipe = right.snapshot.agentSwipeId.compareTo(
+      left.snapshot.agentSwipeId,
+    );
+    if (byAgentSwipe != 0) return byAgentSwipe;
+    return left.snapshot.messageId.compareTo(right.snapshot.messageId);
   }
 
   AgenticSnapshotView _toView(
