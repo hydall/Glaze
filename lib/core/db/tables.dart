@@ -1209,17 +1209,77 @@ class CardEvolutionClaims extends Table {
   TextColumn get predecessorCursorHash => text()();
   IntColumn get predecessorRunOrdinal => integer()();
   TextColumn get inputHash => text()();
+  TextColumn get selectedInputJson => text().nullable()();
+  TextColumn get writerOptionsJson =>
+      text().withDefault(const Constant('{}'))();
   TextColumn get rewriteJobId => text().nullable()();
+  TextColumn get failureCode => text().nullable()();
+  TextColumn get failureDetail => text().nullable()();
   IntColumn get createdAt => integer()();
   IntColumn get completedAt => integer().nullable()();
+  IntColumn get failedAt => integer().nullable()();
   @override
   Set<Column> get primaryKey => {id};
   @override
   List<String> get customConstraints => [
-    "CHECK (status IN ('claimed', 'completed'))",
+    "CHECK (status IN ('claimed', 'failed', 'completed'))",
     "CHECK (id <> '' AND session_id <> '' AND character_id <> '' "
         "AND owner_id <> '' AND first_run_id <> '' AND second_run_id <> '' "
         "AND input_hash <> '' AND predecessor_run_ordinal >= 0)",
+  ];
+}
+
+/// Durable checkpoints for each logical model call in an automatic Card
+/// Rewriter claim. Completed rows form the reusable prefix after a restart.
+@DataClassName('CardEvolutionWriterCallRow')
+@TableIndex(
+  name: 'idx_card_evolution_writer_call_session_updated',
+  columns: {#sessionId, #updatedAt},
+)
+class CardEvolutionWriterCalls extends Table {
+  @override
+  String get tableName => 'card_evolution_writer_calls';
+  TextColumn get id => text()();
+  TextColumn get claimId => text()();
+  TextColumn get sessionId => text()();
+  IntColumn get ordinal => integer()();
+  TextColumn get stage => text()();
+  IntColumn get stageOrdinal => integer()();
+  TextColumn get status => text()();
+  TextColumn get prompt => text()();
+  TextColumn get promptHash => text()();
+  TextColumn get responseText => text().nullable()();
+  TextColumn get responseHash => text().nullable()();
+  TextColumn get resultJson => text().nullable()();
+  TextColumn get source => text().nullable()();
+  TextColumn get lastCallId => text().nullable()();
+  TextColumn get parentCallId => text().nullable()();
+  TextColumn get parserCode => text().nullable()();
+  TextColumn get parserDetail => text().nullable()();
+  TextColumn get failureCode => text().nullable()();
+  TextColumn get failureDetail => text().nullable()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+  IntColumn get completedAt => integer().nullable()();
+  IntColumn get failedAt => integer().nullable()();
+  @override
+  Set<Column> get primaryKey => {id};
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {claimId, ordinal},
+    {claimId, stage, stageOrdinal},
+  ];
+  @override
+  List<String> get customConstraints => [
+    "CHECK (stage IN ('history_consolidation', 'card_writer', "
+        "'card_repair', 'lorebook_writer'))",
+    "CHECK (status IN ('prepared', 'failed', 'completed'))",
+    "CHECK (id <> '' AND claim_id <> '' AND session_id <> '' "
+        "AND ordinal > 0 AND stage_ordinal > 0 AND prompt <> '' "
+        "AND prompt_hash <> '')",
+    "CHECK (status <> 'completed' OR "
+        "(response_text IS NOT NULL AND response_hash IS NOT NULL))",
+    "CHECK (status <> 'failed' OR failure_code IS NOT NULL)",
   ];
 }
 

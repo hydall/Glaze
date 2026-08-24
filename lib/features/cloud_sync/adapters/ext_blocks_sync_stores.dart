@@ -1175,7 +1175,14 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
     List<Map<String, dynamic>> incoming,
   ) async {
     for (final json in incoming) {
-      final row = CardEvolutionClaimRow.fromJson(json);
+      final row = CardEvolutionClaimRow.fromJson({
+        ...json,
+        'selectedInputJson': json['selectedInputJson'],
+        'writerOptionsJson': json['writerOptionsJson'] ?? '{}',
+        'failureCode': json['failureCode'],
+        'failureDetail': json['failureDetail'],
+        'failedAt': json['failedAt'],
+      });
       _requireSession(sessionId, row.sessionId);
       if (row.status != 'completed') continue;
       final boundary =
@@ -1273,6 +1280,11 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       'ownerId': '',
       'leaseExpiresAt': 0,
       'rewriteJobId': null,
+      'selectedInputJson': null,
+      'writerOptionsJson': '{}',
+      'failureCode': null,
+      'failureDetail': null,
+      'failedAt': null,
     };
   }
 

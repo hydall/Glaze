@@ -65,10 +65,13 @@ class SessionDeletionQueries {
     await (_db.delete(
       _db.cardEvolutionCollectorRuns,
     )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.cardEvolutionWriterCalls,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(_db.cardEvolutionClaims)..where((row) {
           final session = row.sessionId.equals(sessionId);
           return preserveMemoryBookSettings
-              ? session & row.status.equals('claimed')
+              ? session & row.status.isIn(const ['claimed', 'failed'])
               : session;
         }))
         .go();

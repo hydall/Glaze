@@ -87,10 +87,51 @@ void main() {
     expect(claim.claim!.selectedInputJson, contains('assistant development'));
     expect(claim.claim!.selectedInputJson, contains('user response'));
     expect(claim.claim!.selectedInputJson, contains('"effectiveCanon"'));
+    expect(claim.claim!.row.selectedInputJson, claim.claim!.selectedInputJson);
     expect(
       await db.select(db.ledgerReconciliationSuccessfulRuns).get(),
       isEmpty,
     );
+  });
+
+  test('failed writer retains exact input and can be reclaimed', () async {
+    final claimed = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+      writerOptionsJson: '{"lorebookEnabled":true,"contractVersion":1}',
+    )).claim!;
+
+    expect(
+      await evolution.markWriterFailed(
+        claimId: claimed.row.id,
+        ownerId: 'owner',
+        now: 11,
+        code: 'cardWriterFailed',
+        detail: 'offline',
+      ),
+      isTrue,
+    );
+    final blocked = await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'automatic',
+      now: 12,
+      leaseSeconds: 30,
+    );
+    expect(blocked.kind, 'failed');
+    expect(blocked.claim?.selectedInputJson, claimed.selectedInputJson);
+
+    final recovered = await evolution.claimFailedWriter(
+      claimId: claimed.row.id,
+      ownerId: 'recovery',
+      now: 13,
+      leaseSeconds: 30,
+    );
+    expect(recovered.kind, 'claimed');
+    expect(recovered.claim?.row.ownerId, 'recovery');
+    expect(recovered.claim?.row.writerOptionsJson, contains('lorebookEnabled'));
+    expect(recovered.claim?.selectedInputJson, claimed.selectedInputJson);
   });
 
   test('a changed chat snapshot makes a claimed lease stale', () async {
@@ -388,7 +429,9 @@ void main() {
       operations: _operations(),
     );
 
-    final outcome = await evolution.deleteReplaceableProposal(finalized.job!.id);
+    final outcome = await evolution.deleteReplaceableProposal(
+      finalized.job!.id,
+    );
 
     expect(outcome.kind, 'deleted');
     expect(await db.select(db.rewriteJobs).get(), isEmpty);
@@ -417,7 +460,9 @@ void main() {
           ..where((row) => row.id.equals(finalized.job!.id)))
         .write(const RewriteJobsCompanion(status: Value('applied')));
 
-    final outcome = await evolution.deleteReplaceableProposal(finalized.job!.id);
+    final outcome = await evolution.deleteReplaceableProposal(
+      finalized.job!.id,
+    );
 
     expect(outcome.kind, 'invalidState');
     expect(await db.select(db.rewriteJobs).get(), hasLength(1));

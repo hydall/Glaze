@@ -39,6 +39,8 @@ const _sessionTables = <(String, String)>[
   ('card_evolution_debug_runs', 'session_id'),
   ('llm_request_capture_rows', 'session_id'),
   ('llm_call_event_rows', 'session_id'),
+  ('card_evolution_claims', 'session_id'),
+  ('card_evolution_writer_calls', 'session_id'),
 ];
 
 void main() {
@@ -245,6 +247,8 @@ Future<void> _seedSession(AppDatabase db, String sessionId) async {
     "INSERT INTO info_blocks (id, session_id, message_id, block_id, block_name, block_type, content) VALUES ('block_$id', '$sessionId', 'message', 'block', 'Block', 'info', 'content')",
     "INSERT INTO ledger_debug_runs (id, session_id, kind, status, created_at) VALUES ('ledger_debug_$id', '$sessionId', 'normal', 'ok', 1)",
     "INSERT INTO card_evolution_debug_runs (session_id, stage, status, model, output, attempts_json, updated_at) VALUES ('$sessionId', 'card', 'ok', 'model', 'output', '[]', 1)",
+    "INSERT INTO card_evolution_claims (id, session_id, character_id, owner_id, status, lease_expires_at, first_run_id, second_run_id, predecessor_cursor_hash, predecessor_run_ordinal, input_hash, selected_input_json, created_at) VALUES ('claim_$id', '$sessionId', 'char_$id', 'owner', 'claimed', 100, 'history', 'canon', 'cursor', 1, 'input', '{}', 1)",
+    "INSERT INTO card_evolution_writer_calls (id, claim_id, session_id, ordinal, stage, stage_ordinal, status, prompt, prompt_hash, created_at, updated_at) VALUES ('writer_call_$id', 'claim_$id', '$sessionId', 1, 'card_writer', 1, 'prepared', 'prompt', 'hash', 1, 1)",
     "INSERT INTO llm_request_capture_rows (sequence, created_at_ms, session_id, stage, truncated, event_json) VALUES (1, 1, '$sessionId', 'studio.final', 0, '{}')",
     "INSERT INTO llm_call_event_rows (id, created_at_ms, session_id, pipeline_run_id, call_id, stage, kind) VALUES ('event-$sessionId', 1, '$sessionId', 'pipeline-$sessionId', 'call-$sessionId', 'studio.final', 'transport_succeeded')",
     "INSERT INTO embeddings (entry_id, source_type, source_id) VALUES ('embedding_$id', 'chat_message', '$sessionId')",
@@ -333,6 +337,7 @@ Future<void> _expectClearGroups(AppDatabase db, String sessionId) async {
     ('reconciliation_run_invalidations', 'session_id'),
     ('ledger_reconciliation_cursors', 'session_id'),
     ('card_evolution_claims', 'session_id'),
+    ('card_evolution_writer_calls', 'session_id'),
     ('character_knowledge_fact_rows', 'chat_session_id'),
     ('chat_summaries', 'session_id'),
     ('info_blocks', 'session_id'),

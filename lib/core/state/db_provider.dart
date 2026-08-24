@@ -36,6 +36,7 @@ import '../db/repositories/ledger_debug_run_repo.dart';
 import '../db/repositories/llm_request_capture_repo.dart';
 import '../db/repositories/card_evolution_repo.dart';
 import '../db/repositories/card_evolution_collector_run_repo.dart';
+import '../db/repositories/card_evolution_writer_call_repo.dart';
 import '../db/repositories/card_evolution_observation_repo.dart';
 import '../db/repositories/character_knowledge_fact_repo.dart';
 import '../db/repositories/character_session_baseline_repo.dart';
@@ -212,6 +213,11 @@ final ledgerDebugRunRepoProvider = Provider<LedgerDebugRunRepo>(
 final cardEvolutionCollectorRunRepoProvider =
     Provider<CardEvolutionCollectorRunRepo>(
       (ref) => CardEvolutionCollectorRunRepo(ref.watch(appDbProvider)),
+    );
+
+final cardEvolutionWriterCallRepoProvider =
+    Provider<CardEvolutionWriterCallRepo>(
+      (ref) => CardEvolutionWriterCallRepo(ref.watch(appDbProvider)),
     );
 
 final cardEvolutionObservationRepoProvider =

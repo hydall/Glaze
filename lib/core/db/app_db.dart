@@ -59,6 +59,7 @@ part 'app_db.g.dart';
     LlmRequestCaptureRows,
     LlmCallEventRows,
     CardEvolutionClaims,
+    CardEvolutionWriterCalls,
     CardEvolutionProposalRuns,
     CardEvolutionDebugRuns,
     CardEvolutionObservations,
@@ -82,7 +83,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 127;
+  int get schemaVersion => 128;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1905,6 +1906,14 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 92) {
         await m.createTable(cardEvolutionClaims);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_card_evolution_claim_session '
+          'ON card_evolution_claims (session_id)',
+        );
+        await customStatement(
+          'CREATE UNIQUE INDEX IF NOT EXISTS idx_card_evolution_claim_input '
+          'ON card_evolution_claims (session_id, input_hash)',
+        );
         await m.createTable(cardEvolutionProposalRuns);
         await _createCardEvolutionIntegrity();
       }
@@ -2333,6 +2342,41 @@ class AppDatabase extends _$AppDatabase {
           'created_at, completed_at FROM card_evolution_collector_runs_v126',
         );
         await customStatement('DROP TABLE card_evolution_collector_runs_v126');
+      }
+      if (from < 128) {
+        await customStatement(
+          'ALTER TABLE card_evolution_claims '
+          'RENAME TO card_evolution_claims_v127',
+        );
+        await customStatement(
+          'DROP INDEX IF EXISTS idx_card_evolution_claim_session',
+        );
+        await customStatement(
+          'DROP INDEX IF EXISTS idx_card_evolution_claim_input',
+        );
+        await customStatement(
+          'DROP INDEX IF EXISTS idx_card_evolution_active_claim',
+        );
+        await m.createTable(cardEvolutionClaims);
+        await customStatement(
+          'INSERT INTO card_evolution_claims '
+          '(id, session_id, character_id, owner_id, status, lease_expires_at, '
+          'first_run_id, second_run_id, predecessor_cursor_hash, '
+          'predecessor_run_ordinal, input_hash, rewrite_job_id, created_at, '
+          'completed_at) SELECT id, session_id, character_id, owner_id, status, '
+          'lease_expires_at, first_run_id, second_run_id, '
+          'predecessor_cursor_hash, predecessor_run_ordinal, input_hash, '
+          'rewrite_job_id, created_at, completed_at '
+          'FROM card_evolution_claims_v127',
+        );
+        await customStatement('DROP TABLE card_evolution_claims_v127');
+        await m.createTable(cardEvolutionWriterCalls);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS '
+          'idx_card_evolution_writer_call_session_updated '
+          'ON card_evolution_writer_calls (session_id, updated_at)',
+        );
+        await _createCardEvolutionIntegrity();
       }
     },
   );
@@ -2866,6 +2910,12 @@ class AppDatabase extends _$AppDatabase {
       'CREATE TRIGGER IF NOT EXISTS card_evolution_proposal_runs_no_update '
       'BEFORE UPDATE ON card_evolution_proposal_runs BEGIN '
       "SELECT RAISE(ABORT, 'card_evolution_proposal_runs is immutable'); END",
+    );
+    await customStatement(
+      'CREATE TRIGGER IF NOT EXISTS card_evolution_writer_calls_completed_no_update '
+      'BEFORE UPDATE ON card_evolution_writer_calls '
+      "WHEN OLD.status = 'completed' BEGIN "
+      "SELECT RAISE(ABORT, 'completed card_evolution_writer_calls are immutable'); END",
     );
   }
 
