@@ -61,6 +61,28 @@ void main() {
     expect(calls, 1);
   });
 
+  test('scope outside available Ledger targets gets one repair', () async {
+    await fixture.seedReconciliationRun(ordinal: 1);
+    var calls = 0;
+    final invalid = jsonDecode(fixture.cardBatchOutput) as Map<String, dynamic>;
+    final operation = (invalid['operations'] as List).single as Map;
+    ((operation['patches'] as List).single as Map)['scopeKey'] = 'npc:Боб';
+    (operation['transition'] as Map)['scopeKey'] = 'npc:Боб';
+
+    final result = await fixture
+        .service((_, prompt) async {
+          calls++;
+          if (calls == 1) return _ok(jsonEncode(invalid));
+          expect(prompt, contains('not an available retrieval target'));
+          expect(prompt, contains('npc:Алиса'));
+          return _ok(fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
+
+    expect(result.kind, 'persisted');
+    expect(calls, 2);
+  });
+
   test(
     'even reconciliation count runs observation pass before card writer',
     () async {
@@ -1106,7 +1128,7 @@ final class _Fixture {
         'field': CardRewriteField.description.wireName,
         'patches': [
           {
-            'scopeKey': 'npc:alice',
+            'scopeKey': 'npc:Алиса',
             'anchor': 'Alice is cautious.',
             'anchorSha256': CardCanonicalizer.scalarSha256(
               'Alice is cautious.',
@@ -1116,7 +1138,7 @@ final class _Fixture {
         ],
         'transition': {
           'id': 'transition',
-          'scopeKey': 'npc:alice',
+          'scopeKey': 'npc:Алиса',
           'canonicalClaim': 'Alice is increasingly trusting.',
           'promotionDestination': 'card',
           'affectedTrackerKeys': <String>[],

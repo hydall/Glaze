@@ -239,7 +239,8 @@ class AutomatedCardEvolutionService {
           reconciliationRunIds:
               reconciliationRunIds ??
               [
-                for (final run in collectorBoundaryRuns) run.reconciliationRunId,
+                for (final run in collectorBoundaryRuns)
+                  run.reconciliationRunId,
               ],
         );
         return CardEvolutionFinalizeOutcome(
@@ -274,7 +275,7 @@ class AutomatedCardEvolutionService {
         if (cardPrompt.length > _writerSnapshotCharacterLimit) {
           return _snapshotTooLarge(cardPrompt.length, stage: 'card prompt');
         }
-        final cardOutcome = await _executor(
+        var cardOutcome = await _executor(
           config: config,
           prompt: cardPrompt,
           maxTokens: _writerMaxTokens,
@@ -282,16 +283,16 @@ class AutomatedCardEvolutionService {
           timeoutMs: timeoutMs,
           cancelToken: token,
         );
-        await _saveDebugOutcome(
-          sessionId: sessionId,
-          stage: 'card',
-          model: config.model,
-          outcome: cardOutcome,
-        );
         if (token.isCancelled ||
             cardOutcome.status == AgentOperationStatus.aborted ||
             !cardOutcome.isOk ||
             cardOutcome.text == null) {
+          await _saveDebugOutcome(
+            sessionId: sessionId,
+            stage: 'card',
+            model: config.model,
+            outcome: cardOutcome,
+          );
           return CardEvolutionFinalizeOutcome(
             token.isCancelled ||
                     cardOutcome.status == AgentOperationStatus.aborted
@@ -301,22 +302,79 @@ class AutomatedCardEvolutionService {
             _modelFailureDetail(cardOutcome),
           );
         }
-        final parsedCardOperations =
+        var parsedCardOperations =
             CardRewriteOperationParser.parseEvolutionBatch(
               cardOutcome.text!,
               allowedFields: allowedCardFields,
             );
+        var parseFailure = parsedCardOperations == null
+            ? CardRewriteOperationParser.explainEvolutionBatchFailure(
+                cardOutcome.text!,
+                allowedFields: allowedCardFields,
+              )
+            : _scopeAllowlistFailure(parsedCardOperations, cardContext);
+        if (parseFailure != null && _isScopeFailure(parseFailure)) {
+          final repairOutcome = await _executor(
+            config: config,
+            prompt: _scopeRepairPrompt(
+              originalPrompt: cardPrompt,
+              failure: parseFailure,
+              selectedInputJson: cardContext,
+            ),
+            maxTokens: _writerMaxTokens,
+            temperature: 0.2,
+            timeoutMs: timeoutMs,
+            cancelToken: token,
+          );
+          cardOutcome = _combineOutcomes(cardOutcome, repairOutcome);
+          if (token.isCancelled ||
+              repairOutcome.status == AgentOperationStatus.aborted ||
+              !repairOutcome.isOk ||
+              repairOutcome.text == null) {
+            await _saveDebugOutcome(
+              sessionId: sessionId,
+              stage: 'card',
+              model: config.model,
+              outcome: cardOutcome,
+            );
+            return CardEvolutionFinalizeOutcome(
+              token.isCancelled ||
+                      repairOutcome.status == AgentOperationStatus.aborted
+                  ? 'cancelled'
+                  : 'cardModelFailed',
+              null,
+              _modelFailureDetail(repairOutcome),
+            );
+          }
+          parsedCardOperations = CardRewriteOperationParser.parseEvolutionBatch(
+            repairOutcome.text!,
+            allowedFields: allowedCardFields,
+          );
+          parseFailure = parsedCardOperations == null
+              ? CardRewriteOperationParser.explainEvolutionBatchFailure(
+                  repairOutcome.text!,
+                  allowedFields: allowedCardFields,
+                )
+              : _scopeAllowlistFailure(parsedCardOperations, cardContext);
+        }
+        await _saveDebugOutcome(
+          sessionId: sessionId,
+          stage: 'card',
+          model: config.model,
+          outcome: cardOutcome,
+        );
         if (parsedCardOperations == null) {
           return CardEvolutionFinalizeOutcome(
             'invalidCardOutput',
             null,
-            _diagnostic(
-              CardRewriteOperationParser.explainEvolutionBatchFailure(
-                cardOutcome.text!,
-                allowedFields: allowedCardFields,
-              ),
-              cardOutcome.text!,
-            ),
+            _diagnostic(parseFailure, cardOutcome.text!),
+          );
+        }
+        if (parseFailure != null) {
+          return CardEvolutionFinalizeOutcome(
+            'invalidCardOutput',
+            null,
+            _diagnostic(parseFailure, cardOutcome.text!),
           );
         }
         cardOperations.addAll(parsedCardOperations);
@@ -981,6 +1039,68 @@ class AutomatedCardEvolutionService {
         : compact;
     return '${reason ?? 'unrecognized response'}; response: $preview';
   }
+
+  static String? _scopeAllowlistFailure(
+    List<CardRewriteOperationSnapshot> operations,
+    String selectedInputJson,
+  ) {
+    final targets = _retrievalTargets(selectedInputJson);
+    if (targets == null || targets.isEmpty) return null;
+    final allowed = targets.keys.where(_isCardScopeTarget).toSet();
+    if (allowed.isEmpty) return null;
+    for (final operation in operations) {
+      final scope = operation.transition.scopeKey;
+      if (!allowed.contains(scope)) {
+        return 'scopeKey "$scope" is not an available retrieval target';
+      }
+    }
+    return null;
+  }
+
+  static bool _isScopeFailure(String failure) => failure.contains('scopeKey');
+
+  static String _scopeRepairPrompt({
+    required String originalPrompt,
+    required String failure,
+    required String selectedInputJson,
+  }) {
+    final allowed =
+        (_retrievalTargets(selectedInputJson)?.keys ?? const [])
+            .where(_isCardScopeTarget)
+            .toList()
+          ..sort();
+    return '$originalPrompt\n\n'
+        '# Required correction\n'
+        'Your previous response was rejected: $failure. Return a fresh complete '
+        'response. Every patch and transition scopeKey MUST equal one of these '
+        'exact available keys: ${jsonEncode(allowed)}. Do not shorten, combine, '
+        'translate, or derive a scope key.';
+  }
+
+  static AuxCallOutcome _combineOutcomes(
+    AuxCallOutcome first,
+    AuxCallOutcome second,
+  ) => AuxCallOutcome(
+    status: second.status,
+    text: second.text,
+    attempts: [
+      ...first.attempts,
+      for (var index = 0; index < second.attempts.length; index++)
+        AgentOperationAttempt(
+          attempt: first.attempts.length + index + 1,
+          statusCode: second.attempts[index].statusCode,
+          status: second.attempts[index].status,
+          error: second.attempts[index].error,
+          startedAtMs: second.attempts[index].startedAtMs,
+          elapsedMs: second.attempts[index].elapsedMs,
+        ),
+    ],
+    totalElapsedMs: first.totalElapsedMs + second.totalElapsedMs,
+    lastError: second.lastError,
+  );
+
+  static bool _isCardScopeTarget(String key) =>
+      !key.contains('/') && CardRewriteScope.tryParse(key) != null;
 
   static String _modelFailureDetail(AuxCallOutcome outcome) {
     final attempts = outcome.attempts;

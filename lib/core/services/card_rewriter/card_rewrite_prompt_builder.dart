@@ -105,9 +105,12 @@ abstract final class CardRewriterPromptBuilder {
       ..writeln()
       ..writeln('# Patch rules')
       ..writeln(
-        '- scopeKey supports npc:<subject>, relationship:<subject>, '
-        'arc:<subject>, world:<subject>, or scene.<subject>. Every patch and '
-        'its transition must use the same scopeKey. Preserve exact RP-language '
+        '- scopeKey supports npc:<subject>, '
+        'relationship:<subject-a>:<subject-b>, arc:<subject>, world:<subject>, '
+        'or scene.<subject>. A relationship scope always contains both subjects. '
+        'Copy its exact group key from the supplied Ledger retrieval targets; '
+        'never derive it from an observation semantic scope. Every patch and its '
+        'transition must use the same scopeKey. Preserve exact RP-language '
         'Unicode identities from supplied Ledger keys; never translate, '
         'transliterate, case-fold, or invent an identity.',
       )
@@ -343,10 +346,10 @@ $instruction''';
       )
       ..writeln(
         '- "scopeKey" MUST parse as one of npc:<subject>, '
-        'relationship:<subject>, arc:<subject>, world:<subject>, or '
+        'relationship:<subject-a>:<subject-b>, arc:<subject>, world:<subject>, or '
         'scene.<subject> (lowercase alphanumerics plus _ - segments; scene '
-        'allows dotted segments). Every patch and the transition MUST use the '
-        'SAME scopeKey.',
+        'allows dotted segments). A relationship scope always contains both '
+        'subjects. Every patch and the transition MUST use the SAME scopeKey.',
       )
       ..writeln(
         '- "anchor" MUST be a literal fragment of the current '

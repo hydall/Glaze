@@ -49,17 +49,20 @@ void main() {
     );
   });
 
-  test('a character differing only outside the snapshot yields the same prompt', () {
-    final uiOnly = character().copyWith(
-      avatarPath: '/tmp/avatar.png',
-      color: '#fff',
-      updatedAt: 5,
-      currentSessionIndex: 9,
-      fav: true,
-      hidden: true,
-    );
-    expect(buildPrompt(card: uiOnly), equals(buildPrompt()));
-  });
+  test(
+    'a character differing only outside the snapshot yields the same prompt',
+    () {
+      final uiOnly = character().copyWith(
+        avatarPath: '/tmp/avatar.png',
+        color: '#fff',
+        updatedAt: 5,
+        currentSessionIndex: 9,
+        fav: true,
+        hidden: true,
+      );
+      expect(buildPrompt(card: uiOnly), equals(buildPrompt()));
+    },
+  );
 
   test('prompt names the target field and current field size', () {
     final prompt = buildPrompt(field: CardRewriteField.creatorNotes);
@@ -94,7 +97,10 @@ void main() {
       instruction: 'Reflect durable changes.',
     );
 
-    expect(prompt, contains('Prefer replacing or refining an existing outdated'));
+    expect(
+      prompt,
+      contains('Prefer replacing or refining an existing outdated'),
+    );
     expect(prompt, contains('Append only when no existing fragment'));
     expect(prompt, contains('smallest exact anchors, not the fewest patches'));
     expect(prompt, contains('every directly conflicting fragment'));
@@ -124,31 +130,37 @@ void main() {
     expect(prompt, contains('temporary relationship moods'));
     expect(prompt, contains('engagement forming or ending'));
     expect(prompt, contains('changes the baseline premise'));
-    expect(prompt, isNot(contains('current state of a relationship in Ledger')));
-  });
-
-  test('chat-confirmed active contradiction cannot produce an empty proposal', () {
-    final prompt = CardRewriterPromptBuilder.buildEvolution(
-      character: character().copyWith(
-        personality: 'Ada is newly engaged to Richard.',
-      ),
-      instruction: 'Reflect durable changes.',
-      accumulatedObservations: const [
-        {
-          'status': 'active',
-          'key': 'relationship.ada.richard.engagement_broken',
-          'canonicalClaim': 'The engagement has permanently ended.',
-        },
-      ],
+    expect(
+      prompt,
+      isNot(contains('current state of a relationship in Ledger')),
     );
-
-    expect(prompt, contains('Ada is newly engaged to Richard.'));
-    expect(prompt, contains('relationship.ada.richard.engagement_broken'));
-    expect(prompt, contains('directly contradicts supplied card text'));
-    expect(prompt, contains('regardless of whether the candidate status'));
-    expect(prompt, contains('smallest valid patch'));
-    expect(prompt, contains('An empty operations list is not valid'));
   });
+
+  test(
+    'chat-confirmed active contradiction cannot produce an empty proposal',
+    () {
+      final prompt = CardRewriterPromptBuilder.buildEvolution(
+        character: character().copyWith(
+          personality: 'Ada is newly engaged to Richard.',
+        ),
+        instruction: 'Reflect durable changes.',
+        accumulatedObservations: const [
+          {
+            'status': 'active',
+            'key': 'relationship.ada.richard.engagement_broken',
+            'canonicalClaim': 'The engagement has permanently ended.',
+          },
+        ],
+      );
+
+      expect(prompt, contains('Ada is newly engaged to Richard.'));
+      expect(prompt, contains('relationship.ada.richard.engagement_broken'));
+      expect(prompt, contains('directly contradicts supplied card text'));
+      expect(prompt, contains('regardless of whether the candidate status'));
+      expect(prompt, contains('smallest valid patch'));
+      expect(prompt, contains('An empty operations list is not valid'));
+    },
+  );
 
   test(
     'prompt describes the operation snapshot shape, hash rule, and scope grammar',
@@ -156,22 +168,22 @@ void main() {
       final prompt = buildPrompt();
       expect(
         prompt,
-        contains('"patches":[{"scopeKey":"...","anchor":"...",'
-            '"anchorSha256":"...","value":"..."}]'),
+        contains(
+          '"patches":[{"scopeKey":"...","anchor":"...",'
+          '"anchorSha256":"...","value":"..."}]',
+        ),
       );
       expect(prompt, contains('"affectedTrackerKeys":[]'));
       expect(prompt, contains('"chatSessionId":null'));
       expect(prompt, contains('- "field" MUST be exactly "description".'));
       expect(prompt, contains('- "patches" MUST be a non-empty list'));
       expect(prompt, contains('npc:<subject>'));
-      expect(prompt, contains('relationship:<subject>'));
+      expect(prompt, contains('relationship:<subject-a>:<subject-b>'));
+      expect(prompt, contains('always contains both subjects'));
       expect(prompt, contains('arc:<subject>'));
       expect(prompt, contains('world:<subject>'));
       expect(prompt, contains('scene.<subject>'));
-      expect(
-        prompt,
-        contains('lowercase hex SHA-256 of the anchor'),
-      );
+      expect(prompt, contains('lowercase hex SHA-256 of the anchor'));
       expect(prompt, contains('EXACTLY ONCE'));
     },
   );
@@ -183,7 +195,10 @@ void main() {
       expect(prompt, contains('{{user}}'));
       expect(prompt, contains('{{char}}'));
       expect(prompt, contains('{{description}}'));
-      expect(prompt, contains('NEVER expand, substitute, rename, translate, or delete'));
+      expect(
+        prompt,
+        contains('NEVER expand, substitute, rename, translate, or delete'),
+      );
       expect(prompt, contains('byte-for-byte'));
     },
   );
@@ -206,39 +221,50 @@ void main() {
     );
   });
 
-  test('evolution prompt omits empty writable fields and forbids empty anchors', () {
-    final prompt = CardRewriterPromptBuilder.buildEvolution(
-      character: character().copyWith(description: '', scenario: null),
-      instruction: 'Update durable facts.',
-    );
+  test(
+    'evolution prompt omits empty writable fields and forbids empty anchors',
+    () {
+      final prompt = CardRewriterPromptBuilder.buildEvolution(
+        character: character().copyWith(description: '', scenario: null),
+        instruction: 'Update durable facts.',
+      );
 
-    expect(prompt, contains('Only these non-empty fields are writable: personality.'));
-    expect(prompt, contains('Empty fields are omitted and MUST NOT appear'));
-    expect(prompt, contains('Empty anchors are forbidden.'));
-    expect(prompt, isNot(contains('"description":""')));
-    expect(prompt, isNot(contains('"scenario":""')));
-  });
+      expect(
+        prompt,
+        contains('Only these non-empty fields are writable: personality.'),
+      );
+      expect(prompt, contains('Empty fields are omitted and MUST NOT appear'));
+      expect(prompt, contains('Empty anchors are forbidden.'));
+      expect(prompt, isNot(contains('"description":""')));
+      expect(prompt, isNot(contains('"scenario":""')));
+    },
+  );
 
-  test('evolution prompts use Ledger as evidence without copying its event log', () {
-    final cardPrompt = CardRewriterPromptBuilder.buildEvolution(
-      character: character(),
-      instruction: 'Update durable facts.',
-    );
-    final lorePrompt = CardRewriterPromptBuilder.buildLorebookEvolution(
-      instruction: 'Update injected setting facts.',
-    );
+  test(
+    'evolution prompts use Ledger as evidence without copying its event log',
+    () {
+      final cardPrompt = CardRewriterPromptBuilder.buildEvolution(
+        character: character(),
+        instruction: 'Update durable facts.',
+      );
+      final lorePrompt = CardRewriterPromptBuilder.buildLorebookEvolution(
+        instruction: 'Update injected setting facts.',
+      );
 
-    expect(cardPrompt, contains('event records are not themselves card content'));
-    expect(
-      cardPrompt,
-      contains('Ledger may establish the evidence'),
-    );
-    expect(lorePrompt, contains('Avoid only card-lorebook duplication'));
-    expect(lorePrompt, contains('proposed card operations'));
-    expect(lorePrompt, contains('not alternate durable targets'));
-    expect(
-      lorePrompt,
-      contains('Ledger fact is accepted evidence, not a reason to omit an eligible lorebook patch'),
-    );
-  });
+      expect(
+        cardPrompt,
+        contains('event records are not themselves card content'),
+      );
+      expect(cardPrompt, contains('Ledger may establish the evidence'));
+      expect(lorePrompt, contains('Avoid only card-lorebook duplication'));
+      expect(lorePrompt, contains('proposed card operations'));
+      expect(lorePrompt, contains('not alternate durable targets'));
+      expect(
+        lorePrompt,
+        contains(
+          'Ledger fact is accepted evidence, not a reason to omit an eligible lorebook patch',
+        ),
+      );
+    },
+  );
 }

@@ -97,7 +97,9 @@ void main() {
       await fixture.db.select(fixture.db.cardEvolutionProposalRuns).get(),
       hasLength(1),
     );
-    final operations = await fixture.db.select(fixture.db.rewriteOperations).get();
+    final operations = await fixture.db
+        .select(fixture.db.rewriteOperations)
+        .get();
     expect(operations, hasLength(1));
     expect(
       operations
@@ -114,24 +116,26 @@ void main() {
   test('model failure leaves no proposal', () async {
     final result = await fixture
         .service(
-          (_, _) async =>
-              const AuxCallOutcome(
-                status: AgentOperationStatus.httpError,
-                attempts: [
-                  AgentOperationAttempt(
-                    attempt: 1,
-                    statusCode: 503,
-                    status: 'http_5xx',
-                    error: 'upstream unavailable',
-                    startedAtMs: 1,
-                    elapsedMs: 2,
-                  ),
-                ],
+          (_, _) async => const AuxCallOutcome(
+            status: AgentOperationStatus.httpError,
+            attempts: [
+              AgentOperationAttempt(
+                attempt: 1,
+                statusCode: 503,
+                status: 'http_5xx',
+                error: 'upstream unavailable',
+                startedAtMs: 1,
+                elapsedMs: 2,
               ),
+            ],
+          ),
         )
         .runOneBatch('session');
     expect(result.kind, 'cardModelFailed');
-    expect(result.detail, '1 attempt(s), http_5xx HTTP 503: upstream unavailable');
+    expect(
+      result.detail,
+      '1 attempt(s), http_5xx HTTP 503: upstream unavailable',
+    );
     final debug = await fixture.db
         .select(fixture.db.cardEvolutionDebugRuns)
         .getSingle();
@@ -140,7 +144,10 @@ void main() {
     expect(debug.output, isNull);
     expect(debug.attemptsJson, contains('upstream unavailable'));
     await fixture.expectNoProposalOrCanonWrites();
-    expect(await fixture.db.select(fixture.db.cardEvolutionClaims).get(), isEmpty);
+    expect(
+      await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
+      isEmpty,
+    );
   });
 
   test('malformed parser output leaves no proposal or cursor', () async {
@@ -154,50 +161,100 @@ void main() {
       'not json',
     );
     await fixture.expectNoProposalOrCanonWrites();
-    expect(await fixture.db.select(fixture.db.cardEvolutionClaims).get(), isEmpty);
+    expect(
+      await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
+      isEmpty,
+    );
   });
 
-  test(
-    'cancellation reaches dedicated token and leaves no proposal',
-    () async {
-      final started = Completer<CancelToken>();
-      final release = Completer<AuxCallOutcome>();
-      final service = fixture.service((token, _) {
-        started.complete(token!);
-        return release.future;
-      });
-      final future = service.runOneBatch('session');
-      final token = await started.future;
-      service.cancelSession('session');
-      expect(token.isCancelled, isTrue);
-      release.complete(
-        const AuxCallOutcome(status: AgentOperationStatus.aborted),
-      );
-      expect((await future).kind, 'cancelled');
-      await fixture.expectNoProposalOrCanonWrites();
-      expect(await fixture.db.select(fixture.db.cardEvolutionClaims).get(), isEmpty);
-    },
-  );
+  test('invalid scope gets one constrained repair attempt', () async {
+    var calls = 0;
+    final prompts = <String>[];
+    final invalid = jsonDecode(fixture.cardBatchOutput) as Map<String, dynamic>;
+    final operation = (invalid['operations'] as List).single as Map;
+    ((operation['patches'] as List).single as Map)['scopeKey'] =
+        'relationship:alice';
+    (operation['transition'] as Map)['scopeKey'] = 'relationship:alice';
 
-  test(
-    'canon changes after generation block proposal',
-    () async {
-      var changedCanon = false;
-      final result = await fixture
-          .service((_, prompt) async {
-            if (!changedCanon) {
-              changedCanon = true;
-              await fixture.db.customStatement(
-                "INSERT INTO tracker_rows (session_id, name, value, scope, provenance, updated_at) VALUES ('session', 'canon_lock:npc:alice', 'locked', 'ledger', 'manual', 2)",
-              );
-            }
-            return _ok(fixture.cardBatchOutput);
-          })
-          .runOneBatch('session');
-      expect(result.kind, 'staleEvidence');
-      await fixture.expectNoProposalOrCanonWrites();
-    },
-  );
+    final result = await fixture
+        .service((_, prompt) async {
+          calls++;
+          prompts.add(prompt);
+          return _ok(
+            calls == 1 ? jsonEncode(invalid) : fixture.cardBatchOutput,
+          );
+        })
+        .runOneBatch('session');
+
+    expect(result.kind, 'persisted');
+    expect(calls, 2);
+    expect(prompts.last, contains('# Required correction'));
+    expect(prompts.last, contains('unparsable patch scopeKey'));
+    expect(
+      (await fixture.db.select(fixture.db.cardEvolutionDebugRuns).getSingle())
+          .output,
+      fixture.cardBatchOutput,
+    );
+  });
+
+  test('invalid scope is rejected after exactly one repair attempt', () async {
+    var calls = 0;
+    final invalid = jsonDecode(fixture.cardBatchOutput) as Map<String, dynamic>;
+    final operation = (invalid['operations'] as List).single as Map;
+    ((operation['patches'] as List).single as Map)['scopeKey'] =
+        'relationship:alice';
+    (operation['transition'] as Map)['scopeKey'] = 'relationship:alice';
+
+    final result = await fixture
+        .service((_, _) async {
+          calls++;
+          return _ok(jsonEncode(invalid));
+        })
+        .runOneBatch('session');
+
+    expect(result.kind, 'invalidCardOutput');
+    expect(calls, 2);
+    await fixture.expectNoProposalOrCanonWrites();
+  });
+
+  test('cancellation reaches dedicated token and leaves no proposal', () async {
+    final started = Completer<CancelToken>();
+    final release = Completer<AuxCallOutcome>();
+    final service = fixture.service((token, _) {
+      started.complete(token!);
+      return release.future;
+    });
+    final future = service.runOneBatch('session');
+    final token = await started.future;
+    service.cancelSession('session');
+    expect(token.isCancelled, isTrue);
+    release.complete(
+      const AuxCallOutcome(status: AgentOperationStatus.aborted),
+    );
+    expect((await future).kind, 'cancelled');
+    await fixture.expectNoProposalOrCanonWrites();
+    expect(
+      await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
+      isEmpty,
+    );
+  });
+
+  test('canon changes after generation block proposal', () async {
+    var changedCanon = false;
+    final result = await fixture
+        .service((_, prompt) async {
+          if (!changedCanon) {
+            changedCanon = true;
+            await fixture.db.customStatement(
+              "INSERT INTO tracker_rows (session_id, name, value, scope, provenance, updated_at) VALUES ('session', 'canon_lock:npc:alice', 'locked', 'ledger', 'manual', 2)",
+            );
+          }
+          return _ok(fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
+    expect(result.kind, 'staleEvidence');
+    await fixture.expectNoProposalOrCanonWrites();
+  });
 
   test('injected lorebook entries use a separate second call', () async {
     await _seedManifest(fixture.db, 'a1', 'entry one');
@@ -219,10 +276,14 @@ void main() {
     expect(lorebookPrompt, contains('"description":"Alice is cautious."'));
     expect(lorebookPrompt, contains('# Proposed card operations (read-only)'));
     expect(lorebookPrompt, contains('increasingly trusting'));
-    final operations = await fixture.db.select(fixture.db.rewriteOperations).get();
+    final operations = await fixture.db
+        .select(fixture.db.rewriteOperations)
+        .get();
     expect(operations, hasLength(2));
     expect(
-      operations.map((operation) => jsonDecode(operation.operationJson)['target']),
+      operations.map(
+        (operation) => jsonDecode(operation.operationJson)['target'],
+      ),
       contains('lorebook'),
     );
     final debug = await fixture.db
@@ -262,18 +323,17 @@ void main() {
     await _seedManifest(fixture.db, 'a1', 'entry one');
     var calls = 0;
     final result = await fixture
-        .service(
-          (_, _) async {
-            calls++;
-            return _ok(fixture.cardBatchOutput);
-          },
-          isLorebookEvolutionEnabled: () => false,
-        )
+        .service((_, _) async {
+          calls++;
+          return _ok(fixture.cardBatchOutput);
+        }, isLorebookEvolutionEnabled: () => false)
         .runOneBatch('session');
 
     expect(result.kind, 'persisted');
     expect(calls, 1);
-    final operations = await fixture.db.select(fixture.db.rewriteOperations).get();
+    final operations = await fixture.db
+        .select(fixture.db.rewriteOperations)
+        .get();
     expect(operations, hasLength(1));
     final debug = await fixture.db
         .select(fixture.db.cardEvolutionDebugRuns)
@@ -286,10 +346,12 @@ void main() {
       "UPDATE characters SET description = '' WHERE char_id = 'character'",
     );
     var calls = 0;
-    final result = await fixture.service((_, _) async {
-      calls++;
-      return _ok(fixture.cardBatchOutput);
-    }).runOneBatch('session');
+    final result = await fixture
+        .service((_, _) async {
+          calls++;
+          return _ok(fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
 
     expect(result.kind, 'emptyModelProposal');
     expect(calls, 0);
@@ -400,31 +462,30 @@ final class _Fixture {
     int timeoutMs = 180000,
     void Function(int timeoutMs)? onTimeout,
     void Function(int maxTokens)? onMaxTokens,
-  }) =>
-      AutomatedCardEvolutionService(
-        repo: repo,
-        resolveModel: () async => const AuxApiConfig(
-          endpoint: 'https://rewrite.example',
-          apiKey: 'key',
-          model: 'model',
-          protocol: 'openai',
-        ),
-        executor:
-            ({
-              required config,
-              required prompt,
-              required maxTokens,
-              required temperature,
-              required timeoutMs,
-              cancelToken,
-            }) {
-              onTimeout?.call(timeoutMs);
-              onMaxTokens?.call(maxTokens);
-              return executor(cancelToken, prompt);
-            },
-        isLorebookEvolutionEnabled: isLorebookEvolutionEnabled,
-        timeoutMs: timeoutMs,
-      );
+  }) => AutomatedCardEvolutionService(
+    repo: repo,
+    resolveModel: () async => const AuxApiConfig(
+      endpoint: 'https://rewrite.example',
+      apiKey: 'key',
+      model: 'model',
+      protocol: 'openai',
+    ),
+    executor:
+        ({
+          required config,
+          required prompt,
+          required maxTokens,
+          required temperature,
+          required timeoutMs,
+          cancelToken,
+        }) {
+          onTimeout?.call(timeoutMs);
+          onMaxTokens?.call(maxTokens);
+          return executor(cancelToken, prompt);
+        },
+    isLorebookEvolutionEnabled: isLorebookEvolutionEnabled,
+    timeoutMs: timeoutMs,
+  );
 
   Future<void> expectNoProposalOrCanonWrites() async {
     expect(await db.select(db.rewriteJobs).get(), isEmpty);
