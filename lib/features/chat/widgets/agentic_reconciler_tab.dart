@@ -188,7 +188,11 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                       namedArgs: {'count': '${result.opsApplied}'},
                     )
             : 'agent_ops_regeneration_failed'.tr(
-                namedArgs: {'error': result.error ?? result.status},
+                namedArgs: {
+                  'error': _localizedRegenerationError(
+                    result.error ?? result.status,
+                  ),
+                },
               ),
         isError: result.status != 'ok',
         position: ToastPosition.top,
@@ -207,6 +211,14 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
       if (mounted) setState(() => _regeneratingRunId = null);
     }
   }
+
+  String _localizedRegenerationError(String error) => switch (error) {
+    'Another reconciliation is already running for this session' =>
+      'agent_ops_reconciliation_busy'.tr(),
+    'An applied Card Rewriter proposal depends on this reconciliation' =>
+      'agent_ops_regeneration_applied_dependency'.tr(),
+    _ => error,
+  };
 
   @override
   Widget build(BuildContext context) {

@@ -1182,6 +1182,27 @@ class LedgerReconciliationCursors extends Table {
   ];
 }
 
+/// Local-only mutex for reconciliation work. Rows are ephemeral and are not
+/// included in backup or sync payloads.
+@DataClassName('LedgerReconciliationLeaseRow')
+class LedgerReconciliationLeases extends Table {
+  @override
+  String get tableName => 'ledger_reconciliation_leases';
+  TextColumn get sessionId => text()();
+  TextColumn get ownerId => text()();
+  TextColumn get purpose => text()();
+  IntColumn get leaseExpiresAt => integer()();
+  IntColumn get acquiredAt => integer()();
+  @override
+  Set<Column> get primaryKey => {sessionId};
+  @override
+  List<String> get customConstraints => [
+    "CHECK (session_id <> '' AND owner_id <> '')",
+    "CHECK (purpose IN ('normal', 'manual', 'replacement'))",
+    'CHECK (lease_expires_at > acquired_at)',
+  ];
+}
+
 /// Expiring ownership for one automated evolution proposal attempt. Completed
 /// rows remain as durable idempotency records; executable rows are `claimed`.
 @DataClassName('CardEvolutionClaimRow')

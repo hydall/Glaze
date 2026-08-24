@@ -2374,6 +2374,8 @@
   "agent_ops_regeneration_unchanged": "Последняя сверка не изменилась.",
   "agent_ops_regeneration_completed": "Последняя сверка перегенерирована: операций — {count}.",
   "agent_ops_regeneration_failed": "Не удалось перегенерировать: {error}",
+  "agent_ops_reconciliation_busy": "Для этой сессии уже выполняется другая сверка.",
+  "agent_ops_regeneration_applied_dependency": "От этой сверки зависит уже применённое предложение Card Rewriter.",
   "agent_ops_current_commits": "Текущих коммитов: {count}",
   "agent_ops_chain_integrity_failure": "Нарушена целостность цепочки сверки",
   "agent_ops_no_checkpoint": "Контрольной точки сверки пока нет.",

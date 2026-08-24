@@ -2345,6 +2345,8 @@
   "agent_ops_regeneration_unchanged": "The latest reconciliation is unchanged.",
   "agent_ops_regeneration_completed": "Latest reconciliation regenerated: {count} ops.",
   "agent_ops_regeneration_failed": "Regeneration failed: {error}",
+  "agent_ops_reconciliation_busy": "Another reconciliation is already running for this session.",
+  "agent_ops_regeneration_applied_dependency": "An applied Card Rewriter proposal depends on this reconciliation.",
   "agent_ops_current_commits": "{count} current commits",
   "agent_ops_chain_integrity_failure": "Reconciliation chain integrity failure",
   "agent_ops_no_checkpoint": "No reconciliation checkpoint yet.",

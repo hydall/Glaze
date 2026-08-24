@@ -55,6 +55,7 @@ part 'app_db.g.dart';
     LedgerReconciliationEffects,
     LedgerReconciliationRunInvalidations,
     LedgerReconciliationCursors,
+    LedgerReconciliationLeases,
     LedgerDebugRuns,
     LlmRequestCaptureRows,
     LlmCallEventRows,
@@ -83,7 +84,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 129;
+  int get schemaVersion => 130;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2382,6 +2383,9 @@ class AppDatabase extends _$AppDatabase {
       if (from < 129) {
         await _normalizeDuplicateActiveRewriteJobs();
         await _createRewriteAuditIntegrity();
+      }
+      if (from < 130) {
+        await m.createTable(ledgerReconciliationLeases);
       }
     },
   );

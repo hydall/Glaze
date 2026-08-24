@@ -63,6 +63,9 @@ class SessionDeletionQueries {
       _db.ledgerReconciliationCursors,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(
+      _db.ledgerReconciliationLeases,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
       _db.cardEvolutionCollectorRuns,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(
