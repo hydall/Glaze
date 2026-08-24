@@ -147,6 +147,20 @@ List<ChatMessage> _conversation(int assistantCount) {
 void main() {
   const parser = StudioLedgerExportParser();
 
+  test('reconciliation range hash is shared with exact reconstruction', () {
+    final messages = _conversation(1);
+    final plan = const LedgerReconciliationPlanner().planForEndpoint(
+      messages: messages,
+      endAssistantMessageId: messages.last.id,
+    );
+
+    expect(plan, isNotNull);
+    expect(
+      plan!.rangeHash,
+      computeLedgerReconciliationRangeHash(plan.messages),
+    );
+  });
+
   group('StudioLedgerPrompt', () {
     test('injects full values only for relevant existing state', () {
       final prompt = const StudioLedgerPrompt().build(

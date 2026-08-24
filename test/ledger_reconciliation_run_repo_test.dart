@@ -359,6 +359,38 @@ void main() {
     },
   );
 
+  test('replacement invalidation requires the exact logical head', () async {
+    await _seedSession(db);
+    final first = _run();
+    expect(await repo.append(first), isA<ReconciliationRunAppended>());
+
+    expect(
+      await repo.invalidateLatestForReplacement(
+        sessionId: 'session',
+        expectedRunId: 'other',
+        expectedChainHash: first.chainHash,
+        createdAt: 2,
+      ),
+      isA<ReconciliationHeadInvalidationConflict>(),
+    );
+    expect((await repo.getHead('session'))!.id, first.id);
+
+    expect(
+      await repo.invalidateLatestForReplacement(
+        sessionId: 'session',
+        expectedRunId: first.id,
+        expectedChainHash: first.chainHash,
+        createdAt: 3,
+      ),
+      isA<ReconciliationHeadInvalidated>(),
+    );
+    expect(await repo.getHead('session'), isNull);
+    expect((await repo.readPhysicalSession('session')).single.id, first.id);
+    final invalidation = (await repo.readInvalidations('session')).single;
+    expect(invalidation.reason, 'latest_head_replaced');
+    expect(invalidation.causeMessageId, first.end.messageId);
+  });
+
   test('message mutation invalidates anchored run suffix, not trigger', () async {
     await _seedSession(db);
     final first = _run();

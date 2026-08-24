@@ -191,6 +191,22 @@ final class ReconciliationRunConflict extends ReconciliationRunIntegrity {
   final String reason;
 }
 
+sealed class ReconciliationHeadInvalidationOutcome {
+  const ReconciliationHeadInvalidationOutcome();
+}
+
+final class ReconciliationHeadInvalidated
+    extends ReconciliationHeadInvalidationOutcome {
+  const ReconciliationHeadInvalidated();
+}
+
+final class ReconciliationHeadInvalidationConflict
+    extends ReconciliationHeadInvalidationOutcome {
+  const ReconciliationHeadInvalidationConflict(this.reason);
+
+  final String reason;
+}
+
 class LedgerReconciliationRunRepo {
   LedgerReconciliationRunRepo(this._db);
   final AppDatabase _db;
@@ -374,6 +390,48 @@ class LedgerReconciliationRunRepo {
             ..orderBy([(r) => OrderingTerm.desc(r.ordinal)])
             ..limit(1))
           .getSingleOrNull();
+
+  /// Invalidates exactly the expected current logical head. The caller owns
+  /// the transaction; no suffix inference or derived-state mutation occurs.
+  Future<ReconciliationHeadInvalidationOutcome> invalidateLatestForReplacement({
+    required String sessionId,
+    required String expectedRunId,
+    required String expectedChainHash,
+    required int createdAt,
+  }) async {
+    final integrity = await validateChain(sessionId);
+    if (integrity is! ReconciliationRunValid) {
+      return const ReconciliationHeadInvalidationConflict(
+        'reconciliation chain is invalid',
+      );
+    }
+    final head = await getHead(sessionId);
+    if (head == null ||
+        head.id != expectedRunId ||
+        head.chainHash != expectedChainHash) {
+      return const ReconciliationHeadInvalidationConflict(
+        'logical reconciliation head changed',
+      );
+    }
+    final inserted = await _db
+        .into(_db.ledgerReconciliationRunInvalidations)
+        .insert(
+          LedgerReconciliationRunInvalidationsCompanion.insert(
+            sessionId: sessionId,
+            runId: expectedRunId,
+            causeMessageId: head.endMessageId,
+            reason: 'latest_head_replaced',
+            createdAt: createdAt,
+          ),
+          mode: InsertMode.insertOrIgnore,
+        );
+    if (inserted == 0) {
+      return const ReconciliationHeadInvalidationConflict(
+        'logical reconciliation head was already invalidated',
+      );
+    }
+    return const ReconciliationHeadInvalidated();
+  }
 
   /// Logically invalidates the first reconciliation whose immutable evidence
   /// references one of [messageIds], plus its already-written causal suffix.

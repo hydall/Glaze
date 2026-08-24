@@ -316,6 +316,25 @@ void main() {
     );
   });
 
+  test('deletes cleanup journal only for the exact ordered range', () async {
+    await db.customStatement(
+      'INSERT INTO ledger_reconciliation_cleanup_journals '
+      '(session_id, endpoint_message_id, message_ids_json, before_images_json, created_at) '
+      "VALUES ('session-1', 'end', '[\"a\",\"end\"]', '[]', 1), "
+      "('session-1', 'end', '[\"other\",\"end\"]', '[]', 2)",
+    );
+
+    await repo.deleteCleanupJournalsForExactRange(
+      sessionId: 'session-1',
+      endpointMessageId: 'end',
+      messageIds: const ['a', 'end'],
+    );
+
+    final rows = await db.select(db.ledgerReconciliationCleanupJournals).get();
+    expect(rows, hasLength(1));
+    expect(rows.single.messageIdsJson, '["other","end"]');
+  });
+
   test(
     'replaying an anchor with no facts clears stale tentative output',
     () async {

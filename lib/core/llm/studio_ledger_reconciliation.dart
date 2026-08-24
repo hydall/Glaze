@@ -12,6 +12,22 @@ import 'studio_ledger_prompt.dart';
 
 const ledgerReconciliationPromptBlockId = 'ledger_reconciliation_prompt';
 
+String computeLedgerReconciliationRangeHash(Iterable<ChatMessage> messages) =>
+    sha256
+        .convert(
+          utf8.encode(
+            messages
+                .map(
+                  (message) =>
+                      '${message.id}\u001f${message.swipeId}\u001f'
+                      '${message.agentSwipeId}\u001f${message.role}\u001f'
+                      '${message.content}',
+                )
+                .join('\u001e'),
+          ),
+        )
+        .toString();
+
 class LedgerReconciliationPlan {
   final List<ChatMessage> messages;
   final ChatMessage endMessage;
@@ -130,24 +146,10 @@ class LedgerReconciliationPlanner {
         .toList(growable: false);
     final end = chunks.last.endAssistant;
 
-    final hash = sha256
-        .convert(
-          utf8.encode(
-            range
-                .map(
-                  (message) =>
-                      '${message.id}\u001f${message.swipeId}\u001f'
-                      '${message.agentSwipeId}\u001f${message.role}\u001f'
-                      '${message.content}',
-                )
-                .join('\u001e'),
-          ),
-        )
-        .toString();
     return LedgerReconciliationPlan(
       messages: range,
       endMessage: end,
-      rangeHash: hash,
+      rangeHash: computeLedgerReconciliationRangeHash(range),
     );
   }
 
