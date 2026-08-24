@@ -628,6 +628,15 @@ void main() {
       );
       final first = (await reconciliationRuns.readSession('session')).single;
       expect(first.ordinal, 1);
+      expect(first.contractVersion, 1);
+      expect(first.createdAt, greaterThan(0));
+      final effect = await reconciliationRuns.readEffect(first.id);
+      expect(effect, isNotNull);
+      final exact =
+          jsonDecode(effect!.actualEffectsJson) as Map<String, dynamic>;
+      final ledgerDiff = exact['ledger'] as Map<String, dynamic>;
+      expect(ledgerDiff['added'], isEmpty);
+      expect(effect.beforeStateHash, effect.afterStateHash);
       final checkpoint = await checkpoints.get('session');
       expect(
         (await service.reconcile(
@@ -913,9 +922,7 @@ void main() {
 
       expect((await run(endpoint.url)).status, 'ok');
 
-      final journal = await LedgerDebugRunRepo(
-        db,
-      ).recentForSession('session');
+      final journal = await LedgerDebugRunRepo(db).recentForSession('session');
       expect(journal, hasLength(1));
       final row = journal.single;
       expect(row.kind, 'normal');

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
@@ -387,6 +388,59 @@ void main() {
       "UPDATE chat_sessions SET messages_json = '[{\"id\":\"user\",\"role\":\"user\",\"content\":\"accepted\"}]' WHERE session_id = 'session'",
     );
     expect(await repo.validateChain('session'), isA<ReconciliationRunValid>());
+  });
+
+  test('records immutable canonical before and after effects', () async {
+    await db
+        .into(db.trackerRows)
+        .insert(
+          TrackerRowsCompanion.insert(
+            sessionId: 'session',
+            name: 'world:time',
+            value: const Value('before'),
+            scope: const Value('ledger'),
+          ),
+        );
+    final before = await repo.captureState('session');
+    await (db.update(db.trackerRows)
+          ..where((row) => row.sessionId.equals('session'))
+          ..where((row) => row.name.equals('world:time')))
+        .write(const TrackerRowsCompanion(value: Value('after')));
+    final after = await repo.captureState('session');
+
+    await repo.recordEffect(
+      runId: 'run-1',
+      sessionId: 'session',
+      before: before,
+      after: after,
+      createdAt: 1,
+    );
+
+    final effect = await repo.readEffect('run-1');
+    expect(effect, isNotNull);
+    expect(effect!.beforeStateHash, before.hash);
+    expect(effect.afterStateHash, after.hash);
+    final diff = jsonDecode(effect.actualEffectsJson) as Map<String, dynamic>;
+    final ledger = diff['ledger'] as Map<String, dynamic>;
+    expect(ledger['changed'], hasLength(1));
+    expect(
+      ((ledger['changed'] as List).single as Map)['before']['value'],
+      'before',
+    );
+    expect(
+      ((ledger['changed'] as List).single as Map)['after']['value'],
+      'after',
+    );
+    expect(
+      () => db
+          .update(db.ledgerReconciliationEffects)
+          .write(
+            const LedgerReconciliationEffectsCompanion(
+              effectsHash: Value('changed'),
+            ),
+          ),
+      throwsA(anything),
+    );
   });
 
   test(

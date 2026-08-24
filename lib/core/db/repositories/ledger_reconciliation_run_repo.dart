@@ -119,6 +119,23 @@ final class LedgerReconciliationRun {
   );
 }
 
+final class ReconciliationStateSnapshot {
+  const ReconciliationStateSnapshot({
+    required this.ledgerJson,
+    required this.knowledgeJson,
+  });
+
+  final String ledgerJson;
+  final String knowledgeJson;
+
+  String get hash => computeHash(
+    _canonicalJson({
+      'ledger': jsonDecode(ledgerJson),
+      'knowledge': jsonDecode(knowledgeJson),
+    }),
+  );
+}
+
 sealed class ReconciliationRunIntegrity {
   const ReconciliationRunIntegrity();
 }
@@ -514,6 +531,81 @@ class LedgerReconciliationRunRepo {
               (row) => OrderingTerm.asc(row.id),
             ]))
           .get();
+
+  Future<LedgerReconciliationEffectRow?> readEffect(String runId) =>
+      (_db.select(
+        _db.ledgerReconciliationEffects,
+      )..where((row) => row.runId.equals(runId))).getSingleOrNull();
+
+  Future<List<LedgerReconciliationEffectRow>> readEffects(String sessionId) =>
+      (_db.select(_db.ledgerReconciliationEffects)
+            ..where((row) => row.sessionId.equals(sessionId))
+            ..orderBy([
+              (row) => OrderingTerm.asc(row.createdAt),
+              (row) => OrderingTerm.asc(row.runId),
+            ]))
+          .get();
+
+  /// Captures the complete reconciliation-owned state in canonical order.
+  /// Caller may invoke this inside the reconciliation transaction.
+  Future<ReconciliationStateSnapshot> captureState(String sessionId) async {
+    final ledger =
+        await (_db.select(_db.trackerRows)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..where((row) => row.scope.equals('ledger'))
+              ..orderBy([(row) => OrderingTerm.asc(row.name)]))
+            .get();
+    final knowledge =
+        await (_db.select(_db.characterKnowledgeFactRows)
+              ..where((row) => row.chatSessionId.equals(sessionId))
+              ..orderBy([(row) => OrderingTerm.asc(row.id)]))
+            .get();
+    return ReconciliationStateSnapshot(
+      ledgerJson: _canonicalJson(ledger.map((row) => row.toJson()).toList()),
+      knowledgeJson: _canonicalJson(
+        knowledge.map((row) => row.toJson()).toList(),
+      ),
+    );
+  }
+
+  /// Persists exact effects once. Caller owns the surrounding transaction.
+  Future<void> recordEffect({
+    required String runId,
+    required String sessionId,
+    required ReconciliationStateSnapshot before,
+    required ReconciliationStateSnapshot after,
+    required int createdAt,
+  }) async {
+    final effectsJson = _canonicalJson({
+      'ledger': _diffRows(
+        jsonDecode(before.ledgerJson) as List,
+        jsonDecode(after.ledgerJson) as List,
+        identityKey: 'name',
+      ),
+      'knowledge': _diffRows(
+        jsonDecode(before.knowledgeJson) as List,
+        jsonDecode(after.knowledgeJson) as List,
+        identityKey: 'id',
+      ),
+    });
+    await _db
+        .into(_db.ledgerReconciliationEffects)
+        .insert(
+          LedgerReconciliationEffectsCompanion.insert(
+            runId: runId,
+            sessionId: sessionId,
+            beforeLedgerJson: before.ledgerJson,
+            afterLedgerJson: after.ledgerJson,
+            beforeKnowledgeJson: before.knowledgeJson,
+            afterKnowledgeJson: after.knowledgeJson,
+            actualEffectsJson: effectsJson,
+            beforeStateHash: before.hash,
+            afterStateHash: after.hash,
+            effectsHash: computeHash(effectsJson),
+            createdAt: createdAt,
+          ),
+        );
+  }
 
   Future<List<LedgerReconciliationSuccessfulRunRow>> readSession(
     String sessionId,
@@ -979,6 +1071,38 @@ bool _isJsonValue(Object? value) =>
     value is Map &&
         value.keys.every((k) => k is String) &&
         value.values.every(_isJsonValue);
+
+Map<String, dynamic> _diffRows(
+  List<dynamic> before,
+  List<dynamic> after, {
+  required String identityKey,
+}) {
+  Map<String, Map<String, dynamic>> index(List<dynamic> rows) => {
+    for (final row in rows.whereType<Map<Object?, Object?>>())
+      if (row[identityKey] is String)
+        row[identityKey] as String: Map<String, dynamic>.from(row),
+  };
+
+  final beforeById = index(before);
+  final afterById = index(after);
+  final ids = {...beforeById.keys, ...afterById.keys}.toList()..sort();
+  final added = <Map<String, dynamic>>[];
+  final removed = <Map<String, dynamic>>[];
+  final changed = <Map<String, dynamic>>[];
+  for (final id in ids) {
+    final oldValue = beforeById[id];
+    final newValue = afterById[id];
+    if (oldValue == null) {
+      added.add(newValue!);
+    } else if (newValue == null) {
+      removed.add(oldValue);
+    } else if (_canonicalJson(oldValue) != _canonicalJson(newValue)) {
+      changed.add({'before': oldValue, 'after': newValue});
+    }
+  }
+  return {'added': added, 'removed': removed, 'changed': changed};
+}
+
 String _canonicalJson(Object? value) => jsonEncode(_canonical(value));
 Object? _canonical(Object? value) {
   if (value is Map<Object?, Object?>) {

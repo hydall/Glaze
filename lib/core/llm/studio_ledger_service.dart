@@ -25,6 +25,7 @@ import '../models/studio_ledger_export.dart';
 import '../models/tracker.dart';
 import '../utils/id_generator.dart';
 import '../utils/cast_helpers.dart';
+import '../utils/time_helpers.dart';
 import '../services/card_rewriter/effective_canon_context_loader.dart';
 import 'aux_llm_client.dart';
 import 'aux_retry_runner.dart';
@@ -640,6 +641,9 @@ class StudioLedgerService {
         );
         final manifestRefs = await _reconciliationRunRepo
             .readAcceptedManifestRefs(sessionId: sessionId, anchors: anchors);
+        final beforeState = await _reconciliationRunRepo.captureState(
+          sessionId,
+        );
         final candidate = LedgerReconciliationRun(
           id: '',
           sessionId: sessionId,
@@ -653,7 +657,7 @@ class StudioLedgerService {
           predecessorChainHash: '',
           contractVersion: 1,
           opsApplied: intendedOps,
-          createdAt: 0,
+          createdAt: currentTimestampSeconds(),
         );
         // The ID covers immutable candidate content, so a canon change appends
         // rather than colliding with an earlier identical plan/LLM output.
@@ -727,6 +731,21 @@ class StudioLedgerService {
           checkCanon: false,
         );
         final updated = await _trackerRepo.getBySessionId(sessionId);
+        final afterState = await _reconciliationRunRepo.captureState(sessionId);
+        final appendedRun = await _reconciliationRunRepo.getByContentHash(
+          sessionId,
+          draft.contentHash,
+        );
+        if (appendedRun == null) {
+          throw StateError('Appended reconciliation run is unavailable');
+        }
+        await _reconciliationRunRepo.recordEffect(
+          runId: appendedRun.id,
+          sessionId: sessionId,
+          before: beforeState,
+          after: afterState,
+          createdAt: candidate.createdAt,
+        );
         await _throwIfLedgerCommitStale(
           sessionId: sessionId,
           canon: canon,

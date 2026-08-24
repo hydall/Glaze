@@ -1097,6 +1097,41 @@ class LedgerReconciliationSuccessfulRuns extends Table {
   ];
 }
 
+/// Immutable before/after state captured atomically with a reconciliation run.
+@DataClassName('LedgerReconciliationEffectRow')
+@TableIndex(
+  name: 'idx_reconciliation_effect_session_created',
+  columns: {#sessionId, #createdAt},
+)
+class LedgerReconciliationEffects extends Table {
+  @override
+  String get tableName => 'ledger_reconciliation_effects';
+
+  TextColumn get runId => text()();
+  TextColumn get sessionId => text()();
+  TextColumn get beforeLedgerJson => text()();
+  TextColumn get afterLedgerJson => text()();
+  TextColumn get beforeKnowledgeJson => text()();
+  TextColumn get afterKnowledgeJson => text()();
+  TextColumn get actualEffectsJson => text()();
+  TextColumn get beforeStateHash => text()();
+  TextColumn get afterStateHash => text()();
+  TextColumn get effectsHash => text()();
+  IntColumn get createdAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {runId};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (run_id <> '' AND session_id <> '' AND before_ledger_json <> '' "
+        "AND after_ledger_json <> '' AND before_knowledge_json <> '' "
+        "AND after_knowledge_json <> '' AND actual_effects_json <> '' "
+        "AND before_state_hash <> '' AND after_state_hash <> '' "
+        "AND effects_hash <> '')",
+  ];
+}
+
 @DataClassName('LedgerReconciliationRunInvalidationRow')
 class LedgerReconciliationRunInvalidations extends Table {
   @override

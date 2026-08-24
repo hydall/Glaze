@@ -52,6 +52,7 @@ part 'app_db.g.dart';
     LedgerReconciliationCheckpoints,
     LedgerReconciliationCleanupJournals,
     LedgerReconciliationSuccessfulRuns,
+    LedgerReconciliationEffects,
     LedgerReconciliationRunInvalidations,
     LedgerReconciliationCursors,
     LedgerDebugRuns,
@@ -81,7 +82,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 125;
+  int get schemaVersion => 126;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2299,6 +2300,14 @@ class AppDatabase extends _$AppDatabase {
         );
         await _createLlmCallEventImmutabilityTrigger();
       }
+      if (from < 126) {
+        await m.createTable(ledgerReconciliationEffects);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_reconciliation_effect_session_created '
+          'ON ledger_reconciliation_effects (session_id, created_at)',
+        );
+        await _createLedgerReconciliationImmutabilityTriggers();
+      }
     },
   );
 
@@ -2810,6 +2819,7 @@ class AppDatabase extends _$AppDatabase {
   Future<void> _createLedgerReconciliationImmutabilityTriggers() async {
     for (final table in const [
       'reconciliation_successful_runs',
+      'ledger_reconciliation_effects',
       'reconciliation_run_invalidations',
       'ledger_reconciliation_cursors',
     ]) {

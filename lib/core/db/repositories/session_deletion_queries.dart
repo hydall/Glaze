@@ -76,6 +76,9 @@ class SessionDeletionQueries {
       _db.ledgerReconciliationRunInvalidations,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(
+      _db.ledgerReconciliationEffects,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
       _db.ledgerReconciliationSuccessfulRuns,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(

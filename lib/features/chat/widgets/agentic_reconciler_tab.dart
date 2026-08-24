@@ -280,16 +280,35 @@ class _RunTile extends StatelessWidget {
           if (run.invalidation != null)
             _MonoDetail(label: 'Invalidation', value: run.invalidation!.reason),
           const SizedBox(height: 6),
-          Text(
-            run.approximateOperations.isEmpty
-                ? 'Exact before/after diff is unavailable for this legacy commit.'
-                : 'Approximate operations:\n${run.approximateOperations.join('\n')}',
-            style: TextStyle(
-              color: context.cs.onSurfaceVariant,
-              fontFamily: 'monospace',
-              fontSize: 11,
+          if (run.effect != null) ...[
+            _MonoDetail(
+              label: 'Before state',
+              value: run.effect!.beforeStateHash,
             ),
-          ),
+            _MonoDetail(
+              label: 'After state',
+              value: run.effect!.afterStateHash,
+            ),
+            const SizedBox(height: 6),
+            SelectableText(
+              run.effect!.actualEffectsJson,
+              style: TextStyle(
+                color: context.cs.onSurfaceVariant,
+                fontFamily: 'monospace',
+                fontSize: 11,
+              ),
+            ),
+          ] else
+            Text(
+              run.approximateOperations.isEmpty
+                  ? 'Exact before/after diff is unavailable for this legacy commit.'
+                  : 'Approximate operations:\n${run.approximateOperations.join('\n')}',
+              style: TextStyle(
+                color: context.cs.onSurfaceVariant,
+                fontFamily: 'monospace',
+                fontSize: 11,
+              ),
+            ),
         ],
       ),
     );

@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **125**
+Current version: **126**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -212,6 +212,8 @@ Migration history:
 - v124: added bounded local `llm_request_capture_rows` diagnostics
 - v125: added stable call IDs to request captures and append-only
   `llm_call_event_rows` for transport outcomes and parser verdicts
+- v126: added append-only `ledger_reconciliation_effects` with exact Ledger and
+  knowledge before/after state, actual state diff, and integrity hashes
 
 ---
 

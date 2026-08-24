@@ -19,6 +19,7 @@ final class ReconciliationRunView {
     required this.messageIds,
     required this.status,
     required this.invalidation,
+    required this.effect,
   });
 
   final LedgerReconciliationSuccessfulRunRow row;
@@ -26,6 +27,7 @@ final class ReconciliationRunView {
   final List<String> messageIds;
   final ReconciliationRunViewStatus status;
   final LedgerReconciliationRunInvalidationRow? invalidation;
+  final LedgerReconciliationEffectRow? effect;
 
   bool get isCurrent => status == ReconciliationRunViewStatus.current;
 
@@ -86,6 +88,7 @@ class ReconcilerViewService {
       _debugRepo.recentForSession(sessionId, limit: 50),
       _checkpointRepo.get(sessionId),
       _chatRepo.getById(sessionId),
+      _runRepo.readEffects(sessionId),
     ]);
     final physical = values[0] as List<LedgerReconciliationSuccessfulRunRow>;
     final logical = values[1] as List<LedgerReconciliationSuccessfulRunRow>;
@@ -97,6 +100,10 @@ class ReconcilerViewService {
         .toList(growable: false);
     final checkpoint = values[5] as LedgerReconciliationCheckpoint?;
     final session = values[6] as ChatSession?;
+    final effects = {
+      for (final effect in values[7] as List<LedgerReconciliationEffectRow>)
+        effect.runId: effect,
+    };
     final messageOrdinals = <String, int>{
       if (session != null)
         for (final entry in session.messages.indexed) entry.$2.id: entry.$1 + 1,
@@ -116,6 +123,7 @@ class ReconcilerViewService {
             logicalIds: logicalIds,
             invalidation: invalidationByRun[row.id],
             chainIsValid: integrity is ReconciliationRunValid,
+            effect: effects[row.id],
           ),
       ],
     );
@@ -127,6 +135,7 @@ class ReconcilerViewService {
     required Set<String> logicalIds,
     required LedgerReconciliationRunInvalidationRow? invalidation,
     required bool chainIsValid,
+    required LedgerReconciliationEffectRow? effect,
   }) {
     final messageIds = _decodeMessageIds(row.anchorsJson);
     final ordinals = messageIds
@@ -151,6 +160,7 @@ class ReconcilerViewService {
       messageIds: messageIds,
       status: status,
       invalidation: invalidation,
+      effect: effect,
     );
   }
 
