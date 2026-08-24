@@ -1520,8 +1520,12 @@ class CardEvolutionCollectorRuns extends Table {
   TextColumn get status => text()();
   IntColumn get leaseExpiresAt => integer()();
   TextColumn get modelOutputHash => text().nullable()();
+  TextColumn get lastCallId => text().nullable()();
+  TextColumn get failureCode => text().nullable()();
+  TextColumn get failureDetail => text().nullable()();
   IntColumn get createdAt => integer()();
   IntColumn get completedAt => integer().nullable()();
+  IntColumn get failedAt => integer().nullable()();
   @override
   Set<Column> get primaryKey => {id};
   @override
@@ -1531,7 +1535,7 @@ class CardEvolutionCollectorRuns extends Table {
   ];
   @override
   List<String> get customConstraints => [
-    "CHECK (status IN ('claimed', 'completed'))",
+    "CHECK (status IN ('claimed', 'failed', 'completed'))",
     "CHECK (id <> '' AND session_id <> '' AND character_id <> '' "
         "AND collector_ordinal > 0 AND reconciliation_run_id <> '' "
         "AND reconciliation_run_ordinal > 0 AND reconciliation_chain_hash <> '' "

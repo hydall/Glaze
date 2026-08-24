@@ -584,6 +584,16 @@ class AutomatedCardEvolutionService {
         snapshot,
         claim.row!.collectorOrdinal,
         pipelineRunId: claim.row!.id,
+        onFailure: ({required code, detail, callId}) async {
+          await collectorRunRepo.markFailed(
+            id: claimId!,
+            ownerId: ownerId!,
+            now: currentTimestampSeconds(),
+            code: code,
+            detail: detail,
+            callId: callId,
+          );
+        },
         finalize: (output, applyEffects) =>
             collectorRunRepo.completeWithEffects(
               id: claimId!,
@@ -620,6 +630,12 @@ class AutomatedCardEvolutionService {
     CardEvolutionObservationSnapshot snapshot,
     int runOrdinal, {
     String? pipelineRunId,
+    Future<void> Function({
+      required String code,
+      String? detail,
+      String? callId,
+    })?
+    onFailure,
     Future<bool> Function(String output, Future<void> Function() applyEffects)?
     finalize,
   }) async {
@@ -653,10 +669,22 @@ class AutomatedCardEvolutionService {
           outcome.status == AgentOperationStatus.aborted ||
           !outcome.isOk ||
           outcome.text == null) {
+        await onFailure?.call(
+          code: outcome.status.name,
+          detail: outcome.lastError?.toString(),
+          callId: outcome.selectedCaptureContext?.callId,
+        );
         return null;
       }
       final actions = _parseObservationResponse(outcome.text!);
-      if (actions == null) return null;
+      if (actions == null) {
+        await onFailure?.call(
+          code: 'parserRejected',
+          detail: 'Collector response is not valid JSON',
+          callId: outcome.selectedCaptureContext?.callId,
+        );
+        return null;
+      }
       final validEvidenceIds = _chatMessageIds(snapshot.selectedInputJson);
       if (validEvidenceIds == null) return null;
       final retrievalTargets = _retrievalTargets(snapshot.selectedInputJson);

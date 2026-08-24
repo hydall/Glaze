@@ -82,7 +82,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 126;
+  int get schemaVersion => 127;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2307,6 +2307,32 @@ class AppDatabase extends _$AppDatabase {
           'ON ledger_reconciliation_effects (session_id, created_at)',
         );
         await _createLedgerReconciliationImmutabilityTriggers();
+      }
+      if (from < 127) {
+        await customStatement(
+          'ALTER TABLE card_evolution_collector_runs '
+          'RENAME TO card_evolution_collector_runs_v126',
+        );
+        await customStatement(
+          'DROP INDEX IF EXISTS idx_card_evolution_collector_session_ordinal',
+        );
+        await customStatement(
+          'DROP INDEX IF EXISTS idx_card_evolution_collector_reconciliation',
+        );
+        await m.createTable(cardEvolutionCollectorRuns);
+        await customStatement(
+          'INSERT INTO card_evolution_collector_runs '
+          '(id, session_id, character_id, collector_ordinal, '
+          'reconciliation_run_id, reconciliation_run_ordinal, '
+          'reconciliation_chain_hash, range_hash, input_hash, owner_id, '
+          'status, lease_expires_at, model_output_hash, created_at, '
+          'completed_at) SELECT id, session_id, character_id, '
+          'collector_ordinal, reconciliation_run_id, '
+          'reconciliation_run_ordinal, reconciliation_chain_hash, range_hash, '
+          'input_hash, owner_id, status, lease_expires_at, model_output_hash, '
+          'created_at, completed_at FROM card_evolution_collector_runs_v126',
+        );
+        await customStatement('DROP TABLE card_evolution_collector_runs_v126');
       }
     },
   );
