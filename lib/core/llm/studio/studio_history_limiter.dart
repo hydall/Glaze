@@ -52,10 +52,40 @@ class StudioHistoryLimiter {
       return cleanedHistory.sublist(persistedStart);
     }
 
-    // A boundary is created only after the assistant reply is committed. Until
-    // then an uninitialized session keeps its full history; a trailing user
-    // turn must never trigger prompt rotation before it receives an answer.
-    return cleanedHistory;
+    final maxMessages = pipelineOverride > 0
+        ? pipelineOverride
+        : preset.maxFinalHistoryMessages;
+    return _bootstrapWindow(
+      cleanedHistory,
+      maxMessages: maxMessages,
+      reasoningHistoryCount: reasoningHistoryCount,
+      excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    );
+  }
+
+  /// Derives a safe initial window for sessions created before stable window
+  /// boundaries existed. A trailing incomplete chunk is always retained, while
+  /// only the already-completed prefix is eligible for rotation.
+  static List<PromptMessage> _bootstrapWindow(
+    List<PromptMessage> history, {
+    required int maxMessages,
+    required int reasoningHistoryCount,
+    required bool excludeReasoningFromContextBudget,
+  }) {
+    var completedEnd = history.length;
+    while (completedEnd > 0 && history[completedEnd - 1].role != 'assistant') {
+      completedEnd--;
+    }
+    if (completedEnd == 0) return history;
+
+    final completedPlan = planCompletedWindow(
+      history.sublist(0, completedEnd),
+      maxMessages: maxMessages,
+      reasoningHistoryCount: reasoningHistoryCount,
+      excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    );
+    if (completedEnd == history.length) return completedPlan.messages;
+    return [...completedPlan.messages, ...history.sublist(completedEnd)];
   }
 
   /// Advances a stable history window after a complete user-assistant chunk.

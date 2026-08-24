@@ -14,9 +14,9 @@ class StudioStreamInterceptor {
 
   /// Compute the set of visible message IDs that form the Studio final
   /// generator's stable source window. When a persisted boundary exists, only
-  /// messages from that boundary onward are visible. Without one, the full
-  /// non-hidden history remains visible until a completed assistant turn can
-  /// rotate the window safely.
+  /// messages from that boundary onward are visible. Without one, an initial
+  /// safe window is derived from completed chunks while any trailing user turn
+  /// remains visible.
   ///
   /// This mirrors [StudioHistoryLimiter.limitFinalHistory] so that memory
   /// source-window exclusion stays in sync with what the final generator
@@ -56,14 +56,51 @@ class StudioStreamInterceptor {
     final currentStart = promptHistory.indexWhere(
       (message) => message.sourceMessageId == historyWindowStartMessageId,
     );
-    final currentWindow = currentStart >= 0
-        ? promptHistory.sublist(currentStart)
-        : promptHistory;
-    return StudioHistoryLimiter.planCompletedWindow(
-      currentWindow,
+    final bootstrap = currentStart >= 0
+        ? (window: promptHistory.sublist(currentStart), dropped: 0)
+        : _bootstrapCompletedTurnWindow(
+            promptHistory,
+            finalContextSize: finalContextSize,
+            reasoningHistoryCount: reasoningHistoryCount,
+            excludeReasoningFromContextBudget:
+                excludeReasoningFromContextBudget,
+          );
+    final plan = StudioHistoryLimiter.planCompletedWindow(
+      bootstrap.window,
       maxMessages: finalContextSize,
       reasoningHistoryCount: reasoningHistoryCount,
       excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    );
+    if (bootstrap.dropped == 0) return plan;
+    return StudioHistoryWindowPlan(
+      messages: plan.messages,
+      droppedMessageCount: bootstrap.dropped + plan.droppedMessageCount,
+      didRotate: true,
+    );
+  }
+
+  static ({List<PromptMessage> window, int dropped})
+  _bootstrapCompletedTurnWindow(
+    List<PromptMessage> history, {
+    required int finalContextSize,
+    required int reasoningHistoryCount,
+    required bool excludeReasoningFromContextBudget,
+  }) {
+    if (history.isEmpty || history.last.role != 'assistant') {
+      return (window: history, dropped: 0);
+    }
+    final requestWindow = StudioHistoryLimiter.limitFinalHistory(
+      history.sublist(0, history.length - 1),
+      StudioPreset(
+        id: 'completed-window-bootstrap',
+        maxFinalHistoryMessages: finalContextSize,
+      ),
+      reasoningHistoryCount: reasoningHistoryCount,
+      excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    );
+    return (
+      window: [...requestWindow, history.last],
+      dropped: history.length - 1 - requestWindow.length,
     );
   }
 

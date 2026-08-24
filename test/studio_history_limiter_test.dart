@@ -60,6 +60,65 @@ void main() {
       expect(ids, isNot(contains('m25')));
     });
 
+    test('bootstraps a bounded window for a legacy session', () {
+      final history = _alternatingChatHistory(101);
+
+      final ids = StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
+        history,
+        50,
+      );
+
+      expect(ids, hasLength(51));
+      expect(ids, containsAll(['m50', 'm100']));
+      expect(ids, isNot(contains('m49')));
+    });
+
+    test(
+      'bootstrap retains the trailing user outside the completed window',
+      () {
+        final history = _alternatingChatHistory(51);
+
+        final ids = StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
+          history,
+          50,
+        );
+
+        expect(ids, hasLength(51));
+        expect(ids, containsAll(['m0', 'm50']));
+      },
+    );
+
+    test(
+      'first completed turn rotates from the bootstrapped request window',
+      () {
+        final history = _alternatingChatHistory(102);
+
+        final plan = StudioStreamInterceptor.planCompletedHistoryWindow(
+          history,
+          finalContextSize: 50,
+        );
+
+        expect(plan.didRotate, isTrue);
+        expect(plan.droppedMessageCount, 76);
+        expect(plan.messages, hasLength(26));
+        expect(plan.startMessageId, 'm76');
+      },
+    );
+
+    test('persists a bootstrap-only trim after the first completed turn', () {
+      final history = _alternatingChatHistory(62);
+
+      final plan = StudioStreamInterceptor.planCompletedHistoryWindow(
+        history,
+        finalContextSize: 50,
+      );
+
+      expect(plan.didRotate, isTrue);
+      expect(plan.droppedMessageCount, 30);
+      expect(plan.messages, hasLength(32));
+      expect(plan.startMessageId, 'm30');
+    });
+
     test('token overflow rotates by complete chunks', () {
       final large = List.filled(20000, 'token').join(' ');
       final history = <PromptMessage>[
