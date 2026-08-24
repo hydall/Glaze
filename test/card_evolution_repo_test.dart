@@ -126,6 +126,47 @@ void main() {
     );
   });
 
+  test('renews only a live claim owned by the caller', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+
+    expect(
+      await evolution.renewClaimLease(
+        claimId: claim.row.id,
+        ownerId: 'owner',
+        now: 20,
+        leaseSeconds: 600,
+      ),
+      isTrue,
+    );
+    final renewed = await (db.select(
+      db.cardEvolutionClaims,
+    )..where((row) => row.id.equals(claim.row.id))).getSingle();
+    expect(renewed.leaseExpiresAt, 620);
+    expect(
+      await evolution.renewClaimLease(
+        claimId: claim.row.id,
+        ownerId: 'other-owner',
+        now: 21,
+        leaseSeconds: 600,
+      ),
+      isFalse,
+    );
+    expect(
+      await evolution.renewClaimLease(
+        claimId: claim.row.id,
+        ownerId: 'owner',
+        now: 620,
+        leaseSeconds: 600,
+      ),
+      isFalse,
+    );
+  });
+
   test(
     'an unknown session is attributed instead of silently ignored',
     () async {

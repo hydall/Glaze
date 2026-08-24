@@ -323,6 +323,32 @@ class CardEvolutionRepo {
     now: now,
   )).snapshot;
 
+  /// Extends a live claim without allowing an expired or different owner to
+  /// reclaim it. Long writer and repair calls use this before starting more
+  /// remote work so finalization cannot lose ownership mid-cycle.
+  Future<bool> renewClaimLease({
+    required String claimId,
+    required String ownerId,
+    required int now,
+    required int leaseSeconds,
+  }) async {
+    if (ownerId.isEmpty || leaseSeconds <= 0) return false;
+    final changed =
+        await (db.update(db.cardEvolutionClaims)..where(
+              (row) =>
+                  row.id.equals(claimId) &
+                  row.ownerId.equals(ownerId) &
+                  row.status.equals('claimed') &
+                  row.leaseExpiresAt.isBiggerThanValue(now),
+            ))
+            .write(
+              CardEvolutionClaimsCompanion(
+                leaseExpiresAt: Value(now + leaseSeconds),
+              ),
+            );
+    return changed == 1;
+  }
+
   /// Same contract as [readPromptSnapshot] but keeps the reason the snapshot
   /// could not be produced, so an early writer bail stays attributable.
   Future<CardEvolutionPromptSnapshotOutcome> readPromptSnapshotOutcome({

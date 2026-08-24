@@ -21,7 +21,8 @@ import 'card_rewrite_prompt_builder.dart';
 import 'card_rewriter_contracts.dart';
 import 'manual_rewrite_service.dart';
 
-const _writerMaxTokens = 20000;
+const _writerMaxTokens = 40000;
+const _writerLeaseSeconds = 600;
 const _writerCollectorBatchSize = 2;
 const _writerSnapshotCharacterLimit = 600000;
 const _writerContextCharacterLimit = 180000;
@@ -45,7 +46,7 @@ class AutomatedCardEvolutionService {
     this.isEnabled,
     this.isLorebookEvolutionEnabled,
     this.timeoutMs = 180000,
-    this.leaseSeconds = 300,
+    this.leaseSeconds = _writerLeaseSeconds,
     CardEvolutionObservationRepo? observationRepo,
     CardEvolutionCollectorRunRepo? collectorRunRepo,
     this.observationPromotionThreshold,
@@ -313,7 +314,22 @@ class AutomatedCardEvolutionService {
                 allowedFields: allowedCardFields,
               )
             : _scopeAllowlistFailure(parsedCardOperations, cardContext);
-        if (parseFailure != null && _isRepairableCardFailure(parseFailure)) {
+        if (parseFailure != null) {
+          final leaseRenewed = await repo.renewClaimLease(
+            claimId: claim.row.id,
+            ownerId: owner,
+            now: currentTimestampSeconds(),
+            leaseSeconds: leaseSeconds,
+          );
+          if (!leaseRenewed) {
+            await _saveDebugOutcome(
+              sessionId: sessionId,
+              stage: 'card',
+              model: config.model,
+              outcome: cardOutcome,
+            );
+            return const CardEvolutionFinalizeOutcome('leaseLost');
+          }
           final repairOutcome = await _executor(
             config: config,
             prompt: _cardRepairPrompt(
@@ -1057,9 +1073,6 @@ class AutomatedCardEvolutionService {
     return null;
   }
 
-  static bool _isRepairableCardFailure(String failure) =>
-      failure.contains('scopeKey') || failure.contains('macro-token multiset');
-
   static String _cardRepairPrompt({
     required String originalPrompt,
     required String failure,
@@ -1070,12 +1083,17 @@ class AutomatedCardEvolutionService {
             .where(_isCardScopeTarget)
             .toList()
           ..sort();
+    final scopeCorrection = allowed.isEmpty
+        ? 'Every patch and transition scopeKey MUST follow the advertised scope '
+              'grammar exactly.'
+        : 'Every patch and transition scopeKey MUST equal one of these exact '
+              'available keys: ${jsonEncode(allowed)}. Do not shorten, combine, '
+              'translate, or derive a scope key.';
     return '$originalPrompt\n\n'
         '# Required correction\n'
         'Your previous response was rejected: $failure. Return a fresh complete '
-        'response. Every patch and transition scopeKey MUST equal one of these '
-        'exact available keys: ${jsonEncode(allowed)}. Do not shorten, combine, '
-        'translate, or derive a scope key. Every replacement value MUST preserve '
+        'response containing exactly one valid JSON object with no prose before '
+        'or after it. $scopeCorrection Every replacement value MUST preserve '
         'the exact macro-token multiset from its anchor. Never add, remove, rename, '
         'or substitute tokens such as {{user}}.';
   }

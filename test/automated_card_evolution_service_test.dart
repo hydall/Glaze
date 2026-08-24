@@ -97,6 +97,10 @@ void main() {
       await fixture.db.select(fixture.db.cardEvolutionProposalRuns).get(),
       hasLength(1),
     );
+    final claim = await fixture.db
+        .select(fixture.db.cardEvolutionClaims)
+        .getSingle();
+    expect(claim.leaseExpiresAt - claim.createdAt, 600);
     final operations = await fixture.db
         .select(fixture.db.rewriteOperations)
         .get();
@@ -150,11 +154,16 @@ void main() {
     );
   });
 
-  test('malformed parser output leaves no proposal or cursor', () async {
+  test('malformed parser output gets exactly one repair attempt', () async {
+    var calls = 0;
     final result = await fixture
-        .service((_, _) async => _ok('not json'))
+        .service((_, _) async {
+          calls++;
+          return _ok('not json');
+        })
         .runOneBatch('session');
     expect(result.kind, 'invalidCardOutput');
+    expect(calls, 2);
     expect(
       (await fixture.db.select(fixture.db.cardEvolutionDebugRuns).getSingle())
           .output,
@@ -165,6 +174,40 @@ void main() {
       await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
       isEmpty,
     );
+  });
+
+  test('malformed JSON can recover on the single repair attempt', () async {
+    var calls = 0;
+    final prompts = <String>[];
+    final result = await fixture
+        .service((_, prompt) async {
+          calls++;
+          prompts.add(prompt);
+          return _ok(calls == 1 ? '{"operations":[' : fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
+
+    expect(result.kind, 'persisted');
+    expect(calls, 2);
+    expect(prompts.last, contains('no JSON object was found'));
+    expect(prompts.last, contains('exactly one valid JSON object'));
+  });
+
+  test('expired claim does not start a repair call', () async {
+    var calls = 0;
+    final result = await fixture
+        .service((_, _) async {
+          calls++;
+          await fixture.db.customStatement(
+            "UPDATE card_evolution_claims SET lease_expires_at = 0 WHERE session_id = 'session'",
+          );
+          return _ok('not json');
+        })
+        .runOneBatch('session');
+
+    expect(result.kind, 'leaseLost');
+    expect(calls, 1);
+    await fixture.expectNoProposalOrCanonWrites();
   });
 
   test('invalid scope gets one constrained repair attempt', () async {
@@ -368,7 +411,7 @@ void main() {
     expect(receivedTimeout, 180000);
   });
 
-  test('uses a 20k response budget for each writer call', () async {
+  test('uses a 40k response budget for each writer call', () async {
     int? receivedMaxTokens;
     final result = await fixture
         .service(
@@ -378,7 +421,7 @@ void main() {
         .runOneBatch('session');
 
     expect(result.kind, 'persisted');
-    expect(receivedMaxTokens, 20000);
+    expect(receivedMaxTokens, 40000);
   });
 
   test('disabled lorebook evolution skips its second model call', () async {
