@@ -175,6 +175,20 @@ class CardEvolutionObservationRepo {
     return [for (final row in rows) _toModel(row)];
   });
 
+  /// All lifecycle states for read-only diagnostics, newest update first.
+  Future<List<CardEvolutionObservation>> getBySessionId(String sessionId) =>
+      db.transaction(() async {
+        final rows =
+            await (db.select(db.cardEvolutionObservations)
+                  ..where((row) => row.sessionId.equals(sessionId))
+                  ..orderBy([
+                    (row) => OrderingTerm.desc(row.updatedAt),
+                    (row) => OrderingTerm.desc(row.id),
+                  ]))
+                .get();
+        return [for (final row in rows) _toModel(row)];
+      });
+
   Future<List<CardEvolutionObservation>> getPromotableObservations(
     String sessionId, {
     required int minRepeatCount,

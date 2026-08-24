@@ -598,7 +598,16 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
   Future<void> _showAgentOpsLog() async {
     final session = ref.read(chatProvider(widget.charId)).value?.session;
-    await AgenticOperationsLogDialog.show(context, sessionId: session?.id);
+    final route = await AgenticOperationsLogDialog.show(
+      context,
+      sessionId: session?.id,
+      characterId: widget.charId,
+    );
+    if (!mounted) return;
+    if (route != null && route.isNotEmpty) {
+      widget.onClose?.call();
+      context.go(route);
+    }
   }
 
   Future<void> _showExtBlocksSheet() async {

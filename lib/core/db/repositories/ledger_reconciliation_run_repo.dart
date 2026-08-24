@@ -491,6 +491,30 @@ class LedgerReconciliationRunRepo {
     return rows.isEmpty ? null : rows.last;
   }
 
+  /// Complete immutable history, including logically invalidated runs.
+  ///
+  /// Unlike [readSession], this audit view does not hide malformed, stale, or
+  /// invalidated rows. Callers must pair it with [validateChain] and
+  /// [readInvalidations] before presenting a run as current.
+  Future<List<LedgerReconciliationSuccessfulRunRow>> readPhysicalSession(
+    String sessionId,
+  ) =>
+      (_db.select(_db.ledgerReconciliationSuccessfulRuns)
+            ..where((row) => row.sessionId.equals(sessionId))
+            ..orderBy([(row) => OrderingTerm.asc(row.ordinal)]))
+          .get();
+
+  Future<List<LedgerReconciliationRunInvalidationRow>> readInvalidations(
+    String sessionId,
+  ) =>
+      (_db.select(_db.ledgerReconciliationRunInvalidations)
+            ..where((row) => row.sessionId.equals(sessionId))
+            ..orderBy([
+              (row) => OrderingTerm.asc(row.createdAt),
+              (row) => OrderingTerm.asc(row.id),
+            ]))
+          .get();
+
   Future<List<LedgerReconciliationSuccessfulRunRow>> readSession(
     String sessionId,
   ) async {

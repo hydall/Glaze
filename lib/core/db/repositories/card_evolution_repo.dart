@@ -683,6 +683,16 @@ class CardEvolutionRepo {
         ),
       );
 
+  /// Latest replaceable writer diagnostics for each stage, newest first.
+  Future<List<CardEvolutionDebugRunRow>> readDebugRuns(String sessionId) =>
+      (db.select(db.cardEvolutionDebugRuns)
+            ..where((row) => row.sessionId.equals(sessionId))
+            ..orderBy([
+              (row) => OrderingTerm.desc(row.updatedAt),
+              (row) => OrderingTerm.asc(row.stage),
+            ]))
+          .get();
+
   /// Builds a read-only observation snapshot (character + canonical selected
   /// input) without claiming a lease. Used by the observation pass which runs
   /// before the regular claim/finalize card-writer flow.

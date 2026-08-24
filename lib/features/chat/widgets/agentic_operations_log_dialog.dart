@@ -3,24 +3,42 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/agent_operation_record.dart';
 import '../../../shared/theme/app_colors.dart';
-import 'agentic_operations_tab.dart';
-import 'agentic_last_turn_tab.dart';
+import '../../../shared/widgets/glaze_tab_bar.dart';
+import '../../../shared/widgets/sheet_view.dart';
+import '../../../shared/widgets/swipe_tab_switcher.dart';
+import '../../card_rewrite/card_rewriter_studio_sheet.dart';
+import 'agentic_collector_tab.dart';
+import 'agentic_reconciler_tab.dart';
 import 'agentic_snapshots_tab.dart';
-import 'agentic_tracker_values_tab.dart';
 import 'post_cleaner_diff_dialog.dart';
 
 class AgenticOperationsLogDialog extends ConsumerStatefulWidget {
   final String? sessionId;
+  final String? characterId;
 
-  const AgenticOperationsLogDialog({super.key, this.sessionId});
+  const AgenticOperationsLogDialog({
+    super.key,
+    this.sessionId,
+    this.characterId,
+  });
 
   /// Opens the dialog as an overlay. Caller passes the current [sessionId]
   /// so the dialog can scope the list, or null to show operations across all
   /// sessions.
-  static Future<void> show(BuildContext context, {String? sessionId}) {
-    return showDialog(
+  static Future<String?> show(
+    BuildContext context, {
+    String? sessionId,
+    String? characterId,
+  }) {
+    return showModalBottomSheet<String>(
       context: context,
-      builder: (_) => AgenticOperationsLogDialog(sessionId: sessionId),
+      useRootNavigator: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => AgenticOperationsLogDialog(
+        sessionId: sessionId,
+        characterId: characterId,
+      ),
     );
   }
 
@@ -31,73 +49,87 @@ class AgenticOperationsLogDialog extends ConsumerStatefulWidget {
 
 class _AgenticOperationsLogDialogState
     extends ConsumerState<AgenticOperationsLogDialog> {
+  int _activeIndex = 0;
+  final Set<int> _visited = {0};
+
+  void _selectTab(int index) => setState(() {
+    _activeIndex = index;
+    _visited.add(index);
+  });
+
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      child: SizedBox(
-        width: 720,
-        height: 560,
-        child: DefaultTabController(
-          length: 4,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Icon(Icons.smart_toy_outlined, color: context.cs.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Agentic Operations Log',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close, size: 20),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ],
+    final sessionId = widget.sessionId;
+    final children = sessionId == null || sessionId.isEmpty
+        ? const <Widget>[
+            Center(child: Text('Open Agent Ops from a chat session.')),
+          ]
+        : <Widget>[
+            _visited.contains(0)
+                ? AgenticReconcilerTab(sessionId: sessionId)
+                : const SizedBox.shrink(),
+            _visited.contains(1)
+                ? AgenticCollectorTab(sessionId: sessionId)
+                : const SizedBox.shrink(),
+            _visited.contains(2)
+                ? widget.characterId == null || widget.characterId!.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'Card Rewriter is available when Agent Ops is opened from the chat drawer.',
+                            textAlign: TextAlign.center,
+                          ),
+                        )
+                      : CardRewriterStudioSheet(
+                          charId: widget.characterId!,
+                          sessionId: sessionId,
+                        )
+                : const SizedBox.shrink(),
+            _visited.contains(3)
+                ? const AgenticSnapshotsTab()
+                : const SizedBox.shrink(),
+          ];
+
+    final body = sessionId == null || sessionId.isEmpty
+        ? children.single
+        : SwipeTabSwitcher(
+            index: _activeIndex,
+            length: 4,
+            onChanged: _selectTab,
+            child: AgenticSessionScope(
+              sessionId: sessionId,
+              child: IndexedStack(index: _activeIndex, children: children),
+            ),
+          );
+    return SheetView(
+      title: 'Agent Ops',
+      showBack: true,
+      startExpanded: true,
+      onBack: () => Navigator.of(context).maybePop(),
+      headerBottom: sessionId == null || sessionId.isEmpty
+          ? null
+          : GlazeTabBar(
+              tabs: const [
+                GlazeTabItem(
+                  label: 'Reconciler',
+                  icon: Icons.rule_folder_outlined,
                 ),
-              ),
-              const TabBar(
-                tabs: [
-                  Tab(
-                    icon: Icon(Icons.history_outlined, size: 16),
-                    text: 'Operations',
-                  ),
-                  Tab(
-                    icon: Icon(Icons.track_changes_outlined, size: 16),
-                    text: 'Studio Ledger',
-                  ),
-                  Tab(
-                    icon: Icon(Icons.warning_amber_outlined, size: 16),
-                    text: 'Last turn',
-                  ),
-                  Tab(
-                    icon: Icon(Icons.history_edu_outlined, size: 16),
-                    text: 'Snapshots',
-                  ),
-                ],
-                tabAlignment: TabAlignment.fill,
-              ),
-              Expanded(
-                child: AgenticSessionScope(
-                  sessionId: widget.sessionId,
-                  child: const TabBarView(
-                    children: [
-                      AgenticOperationsTab(),
-                      AgenticTrackerValuesTab(),
-                      AgenticLastTurnTab(),
-                      AgenticSnapshotsTab(),
-                    ],
-                  ),
+                GlazeTabItem(
+                  label: 'Collector',
+                  icon: Icons.filter_alt_outlined,
                 ),
-              ),
-            ],
-          ),
-        ),
-      ),
+                GlazeTabItem(
+                  label: 'Card Rewriter',
+                  icon: Icons.auto_fix_high_outlined,
+                ),
+                GlazeTabItem(
+                  label: 'Snapshots',
+                  icon: Icons.history_edu_outlined,
+                ),
+              ],
+              activeIndex: _activeIndex,
+              onChanged: _selectTab,
+            ),
+      body: body,
     );
   }
 }

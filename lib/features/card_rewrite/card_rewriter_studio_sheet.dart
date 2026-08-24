@@ -119,6 +119,7 @@ class _CardRewriterStudioSheetState
       ).pop('/character/${widget.charId}/rewrite/${outcome.job!.id}');
       return;
     }
+    ref.invalidate(cardRewriteDebugRunsProvider(widget.sessionId));
     GlazeToast.show(context, _runMessage(outcome), position: ToastPosition.top);
   }
 
@@ -170,6 +171,7 @@ class _CardRewriterStudioSheetState
     }.toList()..sort();
     final configured = settings.apiConfigId.isNotEmpty && config != null;
     final jobs = ref.watch(cardRewriteJobsBySessionProvider(widget.sessionId));
+    final debugRuns = ref.watch(cardRewriteDebugRunsProvider(widget.sessionId));
     final studioPreset = ref.watch(studioPresetProvider).value;
     final ledgerEnabled =
         studioPreset != null && studioPreset.agentEnabled['ledger'] != false;
@@ -311,6 +313,61 @@ class _CardRewriterStudioSheetState
                 ? const SizedBox.square(dimension: 16, child: GlazeSpinner())
                 : const Icon(Icons.auto_fix_high_outlined),
             label: Text(_running ? 'Preparing proposal...' : 'Run now'),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Latest stage diagnostics',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 4),
+          debugRuns.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.all(12),
+              child: Center(child: GlazeSpinner()),
+            ),
+            error: (_, _) => const Text('Could not load stage diagnostics.'),
+            data: (items) => items.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text('No Card Rewriter calls recorded yet.'),
+                  )
+                : Column(
+                    children: [
+                      for (final run in items)
+                        ExpansionTile(
+                          tilePadding: EdgeInsets.zero,
+                          leading: Icon(
+                            run.status == 'ok'
+                                ? Icons.check_circle_outline
+                                : Icons.error_outline,
+                            color: run.status == 'ok'
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.error,
+                          ),
+                          title: Text('${run.stage} · ${run.status}'),
+                          subtitle: Text(
+                            run.model.isEmpty ? 'Model unavailable' : run.model,
+                          ),
+                          childrenPadding: const EdgeInsets.only(bottom: 12),
+                          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SelectableText(
+                              run.output ??
+                                  'Raw output unavailable for this stage.',
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'The exact prompt and earlier attempts are unavailable for this legacy stage record.',
+                              style: TextStyle(fontSize: 11),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
           ),
           const SizedBox(height: 20),
           Text('Past diffs', style: Theme.of(context).textTheme.titleSmall),

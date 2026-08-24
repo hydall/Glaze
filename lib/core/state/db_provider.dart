@@ -30,7 +30,10 @@ import '../db/repositories/tracker_snapshot_repo.dart';
 import '../db/repositories/ledger_raw_tracker_state_reader.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import '../db/repositories/ledger_reconciliation_run_repo.dart';
+import '../db/repositories/ledger_debug_run_repo.dart';
 import '../db/repositories/card_evolution_repo.dart';
+import '../db/repositories/card_evolution_collector_run_repo.dart';
+import '../db/repositories/card_evolution_observation_repo.dart';
 import '../db/repositories/character_knowledge_fact_repo.dart';
 import '../db/repositories/character_session_baseline_repo.dart';
 import '../db/repositories/character_revision_repo.dart';
@@ -164,6 +167,20 @@ final lorebookUseManifestRepoProvider = Provider<LorebookUseManifestRepo>((
 final ledgerReconciliationRunRepoProvider =
     Provider<LedgerReconciliationRunRepo>(
       (ref) => LedgerReconciliationRunRepo(ref.watch(appDbProvider)),
+    );
+
+final ledgerDebugRunRepoProvider = Provider<LedgerDebugRunRepo>(
+  (ref) => LedgerDebugRunRepo(ref.watch(appDbProvider)),
+);
+
+final cardEvolutionCollectorRunRepoProvider =
+    Provider<CardEvolutionCollectorRunRepo>(
+      (ref) => CardEvolutionCollectorRunRepo(ref.watch(appDbProvider)),
+    );
+
+final cardEvolutionObservationRepoProvider =
+    Provider<CardEvolutionObservationRepo>(
+      (ref) => CardEvolutionObservationRepo(ref.watch(appDbProvider)),
     );
 
 final embeddingRepoProvider = Provider<EmbeddingRepo>((ref) {

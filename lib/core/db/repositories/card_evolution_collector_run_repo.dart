@@ -41,6 +41,16 @@ class CardEvolutionCollectorRunRepo {
 
   final AppDatabase db;
 
+  /// Read-only audit history for Agent Ops, newest collector first.
+  Future<List<CardEvolutionCollectorRunRow>> readSession(String sessionId) =>
+      (db.select(db.cardEvolutionCollectorRuns)
+            ..where((row) => row.sessionId.equals(sessionId))
+            ..orderBy([
+              (row) => OrderingTerm.desc(row.collectorOrdinal),
+              (row) => OrderingTerm.desc(row.createdAt),
+            ]))
+          .get();
+
   Future<CardEvolutionCollectorClaimOutcome> claim({
     required LedgerReconciliationSuccessfulRunRow reconciliationRun,
     required String characterId,
