@@ -1926,7 +1926,7 @@ class AutomatedCardEvolutionService {
     try {
       final input = Map<String, Object?>.from(
         jsonDecode(selectedInputJson) as Map,
-      );
+      )..remove('card');
       final observations = input['accumulatedObservations'];
       input['accumulatedObservations'] = observations is List
           ? [
