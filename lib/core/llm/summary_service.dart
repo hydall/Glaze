@@ -204,7 +204,13 @@ class SummaryService {
     for (final msg in messages) {
       if (msg.role == 'user' || msg.role == 'assistant') {
         final speaker = msg.role == 'user' ? 'User' : 'Character';
-        buf.writeln('$speaker: ${msg.content}');
+        // The ledger-stamped game clock travels with the transcript so the
+        // summary stays time-anchored instead of teleporting across hours.
+        final gameTime = msg.time?.trim();
+        final timePrefix = gameTime == null || gameTime.isEmpty
+            ? ''
+            : '[$gameTime] ';
+        buf.writeln('$speaker: $timePrefix${msg.content}');
       }
     }
     return buf.toString();

@@ -145,6 +145,7 @@ class ChatMessageMapper {
       if (m.agentSwipes.length > 1)
         'agentSwipeFinalCount': m.agentSwipes.length,
       if (m.genTime != null) 'genTime': m.genTime,
+      if (m.time != null && m.time!.isNotEmpty) 'gameTime': m.time,
       if (m.tokens != null) 'tokens': m.tokens,
       'isError': m.isError,
       if (m.isTyping) 'isTyping': true,

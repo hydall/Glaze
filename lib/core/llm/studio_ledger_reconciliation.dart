@@ -264,7 +264,14 @@ Knowledge cleanup may only repair facts listed in <knowledge_facts>:
   range explicitly resolves a placeholder or descriptive identity. Never
   rename an already named person into a different named person.
 Never create facts, rewrite fact content, or retract a fact merely because it is
-old or absent from the review range.''';
+old or absent from the review range.
+
+Game clock (world:time, world:date, world:day): advance world:time (24h HH:MM)
+through the review range according to how much in-game time the narrated events
+take, crossing midnight into the next world:day (day 0 = first story day) and
+world:date when tracked. The clock only moves FORWARD — never rewind it; treat
+flashbacks and memories as prose, not clock changes. When the range continues a
+scene immediately, advance time by only a few minutes.''';
   }
 
   List<CharacterKnowledgeFact> relevantKnowledgeFacts(

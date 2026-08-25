@@ -2615,5 +2615,13 @@
   "card_rewriter_studio_stage_history_consolidation": "History consolidation",
   "card_rewriter_studio_stage_card_writer": "Card writer",
   "card_rewriter_studio_stage_card_repair": "Card repair",
-  "card_rewriter_studio_stage_lorebook_writer": "Lorebook writer"
+  "card_rewriter_studio_stage_lorebook_writer": "Lorebook writer",
+  "game_time_seed_title": "Game clock start",
+  "game_time_seed_description": "Anchor the ledger game clock. The day always starts at 0. The date is optional.",
+  "game_time_seed_time_label": "Time (HH:MM)",
+  "game_time_seed_date_label": "Date (DD.MM.YYYY, optional)",
+  "game_time_seed_skip": "Skip",
+  "game_time_seed_confirm": "Start",
+  "game_time_seed_invalid_time": "Enter the time as HH:MM (24-hour).",
+  "game_time_seed_invalid_date": "Enter the date as DD.MM.YYYY or leave it empty."
 }

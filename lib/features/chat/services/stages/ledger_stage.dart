@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/llm/aux_llm_client.dart' show AuxApiConfig;
+import '../../../../core/llm/game_time.dart';
 import '../../../../core/llm/macro_engine.dart';
 import '../../../../core/llm/studio_ledger_service.dart';
 import '../../../../core/llm/studio_ledger_reconciliation.dart';
@@ -20,7 +22,9 @@ import '../../../../core/state/character_provider.dart';
 import '../../../../core/state/card_rewriter_providers.dart';
 import '../../../../core/state/persona_resolution.dart';
 import '../../../../core/state/studio_turn_config_resolver.dart';
+import '../../../../core/utils/time_helpers.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
+import '../../chat_session_service.dart';
 import '../../../card_rewrite/card_rewriter_recovery_view_service.dart';
 import '../../state/agent_operations_log_provider.dart';
 import '../../state/post_gen_status_provider.dart';
@@ -454,6 +458,12 @@ class LedgerStage {
         'elapsedMs=${result.elapsedMs} '
         'error=${result.error ?? "none"}',
       );
+
+      await _syncGameTimeToMessage(
+        sessionId: sessionId,
+        targetMessage: targetMessage,
+        isCurrent: isCurrent,
+      );
     } catch (e) {
       debugPrint(
         '[StudioLedger] pipeline trigger failed session=$sessionId: $e',
@@ -512,6 +522,42 @@ class LedgerStage {
     ctx.ref.invalidate(promptCaptureViewsProvider(sessionId));
     ctx.ref.invalidate(cardRewriteDebugRunsProvider(sessionId));
     ctx.ref.invalidate(cardRewriterRecoveryViewsProvider(sessionId));
+  }
+
+  /// Best-effort: stamps the current ledger game clock (world:time/date/day)
+  /// onto the assistant message as a display-only field. The value is never
+  /// injected into the main prompt — the clock reaches the model through the
+  /// ledger state block — but auxiliary systems (memory/summary history) read
+  /// it so their outputs stay time-anchored.
+  Future<void> _syncGameTimeToMessage({
+    required String sessionId,
+    required ChatMessage targetMessage,
+    required bool Function() isCurrent,
+  }) async {
+    try {
+      final trackers = await ctx.ref
+          .read(trackerRepoProvider)
+          .getBySessionAndScope(sessionId, 'ledger');
+      final display = GameTimeState.fromTrackers(trackers).format();
+      if (display == null || display == targetMessage.time) return;
+      if (!isCurrent()) return;
+
+      final updated = await ctx.ref
+          .read(chatRepoProvider)
+          .mutateMessage(
+            sessionId: sessionId,
+            messageId: targetMessage.id,
+            updatedAt: currentTimestampSeconds(),
+            mutate: (message) => message.copyWith(time: display),
+          );
+      if (updated == null) return;
+      ChatSessionService.updateCache(updated);
+      final liveState = ctx.getState().value;
+      if (liveState == null || liveState.session?.id != updated.id) return;
+      ctx.setState(AsyncData(liveState.copyWith(session: updated)));
+    } catch (e) {
+      debugPrint('[StudioLedger] game time sync failed session=$sessionId: $e');
+    }
   }
 
   String _personaName(Iterable<ChatMessage> messages) {

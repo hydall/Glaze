@@ -35,6 +35,23 @@ void main() {
     expect(restored.effectiveCanonCacheIdentity, 'canon-cache-identity');
   });
 
+  test('prompt isolate codec preserves the ledger game clock', () {
+    final source = PromptPayload(
+      character: const Character(id: 'character', name: 'Alison'),
+      history: const [],
+      apiConfig: const ApiConfig(id: 'api'),
+      gameTime: '19:45',
+      gameDate: '08.11.2027',
+      gameDay: '3',
+    );
+
+    final restored = deserializePayload(serializePayload(source));
+
+    expect(restored.gameTime, '19:45');
+    expect(restored.gameDate, '08.11.2027');
+    expect(restored.gameDay, '3');
+  });
+
   test(
     'prompt isolate codec preserves Ledger policy and injection identity',
     () {

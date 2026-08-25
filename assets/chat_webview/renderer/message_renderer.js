@@ -134,6 +134,11 @@ if (messageData.isEditing) classes.push('editing');
       stack.appendChild(this._createReasoningBlock(reasoning, this._isUser(role)));
     }
 
+    /* --- In-game clock (between reasoning and the main body) --- */
+    if (messageData.gameTime) {
+      stack.appendChild(this._createGameTimeBlock(messageData.gameTime));
+    }
+
     const wrapper = document.createElement('div');
     wrapper.className = 'msg-transition-wrapper';
 
@@ -311,6 +316,14 @@ if (messageData.isEditing) classes.push('editing');
     block.appendChild(header);
     block.appendChild(content);
     return block;
+  }
+
+  /* ----- In-game clock (ledger-stamped, display-only) ----- */
+  _createGameTimeBlock(gameTime) {
+    const el = document.createElement('div');
+    el.className = 'msg-game-time';
+    el.textContent = `⏱ ${gameTime}`;
+    return el;
   }
 
   /* ----- Error window ----- */
@@ -724,6 +737,23 @@ if (messageData.isEditing) classes.push('editing');
   }
 
   updateMessageMeta(sectionEl, msg) {
+    // In-game clock: the ledger stamps the message after the turn, so the
+    // element usually appears (or updates) via this live path rather than at
+    // initial render.
+    if (msg.gameTime) {
+      const stack = sectionEl.querySelector('.msg-content-stack');
+      if (stack) {
+        let clock = stack.querySelector('.msg-game-time');
+        if (!clock) {
+          clock = this._createGameTimeBlock(msg.gameTime);
+          const wrapper = stack.querySelector('.msg-transition-wrapper');
+          stack.insertBefore(clock, wrapper || null);
+        } else {
+          clock.textContent = `⏱ ${msg.gameTime}`;
+        }
+      }
+    }
+
     if (msg.messageIndex !== undefined && msg.messageIndex !== null) {
       sectionEl.dataset.messageIndex = String(msg.messageIndex);
       const idxStr = `#${msg.messageIndex + 1}`;

@@ -60,6 +60,12 @@ class GenerationContextInputs {
   final String? arcContent;
   final String? entitiesContent;
   final String? studioSessionStateContent;
+
+  /// In-game clock from ledger `world:*` trackers for `{{gametime}}` /
+  /// `{{gamedate}}` / `{{gameday}}` macros. Null when no clock is tracked.
+  final String? gameTime;
+  final String? gameDate;
+  final String? gameDay;
   final String? characterKnowledgeContent;
   final String? recalledMessagesContent;
   final List<RecalledMessageChunk> recalledMessageChunks;
@@ -109,6 +115,9 @@ class GenerationContextInputs {
     this.arcContent,
     this.entitiesContent,
     this.studioSessionStateContent,
+    this.gameTime,
+    this.gameDate,
+    this.gameDay,
     this.characterKnowledgeContent,
     this.recalledMessagesContent,
     this.recalledMessageChunks = const [],

@@ -1,10 +1,12 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/llm/game_time.dart';
 import '../../../core/llm/macro_engine.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
+import '../../../core/state/db_provider.dart';
 import '../../../core/state/summary_providers.dart';
 import '../../settings/api_list_provider.dart';
 
@@ -35,25 +37,44 @@ class SummaryGenerationService {
     await _ref.read(apiListProvider.future);
     final apiConfig = _ref.read(activeApiConfigProvider);
     if (apiConfig == null || apiConfig.mode == 'embedding') {
-      throw Exception('No chat API config found. Add one in API Settings first.');
+      throw Exception(
+        'No chat API config found. Add one in API Settings first.',
+      );
     }
 
     final service = _ref.read(summaryServiceProvider);
     final template = await service.getSummaryPrompt(session.id);
 
+    final gameTime = await _readGameTime(session.id);
     return service.generateSummary(
       sessionId: session.id,
       history: session.messages,
       apiConfig: apiConfig,
       customPrompt: template,
-      macroContext: _macroContext(charId: charId, session: session),
+      macroContext: _macroContext(
+        charId: charId,
+        session: session,
+        gameTime: gameTime,
+      ),
       cancelToken: cancelToken,
     );
+  }
+
+  Future<GameTimeState> _readGameTime(String sessionId) async {
+    try {
+      final trackers = await _ref
+          .read(trackerRepoProvider)
+          .getBySessionAndScope(sessionId, 'ledger');
+      return GameTimeState.fromTrackers(trackers);
+    } catch (_) {
+      return const GameTimeState();
+    }
   }
 
   MacroContext _macroContext({
     required String charId,
     required ChatSession session,
+    GameTimeState gameTime = const GameTimeState(),
   }) {
     final character = _ref.read(characterByIdProvider(charId));
     final persona = _ref.read(
@@ -72,6 +93,9 @@ class SummaryGenerationService {
       globalVars: _ref.read(globalVarsProvider),
       charId: charId,
       sessionId: session.id,
+      gameTime: gameTime.time,
+      gameDate: gameTime.date,
+      gameDay: gameTime.day?.toString(),
     );
   }
 }

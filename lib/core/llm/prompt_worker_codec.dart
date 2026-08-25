@@ -58,6 +58,9 @@ Map<String, dynamic> serializePayload(PromptPayload p) => {
   'arcContent': p.arcContent,
   'entitiesContent': p.entitiesContent,
   'studioSessionStateContent': p.studioSessionStateContent,
+  'gameTime': p.gameTime,
+  'gameDate': p.gameDate,
+  'gameDay': p.gameDay,
   'characterKnowledgeContent': p.characterKnowledgeContent,
   'recalledMessagesContent': p.recalledMessagesContent,
   'recalledMessageChunks': p.recalledMessageChunks
@@ -189,6 +192,9 @@ PromptPayload deserializePayload(Map<String, dynamic> json) {
             LedgerPromptInjectionMode.disabled
         ? null
         : json['studioSessionStateContent'] as String?,
+    gameTime: json['gameTime'] as String?,
+    gameDate: json['gameDate'] as String?,
+    gameDay: json['gameDay'] as String?,
     characterKnowledgeContent:
         _decodedLedgerPolicy(json).effectiveMode ==
             LedgerPromptInjectionMode.disabled

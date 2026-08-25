@@ -10,6 +10,7 @@ import '../models/preset.dart';
 import '../models/chat_message.dart';
 import '../models/lorebook.dart';
 import 'macro_engine.dart';
+import 'game_time.dart';
 import 'history_assembler.dart';
 import 'context_calculator.dart';
 import 'lorebook_scanner.dart';
@@ -195,6 +196,9 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
     arcContent: payload.arcContent,
     entitiesContent: payload.entitiesContent,
     studioSessionState: payload.studioSessionStateContent,
+    gameTime: payload.gameTime,
+    gameDate: payload.gameDate,
+    gameDay: payload.gameDay,
   );
 
   var currentSessionVars = Map<String, String>.from(payload.sessionVars);
@@ -863,6 +867,11 @@ PromptResult _assembleMessages({
       calculator: calculator,
       lorebookReserve: lorebookReserve,
       vectorLoreTokens: vectorLoreTokens,
+      gameTime: GameTimeState(
+        time: payload.gameTime,
+        date: payload.gameDate,
+        day: int.tryParse(payload.gameDay ?? ''),
+      ),
     );
     breakdown = result.breakdown;
     finalMemorySelection = result.finalMemorySelection;

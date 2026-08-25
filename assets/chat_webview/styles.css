@@ -558,6 +558,23 @@
 .reasoning-arrow { transition: transform 0.3s ease; }
 .msg-reasoning.collapsed .reasoning-arrow { transform: rotate(-90deg); }
 
+/* ============================================================
+ * In-game clock (ledger-stamped game time between reasoning and body)
+ * ============================================================ */
+.msg-game-time {
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-gray);
+  background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 3px 10px;
+  margin-bottom: 6px;
+  align-self: flex-start;
+  user-select: none;
+}
+
 .msg-studio-outputs {
   display: flex;
   flex-direction: column;

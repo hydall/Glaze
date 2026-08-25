@@ -159,6 +159,9 @@ class ChatMessageSync {
       // reload from DB.
       final genTimeChanged = o.genTime != n.genTime;
       final tokensChanged = o.tokens != n.tokens;
+      // The ledger stamps the game clock onto the message after the turn,
+      // post-bubble-render — the same badge-style update path as genTime.
+      final timeChanged = o.time != n.time;
 
       final needsUpdate =
           contentChanged ||
@@ -174,7 +177,8 @@ class ChatMessageSync {
           greetingChanged ||
           studioOutputsChanged ||
           genTimeChanged ||
-          tokensChanged;
+          tokensChanged ||
+          timeChanged;
 
       if (needsUpdate) {
         await bridge.updateMessage(n);

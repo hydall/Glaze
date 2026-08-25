@@ -21,6 +21,7 @@ import '../state/memory_settings_provider.dart';
 import '../state/summary_providers.dart';
 import 'memory_injection_service.dart';
 import 'memory_retrieval_mode.dart';
+import 'game_time.dart';
 import 'message_recall_service.dart';
 import 'memory_selector.dart';
 import 'generation_context_inputs.dart';
@@ -497,6 +498,9 @@ class PromptPayloadBuilder {
       session: session,
       context: effectiveContext,
     );
+    final gameTimeState = GameTimeState.fromTrackers(
+      ledgerTrackers ?? const <Tracker>[],
+    );
     return GenerationContextInputs(
       character: character,
       persona: persona,
@@ -532,6 +536,9 @@ class PromptPayloadBuilder {
       arcContent: arcContent,
       entitiesContent: entitiesContent,
       studioSessionStateContent: studioSessionStateContent,
+      gameTime: gameTimeState.time,
+      gameDate: gameTimeState.date,
+      gameDay: gameTimeState.day?.toString(),
       characterKnowledgeContent: characterKnowledgeContent,
       recalledMessagesContent: recalledMessagesContent,
       recalledMessageChunks: recalledMessageChunks,
@@ -686,6 +693,9 @@ class PromptPayloadBuilder {
       session: session,
       context: resolvedContext,
     );
+    final gameTimeState = GameTimeState.fromTrackers(
+      projection?.trackers ?? const <Tracker>[],
+    );
     return PromptPayload(
       character: effectiveCharacter,
       persona: persona,
@@ -721,6 +731,9 @@ class PromptPayloadBuilder {
       arcContent: arcContent,
       entitiesContent: entitiesContent,
       studioSessionStateContent: materialized?.studioSessionStateContent,
+      gameTime: gameTimeState.time,
+      gameDate: gameTimeState.date,
+      gameDay: gameTimeState.day?.toString(),
       characterKnowledgeContent: materialized?.characterKnowledgeContent,
       recalledMessagesContent: recalledMessagesContent,
       recalledMessageChunks: const [],

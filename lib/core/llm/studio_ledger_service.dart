@@ -1801,7 +1801,19 @@ Never append history to a state value. Keep each value under 1200 characters.
 Never write npc:*.knowledge or relationship:*.knowledge; durable propositions belong in knowledgeFacts.
 Relationship trust/status/attitude and card overrides are current state and must be updated with set whenever they change.
 Reuse an exact key from <current_state> or <existing_keys> for the same fact; update it with set instead of creating a synonym key.
-Allowed eventState: planned, suggested, threatened, attempted, completed, failed, cancelled, unknown (or omit).''';
+Allowed eventState: planned, suggested, threatened, attempted, completed, failed, cancelled, unknown (or omit).
+
+Game clock (world:time, world:date, world:day):
+- Maintain world:time as the current in-game time of day in 24h HH:MM format.
+- When the final response or chat implies elapsed time, advance world:time to the
+  new in-game time based on how much time the narrated events would take.
+- The game clock only moves FORWARD. Never rewind time; flashbacks and memories
+  stay in prose without touching world:time. When time passes midnight, advance
+  world:day (day 0 is the first day of the story) and world:date when a calendar
+  date is tracked.
+- Do not invent time skips that the narrative does not support. When the scene
+  clearly continues immediately, keep world:time unchanged or move it by only a
+  few minutes.''';
 
     return const StudioAuxPromptAssembler().assemble(
       blocks: ledgerBlocks,

@@ -124,7 +124,15 @@ class MemoryDraftGenerationController {
     }
 
     final historyText = draftMessages
-        .map((m) => '${m.role}: ${m.content}')
+        .map((m) {
+          // Ledger-stamped game clock travels with the transcript so memory
+          // entries stay time-anchored.
+          final gameTime = m.time?.trim();
+          final timePrefix = gameTime == null || gameTime.isEmpty
+              ? ''
+              : '[$gameTime] ';
+          return '${m.role}: $timePrefix${m.content}';
+        })
         .join('\n\n');
     final cancelToken = CancelToken();
     _cancelTokens[draftId] = cancelToken;

@@ -67,6 +67,12 @@ class PromptPayload {
   /// state has been committed for this session yet.
   final String? studioSessionStateContent;
 
+  /// In-game clock from ledger `world:*` trackers for `{{gametime}}` /
+  /// `{{gamedate}}` / `{{gameday}}` macros. Null when no clock is tracked.
+  final String? gameTime;
+  final String? gameDate;
+  final String? gameDay;
+
   /// Scoped atomic character facts committed by Studio Ledger. This is a
   /// separate prompt layer and never mutates the base card payload.
   final String? characterKnowledgeContent;
@@ -159,6 +165,9 @@ class PromptPayload {
     this.arcContent,
     this.entitiesContent,
     this.studioSessionStateContent,
+    this.gameTime,
+    this.gameDate,
+    this.gameDay,
     this.characterKnowledgeContent,
     this.recalledMessagesContent,
     this.recalledMessageChunks = const [],
@@ -258,6 +267,9 @@ class PromptPayload {
       studioSessionStateContent: materialized != null
           ? materialized.studioSessionStateContent
           : (disabled ? null : inputs.studioSessionStateContent),
+      gameTime: inputs.gameTime,
+      gameDate: inputs.gameDate,
+      gameDay: inputs.gameDay,
       characterKnowledgeContent: materialized != null
           ? materialized.characterKnowledgeContent
           : (disabled ? null : inputs.characterKnowledgeContent),
@@ -319,6 +331,9 @@ class PromptPayload {
     arcContent: materialization.arcContent,
     entitiesContent: entitiesContent,
     studioSessionStateContent: materialization.studioSessionStateContent,
+    gameTime: gameTime,
+    gameDate: gameDate,
+    gameDay: gameDay,
     characterKnowledgeContent: materialization.characterKnowledgeContent,
     recalledMessagesContent: recalledMessagesContent,
     recalledMessageChunks: recalledMessageChunks,

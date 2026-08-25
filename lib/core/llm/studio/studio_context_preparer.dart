@@ -6,6 +6,7 @@ import '../../utils/cast_helpers.dart';
 import '../../models/ledger_prompt_injection_mode.dart';
 import '../../models/ledger_prompt_injection_policy.dart';
 import '../generation_context_inputs.dart';
+import '../game_time.dart';
 import '../history_assembler.dart';
 import '../macro_engine.dart';
 import '../prompt/lorebook_context_resolver.dart';
@@ -102,6 +103,9 @@ final class StudioContextPreparer {
       arcContent: arcContent,
       entitiesContent: inputs.entitiesContent,
       studioSessionState: studioSessionState,
+      gameTime: inputs.gameTime,
+      gameDate: inputs.gameDate,
+      gameDay: inputs.gameDay,
     );
     final lore = const LorebookContextResolver().resolve(
       history: inputs.history,
@@ -255,7 +259,19 @@ final class StudioContextPreparer {
           ? null
           : '${inputs.summaryPrefix ?? ''}${inputs.summaryContent}',
     );
-    add(StudioContextSlot.memory, memoryHardContent ?? inputs.memoryContent);
+    final gameTimeState = GameTimeState(
+      time: inputs.gameTime,
+      date: inputs.gameDate,
+      day: int.tryParse(inputs.gameDay ?? ''),
+    );
+    // Game-clock macros ({{gametime}} and friends) expand in the packed
+    // memory content so Memory Book entries can anchor to in-game time.
+    add(
+      StudioContextSlot.memory,
+      gameTimeState.expandMacros(
+        memoryHardContent ?? inputs.memoryContent ?? '',
+      ),
+    );
     slots[StudioContextSlot.loreBefore]!.addAll(lore.loreBefore);
     slots[StudioContextSlot.loreAfter]!.addAll(lore.loreAfter);
     add(StudioContextSlot.loreMacro, loreMacroContent);

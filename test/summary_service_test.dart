@@ -200,6 +200,34 @@ void main() {
     expect(llm.prompt, contains('User: Hi'));
   });
 
+  test('ledger-stamped game time travels with the transcript', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.generateSummary(
+      sessionId: 'session',
+      history: const [
+        ChatMessage(id: '1', role: 'user', content: 'Morning.'),
+        ChatMessage(
+          id: '2',
+          role: 'assistant',
+          content: 'She nods.',
+          time: '12.05.2027 · День 0 · 09:15',
+        ),
+      ],
+      apiConfig: const ApiConfig(
+        id: 'api',
+        endpoint: 'https://example.com/v1',
+        apiKey: 'secret',
+        model: 'model',
+      ),
+      customPrompt: 'Context:\n{{history}}',
+    );
+
+    expect(llm.prompt, contains('User: Morning.'));
+    expect(llm.prompt, contains('[12.05.2027 · День 0 · 09:15] She nods.'));
+  });
+
   test('accepts an OpenRouter config with no endpoint', () async {
     final llm = _RecordingAuxLlmClient();
     final service = SummaryService(repo, llm: llm);

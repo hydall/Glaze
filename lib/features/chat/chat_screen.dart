@@ -16,6 +16,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/debug/perf_debug.dart';
+import '../../core/llm/game_time.dart';
 import '../../core/utils/image_src.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../shared/widgets/glaze_spinner.dart';
@@ -25,10 +26,12 @@ import '../../core/state/character_provider.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/memory_settings_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
+import '../../core/state/studio_turn_config_resolver.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart'
     show isDesktopLayout;
 import 'widgets/message_actions.dart';
+import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
 import '../../shared/theme/theme_provider.dart';
@@ -893,6 +896,55 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
           ),
       ],
     );
+  }
+
+  /// Before the first message of a Studio chat with the ledger enabled, offer
+  /// to anchor the ledger game clock (world:time / world:date / world:day).
+  /// Best-effort: any failure or a skipped dialog never blocks the send.
+  Future<void> _maybeSeedGameTime() async {
+    try {
+      final session = widget.state.session;
+      if (session == null) return;
+      if (widget.state.messages.any((m) => m.role == 'user')) return;
+      final turnConfig = await ref
+          .read(studioTurnConfigResolverProvider)
+          .resolve(session.id);
+      if (!turnConfig.enabled || !turnConfig.ledgerEnabled) return;
+      final trackerRepo = ref.read(trackerRepoProvider);
+      final existing = await trackerRepo.get(session.id, GameTimeState.timeKey);
+      if (existing != null && existing.value.trim().isNotEmpty) return;
+      if (!mounted) return;
+      final result = await showDialog<GameTimeSeedResult>(
+        context: context,
+        builder: (_) => const GameTimeSeedDialog(),
+      );
+      if (result == null) return;
+      await trackerRepo.upsertValue(
+        session.id,
+        GameTimeState.timeKey,
+        result.time,
+        scope: 'ledger',
+        provenance: 'game_time_seed',
+      );
+      if (result.date != null) {
+        await trackerRepo.upsertValue(
+          session.id,
+          GameTimeState.dateKey,
+          result.date!,
+          scope: 'ledger',
+          provenance: 'game_time_seed',
+        );
+      }
+      await trackerRepo.upsertValue(
+        session.id,
+        GameTimeState.dayKey,
+        '0',
+        scope: 'ledger',
+        provenance: 'game_time_seed',
+      );
+    } catch (_) {
+      // Seeding is best-effort — never block the first send on it.
+    }
   }
 
   /// Guards message sending behind an explicitly selected persona. When no
@@ -1984,6 +2036,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                         if (text.trim().isEmpty) {
                                           return false;
                                         }
+                                        await _maybeSeedGameTime();
                                         final accepted = await ref
                                             .read(
                                               chatProvider(
@@ -2001,6 +2054,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                         if (text.trim().isEmpty) {
                                           return false;
                                         }
+                                        await _maybeSeedGameTime();
                                         final accepted = await ref
                                             .read(
                                               chatProvider(
@@ -2023,6 +2077,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                             guidanceText,
                                             imageDataUrl,
                                           ) async {
+                                            await _maybeSeedGameTime();
                                             final accepted = await ref
                                                 .read(
                                                   chatProvider(

@@ -3937,8 +3937,13 @@ ALLOWED CURRENT-STATE KEYS:
 - npc:Name.relationship_to_user, attitude_to_user, trust_to_user, boundaries, card_overrides, location, current_emotional_residue, current_goal, persistent_condition
 - relationship:A:B.trust, status, relationship, attitude, boundaries, card_override
 - arc:id.status, title, summary, do_not_reopen, card_override
-- world:location, time, date, active_threats, current_conditions
+- world:location, time, date, day, active_threats, current_conditions
 - scene.present_entities, absent_backstory_entities, immediate_thread, active_tensions
+
+GAME CLOCK:
+- Keep world:time as the current in-game time of day in 24h HH:MM and advance it when narrated events imply elapsed time.
+- The clock only moves FORWARD. Never rewind it; flashbacks and memories stay in prose. Past midnight, advance world:day (day 0 = the first story day) and world:date when a date is tracked.
+- Do not invent time skips the narrative does not support; an immediately continuing scene moves time by only a few minutes.
 
 Return the mandatory <glaze_memory_export> JSON block followed by a compact diagnostic <studio_ledger> block. Never expose either in story prose.''';
 

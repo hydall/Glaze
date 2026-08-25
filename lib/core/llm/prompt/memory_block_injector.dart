@@ -1,5 +1,6 @@
 import '../../models/chat_message.dart';
 import '../context_calculator.dart';
+import '../game_time.dart';
 import '../history_assembler.dart';
 import '../memory_budget.dart';
 import '../memory_diagnostics.dart';
@@ -320,6 +321,7 @@ DeferredMemoryResult finalizeDeferredMemory({
   required ContextCalculator calculator,
   required int lorebookReserve,
   required int vectorLoreTokens,
+  required GameTimeState gameTime,
 }) {
   var breakdown = baseBreakdown;
   final selection = payload.memorySelection!;
@@ -353,8 +355,11 @@ DeferredMemoryResult finalizeDeferredMemory({
 
   if (excerpted.items.isNotEmpty) {
     final rebuilt = resolved.content!;
-    var memoryContent = rebuilt.hardBlockContent;
-    var memoryMacroContent = rebuilt.macroContent;
+    // Game-clock macros in memory entries ({{gametime}} and friends) expand
+    // here so Memory Book content can anchor itself to the current in-game
+    // time without the full macro engine running over entry text.
+    var memoryContent = gameTime.expandMacros(rebuilt.hardBlockContent);
+    var memoryMacroContent = gameTime.expandMacros(rebuilt.macroContent);
     final replacedMacro = replaceDeferredMemoryPlaceholders(
       messages,
       rebuilt.macroContent,
