@@ -134,6 +134,55 @@ void main() {
     expect(recovered.claim?.selectedInputJson, claimed.selectedInputJson);
   });
 
+  test(
+    'an unreproducible failed claim is dropped and replaced fresh',
+    () async {
+      final dead = (await evolution.claim(
+        sessionId: 'session',
+        ownerId: 'owner',
+        now: 10,
+        leaseSeconds: 30,
+      )).claim!;
+      await db.customStatement(
+        'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+        [
+          jsonEncode([..._messages, _nextAssistant, _nextUser]),
+          'session',
+        ],
+      );
+      // A restart attempt fails to rebuild the snapshot from the changed
+      // chat and marks the claim failed with durable checkpoints.
+      expect(
+        await evolution.markWriterFailed(
+          claimId: dead.row.id,
+          ownerId: 'owner',
+          now: 11,
+          code: 'snapshotUnavailable',
+          detail: 'inputHashMismatch',
+        ),
+        isTrue,
+      );
+
+      // The dead claim no longer blocks the lane: the next claim attempt exits
+      // the restart loop by dropping it and selecting a fresh snapshot.
+      final fresh = await evolution.claim(
+        sessionId: 'session',
+        ownerId: 'automatic',
+        now: 13,
+        leaseSeconds: 30,
+      );
+      expect(fresh.kind, 'claimed');
+      expect(fresh.claim!.row.id, isNot(dead.row.id));
+      expect(fresh.claim!.selectedInputJson, isNot(dead.selectedInputJson));
+      expect(
+        await (db.select(
+          db.cardEvolutionClaims,
+        )..where((row) => row.id.equals(dead.row.id))).get(),
+        isEmpty,
+      );
+    },
+  );
+
   test('a changed chat snapshot makes a claimed lease stale', () async {
     final claim = (await evolution.claim(
       sessionId: 'session',

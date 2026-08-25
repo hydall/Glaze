@@ -304,14 +304,33 @@ class CardEvolutionRepo {
               ..limit(1))
             .getSingleOrNull();
     if (failed != null) {
-      final selected = failed.selectedInputJson;
-      return CardEvolutionClaimOutcome(
-        'failed',
-        selected == null || computeHash(selected) != failed.inputHash
-            ? null
-            : CardEvolutionClaim(row: failed, selectedInputJson: selected),
-        failed.failureCode,
-      );
+      // Validate the failed snapshot the way a real restart would: the stored
+      // input must still reproduce from the current chat and canon. Only a
+      // reproducible claim is recoverable through the manual recovery UI.
+      final selection = await _selectedInputForClaim(failed);
+      final selected = selection.json;
+      if (selected != null) {
+        return CardEvolutionClaimOutcome(
+          'failed',
+          CardEvolutionClaim(row: failed, selectedInputJson: selected),
+          failed.failureCode,
+        );
+      }
+      // The failed snapshot can no longer be reproduced (chat, canon, or the
+      // context format moved on), so no restart can ever succeed. Exit the
+      // restart loop instead of blocking the lane forever: drop the dead
+      // claim with its call chain and select a fresh snapshot below.
+      await (db.delete(
+        db.cardEvolutionWriterCalls,
+      )..where((row) => row.claimId.equals(failed.id))).go();
+      final deleted =
+          await (db.delete(db.cardEvolutionClaims)
+                ..where((row) => row.id.equals(failed.id))
+                ..where((row) => row.status.equals('failed')))
+              .go();
+      if (deleted != 1) {
+        return const CardEvolutionClaimOutcome('busy');
+      }
     }
     final selection = await _selectInput(
       sessionId,
@@ -437,7 +456,28 @@ class CardEvolutionRepo {
     )..where((item) => item.id.equals(claimId))).getSingle();
     final selected = row.selectedInputJson;
     if (selected == null || computeHash(selected) != row.inputHash) {
-      throw StateError('Stored Card Evolution input is invalid');
+      // The stored input is corrupt: put the claim back into its failed state
+      // so the recovery UI keeps showing it instead of stranding a claimed
+      // lease that can never produce a snapshot.
+      await (db.update(db.cardEvolutionClaims)..where(
+            (row) => row.id.equals(claimId) & row.ownerId.equals(ownerId),
+          ))
+          .write(
+            CardEvolutionClaimsCompanion(
+              status: const Value('failed'),
+              leaseExpiresAt: const Value(0),
+              failureCode: const Value('inputHashMismatch'),
+              failureDetail: const Value(
+                'Stored Card Evolution input is invalid',
+              ),
+              failedAt: Value(now),
+            ),
+          );
+      return const CardEvolutionClaimOutcome(
+        'stale',
+        null,
+        'inputHashMismatch',
+      );
     }
     return CardEvolutionClaimOutcome(
       'claimed',

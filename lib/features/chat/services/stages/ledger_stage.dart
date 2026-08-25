@@ -346,6 +346,7 @@ class LedgerStage {
                   'canonUnavailable',
                   'fieldMismatch',
                   'unexpectedFailure',
+                  'failed',
                 }.contains(rewriteOutcome.kind);
                 final detail = rewriteOutcome.kind == 'persisted'
                     ? 'Card Rewriter created a review proposal'

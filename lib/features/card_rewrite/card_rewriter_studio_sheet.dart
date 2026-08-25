@@ -734,6 +734,7 @@ class _WriterCallTile extends StatelessWidget {
       leading: Icon(switch (call.status) {
         'completed' => Icons.check_circle_outline,
         'failed' => Icons.error_outline,
+        'prepared' => Icons.pause_circle_outline,
         _ => Icons.hourglass_top,
       }, color: color),
       title: Text(
@@ -843,6 +844,9 @@ String _writerStageLabel(String stage) => switch (stage) {
 String _writerCallStatusLabel(String status) => switch (status) {
   'completed' => 'card_rewriter_studio_status_completed'.tr(),
   'failed' => 'card_rewriter_studio_status_failed'.tr(),
+  // Recovery chains only render failed claims, so a prepared call is always
+  // a checkpoint of an interrupted attempt — never an in-flight request.
+  'prepared' => 'card_rewriter_studio_status_prepared'.tr(),
   _ => 'card_rewriter_studio_status_pending'.tr(),
 };
 

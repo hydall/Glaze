@@ -2640,6 +2640,7 @@
   "card_rewriter_studio_status_generating": "Генерация",
   "card_rewriter_studio_status_completed": "Завершён",
   "card_rewriter_studio_status_pending": "Ожидает",
+  "card_rewriter_studio_status_prepared": "Подготовлен (не отправлялся)",
   "card_rewriter_studio_stage_history_consolidation": "Консолидация истории",
   "card_rewriter_studio_stage_card_writer": "Писатель карточки",
   "card_rewriter_studio_stage_card_repair": "Исправление карточки",

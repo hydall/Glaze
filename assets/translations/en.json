@@ -2611,6 +2611,7 @@
   "card_rewriter_studio_status_generating": "Generating",
   "card_rewriter_studio_status_completed": "Completed",
   "card_rewriter_studio_status_pending": "Pending",
+  "card_rewriter_studio_status_prepared": "Prepared (never sent)",
   "card_rewriter_studio_stage_history_consolidation": "History consolidation",
   "card_rewriter_studio_stage_card_writer": "Card writer",
   "card_rewriter_studio_stage_card_repair": "Card repair",
