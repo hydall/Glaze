@@ -56,6 +56,15 @@ jobs:
         # *.g.dart / *.freezed.dart are gitignored, so they must be built here.
         run: dart run build_runner build --delete-conflicting-outputs
 
+      - name: Generate localization keys
+        # lib/generated/locale_keys.g.dart comes from easy_localization's own
+        # generator, not build_runner, and is gitignored like the rest of the
+        # generated code. Without this step the localization contract test has
+        # no file to check the translation keys against.
+        run: >-
+          dart run easy_localization:generate
+          -S assets/translations -f keys -o locale_keys.g.dart
+
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
