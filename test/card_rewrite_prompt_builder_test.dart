@@ -162,31 +162,25 @@ void main() {
     },
   );
 
-  test(
-    'prompt describes the operation snapshot shape, hash rule, and scope grammar',
-    () {
-      final prompt = buildPrompt();
-      expect(
-        prompt,
-        contains(
-          '"patches":[{"scopeKey":"...","anchor":"...",'
-          '"anchorSha256":"...","value":"..."}]',
-        ),
-      );
-      expect(prompt, contains('"affectedTrackerKeys":[]'));
-      expect(prompt, contains('"chatSessionId":null'));
-      expect(prompt, contains('- "field" MUST be exactly "description".'));
-      expect(prompt, contains('- "patches" MUST be a non-empty list'));
-      expect(prompt, contains('npc:<subject>'));
-      expect(prompt, contains('relationship:<subject-a>:<subject-b>'));
-      expect(prompt, contains('always contains both subjects'));
-      expect(prompt, contains('arc:<subject>'));
-      expect(prompt, contains('world:<subject>'));
-      expect(prompt, contains('scene.<subject>'));
-      expect(prompt, contains('lowercase hex SHA-256 of the anchor'));
-      expect(prompt, contains('EXACTLY ONCE'));
-    },
-  );
+  test('prompt describes the operation snapshot shape and scope grammar', () {
+    final prompt = buildPrompt();
+    expect(
+      prompt,
+      contains('"patches":[{"scopeKey":"...","anchor":"...","value":"..."}]'),
+    );
+    expect(prompt, contains('"affectedTrackerKeys":[]'));
+    expect(prompt, contains('"chatSessionId":null'));
+    expect(prompt, contains('- "field" MUST be exactly "description".'));
+    expect(prompt, contains('- "patches" MUST be a non-empty list'));
+    expect(prompt, contains('npc:<subject>'));
+    expect(prompt, contains('relationship:<subject-a>:<subject-b>'));
+    expect(prompt, contains('always contains both subjects'));
+    expect(prompt, contains('arc:<subject>'));
+    expect(prompt, contains('world:<subject>'));
+    expect(prompt, contains('scene.<subject>'));
+    expect(prompt, contains('EXACTLY ONCE'));
+    expect(prompt, isNot(contains('anchorSha256')));
+  });
 
   test(
     'prompt forbids macro expansion and demands literal {{...}} preservation',

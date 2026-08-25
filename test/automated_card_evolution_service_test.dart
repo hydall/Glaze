@@ -102,7 +102,13 @@ void main() {
     final claim = await fixture.db
         .select(fixture.db.cardEvolutionClaims)
         .getSingle();
-    expect(claim.leaseExpiresAt - claim.createdAt, 600);
+    // The writer renews the lease right before the model call, so a second
+    // boundary tick between claim creation and renewal legitimately extends
+    // the observed span beyond the base 600s lease.
+    expect(
+      claim.leaseExpiresAt - claim.createdAt,
+      inInclusiveRange(600, 660),
+    );
     final operations = await fixture.db
         .select(fixture.db.rewriteOperations)
         .get();

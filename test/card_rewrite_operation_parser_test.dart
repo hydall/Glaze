@@ -290,22 +290,38 @@ void main() {
     );
   });
 
-  test('rejects a mismatched anchorSha256 by recomputing the hash', () {
-    final payload = validPayload()
-      ..['patches'] = [validPatch()..['anchorSha256'] = 'not-the-real-hash'];
+  test('recomputes the anchor hash and tolerates missing or bogus values', () {
+    // The model contract no longer asks for anchorSha256; when absent the
+    // parser computes it, and a fabricated value is overwritten.
+    final missing = validPayload()
+      ..['patches'] = [validPatch()..remove('anchorSha256')];
+    final missingResult = parsePayload(missing);
+    expect(missingResult.isSuccess, isTrue, reason: missingResult.detail);
     expect(
-      rejectionOf(payload),
-      CardRewriteOperationParseRejection.staleAnchorHash,
+      missingResult.snapshot!.patches.single.anchorSha256,
+      CardCanonicalizer.scalarSha256(anchor),
     );
-    // The recomputed hash of some other text is equally rejected.
-    final foreign = validPayload()
-      ..['patches'] = [
-        validPatch()
-          ..['anchorSha256'] = CardCanonicalizer.scalarSha256('other text'),
-      ];
+
+    for (final bogus in [
+      'not-the-real-hash',
+      CardCanonicalizer.scalarSha256('other text'),
+    ]) {
+      final payload = validPayload()
+        ..['patches'] = [validPatch()..['anchorSha256'] = bogus];
+      final result = parsePayload(payload);
+      expect(result.isSuccess, isTrue, reason: bogus);
+      expect(
+        result.snapshot!.patches.single.anchorSha256,
+        CardCanonicalizer.scalarSha256(anchor),
+      );
+    }
+
+    // A non-string value is still structurally rejected.
+    final nonString = validPayload()
+      ..['patches'] = [validPatch()..['anchorSha256'] = 42];
     expect(
-      rejectionOf(foreign),
-      CardRewriteOperationParseRejection.staleAnchorHash,
+      rejectionOf(nonString),
+      CardRewriteOperationParseRejection.malformedPatch,
     );
   });
 
@@ -661,6 +677,54 @@ void main() {
       expect(result, hasLength(1));
       expect(result!.single.entryId, 'district');
     });
+
+    test(
+      'accepts a lorebook batch with fabricated or missing anchor hashes',
+      () {
+        // Regression for the live lorebook_writer failure: the model cannot
+        // compute SHA-256 and fabricated digests, so the whole batch was
+        // rejected as "not a valid operation batch".
+        const content = 'The district is dangerous.';
+        final operations = [
+          {
+            'lorebookId': 'book',
+            'entryId': 'district',
+            'baseContent': content,
+            'expectedContentHash': CardCanonicalizer.scalarSha256(content),
+            'patches': [
+              {
+                'anchor': 'dangerous',
+                'anchorSha256': '3f7c1e2a5b8d9046e1a7c3b5d8f2e0a4',
+                'value': 'dangerous but lively',
+              },
+            ],
+          },
+          {
+            'lorebookId': 'book',
+            'entryId': 'harbor',
+            'baseContent': content,
+            'expectedContentHash': CardCanonicalizer.scalarSha256(content),
+            'patches': [
+              {'anchor': 'dangerous', 'value': 'dangerous but lively'},
+            ],
+          },
+        ];
+
+        final result = CardRewriteOperationParser.parseLorebookEvolutionBatch(
+          jsonEncode({'operations': operations}),
+        );
+
+        expect(result, hasLength(2));
+        expect(
+          result!.first.patches.single.anchorSha256,
+          CardCanonicalizer.scalarSha256('dangerous'),
+        );
+        expect(
+          result.last.patches.single.anchorSha256,
+          CardCanonicalizer.scalarSha256('dangerous'),
+        );
+      },
+    );
   });
 
   group('macro preservation round-trip', () {

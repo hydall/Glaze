@@ -236,6 +236,8 @@ Map<String, dynamic> finalizeMemoryCoverage(
     'excerptTokensPerChunk': tokensPerChunk,
     'excerptChunksPerEntry': chunksPerEntry,
     'entryIds': excerpted.entries.map((e) => e.id).toList(growable: false),
+    'candidatesTotal': selection.allScores.length,
+    'excludedBySourceWindow': selection.excludedBySourceWindow,
     'budgetTrimmed': excerpted.budgetTrimmed,
     'memoryMacroMissing': memoryMacroMissing,
     'diagnostics': diagnostics,

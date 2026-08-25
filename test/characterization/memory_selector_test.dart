@@ -65,6 +65,45 @@ void main() {
     });
 
     test(
+      'keeps partially visible entries and excludes only fully visible ones',
+      () {
+        final entries = [
+          _entry(
+            id: 'partial',
+            title: 'Bridge collapse',
+            content: 'episode about the bridge',
+            keys: const ['bridge'],
+            messageIds: const ['m1', 'm2', 'm3'],
+            createdAt: 1000,
+          ),
+          _entry(
+            id: 'full',
+            title: 'Harbor fire',
+            content: 'episode about the harbor',
+            keys: const ['harbor'],
+            messageIds: const ['m2', 'm3'],
+            createdAt: 1100,
+          ),
+        ];
+        final result = MemorySelector.select(
+          MemorySelectionInput(
+            entries: entries,
+            visibleMessageIds: const {'m2', 'm3'},
+            maxInjectedEntries: 5,
+            sourceWindowExclusion: true,
+          ),
+        );
+        // 'partial' lost m1 to history rotation, so its recall is still
+        // needed; 'full' is entirely visible in the prompt already.
+        expect(result.entries.map((e) => e.id), ['partial']);
+        expect(result.excludedBySourceWindow, 1);
+        final full = result.allScores.firstWhere((s) => s.entry.id == 'full');
+        expect(full.excludedBySourceWindow, isTrue);
+        expect(full.exclusionReason, 'source_visible_in_prompt');
+      },
+    );
+
+    test(
       'sourceWindowExclusion: false keeps all candidates even when overlap',
       () {
         final entries = [

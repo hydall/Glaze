@@ -47,8 +47,8 @@ abstract final class CardRewriterPromptBuilder {
       ..writeln(
         'Respond with exactly one JSON object and nothing else: '
         '{"operations":[{"field":"description|personality|scenario",'
-        '"patches":[{"scopeKey":"...","anchor":"...",'
-        '"anchorSha256":"...","value":"..."}],"transition":'
+        '"patches":[{"scopeKey":"...","anchor":"...","value":"..."}],'
+        '"transition":'
         '{"id":"...","scopeKey":"...","canonicalClaim":"...",'
         '"promotionDestination":"...","affectedTrackerKeys":[],'
         '"factIds":[],"chatSessionId":null}}]}.',
@@ -115,9 +115,7 @@ abstract final class CardRewriterPromptBuilder {
         'transliterate, case-fold, or invent an identity.',
       )
       ..writeln(
-        '- Each anchor must occur exactly once in its current field and its '
-        'anchorSha256 must be present as a string; the application recomputes '
-        'it from the anchor bytes. '
+        '- Each anchor must occur exactly once in its current field. '
         'Empty anchors are forbidden. Use a meaningful literal phrase of at '
         'least 12 code units, never an isolated word, number, punctuation mark, '
         'or identifier. Never '
@@ -289,8 +287,8 @@ NPC-owned facts may patch only an existing supplied injected lorebook entry. Mai
 
 # Response format
 Respond with exactly one JSON object and nothing else:
-{"operations":[{"lorebookId":"...","entryId":"...","baseContent":"...","expectedContentHash":"...","patches":[{"anchor":"...","anchorSha256":"...","value":"..."}]}]}
-Each target may occur at most once. Return an empty "operations" list ONLY when no supported durable update belongs in any supplied target. A Ledger fact is accepted evidence, not a reason to omit an eligible lorebook patch. baseContent and expectedContentHash must exactly echo the supplied target; when a target has no baseContent field, echo its content as baseContent. Each anchor must occur exactly once in its supplied current content; anchorSha256 is its lowercase SHA-256 UTF-8 hash. Use smallest exact fragment replacements, never rewrite an entire entry. Preserve every {{...}} macro token byte-for-byte.
+{"operations":[{"lorebookId":"...","entryId":"...","baseContent":"...","expectedContentHash":"...","patches":[{"anchor":"...","value":"..."}]}]}
+Each target may occur at most once. Return an empty "operations" list ONLY when no supported durable update belongs in any supplied target. A Ledger fact is accepted evidence, not a reason to omit an eligible lorebook patch. baseContent and expectedContentHash must exactly echo the supplied target; when a target has no baseContent field, echo its content as baseContent. Each anchor must occur exactly once in its supplied current content. Use smallest exact fragment replacements, never rewrite an entire entry. Preserve every {{...}} macro token byte-for-byte.
 
 # Instruction
 $instruction''';
@@ -334,7 +332,7 @@ $instruction''';
       )
       ..writeln(
         '{"field":"${field.wireName}","patches":[{"scopeKey":"...","anchor":"...",'
-        '"anchorSha256":"...","value":"..."}],"transition":{"id":"...","scopeKey":"...",'
+        '"value":"..."}],"transition":{"id":"...","scopeKey":"...",'
         '"canonicalClaim":"...","promotionDestination":"...","affectedTrackerKeys":[],'
         '"factIds":[],"chatSessionId":null}}',
       )
@@ -342,7 +340,7 @@ $instruction''';
       ..writeln('- "field" MUST be exactly "${field.wireName}".')
       ..writeln(
         '- "patches" MUST be a non-empty list of objects with exactly the '
-        'keys scopeKey, anchor, anchorSha256, value.',
+        'keys scopeKey, anchor, value.',
       )
       ..writeln(
         '- "scopeKey" MUST parse as one of npc:<subject>, '
@@ -355,11 +353,7 @@ $instruction''';
         '- "anchor" MUST be a literal fragment of the current '
         '"${field.wireName}" text that occurs there EXACTLY ONCE; each anchor '
         'is replaced by its "value". If and only if the current field is empty, '
-        'use an empty anchor with its SHA-256 to initialize it.',
-      )
-      ..writeln(
-        '- "anchorSha256" MUST be the lowercase hex SHA-256 of the anchor\'s '
-        'UTF-8 bytes. The receiver recomputes it and rejects any mismatch.',
+        'use an empty anchor to initialize it.',
       )
       ..writeln(
         '- "transition.id", "transition.canonicalClaim", and '

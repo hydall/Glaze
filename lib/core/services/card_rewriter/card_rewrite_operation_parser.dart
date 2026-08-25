@@ -198,7 +198,6 @@ abstract final class CardRewriteOperationParser {
         jsonEncode(rawOperation),
         expectedField: field,
         allowEmptyAnchor: false,
-        recomputeAnchorHash: true,
       );
       if (parsed.snapshot == null) {
         final reason = parsed.rejection?.name ?? 'unknown rejection';
@@ -212,6 +211,12 @@ abstract final class CardRewriteOperationParser {
   }
 
   /// Parses the separate writer lane for session-local lorebook patches.
+  ///
+  /// An LLM cannot compute SHA-256 digests, so the model contract no longer
+  /// asks for `anchorSha256`; any model-supplied value is overwritten with
+  /// the recomputed hash before structural validation. The apply layer
+  /// remains the final authority and re-validates anchors against live
+  /// content.
   static List<LorebookRewriteOperationSnapshot>? parseLorebookEvolutionBatch(
     String output,
   ) {
@@ -228,10 +233,23 @@ abstract final class CardRewriteOperationParser {
       final targets = <String>{};
       for (final rawOperation in decoded['operations'] as List) {
         if (rawOperation is! Map) return null;
-        final snapshot = RewriteOperationSnapshotCodec.tryDecode({
+        final normalized = <String, Object?>{
           'target': 'lorebook',
           ...Map<String, Object?>.from(rawOperation),
-        });
+        };
+        final patchesValue = normalized['patches'];
+        if (patchesValue is! List) return null;
+        final patches = <Map<String, Object?>>[];
+        for (final rawPatch in patchesValue) {
+          if (rawPatch is! Map) return null;
+          final patch = Map<String, Object?>.from(rawPatch);
+          final anchor = patch['anchor'];
+          if (anchor is! String) return null;
+          patch['anchorSha256'] = CardCanonicalizer.scalarSha256(anchor);
+          patches.add(patch);
+        }
+        normalized['patches'] = patches;
+        final snapshot = RewriteOperationSnapshotCodec.tryDecode(normalized);
         if (snapshot is! LorebookRewriteOperationSnapshot ||
             !targets.add('${snapshot.lorebookId}\u0000${snapshot.entryId}')) {
           return null;
@@ -248,7 +266,6 @@ abstract final class CardRewriteOperationParser {
     String output, {
     required CardRewriteField expectedField,
     bool allowEmptyAnchor = false,
-    bool recomputeAnchorHash = false,
   }) {
     final raw = extractJsonObject(output);
     if (raw == null) {
@@ -334,11 +351,11 @@ abstract final class CardRewriteOperationParser {
       final value = rawPatch['value'];
       if (scopeKey is! String ||
           anchor is! String ||
-          anchorSha256 is! String ||
+          anchorSha256 != null && anchorSha256 is! String ||
           value is! String) {
         return const CardRewriteOperationParseResult.failure(
           CardRewriteOperationParseRejection.malformedPatch,
-          'patch members scopeKey, anchor, anchorSha256, value must be strings',
+          'patch members scopeKey, anchor, value must be strings',
         );
       }
       final canonicalScopeKey = _canonicalScopeKey(scopeKey);
@@ -353,12 +370,11 @@ abstract final class CardRewriteOperationParser {
           CardRewriteOperationParseRejection.emptyAnchor,
         );
       }
+      // The model cannot compute SHA-256 digests, so the instruction no
+      // longer asks for anchorSha256: any supplied value is advisory and
+      // the hash is always recomputed here. Exact live-anchor checks on
+      // the apply side remain the real safety boundary.
       final computedAnchorHash = CardCanonicalizer.scalarSha256(anchor);
-      if (!recomputeAnchorHash && computedAnchorHash != anchorSha256) {
-        return const CardRewriteOperationParseResult.failure(
-          CardRewriteOperationParseRejection.staleAnchorHash,
-        );
-      }
       if (!AnchoredScalarPatchValidator.preservesMacroTokens(anchor, value)) {
         return const CardRewriteOperationParseResult.failure(
           CardRewriteOperationParseRejection.macroTokensChanged,
@@ -370,9 +386,7 @@ abstract final class CardRewriteOperationParser {
           scopeKey: canonicalScopeKey,
           field: field,
           anchor: anchor,
-          // The automated batch is still bounded by exact live-anchor checks,
-          // but an LLM cannot reliably produce a cryptographic digest.
-          anchorSha256: recomputeAnchorHash ? computedAnchorHash : anchorSha256,
+          anchorSha256: computedAnchorHash,
           value: value,
         ),
       );
