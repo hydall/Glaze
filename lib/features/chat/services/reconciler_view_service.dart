@@ -51,12 +51,14 @@ final class ReconcilerViewSnapshot {
     required this.runs,
     required this.debugRuns,
     required this.checkpoint,
+    required this.checkpointEndMessageOrdinal,
   });
 
   final ReconciliationRunIntegrity integrity;
   final List<ReconciliationRunView> runs;
   final List<LedgerDebugRunRow> debugRuns;
   final LedgerReconciliationCheckpoint? checkpoint;
+  final int? checkpointEndMessageOrdinal;
 
   bool get chainIsValid => integrity is ReconciliationRunValid;
 }
@@ -116,6 +118,9 @@ class ReconcilerViewService {
     return ReconcilerViewSnapshot(
       integrity: integrity,
       checkpoint: checkpoint,
+      checkpointEndMessageOrdinal: checkpoint == null
+          ? null
+          : messageOrdinals[checkpoint.endMessageId],
       debugRuns: debugRows,
       runs: [
         for (final row in physical)

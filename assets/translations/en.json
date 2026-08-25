@@ -2373,7 +2373,7 @@
   "agent_ops_current_commits": "{count} current commits",
   "agent_ops_chain_integrity_failure": "Reconciliation chain integrity failure",
   "agent_ops_no_checkpoint": "No reconciliation checkpoint yet.",
-  "agent_ops_checkpoint": "Checkpoint: {count} messages, ending at {messageId}",
+  "agent_ops_checkpoint": "Checkpoint: {count} messages, ending at message {messageNumber}",
   "agent_ops_run_reconciliation": "Run reconciliation",
   "agent_ops_rerun_ledger": "Rerun latest Ledger",
   "agent_ops_commits": "Commits",

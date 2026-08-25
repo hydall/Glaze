@@ -34,6 +34,17 @@ void main() {
       await _seedSession(db);
       final run = _run();
       expect(await runRepo.append(run), isA<ReconciliationRunAppended>());
+      await LedgerReconciliationCheckpointRepo(db).upsert(
+        const LedgerReconciliationCheckpoint(
+          sessionId: 'session',
+          startMessageId: 'a1',
+          endMessageId: 'a2',
+          endSwipeId: 0,
+          endAgentSwipeId: 0,
+          messageIds: ['a1', 'u1', 'a2'],
+          rangeHash: 'range',
+        ),
+      );
       await db.customStatement(
         'INSERT INTO reconciliation_run_invalidations '
         '(session_id, run_id, cause_message_id, reason, created_at) '
@@ -46,6 +57,7 @@ void main() {
       expect(snapshot.runs, hasLength(1));
       expect(snapshot.runs.single.firstMessageOrdinal, 1);
       expect(snapshot.runs.single.lastMessageOrdinal, 3);
+      expect(snapshot.checkpointEndMessageOrdinal, 3);
       expect(
         snapshot.runs.single.status,
         ReconciliationRunViewStatus.invalidated,

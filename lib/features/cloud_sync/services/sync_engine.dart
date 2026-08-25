@@ -351,6 +351,13 @@ class SyncEngine {
         continue;
       }
 
+      // This aggregate is merge-only, but validating it reads the owning chat.
+      // Defer the merge until the ordered pull phase has applied that chat.
+      if (cloudEntry.type == 'reconciliation_state') {
+        pullEntries.add(cloudEntry);
+        continue;
+      }
+
       if (await _entriesSemanticallyEqual(
         cloudEntry,
         localEntry,
@@ -444,6 +451,10 @@ class SyncEngine {
           cloudEntry.deleted == localEntry?.deleted) {
         continue;
       }
+      if (cloudEntry.type == 'reconciliation_state') {
+        pullEntries.add(cloudEntry);
+        continue;
+      }
       if (await _entriesSemanticallyEqual(
         cloudEntry,
         localEntry,
@@ -501,42 +512,55 @@ class SyncEngine {
     void Function(SyncProgress) onProgress, {
     List<SyncManifestEntry> acceptedCloudEntries = const [],
   }) async {
-    final tasks = <Future<void> Function()>[];
     final appliedEntries = <SyncManifestEntry>[];
     var processed = 0;
+    final primaryEntries = pullEntries
+        .where((entry) => entry.type != 'reconciliation_state')
+        .toList(growable: false);
+    final reconciliationEntries = pullEntries
+        .where((entry) => entry.type == 'reconciliation_state')
+        .toList(growable: false);
 
-    for (final entry in pullEntries) {
-      tasks.add(() async {
-        processed++;
-        onProgress(
-          SyncProgress(
-            current: processed,
-            total: tasks.length,
-            message: 'Pulling ${entry.type}:${entry.id}',
-          ),
-        );
-        await _pullEntry(entry);
-        appliedEntries.add(entry);
-      });
-    }
-
-    onProgress(
-      SyncProgress(
-        current: 0,
-        total: tasks.length,
-        message: 'Pulling ${tasks.length} items...',
-      ),
-    );
-
-    List<Object>? taskErrors;
-    if (tasks.isNotEmpty) {
+    Future<List<Object>> applyEntries(List<SyncManifestEntry> entries) async {
+      final tasks = <Future<void> Function()>[];
+      for (final entry in entries) {
+        tasks.add(() async {
+          processed++;
+          onProgress(
+            SyncProgress(
+              current: processed,
+              total: pullEntries.length,
+              message: 'Pulling ${entry.type}:${entry.id}',
+            ),
+          );
+          await _pullEntry(entry);
+          appliedEntries.add(entry);
+        });
+      }
+      if (tasks.isEmpty) return const [];
       final result = await _queue.enqueueAll(
         tasks,
         concurrency: 3,
         delayMs: 300,
       );
-      taskErrors = result.errors;
+      return result.errors;
     }
+
+    onProgress(
+      SyncProgress(
+        current: 0,
+        total: pullEntries.length,
+        message: 'Pulling ${pullEntries.length} items...',
+      ),
+    );
+
+    // Reconciliation anchors are validated against the local chat transcript.
+    // Apply chat and other primary entities first so concurrent pull workers
+    // cannot validate a newer reconciliation chain against an older chat.
+    final taskErrors = <Object>[
+      ...await applyEntries(primaryEntries),
+      ...await applyEntries(reconciliationEntries),
+    ];
 
     await _finalizePull(
       localManifest,
@@ -544,7 +568,7 @@ class SyncEngine {
       acceptedCloudEntries: [...acceptedCloudEntries, ...appliedEntries],
     );
 
-    if (taskErrors != null && taskErrors.isNotEmpty) {
+    if (taskErrors.isNotEmpty) {
       throw SyncQueueAggregateError(taskErrors);
     }
   }

@@ -58,6 +58,7 @@ class FakeCharacterStore implements SyncCharacterStore {
 
 class FakeChatStore implements SyncChatStore {
   final Map<String, ChatSession> data = {};
+  Duration putDelay = Duration.zero;
 
   @override
   Future<List<SessionMetadata>> getAllSessionMetadata() async {
@@ -81,6 +82,7 @@ class FakeChatStore implements SyncChatStore {
 
   @override
   Future<void> put(ChatSession s) async {
+    if (putDelay > Duration.zero) await Future<void>.delayed(putDelay);
     data[s.id] = s;
   }
 
@@ -393,6 +395,7 @@ class FakeReconciliationStateStore implements SyncReconciliationStateStore {
   final Map<String, Map<String, dynamic>> data = {};
   bool discardCollectors = false;
   bool discardAll = false;
+  Future<void> Function(String sessionId)? beforeMerge;
 
   @override
   Future<List<String>> getAllSessionIds() async => data.keys.toList();
@@ -406,6 +409,7 @@ class FakeReconciliationStateStore implements SyncReconciliationStateStore {
     String sessionId,
     Map<String, dynamic> incoming,
   ) async {
+    await beforeMerge?.call(sessionId);
     if (discardAll) {
       data.remove(sessionId);
       return {};
@@ -792,6 +796,90 @@ void main() {
       progressList.firstWhere(
         (p) => p.total > 0 || p.message?.contains('Nothing to push') == true,
       );
+
+  test('pull applies chat before its reconciliation state', () async {
+    final reconciliationStates = FakeReconciliationStateStore();
+    final world = SyncWorld(reconciliationStateStore: reconciliationStates);
+    const sessionId = 'ordered-pull-session';
+    const oldChat = ChatSession(
+      id: sessionId,
+      characterId: 'character',
+      sessionIndex: 0,
+      updatedAt: 1000,
+      messages: [ChatMessage(id: 'a1', role: 'assistant', content: 'Opening')],
+    );
+    const cloudChat = ChatSession(
+      id: sessionId,
+      characterId: 'character',
+      sessionIndex: 0,
+      updatedAt: 2000,
+      messages: [
+        ChatMessage(id: 'a1', role: 'assistant', content: 'Opening'),
+        ChatMessage(id: 'u1', role: 'user', content: 'Question'),
+        ChatMessage(id: 'a2', role: 'assistant', content: 'Answer'),
+      ],
+    );
+    await world.chats.put(oldChat);
+    reconciliationStates.data[sessionId] = {
+      'runs': [
+        {'id': 'local-run', 'ordinal': 1},
+      ],
+      'collectors': <dynamic>[],
+    };
+    await world.engine.pushEntities(onProgress: (_) {});
+    world.chats.putDelay = const Duration(milliseconds: 50);
+    reconciliationStates.beforeMerge = (_) async {
+      if (world.chats.data[sessionId]?.messages.length != 3) {
+        throw StateError('Reconciliation saw a stale chat transcript');
+      }
+    };
+    final statePayload = <String, dynamic>{
+      'runs': [
+        {'id': 'cloud-run', 'ordinal': 1},
+      ],
+      'collectors': <dynamic>[],
+    };
+    final chatEntry = SyncManifestEntry(
+      type: 'chat',
+      id: sessionId,
+      path: cloudPath('chat', sessionId),
+      updatedAt: 2000,
+      hash: SyncSerialization.computeChatMetadataHash(
+        const SessionMetadata(
+          sessionId: sessionId,
+          characterId: 'character',
+          sessionIndex: 0,
+          updatedAt: 2000,
+          messageCount: 3,
+          lastMessageContent: 'Answer',
+          lastMessageTimestamp: 0,
+        ),
+      ),
+    );
+    final stateEntry = SyncManifestEntry(
+      type: 'reconciliation_state',
+      id: sessionId,
+      path: cloudPath('reconciliation_state', sessionId),
+      updatedAt: 2000,
+      hash: SyncSerialization.computeSyncHash(statePayload),
+    );
+    final cloudManifest = SyncManifest(
+      deviceId: 'cloud-device',
+      createdAt: 1,
+      lastSync: 2000,
+      entries: {stateEntry.key: stateEntry, chatEntry.key: chatEntry},
+    );
+    world.cloud.files[stateEntry.path] = jsonEncode(statePayload);
+    world.cloud.files[chatEntry.path] = jsonEncode(cloudChat.toJson());
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      cloudManifest.toJson(),
+    );
+
+    await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    expect(world.chats.data[sessionId], cloudChat);
+    expect(reconciliationStates.data[sessionId], statePayload);
+  });
 
   test(
     'Push pre-merges cloud-only reconciliation state before rebuilding manifest',

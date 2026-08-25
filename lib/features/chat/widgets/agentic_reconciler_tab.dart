@@ -268,7 +268,8 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                               namedArgs: {
                                 'count':
                                     '${data.checkpoint!.messageIds.length}',
-                                'messageId': data.checkpoint!.endMessageId,
+                                'messageNumber':
+                                    '${data.checkpointEndMessageOrdinal ?? '?'}',
                               },
                             ),
                       style: TextStyle(
