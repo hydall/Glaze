@@ -78,6 +78,24 @@ final class CurrentLedgerInjectionPreviewService {
     required String sessionId,
     String? expectedCharacterId,
   }) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await _loadOnce(
+          sessionId: sessionId,
+          expectedCharacterId: expectedCharacterId,
+        );
+      } on _PreviewChanged {
+        if (attempt > 0) {
+          throw StateError('Chat or canon changed while building the preview.');
+        }
+      }
+    }
+  }
+
+  Future<CurrentLedgerInjectionPreview> _loadOnce({
+    required String sessionId,
+    String? expectedCharacterId,
+  }) async {
     final session = await _chatRepo.getById(sessionId);
     if (session == null) throw StateError('Chat session not found.');
     if (expectedCharacterId != null &&
@@ -136,7 +154,7 @@ final class CurrentLedgerInjectionPreviewService {
           stamp: canon.stamp,
         );
     if (freshSession != session || !canonIsCurrent) {
-      throw StateError('Chat or canon changed while building the preview.');
+      throw const _PreviewChanged();
     }
 
     final projection = EffectiveCanonPromptProjection.fromContext(canon);
@@ -181,6 +199,10 @@ final class CurrentLedgerInjectionPreviewService {
       gapFiller: materialize(LedgerPromptInjectionMode.gapFiller),
     );
   }
+}
+
+final class _PreviewChanged implements Exception {
+  const _PreviewChanged();
 }
 
 typedef CurrentLedgerInjectionPreviewKey = ({

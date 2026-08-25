@@ -129,4 +129,43 @@ void main() {
       expect(await revisions.getForCharacter('c'), isEmpty);
     },
   );
+
+  test('retries once when chat changes during preview assembly', () async {
+    var injections = 0;
+    final retrying = CurrentLedgerInjectionPreviewService(
+      chats,
+      characters,
+      EffectiveCanonContextLoader(
+        db: db,
+        characterRepo: characters,
+        characterRevisionRepo: revisions,
+        baselineRepo: CharacterSessionBaselineRepo(db),
+        factRepo: facts,
+        transitionRepo: AppliedCanonTransitionRepo(db),
+        transitionFactRefRepo: CanonTransitionFactRefRepo(db),
+        loadRawTrackerState: (_) async =>
+            LedgerRawTrackerState(committedTrackers: [], manualControls: []),
+      ),
+      (_) async => StudioTurnConfigSnapshot(
+        config: const StudioConfig(sessionId: 's', enabled: true),
+        preset: const StudioPreset(id: 'preset'),
+        pipelineSettings: const PipelineSettings(),
+        apiConfigs: const [],
+        activeApiConfig: null,
+      ),
+      (_, messages) async {
+        if (injections++ == 0) {
+          final current = (await chats.getById('s'))!;
+          await chats.put(current.copyWith(updatedAt: 2));
+        }
+        return messages;
+      },
+      (_, _) => 'User',
+    );
+
+    final preview = await retrying.load(sessionId: 's');
+
+    expect(preview.visibleMessageIds, contains('m1'));
+    expect(injections, 2);
+  });
 }

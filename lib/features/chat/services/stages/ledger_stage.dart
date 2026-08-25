@@ -21,9 +21,14 @@ import '../../../../core/state/card_rewriter_providers.dart';
 import '../../../../core/state/persona_resolution.dart';
 import '../../../../core/state/studio_turn_config_resolver.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
+import '../../../card_rewrite/card_rewriter_recovery_view_service.dart';
 import '../../state/agent_operations_log_provider.dart';
 import '../../state/post_gen_status_provider.dart';
+import '../collector_view_service.dart';
+import '../current_ledger_injection_preview_service.dart';
 import '../pipeline_utils.dart';
+import '../prompt_capture_view_service.dart';
+import '../reconciler_view_service.dart';
 import 'stage_context.dart';
 
 /// Stage 7: Studio Ledger trigger.
@@ -478,6 +483,7 @@ class LedgerStage {
         isError: true,
       );
     } finally {
+      _invalidateAgentOpsViews(sessionId);
       // Covers cancellation and exceptions in catch-side diagnostics. Identity
       // plus session/task checks ensure an older run cannot clear a newer one.
       if (ownedRunningStatus != null && ownsRunningStatus()) {
@@ -490,6 +496,21 @@ class LedgerStage {
         );
       }
     }
+  }
+
+  void _invalidateAgentOpsViews(String sessionId) {
+    if (!ctx.ref.mounted) return;
+    ctx.ref.invalidate(reconcilerViewProvider(sessionId));
+    ctx.ref.invalidate(
+      currentLedgerInjectionPreviewProvider((
+        sessionId: sessionId,
+        characterId: ctx.charId,
+      )),
+    );
+    ctx.ref.invalidate(collectorViewProvider(sessionId));
+    ctx.ref.invalidate(promptCaptureViewsProvider(sessionId));
+    ctx.ref.invalidate(cardRewriteDebugRunsProvider(sessionId));
+    ctx.ref.invalidate(cardRewriterRecoveryViewsProvider(sessionId));
   }
 
   String _personaName(Iterable<ChatMessage> messages) {

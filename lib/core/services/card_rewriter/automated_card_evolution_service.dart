@@ -446,20 +446,39 @@ class AutomatedCardEvolutionService {
     LedgerReconciliationSuccessfulRunRow reconciliationRun, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
   }) async {
-    final pending = await collectorRunRepo.pendingValidPairs(
-      reconciliationRun.sessionId,
-      currentRun: reconciliationRun,
-    );
-    for (final pair in pending) {
-      final collected = await _runCollector(pair, onStage: onStage);
-      if (!collected) {
-        return const CardEvolutionFinalizeOutcome('collectorUnavailable');
+    try {
+      final pending = await collectorRunRepo.pendingValidPairs(
+        reconciliationRun.sessionId,
+        currentRun: reconciliationRun,
+      );
+      for (final pair in pending) {
+        final collected = await _runCollector(pair, onStage: onStage);
+        if (!collected) {
+          return const CardEvolutionFinalizeOutcome('collectorUnavailable');
+        }
       }
+      return await _continueWriterAfterCollectors(
+        reconciliationRun.sessionId,
+        onStage: onStage,
+      );
+    } catch (error, stackTrace) {
+      debugPrint(
+        '[CardRewriter] automatic lane failed before a durable writer result: '
+        '$error\n$stackTrace',
+      );
+      await _saveSelectionBail(
+        sessionId: reconciliationRun.sessionId,
+        outcome: 'unexpectedFailure',
+        reason: error.toString(),
+        throughCollectorOrdinal: 0,
+        reconciliationRunIds: [reconciliationRun.id],
+      );
+      return CardEvolutionFinalizeOutcome(
+        'unexpectedFailure',
+        null,
+        error.toString(),
+      );
     }
-    return _continueWriterAfterCollectors(
-      reconciliationRun.sessionId,
-      onStage: onStage,
-    );
   }
 
   Future<CardEvolutionFinalizeOutcome> _continueWriterAfterCollectors(
