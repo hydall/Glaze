@@ -10,16 +10,18 @@ import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/services/file_export_service.dart';
 import '../../../core/state/lorebook_provider.dart';
+import '../../../core/utils/error_format.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
+import '../../../shared/widgets/help_tip.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/sheet_view.dart';
-import '../../glossary/glossary_sheet.dart';
 import '../../settings/app_settings_provider.dart';
 import '../janitor_account_provider.dart';
+import '../services/catalog_error_labels.dart';
 import '../services/janitor_extractor.dart';
 import '../services/janitor_lorebook_rebuilder.dart';
 import '../services/janitor_provider.dart';
@@ -27,9 +29,10 @@ import '../services/janitor_public_lorebook.dart';
 import '../services/janitor_separate.dart';
 import '../services/janitor_webview_proxy.dart';
 import 'janitor_build_widgets.dart';
+import 'janitor_extraction_settings_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
 
-/// Glossary term the sheet's header help button opens.
+/// Glossary term the help tip beside the sheet title opens.
 const String _kHelpTermExtraction = 'janitor-extraction';
 
 /// The three stages of the closed-lorebook flow, named in the sheet header so
@@ -149,7 +152,7 @@ class _JanitorLorebookCaptureState
   // Closed-lorebook extraction.
   bool _extracting = false;
   String? _extractPhase;
-  String? _extractError;
+  LabeledError? _extractError;
   ExtractionResult? _extraction;
 
   /// What is stuffed into the message sent into the JanitorAI chat to make the
@@ -171,7 +174,7 @@ class _JanitorLorebookCaptureState
       .contextFromMeta(widget.args.meta);
   final _nameController = TextEditingController();
   bool _building = false;
-  String? _buildError;
+  LabeledError? _buildError;
   LorebookBuildException? _buildDebug;
   Lorebook? _built;
   Timer? _timer;
@@ -334,7 +337,17 @@ class _JanitorLorebookCaptureState
     } catch (e) {
       if (!mounted) return;
       setState(() => _jsBuildingId = null);
-      GlazeToast.show(context, 'catalog_lorebooks_build_failed'.tr(args: ['$e']));
+      GlazeToast.show(
+        context,
+        'catalog_lorebooks_build_failed'.tr(
+          args: [
+            describeCatalogError(
+              e,
+              fallback: CatalogErrorSource.provider,
+            ).inline,
+          ],
+        ),
+      );
     }
   }
 
@@ -460,7 +473,10 @@ class _JanitorLorebookCaptureState
       }
     } catch (e) {
       if (mounted) {
-        GlazeToast.show(context, 'catalog_lorebooks_save_failed'.tr(args: ['$e']));
+        GlazeToast.show(
+          context,
+          'catalog_lorebooks_save_failed'.tr(args: [formatError(e)]),
+        );
       }
     }
   }
@@ -483,7 +499,7 @@ class _JanitorLorebookCaptureState
       if (mounted) {
         GlazeToast.show(
           context,
-          'catalog_lorebooks_export_failed'.tr(args: ['$e']),
+          'catalog_lorebooks_export_failed'.tr(args: [formatError(e)]),
         );
       }
     }
@@ -540,11 +556,18 @@ class _JanitorLorebookCaptureState
         }
       });
     } catch (e) {
-      // JanitorAI refusing to assemble the prompt (creator locked the card to
-      // their own model) is a permanent answer, not a failure worth retrying —
-      // quote its wording and say what it means for these books.
+      // Everything the capture talks to is Janitor.AI, so a failure with no
+      // source of its own is labelled as theirs. JanitorAI refusing to assemble
+      // the prompt (creator locked the card to their own model) is a permanent
+      // answer, not a failure worth retrying — `describeCatalogError` quotes its
+      // wording and says what it means for these books.
       if (mounted) {
-        setState(() => _extractError = _extractErrorText(e));
+        setState(() {
+          _extractError = describeCatalogError(
+            e,
+            fallback: CatalogErrorSource.janitor,
+          );
+        });
       }
     } finally {
       if (mounted) {
@@ -553,18 +576,6 @@ class _JanitorLorebookCaptureState
         });
       }
     }
-  }
-
-  /// The message shown under the rebuild button. A [JanitorRefusedException]
-  /// gets JanitorAI's own sentence plus what it means for these books; anything
-  /// else is reported verbatim.
-  String _extractErrorText(Object e) {
-    if (e is JanitorAuthException) {
-      return 'catalog_janitor_session_expired'.tr();
-    }
-    if (e is! JanitorRefusedException) return e.toString();
-    final explain = 'catalog_janitor_refused_body'.tr();
-    return '${e.message}.\n$explain';
   }
 
   Future<void> _build() async {
@@ -601,9 +612,14 @@ class _JanitorLorebookCaptureState
           );
       if (mounted) setState(() => _built = book);
     } catch (e) {
+      // The build stage only ever talks to the user's own LLM connection, so
+      // an unlabelled failure here is the provider's.
       if (mounted) {
         setState(() {
-          _buildError = e.toString();
+          _buildError = describeCatalogError(
+            e,
+            fallback: CatalogErrorSource.provider,
+          );
           _buildDebug = e is LorebookBuildException ? e : null;
         });
       }
@@ -629,6 +645,12 @@ class _JanitorLorebookCaptureState
       context,
       buildLorebookMessages(
         _withoutPublicScripts(ex.lorebookText),
+        // The preview must show what the build would really send, so it takes
+        // the same system prompt — the edited one when the user changed it in
+        // the extraction settings.
+        systemPrompt: lorebookSystemPrompt(
+          ref.read(appSettingsProvider).value,
+        ),
         card: _buildSources.card ? ex.cardContext : '',
         catalog: _buildSources.catalog ? ex.catalogContext : '',
         scenario: _buildSources.scenario ? ex.scenarioContext : '',
@@ -672,7 +694,7 @@ class _JanitorLorebookCaptureState
       if (mounted) {
         GlazeToast.show(
           context,
-          'catalog_lorebooks_export_failed'.tr(args: ['$e']),
+          'catalog_lorebooks_export_failed'.tr(args: [formatError(e)]),
         );
       }
     }
@@ -708,16 +730,33 @@ class _JanitorLorebookCaptureState
     final cs = context.cs;
     final closed = _closedBooks;
     return SheetView(
-      title: 'catalog_lorebooks_title'.tr(),
+      // The help sits with the title it explains — the same inline [HelpTip]
+      // every group header uses — and the header's action slot carries the
+      // settings that change what the flow does.
+      titleWidget: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              'catalog_lorebooks_title'.tr(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
+              ),
+            ),
+          ),
+          const HelpTip(term: _kHelpTermExtraction, size: 18),
+        ],
+      ),
       startExpanded: true,
       actions: [
         SheetViewAction(
-          icon: const Icon(Icons.help_outline_rounded, size: 20),
-          tooltip: 'menu_glossary'.tr(),
-          onPressed: () => GlossarySheet.show(
-            context,
-            initialTerm: _kHelpTermExtraction,
-          ),
+          icon: const Icon(Icons.tune_rounded, size: 20),
+          tooltip: 'catalog_extraction_settings_title'.tr(),
+          onPressed: () => showJanitorExtractionSettingsSheet(context),
         ),
       ],
       headerBottom: _hasFlow ? _phaseStrip(cs) : null,
@@ -980,7 +1019,10 @@ class _JanitorLorebookCaptureState
         if (_extractError != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: GlazeErrorBlock(message: _extractError!),
+            child: GlazeErrorBlock(
+              message: _extractError!.message,
+              label: _extractError!.label,
+            ),
           ),
       ],
     );
@@ -1090,7 +1132,10 @@ class _JanitorLorebookCaptureState
         if (_buildError != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: GlazeErrorBlock(message: _buildError!),
+            child: GlazeErrorBlock(
+              message: _buildError!.message,
+              label: _buildError!.label,
+            ),
           ),
         if (_buildDebug != null) ...[
           _LlmDebugPanel(error: _buildDebug!, cs: cs),

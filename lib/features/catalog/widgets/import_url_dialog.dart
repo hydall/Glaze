@@ -8,8 +8,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/services/character_import_persistence_coordinator.dart';
+import '../../../core/utils/error_format.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_error_block.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../character_list/character_import_persistence_provider.dart';
@@ -105,10 +107,7 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
           ],
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(
-              _error!,
-              style: const TextStyle(color: Colors.redAccent, fontSize: 13),
-            ),
+            GlazeErrorBlock(message: _error!),
           ],
           const SizedBox(height: 16),
           SizedBox(
@@ -202,7 +201,7 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = e.toString();
+          _error = formatError(e);
         });
       }
     }
@@ -244,7 +243,7 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = e.toString();
+          _error = formatError(e);
         });
       }
     }

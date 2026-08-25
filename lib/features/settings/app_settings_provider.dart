@@ -65,6 +65,17 @@ abstract class AppSettings with _$AppSettings {
     @Default(true) bool messageVibration,
     @Default(false) bool extractJanitorLocally,
 
+    /// User-edited system prompt for the closed-lorebook build (the JanitorAI
+    /// extraction flow). Empty means the built-in default
+    /// (`kLorebookSystemPrompt`) is used — that is also what clearing the field
+    /// in the extraction settings does.
+    @Default('') String lorebookBuildPrompt,
+
+    /// Same, for the scripted ("advanced" / Nine API) lorebook path, which asks
+    /// the model to recover entries from JavaScript source instead of splitting
+    /// concatenated bodies. Empty → `kLorebookSystemPromptJs`.
+    @Default('') String lorebookBuildPromptJs,
+
     /// When on, the shuffle button opens a random character straight in the
     /// detail sheet (the classic behaviour) instead of the randomizing
     /// (Holocard) discovery overlay. Off by default.
@@ -154,6 +165,8 @@ class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
         'extractJanitorLocally',
         defaultValue: false,
       ),
+      lorebookBuildPrompt: prefs.getString('lorebookBuildPrompt') ?? '',
+      lorebookBuildPromptJs: prefs.getString('lorebookBuildPromptJs') ?? '',
       useStandardRandomizer: _readBoolPref(
         prefs,
         'useStandardRandomizer',
@@ -198,6 +211,14 @@ class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
     await prefs.setBool(
       'extractJanitorLocally',
       normalized.extractJanitorLocally,
+    );
+    await prefs.setString(
+      'lorebookBuildPrompt',
+      normalized.lorebookBuildPrompt,
+    );
+    await prefs.setString(
+      'lorebookBuildPromptJs',
+      normalized.lorebookBuildPromptJs,
     );
     await prefs.setBool(
       'useStandardRandomizer',

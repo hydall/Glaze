@@ -15,6 +15,13 @@ import 'transport/transport_factory.dart';
 
 typedef AuxTransportPicker = ChatTransport Function(String protocol);
 
+/// Receives the provider's own response fields for a non-streaming aux call:
+/// the separate reasoning stream (when the model emitted one) and the raw JSON
+/// payload. Callers use them for diagnostics when the assistant text alone does
+/// not explain a failure.
+typedef AuxRawResponseSink =
+    void Function(String? reasoning, String? rawResponseJson);
+
 /// Resolved auxiliary API configuration for a non-streaming LLM call.
 class AuxApiConfig {
   final String endpoint;
@@ -116,23 +123,30 @@ class AuxLlmClient {
   ///
   /// Prefer [callOnceWithLog] when the caller wants the per-attempt log for
   /// the agentic operations UI.
+  ///
+  /// Pass [messages] instead of [prompt] for a call that needs a full chat
+  /// (a `system` prompt plus the user turn) rather than a single user message.
   Future<String> callOnce({
     required AuxApiConfig config,
-    required String prompt,
+    String prompt = '',
+    List<Map<String, String>>? messages,
     required int maxTokens,
     required double temperature,
     required int timeoutMs,
     CancelToken? cancelToken,
     LlmCaptureContext? captureContext,
+    AuxRawResponseSink? onRawResponse,
   }) async {
     final outcome = await callOnceWithLog(
       config: config,
       prompt: prompt,
+      messages: messages,
       maxTokens: maxTokens,
       temperature: temperature,
       timeoutMs: timeoutMs,
       cancelToken: cancelToken,
       captureContext: captureContext,
+      onRawResponse: onRawResponse,
     );
     if (outcome.isOk && outcome.text != null) return outcome.text!;
     throw _descriptiveError(outcome);
@@ -142,7 +156,8 @@ class AuxLlmClient {
   /// log so callers can record it in the agentic operations log.
   Future<AuxCallOutcome> callOnceWithLog({
     required AuxApiConfig config,
-    required String prompt,
+    String prompt = '',
+    List<Map<String, String>>? messages,
     required int maxTokens,
     required double temperature,
     required int timeoutMs,
@@ -150,10 +165,15 @@ class AuxLlmClient {
     bool omitReasoning = false,
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
+    bool omitTopP = true,
     LlmCaptureContext? captureContext,
+    AuxRawResponseSink? onRawResponse,
   }) async {
     if (config.endpoint.isEmpty || config.model.isEmpty) {
       throw Exception('Aux API not configured');
+    }
+    if (messages == null && prompt.isEmpty) {
+      throw ArgumentError('Provide a prompt or messages');
     }
     final runner = AuxRetryRunner(policy: retryPolicy);
     final identifiedContext = _identifiedContext(captureContext);
@@ -172,6 +192,7 @@ class AuxLlmClient {
       attemptWithCancelToken: (i, attemptCancelToken) => _callOnce(
         config: config,
         prompt: prompt,
+        messages: messages,
         maxTokens: maxTokens,
         temperature: temperature,
         timeoutMs: timeoutMs,
@@ -179,7 +200,9 @@ class AuxLlmClient {
         omitReasoning: omitReasoning,
         omitReasoningEffort: omitReasoningEffort,
         requestReasoning: requestReasoning,
+        omitTopP: omitTopP,
         captureContext: identifiedContext?.withAttempt(i + 1),
+        onRawResponse: onRawResponse,
       ),
     );
   }
@@ -284,7 +307,8 @@ class AuxLlmClient {
 
   Future<String> _callOnce({
     required AuxApiConfig config,
-    required String prompt,
+    String prompt = '',
+    List<Map<String, String>>? messages,
     required int maxTokens,
     required double temperature,
     required int timeoutMs,
@@ -292,7 +316,9 @@ class AuxLlmClient {
     bool omitReasoning = false,
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
+    bool omitTopP = true,
     LlmCaptureContext? captureContext,
+    AuxRawResponseSink? onRawResponse,
   }) async {
     final transport = transportPicker(config.protocol);
     String? result;
@@ -303,14 +329,18 @@ class AuxLlmClient {
 
     // Idle timeout: cancel the timer on the first chunk (text OR reasoning)
     // so a long (but progressing) generation is never cut off. Mirrors
-    // AgentStreamRunner's pattern.
-    final guard = IdleTimeoutGuard(timeoutMs, () {
-      if (acceptingCallbacks) {
-        timedOut = true;
-        acceptingCallbacks = false;
-        cancelToken?.cancel('Aux call idle timeout');
-      }
-    });
+    // AgentStreamRunner's pattern. `timeoutMs <= 0` means the caller owns the
+    // deadline itself (a single long request whose answer only arrives at the
+    // end, such as a lorebook rebuild) — no guard is armed at all.
+    final guard = timeoutMs > 0
+        ? IdleTimeoutGuard(timeoutMs, () {
+            if (acceptingCallbacks) {
+              timedOut = true;
+              acceptingCallbacks = false;
+              cancelToken?.cancel('Aux call idle timeout');
+            }
+          })
+        : null;
 
     try {
       // Deliberately await the transport itself, not a callback completer. On
@@ -321,40 +351,49 @@ class AuxLlmClient {
           endpoint: config.endpoint,
           apiKey: config.apiKey,
           model: config.model,
-          messages: [
-            {'role': 'user', 'content': prompt},
-          ],
+          messages:
+              messages ??
+              [
+                {'role': 'user', 'content': prompt},
+              ],
           maxTokens: maxTokens,
           temperature: temperature,
           topP: 1.0,
           // Aux calls pin their own temperature and deliberately don't steer
           // top_p. Say so explicitly — the transports no longer treat 1.0 as
           // "unset".
-          omitTopP: true,
+          omitTopP: omitTopP,
           stream: false,
           requestReasoning: requestReasoning,
           useResponsesApi: config.useResponsesApi,
           omitReasoning: omitReasoning,
           omitReasoningEffort: omitReasoningEffort,
           extraRequestParameters: config.extraRequestParameters,
-          receiveTimeoutMs: timeoutMs,
+          // 0 also disables the transport-level HTTP receive timeout, so a
+          // caller that opted out of the idle guard is not cut off by Dio
+          // instead.
+          receiveTimeoutMs: timeoutMs > 0 ? timeoutMs : 0,
           captureContext: captureContext,
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
           if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
           if (delta.isNotEmpty || reasoningDelta?.isNotEmpty == true) {
-            guard.cancel();
+            guard?.cancel();
           }
         },
-        onComplete: (text, _, {rawResponseJson}) {
-          guard.dispose();
+        onComplete: (text, reasoning, {rawResponseJson}) {
+          guard?.dispose();
           if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
           callbackReceived = true;
           result = text;
+          // Handed to the caller even on a "successful" empty answer: a build
+          // that parses the text needs the provider payload to explain why
+          // there was nothing in it.
+          onRawResponse?.call(reasoning, rawResponseJson);
         },
         onError: (error) {
-          guard.dispose();
+          guard?.dispose();
           if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
           callbackReceived = true;
           transportError = error;
@@ -364,7 +403,7 @@ class AuxLlmClient {
       if (acceptingCallbacks) transportError = e;
     } finally {
       acceptingCallbacks = false;
-      guard.dispose();
+      guard?.dispose();
     }
     if (timedOut) {
       throw TimeoutException('Aux call timed out (idle) after ${timeoutMs}ms');

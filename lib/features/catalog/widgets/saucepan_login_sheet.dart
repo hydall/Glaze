@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/error_format.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
@@ -87,7 +88,7 @@ class _SaucepanLoginFormState extends ConsumerState<_SaucepanLoginForm> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _error = e.toString();
+          _error = formatError(e);
         });
       }
     }

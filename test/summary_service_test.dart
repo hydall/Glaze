@@ -28,12 +28,14 @@ class _RecordingAuxLlmClient extends AuxLlmClient {
   @override
   Future<String> callOnce({
     required AuxApiConfig config,
-    required String prompt,
+    String prompt = '',
+    List<Map<String, String>>? messages,
     required int maxTokens,
     required double temperature,
     required int timeoutMs,
     CancelToken? cancelToken,
     LlmCaptureContext? captureContext,
+    AuxRawResponseSink? onRawResponse,
   }) async {
     this.config = config;
     this.prompt = prompt;

@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_error_block.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../core/llm/tokenizer.dart';
+import '../services/catalog_error_labels.dart';
 import '../services/janitor_extractor.dart';
 
 /// Dev tool: extract a JanitorAI character's **hidden card** + **closed
@@ -37,7 +39,7 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
   final _controller = TextEditingController();
   bool _busy = false;
   String? _phase;
-  String? _error;
+  LabeledError? _error;
   ExtractionResult? _result;
 
   @override
@@ -64,7 +66,14 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
           );
       if (mounted) setState(() => _result = result);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) {
+        setState(
+          () => _error = describeCatalogError(
+            e,
+            fallback: CatalogErrorSource.janitor,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -91,7 +100,14 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
           : 'Imported ${commit.characterName} + ${commit.lorebookEntryCount} lorebook entries';
       GlazeToast.show(context, msg);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) {
+        setState(
+          () => _error = describeCatalogError(
+            e,
+            fallback: CatalogErrorSource.janitor,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -185,9 +201,9 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
               ],
               if (_error != null) ...[
                 const SizedBox(height: 12),
-                Text(
-                  _error!,
-                  style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                GlazeErrorBlock(
+                  message: _error!.message,
+                  label: _error!.label,
                 ),
               ],
               if (_result != null && !_busy) ...[

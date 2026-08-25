@@ -11,6 +11,7 @@ import '../../../core/services/character_book_converter.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../core/state/shared_prefs_provider.dart';
+import '../../../core/utils/error_format.dart';
 import 'catalog_models.dart';
 import 'services/datacat_provider.dart';
 import 'services/janitor_provider.dart';
@@ -304,7 +305,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
       );
     } catch (e) {
       if (!mounted || epoch != _searchEpoch) return;
-      state = state.copyWith(loading: false, error: e.toString());
+      state = state.copyWith(loading: false, error: formatError(e));
     }
   }
 

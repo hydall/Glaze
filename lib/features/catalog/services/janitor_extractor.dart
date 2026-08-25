@@ -7,6 +7,7 @@ import '../../../core/models/lorebook.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
+import 'catalog_error_labels.dart';
 import 'janitor_field_diff.dart';
 import 'janitor_lorebook_rebuilder.dart';
 import 'janitor_provider.dart';
@@ -392,7 +393,10 @@ class JanitorExtractor {
         glazeCharacterId: glazeId,
         characterName: result.character.charData.name,
         lorebookEntryCount: 0,
-        lorebookError: e.toString(),
+        lorebookError: describeCatalogError(
+          e,
+          fallback: CatalogErrorSource.provider,
+        ).inline,
       );
     }
   }
