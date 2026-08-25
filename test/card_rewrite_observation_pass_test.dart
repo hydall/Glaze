@@ -587,7 +587,7 @@ void main() {
           'id': 'long-$index',
           'role': index.isEven ? 'assistant' : 'user',
           'content':
-              '${index.isEven ? 'assistant' : 'user'}-$index ${'x' * 4920}',
+              '${index.isEven ? 'assistant' : 'user'}-$index ${'x' * 10300}',
         };
       });
       final starts = [0, 1, 21, 21];

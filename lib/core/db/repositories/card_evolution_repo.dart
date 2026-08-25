@@ -1496,7 +1496,14 @@ class CardEvolutionRepo {
       final overlay = overlays['${entry.lorebookId}\u0000${entry.entryId}'];
       final baseContent = overlay?.baseContent ?? entry.rawContent;
       final content = overlay?.content ?? entry.rawContent;
-      final size = baseContent.length + content.length;
+      // The base is materialized only when session evolution diverged from
+      // the source entry. Without an overlay base and content are identical,
+      // and echoing both would double the shared writer context for every
+      // injected entry.
+      final carriesBase = baseContent != content;
+      final size = carriesBase
+          ? baseContent.length + content.length
+          : content.length;
       // Exact content is required for safe anchored lorebook patching. Omit an
       // oversized target rather than truncating and weakening CAS validation.
       if (baseContent.length > _maxLorebookEntryCharacters ||
@@ -1507,7 +1514,7 @@ class CardEvolutionRepo {
       result.add(<String, Object?>{
         'lorebookId': entry.lorebookId,
         'entryId': entry.entryId,
-        'baseContent': baseContent,
+        if (carriesBase) 'baseContent': baseContent,
         'content': content,
         'expectedContentHash': CardCanonicalizer.scalarSha256(content),
       });
@@ -1711,15 +1718,18 @@ Map<String, (String, String)>? _loreTargetsFromInput(String selectedInputJson) {
     if (entries is! List) return null;
     final result = <String, (String, String)>{};
     for (final raw in entries) {
+      // Entries without session evolution carry no separate base; their
+      // current content is the CAS base the model must echo.
+      final base = raw is Map ? raw['baseContent'] ?? raw['content'] : null;
       if (raw is! Map ||
           raw['lorebookId'] is! String ||
           raw['entryId'] is! String ||
-          raw['baseContent'] is! String ||
+          base is! String ||
           raw['expectedContentHash'] is! String) {
         return null;
       }
       result['${raw['lorebookId']}\u0000${raw['entryId']}'] = (
-        raw['baseContent'] as String,
+        base,
         raw['expectedContentHash'] as String,
       );
     }

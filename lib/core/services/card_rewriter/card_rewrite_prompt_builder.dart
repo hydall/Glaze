@@ -290,7 +290,7 @@ NPC-owned facts may patch only an existing supplied injected lorebook entry. Mai
 # Response format
 Respond with exactly one JSON object and nothing else:
 {"operations":[{"lorebookId":"...","entryId":"...","baseContent":"...","expectedContentHash":"...","patches":[{"anchor":"...","anchorSha256":"...","value":"..."}]}]}
-Each target may occur at most once. Return an empty "operations" list ONLY when no supported durable update belongs in any supplied target. A Ledger fact is accepted evidence, not a reason to omit an eligible lorebook patch. baseContent and expectedContentHash must exactly echo the supplied target. Each anchor must occur exactly once in its supplied current content; anchorSha256 is its lowercase SHA-256 UTF-8 hash. Use smallest exact fragment replacements, never rewrite an entire entry. Preserve every {{...}} macro token byte-for-byte.
+Each target may occur at most once. Return an empty "operations" list ONLY when no supported durable update belongs in any supplied target. A Ledger fact is accepted evidence, not a reason to omit an eligible lorebook patch. baseContent and expectedContentHash must exactly echo the supplied target; when a target has no baseContent field, echo its content as baseContent. Each anchor must occur exactly once in its supplied current content; anchorSha256 is its lowercase SHA-256 UTF-8 hash. Use smallest exact fragment replacements, never rewrite an entire entry. Preserve every {{...}} macro token byte-for-byte.
 
 # Instruction
 $instruction''';

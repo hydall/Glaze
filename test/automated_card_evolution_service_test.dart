@@ -481,6 +481,9 @@ void main() {
     expect(lorebookPrompt, contains('"description":"Alice is cautious."'));
     expect(lorebookPrompt, contains('# Proposed card operations (read-only)'));
     expect(lorebookPrompt, contains('increasingly trusting'));
+    // Without a session overlay the entry must not carry a duplicated base.
+    expect(lorebookPrompt, contains('"content":"entry one"'));
+    expect(lorebookPrompt, isNot(contains('"baseContent":"entry one"')));
     final operations = await fixture.db
         .select(fixture.db.rewriteOperations)
         .get();
@@ -495,6 +498,75 @@ void main() {
         .select(fixture.db.cardEvolutionDebugRuns)
         .get();
     expect(debug.map((row) => row.stage), containsAll(['card', 'lorebook']));
+  });
+
+  test('evolved lorebook entries keep their diverged base', () async {
+    await _seedManifest(fixture.db, 'a1', 'entry one');
+    await fixture.db
+        .into(fixture.db.sessionLorebookEvolutionRows)
+        .insert(
+          SessionLorebookEvolutionRowsCompanion.insert(
+            chatSessionId: 'session',
+            lorebookId: 'book-a1',
+            entryId: 'entry-a1-0',
+            baseContent: 'entry one',
+            baseContentHash: CardCanonicalizer.scalarSha256('entry one'),
+            content: 'entry one evolved',
+            contentHash: CardCanonicalizer.scalarSha256('entry one evolved'),
+            createdAt: 1,
+            updatedAt: 1,
+          ),
+        );
+    String? lorebookPrompt;
+    final result = await fixture
+        .service((_, prompt) async {
+          if (prompt.contains('Glaze lorebook rewriter')) {
+            lorebookPrompt = prompt;
+            return _ok(
+              jsonEncode({
+                'operations': [
+                  {
+                    'lorebookId': 'book-a1',
+                    'entryId': 'entry-a1-0',
+                    'baseContent': 'entry one',
+                    'expectedContentHash': CardCanonicalizer.scalarSha256(
+                      'entry one evolved',
+                    ),
+                    'patches': [
+                      {
+                        'anchor': 'evolved',
+                        'anchorSha256': CardCanonicalizer.scalarSha256(
+                          'evolved',
+                        ),
+                        'value': 'evolved further',
+                      },
+                    ],
+                  },
+                ],
+              }),
+            );
+          }
+          return _ok(fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
+
+    expect(result.kind, 'persisted', reason: result.detail);
+    expect(lorebookPrompt, contains('"baseContent":"entry one"'));
+    expect(lorebookPrompt, contains('"content":"entry one evolved"'));
+  });
+
+  test('oversized shared context reports the context gate limit', () async {
+    await _seedManifestEntries(
+      fixture.db,
+      'a1',
+      List.generate(7, (index) => 'x' * 60000),
+    );
+    final result = await fixture
+        .service((_, prompt) async => _ok('{"operations":[]}'))
+        .runOneBatch('session');
+
+    expect(result.kind, 'snapshotTooLarge');
+    expect(result.detail, contains('safe request limit is 400000'));
   });
 
   test(
@@ -702,7 +774,7 @@ final class _Fixture {
     'operations': [
       {
         'lorebookId': 'book-a1',
-        'entryId': 'entry-a1',
+        'entryId': 'entry-a1-0',
         'baseContent': 'entry one',
         'expectedContentHash': CardCanonicalizer.scalarSha256('entry one'),
         'patches': [
@@ -772,25 +844,31 @@ const _messages = [
   {'id': 'u2', 'role': 'user', 'content': 'user 2'},
 ];
 
-Future<void> _seedManifest(
+Future<void> _seedManifest(AppDatabase db, String messageId, String content) =>
+    _seedManifestEntries(db, messageId, [content]);
+
+Future<void> _seedManifestEntries(
   AppDatabase db,
   String messageId,
-  String content,
+  List<String> contents,
 ) async {
-  final entry = ExactLorebookManifestEntry.fromMergedEntry(
-    entry: LorebookEntry(
-      id: 'entry-$messageId',
-      lorebookId: 'book-$messageId',
-      content: content,
-      position: 'worldInfoBefore',
-    ),
-    source: 'keyword',
-    classification: 'worldInfoBefore',
-    injectionIndex: 0,
-    renderedContent: content,
-  );
+  final entries = [
+    for (var index = 0; index < contents.length; index++)
+      ExactLorebookManifestEntry.fromMergedEntry(
+        entry: LorebookEntry(
+          id: 'entry-$messageId-$index',
+          lorebookId: 'book-$messageId',
+          content: contents[index],
+          position: 'worldInfoBefore',
+        ),
+        source: 'keyword',
+        classification: 'worldInfoBefore',
+        injectionIndex: index,
+        renderedContent: contents[index],
+      ),
+  ];
   final manifest = ExactLorebookManifest(
-    entries: [entry],
+    entries: entries,
     promptProvenance: const ExactLorebookPromptProvenance(
       characterId: 'character',
       sessionId: 'session',
@@ -816,12 +894,13 @@ Future<void> _seedManifest(
     ),
     createdAt: 1,
     entries: [
-      LorebookUseManifestEntryInput(
-        lorebookId: entry.lorebookId,
-        entryId: entry.entryId,
-        entryOrder: 0,
-        evidenceJson: jsonEncode(entry.toJson()),
-      ),
+      for (var index = 0; index < entries.length; index++)
+        LorebookUseManifestEntryInput(
+          lorebookId: entries[index].lorebookId,
+          entryId: entries[index].entryId,
+          entryOrder: index,
+          evidenceJson: jsonEncode(entries[index].toJson()),
+        ),
     ],
   );
 }
