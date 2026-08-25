@@ -6,12 +6,13 @@ import '../../../shared/widgets/sheet_view.dart';
 import 'tokenizer_sheet.dart';
 import 'prompt_preview_screen.dart';
 import 'lorebook_coverage_sheet.dart';
-import 'studio_prompt_capture_tab.dart';
+import 'studio_prompt_preview_tab.dart';
 
 /// Unified diagnostics surface that merges the Context (tokenizer), Request
-/// Preview, Lorebook Coverage, and captured Studio requests into one sheet. All
-/// answer the same question - "what actually goes into the prompt?" - so they
-/// live behind a single Magic Drawer entry instead of three separate cards.
+/// Preview, Lorebook Coverage, and current Studio prompt previews into one
+/// sheet. All answer the same question - "what actually goes into the prompt?"
+/// - so they live behind a single Magic Drawer entry instead of three separate
+/// cards.
 class PromptInspectorSheet extends StatefulWidget {
   final String charId;
   final String initialTabId;
@@ -64,7 +65,7 @@ class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
             ? CoveragePanel(charId: widget.charId, embedded: true)
             : const SizedBox.shrink(),
         _visitedTabs.contains(PromptInspectorSheet._tabStudio)
-            ? StudioPromptCaptureTab(charId: widget.charId)
+            ? StudioPromptPreviewTab(charId: widget.charId)
             : const SizedBox.shrink(),
       ],
     );

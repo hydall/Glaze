@@ -51,6 +51,51 @@ const _resolved = ResolvedAgentConfig(
 );
 
 void main() {
+  test('pure request builder matches the request sent by run', () async {
+    final transport = _FakeTransport(delay: Duration.zero);
+    final runner = AgentStreamRunner((_) => transport);
+    const agent = StudioAgent(id: 'agent', controllerId: 'agency');
+    const resolved = ResolvedAgentConfig(
+      endpoint: 'https://example.test',
+      apiKey: 'key',
+      model: 'model',
+      protocol: 'openai',
+      stream: false,
+    );
+    const messages = [
+      {'role': 'user', 'content': 'hello'},
+    ];
+    final expected = AgentStreamRunner.buildRequest(
+      agent: agent,
+      messages: messages,
+      resolved: resolved,
+      sessionId: 'session',
+      isFinalResponse: false,
+      maxTokensOverride: 321,
+      temperatureOverride: 0.4,
+    );
+
+    await runner.run(
+      agent: agent,
+      messages: messages,
+      resolved: resolved,
+      sessionId: 'session',
+      isFinalResponse: false,
+      cancelToken: CancelToken(),
+      timeoutMs: 1000,
+      maxTokensOverride: 321,
+      temperatureOverride: 0.4,
+    );
+
+    expect(transport.request?.messages, expected.messages);
+    expect(transport.request?.maxTokens, expected.maxTokens);
+    expect(transport.request?.temperature, expected.temperature);
+    expect(
+      transport.request?.captureContext?.toJson(),
+      expected.captureContext?.toJson(),
+    );
+  });
+
   test(
     'non-streaming response can complete within configured timeout',
     () async {

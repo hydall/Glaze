@@ -11,6 +11,13 @@ abstract interface class LlmRequestCaptureSink {
   FutureOr<void> record(LlmRequestCaptureEvent event);
 }
 
+final class SanitizedLlmRequest {
+  const SanitizedLlmRequest({required this.request, required this.truncated});
+
+  final Map<String, dynamic> request;
+  final bool truncated;
+}
+
 /// Sanitized, immutable view of the request observed by the transport layer.
 final class LlmRequestCaptureEvent {
   const LlmRequestCaptureEvent({
@@ -53,13 +60,23 @@ class LlmRequestCapture {
     ChatTransportRequest request, {
     String? protocol,
   }) {
-    final sanitizer = _CaptureSanitizer();
+    final sanitized = sanitizeRequest(request);
     return LlmRequestCaptureEvent(
       sequence: _sequence++,
       createdAt: DateTime.now().toUtc(),
       protocol: protocol,
       context: request.captureContext,
-      request: {
+      request: sanitized.request,
+      truncated: sanitized.truncated,
+    );
+  }
+
+  /// Returns the same credential-free payload used by captures without
+  /// allocating a capture sequence or dispatching diagnostics.
+  static SanitizedLlmRequest sanitizeRequest(ChatTransportRequest request) {
+    final sanitizer = _CaptureSanitizer();
+    return SanitizedLlmRequest(
+      request: Map<String, dynamic>.unmodifiable({
         'protocolEndpoint': _stripQuery(request.endpoint),
         'model': request.model,
         'stream': request.stream,
@@ -88,7 +105,7 @@ class LlmRequestCapture {
         'messages': sanitizer.sanitize(request.messages),
         if (request.tools != null) 'toolCount': request.tools!.length,
         if (request.toolChoice != null) 'toolChoice': request.toolChoice,
-      },
+      }),
       truncated: sanitizer.truncated,
     );
   }

@@ -170,88 +170,12 @@ class AgentRunner {
         (preResolvedConfig != null && !isFinalResponse
             ? null
             : effectiveTemperature(agent, isFinalResponse, turnConfig));
-    final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
-    // Each reasoning parameter is gated on its `*Override` flag: when the flag
-    // is off the argument stays null, and `copyWithReasoning` keeps whatever
-    // the selected API preset resolved to. `DisableReasoning` is a hard kill
-    // switch and wins over both the flag and the preset.
-    final studio = pipeline.studioAgent;
-    final cleaner = pipeline.cleaner;
-    final effectiveResolved = isFinalResponse
-        ? resolved.copyWithReasoning(
-            useResponsesApi: studio.studioFinalUseResponsesApiOverride
-                ? studio.studioFinalUseResponsesApi
-                : null,
-            requestReasoning: studio.studioFinalDisableReasoning
-                ? false
-                : studio.studioFinalRequestReasoningOverride
-                ? studio.studioFinalRequestReasoning
-                : null,
-            showNativeReasoning: studio.studioFinalShowNativeReasoningOverride
-                ? studio.studioFinalShowNativeReasoning
-                : null,
-            omitReasoning: studio.studioFinalDisableReasoning
-                ? true
-                : studio.studioFinalRequestReasoningOverride
-                ? studio.studioFinalOmitReasoning
-                : null,
-            omitReasoningEffort: studio.studioFinalReasoningEffortOverride
-                ? studio.studioFinalOmitReasoningEffort
-                : null,
-            reasoningEffort: studio.studioFinalReasoningEffortOverride
-                ? studio.studioFinalReasoningEffort
-                : null,
-          )
-        : agent.phase == 'post_processing'
-        ? resolved.copyWithReasoning(
-            useResponsesApi: cleaner.postCleanerUseResponsesApiOverride
-                ? cleaner.postCleanerUseResponsesApi
-                : null,
-            requestReasoning: cleaner.postCleanerDisableReasoning
-                ? false
-                : cleaner.postCleanerRequestReasoningOverride
-                ? cleaner.postCleanerRequestReasoning
-                : null,
-            showNativeReasoning: cleaner.postCleanerShowNativeReasoningOverride
-                ? cleaner.postCleanerShowNativeReasoning
-                : null,
-            omitReasoning: cleaner.postCleanerDisableReasoning
-                ? true
-                : cleaner.postCleanerRequestReasoningOverride
-                ? cleaner.postCleanerOmitReasoning
-                : null,
-            omitReasoningEffort: cleaner.postCleanerReasoningEffortOverride
-                ? cleaner.postCleanerOmitReasoningEffort
-                : null,
-            reasoningEffort: cleaner.postCleanerReasoningEffortOverride
-                ? cleaner.postCleanerReasoningEffort
-                : null,
-          )
-        : resolved.copyWithReasoning(
-            useResponsesApi: studio.studioControllerUseResponsesApiOverride
-                ? studio.studioControllerUseResponsesApi
-                : null,
-            requestReasoning: studio.studioControllerDisableReasoning
-                ? false
-                : studio.studioControllerRequestReasoningOverride
-                ? studio.studioControllerRequestReasoning
-                : null,
-            showNativeReasoning:
-                studio.studioControllerShowNativeReasoningOverride
-                ? studio.studioControllerShowNativeReasoning
-                : null,
-            omitReasoning: studio.studioControllerDisableReasoning
-                ? true
-                : studio.studioControllerRequestReasoningOverride
-                ? studio.studioControllerOmitReasoning
-                : null,
-            omitReasoningEffort: studio.studioControllerReasoningEffortOverride
-                ? studio.studioControllerOmitReasoningEffort
-                : null,
-            reasoningEffort: studio.studioControllerReasoningEffortOverride
-                ? studio.studioControllerReasoningEffort
-                : null,
-          );
+    final effectiveResolved = effectiveRequestConfig(
+      agent,
+      resolved,
+      isFinalResponse,
+      turnConfig,
+    );
     return _streamRunner.run(
       agent: agent,
       messages: messages,
@@ -292,6 +216,95 @@ class AgentRunner {
       isFinalResponse: isFinalResponse,
       apiConfigId: apiConfigId,
       turnConfig: turnConfig,
+    );
+  }
+
+  /// Applies the per-lane reasoning overrides used immediately before a Studio
+  /// request is built. Kept pure so diagnostics can preview the same request.
+  ResolvedAgentConfig effectiveRequestConfig(
+    StudioAgent agent,
+    ResolvedAgentConfig resolved,
+    bool isFinalResponse, [
+    StudioTurnConfigSnapshot? turnConfig,
+  ]) {
+    final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
+    final studio = pipeline.studioAgent;
+    final cleaner = pipeline.cleaner;
+    if (isFinalResponse) {
+      return resolved.copyWithReasoning(
+        useResponsesApi: studio.studioFinalUseResponsesApiOverride
+            ? studio.studioFinalUseResponsesApi
+            : null,
+        requestReasoning: studio.studioFinalDisableReasoning
+            ? false
+            : studio.studioFinalRequestReasoningOverride
+            ? studio.studioFinalRequestReasoning
+            : null,
+        showNativeReasoning: studio.studioFinalShowNativeReasoningOverride
+            ? studio.studioFinalShowNativeReasoning
+            : null,
+        omitReasoning: studio.studioFinalDisableReasoning
+            ? true
+            : studio.studioFinalRequestReasoningOverride
+            ? studio.studioFinalOmitReasoning
+            : null,
+        omitReasoningEffort: studio.studioFinalReasoningEffortOverride
+            ? studio.studioFinalOmitReasoningEffort
+            : null,
+        reasoningEffort: studio.studioFinalReasoningEffortOverride
+            ? studio.studioFinalReasoningEffort
+            : null,
+      );
+    }
+    if (agent.phase == 'post_processing') {
+      return resolved.copyWithReasoning(
+        useResponsesApi: cleaner.postCleanerUseResponsesApiOverride
+            ? cleaner.postCleanerUseResponsesApi
+            : null,
+        requestReasoning: cleaner.postCleanerDisableReasoning
+            ? false
+            : cleaner.postCleanerRequestReasoningOverride
+            ? cleaner.postCleanerRequestReasoning
+            : null,
+        showNativeReasoning: cleaner.postCleanerShowNativeReasoningOverride
+            ? cleaner.postCleanerShowNativeReasoning
+            : null,
+        omitReasoning: cleaner.postCleanerDisableReasoning
+            ? true
+            : cleaner.postCleanerRequestReasoningOverride
+            ? cleaner.postCleanerOmitReasoning
+            : null,
+        omitReasoningEffort: cleaner.postCleanerReasoningEffortOverride
+            ? cleaner.postCleanerOmitReasoningEffort
+            : null,
+        reasoningEffort: cleaner.postCleanerReasoningEffortOverride
+            ? cleaner.postCleanerReasoningEffort
+            : null,
+      );
+    }
+    return resolved.copyWithReasoning(
+      useResponsesApi: studio.studioControllerUseResponsesApiOverride
+          ? studio.studioControllerUseResponsesApi
+          : null,
+      requestReasoning: studio.studioControllerDisableReasoning
+          ? false
+          : studio.studioControllerRequestReasoningOverride
+          ? studio.studioControllerRequestReasoning
+          : null,
+      showNativeReasoning: studio.studioControllerShowNativeReasoningOverride
+          ? studio.studioControllerShowNativeReasoning
+          : null,
+      omitReasoning: studio.studioControllerDisableReasoning
+          ? true
+          : studio.studioControllerRequestReasoningOverride
+          ? studio.studioControllerOmitReasoning
+          : null,
+      omitReasoningEffort: studio.studioControllerReasoningEffortOverride
+          ? studio.studioControllerOmitReasoningEffort
+          : null,
+      reasoningEffort: studio.studioControllerReasoningEffortOverride
+          ? studio.studioControllerReasoningEffort
+          : null,
     );
   }
 

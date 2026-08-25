@@ -96,6 +96,17 @@ void main() {
     expect(event.toJson().toString(), isNot(contains('a' * 100)));
   });
 
+  test('pure sanitization never dispatches a capture event', () {
+    final sink = _RecordingSink();
+    LlmRequestCapture.sink = sink;
+
+    final sanitized = LlmRequestCapture.sanitizeRequest(_request());
+
+    expect(sanitized.request['protocolEndpoint'], 'https://example.test/v1');
+    expect(sanitized.request.toString(), isNot(contains('super-secret-key')));
+    expect(sink.events, isEmpty);
+  });
+
   test('sink failure never prevents the provider call', () async {
     final inner = _CompletingTransport();
     LlmRequestCapture.sink = _ThrowingSink();

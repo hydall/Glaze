@@ -149,6 +149,8 @@ class PromptPayloadBuilder {
     String? guidanceText,
     bool skipVectorSearch = false,
     bool includeEffectiveCanon = false,
+    bool readOnlyEffectiveCanon = false,
+    bool allowRemoteRetrieval = true,
     bool Function()? shouldAbort,
     CancelToken? cancelToken,
   }) async {
@@ -171,6 +173,13 @@ class PromptPayloadBuilder {
     }
     final effectiveContext = session == null || !includeEffectiveCanon
         ? null
+        : readOnlyEffectiveCanon
+        ? await _ref
+              .read(effectiveCanonContextLoaderProvider)
+              .loadReadOnly(
+                sessionId: session.id,
+                sourceCharacter: sourceCharacter,
+              )
         : await _ref
               .read(effectiveCanonContextLoaderProvider)
               .load(sessionId: session.id, sourceCharacter: sourceCharacter);
@@ -268,7 +277,7 @@ class PromptPayloadBuilder {
       // endpoint is slow. The final memory refilter against the visible
       // window happens later inside buildPrompt (see
       // docs/INVARIANTS.md §5.5).
-      final lorebookFuture = (!skipVectorSearch)
+      final lorebookFuture = (!skipVectorSearch && allowRemoteRetrieval)
           ? _vectorSearcher
                 .search(
                   session.messages,
@@ -283,7 +292,8 @@ class PromptPayloadBuilder {
                 .timeout(const Duration(seconds: 30), onTimeout: () => const [])
           : Future<List<LorebookEntry>>.value(const []);
 
-      final memoryFuture = memoryGraphEnabled && memoryBook != null
+      final memoryFuture =
+          allowRemoteRetrieval && memoryGraphEnabled && memoryBook != null
           ? memoryService.buildCandidatesWithDiagnostics(
               sessionId: session.id,
               history: session.messages,
@@ -309,19 +319,21 @@ class PromptPayloadBuilder {
       // Rationale (patch #3): raw-message recall is a lossless backstop for
       // the lossy MemoryBook compression — chunk=5 messages → cosine search →
       // `<recalled_messages>` injection (Marinara memory-recall analog).
-      final recallFuture = _ref
-          .read(messageRecallServiceProvider)
-          .recall(
-            sessionId: session.id,
-            currentText: currentText,
-            config: embeddingConfig,
-            cancelToken: cancelToken,
-            shouldAbort: shouldAbort,
-          )
-          .timeout(
-            const Duration(seconds: 30),
-            onTimeout: () => const MessageRecallResult(),
-          );
+      final recallFuture = allowRemoteRetrieval
+          ? _ref
+                .read(messageRecallServiceProvider)
+                .recall(
+                  sessionId: session.id,
+                  currentText: currentText,
+                  config: embeddingConfig,
+                  cancelToken: cancelToken,
+                  shouldAbort: shouldAbort,
+                )
+                .timeout(
+                  const Duration(seconds: 30),
+                  onTimeout: () => const MessageRecallResult(),
+                )
+          : Future.value(const MessageRecallResult());
 
       throwIfAborted();
       final results = await Future.wait([

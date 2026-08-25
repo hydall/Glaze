@@ -52,11 +52,6 @@ class AgentStreamRunner {
     void Function(String text)? onIntermediateUpdate,
   }) async {
     final completer = Completer<AgentRunResult>();
-    final requestMessages =
-        isFinalResponse &&
-            (!resolved.requestReasoning || resolved.omitReasoning)
-        ? ReasoningStripper.stripMessageReasoning(messages)
-        : messages;
     final shouldStream = resolved.stream;
 
     const defaultTagStart = '<think>';
@@ -70,10 +65,6 @@ class AgentStreamRunner {
     final hasInlineTags =
         effectiveTagStart.isNotEmpty && effectiveTagEnd.isNotEmpty;
 
-    // Sampling defaults come from the agent's fixed spec (§4) — an agent
-    // carries no generation parameters of its own.
-    final spec = StudioControllerOntology.specForAgent(agent);
-
     final accumulator = StreamAccumulator(
       tagStart: effectiveTagStart,
       tagEnd: effectiveTagEnd,
@@ -82,51 +73,16 @@ class AgentStreamRunner {
       headerInline: headerInline,
     );
 
-    final request = ChatTransportRequest(
-      endpoint: resolved.endpoint,
-      apiKey: resolved.apiKey,
-      model: resolved.model,
-      messages: requestMessages,
-      maxTokens: maxTokensOverride ?? (spec?.maxTokens ?? 8000),
-      temperature: temperatureOverride ?? (spec?.temperature ?? 0.3),
-      topP: resolved.topP,
-      topK: resolved.topK,
-      frequencyPenalty: resolved.frequencyPenalty,
-      presencePenalty: resolved.presencePenalty,
-      stream: shouldStream,
-      requestReasoning: resolved.requestReasoning,
-      useResponsesApi: resolved.useResponsesApi,
-      reasoningEffort: resolved.requestReasoning
-          ? resolved.reasoningEffort
-          : null,
-      omitTemperature: resolved.omitTemperature,
-      omitTopP: resolved.omitTopP,
-      omitTopK: resolved.omitTopK,
-      omitFrequencyPenalty: resolved.omitFrequencyPenalty,
-      omitPresencePenalty: resolved.omitPresencePenalty,
-      omitReasoning: resolved.omitReasoning,
-      omitReasoningEffort: resolved.omitReasoningEffort,
-      showNativeReasoning: resolved.showNativeReasoning,
-      // The Studio timer owns first-chunk timeout semantics. A Dio receive
-      // timeout would incorrectly become a second total/idle timeout.
-      receiveTimeoutMs: 0,
+    final request = buildRequest(
+      agent: agent,
+      messages: messages,
+      resolved: resolved,
       sessionId: sessionId,
-      cacheControlTtl: resolved.cacheControlTtl,
-      cacheBreakpointMode: resolved.cacheBreakpointMode,
-      sessionIdMode: resolved.sessionIdMode,
-      promptPostProcessing: resolved.promptPostProcessing,
+      isFinalResponse: isFinalResponse,
+      maxTokensOverride: maxTokensOverride,
+      temperatureOverride: temperatureOverride,
       charName: charName,
       userName: userName,
-      extraRequestParameters: resolved.extraRequestParameters,
-      captureContext: LlmCaptureContext(
-        stage: isFinalResponse
-            ? 'studio.final'
-            : agent.phase == 'post_processing'
-            ? 'studio.post_processing'
-            : 'studio.controller',
-        sessionId: sessionId,
-        agentId: agent.id,
-      ),
     );
     final transport = _pickTransport(resolved.protocol);
     final startedAt = DateTime.now();
@@ -259,6 +215,73 @@ class AgentStreamRunner {
     return completer.future.whenComplete(() {
       idleTimer?.cancel();
     });
+  }
+
+  /// Builds the exact provider-neutral request used by [run] without invoking
+  /// a transport. Prompt Inspector uses this pure seam for current previews.
+  static ChatTransportRequest buildRequest({
+    required StudioAgent agent,
+    required List<Map<String, dynamic>> messages,
+    required ResolvedAgentConfig resolved,
+    required String sessionId,
+    required bool isFinalResponse,
+    int? maxTokensOverride,
+    double? temperatureOverride,
+    String? charName,
+    String? userName,
+  }) {
+    final requestMessages =
+        isFinalResponse &&
+            (!resolved.requestReasoning || resolved.omitReasoning)
+        ? ReasoningStripper.stripMessageReasoning(messages)
+        : messages;
+    final spec = StudioControllerOntology.specForAgent(agent);
+    return ChatTransportRequest(
+      endpoint: resolved.endpoint,
+      apiKey: resolved.apiKey,
+      model: resolved.model,
+      messages: requestMessages,
+      maxTokens: maxTokensOverride ?? (spec?.maxTokens ?? 8000),
+      temperature: temperatureOverride ?? (spec?.temperature ?? 0.3),
+      topP: resolved.topP,
+      topK: resolved.topK,
+      frequencyPenalty: resolved.frequencyPenalty,
+      presencePenalty: resolved.presencePenalty,
+      stream: resolved.stream,
+      requestReasoning: resolved.requestReasoning,
+      useResponsesApi: resolved.useResponsesApi,
+      reasoningEffort: resolved.requestReasoning
+          ? resolved.reasoningEffort
+          : null,
+      omitTemperature: resolved.omitTemperature,
+      omitTopP: resolved.omitTopP,
+      omitTopK: resolved.omitTopK,
+      omitFrequencyPenalty: resolved.omitFrequencyPenalty,
+      omitPresencePenalty: resolved.omitPresencePenalty,
+      omitReasoning: resolved.omitReasoning,
+      omitReasoningEffort: resolved.omitReasoningEffort,
+      showNativeReasoning: resolved.showNativeReasoning,
+      // The Studio timer owns first-chunk timeout semantics. A Dio receive
+      // timeout would incorrectly become a second total/idle timeout.
+      receiveTimeoutMs: 0,
+      sessionId: sessionId,
+      cacheControlTtl: resolved.cacheControlTtl,
+      cacheBreakpointMode: resolved.cacheBreakpointMode,
+      sessionIdMode: resolved.sessionIdMode,
+      promptPostProcessing: resolved.promptPostProcessing,
+      charName: charName,
+      userName: userName,
+      extraRequestParameters: resolved.extraRequestParameters,
+      captureContext: LlmCaptureContext(
+        stage: isFinalResponse
+            ? 'studio.final'
+            : agent.phase == 'post_processing'
+            ? 'studio.post_processing'
+            : 'studio.controller',
+        sessionId: sessionId,
+        agentId: agent.id,
+      ),
+    );
   }
 }
 
