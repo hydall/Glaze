@@ -1572,7 +1572,17 @@ class CardEvolutionRepo {
         sessionId: sessionId,
         characterId: characterId,
       );
-      return (input, const EffectiveCanonAssembler().assemble(input));
+      // The automated evolution lane stamps canon with the stable identity:
+      // the per-turn Ledger mutates committed trackers and facts every turn,
+      // which would invalidate every automated proposal within a minute.
+      // Per-operation anchor CAS and evidence validation carry the safety.
+      return (
+        input,
+        const EffectiveCanonAssembler().assemble(
+          input,
+          stampVolatileState: false,
+        ),
+      );
     } catch (_) {
       return null;
     }

@@ -377,9 +377,24 @@ void main() {
     },
   );
 
+  /// Automated evolution jobs are stamped with the stable canon identity
+  /// (volatile Ledger state excluded). Restamps the seeded job accordingly.
+  Future<String> restampJobAsAutomated() async {
+    final stableStamp = const EffectiveCanonAssembler()
+        .assemble(
+          await reader.readInTransaction(sessionId: 's', characterId: 'c'),
+          stampVolatileState: false,
+        )
+        .identity;
+    await (db.update(db.rewriteJobs)..where((t) => t.id.equals('job')))
+        .write(RewriteJobsCompanion(canonStamp: Value(stableStamp)));
+    return stableStamp;
+  }
+
   test('valid automatic proposal evidence remains applyable', () async {
-    final stamp = await seed();
+    await seed();
     await addAutomaticProposal();
+    final stamp = await restampJobAsAutomated();
 
     final outcome = await ManualRewriteApplyRepo(db: db, canonReader: reader)
         .applyApproved(
@@ -394,7 +409,8 @@ void main() {
   test(
     'apply consumes only promoted observations targeted by applied ops',
     () async {
-      final stamp = await seed();
+      await seed();
+      final stamp = await restampJobAsAutomated();
       for (final entry in const [
         ('used', 'npc:alice', 'description', 'promoted'),
         ('wrong-field', 'stored:wrong-field', 'personality', 'promoted'),
@@ -687,6 +703,53 @@ void main() {
       expect((await characters.getById('c'))!.description, 'old text');
       expect(await revisions.getForCharacter('c'), hasLength(1));
       expect(await db.select(db.appliedCanonTransitionRows).get(), isEmpty);
+    },
+  );
+
+  test(
+    'automated evolution job applies despite volatile ledger drift',
+    () async {
+      final fullStamp = await seed();
+      await addAutomaticProposal();
+      final stableStamp = const EffectiveCanonAssembler()
+          .assemble(
+            await reader.readInTransaction(sessionId: 's', characterId: 'c'),
+            stampVolatileState: false,
+          )
+          .identity;
+      expect(stableStamp, isNot(fullStamp));
+      await (db.update(db.rewriteJobs)..where((t) => t.id.equals('job'))).write(
+        RewriteJobsCompanion(canonStamp: Value(stableStamp)),
+      );
+      // The per-turn Ledger committed new trackers after the automated
+      // proposal existed (normal LedgerStage ordering).
+      raw = LedgerRawTrackerState(
+        committedTrackers: const [
+          Tracker(sessionId: 's', name: 'arc.status', value: 'advanced'),
+        ],
+        manualControls: const [],
+      );
+      final freshStable = const EffectiveCanonAssembler()
+          .assemble(
+            await reader.readInTransaction(sessionId: 's', characterId: 'c'),
+            stampVolatileState: false,
+          )
+          .identity;
+      expect(freshStable, stableStamp);
+
+      final outcome = await ManualRewriteApplyRepo(db: db, canonReader: reader)
+          .applyApproved(
+            jobId: 'job',
+            expectedCanonStamp: freshStable,
+            expectedJobVersion: 1,
+          );
+
+      expect(outcome.kind, 'applied');
+      final session = await db.select(db.chatSessions).getSingle();
+      expect(
+        (await characters.getById(session.characterId))!.description,
+        'new text',
+      );
     },
   );
 

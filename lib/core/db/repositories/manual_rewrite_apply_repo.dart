@@ -141,7 +141,15 @@ class ManualRewriteApplyRepo {
         }
         EffectiveCanonAssembly assembly;
         try {
-          assembly = _assembler.assemble(input);
+          // Automated evolution jobs (proposal != null) are stamped with the
+          // stable identity: the per-turn Ledger mutates committed trackers
+          // and facts after the proposal exists, and per-operation anchor CAS
+          // plus the proposal evidence validation above carry the safety.
+          // Manual jobs keep the full fence.
+          assembly = _assembler.assemble(
+            input,
+            stampVolatileState: proposal == null,
+          );
         } on EffectiveCanonAssemblyUnavailable {
           return const ManualRewriteApplyOutcome.blocked('invalidCanonContext');
         }

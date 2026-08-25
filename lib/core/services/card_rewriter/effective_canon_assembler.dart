@@ -58,7 +58,16 @@ final class EffectiveCanonAssembly {
 class EffectiveCanonAssembler {
   const EffectiveCanonAssembler();
 
-  EffectiveCanonAssembly assemble(EffectiveCanonAssemblyInput input) {
+  /// [stampVolatileState] controls whether per-turn Ledger state (knowledge
+  /// facts and committed trackers) participates in the identity hash. Manual
+  /// rewrite jobs keep the full fence. Automated evolution proposals use the
+  /// stable stamp: the per-turn Ledger mutates committed trackers and facts on
+  /// every turn, and per-operation anchor CAS plus dedicated evidence
+  /// validation already protect the automated lane's targets.
+  EffectiveCanonAssembly assemble(
+    EffectiveCanonAssemblyInput input, {
+    bool stampVolatileState = true,
+  }) {
     if (input.lineage.isEmpty) {
       throw const EffectiveCanonAssemblyUnavailable('Source lineage is empty.');
     }
@@ -79,7 +88,11 @@ class EffectiveCanonAssembler {
       lineage: lineage,
       resolution: resolution,
       requiresBaselineDecision: selection.requiresDecision,
-      identity: _stampIdentity(input, selection.revision),
+      identity: _stampIdentity(
+        input,
+        selection.revision,
+        stampVolatileState: stampVolatileState,
+      ),
     );
   }
 
@@ -130,8 +143,9 @@ class EffectiveCanonAssembler {
 
   String _stampIdentity(
     EffectiveCanonAssemblyInput input,
-    CanonRevisionIdentity revision,
-  ) => _hash(
+    CanonRevisionIdentity revision, {
+    bool stampVolatileState = true,
+  }) => _hash(
     _json({
       'baseline': input.baseline == null
           ? null
@@ -161,36 +175,38 @@ class EffectiveCanonAssembler {
           },
         ),
       ),
-      'facts': _sorted(
-        input.facts.map(
-          (item) => {
-            'id': item.id,
-            'chatSessionId': item.chatSessionId,
-            'knowerKey': item.knowerKey,
-            'knowerName': item.knowerName,
-            'subjectKey': item.subjectKey,
-            'subjectName': item.subjectName,
-            'factClass': item.factClass.wireName,
-            'scopeKey': item.scopeKey,
-            'predicate': item.predicate,
-            'object': item.object,
-            'epistemicState': item.epistemicState.wireName,
-            'confidence': item.confidence,
-            'importance': item.importance,
-            'entities': [...item.entities]..sort(),
-            'topics': [...item.topics]..sort(),
-            'sourceMessageId': item.sourceMessageId,
-            'sourceSwipeId': item.sourceSwipeId,
-            'sourceAgentSwipeId': item.sourceAgentSwipeId,
-            'sourceKind': item.sourceKind,
-            'supersedesId': item.supersedesId,
-            'lifecycle': item.lifecycle.wireName,
-            'basisRevisionNumber': item.basisRevisionNumber,
-            'basisRevisionHash': item.basisRevisionHash,
-          },
+      if (stampVolatileState)
+        'facts': _sorted(
+          input.facts.map(
+            (item) => {
+              'id': item.id,
+              'chatSessionId': item.chatSessionId,
+              'knowerKey': item.knowerKey,
+              'knowerName': item.knowerName,
+              'subjectKey': item.subjectKey,
+              'subjectName': item.subjectName,
+              'factClass': item.factClass.wireName,
+              'scopeKey': item.scopeKey,
+              'predicate': item.predicate,
+              'object': item.object,
+              'epistemicState': item.epistemicState.wireName,
+              'confidence': item.confidence,
+              'importance': item.importance,
+              'entities': [...item.entities]..sort(),
+              'topics': [...item.topics]..sort(),
+              'sourceMessageId': item.sourceMessageId,
+              'sourceSwipeId': item.sourceSwipeId,
+              'sourceAgentSwipeId': item.sourceAgentSwipeId,
+              'sourceKind': item.sourceKind,
+              'supersedesId': item.supersedesId,
+              'lifecycle': item.lifecycle.wireName,
+              'basisRevisionNumber': item.basisRevisionNumber,
+              'basisRevisionHash': item.basisRevisionHash,
+            },
+          ),
         ),
-      ),
-      'committedTrackers': _sorted(input.committedTrackers.map(_tracker)),
+      if (stampVolatileState)
+        'committedTrackers': _sorted(input.committedTrackers.map(_tracker)),
       'manualControls': _sorted(input.manualControls.map(_tracker)),
       'transitionFactRefs': _sorted(
         input.transitionFactRefs.map(

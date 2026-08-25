@@ -122,6 +122,7 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
     final fresh = await computeFreshCanonIdentity(
       sessionId: job.chatSessionId,
       character: character,
+      stableStamp: isAutomatedEvolutionJob(job),
     );
     final next = fresh == null
         ? RewriteCanonFreshness.unavailable
@@ -133,15 +134,21 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
   }
 
   /// Fresh read-side canon stamp. Null when the assembly is unreadable.
+  /// [stableStamp] mirrors the guarded apply: automated evolution jobs are
+  /// compared against the stable identity that ignores per-turn Ledger
+  /// tracker/fact drift; manual jobs use the full fence.
   Future<String?> computeFreshCanonIdentity({
     required String sessionId,
     required Character character,
+    bool stableStamp = false,
   }) async {
     try {
       final input = await ref
           .read(_canonReaderProvider)
           .readFromSource(sessionId: sessionId, sourceCharacter: character);
-      return const EffectiveCanonAssembler().assemble(input).identity;
+      return const EffectiveCanonAssembler()
+          .assemble(input, stampVolatileState: !stableStamp)
+          .identity;
     } catch (_) {
       return null;
     }
@@ -290,6 +297,7 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
       final stamp = await computeFreshCanonIdentity(
         sessionId: snap.job.chatSessionId,
         character: character,
+        stableStamp: isAutomatedEvolutionJob(snap.job),
       );
       if (stamp == null) {
         return const ManualRewriteApplyOutcome.blocked('invalidCanonContext');
