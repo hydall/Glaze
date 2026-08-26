@@ -1,3 +1,15 @@
+/* How close to the end of the list still counts as "resting at the end" for
+ * the streaming auto-follow. Deliberately tiny: the follow is meant to hold
+ * only while the newest text is fully in view, and to resume only once the
+ * user has scrolled all the way back down. */
+const BOTTOM_PIN_EPSILON = 8;
+
+/* How close the user has to get, while scrolling back *down*, for the follow to
+ * take over again. Wider than the epsilon above so returning to the newest
+ * message does not demand hitting the last pixel — but it only ever applies to
+ * a downward move, never to a list the user is scrolling away from. */
+const BOTTOM_PIN_RESUME = 100;
+
 class VirtualScrollHeightCache {
     constructor(getItemLength, getColumns, estimateHeight) {
         this.getItemLength = getItemLength;
@@ -161,13 +173,13 @@ class UseVirtualScroll {
         this.scrollRaf = null;
         this.mounted = true;
 
-        // Mirrors Vue ChatView's `showScrollButton` gate for `smartScroll`:
-        // tracks whether the user is parked near the bottom. Updated only on
-        // *user* scrolls (programmatic scrolls are ignored) so that streaming
-        // content growth — which fires no scroll event — keeps following the
-        // bottom while the user has not deliberately scrolled away. Defaults to
-        // true because chats open pinned to the bottom.
+        // Gate for `smartScroll`: tracks whether the list is resting at the end
+        // of the chat. Content growth fires no scroll event, so streaming keeps
+        // following the bottom while this holds. Defaults to true because chats
+        // open pinned to the bottom. Maintained by _onContainerScroll().
         this._pinnedToBottom = true;
+        this._lastScrollTop = 0;
+        this._selfPinTop = null;
         this._smartScrollUnlock = null;
         
         this.visibleIndices = new Set();
@@ -387,6 +399,11 @@ class UseVirtualScroll {
         if (this.items.length === 0) return;
         this.isProgrammaticScrolling = true;
         this.container.scrollTop = this.container.scrollHeight;
+        // Remember where the follow parked so the scroll event it queues is
+        // recognised as ours even if the next chunk grows the list before that
+        // event is dispatched — otherwise the follow would read its own pin as
+        // "the user moved away" and switch itself off mid-stream.
+        this._lastScrollTop = this._selfPinTop = this.container.scrollTop;
         clearTimeout(this._smartScrollUnlock);
         this._smartScrollUnlock = setTimeout(() => {
             this.isProgrammaticScrolling = false;
@@ -568,7 +585,12 @@ class UseVirtualScroll {
         this.cache.pruneStale();
 
         if (type === 'append') {
-            const wasAtBottom = this.isNearBottom(100);
+            // Only follow a newly appended message when the user is actually
+            // parked at the end — the same gate the streaming auto-follow uses,
+            // so a reader who scrolled up is not yanked back down. (A message
+            // the user just sent scrolls down through appendMessage() /
+            // pendingScrollToBottom, which is independent of this.)
+            const wasAtBottom = this._pinnedToBottom && this.isNearBottom(100);
             if (wasAtBottom || this._scrollToBottomPending) {
                 this.renderEnd = newLen;
                 const vh = this.container.clientHeight || 800;
@@ -746,14 +768,38 @@ class UseVirtualScroll {
 
     _onContainerScroll() {
         // Update the bottom-pin tracker on EVERY scroll event — including the
-        // ones our own programmatic scrolls fire. This mirrors Vue's separate
-        // `onScroll` handler updating `showScrollButton` unconditionally. It is
-        // essential during streaming: smartScroll keeps isProgrammaticScrolling
-        // continuously true, so gating this behind the early-return below would
-        // make it impossible for the user to scroll up and detach from the
-        // auto-follow. smartScroll re-pins to the exact bottom, so its own
-        // events keep this true; only a genuine user scroll-up flips it false.
-        this._pinnedToBottom = this.isNearBottom(100);
+        // ones our own programmatic scrolls fire. This is essential during
+        // streaming: smartScroll keeps isProgrammaticScrolling continuously
+        // true, so gating this behind the early-return below would make it
+        // impossible for the user to scroll up and detach from the auto-follow.
+        //
+        // The rule is directional, not a distance band: the follow only stays
+        // on while the list is *resting at the end*, and ANY upward move — a
+        // single wheel notch, a short finger drag — detaches it at once. The
+        // old `isNearBottom(100)` band made scrolling away during a stream
+        // impossible: anywhere inside those 100px the next chunk's smartScroll
+        // pinned the list straight back to the bottom, so the view snapped back
+        // before the user could get out of the band. Our own auto-follow lands
+        // exactly at the end (scrollTop clamps to the maximum), and so does the
+        // inset re-pin glide, so neither loses the pin by scrolling upward.
+        const scrollTop = this.container.scrollTop;
+        const movedUp = scrollTop < this._lastScrollTop - 1;
+        const movedDown = scrollTop > this._lastScrollTop + 1;
+        const isOwnPin = this._selfPinTop !== null &&
+            Math.abs(scrollTop - this._selfPinTop) <= 1;
+        if (!isOwnPin) this._selfPinTop = null;
+        this._lastScrollTop = scrollTop;
+        if (isOwnPin || this.isNearBottom(BOTTOM_PIN_EPSILON)) {
+            // Resting at the end (or parked there by the follow itself).
+            this._pinnedToBottom = true;
+        } else if (movedUp) {
+            this._pinnedToBottom = false;
+        } else if (movedDown && this.isNearBottom(BOTTOM_PIN_RESUME)) {
+            // Coming back down to the newest message — resume the follow
+            // without making the user land on the exact last pixel.
+            this._pinnedToBottom = true;
+        }
+
         if (this.isProgrammaticScrolling) return;
         this.isScrolling = true;
         clearTimeout(this.scrollTimeout);

@@ -963,6 +963,26 @@
   justify-self: end;
   gap: 8px;
   grid-column: 3;
+  min-height: 28px;
+}
+
+/* The Save/Cancel row is part of the edited message's own layout box: it keeps
+   a full-height row plus a gap beneath it, so the message measures taller while
+   it is being edited. The chat container's bottom inset (input bar + keyboard)
+   then clears those controls exactly like it clears any other content — no
+   edit-specific padding has to be reserved on the Flutter side. */
+.message-section.editing .msg-footer {
+  row-gap: 8px;
+  min-height: 32px;
+  margin-bottom: 8px;
+}
+/* Bubble layout: the footer is a wrapping flex row whose width follows the
+   bubble, so a narrow bubble would squeeze the two buttons against the meta /
+   switcher columns. Give them a row of their own, aligned to the same side as
+   the rest of the footer (left for char, right for user). */
+.message-section.layout-bubble.editing .edit-buttons {
+  flex: 1 0 100%;
+  justify-content: inherit;
 }
 .edit-btn {
   width: 28px;

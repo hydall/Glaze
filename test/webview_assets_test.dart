@@ -126,6 +126,33 @@ void main() {
       expect(virtualScrollJs, contains('if (!this._pinnedToBottom) return'));
     });
 
+    test('the streaming follow detaches on any upward scroll', () {
+      final body = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf('_onContainerScroll() {'),
+      );
+      expect(
+        body,
+        contains('const movedUp = scrollTop < this._lastScrollTop - 1'),
+        reason:
+            'The pin has to be directional: with a plain isNearBottom(100) band '
+            'the next streamed chunk re-pinned the list before the user could '
+            'scroll out of those 100px, so scrolling up during generation was '
+            'impossible.',
+      );
+      expect(
+        body,
+        contains('this.isNearBottom(BOTTOM_PIN_EPSILON)'),
+        reason:
+            'The follow resumes only when the list rests at the very end of the '
+            'container, not anywhere inside a wide band above it.',
+      );
+      expect(
+        body,
+        isNot(contains('this._pinnedToBottom = this.isNearBottom(100)')),
+      );
+    });
+
     test('scroll-to-bottom resolves after its correction pass', () {
       final body = _extractBlockBody(
         virtualScrollJs,
@@ -1307,6 +1334,25 @@ void main() {
         reason:
             'Without overscroll-behavior:contain, reaching the end of the textarea '
             'causes the parent chat container to scroll',
+      );
+    });
+
+    test('the edit footer reserves its own room inside the message', () {
+      expect(
+        stylessCss,
+        contains('.message-section.editing .msg-footer {'),
+        reason:
+            'The Save/Cancel row must be sized inside the edited message so the '
+            'chat container clears it with its ordinary bottom inset — Flutter '
+            'no longer reserves edit-only scroll room (chat_screen.dart).',
+      );
+      expect(
+        stylessCss,
+        contains('.message-section.layout-bubble.editing .edit-buttons {'),
+        reason:
+            'In bubble layout the footer is a wrapping flex row that follows the '
+            'bubble width; the edit buttons need a row of their own or a narrow '
+            'bubble squeezes them against the meta/switcher columns.',
       );
     });
   });

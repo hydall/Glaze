@@ -1331,20 +1331,14 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
           1.0,
           targetPanelHeight / math.max(1.0, safeBottom),
         );
-        // While inline-editing a message, reserve extra scroll room at the
-        // bottom. The normal inset only matches the input bar + keyboard, so a
-        // message edited at the very end of the chat can scroll its body up to
-        // that boundary but no further — and in bubble mode the Save/Cancel
-        // footer wraps onto its own row *below* the bubble, landing behind the
-        // input bar where it can't be reached. The extra padding lets the whole
-        // edit footer clear the bottom overlays. Reclaimed automatically when
-        // editing ends (isEditingMessage flips back to false).
-        const editFooterScrollRoom = 96.0;
+        // Editing needs no inset of its own: the Save/Cancel row is laid out
+        // inside the edited message (see `.message-section.editing .msg-footer`
+        // in assets/chat_webview/styles.css), so the message's own height
+        // already carries it and this inset clears it like any other content.
         final webViewBottomInset =
             _inputBarHeight +
             targetPanelHeight +
-            (safeBottom * (1 - targetFactor)) +
-            (isEditingMessage ? editFooterScrollRoom : 0.0);
+            (safeBottom * (1 - targetFactor));
         _lastMessageListBottom = webViewBottomInset;
         final showScrollBtn =
             _showScrollToBottom &&
