@@ -255,7 +255,10 @@ class EditController {
     const scrollPos = scrollTopFn();
     section.classList.add('editing');
 
-    const rawText = (section.dataset.rawText || '').replace(/^<think\b[^>]*>[\s\S]*?<\/think>\s*/, '');
+    // Mirrors bridge/edit_controller.js: edit the stored text, never the
+    // rendered one, so a display-only regex is not saved over its own source.
+    const editSource = section.dataset.sourceText ?? section.dataset.rawText ?? '';
+    const rawText = editSource.replace(/^<think\b[^>]*>[\s\S]*?<\/think>\s*/, '');
     const reasoning = section.dataset.reasoning || '';
     let editText = rawText;
     if (reasoning) editText = '<' + 'think>\n' + reasoning + '\n</' + 'think>\n' + rawText;
@@ -1195,6 +1198,8 @@ class Bridge {
     else if (msg.reasoning === null || msg.reasoning === '') delete section.dataset.reasoning;
 
     if (msg.text != null) section.dataset.rawText = msg.text;
+    if (msg.sourceText != null) section.dataset.sourceText = msg.sourceText;
+    else if (msg.text != null) delete section.dataset.sourceText;
 
     if (msg.isError !== undefined) section.classList.toggle('error', !!msg.isError);
 

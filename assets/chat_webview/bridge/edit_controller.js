@@ -30,7 +30,13 @@ export class EditController {
     const scrollPos = scrollTopFn();
     section.classList.add('editing');
 
-    const rawText = (section.dataset.rawText || '').replace(/^<think\b[^>]*>[\s\S]*?<\/think>\s*/, '');
+    // Edit the stored text, not the rendering. `rawText` holds the display
+    // form — macros expanded and display regexes applied — so saving from it
+    // would persist the rendered output over the source (a `markdownOnly`
+    // card regex would eat its own `{TRK|…}` marker). `sourceText` is sent
+    // whenever the two differ; without it they are the same string.
+    const editSource = section.dataset.sourceText ?? section.dataset.rawText ?? '';
+    const rawText = editSource.replace(/^<think\b[^>]*>[\s\S]*?<\/think>\s*/, '');
     const reasoning = section.dataset.reasoning || '';
     let editText = rawText;
     if (reasoning) editText = '<' + 'think>\n' + reasoning + '\n</' + 'think>\n' + rawText;

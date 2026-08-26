@@ -498,6 +498,31 @@ void main() {
     });
   });
 
+  group('edit opens the stored text, not the rendering', () {
+    test('section carries sourceText when Dart sends one', () {
+      expect(
+        rendererMessageJs,
+        contains('section.dataset.sourceText = messageData.sourceText'),
+      );
+    });
+
+    test('startEdit prefers sourceText over rawText', () {
+      expect(
+        editControllerJs,
+        contains(
+          'section.dataset.sourceText ?? section.dataset.rawText',
+        ),
+      );
+    });
+
+    test('an update without sourceText clears a stale one', () {
+      expect(
+        bridgeControllerJs,
+        contains('delete section.dataset.sourceText'),
+      );
+    });
+  });
+
   group('bridge ES module layout', () {
     test('module entrypoint exports and bootstraps Bridge', () {
       expect(

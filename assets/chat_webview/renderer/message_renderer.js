@@ -95,6 +95,12 @@ export class Renderer {
     const section = document.createElement('div');
     section.dataset.messageId = id;
     section.dataset.rawText = text || '';
+    // Present only when the stored text differs from what is rendered (macros
+    // expanded, display regexes applied). The editor opens this instead of
+    // rawText so a display-only rewrite is never saved over the source.
+    if (messageData.sourceText != null) {
+      section.dataset.sourceText = messageData.sourceText;
+    }
     if (reasoning) section.dataset.reasoning = reasoning;
     if (isLast && this._roleKey(role) === 'char') section.dataset.isLast = 'true';
     if (messageData.personaName) section.dataset.personaName = messageData.personaName;

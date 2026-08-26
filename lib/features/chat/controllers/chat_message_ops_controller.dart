@@ -123,13 +123,18 @@ class ChatMessageOpsController {
     );
     final depth = session.messages.length - 1 - index;
     final ctx = RegexApplyContext(char: char, persona: persona, depth: depth);
+    // `isMarkdown: false` on purpose: this pass writes its result back into the
+    // session, and a `markdownOnly` script ("Only Format Display" in ST) must
+    // never touch stored text. Running it here baked the rendered output into
+    // the message — a card-rendering regex replaced its own `{TRK|…}` marker,
+    // so after one edit there was nothing left for it to match.
     final content = applyRegexes(
       msg.content,
       placement,
       1,
       editScripts,
       ctx,
-      isMarkdown: true,
+      isMarkdown: false,
     );
     if (content == msg.content) return session;
     final newMessages = List<ChatMessage>.from(session.messages);

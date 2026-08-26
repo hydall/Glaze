@@ -577,6 +577,12 @@ export class Bridge {
 
     if (msg.text != null) section.dataset.rawText = msg.text;
 
+    // Kept in step with rawText: an update that carries text but no sourceText
+    // means the stored text and the rendered one are identical again, so a
+    // stale source from an earlier update must not survive into the editor.
+    if (msg.sourceText != null) section.dataset.sourceText = msg.sourceText;
+    else if (msg.text != null) delete section.dataset.sourceText;
+
     if (msg.isError !== undefined) section.classList.toggle('error', !!msg.isError);
 
     const isUser = section.classList.contains('user');

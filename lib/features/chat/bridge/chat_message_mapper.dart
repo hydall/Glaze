@@ -124,10 +124,22 @@ class ChatMessageMapper {
       memoryStatus = 'DRAFT';
     }
 
+    // What the editor must show. `text` below carries the *display* form —
+    // macros expanded, display regexes applied — and the WebView keeps it in
+    // `dataset.rawText`. Feeding that into the edit textarea would let a
+    // display-only rewrite be saved back over the message: a `markdownOnly`
+    // regex that turns `{TRK|…}` into a styled HTML card would replace the
+    // marker in storage, and the next render would have nothing left to match.
+    // The stored content rides along whenever it differs so `startEdit` can
+    // open the source instead of the rendering.
+    final displayText = stripThinkTags(content);
+    final sourceText = stripThinkTags(m.content);
+
     return {
       'id': m.id,
       'role': m.role,
-      'text': stripThinkTags(content),
+      'text': displayText,
+      if (sourceText != displayText) 'sourceText': sourceText,
       'timestamp': m.timestamp,
       'isUser': isUser,
       'isAssistant': isAssistant,
