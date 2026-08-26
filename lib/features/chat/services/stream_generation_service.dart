@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/llm/game_time.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
@@ -34,6 +35,7 @@ import '../../../core/models/pipeline_settings.dart';
 import '../../../core/services/model_usage_service.dart';
 import '../../../core/services/preset_defaults.dart';
 import '../../../core/state/active_selection_provider.dart';
+import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../chat_provider.dart';
 import '../chat_state.dart';
@@ -436,6 +438,16 @@ class StreamGenerationService {
             studioFinalMessages,
           ),
         );
+        // Opening game clock: read the current ledger trackers before the
+        // message is written so the badge travels with the initial append
+        // (the post-turn Ledger stamp refines it afterwards). Null when no
+        // complete date/day/time tuple exists — never a partial clock.
+        final openingTrackers = await _ref
+            .read(trackerRepoProvider)
+            .getBySessionAndScope(session.id, 'ledger');
+        final openingClock = GameTimeState.fromTrackers(
+          openingTrackers,
+        ).format();
         final finalState = _writer
             .writeAssistant(
               text: wrappedStudioText,
@@ -447,6 +459,7 @@ class StreamGenerationService {
               pendingSessionVars: beautyApplied.vars,
               genTime: '${(elapsed / 1000).toStringAsFixed(1)}s',
               tokens: estimateTokens(studioResult.response),
+              time: openingClock,
               rawResponse:
                   studioResult.rawResponseJson ?? studioResult.response,
               previousSwipes: previousSwipes,

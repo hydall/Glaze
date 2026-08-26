@@ -30,6 +30,7 @@ class SavedMessageWriter {
     String? genTime,
     int? tokens,
     String? rawResponse,
+    String? time,
     List<String>? previousSwipes,
     int previousSwipeId = 0,
     String? previousReasoning,
@@ -63,6 +64,10 @@ class SavedMessageWriter {
       'genTime': genTime,
       'reasoning': reasoning,
       'tokens': tokens,
+      // Opening game clock (Studio only): stamped at creation so the badge
+      // renders with the initial append instead of waiting for the
+      // post-turn Ledger update.
+      'time': ?time,
       if (studioOutputs.isNotEmpty) 'studioOutputs': studioOutputs,
       // Persist triggered entries per swipe so each variation shows its own
       // lorebook/memory activations (restored on swipe in ChatMessageService).
@@ -120,6 +125,7 @@ class SavedMessageWriter {
             reasoning: reasoning,
             genTime: genTime,
             tokens: tokens,
+            time: time,
             studioOutputs: studioOutputs,
           ),
         ];
@@ -159,7 +165,9 @@ class SavedMessageWriter {
           agentSwipes: agentSwipes,
           agentSwipeId: agentSwipeId,
           studioOutputs: studioOutputs,
-          time: null,
+          // Fresh variation carries the opening clock (may be null when no
+          // complete game-time tuple exists); Ledger restamps after the turn.
+          time: time,
         );
         final updatedMessages = [...currentSession.messages];
         updatedMessages[idx] = updated;
@@ -194,6 +202,7 @@ class SavedMessageWriter {
         reasoning: reasoning,
         genTime: genTime,
         tokens: tokens,
+        time: time,
         studioOutputs: studioOutputs,
       ),
     ];
@@ -206,6 +215,7 @@ class SavedMessageWriter {
       genTime: genTime,
       tokens: tokens,
       timestamp: DateTime.now().millisecondsSinceEpoch,
+      time: time,
       swipes: swipes,
       swipeId: swipeId,
       swipesMeta: swipesMeta,
