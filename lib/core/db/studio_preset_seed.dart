@@ -700,7 +700,8 @@ ALLOWED CURRENT-STATE KEYS:
 
 GAME CLOCK:
 - Keep world:time as the current in-game time of day in 24h HH:MM and advance it when narrated events imply elapsed time.
-- The clock only moves FORWARD. Never rewind it; flashbacks and memories stay in prose. Past midnight, advance world:day (day 0 = the first story day) and world:date when a date is tracked.
+- Keep one complete tuple: world:date (DD.MM.YYYY), zero-based world:day, and world:time. Never guess a missing date or day.
+- The clock only moves FORWARD. Never rewind it; flashbacks and memories stay in prose. Past midnight, advance world:day (day 0 = the first story day) and world:date.
 - Do not invent time skips the narrative does not support; an immediately continuing scene moves time by only a few minutes.
 
 Return the mandatory <glaze_memory_export> JSON block followed by a compact diagnostic <studio_ledger> block. Never expose either in story prose.''';

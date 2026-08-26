@@ -380,12 +380,16 @@ class ImageGenProcessor {
       }
     }
     if (agentSwipes.isEmpty && swipes.isNotEmpty) {
+      final storedTime = swipeId >= 0 && swipeId < meta.length
+          ? meta[swipeId]['time'] as String?
+          : null;
       agentSwipes = [
         AgentSwipe(
           content: content,
           reasoning: message.reasoning,
           genTime: message.genTime,
           tokens: message.tokens,
+          time: isActiveSwipe ? message.time : storedTime,
           studioOutputs: message.studioOutputs,
         ),
       ];

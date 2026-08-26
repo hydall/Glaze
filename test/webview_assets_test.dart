@@ -94,6 +94,18 @@ void main() {
   });
 
   group('memory badge and virtual-scroll settling', () {
+    test('game-time metadata can be added, updated, and removed live', () {
+      final body = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('updateMessageMeta(sectionEl, msg)'),
+      );
+      expect(body, contains("querySelector('.msg-game-time')"));
+      expect(body, contains(r'clock.textContent = `⏱ ${msg.gameTime}`'));
+      expect(body, contains('clock?.remove()'));
+      expect(body, contains("hasOwnProperty.call(msg, 'gameTime')"));
+      expect(body, contains("hasOwnProperty.call(msg, 'gameTime')"));
+    });
+
     test('late memory state patches metadata without a full render', () {
       final body = _extractBlockBody(
         bridgeControllerJs,
@@ -509,17 +521,12 @@ void main() {
     test('startEdit prefers sourceText over rawText', () {
       expect(
         editControllerJs,
-        contains(
-          'section.dataset.sourceText ?? section.dataset.rawText',
-        ),
+        contains('section.dataset.sourceText ?? section.dataset.rawText'),
       );
     });
 
     test('an update without sourceText clears a stale one', () {
-      expect(
-        bridgeControllerJs,
-        contains('delete section.dataset.sourceText'),
-      );
+      expect(bridgeControllerJs, contains('delete section.dataset.sourceText'));
     });
   });
 
@@ -703,8 +710,14 @@ void main() {
       // The count is `variants.length > 1` on both the switcher and the data
       // attributes, so a single-image block keeps its historical markup.
       expect(formatterFormatterJs, contains('imggen-variants'));
-      expect(formatterFormatterJs, contains("data-action=\"img-variant-prev\""));
-      expect(formatterFormatterJs, contains("data-action=\"img-variant-next\""));
+      expect(
+        formatterFormatterJs,
+        contains("data-action=\"img-variant-prev\""),
+      );
+      expect(
+        formatterFormatterJs,
+        contains("data-action=\"img-variant-next\""),
+      );
       expect(
         RegExp(r'variants\.length > 1').allMatches(formatterFormatterJs).length,
         greaterThanOrEqualTo(3),
@@ -756,8 +769,10 @@ void main() {
       );
       expect(
         bridgeControllerJs,
-        contains("import { parseImageResultElement } from "
-            "'../formatter/formatter.js';"),
+        contains(
+          "import { parseImageResultElement } from "
+          "'../formatter/formatter.js';",
+        ),
       );
     });
 
@@ -767,10 +782,7 @@ void main() {
       expect(interactionDispatchJs, contains("'img-variant-next'"));
       // The lightbox and the download button read data-src, so it moves too.
       expect(interactionDispatchJs, contains('img.dataset.src = src'));
-      expect(
-        interactionDispatchJs,
-        contains("_sendToFlutter('onImgVariant'"),
-      );
+      expect(interactionDispatchJs, contains("_sendToFlutter('onImgVariant'"));
     });
 
     test('the switcher is small and see-through', () {
@@ -1529,7 +1541,10 @@ void main() {
         contains('container.scrollHeight - container.clientHeight > 50'),
       );
       expect(helper, contains('this._headerHidden = false'));
-      expect(helper, contains("this._sendToFlutter('onHeaderScroll', [false])"));
+      expect(
+        helper,
+        contains("this._sendToFlutter('onHeaderScroll', [false])"),
+      );
     });
 
     test('a trimmed message re-checks that the header is reachable', () {

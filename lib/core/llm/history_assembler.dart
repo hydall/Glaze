@@ -19,7 +19,7 @@ class HistoryAssembler {
       messages.add(
         PromptMessage(
           role: msg.role,
-          content: _withGameTime(normalized, msg),
+          content: normalized,
           reasoningContent: msg.reasoning,
           isHistory: true,
           sourceMessageId: msg.id,
@@ -31,16 +31,6 @@ class HistoryAssembler {
     }
 
     return messages;
-  }
-
-  /// The in-game clock travels with the chat history itself: every message
-  /// stamped by the ledger carries its full game time, so the model sees the
-  /// whole progression of the clock instead of a single current timestamp.
-  String _withGameTime(String content, ChatMessage msg) {
-    final time = msg.time?.trim();
-    if (time == null || time.isEmpty) return content;
-    if (content.isEmpty) return '[$time]';
-    return '[$time]\n$content';
   }
 }
 

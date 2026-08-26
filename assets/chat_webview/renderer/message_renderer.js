@@ -759,16 +759,20 @@ if (messageData.isEditing) classes.push('editing');
     // In-game clock: the ledger stamps the message after the turn, so the
     // element usually appears (or updates) via this live path rather than at
     // initial render.
-    if (msg.gameTime) {
-      const stack = sectionEl.querySelector('.msg-content-stack');
-      if (stack) {
-        let clock = stack.querySelector('.msg-game-time');
-        if (!clock) {
-          clock = this._createGameTimeBlock(msg.gameTime);
-          const wrapper = stack.querySelector('.msg-transition-wrapper');
-          stack.insertBefore(clock, wrapper || null);
+    const stack = sectionEl.querySelector('.msg-content-stack');
+    if (stack) {
+      let clock = stack.querySelector('.msg-game-time');
+      if (Object.prototype.hasOwnProperty.call(msg, 'gameTime')) {
+        if (msg.gameTime) {
+          if (!clock) {
+            clock = this._createGameTimeBlock(msg.gameTime);
+            const wrapper = stack.querySelector('.msg-transition-wrapper');
+            stack.insertBefore(clock, wrapper || null);
+          } else {
+            clock.textContent = `⏱ ${msg.gameTime}`;
+          }
         } else {
-          clock.textContent = `⏱ ${msg.gameTime}`;
+          clock?.remove();
         }
       }
     }

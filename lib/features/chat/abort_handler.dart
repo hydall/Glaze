@@ -268,11 +268,20 @@ class AbortHandler {
                     'genTime': restoration.genTime,
                     'reasoning': restoration.reasoning,
                     'tokens': restoration.tokens,
+                    'time': restoration.time,
                   },
                 ],
         );
         keptSwipes.add(partialText);
-        keptSwipesMeta.add(<String, dynamic>{});
+        final partialAgentSwipe = AgentSwipe(
+          content: partialText,
+          reasoning: partialStreaming.reasoning,
+          parentSwipeId: keptSwipes.length - 1,
+        );
+        keptSwipesMeta.add(<String, dynamic>{
+          'agentSwipes': [partialAgentSwipe.toJson()],
+          'agentSwipeId': 0,
+        });
         final newSwipeId = keptSwipes.length - 1;
         final updated = target.copyWith(
           content: partialText,
@@ -282,6 +291,9 @@ class AbortHandler {
           reasoning: partialStreaming.reasoning,
           genTime: null,
           tokens: null,
+          time: null,
+          agentSwipes: [partialAgentSwipe],
+          agentSwipeId: 0,
           isTyping: false,
           // Partial text becomes a fresh (healthy) swipe; with nothing
           // streamed we put the pre-regen variation back untouched — an

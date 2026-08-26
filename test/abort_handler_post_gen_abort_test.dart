@@ -154,6 +154,73 @@ void main() {
   );
 
   test(
+    'partial regeneration starts a fresh untimed nested variation',
+    () async {
+      const restoration = ChatMessage(
+        id: 'assistant-1',
+        role: 'assistant',
+        content: 'Original',
+        swipes: ['Original'],
+        swipesMeta: [
+          {
+            'time': '01.01.2026 · RP_Day 0 · 14:12',
+            'agentSwipeId': 0,
+            'agentSwipes': [
+              {
+                'content': 'Original',
+                'kind': 'final',
+                'time': '01.01.2026 · RP_Day 0 · 14:12',
+              },
+            ],
+          },
+        ],
+        agentSwipes: [
+          AgentSwipe(
+            content: 'Original',
+            time: '01.01.2026 · RP_Day 0 · 14:12',
+          ),
+        ],
+        time: '01.01.2026 · RP_Day 0 · 14:12',
+      );
+      final initialState = ChatState(
+        session: _session([restoration]),
+        isGenerating: true,
+        regenTargetId: restoration.id,
+      );
+      final harnessProvider = _abortHarnessProvider(initialState);
+      final container = ProviderContainer(
+        overrides: [
+          extensionPostGenServiceProvider.overrideWith(
+            (ref) => _RecordingExtensionPostGenService(ref),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      final harness = container.read(harnessProvider);
+      harness.handler.restorationMessage = restoration;
+      container.read(streamingStateProvider('char-1').notifier).state =
+          const StreamingState(text: 'Partial', reasoning: 'Reasoning');
+
+      await harness.handler.abortGeneration();
+
+      final message = harness.durableSession!.messages.single;
+      expect(message.content, 'Partial');
+      expect(message.time, isNull);
+      expect(message.agentSwipeId, 0);
+      expect(message.agentSwipes, hasLength(1));
+      expect(message.agentSwipes.single.content, 'Partial');
+      expect(message.agentSwipes.single.time, isNull);
+      final stored = message.swipesMeta.last['agentSwipes'] as List<dynamic>;
+      expect(
+        AgentSwipe.fromJson(
+          Map<String, dynamic>.from(stored.single as Map<dynamic, dynamic>),
+        ).time,
+        isNull,
+      );
+    },
+  );
+
+  test(
     'post-gen Stop restores the snapshot without re-enabling generation flags',
     () async {
       final initialState = ChatState(

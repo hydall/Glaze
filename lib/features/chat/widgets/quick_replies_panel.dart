@@ -15,11 +15,13 @@ class QuickRepliesPanel extends ConsumerStatefulWidget {
   final String charId;
   final bool disableEffects;
   final VoidCallback? onClose;
+  final Future<bool> Function()? beforeGeneration;
 
   const QuickRepliesPanel({
     super.key,
     required this.charId,
     this.onClose,
+    this.beforeGeneration,
     this.disableEffects = false,
   });
 
@@ -43,16 +45,18 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     setState(() => _editing = !_editing);
   }
 
-  void _handleTap(QuickReply reply) {
+  Future<void> _handleTap(QuickReply reply) async {
     if (_editing) {
-      _showEditSheet(existing: reply);
+      await _showEditSheet(existing: reply);
       return;
     }
     final notifier = ref.read(chatProvider(widget.charId).notifier);
+    if (await widget.beforeGeneration?.call() == false) return;
+    if (!mounted) return;
     if (reply.isContinueAction) {
-      notifier.continueMessage();
+      await notifier.continueMessage();
     } else if (reply.text.trim().isNotEmpty) {
-      notifier.sendMessage(reply.text);
+      await notifier.sendMessage(reply.text);
     }
     widget.onClose?.call();
   }
@@ -344,9 +348,7 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
               const SizedBox(width: 8),
               FilledButton(
                 onPressed: _submit,
-                child: Text(
-                  widget.isNew ? 'action_add'.tr() : 'btn_save'.tr(),
-                ),
+                child: Text(widget.isNew ? 'action_add'.tr() : 'btn_save'.tr()),
               ),
             ],
           ),

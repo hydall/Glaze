@@ -31,6 +31,7 @@ import '../../state/post_gen_status_provider.dart';
 import '../collector_view_service.dart';
 import '../current_ledger_injection_preview_service.dart';
 import '../pipeline_utils.dart';
+import '../game_time_message_stamp.dart';
 import '../prompt_capture_view_service.dart';
 import '../reconciler_view_service.dart';
 import 'stage_context.dart';
@@ -539,7 +540,7 @@ class LedgerStage {
           .read(trackerRepoProvider)
           .getBySessionAndScope(sessionId, 'ledger');
       final display = GameTimeState.fromTrackers(trackers).format();
-      if (display == null || display == targetMessage.time) return;
+      if (display == null) return;
       if (!isCurrent()) return;
 
       final updated = await ctx.ref
@@ -548,7 +549,12 @@ class LedgerStage {
             sessionId: sessionId,
             messageId: targetMessage.id,
             updatedAt: currentTimestampSeconds(),
-            mutate: (message) => message.copyWith(time: display),
+            mutate: (message) => stampGameTimeForVariation(
+              message,
+              swipeId: targetMessage.swipeId,
+              agentSwipeId: targetMessage.agentSwipeId,
+              time: display,
+            ),
           );
       if (updated == null) return;
       ChatSessionService.updateCache(updated);

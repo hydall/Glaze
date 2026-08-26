@@ -677,7 +677,7 @@ class StudioLedgerExportParser {
       }
     } else if (key.startsWith('world:')) {
       if (!RegExp(
-        r'^world:(location|time|date|active_threats|current_conditions)$',
+        r'^world:(location|time|date|day|active_threats|current_conditions)$',
       ).hasMatch(key)) {
         return 'unknown world key "$key"';
       }

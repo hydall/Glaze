@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../db/repositories/summary_repo.dart';
 import '../models/api_config.dart';
 import '../models/chat_message.dart';
+import 'auxiliary_timed_history.dart';
 import 'aux_llm_client.dart';
 import 'macro_engine.dart';
 import 'transport/llm_protocol.dart';
@@ -206,11 +207,7 @@ class SummaryService {
         final speaker = msg.role == 'user' ? 'User' : 'Character';
         // The ledger-stamped game clock travels with the transcript so the
         // summary stays time-anchored instead of teleporting across hours.
-        final gameTime = msg.time?.trim();
-        final timePrefix = gameTime == null || gameTime.isEmpty
-            ? ''
-            : '[$gameTime] ';
-        buf.writeln('$speaker: $timePrefix${msg.content}');
+        buf.writeln('$speaker: ${auxiliaryTimedContent(msg)}');
       }
     }
     return buf.toString();

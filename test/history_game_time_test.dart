@@ -14,20 +14,23 @@ void main() {
     sessionId: 'session',
   );
 
-  test('history assembler prefixes ledger-stamped game time', () {
-    final history = HistoryAssembler(macroCtx).assemble([
-      const ChatMessage(id: 'u1', role: 'user', content: 'Hello'),
-      const ChatMessage(
-        id: 'a1',
-        role: 'assistant',
-        content: 'She looks up.',
-        time: '12.05.2027 · День 0 · 09:15',
-      ),
-    ]);
+  test(
+    'history assembler keeps display-only game time out of chat history',
+    () {
+      final history = HistoryAssembler(macroCtx).assemble([
+        const ChatMessage(id: 'u1', role: 'user', content: 'Hello'),
+        const ChatMessage(
+          id: 'a1',
+          role: 'assistant',
+          content: 'She looks up.',
+          time: '12.05.2027 · День 0 · 09:15',
+        ),
+      ]);
 
-    expect(history[0].content, 'Hello');
-    expect(history[1].content, '[12.05.2027 · День 0 · 09:15]\nShe looks up.');
-  });
+      expect(history[0].content, 'Hello');
+      expect(history[1].content, 'She looks up.');
+    },
+  );
 
   test('history assembler leaves unstamped messages untouched', () {
     final history = HistoryAssembler(
@@ -37,7 +40,7 @@ void main() {
     expect(history[0].content, 'Hello');
   });
 
-  test('fallback prompt builder carries the game time into history', () {
+  test('fallback prompt builder keeps game time out of chat history', () {
     final payload = PromptPayload(
       character: const Character(id: 'character', name: 'Alison'),
       history: const [
@@ -57,6 +60,6 @@ void main() {
       (m) => m.sourceMessageId == 'a1',
     );
 
-    expect(historyMessage.content, '[День 2 · 18:30]\nHi.');
+    expect(historyMessage.content, 'Hi.');
   });
 }

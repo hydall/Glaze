@@ -748,6 +748,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       isTyping: true,
       genTime: null,
       tokens: null,
+      time: null,
       isError: false,
       swipes: pendingSwipes,
       swipeId: pendingSwipes.length - 1,
@@ -875,20 +876,36 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   }
 
   List<Map<String, dynamic>>? _previousSwipesMetaForRegen(ChatMessage message) {
-    if (message.swipesMeta.isNotEmpty) return message.swipesMeta;
     final swipes = message.swipes.isNotEmpty
         ? message.swipes
         : [message.content];
-    return List<Map<String, dynamic>>.generate(
+    final meta = List<Map<String, dynamic>>.generate(
       swipes.length,
-      (i) => i == message.swipeId
-          ? <String, dynamic>{
-              'genTime': message.genTime,
-              'reasoning': message.reasoning,
-              'tokens': message.tokens,
-            }
+      (i) => i < message.swipesMeta.length
+          ? Map<String, dynamic>.from(message.swipesMeta[i])
           : <String, dynamic>{},
     );
+    if (message.swipeId >= 0 && message.swipeId < meta.length) {
+      final active = meta[message.swipeId];
+      final nested = message.agentSwipes
+          .map((swipe) => swipe.toJson())
+          .toList();
+      if (message.agentSwipeId >= 0 &&
+          message.agentSwipeId < nested.length &&
+          nested[message.agentSwipeId]['time'] == null) {
+        nested[message.agentSwipeId]['time'] = message.time;
+      }
+      meta[message.swipeId] = <String, dynamic>{
+        ...active,
+        if (!active.containsKey('genTime')) 'genTime': message.genTime,
+        if (!active.containsKey('reasoning')) 'reasoning': message.reasoning,
+        if (!active.containsKey('tokens')) 'tokens': message.tokens,
+        if (!active.containsKey('time')) 'time': message.time,
+        if (nested.isNotEmpty) 'agentSwipes': nested,
+        if (nested.isNotEmpty) 'agentSwipeId': message.agentSwipeId,
+      };
+    }
+    return meta;
   }
 
   /// Extend the trailing assistant message with a fresh generation, then fold

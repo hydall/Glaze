@@ -159,6 +159,7 @@ class SavedMessageWriter {
           agentSwipes: agentSwipes,
           agentSwipeId: agentSwipeId,
           studioOutputs: studioOutputs,
+          time: null,
         );
         final updatedMessages = [...currentSession.messages];
         updatedMessages[idx] = updated;
@@ -311,6 +312,7 @@ class SavedMessageWriter {
           'genTime': original.genTime,
           'reasoning': original.reasoning,
           'tokens': original.tokens,
+          'time': original.time,
         });
       } else {
         priorMeta.add(<String, dynamic>{});
@@ -330,6 +332,7 @@ class SavedMessageWriter {
       reasoning: null,
       genTime: null,
       tokens: null,
+      time: null,
     );
     final finalMessages = [...saveSession.messages];
     finalMessages[idx] = updated;

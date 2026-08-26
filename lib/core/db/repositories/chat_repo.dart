@@ -847,6 +847,7 @@ class ChatRepo implements SyncChatStore {
                 reasoning: msg.reasoning,
                 genTime: msg.genTime,
                 tokens: msg.tokens,
+                time: msg.time,
                 studioOutputs: msg.studioOutputs,
               ),
             );
@@ -877,17 +878,19 @@ class ChatRepo implements SyncChatStore {
                     ? agentSwipes[parentSwipeId].studioOutputs
                     : const <Map<String, dynamic>>[]);
 
-          agentSwipes.add(
-            AgentSwipe(
-              content: content,
-              kind: kind,
-              reasoning: reasoning,
-              genTime: genTime,
-              tokens: tokens,
-              studioOutputs: effectiveStudioOutputs,
-              parentSwipeId: parentSwipeId,
-            ),
+          final appendedSwipe = AgentSwipe(
+            content: content,
+            kind: kind,
+            reasoning: reasoning,
+            genTime: genTime,
+            tokens: tokens,
+            time: kind == 'cleaned' && parentSwipeId != null
+                ? agentSwipes[parentSwipeId].time
+                : null,
+            studioOutputs: effectiveStudioOutputs,
+            parentSwipeId: parentSwipeId,
           );
+          agentSwipes.add(appendedSwipe);
 
           messages[i] = msg.copyWith(
             content: content,
@@ -900,6 +903,7 @@ class ChatRepo implements SyncChatStore {
             // applyCleanedText fallback path.
             genTime: genTime ?? msg.genTime,
             tokens: tokens ?? msg.tokens,
+            time: appendedSwipe.time,
             agentSwipes: agentSwipes,
             agentSwipeId: agentSwipes.length - 1,
             swipesMeta: _syncAgentSwipesToMeta(
@@ -1068,6 +1072,7 @@ class ChatRepo implements SyncChatStore {
           content: active.content,
           genTime: active.genTime,
           tokens: active.tokens,
+          time: active.time,
           agentSwipes: agentSwipes,
           agentSwipeId: newActiveId,
           swipesMeta: _syncAgentSwipesToMeta(

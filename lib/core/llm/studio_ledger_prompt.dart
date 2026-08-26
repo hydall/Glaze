@@ -388,9 +388,11 @@ Rules:
 - Arc keys: arc:id.status, arc:id.summary, arc:id.do_not_reopen, arc:id.card_override
 - World/scene keys: world:location, world:time, world:date, world:day, world:active_threats, scene.present_entities, scene.absent_backstory_entities
 - Game clock: keep world:time in 24h HH:MM as the current in-game time of day and
+  keep it paired with world:date (DD.MM.YYYY) and zero-based world:day. Never
+  guess a missing date or day. When all three are established,
   advance it when narrated events imply elapsed time. The clock only moves
   FORWARD — never rewind it; flashbacks stay in prose. Past midnight, advance
-  world:day (day 0 = first story day) and world:date when a date is tracked.
+  world:day (day 0 = first story day) and world:date.
   Do not invent time skips the narrative does not support.''';
 
   static const String _legacyTurnOnlySystemPrompt =
@@ -413,5 +415,5 @@ Rules:
 - Relationship keys include trust, status, relationship, attitude, boundaries, and card_override.
 - Never write npc:*.knowledge or relationship:*.knowledge. Use knowledgeFacts.
 - Arc keys: arc:id.status, arc:id.summary, arc:id.do_not_reopen, arc:id.card_override.
-- World/scene keys: world:location, world:time, world:date, world:active_threats, scene.present_entities, scene.absent_backstory_entities.''';
+- World/scene keys: world:location, world:time, world:date, world:day, world:active_threats, scene.present_entities, scene.absent_backstory_entities.''';
 }

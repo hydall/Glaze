@@ -2655,11 +2655,10 @@
   "card_rewriter_studio_stage_card_repair": "Исправление карточки",
   "card_rewriter_studio_stage_lorebook_writer": "Писатель лорбука",
   "game_time_seed_title": "Начало игрового времени",
-  "game_time_seed_description": "Задай точку отсчёта игровых часов леджера. День всегда начинается с 0. Дата необязательна.",
+  "game_time_seed_description": "Задай точку отсчёта игровых часов леджера. RP-день всегда начинается с 0. Укажи полную дату и время, чтобы временные метки памяти были однозначными.",
   "game_time_seed_time_label": "Время (ЧЧ:ММ)",
-  "game_time_seed_date_label": "Дата (ДД.ММ.ГГГГ, необязательно)",
-  "game_time_seed_skip": "Пропустить",
+  "game_time_seed_date_label": "Дата (ДД.ММ.ГГГГ)",
   "game_time_seed_confirm": "Начать",
   "game_time_seed_invalid_time": "Введи время в формате ЧЧ:ММ (24 часа).",
-  "game_time_seed_invalid_date": "Введи дату в формате ДД.ММ.ГГГГ или оставь поле пустым."
+  "game_time_seed_invalid_date": "Введи дату в формате ДД.ММ.ГГГГ."
 }

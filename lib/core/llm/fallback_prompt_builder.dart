@@ -32,16 +32,10 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
     (message) => !message.isHidden && !message.isTyping,
   )) {
     final macroResult = replaceMacros(msg.content, macroCtx);
-    final gameTime = msg.time?.trim();
-    final content = gameTime == null || gameTime.isEmpty
-        ? macroResult.text
-        : macroResult.text.isEmpty
-        ? '[$gameTime]'
-        : '[$gameTime]\n${macroResult.text}';
     history.add(
       PromptMessage(
         role: msg.role,
-        content: content,
+        content: macroResult.text,
         reasoningContent: msg.reasoning,
         isHistory: true,
         sourceMessageId: msg.id,

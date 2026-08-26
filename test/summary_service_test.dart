@@ -212,7 +212,7 @@ void main() {
           id: '2',
           role: 'assistant',
           content: 'She nods.',
-          time: '12.05.2027 · День 0 · 09:15',
+          time: '12.05.2027 · RP_Day 0 · 09:15',
         ),
       ],
       apiConfig: const ApiConfig(
@@ -225,7 +225,7 @@ void main() {
     );
 
     expect(llm.prompt, contains('User: Morning.'));
-    expect(llm.prompt, contains('[12.05.2027 · День 0 · 09:15] She nods.'));
+    expect(llm.prompt, contains('[12.05.2027 · RP_Day 0 · 09:15] She nods.'));
   });
 
   test('accepts an OpenRouter config with no endpoint', () async {

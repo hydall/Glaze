@@ -926,27 +926,33 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     );
   }
 
-  /// Before the first message of a Studio chat with the ledger enabled, offer
-  /// to anchor the ledger game clock (world:time / world:date / world:day).
-  /// Best-effort: any failure or a skipped dialog never blocks the send.
-  Future<void> _maybeSeedGameTime() async {
+  /// Before the first message of a Studio chat with Ledger enabled, require a
+  /// complete world:date/day/time tuple. Ordinary chats never enter this path.
+  Future<bool> _maybeSeedGameTime() async {
     try {
       final session = widget.state.session;
-      if (session == null) return;
-      if (widget.state.messages.any((m) => m.role == 'user')) return;
+      if (session == null) return false;
+      if (widget.state.messages.any((m) => m.role == 'user')) return true;
       final turnConfig = await ref
           .read(studioTurnConfigResolverProvider)
           .resolve(session.id);
-      if (!turnConfig.enabled || !turnConfig.ledgerEnabled) return;
+      if (!turnConfig.enabled || !turnConfig.ledgerEnabled) return true;
       final trackerRepo = ref.read(trackerRepoProvider);
-      final existing = await trackerRepo.get(session.id, GameTimeState.timeKey);
-      if (existing != null && existing.value.trim().isNotEmpty) return;
-      if (!mounted) return;
+      final existing = await Future.wait([
+        trackerRepo.get(session.id, GameTimeState.timeKey),
+        trackerRepo.get(session.id, GameTimeState.dateKey),
+        trackerRepo.get(session.id, GameTimeState.dayKey),
+      ]);
+      if (GameTimeState.fromTrackers(existing.nonNulls).format() != null) {
+        return true;
+      }
+      if (!mounted) return false;
       final result = await showDialog<GameTimeSeedResult>(
         context: context,
+        barrierDismissible: false,
         builder: (_) => const GameTimeSeedDialog(),
       );
-      if (result == null) return;
+      if (result == null) return false;
       await trackerRepo.upsertValue(
         session.id,
         GameTimeState.timeKey,
@@ -954,15 +960,13 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         scope: 'ledger',
         provenance: 'game_time_seed',
       );
-      if (result.date != null) {
-        await trackerRepo.upsertValue(
-          session.id,
-          GameTimeState.dateKey,
-          result.date!,
-          scope: 'ledger',
-          provenance: 'game_time_seed',
-        );
-      }
+      await trackerRepo.upsertValue(
+        session.id,
+        GameTimeState.dateKey,
+        result.date,
+        scope: 'ledger',
+        provenance: 'game_time_seed',
+      );
       await trackerRepo.upsertValue(
         session.id,
         GameTimeState.dayKey,
@@ -970,8 +974,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         scope: 'ledger',
         provenance: 'game_time_seed',
       );
+      return true;
     } catch (_) {
-      // Seeding is best-effort — never block the first send on it.
+      return false;
     }
   }
 
@@ -1509,6 +1514,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                               .agentSwipes
                                               .length >
                                           1,
+                                  beforeRegenerate: _maybeSeedGameTime,
                                 );
                               },
                           onSwipe: (id, direction) {
@@ -1540,8 +1546,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                 .read(chatProvider(widget.charId).notifier)
                                 .setGreeting(idx, dir);
                           },
-                          onRegenerate: (id, mode) {
-                            ref
+                          onRegenerate: (id, mode) async {
+                            if (!await _maybeSeedGameTime()) return;
+                            await ref
                                 .read(chatProvider(widget.charId).notifier)
                                 .regenerateLastAssistant();
                           },
@@ -1583,7 +1590,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                               );
                             }
                           },
-                          onGuidedSwipe: (id, guidanceText) {
+                          onGuidedSwipe: (id, guidanceText) async {
                             final idx = widget.state.messages.indexWhere(
                               (m) => m.id == id,
                             );
@@ -1593,7 +1600,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                 msg.role == 'assistant' &&
                                 idx == widget.state.messages.length - 1;
                             if (isLastAssistant) {
-                              ref
+                              if (!await _maybeSeedGameTime()) return;
+                              await ref
                                   .read(chatProvider(widget.charId).notifier)
                                   .regenerateLastAssistant(
                                     guidanceText: guidanceText,
@@ -1934,6 +1942,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                               DrawerPanel.quickReplies
                           ? QuickRepliesPanel(
                               charId: widget.charId,
+                              beforeGeneration: _maybeSeedGameTime,
                               onClose: () => widget.drawerCtrl.closeDrawer(),
                               disableEffects:
                                   batterySaver &&
@@ -2059,7 +2068,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                         if (text.trim().isEmpty) {
                                           return false;
                                         }
-                                        await _maybeSeedGameTime();
+                                        if (!await _maybeSeedGameTime()) {
+                                          return false;
+                                        }
                                         final accepted = await ref
                                             .read(
                                               chatProvider(
@@ -2077,7 +2088,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                         if (text.trim().isEmpty) {
                                           return false;
                                         }
-                                        await _maybeSeedGameTime();
+                                        if (!await _maybeSeedGameTime()) {
+                                          return false;
+                                        }
                                         final accepted = await ref
                                             .read(
                                               chatProvider(
@@ -2100,7 +2113,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                             guidanceText,
                                             imageDataUrl,
                                           ) async {
-                                            await _maybeSeedGameTime();
+                                            if (!await _maybeSeedGameTime()) {
+                                              return false;
+                                            }
                                             final accepted = await ref
                                                 .read(
                                                   chatProvider(

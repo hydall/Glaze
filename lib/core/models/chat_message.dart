@@ -53,6 +53,7 @@ class AgentSwipe {
   final String? reasoning;
   final String? genTime;
   final int? tokens;
+  final String? time;
   final List<Map<String, dynamic>> studioOutputs;
   final int? parentSwipeId;
 
@@ -62,6 +63,7 @@ class AgentSwipe {
     this.reasoning,
     this.genTime,
     this.tokens,
+    this.time,
     this.studioOutputs = const [],
     this.parentSwipeId,
   });
@@ -72,6 +74,7 @@ class AgentSwipe {
     reasoning: json['reasoning'] as String?,
     genTime: json['genTime'] as String?,
     tokens: json['tokens'] as int?,
+    time: json['time'] as String?,
     studioOutputs:
         (json['studioOutputs'] as List?)
             ?.whereType<Map<dynamic, dynamic>>()
@@ -87,6 +90,7 @@ class AgentSwipe {
     'reasoning': reasoning,
     'genTime': genTime,
     'tokens': tokens,
+    'time': time,
     'studioOutputs': studioOutputs,
     'parentSwipeId': parentSwipeId,
   };
@@ -97,6 +101,7 @@ class AgentSwipe {
     String? reasoning,
     String? genTime,
     int? tokens,
+    String? time,
     List<Map<String, dynamic>>? studioOutputs,
     int? parentSwipeId,
   }) => AgentSwipe(
@@ -105,6 +110,7 @@ class AgentSwipe {
     reasoning: reasoning ?? this.reasoning,
     genTime: genTime ?? this.genTime,
     tokens: tokens ?? this.tokens,
+    time: time ?? this.time,
     studioOutputs: studioOutputs ?? this.studioOutputs,
     parentSwipeId: parentSwipeId ?? this.parentSwipeId,
   );

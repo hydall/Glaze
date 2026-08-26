@@ -126,12 +126,13 @@ Allowed eventState: planned, suggested, threatened, attempted, completed, failed
 
 Game clock (world:time, world:date, world:day):
 - Maintain world:time as the current in-game time of day in 24h HH:MM format.
+- Keep one complete tuple: world:date (DD.MM.YYYY), zero-based world:day, and
+  world:time. Never guess a missing date or day.
 - When the final response or chat implies elapsed time, advance world:time to the
   new in-game time based on how much time the narrated events would take.
 - The game clock only moves FORWARD. Never rewind time; flashbacks and memories
   stay in prose without touching world:time. When time passes midnight, advance
-  world:day (day 0 is the first day of the story) and world:date when a calendar
-  date is tracked.
+  world:day (day 0 is the first day of the story) and world:date.
 - Do not invent time skips that the narrative does not support. When the scene
   clearly continues immediately, keep world:time unchanged or move it by only a
   few minutes.''';

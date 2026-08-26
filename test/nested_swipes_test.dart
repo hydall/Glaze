@@ -13,6 +13,7 @@ void main() {
         reasoning: 'thought',
         genTime: '1.5s',
         tokens: 42,
+        time: '12.05.2027 · RP_Day 2 · 14:12',
         studioOutputs: [
           {'id': 'out1', 'content': 'brief'},
         ],
@@ -25,6 +26,7 @@ void main() {
       expect(restored.reasoning, 'thought');
       expect(restored.genTime, '1.5s');
       expect(restored.tokens, 42);
+      expect(restored.time, '12.05.2027 · RP_Day 2 · 14:12');
       expect(restored.parentSwipeId, 0);
       expect(restored.studioOutputs.length, 1);
       expect(restored.studioOutputs[0]['id'], 'out1');
@@ -42,11 +44,16 @@ void main() {
     });
 
     test('copyWith creates a modified copy', () {
-      const original = AgentSwipe(content: 'a', kind: 'final');
+      const original = AgentSwipe(
+        content: 'a',
+        kind: 'final',
+        time: '12.05.2027 · RP_Day 2 · 14:12',
+      );
       final modified = original.copyWith(content: 'b', kind: 'cleaned');
       expect(modified.content, 'b');
       expect(modified.kind, 'cleaned');
       expect(modified.reasoning, isNull);
+      expect(modified.time, original.time);
     });
   });
 
@@ -285,6 +292,7 @@ void main() {
                 kind: 'cleaned',
                 reasoning: 'last reasoning',
                 tokens: 17,
+                time: '12.05.2027 · RP_Day 2 · 14:15',
               ).toJson(),
             ],
           },
@@ -306,6 +314,7 @@ void main() {
       expect(result.content, 'last cleaned');
       expect(result.reasoning, 'last reasoning');
       expect(result.tokens, 17);
+      expect(result.time, '12.05.2027 · RP_Day 2 · 14:15');
       expect(result.isError, isTrue);
     });
 
@@ -327,9 +336,22 @@ void main() {
         swipes: const ['final 2'],
         swipesMeta: const [<String, dynamic>{}],
         agentSwipes: const [
-          AgentSwipe(content: 'final 1', kind: 'final'),
-          AgentSwipe(content: 'final 2', kind: 'final'),
-          AgentSwipe(content: 'cleaned', kind: 'cleaned', parentSwipeId: 1),
+          AgentSwipe(
+            content: 'final 1',
+            kind: 'final',
+            time: '12.05.2027 · RP_Day 1 · 13:00',
+          ),
+          AgentSwipe(
+            content: 'final 2',
+            kind: 'final',
+            time: '12.05.2027 · RP_Day 1 · 14:00',
+          ),
+          AgentSwipe(
+            content: 'cleaned',
+            kind: 'cleaned',
+            parentSwipeId: 1,
+            time: '12.05.2027 · RP_Day 1 · 14:00',
+          ),
         ],
         agentSwipeId: 1,
       );
@@ -341,6 +363,7 @@ void main() {
       expect(result.content, 'cleaned');
       expect(result.swipes, ['final 1']);
       expect(result.agentSwipes[1].parentSwipeId, 0);
+      expect(result.time, '12.05.2027 · RP_Day 1 · 14:00');
       expect(result.swipesMeta[0]['agentSwipeId'], 1);
     });
 

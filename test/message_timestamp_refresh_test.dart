@@ -86,4 +86,90 @@ void main() {
     expect(updated.messages.last.timestamp, greaterThan(2));
     expect(updated.messages.first.timestamp, 1);
   });
+
+  test('switching green variations restores each game-time stamp', () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [appDbProvider.overrideWithValue(db)],
+    );
+    addTearDown(() async {
+      container.dispose();
+      await db.close();
+    });
+    final service = container.read(_messageServiceProvider);
+    final session = ChatSession(
+      id: 's1',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: [
+        ChatMessage(
+          id: 'a1',
+          role: 'assistant',
+          content: 'first',
+          time: '12.05.2027 · RP_Day 2 · 14:12',
+          swipes: const ['first', 'second'],
+          swipeId: 0,
+          swipesMeta: [
+            <String, dynamic>{},
+            <String, dynamic>{
+              'time': '12.05.2027 · RP_Day 2 · 14:15',
+              'agentSwipes': [
+                const AgentSwipe(
+                  content: 'second',
+                  time: '12.05.2027 · RP_Day 2 · 14:15',
+                ).toJson(),
+              ],
+            },
+          ],
+          agentSwipes: const [AgentSwipe(content: 'first')],
+        ),
+      ],
+    );
+
+    final second = service.setSwipe(session, 0, 1);
+    expect(second.messages.single.time, contains('14:15'));
+
+    final first = service.setSwipe(second, 0, 0);
+    expect(first.messages.single.time, contains('14:12'));
+  });
+
+  test('switching nested variations restores each game-time stamp', () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [appDbProvider.overrideWithValue(db)],
+    );
+    addTearDown(() async {
+      container.dispose();
+      await db.close();
+    });
+    final service = container.read(_messageServiceProvider);
+    const session = ChatSession(
+      id: 's1',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: [
+        ChatMessage(
+          id: 'a1',
+          role: 'assistant',
+          content: 'first',
+          time: '12.05.2027 · RP_Day 2 · 14:12',
+          swipes: ['green'],
+          agentSwipes: [
+            AgentSwipe(content: 'first', time: '12.05.2027 · RP_Day 2 · 14:12'),
+            AgentSwipe(
+              content: 'second',
+              kind: 'cleaned',
+              time: '12.05.2027 · RP_Day 2 · 14:15',
+            ),
+          ],
+        ),
+      ],
+    );
+
+    final second = service.setAgentSwipe(session, 0, 1);
+    expect(second.messages.single.time, contains('14:15'));
+
+    final first = service.setAgentSwipe(second, 0, 0);
+    expect(first.messages.single.time, contains('14:12'));
+  });
 }

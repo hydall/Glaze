@@ -162,6 +162,37 @@ void main() {
     expect(message.content, 'new active');
   });
 
+  test('image update does not copy the active clock to an inactive swipe', () {
+    const message = ChatMessage(
+      id: 'image',
+      role: 'assistant',
+      content: 'active',
+      swipes: ['[IMG:GEN]', 'active'],
+      swipesMeta: [
+        {'time': '01.01.2026 · RP_Day 0 · 14:12'},
+        {'time': '01.01.2026 · RP_Day 0 · 14:15'},
+      ],
+      swipeId: 1,
+      time: '01.01.2026 · RP_Day 0 · 14:15',
+    );
+
+    final updated = ImageGenProcessor.replaceImageContentAt(
+      message,
+      '[IMG:RESULT:/new.png]',
+      swipeId: 0,
+      agentSwipeId: 0,
+    );
+
+    final stored = updated.swipesMeta.first['agentSwipes'] as List<dynamic>;
+    expect(
+      AgentSwipe.fromJson(
+        Map<String, dynamic>.from(stored.single as Map<dynamic, dynamic>),
+      ).time,
+      '01.01.2026 · RP_Day 0 · 14:12',
+    );
+    expect(updated.time, '01.01.2026 · RP_Day 0 · 14:15');
+  });
+
   test(
     'author note mutation preserves concurrent draft and messages',
     () async {

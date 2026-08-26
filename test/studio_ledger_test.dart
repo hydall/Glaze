@@ -997,6 +997,28 @@ Ledger text.
       expect(result.wasRejected, isTrue);
     });
 
+    test('accepts the documented world day clock key', () {
+      const raw = '''
+<glaze_memory_export>
+{
+  "ops": [
+    {
+      "op": "set",
+      "key": "world:day",
+      "value": "2",
+      "evidence": "The story crossed midnight twice.",
+      "eventState": "completed"
+    }
+  ]
+}
+</glaze_memory_export>''';
+
+      final result = parser.parse(raw);
+
+      expect(result.wasRejected, isFalse);
+      expect(result.export!.ops.single.key, 'world:day');
+    });
+
     test('rejects model-owned tracker and arc state for the focal user', () {
       const raw = '''
 <glaze_memory_export>

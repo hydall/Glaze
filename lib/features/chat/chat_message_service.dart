@@ -340,9 +340,18 @@ class ChatMessageService {
     // swipe's meta, then load (or seed) agentSwipes for the incoming swipe.
     // Save outgoing agentSwipes.
     if (msg.agentSwipes.isNotEmpty && msg.swipeId < swipesMeta.length) {
+      final outgoingAgentSwipes = List<AgentSwipe>.from(msg.agentSwipes);
+      if (msg.agentSwipeId >= 0 &&
+          msg.agentSwipeId < outgoingAgentSwipes.length &&
+          outgoingAgentSwipes[msg.agentSwipeId].time == null &&
+          msg.time != null) {
+        outgoingAgentSwipes[msg.agentSwipeId] =
+            outgoingAgentSwipes[msg.agentSwipeId].copyWith(time: msg.time);
+      }
       swipesMeta[msg.swipeId] = {
         ...swipesMeta[msg.swipeId],
-        'agentSwipes': msg.agentSwipes.map((e) => e.toJson()).toList(),
+        'time': msg.time,
+        'agentSwipes': outgoingAgentSwipes.map((e) => e.toJson()).toList(),
         'agentSwipeId': msg.agentSwipeId,
       };
     }
@@ -362,6 +371,7 @@ class ChatMessageService {
           reasoning: meta?['reasoning'] as String?,
           genTime: meta?['genTime'] as String?,
           tokens: meta?['tokens'] as int?,
+          time: meta?['time'] as String?,
           studioOutputs: _studioOutputsFromMeta(meta),
         ),
       ];
@@ -373,6 +383,9 @@ class ChatMessageService {
         ? nextAgentSwipes[nextAgentSwipeId.clamp(0, nextAgentSwipes.length - 1)]
               .content
         : msg.swipes[swipeId];
+    final activeAgentSwipe = nextAgentSwipes.isNotEmpty
+        ? nextAgentSwipes[nextAgentSwipeId.clamp(0, nextAgentSwipes.length - 1)]
+        : null;
 
     final updated = msg.copyWith(
       swipeId: swipeId,
@@ -406,6 +419,7 @@ class ChatMessageService {
                 )]
                 .tokens
           : meta?['tokens'] as int?,
+      time: activeAgentSwipe?.time,
       triggeredLorebooks: _triggeredFromMeta(meta, 'triggeredLorebooks'),
       triggeredMemories: _triggeredFromMeta(meta, 'triggeredMemories'),
       studioOutputs: nextAgentSwipes.isNotEmpty
@@ -467,11 +481,12 @@ class ChatMessageService {
         agentSwipeId >= msg.agentSwipes.length) {
       return session;
     }
-    final swipe = msg.agentSwipes[agentSwipeId];
+    final agentSwipes = _withActiveTime(msg);
+    final swipe = agentSwipes[agentSwipeId];
     final swipesMeta = _syncAgentSwipesToMeta(
       msg.swipesMeta,
       msg.swipeId,
-      msg.agentSwipes,
+      agentSwipes,
       agentSwipeId,
     );
     final updated = msg.copyWith(
@@ -482,7 +497,9 @@ class ChatMessageService {
       reasoning: swipe.reasoning,
       genTime: swipe.genTime,
       tokens: swipe.tokens,
+      time: swipe.time,
       studioOutputs: swipe.studioOutputs,
+      agentSwipes: agentSwipes,
       swipesMeta: swipesMeta,
     );
     final newMessages = List<ChatMessage>.from(session.messages);
@@ -783,6 +800,7 @@ class ChatMessageService {
               reasoning: nextMeta['reasoning'] as String?,
               genTime: nextMeta['genTime'] as String?,
               tokens: nextMeta['tokens'] as int?,
+              time: nextMeta['time'] as String?,
               studioOutputs: _studioOutputsFromMeta(nextMeta),
             ),
           ]
@@ -809,6 +827,7 @@ class ChatMessageService {
           active.content.isEmpty && (active.reasoning?.isNotEmpty ?? false),
       genTime: active.genTime,
       tokens: active.tokens,
+      time: active.time,
       studioOutputs: active.studioOutputs,
       isError: nextMeta['isError'] == true,
       triggeredLorebooks: _triggeredFromMeta(nextMeta, 'triggeredLorebooks'),
@@ -844,6 +863,7 @@ class ChatMessageService {
         reasoning: swipe.reasoning,
         genTime: swipe.genTime,
         tokens: swipe.tokens,
+        time: swipe.time,
         studioOutputs: swipe.studioOutputs,
         parentSwipeId: parent,
       );
@@ -873,6 +893,7 @@ class ChatMessageService {
           active.content.isEmpty && (active.reasoning?.isNotEmpty ?? false),
       genTime: active.genTime,
       tokens: active.tokens,
+      time: active.time,
       studioOutputs: active.studioOutputs,
       swipes: greenSwipes,
       swipesMeta: meta,
@@ -899,6 +920,20 @@ class ChatMessageService {
       'agentSwipeId': agentSwipeId,
     };
     return meta;
+  }
+
+  static List<AgentSwipe> _withActiveTime(ChatMessage message) {
+    final swipes = List<AgentSwipe>.from(message.agentSwipes);
+    if (message.time == null ||
+        message.agentSwipeId < 0 ||
+        message.agentSwipeId >= swipes.length ||
+        swipes[message.agentSwipeId].time != null) {
+      return swipes;
+    }
+    swipes[message.agentSwipeId] = swipes[message.agentSwipeId].copyWith(
+      time: message.time,
+    );
+    return swipes;
   }
 
   /// Parse the per-swipe triggered entries stored in [swipesMeta]. Each
@@ -1008,11 +1043,12 @@ class ChatMessageService {
       return const ChangeSwipeResult.noop();
     }
 
-    final swipe = msg.agentSwipes[newIndex];
+    final agentSwipes = _withActiveTime(msg);
+    final swipe = agentSwipes[newIndex];
     final swipesMeta = _syncAgentSwipesToMeta(
       msg.swipesMeta,
       msg.swipeId,
-      msg.agentSwipes,
+      agentSwipes,
       newIndex,
     );
     final updated = msg.copyWith(
@@ -1021,7 +1057,9 @@ class ChatMessageService {
       reasoning: swipe.reasoning,
       genTime: swipe.genTime,
       tokens: swipe.tokens,
+      time: swipe.time,
       studioOutputs: swipe.studioOutputs,
+      agentSwipes: agentSwipes,
       swipeDirection: animDir,
       swipesMeta: swipesMeta,
     );

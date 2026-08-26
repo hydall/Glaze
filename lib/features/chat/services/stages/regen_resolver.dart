@@ -78,6 +78,7 @@ class RegenResolver {
               'genTime': original.genTime,
               'reasoning': original.reasoning,
               'tokens': original.tokens,
+              'time': original.time,
             },
           ];
     final restored = restoreSession.messages[idx].copyWith(
@@ -87,6 +88,7 @@ class RegenResolver {
       reasoning: original.reasoning,
       genTime: original.genTime,
       tokens: original.tokens,
+      time: original.time,
       swipesMeta: rollbackSwipesMeta,
       swipeDirection: original.swipeDirection,
       isTyping: false,

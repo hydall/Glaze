@@ -155,9 +155,10 @@ class PostGenCoordinator {
     );
     if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
 
-    // Embed and auto-draft work is intentionally background work: neither
-    // changes the visible assistant turn nor needs to own the Send/Stop lock.
-    // Keep errors observable without letting a stalled auxiliary task block chat.
+    final studioEnabled = studioTurnConfig?.enabled == true;
+
+    // Embedding is independent of the Studio Ledger clock and can start from
+    // the committed response immediately.
     _runInBackground(
       () => embedStage.run(
         sessionId: sessionId,
@@ -167,20 +168,21 @@ class PostGenCoordinator {
       'chat embedding',
       notifService,
     );
-    _runInBackground(
-      () => draftStage.run(result.session),
-      'memory auto-draft',
-      notifService,
-    );
-    _runInBackground(
-      () => autoSummaryStage.run(result.session),
-      'auto-summary',
-      notifService,
-    );
+    if (!studioEnabled) {
+      _runInBackground(
+        () => draftStage.run(result.session),
+        'memory auto-draft',
+        notifService,
+      );
+      _runInBackground(
+        () => autoSummaryStage.run(result.session),
+        'auto-summary',
+        notifService,
+      );
+    }
 
     // Determine Studio status before acquiring the foreground post-gen hold.
     // A disabled/no-op ordinary path must not retain that hold.
-    final studioEnabled = studioTurnConfig?.enabled == true;
     if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
 
     if (!studioEnabled) {
@@ -218,6 +220,33 @@ class PostGenCoordinator {
       studioTurnConfig: studioTurnConfig,
     );
     postGenFutures.add(cleanerTask);
+
+    // Studio auxiliary consumers need the clock stamped by Ledger, which runs
+    // inside CleanerStage. Re-read the durable session after that workflow so
+    // Memory and Summary never infer a missing time from the pre-Ledger copy.
+    postGenFutures.add(
+      cleanerTask.then((_) async {
+        if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
+        final refreshed = await ctx.ref
+            .read(chatRepoProvider)
+            .getById(sessionId);
+        if (!ctx.ref.mounted ||
+            !ctx.abortHandler.isCurrentGen(genId) ||
+            refreshed == null) {
+          return;
+        }
+        _runInBackground(
+          () => draftStage.run(refreshed),
+          'memory auto-draft',
+          notifService,
+        );
+        _runInBackground(
+          () => autoSummaryStage.run(refreshed),
+          'auto-summary',
+          notifService,
+        );
+      }),
+    );
 
     // Stage 5: Image tags — on canonical text, after cleaner. Re-read
     // the session from DB so image tags bind to the cleaned swipe.

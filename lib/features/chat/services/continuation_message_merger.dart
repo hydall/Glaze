@@ -43,6 +43,7 @@ ChatMessage mergeContinuationMessage(
             reasoning: reasoning,
             genTime: generated.genTime,
             tokens: generated.tokens,
+            time: original.time,
             studioOutputs: generated.studioOutputs,
             parentSwipeId: swipeId,
           ),

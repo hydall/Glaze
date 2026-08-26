@@ -59,6 +59,26 @@ void main() {
       expect(completed, isTrue);
     });
 
+    test('sends a time-only metadata update to the WebView', () async {
+      final bridge = _FakeBridge();
+      final oldMessage = _assistant('a1');
+      final updated = oldMessage.copyWith(
+        time: '12.05.2027 · RP_Day 2 · 14:15',
+      );
+
+      await const ChatMessageSync().sync(
+        bridge: bridge,
+        oldMsgs: [oldMessage],
+        newMsgs: [updated],
+        visibleStartIndex: 0,
+        isGenerating: false,
+        sessionSwitching: false,
+      );
+
+      expect(bridge.updatedMessages, [updated]);
+      expect(bridge.appendedMessages, isEmpty);
+    });
+
     test('appends streaming placeholder after persisted user append', () async {
       final userAppend = Completer<void>();
       final calls = <String>[];
@@ -195,7 +215,9 @@ void main() {
 
     test('pushes the search as soon as the query changes', () {
       final bridge = _FakeBridge();
-      final dispatcher = ChatWebViewSyncDispatcher(state: ChatWebViewSyncState());
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
 
       final result = dispatcher.dispatch(
         bridge: bridge,
@@ -221,7 +243,9 @@ void main() {
     test('defers the highlight pass when the messages changed under a '
         'search', () {
       final bridge = _FakeBridge();
-      final dispatcher = ChatWebViewSyncDispatcher(state: ChatWebViewSyncState());
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
       final edited = _assistant('a1').copyWith(content: 'edited');
 
       final result = dispatcher.dispatch(
@@ -256,7 +280,9 @@ void main() {
 
     test('re-numbers without scrolling on the deferred pass', () {
       final bridge = _FakeBridge();
-      final dispatcher = ChatWebViewSyncDispatcher(state: ChatWebViewSyncState());
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
 
       dispatcher.applySearch(
         bridge: bridge,

@@ -22,6 +22,7 @@ void showMessageContextMenu({
   required bool isHidden,
   required bool canDeleteSwipe,
   required bool canDeleteAgentSwipe,
+  Future<bool> Function()? beforeRegenerate,
 }) {
   // Notifier is read fresh inside each onTap callback instead of captured
   // here. If the provider is invalidated while the menu is open (e.g. by a
@@ -72,9 +73,12 @@ void showMessageContextMenu({
         BottomSheetItem(
           icon: Icons.refresh,
           label: 'Regenerate',
-          onTap: () {
+          onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
-            ref.read(chatProvider(charId).notifier).regenerateLastAssistant();
+            if (await beforeRegenerate?.call() == false) return;
+            await ref
+                .read(chatProvider(charId).notifier)
+                .regenerateLastAssistant();
           },
         ),
       if (isActivelyGenerating)

@@ -18,7 +18,7 @@ void main() {
       expect(state.time, '09:05');
       expect(state.date, '03.04.2027');
       expect(state.day, 2);
-      expect(state.format(), '03.04.2027 · День 2 · 09:05');
+      expect(state.format(), '03.04.2027 · RP_Day 2 · 09:05');
     });
 
     test('rejects out-of-range values and ignores empty rows', () {
@@ -34,10 +34,43 @@ void main() {
       expect(state.format(), isNull);
     });
 
-    test('formats with only the parts that exist', () {
-      expect(GameTimeState(time: '12:30').format(), '12:30');
-      expect(GameTimeState(time: '12:30', day: 0).format(), 'День 0 · 12:30');
-      expect(GameTimeState(day: 4).formatEnglish(), 'Day 4');
+    test('requires a complete date, RP day, and time for a stamp', () {
+      expect(GameTimeState(time: '12:30').format(), isNull);
+      expect(GameTimeState(time: '12:30', day: 0).format(), isNull);
+      expect(
+        const GameTimeState(
+          time: '12:30',
+          date: '03.04.2027',
+          day: 0,
+        ).formatEnglish(),
+        '03.04.2027 · RP_Day 0 · 12:30',
+      );
+    });
+
+    test('normalizes dashed ledger dates to the display contract', () {
+      final state = GameTimeState.fromTrackers([
+        tracker(GameTimeState.timeKey, '14:15'),
+        tracker(GameTimeState.dateKey, '26-08-2026'),
+        tracker(GameTimeState.dayKey, '7'),
+      ]);
+
+      expect(state.format(), '26.08.2026 · RP_Day 7 · 14:15');
+    });
+
+    test('rejects impossible dates and negative RP days', () {
+      final impossibleDate = GameTimeState.fromTrackers([
+        tracker(GameTimeState.timeKey, '12:00'),
+        tracker(GameTimeState.dateKey, '31.02.2026'),
+        tracker(GameTimeState.dayKey, '0'),
+      ]);
+      final negativeDay = GameTimeState.fromTrackers([
+        tracker(GameTimeState.timeKey, '12:00'),
+        tracker(GameTimeState.dateKey, '01.02.2026'),
+        tracker(GameTimeState.dayKey, '-1'),
+      ]);
+
+      expect(impossibleDate.format(), isNull);
+      expect(negativeDay.format(), isNull);
     });
   });
 

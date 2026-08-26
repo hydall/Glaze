@@ -1,6 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/llm/game_time.dart';
+import '../../../core/state/db_provider.dart';
+import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/chat_state.dart';
 import '../../chat/editing_message_provider.dart';
@@ -74,6 +77,36 @@ class GenerationDispatcher {
     final resolved = _resolveAuto(current, mode);
 
     try {
+      final checkedSessionId = current.session!.id;
+      if (!current.session!.messages.any((message) => message.role == 'user')) {
+        final turnConfig = await ref
+            .read(studioTurnConfigResolverProvider)
+            .resolve(checkedSessionId);
+        if (turnConfig.enabled && turnConfig.ledgerEnabled) {
+          final trackerRepo = ref.read(trackerRepoProvider);
+          final trackers = await Future.wait([
+            trackerRepo.get(checkedSessionId, GameTimeState.timeKey),
+            trackerRepo.get(checkedSessionId, GameTimeState.dateKey),
+            trackerRepo.get(checkedSessionId, GameTimeState.dayKey),
+          ]);
+          if (GameTimeState.fromTrackers(trackers.nonNulls).format() == null) {
+            return TriggerError(
+              message:
+                  'Studio Ledger requires a complete game date and time before generation.',
+              mode: resolved,
+            );
+          }
+        }
+      }
+
+      final latest = ref.read(chatProvider(charId)).value;
+      if (latest?.session?.id != checkedSessionId) {
+        return TriggerNoSession(mode: resolved);
+      }
+      if (latest!.isGenerating || latest.isPostGenRunning) {
+        return TriggerBusy(busyKind: 'chat', mode: resolved);
+      }
+
       switch (resolved) {
         case TriggerMode.continueGeneration:
           await notifier.continueMessage();

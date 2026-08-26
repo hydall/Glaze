@@ -4,7 +4,7 @@ import '../models/tracker.dart';
 ///
 /// The ledger maintains three keys:
 /// - `world:time` — current in-game time of day, `HH:MM` (24h);
-/// - `world:date` — optional in-game date, `DD.MM.YYYY`;
+/// - `world:date` — in-game date, `DD.MM.YYYY`;
 /// - `world:day` — zero-based in-game day counter (day 0 = the day the
 ///   story starts).
 ///
@@ -22,7 +22,7 @@ class GameTimeState {
   /// `HH:MM` in-game time of day, or null when the ledger has none yet.
   final String? time;
 
-  /// `DD.MM.YYYY` in-game date, or null when the story has no calendar.
+  /// `DD.MM.YYYY` in-game date, or null when the ledger has none yet.
   final String? date;
 
   /// Zero-based in-game day number, or null when unset.
@@ -46,22 +46,23 @@ class GameTimeState {
           day = int.tryParse(value);
       }
     }
-    return GameTimeState(time: time, date: date, day: day);
+    return GameTimeState(
+      time: time,
+      date: date,
+      day: day != null && day >= 0 ? day : null,
+    );
   }
 
-  /// Compact display string: `DD.MM.YYYY · День N · HH:MM` with the parts
-  /// that exist. Returns null when no clock part is known at all.
+  /// Canonical auxiliary/display stamp. A partial clock is not emitted because
+  /// consumers must not invent missing calendar context.
   String? format() {
-    if (time == null && date == null && day == null) return null;
-    final parts = <String>[?date, if (day != null) 'День $day', ?time];
-    return parts.join(' · ');
+    if (time == null || date == null || day == null) return null;
+    return '$date · RP_Day $day · $time';
   }
 
   /// English display variant used where localization is not available.
   String? formatEnglish() {
-    if (time == null && date == null && day == null) return null;
-    final parts = <String>[?date, if (day != null) 'Day $day', ?time];
-    return parts.join(' · ');
+    return format();
   }
 
   static String? _normalizeTime(String raw) {
@@ -74,11 +75,16 @@ class GameTimeState {
   }
 
   static String? _normalizeDate(String raw) {
-    final match = RegExp(r'(\d{2})\.(\d{2})\.(\d{4})').firstMatch(raw);
+    final match = RegExp(r'(\d{2})[.-](\d{2})[.-](\d{4})').firstMatch(raw);
     if (match == null) return null;
     final day = int.parse(match.group(1)!);
     final month = int.parse(match.group(2)!);
     if (day < 1 || day > 31 || month < 1 || month > 12) return null;
+    final year = int.parse(match.group(3)!);
+    final parsed = DateTime.utc(year, month, day);
+    if (parsed.year != year || parsed.month != month || parsed.day != day) {
+      return null;
+    }
     return '${match.group(1)}.${match.group(2)}.${match.group(3)}';
   }
 
