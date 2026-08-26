@@ -17,9 +17,7 @@ import '../db/repositories/reconciliation_replacement_repo.dart';
 import '../db/repositories/reconciliation_state_codec.dart';
 import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
-import '../models/character_knowledge_fact.dart';
 import '../models/knowledge_cleanup.dart';
-import '../models/memory_book.dart';
 import '../models/pipeline_settings.dart';
 import '../models/studio_config.dart';
 import '../models/studio_ledger_export.dart';
@@ -35,6 +33,8 @@ import 'ledger/ledger_output_recovery.dart';
 import 'ledger/ledger_prompt_factory.dart';
 import 'ledger/ledger_run_diagnostics.dart';
 import 'ledger/ledger_run_result.dart';
+import 'ledger/ledger_turn_committer.dart';
+import 'ledger/ledger_turn_runner.dart';
 import 'knowledge_cleanup_parser.dart';
 import 'macro_engine.dart';
 import 'studio_ledger_export_parser.dart';
@@ -43,7 +43,6 @@ import 'transport/llm_capture_context.dart';
 
 export 'ledger/ledger_op_applier.dart';
 export 'ledger/ledger_run_result.dart';
-export 'ledger/ledger_canon_authority.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // StudioLedgerService
@@ -100,11 +99,11 @@ class StudioLedgerService {
   final StudioLedgerExportParser _parser;
   final LedgerOpApplier _opApplier;
   final LedgerInFlightRegistry _inFlightRegistry;
-  final LedgerPromptFactory _promptFactory;
   final LedgerOutputRecovery _outputRecovery;
   final LedgerRunDiagnostics _runDiagnostics;
   final LedgerReconciliationLeaseRepo _reconciliationLeaseRepo;
   final ReconciliationReplacementRepo _replacementRepo;
+  late final LedgerTurnRunner _turnRunner;
 
   StudioLedgerService({
     required this._llm,
@@ -125,10 +124,10 @@ class StudioLedgerService {
     LedgerOutputRecovery? outputRecovery,
     LedgerRunDiagnostics? runDiagnostics,
     LedgerCanonAuthority? canonAuthority,
+    LedgerTurnRunner? turnRunner,
   }) : _parser = const StudioLedgerExportParser(),
        _opApplier = const LedgerOpApplier(),
        _inFlightRegistry = inFlightRegistry ?? const LedgerInFlightRegistry(),
-       _promptFactory = promptFactory ?? const LedgerPromptFactory(),
        _outputRecovery = outputRecovery ?? const LedgerOutputRecovery(),
        _runDiagnostics =
            runDiagnostics ??
@@ -147,7 +146,25 @@ class StudioLedgerService {
              chatRepo: chatRepo,
              canonContextLoader: canonContextLoader,
              snapshotRepo: _snapshotRepo,
-           );
+           ) {
+    _turnRunner =
+        turnRunner ??
+        LedgerTurnRunner(
+          llm: _llm,
+          bookRepo: _bookRepo,
+          knowledgeFactRepo: _knowledgeFactRepo,
+          canonAuthority: _canonAuthority,
+          committer: LedgerTurnCommitter(
+            trackerRepo: _trackerRepo,
+            snapshotRepo: _snapshotRepo,
+            knowledgeFactRepo: _knowledgeFactRepo,
+            canonAuthority: _canonAuthority,
+          ),
+          runDiagnostics: _runDiagnostics,
+          promptFactory: promptFactory ?? const LedgerPromptFactory(),
+          outputRecovery: _outputRecovery,
+        );
+  }
 
   Future<LedgerRunResult> reconcile({
     required String sessionId,
@@ -1084,24 +1101,25 @@ class StudioLedgerService {
     StudioLedgerEngine engine = StudioLedgerEngine.currentReconciled,
     String? operationIdentity,
   }) {
+    final request = LedgerTurnRequest(
+      sessionId: sessionId,
+      settings: settings,
+      config: config,
+      finalAssistantText: finalAssistantText,
+      recentHistoryText: recentHistoryText,
+      messageId: messageId,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+      forceEnabled: forceEnabled,
+      isStillCurrent: isStillCurrent,
+      cancelToken: cancelToken,
+      ledgerBlocks: ledgerBlocks,
+      macroCtx: macroCtx,
+      commitSnapshot: commitSnapshot,
+      engine: engine,
+    );
     if (operationIdentity == null) {
-      return _runUnshared(
-        sessionId: sessionId,
-        settings: settings,
-        config: config,
-        finalAssistantText: finalAssistantText,
-        recentHistoryText: recentHistoryText,
-        messageId: messageId,
-        swipeId: swipeId,
-        agentSwipeId: agentSwipeId,
-        forceEnabled: forceEnabled,
-        isStillCurrent: isStillCurrent,
-        cancelToken: cancelToken,
-        ledgerBlocks: ledgerBlocks,
-        macroCtx: macroCtx,
-        commitSnapshot: commitSnapshot,
-        engine: engine,
-      );
+      return _turnRunner.run(request);
     }
     final key = _inFlightRegistry.runKey(
       operationIdentity: operationIdentity,
@@ -1119,571 +1137,7 @@ class StudioLedgerService {
       ledgerBlocks: ledgerBlocks,
       macroCtx: macroCtx,
     );
-    return _inFlightRegistry.join(
-      key,
-      () => _runUnshared(
-        sessionId: sessionId,
-        settings: settings,
-        config: config,
-        finalAssistantText: finalAssistantText,
-        recentHistoryText: recentHistoryText,
-        messageId: messageId,
-        swipeId: swipeId,
-        agentSwipeId: agentSwipeId,
-        forceEnabled: forceEnabled,
-        isStillCurrent: isStillCurrent,
-        cancelToken: cancelToken,
-        ledgerBlocks: ledgerBlocks,
-        macroCtx: macroCtx,
-        commitSnapshot: commitSnapshot,
-        engine: engine,
-      ),
-    );
-  }
-
-  Future<LedgerRunResult> _runUnshared({
-    required String sessionId,
-    required PipelineSettings settings,
-    required AuxApiConfig config,
-    required String finalAssistantText,
-    required String recentHistoryText,
-    required String messageId,
-    required int swipeId,
-    required int agentSwipeId,
-    bool forceEnabled = false,
-    FutureOr<bool> Function()? isStillCurrent,
-    CancelToken? cancelToken,
-    List<StudioPresetBlock> ledgerBlocks = const [],
-    MacroContext? macroCtx,
-    bool commitSnapshot = false,
-    StudioLedgerEngine engine = StudioLedgerEngine.currentReconciled,
-  }) async {
-    final trace = LedgerRunTrace(
-      sessionId: sessionId,
-      kind: LedgerDebugRunKind.normal,
-      messageId: messageId,
-      swipeId: swipeId,
-      agentSwipeId: agentSwipeId,
-    );
-    final result = await _runTraced(
-      trace: trace,
-      sessionId: sessionId,
-      settings: settings,
-      config: config,
-      finalAssistantText: finalAssistantText,
-      recentHistoryText: recentHistoryText,
-      messageId: messageId,
-      swipeId: swipeId,
-      agentSwipeId: agentSwipeId,
-      forceEnabled: forceEnabled,
-      isStillCurrent: isStillCurrent,
-      cancelToken: cancelToken,
-      ledgerBlocks: ledgerBlocks,
-      macroCtx: macroCtx,
-      commitSnapshot: commitSnapshot,
-      engine: engine,
-    );
-    await _runDiagnostics.recordDebugRun(trace, result);
-    return result;
-  }
-
-  Future<LedgerRunResult> _runTraced({
-    required LedgerRunTrace trace,
-    required String sessionId,
-    required PipelineSettings settings,
-    required AuxApiConfig config,
-    required String finalAssistantText,
-    required String recentHistoryText,
-    required String messageId,
-    required int swipeId,
-    required int agentSwipeId,
-    bool forceEnabled = false,
-    FutureOr<bool> Function()? isStillCurrent,
-    CancelToken? cancelToken,
-    List<StudioPresetBlock> ledgerBlocks = const [],
-    MacroContext? macroCtx,
-    bool commitSnapshot = false,
-    StudioLedgerEngine engine = StudioLedgerEngine.currentReconciled,
-  }) async {
-    // Studio Ledger is always-on when Studio is enabled. forceEnabled is
-    // still respected for manual triggers.
-
-    if (finalAssistantText.trim().isEmpty) {
-      debugPrint('[StudioLedger] skipping — empty assistant text');
-      return LedgerRunResult.skipped;
-    }
-
-    final token = cancelToken ?? CancelToken();
-    if (token.isCancelled) return LedgerRunResult.aborted;
-
-    final sw = Stopwatch()..start();
-
-    try {
-      // ── 1. LLM config is resolved by the caller via StudioSlotResolver ──
-      if (token.isCancelled ||
-          await _canonAuthority.passesCurrentnessGuard(isStillCurrent) ==
-              false) {
-        return LedgerRunResult.aborted;
-      }
-
-      // ── 2. Load prompt base (committed canon + live manual overrides) ────
-      final canon = await _canonAuthority.load(sessionId);
-      final promptTrackers = _canonAuthority.projectPromptTrackers(
-        canon.context,
-      );
-      final book = await _bookRepo.getBySessionId(sessionId);
-      final recentEntries =
-          book?.entries.where((e) => e.status == 'active').take(20).toList() ??
-          const <MemoryEntry>[];
-      final entityAliases = await _knowledgeFactRepo.getEntityAliases(
-        sessionId,
-      );
-
-      if (token.isCancelled ||
-          await _canonAuthority.passesCurrentnessGuard(isStillCurrent) ==
-              false) {
-        return LedgerRunResult.aborted;
-      }
-      if (!await _canonAuthority.isStillCurrent(sessionId, canon)) {
-        return LedgerRunResult.aborted;
-      }
-
-      // ── 3. Build prompt ─────────────────────────────────────────────────
-      final prompt = _promptFactory.buildLedgerPrompt(
-        finalAssistantText: finalAssistantText,
-        recentHistoryText: recentHistoryText,
-        currentTrackers: promptTrackers,
-        recentMemoryEntries: recentEntries,
-        ledgerBlocks: ledgerBlocks,
-        macroCtx: macroCtx,
-        character: canon.source,
-        entityAliases: entityAliases,
-        engine: engine,
-      );
-
-      debugPrint(
-        '[StudioLedger] prompt session=$sessionId '
-        'chars=${prompt.length} '
-        'usingPresetBlocks=${ledgerBlocks.isNotEmpty && macroCtx != null} '
-        'first500=${prompt.length > 500 ? prompt.substring(0, 500) : prompt}',
-      );
-
-      // ── 4. Call LLM ─────────────────────────────────────────────────────
-      final maxTokens = settings.ledger.studioLedgerMaxTokens > 0
-          ? settings.ledger.studioLedgerMaxTokens
-          : 15000;
-      final temperature = settings.ledger.studioLedgerTemperature >= 0
-          ? settings.ledger.studioLedgerTemperature
-          : 0.2;
-      final timeoutMs = _llm.resolveLedgerTimeout(settings);
-
-      debugPrint(
-        '[StudioLedger] starting session=$sessionId '
-        'model=${config.model} '
-        'timeoutMs=$timeoutMs '
-        'textChars=${finalAssistantText.length}',
-      );
-
-      final outcome = await _llm.callOnceWithLog(
-        config: config,
-        prompt: prompt,
-        maxTokens: maxTokens,
-        temperature: temperature,
-        timeoutMs: timeoutMs,
-        cancelToken: token,
-        omitReasoning: true,
-        captureContext: LlmCaptureContext(
-          stage: 'ledger.turn',
-          sessionId: sessionId,
-          messageId: messageId,
-          pipelineRunId: 'ledger:$messageId:$swipeId:$agentSwipeId',
-          logicalCallId: 'ledger:$messageId:$swipeId:$agentSwipeId',
-          relatedArtifactId: messageId,
-        ),
-      );
-
-      if (token.isCancelled ||
-          await _canonAuthority.passesCurrentnessGuard(isStillCurrent) ==
-              false) {
-        return LedgerRunResult.aborted;
-      }
-
-      if (!outcome.isOk || outcome.text == null || outcome.text!.isEmpty) {
-        final lastAttempt = outcome.attempts.lastOrNull;
-        debugPrint(
-          '[StudioLedger] LLM call failed session=$sessionId '
-          'status=${lastAttempt?.status} '
-          'statusCode=${lastAttempt?.statusCode ?? 0} '
-          'elapsedMs=${lastAttempt?.elapsedMs ?? 0} '
-          'error=${lastAttempt?.error ?? "none"}',
-        );
-        return LedgerRunResult(
-          status: 'error',
-          error:
-              'LLM call failed: ${lastAttempt?.status}'
-              '${lastAttempt?.error != null ? ': ${lastAttempt!.error}' : ''}',
-          elapsedMs: sw.elapsedMilliseconds,
-          attempts: outcome.attempts,
-          model: config.model,
-        );
-      }
-
-      // ── 5. Parse + validate ─────────────────────────────────────────────
-      final rawResponse = outcome.text!;
-      debugPrint(
-        '[StudioLedger] raw response session=$sessionId '
-        'chars=${rawResponse.length} '
-        'first1000=${rawResponse.length > 1000 ? rawResponse.substring(0, 1000) : rawResponse}',
-      );
-
-      var effectiveResponse = rawResponse;
-      var parseResult = _parser.parse(
-        effectiveResponse,
-        focalUserName: macroCtx?.userName ?? '',
-      );
-      await _runDiagnostics.recordLedgerParserVerdict(outcome, parseResult);
-      trace.recordFirstResponse(
-        model: config.model,
-        responseText: rawResponse,
-        parsed: parseResult,
-      );
-      final originalFailure = parseResult.failure;
-      final originalVisibleLedger = parseResult.visibleLedger;
-      var attempts = outcome.attempts;
-      var repairAttempted = false;
-      var totalPromptChars = prompt.length;
-      var totalResponseChars = rawResponse.length;
-
-      if (parseResult.failure.isRepairable) {
-        if (token.isCancelled ||
-            await _canonAuthority.passesCurrentnessGuard(isStillCurrent) ==
-                false) {
-          return LedgerRunResult.aborted;
-        }
-        if (!await _canonAuthority.isStillCurrent(sessionId, canon)) {
-          return LedgerRunResult.aborted;
-        }
-        if (_outputRecovery.isOversizedRepairInput(effectiveResponse)) {
-          return LedgerRunResult(
-            status: 'error',
-            visibleLedger: originalVisibleLedger,
-            error: 'Ledger output is too large for safe deterministic repair',
-            elapsedMs: sw.elapsedMilliseconds,
-            attempts: attempts,
-            model: config.model,
-            effectiveTimeoutMs: timeoutMs,
-            promptChars: totalPromptChars,
-            responseChars: totalResponseChars,
-          );
-        }
-        repairAttempted = true;
-        trace.recordRepairRequested(exportRepair: true);
-        final repairPrompt = _outputRecovery.buildRepairPrompt(
-          effectiveResponse,
-        );
-        totalPromptChars += repairPrompt.length;
-        final repair = await _llm.callOnceWithLog(
-          config: config,
-          prompt: repairPrompt,
-          maxTokens: maxTokens,
-          temperature: 0,
-          timeoutMs: timeoutMs,
-          cancelToken: token,
-          omitReasoning: true,
-          captureContext: LlmCaptureContext(
-            stage: 'ledger.turn_repair',
-            sessionId: sessionId,
-            messageId: messageId,
-            pipelineRunId: 'ledger:$messageId:$swipeId:$agentSwipeId',
-            logicalCallId: 'ledger:$messageId:$swipeId:$agentSwipeId:repair',
-            relatedArtifactId: messageId,
-          ),
-        );
-        attempts = _outputRecovery.combineAttempts(attempts, repair.attempts);
-        totalResponseChars += repair.text?.length ?? 0;
-        if (token.isCancelled ||
-            await _canonAuthority.passesCurrentnessGuard(isStillCurrent) ==
-                false) {
-          return LedgerRunResult.aborted;
-        }
-        if (!await _canonAuthority.isStillCurrent(sessionId, canon)) {
-          return LedgerRunResult.aborted;
-        }
-        if (!repair.isOk || repair.text == null || repair.text!.isEmpty) {
-          return LedgerRunResult(
-            status: 'error',
-            error: 'Ledger export repair call failed',
-            elapsedMs: sw.elapsedMilliseconds,
-            attempts: attempts,
-            model: config.model,
-            repairAttempted: true,
-            effectiveTimeoutMs: timeoutMs,
-            promptChars: totalPromptChars,
-            responseChars: totalResponseChars,
-          );
-        }
-        effectiveResponse = repair.text!;
-        parseResult = _parser.parse(
-          effectiveResponse,
-          focalUserName: macroCtx?.userName ?? '',
-        );
-        await _runDiagnostics.recordLedgerParserVerdict(repair, parseResult);
-        trace.recordRepairResponse(
-          responseText: effectiveResponse,
-          parsed: parseResult,
-        );
-        if (parseResult.export != null &&
-            !_outputRecovery.repairPreservesStructuredEvidence(
-              rawResponse,
-              parseResult.export!,
-            )) {
-          return LedgerRunResult(
-            status: 'error',
-            visibleLedger: originalVisibleLedger,
-            error:
-                'Ledger repair introduced data absent from the original output',
-            elapsedMs: sw.elapsedMilliseconds,
-            attempts: attempts,
-            model: config.model,
-            repairAttempted: true,
-            effectiveTimeoutMs: timeoutMs,
-            promptChars: totalPromptChars,
-            responseChars: totalResponseChars,
-          );
-        }
-      }
-
-      debugPrint(
-        '[StudioLedger] parsed session=$sessionId '
-        'hasExport=${parseResult.hasExport} '
-        'visibleLedgerChars=${parseResult.visibleLedger.length} '
-        'rejection=${parseResult.rejectionReason ?? "none"}',
-      );
-
-      if (repairAttempted &&
-          originalFailure == LedgerParseFailure.missingExport &&
-          parseResult.failure == LedgerParseFailure.emptyExport) {
-        return LedgerRunResult(
-          status: 'error',
-          visibleLedger: originalVisibleLedger,
-          error:
-              'Repair produced an empty export without explicit empty intent',
-          elapsedMs: sw.elapsedMilliseconds,
-          attempts: attempts,
-          model: config.model,
-          repairAttempted: true,
-          effectiveTimeoutMs: timeoutMs,
-          promptChars: totalPromptChars,
-          responseChars: totalResponseChars,
-        );
-      }
-
-      if (!parseResult.hasExport &&
-          parseResult.failure != LedgerParseFailure.emptyExport) {
-        return LedgerRunResult(
-          status: 'error',
-          visibleLedger: originalVisibleLedger.isNotEmpty
-              ? originalVisibleLedger
-              : parseResult.visibleLedger,
-          error: parseResult.rejectionReason,
-          elapsedMs: sw.elapsedMilliseconds,
-          attempts: attempts,
-          model: config.model,
-          repairAttempted: repairAttempted,
-          effectiveTimeoutMs: timeoutMs,
-          promptChars: totalPromptChars,
-          responseChars: totalResponseChars,
-        );
-      }
-
-      if (token.isCancelled ||
-          await _canonAuthority.passesCurrentnessGuard(isStillCurrent) ==
-              false) {
-        return LedgerRunResult.aborted;
-      }
-
-      // ── 6. Apply ops to tracker namespace ───────────────────────────────
-      final export = parseResult.export ?? const StudioLedgerExport();
-      var opsApplied = 0;
-      final target = LedgerTarget(
-        messageId: messageId,
-        swipeId: swipeId,
-        agentSwipeId: agentSwipeId,
-        content: finalAssistantText,
-      );
-      // Parse optional knowledge cleanup (rename_entity) from the same
-      // response. It is committed under the same target/canon fence as the
-      // tracker patch so an obsolete swipe can never rename live facts.
-      final cleanupOps = const KnowledgeCleanupParser().parse(
-        output: effectiveResponse,
-        reviewText: '$recentHistoryText\n$finalAssistantText',
-        entityKeys: entityAliases.keys.toSet(),
-      );
-      final facts = export.knowledgeFacts
-          .map(
-            (fact) => CharacterKnowledgeFact(
-              id: generateId(),
-              chatSessionId: sessionId,
-              knowerKey: fact.knowerKey,
-              knowerName: fact.knowerName,
-              subjectKey: fact.subjectKey,
-              subjectName: fact.subjectName,
-              factClass: CharacterKnowledgeFactClass.fromWireName(
-                fact.factClass,
-              ),
-              scopeKey: fact.scopeKey,
-              predicate: fact.predicate,
-              object: fact.object,
-              epistemicState: CharacterKnowledgeEpistemicState.fromWireName(
-                fact.epistemicState,
-              ),
-              confidence: fact.confidence,
-              importance: fact.importance,
-              entities: fact.entities,
-              topics: fact.topics,
-              sourceMessageId: messageId,
-              sourceSwipeId: swipeId,
-              sourceAgentSwipeId: agentSwipeId,
-              supersedesId: fact.supersedesId,
-              basisRevisionNumber: canon.context.effectiveRevision.number,
-              basisRevisionHash: canon.context.effectiveRevision.hash,
-            ),
-          )
-          .toList(growable: false);
-      await _trackerRepo.db.transaction(() async {
-        await _canonAuthority.throwIfCommitStale(
-          sessionId: sessionId,
-          canon: canon,
-          token: token,
-          isStillCurrent: isStillCurrent,
-          target: target,
-        );
-        // Rebuild model-owned state from committed canon before this patch.
-        await _trackerRepo.replaceLedgerState(
-          sessionId,
-          _canonAuthority.stampTrackers(canon, promptTrackers),
-        );
-        for (final op in export.ops) {
-          await _canonAuthority.throwIfCommitStale(
-            sessionId: sessionId,
-            canon: canon,
-            token: token,
-            isStillCurrent: isStillCurrent,
-            target: target,
-          );
-          await _opApplier.applyOp(
-            op: op,
-            sessionId: sessionId,
-            messageId: messageId,
-            swipeId: swipeId,
-            agentSwipeId: agentSwipeId,
-            trackerRepo: _trackerRepo,
-            basisRevisionNumber: canon.context.effectiveRevision.number,
-            basisRevisionHash: canon.context.effectiveRevision.hash,
-          );
-          opsApplied++;
-        }
-        await _canonAuthority.throwIfCommitStale(
-          sessionId: sessionId,
-          canon: canon,
-          token: token,
-          isStillCurrent: isStillCurrent,
-          target: target,
-        );
-        await _knowledgeFactRepo.replaceTentativeAnchor(
-          sessionId: sessionId,
-          messageId: messageId,
-          swipeId: swipeId,
-          agentSwipeId: agentSwipeId,
-          facts: facts,
-        );
-        if (cleanupOps.isNotEmpty) {
-          await _canonAuthority.throwIfCommitStale(
-            sessionId: sessionId,
-            canon: canon,
-            token: token,
-            isStillCurrent: isStillCurrent,
-            target: target,
-          );
-          opsApplied += await _knowledgeFactRepo.applyReconciliationCleanup(
-            sessionId: sessionId,
-            ops: cleanupOps,
-            endpointMessageId: null,
-          );
-        }
-        await _canonAuthority.throwIfCommitStale(
-          sessionId: sessionId,
-          canon: canon,
-          token: token,
-          isStillCurrent: isStillCurrent,
-          target: target,
-          checkCanon: false,
-        );
-        final updatedTrackers = await _trackerRepo.getBySessionId(sessionId);
-        await _snapshotRepo.upsertTrackers(
-          sessionId: sessionId,
-          messageId: messageId,
-          swipeId: swipeId,
-          agentSwipeId: agentSwipeId,
-          trackers: updatedTrackers,
-          committed: commitSnapshot,
-        );
-        await _canonAuthority.throwIfCommitStale(
-          sessionId: sessionId,
-          canon: canon,
-          token: token,
-          isStillCurrent: isStillCurrent,
-          target: target,
-          checkCanon: false,
-        );
-      });
-
-      debugPrint(
-        '[StudioLedger] applied $opsApplied/${export.ops.length} ops session=$sessionId',
-      );
-
-      sw.stop();
-      debugPrint(
-        '[StudioLedger] done session=$sessionId '
-        'ops=$opsApplied '
-        'elapsedMs=${sw.elapsedMilliseconds}',
-      );
-
-      return LedgerRunResult(
-        status: 'ok',
-        visibleLedger: originalVisibleLedger.isNotEmpty
-            ? originalVisibleLedger
-            : parseResult.visibleLedger,
-        opsApplied: opsApplied,
-        elapsedMs: sw.elapsedMilliseconds,
-        attempts: attempts,
-        model: config.model,
-        repairAttempted: repairAttempted,
-        effectiveTimeoutMs: timeoutMs,
-        promptChars: totalPromptChars,
-        responseChars: totalResponseChars,
-      );
-    } on LedgerCommitStale {
-      return LedgerRunResult.aborted;
-    } on TimeoutException {
-      sw.stop();
-      debugPrint('[StudioLedger] timeout session=$sessionId');
-      return LedgerRunResult(
-        status: 'timeout',
-        elapsedMs: sw.elapsedMilliseconds,
-      );
-    } catch (e) {
-      sw.stop();
-      if (token.isCancelled || (e is DioException && CancelToken.isCancel(e))) {
-        return LedgerRunResult.aborted;
-      }
-      debugPrint('[StudioLedger] error session=$sessionId: $e');
-      return LedgerRunResult(
-        status: 'error',
-        error: '$e',
-        elapsedMs: sw.elapsedMilliseconds,
-      );
-    }
+    return _inFlightRegistry.join(key, () => _turnRunner.run(request));
   }
 
   Future<_ReplacementBasis> _prepareReplacementBasis({
