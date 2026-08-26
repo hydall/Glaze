@@ -986,6 +986,8 @@ void main() {
       );
 
       await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+      final acceptedManifest = await world.manifestProvider.readLocalManifest();
+      expect(acceptedManifest.entries[entry.key]?.hash, entry.hash);
       final progress = <SyncProgress>[];
       await world.engine.pullEntities(
         onProgress: progress.add,

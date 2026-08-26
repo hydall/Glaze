@@ -337,9 +337,13 @@ class SyncEngine {
 
     for (final cloudEntry in entries) {
       final localEntry = localManifest.entries[cloudEntry.key];
+      final previouslyAccepted = previousManifest.entries[cloudEntry.key];
 
-      if (cloudEntry.hash == localEntry?.hash &&
-          cloudEntry.deleted == localEntry?.deleted) {
+      if (_isAlreadyCurrentOrAccepted(
+        cloudEntry,
+        localEntry,
+        previouslyAccepted,
+      )) {
         continue;
       }
 
@@ -438,6 +442,7 @@ class SyncEngine {
         await _loadCloudManifestForPendingPull() ??
         await _downloadCloudManifest();
     if (cloudManifest == null) return;
+    final previousManifest = await _manifestBuilder.readLocalManifest();
     final localManifest = await _manifestBuilder.buildLocalManifest(
       cloudManifest: cloudManifest,
     );
@@ -447,8 +452,12 @@ class SyncEngine {
 
     for (final cloudEntry in cloudManifest.entries.values) {
       final localEntry = localManifest.entries[cloudEntry.key];
-      if (cloudEntry.hash == localEntry?.hash &&
-          cloudEntry.deleted == localEntry?.deleted) {
+      final previouslyAccepted = previousManifest.entries[cloudEntry.key];
+      if (_isAlreadyCurrentOrAccepted(
+        cloudEntry,
+        localEntry,
+        previouslyAccepted,
+      )) {
         continue;
       }
       if (cloudEntry.type == 'reconciliation_state') {
@@ -584,7 +593,7 @@ class SyncEngine {
     final entries = Map<String, SyncManifestEntry>.from(rebuilt.entries);
     for (final entry in acceptedCloudEntries) {
       if (entry.type == 'reconciliation_state') {
-        entries.putIfAbsent(entry.key, () => entry);
+        entries[entry.key] = entry;
       }
     }
     await _manifestBuilder.writeLocalManifest(
@@ -597,6 +606,20 @@ class SyncEngine {
       ),
     );
     await _manifestBuilder.clearDeleted();
+  }
+
+  bool _isAlreadyCurrentOrAccepted(
+    SyncManifestEntry cloudEntry,
+    SyncManifestEntry? localEntry,
+    SyncManifestEntry? previouslyAccepted,
+  ) {
+    if (cloudEntry.hash == localEntry?.hash &&
+        cloudEntry.deleted == localEntry?.deleted) {
+      return true;
+    }
+    return cloudEntry.type == 'reconciliation_state' &&
+        cloudEntry.hash == previouslyAccepted?.hash &&
+        cloudEntry.deleted == previouslyAccepted?.deleted;
   }
 
   Future<SyncManifest?> _downloadCloudManifest() async {
