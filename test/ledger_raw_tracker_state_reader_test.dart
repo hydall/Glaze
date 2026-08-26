@@ -62,4 +62,117 @@ void main() {
       ]);
     },
   );
+
+  test('uses a complete game-time seed before the first snapshot', () async {
+    await trackers.seedInitialGameTime(
+      sessionId: 'session',
+      time: '14:12',
+      date: '26.08.2026',
+    );
+
+    final state = await db.transaction(() => reader.read('session'));
+
+    expect(
+      {
+        for (final tracker in state.committedTrackers)
+          tracker.name: tracker.value,
+      },
+      {'world:time': '14:12', 'world:date': '26.08.2026', 'world:day': '0'},
+    );
+  });
+
+  test(
+    'zero-op first Ledger replacement preserves the game-time seed',
+    () async {
+      await trackers.seedInitialGameTime(
+        sessionId: 'session',
+        time: '14:12',
+        date: '26.08.2026',
+      );
+      final bootstrap = await db.transaction(() => reader.read('session'));
+
+      await trackers.replaceLedgerState('session', bootstrap.committedTrackers);
+
+      final live = await trackers.getBySessionAndScope('session', 'ledger');
+      expect(
+        {for (final tracker in live) tracker.name: tracker.value},
+        {'world:time': '14:12', 'world:date': '26.08.2026', 'world:day': '0'},
+      );
+    },
+  );
+
+  test('stale seed dialog cannot overwrite a changed clock', () async {
+    await trackers.upsertValue(
+      'session',
+      'world:time',
+      '14:15',
+      scope: 'ledger',
+      provenance: 'source=studio_ledger',
+    );
+
+    final seeded = await trackers.seedInitialGameTime(
+      sessionId: 'session',
+      time: '14:12',
+      date: '26.08.2026',
+      expectedValues: const {
+        'world:time': null,
+        'world:date': null,
+        'world:day': null,
+      },
+    );
+
+    expect(seeded, isFalse);
+    expect((await trackers.get('session', 'world:time'))?.value, '14:15');
+    expect(await trackers.get('session', 'world:date'), isNull);
+    expect(await trackers.get('session', 'world:day'), isNull);
+  });
+
+  test('ignores a partial or unrelated live Ledger bootstrap', () async {
+    await trackers.upsertValue(
+      'session',
+      'world:time',
+      '14:12',
+      scope: 'ledger',
+      provenance: 'game_time_seed',
+    );
+    await trackers.upsertValue(
+      'session',
+      'world:date',
+      '26.08.2026',
+      scope: 'ledger',
+      provenance: 'other',
+    );
+
+    final state = await db.transaction(() => reader.read('session'));
+
+    expect(state.committedTrackers, isEmpty);
+  });
+
+  test('committed snapshot supersedes the live game-time seed', () async {
+    await trackers.seedInitialGameTime(
+      sessionId: 'session',
+      time: '14:12',
+      date: '26.08.2026',
+    );
+    await snapshots.upsertTrackers(
+      sessionId: 'session',
+      messageId: 'message',
+      swipeId: 0,
+      agentSwipeId: 0,
+      committed: true,
+      trackers: const [
+        Tracker(
+          sessionId: 'session',
+          name: 'world:time',
+          value: '14:15',
+          scope: 'ledger',
+        ),
+      ],
+    );
+
+    final state = await db.transaction(() => reader.read('session'));
+
+    expect(state.committedTrackers, hasLength(1));
+    expect(state.committedTrackers.single.value, '14:15');
+  });
 }

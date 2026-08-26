@@ -233,11 +233,11 @@ final currentLedgerInjectionPreviewServiceProvider =
       );
     });
 
-final currentLedgerInjectionPreviewProvider =
-    FutureProvider.family<
-      CurrentLedgerInjectionPreview,
-      CurrentLedgerInjectionPreviewKey
-    >((ref, key) {
+final currentLedgerInjectionPreviewProvider = FutureProvider.autoDispose
+    .family<CurrentLedgerInjectionPreview, CurrentLedgerInjectionPreviewKey>((
+      ref,
+      key,
+    ) {
       return ref
           .watch(currentLedgerInjectionPreviewServiceProvider)
           .load(sessionId: key.sessionId, expectedCharacterId: key.characterId);

@@ -6,6 +6,7 @@ import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../../../shared/widgets/swipe_tab_switcher.dart';
 import '../../card_rewrite/card_rewriter_studio_sheet.dart';
+import '../chat_provider.dart';
 import 'agentic_collector_tab.dart';
 import 'agentic_reconciler_tab.dart';
 import 'agentic_snapshots_tab.dart';
@@ -20,9 +21,9 @@ class AgenticOperationsLogDialog extends ConsumerStatefulWidget {
     this.characterId,
   });
 
-  /// Opens the dialog as an overlay. Caller passes the current [sessionId]
-  /// so the dialog can scope the list, or null to show operations across all
-  /// sessions.
+  /// Opens the dialog as an overlay. When [characterId] is available, the
+  /// dialog follows that chat's active session instead of retaining a stale
+  /// session captured when the sheet was opened.
   static Future<String?> show(
     BuildContext context, {
     String? sessionId,
@@ -57,7 +58,13 @@ class _AgenticOperationsLogDialogState
 
   @override
   Widget build(BuildContext context) {
-    final sessionId = widget.sessionId;
+    final characterId = widget.characterId;
+    final liveSessionId = characterId == null || characterId.isEmpty
+        ? null
+        : ref.watch(chatProvider(characterId)).value?.session?.id;
+    final sessionId = characterId == null || characterId.isEmpty
+        ? widget.sessionId
+        : liveSessionId;
     final children = sessionId == null || sessionId.isEmpty
         ? <Widget>[Center(child: Text('agent_ops_open_from_chat'.tr()))]
         : <Widget>[
@@ -94,9 +101,12 @@ class _AgenticOperationsLogDialogState
             index: _activeIndex,
             length: 4,
             onChanged: _selectTab,
-            child: AgenticSessionScope(
-              sessionId: sessionId,
-              child: IndexedStack(index: _activeIndex, children: children),
+            child: KeyedSubtree(
+              key: ValueKey(sessionId),
+              child: AgenticSessionScope(
+                sessionId: sessionId,
+                child: IndexedStack(index: _activeIndex, children: children),
+              ),
             ),
           );
     return SheetView(

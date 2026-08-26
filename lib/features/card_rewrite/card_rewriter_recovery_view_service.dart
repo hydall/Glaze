@@ -42,10 +42,7 @@ final cardRewriterRecoveryViewServiceProvider =
       );
     });
 
-final cardRewriterRecoveryViewsProvider =
-    FutureProvider.family<List<CardRewriterRecoveryView>, String>((
-      ref,
-      sessionId,
-    ) {
+final cardRewriterRecoveryViewsProvider = FutureProvider.autoDispose
+    .family<List<CardRewriterRecoveryView>, String>((ref, sessionId) {
       return ref.watch(cardRewriterRecoveryViewServiceProvider).load(sessionId);
     });

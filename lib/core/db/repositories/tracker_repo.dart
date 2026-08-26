@@ -56,6 +56,59 @@ class TrackerRepo {
     );
   }
 
+  /// Returns the complete first-turn game-clock seed, if one exists.
+  ///
+  /// Ledger normally reads model-owned state from committed snapshots. A new
+  /// session has no snapshot yet, so this narrowly scoped bootstrap is the
+  /// only live model-owned state allowed into that initial committed base.
+  Future<List<Tracker>> getInitialGameTimeSeed(String sessionId) async {
+    const names = {'world:time', 'world:date', 'world:day'};
+    final trackers = await getBySessionAndScope(sessionId, 'ledger');
+    final seed = trackers
+        .where(
+          (tracker) =>
+              tracker.provenance == 'game_time_seed' &&
+              names.contains(tracker.name) &&
+              tracker.value.trim().isNotEmpty,
+        )
+        .toList(growable: false);
+    return seed.map((tracker) => tracker.name).toSet().length == names.length
+        ? seed
+        : const [];
+  }
+
+  /// Persists the complete first-turn clock atomically if its rows still match
+  /// the values observed before the seed dialog opened.
+  Future<bool> seedInitialGameTime({
+    required String sessionId,
+    required String time,
+    required String date,
+    Map<String, String?> expectedValues = const {},
+  }) {
+    return db.transaction(() async {
+      if (expectedValues.isNotEmpty) {
+        for (final name in const ['world:time', 'world:date', 'world:day']) {
+          final current = await get(sessionId, name);
+          if (current?.value != expectedValues[name]) return false;
+        }
+      }
+      for (final entry in {
+        'world:time': time,
+        'world:date': date,
+        'world:day': '0',
+      }.entries) {
+        await upsertValue(
+          sessionId,
+          entry.key,
+          entry.value,
+          scope: 'ledger',
+          provenance: 'game_time_seed',
+        );
+      }
+      return true;
+    });
+  }
+
   /// Atomic upsert by natural key (sessionId, name). If a tracker with the
   /// same name already exists for the session, its value/scope/provenance/
   /// updatedAt are overwritten. Safe under concurrent writes — Drift resolves

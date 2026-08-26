@@ -172,6 +172,16 @@ class LedgerStage {
         return;
       }
 
+      // Project the seeded opening clock immediately. The Ledger call may be
+      // delayed by reconciliation or fail; a valid seed is still the current
+      // story time until Ledger advances it.
+      await _syncGameTimeToMessage(
+        sessionId: sessionId,
+        targetMessage: targetMessage,
+        isCurrent: isCurrent,
+      );
+      if (!isCurrent()) return;
+
       // Always resolve the dedicated Ledger slot from the immutable turn
       // snapshot. A cleaner config must never override an explicit Ledger slot.
       final AuxApiConfig ledgerConfig;

@@ -131,7 +131,7 @@ final collectorViewServiceProvider = Provider<CollectorViewService>((ref) {
   );
 });
 
-final collectorViewProvider =
-    FutureProvider.family<CollectorViewSnapshot, String>((ref, sessionId) {
+final collectorViewProvider = FutureProvider.autoDispose
+    .family<CollectorViewSnapshot, String>((ref, sessionId) {
       return ref.watch(collectorViewServiceProvider).load(sessionId);
     });

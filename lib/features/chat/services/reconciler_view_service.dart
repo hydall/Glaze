@@ -193,7 +193,7 @@ final reconcilerViewServiceProvider = Provider<ReconcilerViewService>((ref) {
   );
 });
 
-final reconcilerViewProvider =
-    FutureProvider.family<ReconcilerViewSnapshot, String>((ref, sessionId) {
+final reconcilerViewProvider = FutureProvider.autoDispose
+    .family<ReconcilerViewSnapshot, String>((ref, sessionId) {
       return ref.watch(reconcilerViewServiceProvider).load(sessionId);
     });

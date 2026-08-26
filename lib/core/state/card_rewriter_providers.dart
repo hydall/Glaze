@@ -111,10 +111,7 @@ final cardRewriteJobsBySessionProvider =
           .watchJobsBySessionId(sessionId);
     });
 
-final cardRewriteDebugRunsProvider =
-    FutureProvider.family<List<CardEvolutionDebugRunRow>, String>((
-      ref,
-      sessionId,
-    ) {
+final cardRewriteDebugRunsProvider = FutureProvider.autoDispose
+    .family<List<CardEvolutionDebugRunRow>, String>((ref, sessionId) {
       return ref.watch(cardEvolutionRepoProvider).readDebugRuns(sessionId);
     });

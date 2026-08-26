@@ -1,4 +1,5 @@
 import '../../models/ledger_raw_tracker_state.dart';
+import '../../models/tracker.dart';
 import '../app_db.dart';
 import 'tracker_repo.dart';
 import 'tracker_snapshot_repo.dart';
@@ -19,12 +20,15 @@ final class LedgerRawTrackerStateReader {
   Future<LedgerRawTrackerState> read(String sessionId) async {
     final snapshot = await _snapshots.getLatestCommitted(sessionId);
     final controls = await _trackers.getLiveCanonControls(sessionId);
+    final bootstrap = snapshot == null
+        ? await _trackers.getInitialGameTimeSeed(sessionId)
+        : const <Tracker>[];
     return LedgerRawTrackerState(
       committedTrackers:
           snapshot?.trackers
               .where((tracker) => tracker.scope == 'ledger')
               .toList(growable: false) ??
-          const [],
+          bootstrap,
       manualControls: controls,
     );
   }

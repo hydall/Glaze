@@ -97,8 +97,8 @@ final promptCaptureViewServiceProvider = Provider<PromptCaptureViewService>(
   (ref) => PromptCaptureViewService(ref.watch(llmRequestCaptureRepoProvider)),
 );
 
-final promptCaptureViewsProvider =
-    FutureProvider.family<List<PromptCaptureView>, String>(
+final promptCaptureViewsProvider = FutureProvider.autoDispose
+    .family<List<PromptCaptureView>, String>(
       (ref, sessionId) =>
           ref.watch(promptCaptureViewServiceProvider).load(sessionId),
     );

@@ -932,10 +932,15 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     try {
       final session = widget.state.session;
       if (session == null) return false;
+      bool isCurrentSession() =>
+          mounted &&
+          ref.read(chatProvider(widget.charId)).value?.session?.id ==
+              session.id;
       if (widget.state.messages.any((m) => m.role == 'user')) return true;
       final turnConfig = await ref
           .read(studioTurnConfigResolverProvider)
           .resolve(session.id);
+      if (!isCurrentSession()) return false;
       if (!turnConfig.enabled || !turnConfig.ledgerEnabled) return true;
       final trackerRepo = ref.read(trackerRepoProvider);
       final existing = await Future.wait([
@@ -943,6 +948,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         trackerRepo.get(session.id, GameTimeState.dateKey),
         trackerRepo.get(session.id, GameTimeState.dayKey),
       ]);
+      if (!isCurrentSession()) return false;
       if (GameTimeState.fromTrackers(existing.nonNulls).format() != null) {
         return true;
       }
@@ -953,28 +959,18 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         builder: (_) => const GameTimeSeedDialog(),
       );
       if (result == null) return false;
-      await trackerRepo.upsertValue(
-        session.id,
-        GameTimeState.timeKey,
-        result.time,
-        scope: 'ledger',
-        provenance: 'game_time_seed',
+      if (!isCurrentSession()) return false;
+      final seeded = await trackerRepo.seedInitialGameTime(
+        sessionId: session.id,
+        time: result.time,
+        date: result.date,
+        expectedValues: {
+          GameTimeState.timeKey: existing[0]?.value,
+          GameTimeState.dateKey: existing[1]?.value,
+          GameTimeState.dayKey: existing[2]?.value,
+        },
       );
-      await trackerRepo.upsertValue(
-        session.id,
-        GameTimeState.dateKey,
-        result.date,
-        scope: 'ledger',
-        provenance: 'game_time_seed',
-      );
-      await trackerRepo.upsertValue(
-        session.id,
-        GameTimeState.dayKey,
-        '0',
-        scope: 'ledger',
-        provenance: 'game_time_seed',
-      );
-      return true;
+      return seeded && isCurrentSession();
     } catch (_) {
       return false;
     }
