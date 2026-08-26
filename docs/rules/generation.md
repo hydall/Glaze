@@ -15,7 +15,7 @@ Full formal invariants with code references: `docs/INVARIANTS.md`
 | Summary (manual) | Widget-local in `summary_tab.dart` | No | Not abortable (INV-S2) |
 | Summary (auto) | `AutoSummaryStage`, from `PostGenCoordinator` | No | Not abortable (INV-S2) |
 | Memory draft | `MemoryBookController` | No | Per-draft `CancelToken`; mutex via `memory_active_drafts_provider` |
-| Ext blocks | `ExtensionPostGenService._extensionBlocksCancelToken` | No (per-block LLM call) | `cancelBlocks()` — independent of chat cancel token (INV-EG5) |
+| Ext blocks | `ExtensionPostGenService._blocksCancelTokens` | No (per-block LLM call) | `cancelBlocks()` cancels every registered per-run token; independent of chat cancel token (INV-EG5) |
 | JS extension (`glaze.generateText`) | `ActiveApiConfigProvider` (active or connection-profile slot) | No (one-shot, 55 s timeout) | Per-call `CancelToken` from the bridge handler |
 | JS extension (`glaze.triggerGeneration`) | `GenerationDispatcher` | Routed through `ChatNotifier.continueMessage` / `regenerateLastAssistant` | Reuses chat + memory-draft mutex (INV-JS3) |
 | JS extension periodic | `PeriodicTriggerScheduler` (`Timer.periodic`) | No (side-effect tick) | Each tick creates a fresh `CancelToken`; cancelled ticks are swallowed |
@@ -215,10 +215,10 @@ Studio Mode (tracker-around-generator, Phase 5+):
   run cancels and waits for the previous cleanup; superseded queued runs never
   start. Only the latest shared-state owner may publish cleaner UI/token state
   (INV-ST9).
-- **Separate audit model (UX phase):** `PipelineSettings.postCleanerAuditModel`
-  overrides only the model for the character/world audit; endpoint/key/source/
-  protocol are inherited from the cleaner config. Falls back to the
-  cleaner-resolved model when empty (`SidecarLlmClient.resolveConfigForAudit`).
+- **Separate audit model setting:** `PipelineSettings.cleaner.postCleanerAuditModel`
+  exists, but is not currently wired into runtime resolution. `CleanerStage`
+  passes the same resolved `cleanerConfig` to both the character/world audit
+  and the cleaner, so the setting currently has no runtime effect.
 - The Studio tracker-cycle is logged in the agentic operations log as a
   `studioTracker` kind record (Phase 10). The record carries an aggregate
   `AgentOperationAttempt` covering the whole cycle elapsed time; per-agent
@@ -261,11 +261,14 @@ See INV-CM1, INV-CM2 before changing this path.
 
 ## Extension post-generation
 
-After normal/regen completion, `GenerationPipeline` calls
-`ChatGenerationService.processExtensions()` → `ExtensionPostGenService`.
-Failures are logged only (INV-EG2). Gated by `extensionsSettings.enabled` and
-active preset id (INV-EG3). The block chain does not start on aborted or errored
-generation (INV-EG4).
+After normal/regen completion, `PostGenCoordinator` launches
+`ExtBlocksStage.launchForSwipe()` directly for ordinary generation. In Studio,
+`CleanerStage` launches it after the cleaner finalizes or is skipped. Both paths
+delegate to `ExtensionPostGenService.processAfterGeneration()` and then
+`runBlocksForMessage()`, binding blocks to the visible final or cleaned swipe.
+Failures are logged only (INV-EG2). Execution is gated by
+`extensionsSettings.enabled` and the active preset id (INV-EG3). The block
+chain does not start on aborted or errored generation (INV-EG4).
 
 ### Block triggers
 
@@ -275,9 +278,10 @@ reused for all three trigger types:
 
 | `BlockTrigger` | Entry point | Cancel / lifecycle |
 |---|---|---|
-| `afterAssistant` | `processAfterGeneration` → `runBlocksForMessage` | Uses `_extensionBlocksCancelToken` (INV-EG5) |
-| `afterUser` | `ChatNotifier.sendMessage` → `unawaited(_dispatchAfterUserBlocks)` → `runAfterUserBlocks` | Same cancel token, fire-and-forget from the notifier's perspective |
-| `periodic` | `PeriodicTriggerScheduler` → `Timer.periodic(periodicIntervalSeconds)` → `runJsBlock` (no chain) | Each tick creates a fresh `CancelToken`; the scheduler itself pauses on app background (INV-JS6) |
+| `afterAssistant` | Ordinary: `PostGenCoordinator`; Studio: `CleanerStage`; both → `ExtBlocksStage.launchForSwipe` → `processAfterGeneration` → `runBlocksForMessage` | Registers a per-run token in `_blocksCancelTokens` (INV-EG5) |
+| `afterAssistant` manual rerun | Chat WebView ext-block callback → `runBlocksForMessage` | Registers a per-run token and can replace blocks for the selected swipe |
+| `afterUser` | `ChatNotifier.sendMessage` → `unawaited(_dispatchAfterUserBlocks)` → `runAfterUserBlocks` | Registers its own per-run token; fire-and-forget from the notifier's perspective |
+| `periodic` | `PeriodicTriggerScheduler` → `Timer.periodic(periodicIntervalSeconds)` → `runJsBlock` (no chain) | Runs only through the currently active visual chat bridge; each tick creates a fresh token and loses authorization when active chat changes; scheduler pauses in app background (INV-JS6) |
 
 ### Block execution model
 
@@ -301,15 +305,16 @@ for block in blocks:
 |---|---|---|
 | `infoblock` | `InfoBlockService` (LLM) | Result stored in `InfoBlock.content` |
 | `imageGen` | `ImageGenService` (LLM agent → image API) | `<img data-iig-…>` element with a data-root-relative `src` in `InfoBlock.content` (INV-IG9) |
-| `jsRunner` | `JsEngineService` (preferred) → `ChatBridgeController.runJsBlock` (fallback) | Script output becomes the block content; null origin iframe (INV-EG8) |
+| `jsRunner` | Active visual chat's `ChatBridgeController.runJsBlock` | Requires the matching chat WebView bridge; script output becomes block content in a null-origin iframe (INV-EG8) |
 | `interactive` | `PanelHostService` (LLM agent → sandboxed iframe panel) | HTML persisted to `InfoBlock.content`; panel is rendered as a live iframe island |
 
 ### Cancel
 
-`ExtensionPostGenService.cancelBlocks()` cancels `_extensionBlocksCancelToken`.
-Each `_runSingleBlock` checks the token before and after every `await`; cancelled
-blocks are marked `BlockRunStatus.stopped`. Does **not** affect the chat text cancel
-token or in-progress image generation.
+`ExtensionPostGenService.cancelBlocks()` cancels every token currently
+registered in `_blocksCancelTokens`, covering overlapping chains and reruns.
+Each `_runSingleBlock` checks its per-run token before and after every `await`;
+cancelled blocks are marked `BlockRunStatus.stopped`. This does **not** affect
+the chat text cancel token or in-progress image generation.
 
 ### Bridge feedback
 

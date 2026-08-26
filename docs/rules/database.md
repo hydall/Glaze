@@ -75,11 +75,22 @@ Never cache an optimistic, generated, restoration, or pre-write snapshot.
 
 ## Schema migrations
 
-All schema changes go in `AppDatabase.migration` in `app_db.dart`.
-Bump the schema version and add a `from → to` migration step.
-Never modify existing column types without a migration.
+`lib/core/db/app_db.dart` is the schema registration point: its
+`@DriftDatabase` annotation lists every registered table and its
+`AppDatabase.migration` delegates versioned upgrades. Table declarations are
+parts under `lib/core/db/tables/`, collected by `tables.dart`. Migration and
+integrity helpers are split into these `app_db.dart` parts:
 
-Current version: **130**
+- `migrations/upgrade_v2_v50.dart`
+- `migrations/upgrade_v51_v100.dart`
+- `migrations/upgrade_v101_v130.dart`
+- `migrations/database_integrity.dart`
+- `migrations/studio_legacy.dart`
+
+All schema changes must update the registration/migration path in
+`app_db.dart`. Bump the schema version and add a guarded `from -> to` migration
+step; never modify existing column types without a migration. The current
+schema is **v130** with **56 registered tables**.
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -115,7 +126,7 @@ Migration history:
 - v51: data migration — aggregates `tracker_rows` per session into a baseline snapshot at the sentinel anchor `(messageId='', committed=1)`. Legacy sessions that had `tracker_rows` but no snapshots get a one-time baseline so the snapshot-first read path (Phase 3) finds data immediately. The sentinel anchor is never dropped by `deleteForMessage` (only by `deleteBySessionId` / `deleteByCharacterId`).
 - v52: dropped `pipeline_settings_rows` — pipeline settings moved to a singleton in SharedPreferences (key `pipelineSettings`), per-session overrides abandoned. SharedPreferences payload unaffected.
 - v53: added `info_blocks.agentSwipeId` INTEGER DEFAULT -1 — binds ext blocks to the blue cleaned sub-swipe so blocks launched after the POST-cleaner target the cleaned text. -1 = "no agent swipe" (legacy blocks, match by `(messageId, swipeId)` only).
-- v54: added `studio_preset_rows` table — Studio prompts (controller ontology, runtime envelope, final brief, cleaner and Ledger prompts, beauty shard, extractors, block router, brief parser, shard synthesizers) migrated to   a DB table so the user can edit them without code changes. Seeded with the then-current hardcoded values via a single INSERT. See `docs/plans/studio-preset-db.md`.
+- v54: added `studio_preset_rows` table — Studio prompts (controller ontology, runtime envelope, final brief, cleaner and Ledger prompts, beauty shard, extractors, block router, brief parser, shard synthesizers) migrated to a DB table so the user can edit them without code changes. Seeded with the then-current hardcoded values via a single INSERT.
 - v55: Studio config overhaul — added `studio_preset_id`, `expensive_api_config_id`, `cheap_api_config_id`, `cleaner_api_config_id`; dropped `source_preset_id`, `source_preset_hash`, `routing_mode`, `agent_studio_preset_id`, `final_studio_preset_id`, `studio_preset_overrides_json`, `builder_prompt_template`, `selected_block_ids_json`, `selected_block_ids_initialized`, `build_api_config_id`, `build_model_override`. Unbinds Studio from user presets, switches to 3 API config slots + `studioPresetId`.
 - v56: historical data migration — originally added `cleaner_beauty` and refreshed the then-active `writeloop_system` block. The generic write-loop is retired; current migration code adds current missing seed blocks but preserves existing user `writeloop` JSON as inert data.
 - v57: data migration — moves `cleaner_beauty` to the end of the cleaner section (`order` 99) so the LLM sees styling instructions last among preset blocks (recency effect).
@@ -391,9 +402,11 @@ and upserts an immutable snapshot at that anchor via
 generation starts. Committed snapshots are surfaced by the read path;
 uncommitted snapshots are tentative state from the most recent Ledger pass.
 
-`post_cleaner_service.applyCleanedText` (Phase 2) clones the parent
-message's snapshot into the new `'cleaned'` agent-swipe anchor so the
-cleaned sub-swipe inherits the parent's tracker state.
+`CleanerStage` normally pre-creates the `'cleaned'` agent swipe and immediately
+clones the parent agent-swipe snapshot into its new anchor, before cleaner
+streaming begins. `PostCleanerService.applyCleanedText` retains the same clone
+as a fallback for the append-after-cleaning path when no pre-created swipe is
+available.
 
 ### Read path (snapshot-first)
 

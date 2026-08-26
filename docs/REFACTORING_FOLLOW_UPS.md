@@ -24,37 +24,28 @@ The `refactor/db-studio-dedup` work established the following boundaries:
 
 ## 1. Automated Card Evolution
 
-**ROI: highest. Implementation may proceed in verified stages.**
+**Completed.** The decomposition preserved the public entrypoints, durable
+status model, retry policy, prompts, checkpoint schema, and lease ordering.
+Current ownership is:
 
-`lib/core/services/card_rewriter/automated_card_evolution_service.dart` owns
-collector cadence, recovery, in-flight cancellation, durable writer leases and
-checkpoints, LLM execution, context consolidation, parsing, promotion, effects,
-and diagnostics. These are independent change axes with materially different
-failure semantics.
-
-Target boundaries, in safe order:
-
-1. `ObservationResponseParser`: pure collector response parsing and typed
-   actions.
-2. `CardEvolutionDiagnostics`: parser verdicts, model outcomes, and selection
-   bail persistence.
-3. `DurableWriterCallRunner`: one checkpointed prepare/replay/execute/complete
-   protocol, preserving lease and status ordering exactly.
-4. `WriterContextConsolidator`: bounded history chunking and cumulative handoff.
-5. `CardEvolutionCollectorCoordinator`: collector claim, evidence validation,
-   effects, and promotion.
-6. `CardEvolutionWriterCoordinator`: card writer, repair, lorebook writer, and
-   finalization ordering.
-
-Do not combine decomposition with status renames, retry-policy changes, prompt
-changes, or checkpoint schema changes. Run
-`automated_card_evolution_service_test.dart` and
-`card_rewrite_observation_pass_test.dart` after every stage, followed by the
-collector, observation, and writer-call repository suites.
+- `AutomatedCardEvolutionService`: compatibility facade, public recovery/run
+  entrypoints, enablement, and per-session in-flight deduplication.
+- `ObservationResponseParser`: pure collector response parsing and typed
+  actions.
+- `CardEvolutionDiagnostics`: parser verdicts, model outcomes, and selection
+  bail persistence.
+- `DurableWriterCallRunner`: checkpointed prepare/replay/execute/complete
+  protocol while preserving claim ownership and status ordering.
+- `WriterContextConsolidator`: bounded immutable-history chunking and cumulative
+  handoff.
+- `CardEvolutionCollectorCoordinator`: collector claims, evidence validation,
+  observation effects, promotion, recovery, and collector cancellation.
+- `CardEvolutionWriterCoordinator`: durable writer claims, cancellation,
+  card/repair/lorebook writer execution, and finalization ordering.
 
 ## 2. Chat Message Mutations
 
-**ROI: high. Follow-up after Card Evolution.**
+**ROI: high.**
 
 `lib/features/chat/chat_message_service.dart` mixes pure message/swipe
 transforms with destructive multi-repository transactions, causal rollback,
@@ -119,13 +110,21 @@ and one top-level transactional merger. The transaction must remain atomic.
 
 ## Measure Or Decide First
 
+- Wire `CleanerSettings.postCleanerAuditModel` through a distinct runtime model
+  resolution path, or explicitly remove the setting. The UI and persisted model
+  exist, but `CleanerStage` currently uses the cleaner config for both calls.
+- Decide whether the remaining MemoryBook hardening work is still required:
+  read-only Lucy output auditing and stronger write-time semantic duplicate
+  prevention are not implemented. Visible-window exclusion and temporal
+  diversity already are.
 - Benchmark incremental chat-embedding manifests before adding persistent
   watermark metadata.
 - Profile chat and WebView rebuild/platform-view creation counts before changing
   widget subscriptions or hierarchy.
 - Decide whether disabled Memory Graph building also forbids graph reads during
   generation.
-- Choose scheduler authority before enabling periodic extensions.
+- Measure periodic extension behavior on mobile lifecycle transitions and
+  long-running visual Chat WebView sessions before expanding its scope.
 - Treat relational chat storage and SQLite runtime replacement as independent
   migration projects.
 
@@ -142,8 +141,15 @@ Every extraction stage must:
 
 - preserve public import paths and source compatibility;
 - preserve transaction, lease, checkpoint, and cancellation ordering;
-- run focused characterization tests before broader tests;
-- pass `flutter analyze` with no new diagnostics;
-- run `dart run build_runner build` immediately after generated-model or Drift
-  structural changes;
+- run focused characterization tests for the changed ownership boundary;
+- run `dart run build_runner build --delete-conflicting-outputs` after generated
+  model or Drift structural changes;
+- run `dart run easy_localization:generate -S assets/translations -f keys -o locale_keys.g.dart`
+  when localization keys or their generated contract can be affected;
+- pass the CI analyzer command:
+  `flutter analyze --no-fatal-infos --no-fatal-warnings`;
+- pass focused tests first, then the full CI suite with
+  `flutter test --reporter expanded`;
+- leave the PR CI gate in `.github/workflows/ci.yml` green; it regenerates
+  build-runner output and localization keys before analyzer and full tests;
 - land as a small scoped commit that can be reviewed or reverted independently.

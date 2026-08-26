@@ -1,229 +1,93 @@
-# Dependency Upgrade Plan
+# Dependency Baseline
 
-Актуально для ветки `feat/freezed-3x-migration` после восстановления Robocopy-corruption и `dart pub cache repair`.
-Flutter SDK задаётся через `PATH` или `FLUTTER_ROOT`. Dart/Flutter версии см. в локальном SDK и `pubspec.lock`.
+This document describes the maintained dependency baseline. It is not an
+upgrade plan for a particular branch.
 
-## Текущий baseline
+## Sources of truth
 
-Перед дальнейшими dependency upgrades baseline должен оставаться зелёным:
+- `pubspec.yaml` defines direct dependency constraints and SDK requirements.
+- `pubspec.lock` defines the versions resolved for the repository.
+- `.github/workflows/ci.yml` defines the required generated artifacts and the
+  analyzer/test commands used by CI.
+- `docs/BUILD_NOTES.md` records platform-specific constraints and workarounds.
+
+Do not copy version or test-count snapshots into planning documents. Read the
+current lockfile and current test output instead.
+
+## Baseline commands
+
+Run these from the repository root after changing dependencies. Code and
+localization generation are required because generated files are gitignored
+and recreated in CI.
 
 ```powershell
 flutter pub get
-dart run build_runner build
-flutter analyze
-flutter test
+dart run build_runner build --delete-conflicting-outputs
+dart run easy_localization:generate -S assets/translations -f keys -o locale_keys.g.dart
+flutter analyze --no-fatal-infos --no-fatal-warnings
+flutter test --reporter expanded
 ```
 
-Последняя проверка после `dart pub cache repair`:
-
-| Проверка | Статус | Примечание |
-|---|---:|---|
-| `flutter pub get` | pass | `path_provider` overrides removed after Windows verification |
-| `dart run build_runner build` | pass | build_runner не зависает, генерация проходит |
-| `flutter analyze` | pass with warnings | errors нет, остаются существующие warnings/info |
-| `flutter test` | pass | 712 tests passed |
-| `flutter build apk --debug` | pass | Android wrapper restored via `flutter create --platforms=android .`; APK built |
-| `flutter build windows` | pass | MSVC 14.51 coroutine deprecation suppressed in `windows/CMakeLists.txt`; release exe built |
-
-Если снова появляются странные ошибки пакетов или codegen, сначала восстановить Pub cache:
+Build every affected target platform that is available in the verification
+environment. Glaze targets Windows, Android, iOS, macOS, and Linux; web is not
+supported. Typical one-shot checks include:
 
 ```powershell
-dart pub cache repair
-flutter pub get
-```
-
-Жёсткий вариант только при повторной corruption cache:
-
-```powershell
-Remove-Item -LiteralPath "$env:PUB_CACHE\hosted" -Recurse -Force
-flutter pub get
-```
-
-## Текущие ключевые версии
-
-Полный список всегда проверять по `pubspec.lock`. Ниже только пакеты, важные для миграции.
-
-| Пакет | Текущая версия | Статус |
-|---|---:|---|
-| `build_runner` | 2.15.0 | done |
-| `freezed` | 3.2.5 | done |
-| `freezed_annotation` | 3.1.0 | done |
-| `drift` / `drift_dev` | 2.33.0 | latest stable на момент проверки |
-| `flutter_riverpod` / `riverpod` | 3.3.1 / 3.2.1 | done |
-| `go_router` | 17.3.0 | done |
-| `app_links` | 7.1.1 | done |
-| `flutter_dotenv` | 6.0.1 | done |
-| `sqlite3_flutter_libs` | 0.6.0+eol | done |
-| `share_plus` | 12.0.2 | done |
-| `file_picker` | 11.0.2 | latest stable; prerelease 12.0.0-beta.5 deferred |
-| `image` | 4.9.1 | done |
-| `gpt_markdown` | 1.1.7 | patched, `imageBuilder` API changed |
-| `path_provider` | 2.1.6 | done |
-| `path_provider_foundation` | 2.6.0 | done; `objective_c 9.4.1` verified on Windows |
-
-## Resolved Override
-
-The exact `path_provider 2.1.5` and `path_provider_foundation 2.4.2` overrides
-were removed on 2026-07-16. A Windows release build passes with
-`path_provider 2.1.6`, `path_provider_foundation 2.6.0`, and
-`objective_c 9.4.1`. See `docs/BUILD_NOTES.md` for the original failure.
-
-## Working Migration Order
-
-Не делать один большой `flutter pub upgrade --major-versions`. Обновлять маленькими партиями и после каждой партии прогонять baseline checks.
-
-### 0. Stabilization Gate
-
-Статус: done в текущей ветке.
-
-Цель этапа:
-
-| Задача | Статус |
-|---|---:|
-| Восстановить Pub cache | done |
-| Подтвердить `build_runner build` | done |
-| Починить текущие analyze errors | done |
-| Починить WebView/navigation smoke failures | done |
-| Подтвердить полный `flutter test` | done |
-
-Новые dependency upgrades начинаются только от этого состояния.
-
-### 1. Safe Minor/Patch Batch
-
-Цель: обновить низкорисковые пакеты без архитектурных миграций.
-
-Кандидаты из `flutter pub outdated` после cache repair:
-
-| Пакет | Current | Resolvable/Latest | Риск |
-|---|---:|---:|---|
-| `image` | 4.9.1 | 4.9.1 | done; image storage/export tests pass |
-| `test_api` | 0.7.11 | 0.7.12 | low, обычно транзитивно |
-| `meta` | 1.18.0 | 1.18.3 | low, транзитивно |
-| `matcher` | 0.12.19 | 0.12.20 | low, транзитивно |
-
-Команда-кандидат:
-
-```powershell
-flutter pub upgrade image
-```
-
-Не форсировать транзитивные test/analyzer пакеты вручную без причины.
-
-### 2. `go_router` 14.8.1 -> 17.x
-
-Status: done. Upgraded to `17.3.0`; `flutter analyze`, `test/navigation_smoke_test.dart`, and full `flutter test` pass.
-
-Приоритет: medium. Делать до Riverpod, потому что router scope меньше и navigation tests уже покрывают критичный путь.
-
-Перед правками читать:
-
-| Файл | Причина |
-|---|---|
-| `docs/ARCHITECTURE.md` | navigation architecture and sub-screen back button invariant |
-| `lib/core/navigation/router.dart` | single source of GoRouter setup |
-| `test/navigation_smoke_test.dart` | regression coverage |
-
-Проверить changelog `go_router` для 15.x, 16.x, 17.x. Особое внимание:
-
-| Зона | Что проверить |
-|---|---|
-| `StatefulShellRoute` | API and branch behavior |
-| `GoRouter.onException` | signature and redirect behavior |
-| `GoRouterState.uri` | API compatibility |
-| `context.go` / `context.push` | behavior with shell and standalone routes |
-| `routerProvider` tests | fresh `GlobalKey<NavigatorState>` per test |
-
-Verification for this batch:
-
-```powershell
-flutter analyze
-flutter test test/navigation_smoke_test.dart
-flutter test
-```
-
-### 3. `flutter_riverpod` 2.6.1 -> 3.x
-
-Status: done. Upgraded to `flutter_riverpod 3.3.1` / `riverpod 3.2.1`; `flutter analyze`, `test/navigation_smoke_test.dart`, `test/trigger_generation_test.dart`, and full `flutter test` pass.
-
-Приоритет: medium/high только после зелёного `go_router` batch.
-
-Важно: не смешивать upgrade to Riverpod 3 с переходом на `@riverpod` code generation. Сначала сохранить ручные providers, если API позволяет.
-
-Основные зоны риска:
-
-| Зона | Примеры |
-|---|---|
-| `AsyncNotifierProvider` | DB-backed lists, chat state |
-| `StateNotifierProvider` | theme/settings/catalog/extensions state |
-| `StateProvider.family` | streaming state and UI state |
-| `ProviderContainer` tests | overrides and disposal behavior |
-| `ref.listen` side effects | chat/webview/build listeners |
-
-Поиск перед миграцией:
-
-```powershell
-rg "AsyncNotifierProvider|StateNotifierProvider|StateProvider|FutureProvider|ProviderContainer|ref\.listen|\.notifier" lib test
-```
-
-Verification for this batch:
-
-```powershell
-flutter analyze
-flutter test test/navigation_smoke_test.dart
-flutter test test/trigger_generation_test.dart
-flutter test
-```
-
-### 4. Platform/Runtime Major Packages
-
-Делать только после router/Riverpod или в отдельных ветках, если нужны срочно.
-
-| Пакет | Current | Latest | Notes |
-|---|---:|---:|---|
-| `app_links` | 7.1.1 | 7.1.1 | done; source-compatible, analyze/test pass |
-| `flutter_dotenv` | 6.0.1 | 6.0.1 | done; `.env` load API source-compatible, analyze/test pass |
-| `flutter_foreground_task` | 9.2.2 | 9.2.2 | done; Android foreground service compiles, analyze/test/Android debug build pass |
-| `flutter_local_notifications` | 22.0.0 | 22.0.0 | done; named-argument API migrated, analyze/test/Android debug build pass |
-| `share_plus` | 12.0.2 | 13.1.0 | done to highest stable/resolvable without prerelease dependencies; migrated to `SharePlus.instance.share`, AGP 8.12.1; Android debug build pass after wrapper restore |
-| `file_picker` | 11.0.2 | 12.0.0-beta.5 | latest stable; beta only considered together with `share_plus` 13.x |
-| `sqlite3_flutter_libs` | 0.6.0+eol | 0.6.0+eol | done; no Dart API usage, analyze/test pass |
-
-Do not batch all of these together. One package or one tightly related group per commit.
-
-### 5. Deferred/Blocked
-
-| Item | Status | Rule |
-|---|---|---|
-| `path_provider_foundation` override removal | done | Windows release build verified with `objective_c 9.4.1` |
-| `share_plus` 13.x | deferred | only resolves with prerelease `file_picker 12.0.0-beta.5` today; wait for stable `file_picker` compatibility with `win32 ^6` or test as a separate beta-risk batch |
-| `drift` 3.x | unavailable | revisit when stable release exists |
-| Riverpod code generation migration | deferred | separate refactor after Riverpod 3 works manually |
-
-## Commit Strategy
-
-Use small commits with one purpose each:
-
-| Commit | Contents |
-|---|---|
-| stabilization | analyze/test fixes, WebView guard restoration |
-| safe dependency batch | low-risk package updates only |
-| go_router migration | router code and tests |
-| riverpod migration | provider compatibility updates |
-| platform package migration | one platform package group |
-| docs | update this file and build notes as needed |
-
-Never commit generated `.freezed.dart` / `.g.dart` files if they are gitignored. Still run `build_runner build` after changing freezed/drift/json models.
-
-## PR Checklist
-
-Before opening or updating the PR:
-
-```powershell
-git status --short --branch
-flutter pub get
-dart run build_runner build
-flutter analyze
-flutter test
 flutter build windows
-flutter pub outdated
+flutter build apk --debug
+flutter build ios --no-codesign
+flutter build macos
+flutter build linux
 ```
+
+Only run builds relevant to the dependency or platform files changed. Apple
+builds require macOS, Linux builds require Linux, and Windows builds require
+Windows with the configured native toolchain.
+
+## Locked versions
+
+Always verify the full resolved graph in `pubspec.lock`. Selected dependencies
+that commonly affect migrations or platform integration currently resolve to:
+
+| Package | Locked version |
+|---|---:|
+| `build_runner` | 2.15.0 |
+| `freezed` | 3.2.5 |
+| `freezed_annotation` | 3.1.0 |
+| `drift` / `drift_dev` | 2.33.0 |
+| `flutter_riverpod` / `riverpod` | 3.3.2 / 3.3.2 |
+| `go_router` | 17.3.0 |
+| `app_links` | 7.2.1 |
+| `flutter_dotenv` | 6.0.1 |
+| `flutter_local_notifications` | 22.0.1 |
+| `sqlite3_flutter_libs` | 0.6.0+eol |
+| `share_plus` | 12.0.2 |
+| `file_picker` | 11.0.2 |
+| `image` | 4.9.1 |
+| `gpt_markdown` | 1.1.8 |
+| `path_provider` | 2.1.6 |
+| `path_provider_foundation` | 2.6.0 |
+
+## Upgrade policy
+
+- Upgrade one package or one tightly related package group at a time.
+- Inspect `flutter pub outdated` and upstream changelogs before changing
+  constraints; do not force transitive analyzer/test packages without a reason.
+- Run the complete baseline after each dependency batch, plus focused tests and
+  affected platform builds.
+- Keep dependency upgrades separate from unrelated architecture refactors when
+  practical.
+- Never commit generated `.freezed.dart`, `.g.dart`, or localization key files
+  when they are gitignored, but always regenerate them for verification.
+
+## Historical migration status
+
+The Freezed 3, GoRouter 17, and Riverpod 3 migrations, the Android wrapper
+restoration, and removal of the old `path_provider` overrides are historical
+completed work. They are not gates or a prescribed migration order for current
+branches. See repository history and `docs/BUILD_NOTES.md` when investigating
+those changes.
+
+If package resolution or code generation shows evidence of a corrupted Pub
+cache, use `dart pub cache repair`, then rerun `flutter pub get`. Destructive
+cache deletion is a last resort, not a normal baseline step.

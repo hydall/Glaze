@@ -1,9 +1,22 @@
 # Studio UX Analysis — переход к модели «Agentic Preset»
 
-**Статус:** предложение (proposal), код не менялся.
-**Ревизия:** v3 — решения по всем развилкам приняты, см. §«Принятые решения».
-**Ветка:** `claude/studio-ux-refactor-4tlo8u`.
+**Статус:** частично реализованный design plan. Значительная часть фаз уже
+вошла в код, тогда как полный нейминг `Studio -> AgenticPreset` и отдельные
+cleanup-пункты еще не завершены. Разделы "Как сейчас" и старые номера строк
+фиксируют исходный аудит и не являются текущей картой файлов.
+**Ревизия:** v4 — актуальная карта реализации добавлена в 2026-08.
 **Область:** UI студии, ontology агентов, модель блоков пресета, нейминг.
+
+**Текущая карта кода:**
+
+- Studio seed payload: `lib/core/db/studio_preset_seed.dart`;
+- DB registration/schema: `lib/core/db/app_db.dart` (`schemaVersion = 130`);
+- split table declarations: `lib/core/db/tables/studio_and_presets.dart` and
+  `lib/core/db/tables/ledger.dart`;
+- Ledger facade: `lib/core/llm/studio_ledger_service.dart`;
+- Ledger execution/commit specialists: `lib/core/llm/ledger/`;
+- Studio block model: `lib/core/models/studio_config.dart`;
+- Studio UI: `lib/features/studio/`.
 
 Документ описывает целевую модель: что есть сейчас (с привязкой к коду), что
 предлагается, что придётся тронуть, какие миграции и риски. Пошаговый план
@@ -518,9 +531,8 @@ beauty, `:68`).
    (`app_db.dart:1544-1548`) перечисляет источники: `studio_beauty_extractor.dart`,
    `studio_block_router.dart`, `studio_cleaner_rules_extractor.dart`,
    `studio_shard_synthesizer.dart` — ни одного из этих файлов в `lib/` нет.
-   Решение зафиксировано в `docs/plans/studio-preset-db.md`: «decomposition
-   service, block router, shard synthesizer, beauty extractor, cleaner rules
-   extractor all DELETED».
+   Историческая decomposition pipeline, block router, shard synthesizer,
+   beauty extractor и cleaner rules extractor удалены.
 2. **Никто не фильтрует блоки по этим секциям.** Единственные потребители
    секций — `StudioAuxPromptAssembler`, который принимает только `'cleaner'` и
    `'ledger'` (`studio_aux_prompt_assembler.dart:28,41,49`), и
@@ -735,7 +747,7 @@ ST-пресета `isStashed` читается и схлопывается в `e
 
 ### Как считать количество запросов
 
-Чистая функция `agenticPresetRequestEstimate(preset)`:
+Текущая функция `studioPresetRequestCount(preset)` оценивает целевую топологию:
 
 ```
 pregen    = число батч-групп + число индивидуальных агентов
@@ -746,19 +758,19 @@ postClean = enabled ? 2 : 0     // аудит + переписывание — �
 ledger    = enabled && runMode == 'every_turn' ? 1 : 0
 ```
 
-Для дефолтного пресета: 1 батч + 1 финал + 2 Post Clean + 1 Трекер =
-**`5/ход`**.
+Для дефолтного пресета целевая оценка: 1 батч + 1 финал + 2 Post Clean +
+1 Трекер = **`5/ход`**.
 
 MemoryBook и ExtBlocks в счёт **не входят** (решение 15): они не агенты
 пресета, живут по своим настройкам и от выбора пресета не зависят — иначе
 бейдж перестанет отражать то, что пользователь этим пресетом настроил.
 
-Это **оценка сверху**. Реальное число меньше, когда срабатывают `runInterval`,
-`activationKeywords` (`studio_activation_gate.dart:54-76`) или кэш брифов
-(`StudioBriefCache`). Плюс группировка батчей зависит от `(provider, model)` —
-агенты на разных моделях не батчатся (`tracker_batcher.dart:50-56`), то есть
-оценка зависит и от настроек §9. Формат `5/ход` эту неточность не проговаривает;
-расшифровка по фазам показывается в карточке пресета.
+Это пока не точная верхняя граница: встроенные `post_clean` и `ledger` остаются
+также в generic `post_processing` path `MemoryStudioService`, а затем
+выполняются dedicated durable стадиями. Текущий badge не учитывает эти два
+compatibility-вызова. При окончательном устранении двойного ownership формула
+должна считать только один канонический путь. Кэш briefs и batching также могут
+уменьшать фактическое число запросов.
 
 ---
 
@@ -1023,29 +1035,32 @@ Agentic Preset
 
 ## Порядок работ
 
-Каждая фаза — отдельный коммит, `flutter analyze` + `flutter test` зелёные на
-каждом. Фазы 1-6 меняют модель данных → `dart run build_runner build` после
-каждой.
+Таблица ниже сохраняет исходный порядок зависимостей. Фазы 1-5 и большая часть
+фаз 6-9 уже реализованы; оставшиеся пункты — удаление `isStashed`, устранение
+двойного ownership `post_clean`/`ledger`, перенос Recovery, завершение
+унификации preset model и нейминга. Legacy `build`/`brief_parser` уже
+фильтруются миграцией/нормализацией, а их seed payload сохраняется только для
+исторических апгрейдов. Для
+каждого нового изменения нужны отдельный коммит, focused tests, полный
+`flutter test` и `build_runner` после изменений generated models или Drift.
 
-| Фаза | Содержание | Зависит от |
-|---|---|---|
-| 1 | §4: `specId` + идентичность в spec'ах, backfill, удаление эвристик 1 и 3 | — |
-| 2 | §3: `lockedOn` для `final`, `isFinal`-first в split, удаление Narrative | 1 |
-| 3 | §1: Beauty внутрь Post Clean, захват состояния отвязан от постпроцесса, миграция пресетов | 1 |
-| 4 | §2: `post_clean` и `ledger` как агенты, `phase: post_processing`, `requiresSpecId` (Трекер → Continuity) | 2, 3 |
-| 5 | §6: удаление `StudioExecutionMode` + миграция в `agentEnabled` | 4 |
-| 6 | §5: `kind` → `mode` + `id`/`isStatic`, `section` → `injectionPoint`, `targetAgentId` / `sourceAgentId`, удаление `isStashed` и секций `build`/`brief_parser` (удаляет эвристики 2 и 4) | 5 |
-| 7 | §9: вкладка «Агенты» + слот Трекера | 4 |
-| 8 | §7: унификация моделей пресета, один активный пресет, бейдж запросов | 6, 7 |
-| 9 | §8: удаление шита студии, Recovery → Agentic Ops | 7, 8 |
-| 10 | §10 фазы A→B→C: нейминг | 9 |
+| Фаза | Статус | Содержание | Зависит от |
+|---|---|---|---|
+| 1 | Выполнено | §4: `specId` + идентичность в spec'ах, backfill, удаление эвристик 1 и 3 | — |
+| 2 | Выполнено | §3: `lockedOn` для `final`, `isFinal`-first в split, удаление Narrative | 1 |
+| 3 | Выполнено | §1: Beauty внутрь Post Clean, захват состояния отвязан от постпроцесса, миграция пресетов | 1 |
+| 4 | Выполнено | §2: `post_clean` и `ledger` как агенты, `phase: post_processing`, `requiresSpecId` | 2, 3 |
+| 5 | Выполнено | §6: удаление `StudioExecutionMode` + миграция в `agentEnabled` | 4 |
+| 6 | Частично | §5: новая block model и cleanup legacy sections реализованы; остаётся `isStashed` | 5 |
+| 7 | Выполнено | §9: вкладка «Агенты» + отдельный слот Ledger | 4 |
+| 8 | Частично | §7: preset UI и badge реализованы; estimate неточен до устранения двойного post-processing ownership, полная унификация model ещё не завершена | 6, 7 |
+| 9 | Частично | §8: старые sheets удалены; Recovery ещё нужно перенести пятой вкладкой в Agentic Ops | 7, 8 |
+| 10 | Не начато | §10 фазы A→B→C: полный нейминг `Studio -> AgenticPreset` | 9 |
 
-Тесты под переписывание: `studio_execution_mode_test.dart`,
-`studio_preset_topology_test.dart`, `studio_activation_test.dart`,
-`studio_agents_sheet_test.dart`, `studio_3config_resolution_test.dart`,
-`studio_agent_settings_test.dart`, `studio_preset_block_groups_test.dart`,
-`studio_block_editor_dialog_test.dart`,
-`characterization/memory_studio_pipeline_test.dart`.
+Исторический список предполагаемых тестов больше не является картой файлов.
+Для каждого оставшегося изменения сначала ищутся текущие tests по затронутым
+symbols; обязательный regression gate включает существующие Studio ontology,
+config resolution, preset DB, Ledger, migration и pipeline suites.
 
 ---
 

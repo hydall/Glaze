@@ -2,7 +2,7 @@
 
 Native LLM frontend for AI roleplay. Flutter rewrite of the original Vue + Capacitor
 app, which is archived on the `legacy-vue` branch.
-**Stack:** Flutter 3.44 + Riverpod 2 + Drift (SQLite) + GoRouter. **Language:** Dart only. **License:** AGPL-3.0.
+**Stack:** Flutter 3.44 + Riverpod 3 + Drift (SQLite) + GoRouter. **Language:** Dart only. **License:** AGPL-3.0.
 
 Architecture: `docs/ARCHITECTURE.md`. Workflow (git, PRs, Trello): `docs/WORKFLOW.md`.
 
@@ -39,18 +39,17 @@ dart run build_runner build              # Regenerate after editing freezed/drif
 
 For `flutter run` (dev server), see below — the agent cannot run it.
 
-**`flutter run` and `flutter test --watch` are permanently unavailable to the agent.**
+**`flutter run` is unavailable to the agent because it is long-running and
+interactive.** Use only one-shot commands such as:
 
-Reason: both commands are **long-running / blocking**. `flutter run` starts a persistent dev server and keeps the terminal occupied until the app is manually closed. The agent session would freeze indefinitely, unable to continue any work, issue further commands, or report results.
+- `flutter analyze`
+- `flutter test`
+- `dart run build_runner build --delete-conflicting-outputs`
+- `dart run easy_localization:generate -S assets/translations -f keys -o locale_keys.g.dart`
 
-Only run one-shot, non-interactive commands:
-- `flutter analyze` (with optional file path argument)
-- `flutter test` (non-watch, one-shot)
-- `dart run build_runner build` when required
-
-(Fall back to `& "$env:FLUTTER_ROOT\bin\flutter.bat"` if `flutter` is not on PATH.)
-
-If you need to verify runtime behavior or hot-reload changes, ask the user to run `flutter run -d <platform>` in a separate terminal and report back. The agent cannot drive or observe a live Flutter session.
+Fall back to `& "$env:FLUTTER_ROOT\bin\flutter.bat"` if `flutter` is not on
+`PATH`. If runtime or hot-reload verification is required, ask the user to run
+`flutter run -d <platform>` in a separate terminal and report the result.
 
 Web is **not** a target platform — `lib/` imports `dart:io` without conditional stubs, and Drift/`sqlite3_flutter_libs`, `photo_manager` and the WebView bridge have no web support. Target Windows, Android, iOS, macOS or Linux.
 
@@ -126,7 +125,7 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 
 ### Theme
 - Material 3 with `colorSchemeSeed`
-- Dark theme only for MVP
+- Light, dark, and system theme modes are supported; each theme preset can also select its preferred mode
 - Colors in `lib/shared/theme/app_colors.dart`
 - Theme in `lib/shared/theme/app_theme.dart`
 

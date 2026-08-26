@@ -57,7 +57,8 @@ Download the latest release from the [Releases](../../releases) page.
 - **Android** — Install the APK directly on your device.
 - **iOS** — Sideload the IPA using [AltStore](https://altstore.io/) or a similar tool. App Store distribution is not yet available.
 - **Windows** — Download the Windows build and run it directly on your PC.
-- **macOS / Linux** — Buildable from source, but not published as prebuilt releases yet; packaging and signing are still to be set up.
+- **Linux** — Download the published DEB or pacman package when available for the release.
+- **macOS** — Buildable from source, but not currently published as a prebuilt release.
 
 Backups from **SillyTavern** (`.zip`) can be imported via **Menu → Backups**.
 
@@ -90,7 +91,7 @@ It holds the OAuth credentials for cloud sync. Leaving the values empty is fine 
 ### 🚀 Dev Run
 
 ```bash
-flutter run -d windows   # or: -d android, -d chrome, ...
+flutter run -d windows   # or: -d android, -d ios, -d macos, -d linux
 ```
 
 ### 🏭 Builds

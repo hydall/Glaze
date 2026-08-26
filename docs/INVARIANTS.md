@@ -50,7 +50,7 @@ Continuation uses the same delta merge. Error, rollback, and abort paths do not
 apply the generated delta.
 
 `currentSessionVars` lives only inside the isolate's local scope during
-`buildPrompt()` (`lib/core/llm/prompt_builder.dart:279`) — nothing is persisted
+`buildPrompt()` in `lib/core/llm/prompt_builder.dart`; nothing is persisted
 before the success branch, so there is no variable rollback write. Non-success
 paths reload or preserve the latest durable variables.
 
@@ -75,11 +75,14 @@ on abort and on each new generation start.
 
 ### INV-IG1: Image generation runs after text generation completes
 
-`ChatGenerationService.processImageTags()` is called only after the SSE stream completes
-and the assistant message is saved, via `GenerationPipeline._runPostTextSide()`.
-It never runs concurrently with text generation. `continueMessage()` goes
-through the same pipeline and post-gen coordinator, bound to the merged message
-— see INV-CM2.
+`ImageTagStage` is scheduled by `PostGenCoordinator` only after the SSE stream
+completes and the assistant message commit succeeds. With Studio disabled it
+runs against that committed result. With Studio enabled it awaits
+`CleanerStage`, reloads the canonical session from `ChatRepo`, and only then
+processes image tags, so images bind to the selected final/cleaned/partial
+swipe. It never runs concurrently with text generation. `continueMessage()`
+uses the same pipeline and post-generation coordinator, bound to the merged
+message — see INV-CM2.
 
 ### INV-IG2: Image generation has independent abort infrastructure
 
@@ -265,18 +268,18 @@ path writes MemoryBook entries.
 
 ## 4b. Studio Tracker Invariants
 
-These cover the tracker-around-generator pipeline introduced in Phase 5
-(`docs/PLAN_AGENTIC_STUDIO.md`). See also `docs/rules/generation.md` § Studio
-Mode for the rules every contributor touching `MemoryStudioService` /
-`AgentRunner` / `TrackerBatcher` must follow.
+These cover the tracker-around-generator pipeline used by Studio. See also
+`docs/rules/generation.md` for the rules every contributor touching `MemoryStudioService`,
+`ControllerPhaseRunner`, `StudioAgentExecutor`, or `ControllerBatcher` must
+follow.
 
 ### INV-ST1: Trackers receive ≤ contextSize last messages, not full history ✅ ENFORCED (Phase 3)
 
-`MemoryStudioService._limitTrackerHistory(history, contextSize)` slices
-`history.slice(-contextSize)` before building tracker messages. Each message is
-run through `_truncateAgentText` (head 40% + `[Trimmed ...]` marker + tail 60%,
-rune-counted) and `_stripHtmlTags` (conservative tag regex preserving `==...==`
-markers and code fences). `StudioAgent.contextSize` default 5, hard-cap 200.
+`StudioHistoryLimiter.limitTrackerHistory` owns the tracker history cap and
+slices the trailing `contextSize` messages before tracker prompt construction.
+It also owns per-message text truncation (head 40% + `[Trimmed ...]` marker +
+tail 60%, rune-counted) and conservative HTML stripping that preserves
+`==...==` markers and code fences. The tracker context hard-cap is 200.
 
 The final generator does NOT use this trim — it uses
 `StudioPreset.maxFinalHistoryMessages` (default 50). MemoryBook injection
@@ -293,14 +296,13 @@ high-water mark, it advances the boundary by roughly half the current window
 on a complete user-assistant chunk boundary. A trailing user message never
 rotates the window. Trackers are governed by INV-ST1 instead.
 
-### INV-ST3: Same-(provider, model) trackers batch into one LLM request ✅ ENFORCED (Phase 5)
+### INV-ST3: Same-(provider, model, phase) trackers batch into one LLM request ✅ ENFORCED (Phase 5)
 
-`TrackerBatcher.groupAgents` keys batch groups by `"${resolved.protocol}|${resolved.model}"`.
-Agents with `StudioAgent.runIndividually = true` (or whose name matches
-`expression` / `illustrator` / `lorebook`, case-insensitive) are pulled out of
-the batch and run as individual requests. There is no `postProcessingDataKey`
-grouping (yet) — all trackers are pre-generation; the POST-cleaner is a separate
-post-gen rewrite pass, not a tracker.
+`ControllerBatcher.groupAgents` keys batch groups by resolved protocol, model,
+and agent phase. Agents selected by `shouldRunIndividually` are pulled out and
+run as individual requests. Pre-generation and post-processing agents must not
+share a batch because their runtime context differs; the POST-cleaner remains a
+separate post-generation rewrite pass.
 
 ### INV-ST4: Nested agentSwipes (cleaned / final) ✅ ENFORCED
 
@@ -355,17 +357,14 @@ never leaks across runs.
 
 ### INV-ST5: Tracker failure aborts Studio after two retries ✅ ENFORCED
 
-`AgentRunner.runAgent` wraps any tracker exception (timeout, transport, idle,
-invalid output) in `AgentRunFailedException`. Chat-time Studio tracker calls get
-the initial attempt plus two retries. If the tracker still fails, or if a batch
-response is returned but one or more `<result>` blocks cannot be parsed,
-`MemoryStudioService.runTrackerCycle` returns `StudioPipelineResult(status:
-'error')` before the final generator runs.
-
-Batch failures retry the same batch twice. There is no individual fallback from
-a failed batch, and the final generator does not run with partial tracker
-output. The final generator rethrows normally — its failure also aborts the
-turn.
+`ControllerPhaseRunner` owns the tracker phase and the hard-failure decision.
+`StudioBatchCoordinator` owns whole-batch retries, while
+`StudioAgentExecutor` owns individual tracker retries; each path gets the
+initial attempt plus two retries. If a tracker still fails, or a batch response
+has a missing/unparseable `<result>` block, `ControllerPhaseRunner` returns an
+error before the final generator runs. There is no individual fallback from an
+exhausted batch and no final generation with partial tracker output. The final
+generator's own failure also aborts the turn.
 
 ### INV-ST6: Batch budget and concurrency caps ✅ ENFORCED (Phase 5.7.2)
 
@@ -382,13 +381,13 @@ risk).
 
 ### INV-ST7: Studio cache-friendly prompt ordering ✅ ENFORCED (Phase 6.1)
 
-`TrackerBatcher.buildBatchSystemPrompt` orders the batch system prompt as
+`ControllerBatcher.buildBatchSystemPrompt` orders the batch system prompt as
 `<role>` (shared role text) → `<lore>` (shared static + dynamic + trimmed
 history) → `<agents>` (per-agent `<agent_task>` XML) → required output format.
 Shared stable content sits at the prefix; per-agent volatile content sits at
-the tail. `MemoryStudioService._buildSharedBatchMessages` orders shared
-messages as `static_context` → `dynamic_context` → `chat_history` for the same
-reason. This gives the provider's prompt cache (Anthropic ephemeral /
+the tail. `StudioMessageBuilder.buildSharedBatchMessages` orders shared messages
+as `static_context` → `dynamic_context` → `chat_history` for the same reason.
+This gives the provider's prompt cache (Anthropic ephemeral /
 OpenRouter `cache_control`) a long stable prefix to hit across turns.
 `cacheControlTtl` / `cacheBreakpointMode` are wired through
 `ResolvedAgentConfig.fromApiConfig` → `ChatTransportRequest` → transport.
@@ -401,6 +400,12 @@ POST-cleaner, and Ledger. Downstream stages must prefer the supplied snapshot
 and must not re-read mutable Studio preset, API, or pipeline settings during
 that turn. The API-config list is immutable. A manual action that starts a
 separate operation may resolve a fresh snapshot.
+
+`StudioLedgerService` remains the compatibility facade, but it does not own
+durable mutation details. `LedgerTurnCommitter` exclusively owns normal-turn
+Ledger/fact/snapshot writes, and `LedgerReconciliationCommitter` exclusively
+owns reconciliation and replacement writes. Their transaction and stale-fence
+ordering must not be bypassed by runners, stages, or callers.
 
 ### INV-ST9: Cleaner execution has lease authority ✅ ENFORCED
 
@@ -458,9 +463,10 @@ when newer rows are deleted. Applying that selected snapshot to the mutable
 `tracker_rows` materialization is explicit and transactional.
 
 Code refs: `lib/core/db/repositories/tracker_snapshot_repo.dart`,
-`lib/core/llm/studio_ledger_service.dart`,
-`lib/features/chat/chat_message_service.dart:commitDeleteMessages` →
-`deleteForMessages`. The UI publishes the shortened message list before this
+`lib/core/llm/ledger/ledger_turn_committer.dart`,
+`lib/core/llm/ledger/ledger_reconciliation_committer.dart`, and
+`ChatMessageService.commitDeleteMessages` → `deleteForMessages`. The UI
+publishes the shortened message list before this
 commit runs (`ChatMessageOpsController.deleteMessages` is optimistic), so the
 snapshot rollback is *not* observable state — it lands with the transaction,
 and a failed commit restores the pre-delete session in the UI.
@@ -476,8 +482,9 @@ full-character cleanup) may drop it.
 This guarantees legacy sessions (migrated from `tracker_rows` in v51)
 always have a baseline snapshot until the session itself is deleted.
 
-Code ref: `lib/core/db/repositories/tracker_snapshot_repo.dart:deleteForMessage`
-— the `where` clause filters by `messageId.equals(messageId)` and the
+Code ref: `TrackerSnapshotRepo.deleteForMessage` in
+`lib/core/db/repositories/tracker_snapshot_repo.dart`: its `where` clause
+filters by `messageId.equals(messageId)` and the
 sentinel anchor has `messageId = ''`, so it is never matched.
 
 ### INV-TS3: Read path is snapshot-first with `tracker_rows` fallback ✅ ENFORCED (Phase 3)
@@ -512,9 +519,9 @@ state; the original `'final'` snapshot is preserved. Two paths:
 - **Legacy fallback (`post_cleaner_service.applyCleanedText`):** used when
   pre-create failed earlier; clones after the append inside `applyCleanedText`.
 
-Code ref: `lib/features/chat/services/stages/cleaner_stage.dart` (pre-create
-snapshot clone) and `lib/core/llm/post_cleaner_service.dart:applyCleanedText`
-(fallback) — both call `snapshotRepo.upsertTrackers(...)` with the parent's
+Code ref: `CleanerStage` (pre-create snapshot clone) and
+`PostCleanerService.applyCleanedText` (fallback); both call
+`snapshotRepo.upsertTrackers(...)` with the parent's
 `messageId`/`swipeId` and the new `agentSwipeId`.
 
 ### INV-TS6: Branch copies snapshots for sliced messages ✅ ENFORCED (Phase 5)
@@ -526,8 +533,8 @@ point are not copied (the branch starts fresh from the slice). The PK
 includes `sessionId` as a prefix, so branches don't alias even though
 messages are not re-id'd on branch.
 
-Code ref: `lib/core/db/repositories/tracker_snapshot_repo.dart:copyForSessionBranch`,
-`lib/features/chat/chat_session_service.dart:branchSession`.
+Code refs: `TrackerSnapshotRepo.copyForSessionBranch` and
+`ChatSessionService.branchSession`.
 
 ### INV-TS7: Snapshots are covered by backup + cloud sync ✅ ENFORCED (Phase 8, 9)
 
@@ -956,15 +963,18 @@ the badge on the failure path, where no message changed.
 
 ### INV-EG1: Extensions run only after a successful normal/regen chat completion
 
-`ExtensionPostGenService.processAfterGeneration()` is invoked from
-`ChatGenerationService.processExtensions()`, which is called only from
-`GenerationPipeline._runPostTextSide()` after text is saved. It does not run during
-SSE streaming. `continueMessage()` runs it too, bound to the merged message
-(INV-CM2).
+After-assistant ExtBlocks dispatch through `ExtBlocksStage` under
+`PostGenCoordinator`: directly as background work for ordinary chat, or from
+`CleanerStage` after Studio selects and reloads the canonical swipe.
+`ExtBlocksStage` then calls `ExtensionPostGenService.processAfterGeneration()`.
+They do not run during SSE streaming. `continueMessage()` uses the same pipeline
+and post-generation coordinator, bound to the merged message (INV-CM2).
+After-user blocks use the separate
+`ExtensionPostGenService.runAfterUserBlocks()` entrypoint.
 
 ### INV-EG2: Extension failures do not fail chat generation
 
-`ChatGenerationService.processExtensions()` catches errors and logs them; the
+`ExtBlocksStage` catches errors and reports post-generation status; the
 assistant message and chat state remain committed.
 
 ### INV-EG3: Extensions are gated by settings
@@ -975,21 +985,19 @@ Processing is a no-op when `extensionsSettings.enabled` is false or
 
 ### INV-EG4: Block chain does not start if text generation was aborted or errored
 
-`ExtensionPostGenService.processAfterGeneration()` is only reached via
-`GenerationPipeline._runPostTextSide()`, which itself only executes when the SSE
-stream completes successfully. An aborted generation never reaches the pipeline's
-post-text side; therefore the block chain never starts. When the stream returns
-an error (via `SavedMessageWriter.writeError` / `writeRegenError`), the last
-assistant message has `isError: true`; `_runPostTextSide()` checks this flag and
-skips `processExtensions()`, so the block chain does not start on error either.
-The regen path additionally gates on `regenSucceeded` (`!regenMsg.isError`).
+`PostGenCoordinator` is reached only after the generation result is committed.
+An aborted generation never reaches this dispatch. `ExtBlocksStage` and
+`ExtensionPostGenService.processAfterGeneration()` reject a trailing user or
+errored message, so the block chain cannot start for an error result either.
+The regen path additionally requires a non-error regenerated message.
 
 ### INV-EG5: Extension cancel token is independent of the chat generation cancel token
 
-`ExtensionPostGenService` owns `_extensionBlocksCancelToken` (`CancelToken`).
-`cancelBlocks()` cancels this token; it does not touch the chat `_cancelToken` or
-`_imgGenCancelToken`. Conversely, aborting chat generation does not cancel in-flight
-extension blocks (they have already started post-SSE). Stopped blocks are marked
+`ExtensionPostGenService` owns the plural `_blocksCancelTokens` set because
+after-user, after-assistant, manual, and periodic runs may overlap.
+`cancelBlocks()` cancels every token in that set; it does not touch the chat
+generation or image-generation tokens. Conversely, aborting chat generation
+does not cancel already-started ExtBlocks. Stopped persisted blocks are marked
 `BlockRunStatus.stopped` in the DB.
 
 ### INV-EG6: `dependsOnPrevious = true` blocks run serially; output chaining is preserved
@@ -1135,17 +1143,22 @@ all handler exceptions and returns `CommandResult.error`.
 
 ### INV-JS6: Periodic scheduler pauses on app background, never produces catch-up ticks ✅ ENFORCED
 
+`SessionLifecycleTracker` bootstraps `periodicTriggerSchedulerProvider` while a
+visual chat is mounted and publishes its real `charId`/`sessionId` through
+`GenerationNotificationService.activeChatContext`. A tick requires that active
+authority and the matching registered Chat WebView bridge; authority changes
+cancel in-flight periodic execution. There is no headless fallback.
+
 `PeriodicTriggerScheduler` is a `WidgetsBindingObserver`. On
 `paused` / `inactive` / `hidden` / `detached` it cancels every timer.
 On `resumed` it rebuilds the timer set from the current active preset;
 the first tick after a long backgrounding period is **not** a catch-up
 firing — the timer is fresh.
 
-`_tick` is `unawaited` (fire-and-forget): the chain itself owns its
-own cancel token and writes via `infoBlocksProvider.notifier.addOrReplace()`
-without blocking the scheduler. The `debugLifecycleState` test seam
-in `periodic_lifecycle_test.dart` exercises the full pause/resume
-contract.
+`_tick` is `unawaited` (fire-and-forget). `PeriodicJsBlockRunner` owns the
+per-tick cancel token and executes directly through the visual bridge without
+creating an `InfoBlock` row. The `debugLifecycleState` test seam in
+`periodic_lifecycle_test.dart` exercises the pause/resume contract.
 
 ---
 
