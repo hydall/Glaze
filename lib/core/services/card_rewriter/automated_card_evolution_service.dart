@@ -14,7 +14,6 @@ import '../../llm/card_rewrite_slot_resolver.dart';
 import '../../llm/aux_retry_runner.dart';
 import '../../llm/aux_llm_client.dart';
 import '../../llm/transport/llm_capture_context.dart';
-import '../../llm/transport/llm_call_event.dart';
 import '../../models/agent_operation_record.dart';
 import '../../models/card_evolution_observation.dart';
 import '../../utils/id_generator.dart';
@@ -23,7 +22,9 @@ import '../../utils/time_helpers.dart';
 import 'card_rewrite_operation_parser.dart';
 import 'card_rewrite_prompt_builder.dart';
 import 'card_rewriter_contracts.dart';
+import 'card_evolution_diagnostics.dart';
 import 'manual_rewrite_service.dart';
+import 'observation_response_parser.dart';
 
 const _writerMaxTokens = 40000;
 const _writerLeaseSeconds = 600;
@@ -55,6 +56,7 @@ class AutomatedCardEvolutionService {
     CardEvolutionCollectorRunRepo? collectorRunRepo,
     CardEvolutionWriterCallRepo? writerCallRepo,
     LlmRequestCaptureRepo? requestCaptureRepo,
+    CardEvolutionDiagnostics? diagnostics,
     this.observationPromotionThreshold,
     this.observationMinConfidence,
     this.observationExpiryRuns,
@@ -64,13 +66,17 @@ class AutomatedCardEvolutionService {
            collectorRunRepo ?? CardEvolutionCollectorRunRepo(repo.db),
        writerCallRepo = writerCallRepo ?? CardEvolutionWriterCallRepo(repo.db),
        requestCaptureRepo =
-           requestCaptureRepo ?? LlmRequestCaptureRepo(repo.db);
+           requestCaptureRepo ?? LlmRequestCaptureRepo(repo.db),
+       _diagnostics = diagnostics ?? CardEvolutionDiagnostics(repo);
 
   final CardEvolutionRepo repo;
   final CardEvolutionObservationRepo observationRepo;
   final CardEvolutionCollectorRunRepo collectorRunRepo;
   final CardEvolutionWriterCallRepo writerCallRepo;
   final LlmRequestCaptureRepo requestCaptureRepo;
+  final ObservationResponseParser _observationResponseParser =
+      const ObservationResponseParser();
+  final CardEvolutionDiagnostics _diagnostics;
   final CardRewriteModelResolver resolveModel;
   final CardRewriteLlmExecutor _executor;
   final bool Function()? isEnabled;
@@ -466,7 +472,7 @@ class AutomatedCardEvolutionService {
         '[CardRewriter] automatic lane failed before a durable writer result: '
         '$error\n$stackTrace',
       );
-      await _saveSelectionBail(
+      await _diagnostics.saveSelectionBail(
         sessionId: reconciliationRun.sessionId,
         outcome: 'unexpectedFailure',
         reason: error.toString(),
@@ -545,7 +551,7 @@ class AutomatedCardEvolutionService {
     );
     final claim = claimed.claim;
     if (!claimed.isClaimed || claim == null) {
-      await _saveSelectionBail(
+      await _diagnostics.saveSelectionBail(
         sessionId: sessionId,
         outcome: claimed.kind,
         reason: claimed.detail,
@@ -978,9 +984,9 @@ class AutomatedCardEvolutionService {
         );
         return null;
       }
-      final actions = _parseObservationResponse(outcome.text!);
+      final actions = _observationResponseParser.parse(outcome.text!);
       if (actions == null) {
-        await _recordCollectorParserVerdict(
+        await _diagnostics.recordCollectorParserVerdict(
           context: outcome.selectedCaptureContext,
           accepted: false,
           code: 'invalidOutput',
@@ -1012,7 +1018,7 @@ class AutomatedCardEvolutionService {
         );
         return null;
       }
-      await _recordCollectorParserVerdict(
+      await _diagnostics.recordCollectorParserVerdict(
         context: outcome.selectedCaptureContext,
         accepted: true,
         code: 'accepted',
@@ -1053,9 +1059,9 @@ class AutomatedCardEvolutionService {
     required LlmCaptureContext? captureContext,
     required String source,
   }) async {
-    final actions = _parseObservationResponse(output);
+    final actions = _observationResponseParser.parse(output);
     if (actions == null) {
-      await _recordCollectorParserVerdict(
+      await _diagnostics.recordCollectorParserVerdict(
         context: captureContext,
         accepted: false,
         code: 'invalidOutput',
@@ -1076,7 +1082,7 @@ class AutomatedCardEvolutionService {
         'Collector input cannot be validated',
       );
     }
-    await _recordCollectorParserVerdict(
+    await _diagnostics.recordCollectorParserVerdict(
       context: captureContext,
       accepted: true,
       code: 'accepted',
@@ -1129,7 +1135,7 @@ class AutomatedCardEvolutionService {
     required String sessionId,
     required CardEvolutionObservationSnapshot snapshot,
     required int runOrdinal,
-    required List<_ParsedObservationAction> actions,
+    required List<ParsedObservationAction> actions,
     required Set<String> validEvidenceIds,
     required Map<String, String> retrievalTargets,
   }) async {
@@ -1169,36 +1175,12 @@ class AutomatedCardEvolutionService {
     );
   }
 
-  static Future<void> _recordCollectorParserVerdict({
-    required LlmCaptureContext? context,
-    required bool accepted,
-    required String code,
-    required String source,
-    String? detail,
-    String? responseText,
-  }) {
-    if (context?.callId == null || context?.pipelineRunId == null) {
-      return Future<void>.value();
-    }
-    return LlmCallEventCapture.record(
-      LlmCallEvent.parserVerdict(
-        context: context!,
-        parserName: 'AutomatedCardEvolutionService.collectorResponse',
-        accepted: accepted,
-        code: code,
-        detail: detail,
-        responseText: responseText,
-        payload: {'source': source},
-      ),
-    );
-  }
-
   Future<void> _applyObservationAction({
     required String sessionId,
     required String characterId,
     required int runOrdinal,
     required int now,
-    required _ParsedObservationAction action,
+    required ParsedObservationAction action,
   }) async {
     switch (action.action) {
       case 'confirm':
@@ -1742,7 +1724,7 @@ class AutomatedCardEvolutionService {
           detail: detail,
           lastCallId: modelOutcome.selectedCaptureContext?.callId ?? call.id,
         );
-        await _saveDebugOutcome(
+        await _diagnostics.saveModelOutcome(
           sessionId: claim.row.sessionId,
           stage: call.stage == 'lorebook_writer' ? 'lorebook' : 'card',
           model: config!.model,
@@ -1761,7 +1743,7 @@ class AutomatedCardEvolutionService {
     final responseText = response!;
     final parserContext = outcome?.selectedCaptureContext ?? context;
     final parsed = parse(responseText);
-    await _recordWriterParserVerdict(
+    await _diagnostics.recordWriterParserVerdict(
       context: parserContext,
       accepted: parsed.accepted,
       detail: parsed.detail,
@@ -1821,7 +1803,7 @@ class AutomatedCardEvolutionService {
       );
     }
     if (outcome != null) {
-      await _saveDebugOutcome(
+      await _diagnostics.saveModelOutcome(
         sessionId: claim.row.sessionId,
         stage: call.stage == 'lorebook_writer' ? 'lorebook' : 'card',
         model: config!.model,
@@ -1883,24 +1865,6 @@ class AutomatedCardEvolutionService {
     }
   }
 
-  static Future<void> _recordWriterParserVerdict({
-    required LlmCaptureContext context,
-    required bool accepted,
-    required String source,
-    String? detail,
-    String? responseText,
-  }) => LlmCallEventCapture.record(
-    LlmCallEvent.parserVerdict(
-      context: context,
-      parserName: 'CardRewriteOperationParser.writerCheckpoint',
-      accepted: accepted,
-      code: accepted ? 'accepted' : 'invalidOutput',
-      detail: detail,
-      responseText: responseText,
-      payload: {'source': source},
-    ),
-  );
-
   static String _historyConsolidationPrompt({
     required Map<String, dynamic> common,
     required String? priorHandoff,
@@ -1950,102 +1914,6 @@ class AutomatedCardEvolutionService {
       return jsonEncode(decoded);
     } catch (_) {
       return selectedInputJson;
-    }
-  }
-
-  static List<_ParsedObservationAction>? _parseObservationResponse(
-    String output,
-  ) {
-    try {
-      final cleaned = output
-          .replaceAll(RegExp(r'^```(?:json)?\s*'), '')
-          .replaceAll(RegExp(r'\s*```$'), '')
-          .trim();
-      final decoded = jsonDecode(cleaned);
-      if (decoded is! Map) return null;
-      final observations = decoded['observations'];
-      if (observations is! List) return null;
-      final result = <_ParsedObservationAction>[];
-      final scopes = <String>{};
-      for (final raw in observations) {
-        if (raw is! Map) return null;
-        final action = raw['action'];
-        final scopeKey = raw['scopeKey'];
-        final observedChange = raw['observedChange'];
-        final confidence = raw['confidence'];
-        final retrievalKeysRaw = raw['retrievalKeys'];
-        final targetKind = raw['targetKind'];
-        if (action is! String ||
-            !const {
-              'confirm',
-              'new',
-              'no_evidence',
-              'contradict',
-            }.contains(action) ||
-            scopeKey is! String ||
-            scopeKey.isEmpty ||
-            !scopes.add(scopeKey) ||
-            (action == 'new' &&
-                (observedChange is! String || observedChange.isEmpty)) ||
-            (action != 'no_evidence' &&
-                (retrievalKeysRaw is! List ||
-                    retrievalKeysRaw.isEmpty ||
-                    retrievalKeysRaw.any(
-                      (value) => value is! String || value.isEmpty,
-                    ))) ||
-            (action != 'no_evidence' &&
-                !const {
-                  'main_character_card',
-                  'injected_lorebook_entry',
-                }.contains(targetKind))) {
-          return null;
-        }
-        final conf = confidence is num ? confidence.toDouble() : 0.5;
-        final clampedConf = conf < 0.0
-            ? 0.0
-            : conf > 1.0
-            ? 1.0
-            : conf;
-        final evidenceRaw = raw['evidenceMessageIds'];
-        if (action != 'no_evidence' &&
-            (evidenceRaw is! List ||
-                evidenceRaw.any((item) => item is! String))) {
-          return null;
-        }
-        final evidence = <String>[];
-        for (final item
-            in (evidenceRaw is List
-                ? evidenceRaw.cast<String>()
-                : const <String>[])) {
-          if (item.isNotEmpty && !evidence.contains(item)) evidence.add(item);
-        }
-        if (action != 'no_evidence' && evidence.isEmpty) return null;
-        result.add(
-          _ParsedObservationAction(
-            action: action,
-            scopeKey: scopeKey,
-            observedChange: observedChange is String ? observedChange : '',
-            canonicalClaim: raw['canonicalClaim'] is String
-                ? raw['canonicalClaim'] as String
-                : null,
-            evidenceMessageIds: evidence,
-            retrievalKeys: retrievalKeysRaw is List
-                ? retrievalKeysRaw.cast<String>().toSet().toList()
-                : const [],
-            targetKind: targetKind is String ? targetKind : null,
-            cardFieldPath: raw['cardFieldPath'] is String
-                ? raw['cardFieldPath'] as String
-                : null,
-            lorebookEntryId: raw['lorebookEntryId'] is String
-                ? raw['lorebookEntryId'] as String
-                : null,
-            confidence: clampedConf,
-          ),
-        );
-      }
-      return result;
-    } catch (_) {
-      return null;
     }
   }
 
@@ -2111,70 +1979,6 @@ class AutomatedCardEvolutionService {
         : ': ${error.length > 180 ? '${error.substring(0, 180)}...' : error}';
     final code = last.statusCode == 0 ? '' : ' HTTP ${last.statusCode}';
     return '${attempts.length} attempt(s), ${last.status}$code$compactError';
-  }
-
-  Future<void> _saveDebugOutcome({
-    required String sessionId,
-    required String stage,
-    required String model,
-    required AuxCallOutcome outcome,
-  }) async {
-    try {
-      await repo.saveDebugRun(
-        sessionId: sessionId,
-        stage: stage,
-        status: outcome.status.name,
-        model: model,
-        output: outcome.text,
-        attemptsJson: jsonEncode([
-          for (final attempt in outcome.attempts) attempt.toJson(),
-        ]),
-        updatedAt: currentTimestampSeconds(),
-      );
-    } catch (error) {
-      debugPrint('[CardRewriter] failed to persist model diagnostics: $error');
-    }
-  }
-
-  /// Records a writer run that ended before any model call. Without this the
-  /// only trace of a refused claim or an unavailable prompt snapshot is a
-  /// transient toast, which makes the cause unrecoverable after the fact.
-  Future<void> _saveSelectionBail({
-    required String sessionId,
-    required String outcome,
-    required String? reason,
-    required int throughCollectorOrdinal,
-    required List<String> reconciliationRunIds,
-  }) async {
-    final detail = reason == null || reason.isEmpty ? 'unattributed' : reason;
-    debugPrint(
-      '[CardRewriter] writer bailed before model session=$sessionId '
-      'outcome=$outcome reason=$detail '
-      'collectorBoundary=$throughCollectorOrdinal '
-      'runs=${reconciliationRunIds.length}',
-    );
-    try {
-      await repo.saveDebugRun(
-        sessionId: sessionId,
-        stage: 'selection',
-        status: outcome,
-        model: '',
-        output: null,
-        attemptsJson: jsonEncode([
-          {
-            'outcome': outcome,
-            'reason': detail,
-            'collectorBoundary': throughCollectorOrdinal,
-            'reconciliationRunIds': reconciliationRunIds,
-            'at': currentTimestampSeconds(),
-          },
-        ]),
-        updatedAt: currentTimestampSeconds(),
-      );
-    } catch (error) {
-      // Diagnostics must never break the pipeline.
-      debugPrint('[CardRewriter] failed to persist selection bail: $error');
-    }
   }
 }
 
@@ -2246,30 +2050,4 @@ final class _CollectorFinalizeResult {
   final bool success;
   final String code;
   final String? detail;
-}
-
-final class _ParsedObservationAction {
-  const _ParsedObservationAction({
-    required this.action,
-    required this.scopeKey,
-    required this.observedChange,
-    required this.canonicalClaim,
-    required this.evidenceMessageIds,
-    required this.retrievalKeys,
-    required this.targetKind,
-    required this.cardFieldPath,
-    required this.lorebookEntryId,
-    required this.confidence,
-  });
-
-  final String action;
-  final String scopeKey;
-  final String observedChange;
-  final String? canonicalClaim;
-  final List<String> evidenceMessageIds;
-  final List<String> retrievalKeys;
-  final String? targetKind;
-  final String? cardFieldPath;
-  final String? lorebookEntryId;
-  final double confidence;
 }
