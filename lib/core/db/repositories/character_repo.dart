@@ -204,6 +204,12 @@ class CharacterRepo implements SyncCharacterStore {
     return {for (final r in rows) r.charId: _toModel(r)};
   }
 
+  Future<void> setCurrentSessionIndex(String characterId, int index) async {
+    await (_db.update(_db.characters)
+          ..where((row) => row.charId.equals(characterId)))
+        .write(CharactersCompanion(currentSessionIndex: Value(index)));
+  }
+
   @override
   Future<void> put(Character character) async {
     // Cache the estimated token count on every write (import/save) so the UI

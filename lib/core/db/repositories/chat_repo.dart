@@ -143,6 +143,18 @@ class ChatRepo implements SyncChatStore {
         .insertOnConflictUpdate(_toCompanion(session));
   }
 
+  /// Inserts a newly allocated session without replacing an existing owner of
+  /// the same globally unique session id.
+  Future<bool> insertIfAbsent(ChatSession session) async {
+    final inserted = await _db
+        .into(_db.chatSessions)
+        .insertReturningOrNull(
+          _toCompanion(session),
+          mode: InsertMode.insertOrIgnore,
+        );
+    return inserted != null;
+  }
+
   /// Atomically appends a user message and clears the draft.
   ///
   /// This avoids the send path writing a whole stale session blob while the

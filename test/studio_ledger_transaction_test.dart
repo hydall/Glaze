@@ -15,6 +15,7 @@ import 'package:glaze_flutter/core/db/repositories/character_revision_repo.dart'
 import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_debug_run_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/ledger_raw_tracker_state_reader.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_lease_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
@@ -22,7 +23,6 @@ import 'package:glaze_flutter/core/db/repositories/memory_book_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_snapshot_repo.dart';
 import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
-import 'package:glaze_flutter/core/llm/prompt/ledger_tracker_loader.dart';
 import 'package:glaze_flutter/core/llm/studio_ledger_reconciliation.dart';
 import 'package:glaze_flutter/core/llm/studio_ledger_service.dart';
 import 'package:glaze_flutter/core/models/character.dart';
@@ -129,20 +129,7 @@ void main() {
       factRepo: facts,
       transitionRepo: transitions,
       transitionFactRefRepo: CanonTransitionFactRefRepo(db),
-      loadRawTrackerState: (sessionId) async {
-        final committed = await snapshots.getLatestCommitted(sessionId);
-        final live = await trackers.getBySessionAndScope(sessionId, 'ledger');
-        return LedgerRawTrackerState(
-          committedTrackers:
-              committed?.trackers
-                  .where((tracker) => tracker.scope == 'ledger')
-                  .toList() ??
-              const [],
-          manualControls: live
-              .where((tracker) => tracker.name.startsWith('canon_'))
-              .toList(),
-        );
-      },
+      loadRawTrackerState: LedgerRawTrackerStateReader(db).read,
     );
     service = StudioLedgerService(
       llm: const AuxLlmClient(),
@@ -1165,6 +1152,48 @@ void main() {
       expect(fact.basisRevisionHash, tracker.basisRevisionHash);
     },
   );
+
+  test('first Ledger turn commits from the game-time seed', () async {
+    await trackers.seedInitialGameTime(
+      sessionId: 'session',
+      time: '00:30',
+      date: '2026-08-26',
+      day: '0',
+    );
+    final endpoint = await _serve(_response);
+    addTearDown(endpoint.close);
+
+    final result = await run(endpoint.url);
+
+    expect(result.status, 'ok');
+    expect(result.opsApplied, 1);
+    expect((await trackers.get('session', 'world:time'))?.value, '01:00');
+    expect((await trackers.get('session', 'world:date'))?.value, '2026-08-26');
+    expect((await trackers.get('session', 'world:day'))?.value, '0');
+    expect(
+      await facts.getBySourceAnchor(
+        sessionId: 'session',
+        messageId: 'a1',
+        swipeId: 0,
+        agentSwipeId: 0,
+      ),
+      hasLength(1),
+    );
+    final snapshot = await snapshots.getByAnchor(
+      sessionId: 'session',
+      messageId: 'a1',
+      swipeId: 0,
+      agentSwipeId: 0,
+    );
+    expect(snapshot, isNotNull);
+    expect(snapshot!.committed, isFalse);
+    expect(
+      snapshot.trackers
+          .singleWhere((tracker) => tracker.name == 'world:time')
+          .value,
+      '01:00',
+    );
+  });
 
   group('structured output recovery', () {
     const malformed = '''

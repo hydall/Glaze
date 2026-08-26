@@ -101,6 +101,7 @@ class LedgerTurnCommitter {
           token: request.token,
           isStillCurrent: request.isStillCurrent,
           target: target,
+          checkCanon: false,
         );
         await _opApplier.applyOp(
           op: op,
@@ -120,6 +121,7 @@ class LedgerTurnCommitter {
         token: request.token,
         isStillCurrent: request.isStillCurrent,
         target: target,
+        checkCanon: false,
       );
       await _knowledgeFactRepo.replaceTentativeAnchor(
         sessionId: request.sessionId,
@@ -135,6 +137,7 @@ class LedgerTurnCommitter {
           token: request.token,
           isStillCurrent: request.isStillCurrent,
           target: target,
+          checkCanon: false,
         );
         opsApplied += await _knowledgeFactRepo.applyReconciliationCleanup(
           sessionId: request.sessionId,

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models/character.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/persona.dart';
 import '../../core/state/active_selection_provider.dart';
@@ -65,7 +66,6 @@ class ChatSessionService {
   }
 
   Future<ChatSession> createInitialSession(String charId) async {
-    final repo = _ref.read(chatRepoProvider);
     final charRepo = _ref.read(characterRepoProvider);
     final personaRepo = _ref.read(personaRepoProvider);
     final activePersonaId = _ref.read(activePersonaIdProvider);
@@ -80,23 +80,12 @@ class ChatSessionService {
       connections,
     );
 
-    final sessionId = '${charId}_0';
-    final initialMessages = InitialMessageBuilder.build(
+    final session = await _insertNewSession(
+      charId: charId,
       character: character,
       persona: persona,
-      sessionId: sessionId,
+      stampUpdatedAt: false,
     );
-
-    final session = ChatSession(
-      id: sessionId,
-      characterId: charId,
-      sessionIndex: 0,
-      messages: initialMessages,
-    );
-    await repo.put(session);
-    // Publish the durable row: `_0` is the most recycled id there is, and a
-    // cache entry left over from a deleted session under the same id would be
-    // served to the next `switchToSession`.
     updateCache(session);
     return session;
   }
@@ -109,7 +98,7 @@ class ChatSessionService {
 
     final directId = '${charId}_$currentIdx';
     var session = await repo.getById(directId);
-    if (session != null) return session;
+    if (session?.characterId == charId) return session;
 
     final sessions = await repo.getByCharacterId(charId);
     if (sessions.isEmpty) return null;
@@ -128,7 +117,9 @@ class ChatSessionService {
     final cacheKey = '${charId}_$sessionIndex';
 
     final cached = _cache[cacheKey];
-    if (cached != null) {
+    if (cached != null &&
+        cached.characterId == charId &&
+        cached.sessionIndex == sessionIndex) {
       _touchCacheKey(cacheKey);
       await saveCurrentSessionIndex(charId, sessionIndex);
       _prefetchAdjacent(charId, sessionIndex);
@@ -137,7 +128,9 @@ class ChatSessionService {
 
     final repo = _ref.read(chatRepoProvider);
     final session = await repo.getById(cacheKey);
-    if (session == null) {
+    if (session == null ||
+        session.characterId != charId ||
+        session.sessionIndex != sessionIndex) {
       final sessions = await repo.getByCharacterId(charId);
       final target = sessions
           .where((s) => s.sessionIndex == sessionIndex)
@@ -196,12 +189,10 @@ class ChatSessionService {
   }
 
   Future<ChatSession> createNewSession(String charId) async {
-    final repo = _ref.read(chatRepoProvider);
     final charRepo = _ref.read(characterRepoProvider);
     final personaRepo = _ref.read(personaRepoProvider);
     final activePersonaId = _ref.read(activePersonaIdProvider);
     final connections = _ref.read(personaConnectionsProvider);
-    final nextIndex = await _nextSessionIndex(charId);
     final character = await charRepo.getById(charId);
     final personas = await personaRepo.getAll();
     final persona = getEffectivePersona(
@@ -211,28 +202,46 @@ class ChatSessionService {
       activePersonaId,
       connections,
     );
-    final sessionId = '${charId}_$nextIndex';
-    final initialMessages = InitialMessageBuilder.build(
+    final session = await _insertNewSession(
+      charId: charId,
       character: character,
       persona: persona,
-      sessionId: sessionId,
+      stampUpdatedAt: true,
     );
-    final session = ChatSession(
-      id: sessionId,
-      characterId: charId,
-      sessionIndex: nextIndex,
-      messages: initialMessages,
-      // Stamp creation time so the new chat carries a real "last activity"
-      // date for the session list (display + sorting) instead of 0.
-      updatedAt: currentTimestampSeconds(),
-    );
-    await repo.put(session);
-    // Post-commit publication. Without it a cache entry left behind by a
-    // deleted session under the same (recycled) id survives, and the next
-    // switch to this index serves the deleted chat instead of this one.
     updateCache(session);
-    await saveCurrentSessionIndex(charId, nextIndex);
     return session;
+  }
+
+  Future<ChatSession> _insertNewSession({
+    required String charId,
+    required Character? character,
+    required Persona? persona,
+    required bool stampUpdatedAt,
+  }) {
+    final repo = _ref.read(chatRepoProvider);
+    final charRepo = _ref.read(characterRepoProvider);
+    return repo.transaction(() async {
+      var index = await _nextSessionIndex(charId);
+      while (true) {
+        final sessionId = '${charId}_$index';
+        final session = ChatSession(
+          id: sessionId,
+          characterId: charId,
+          sessionIndex: index,
+          messages: InitialMessageBuilder.build(
+            character: character,
+            persona: persona,
+            sessionId: sessionId,
+          ),
+          updatedAt: stampUpdatedAt ? currentTimestampSeconds() : 0,
+        );
+        if (await repo.insertIfAbsent(session)) {
+          await charRepo.setCurrentSessionIndex(charId, index);
+          return session;
+        }
+        index++;
+      }
+    });
   }
 
   Future<ChatSession> branchSession(
@@ -467,10 +476,7 @@ class ChatSessionService {
     if (!_ref.mounted) return;
     final charRepo = _ref.read(characterRepoProvider);
     try {
-      final character = await charRepo.getById(charId);
-      if (character != null) {
-        await charRepo.put(character.copyWith(currentSessionIndex: index));
-      }
+      await charRepo.setCurrentSessionIndex(charId, index);
     } catch (e) {
       debugPrint('[ChatSessionService] saveCurrentSessionIndex error: $e');
     }
