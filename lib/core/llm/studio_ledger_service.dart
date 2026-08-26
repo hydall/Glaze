@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
-import '../db/app_db.dart';
 import '../db/repositories/character_knowledge_fact_repo.dart';
 import '../db/repositories/character_repo.dart';
 import '../db/repositories/chat_repo.dart';
@@ -14,7 +13,6 @@ import '../db/repositories/ledger_reconciliation_lease_repo.dart';
 import '../db/repositories/ledger_reconciliation_run_repo.dart';
 import '../db/repositories/memory_book_repo.dart';
 import '../db/repositories/reconciliation_replacement_repo.dart';
-import '../db/repositories/reconciliation_state_codec.dart';
 import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
 import '../models/knowledge_cleanup.dart';
@@ -31,6 +29,7 @@ import 'ledger/ledger_in_flight_registry.dart';
 import 'ledger/ledger_op_applier.dart';
 import 'ledger/ledger_output_recovery.dart';
 import 'ledger/ledger_prompt_factory.dart';
+import 'ledger/ledger_replacement_basis_resolver.dart';
 import 'ledger/ledger_run_diagnostics.dart';
 import 'ledger/ledger_run_result.dart';
 import 'ledger/ledger_turn_committer.dart';
@@ -103,6 +102,7 @@ class StudioLedgerService {
   final LedgerRunDiagnostics _runDiagnostics;
   final LedgerReconciliationLeaseRepo _reconciliationLeaseRepo;
   final ReconciliationReplacementRepo _replacementRepo;
+  late final LedgerReplacementBasisResolver _replacementBasisResolver;
   late final LedgerTurnRunner _turnRunner;
 
   StudioLedgerService({
@@ -124,6 +124,7 @@ class StudioLedgerService {
     LedgerOutputRecovery? outputRecovery,
     LedgerRunDiagnostics? runDiagnostics,
     LedgerCanonAuthority? canonAuthority,
+    LedgerReplacementBasisResolver? replacementBasisResolver,
     LedgerTurnRunner? turnRunner,
   }) : _parser = const StudioLedgerExportParser(),
        _opApplier = const LedgerOpApplier(),
@@ -147,6 +148,15 @@ class StudioLedgerService {
              canonContextLoader: canonContextLoader,
              snapshotRepo: _snapshotRepo,
            ) {
+    _replacementBasisResolver =
+        replacementBasisResolver ??
+        LedgerReplacementBasisResolver(
+          reconciliationCheckpointRepo: _reconciliationCheckpointRepo,
+          reconciliationRunRepo: _reconciliationRunRepo,
+          replacementRepo: _replacementRepo,
+          snapshotRepo: _snapshotRepo,
+          canonAuthority: _canonAuthority,
+        );
     _turnRunner =
         turnRunner ??
         LedgerTurnRunner(
@@ -281,16 +291,16 @@ class StudioLedgerService {
     }
     final token = cancelToken ?? CancelToken();
     try {
-      final basis = await _prepareReplacementBasis(
+      final basis = await _replacementBasisResolver.prepare(
         sessionId: sessionId,
         expectedRunId: expectedRunId,
         token: token,
         isStillCurrent: isStillCurrent,
       );
-      if (basis is _ReplacementBasisFailure) {
+      if (basis is LedgerReplacementBasisFailure) {
         return LedgerRunResult(status: 'error', error: basis.reason);
       }
-      final ready = basis as _ReplacementBasisReady;
+      final ready = basis as LedgerReplacementBasisReady;
       final trace = LedgerRunTrace(
         sessionId: sessionId,
         kind: LedgerDebugRunKind.reconciliation,
@@ -396,7 +406,7 @@ class StudioLedgerService {
     FutureOr<bool> Function()? isStillCurrent,
     CancelToken? cancelToken,
     LedgerCanonContext? canonOverride,
-    _ReplacementBasisReady? replacement,
+    LedgerReplacementBasisReady? replacement,
     required String leaseOwnerId,
   }) async {
     final token = cancelToken ?? CancelToken();
@@ -499,7 +509,7 @@ class StudioLedgerService {
               false) {
         return LedgerRunResult.aborted;
       }
-      if (!await _isReconciliationBasisCurrent(
+      if (!await _replacementBasisResolver.isReconciliationBasisCurrent(
         sessionId: sessionId,
         canon: canon,
         replacement: replacement,
@@ -544,7 +554,7 @@ class StudioLedgerService {
       final needsRepair = needsExportRepair || needsCleanupRepair;
       if (needsRepair) {
         await _throwIfReconciliationAborted(token, isStillCurrent);
-        if (!await _isReconciliationBasisCurrent(
+        if (!await _replacementBasisResolver.isReconciliationBasisCurrent(
           sessionId: sessionId,
           canon: canon,
           replacement: replacement,
@@ -598,7 +608,7 @@ class StudioLedgerService {
         attempts = _outputRecovery.combineAttempts(attempts, repair.attempts);
         totalResponseChars += repair.text?.length ?? 0;
         await _throwIfReconciliationAborted(token, isStillCurrent);
-        if (!await _isReconciliationBasisCurrent(
+        if (!await _replacementBasisResolver.isReconciliationBasisCurrent(
           sessionId: sessionId,
           canon: canon,
           replacement: replacement,
@@ -820,7 +830,7 @@ class StudioLedgerService {
             requireCommittedSnapshot: true,
           );
         } else {
-          await _throwIfReplacementStale(
+          await _replacementBasisResolver.throwIfReplacementStale(
             replacement,
             token: token,
             isStillCurrent: isStillCurrent,
@@ -1140,196 +1150,6 @@ class StudioLedgerService {
     return _inFlightRegistry.join(key, () => _turnRunner.run(request));
   }
 
-  Future<_ReplacementBasis> _prepareReplacementBasis({
-    required String sessionId,
-    required String expectedRunId,
-    required CancelToken token,
-    required FutureOr<bool> Function()? isStillCurrent,
-  }) async {
-    if (token.isCancelled ||
-        await _canonAuthority.passesCurrentnessGuard(isStillCurrent) == false) {
-      return const _ReplacementBasisFailure('Replacement was cancelled');
-    }
-    if (await _reconciliationRunRepo.validateChain(sessionId)
-        is! ReconciliationRunValid) {
-      return const _ReplacementBasisFailure(
-        'Reconciliation history failed integrity validation',
-      );
-    }
-    final head = await _reconciliationRunRepo.getHead(sessionId);
-    if (head == null || head.id != expectedRunId) {
-      return const _ReplacementBasisFailure(
-        'The selected reconciliation is no longer the latest commit',
-      );
-    }
-    final validated = await _reconciliationRunRepo.validateEffect(head);
-    if (validated is! ReconciliationEffectValid) {
-      return _ReplacementBasisFailure(
-        validated is ReconciliationEffectInvalid
-            ? validated.reason
-            : 'Exact reconciliation effect is unavailable',
-      );
-    }
-    if (!await _reconciliationRunRepo.currentStateMatches(
-      sessionId,
-      validated.after,
-    )) {
-      return const _ReplacementBasisFailure(
-        'Current Ledger or knowledge state changed after this commit',
-      );
-    }
-    final messages = await _reconciliationRunRepo.reconstructSelectedMessages(
-      head,
-    );
-    if (messages == null || messages.isEmpty) {
-      return const _ReplacementBasisFailure(
-        'The committed message range no longer matches the transcript',
-      );
-    }
-    final plan = LedgerReconciliationPlan(
-      messages: messages,
-      endMessage: messages.last,
-      rangeHash: computeLedgerReconciliationRangeHash(messages),
-    );
-    final checkpoint = await _reconciliationCheckpointRepo.get(sessionId);
-    if (!_checkpointMatchesPlan(checkpoint, plan)) {
-      return const _ReplacementBasisFailure(
-        'Reconciliation checkpoint does not match the latest commit',
-      );
-    }
-    if (await _replacementRepo.hasAppliedDependency(
-      sessionId: sessionId,
-      reconciliationRunId: head.id,
-    )) {
-      return const _ReplacementBasisFailure(
-        'An applied Card Rewriter proposal depends on this reconciliation',
-      );
-    }
-    final currentCanon = await _canonAuthority.loadReadOnly(sessionId);
-    final decoded = ReconciliationStateCodec.decode(
-      sessionId: sessionId,
-      ledgerJson: validated.before.ledgerJson,
-      knowledgeJson: validated.before.knowledgeJson,
-    );
-    final beforeCanon = await _canonAuthority
-        .loadReadOnlyFromReconciliationState(
-          sessionId: sessionId,
-          sourceCharacter: currentCanon.source,
-          ledgerTrackers: decoded.trackers,
-          knowledgeFacts: decoded.knowledgeFacts,
-        );
-    final beforeContext = beforeCanon.context;
-    if (beforeContext.stamp.identity != head.effectiveCanonStamp ||
-        beforeContext.effectiveRevision.number != head.effectiveCanonRevision ||
-        beforeContext.effectiveRevision.hash != head.effectiveCanonHash) {
-      return const _ReplacementBasisFailure(
-        'The saved before-state no longer matches the commit canon',
-      );
-    }
-    final endpointSnapshot = await _snapshotRepo.getByAnchor(
-      sessionId: sessionId,
-      messageId: plan.endMessage.id,
-      swipeId: plan.endMessage.swipeId,
-      agentSwipeId: plan.endMessage.agentSwipeId,
-    );
-    if (endpointSnapshot == null || !endpointSnapshot.committed) {
-      return const _ReplacementBasisFailure(
-        'The reconciliation endpoint snapshot is not committed',
-      );
-    }
-    return _ReplacementBasisReady(
-      head: head,
-      effect: validated,
-      plan: plan,
-      beforeCanon: beforeCanon,
-      currentCanon: currentCanon,
-    );
-  }
-
-  Future<bool> _isReconciliationBasisCurrent({
-    required String sessionId,
-    required LedgerCanonContext canon,
-    required _ReplacementBasisReady? replacement,
-  }) async {
-    if (replacement == null) {
-      return _canonAuthority.isStillCurrent(sessionId, canon);
-    }
-    return _replacementBasisStillCurrent(replacement);
-  }
-
-  Future<bool> _replacementBasisStillCurrent(
-    _ReplacementBasisReady basis,
-  ) async {
-    final head = await _reconciliationRunRepo.getHead(basis.head.sessionId);
-    final snapshot = await _snapshotRepo.getByAnchor(
-      sessionId: basis.head.sessionId,
-      messageId: basis.plan.endMessage.id,
-      swipeId: basis.plan.endMessage.swipeId,
-      agentSwipeId: basis.plan.endMessage.agentSwipeId,
-    );
-    return head?.id == basis.head.id &&
-        head?.chainHash == basis.head.chainHash &&
-        snapshot?.committed == true &&
-        await _reconciliationRunRepo.currentStateMatches(
-          basis.head.sessionId,
-          basis.effect.after,
-        ) &&
-        await _canonAuthority.isStillCurrent(
-          basis.head.sessionId,
-          basis.currentCanon,
-        );
-  }
-
-  Future<void> _throwIfReplacementStale(
-    _ReplacementBasisReady basis, {
-    required CancelToken token,
-    required FutureOr<bool> Function()? isStillCurrent,
-  }) async {
-    if (token.isCancelled ||
-        await _canonAuthority.passesCurrentnessGuard(isStillCurrent) == false ||
-        !await _replacementBasisStillCurrent(basis)) {
-      throw const LedgerCommitStale();
-    }
-    final messages = await _reconciliationRunRepo.reconstructSelectedMessages(
-      basis.head,
-    );
-    final checkpoint = await _reconciliationCheckpointRepo.get(
-      basis.head.sessionId,
-    );
-    if (messages == null || !_checkpointMatchesPlan(checkpoint, basis.plan)) {
-      throw const LedgerCommitStale();
-    }
-    final validated = await _reconciliationRunRepo.validateEffect(basis.head);
-    if (validated is! ReconciliationEffectValid ||
-        validated.before.hash != basis.effect.before.hash ||
-        validated.after.hash != basis.effect.after.hash ||
-        await _replacementRepo.hasAppliedDependency(
-          sessionId: basis.head.sessionId,
-          reconciliationRunId: basis.head.id,
-        )) {
-      throw const LedgerCommitStale();
-    }
-  }
-
-  bool _checkpointMatchesPlan(
-    LedgerReconciliationCheckpoint? checkpoint,
-    LedgerReconciliationPlan plan,
-  ) {
-    if (checkpoint == null ||
-        checkpoint.startMessageId != plan.startMessageId ||
-        checkpoint.endMessageId != plan.endMessage.id ||
-        checkpoint.endSwipeId != plan.endMessage.swipeId ||
-        checkpoint.endAgentSwipeId != plan.endMessage.agentSwipeId ||
-        checkpoint.rangeHash != plan.rangeHash ||
-        checkpoint.messageIds.length != plan.messageIds.length) {
-      return false;
-    }
-    for (var i = 0; i < checkpoint.messageIds.length; i++) {
-      if (checkpoint.messageIds[i] != plan.messageIds[i]) return false;
-    }
-    return true;
-  }
-
   Map<String, dynamic> _cleanupOpJson(KnowledgeCleanupOp op) => {
     'type': op.type.name,
     if (op.factId.isNotEmpty) 'factId': op.factId,
@@ -1343,32 +1163,6 @@ class StudioLedgerService {
     KnowledgeCleanupOpType.renameEntity =>
       'cleanup:rename:${op.fromKey}:${op.toKey}:${op.canonicalName}',
   };
-}
-
-sealed class _ReplacementBasis {
-  const _ReplacementBasis();
-}
-
-final class _ReplacementBasisReady extends _ReplacementBasis {
-  const _ReplacementBasisReady({
-    required this.head,
-    required this.effect,
-    required this.plan,
-    required this.beforeCanon,
-    required this.currentCanon,
-  });
-
-  final LedgerReconciliationSuccessfulRunRow head;
-  final ReconciliationEffectValid effect;
-  final LedgerReconciliationPlan plan;
-  final LedgerCanonContext beforeCanon;
-  final LedgerCanonContext currentCanon;
-}
-
-final class _ReplacementBasisFailure extends _ReplacementBasis {
-  const _ReplacementBasisFailure(this.reason);
-
-  final String reason;
 }
 
 class _LedgerReconciliationAborted implements Exception {
