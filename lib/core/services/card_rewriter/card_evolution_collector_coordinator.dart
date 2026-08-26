@@ -628,9 +628,6 @@ class CardEvolutionCollectorCoordinator {
     }
   }
 
-  Map<String, String>? retrievalTargets(String selectedInputJson) =>
-      _retrievalTargets(selectedInputJson);
-
   void cancelSession(String sessionId) {
     _observationTokens[sessionId]?.cancel('generationAborted');
   }
