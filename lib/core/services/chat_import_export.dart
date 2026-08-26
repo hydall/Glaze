@@ -5,11 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/chat_message.dart';
 import '../models/character.dart';
-
-class ChatExportResult {
-  final String filePath;
-  ChatExportResult({required this.filePath});
-}
+import 'file_export_result.dart';
 
 class ChatImportResult {
   final List<ChatMessage> messages;
@@ -17,7 +13,7 @@ class ChatImportResult {
   ChatImportResult({required this.messages, this.userName});
 }
 
-Future<ChatExportResult> exportChatAsJsonl({
+Future<FileExportResult> exportChatAsJsonl({
   required ChatSession session,
   required Character character,
   required String outputDir,
@@ -45,7 +41,9 @@ Future<ChatExportResult> exportChatAsJsonl({
       'name': name,
       'is_user': isUser,
       'is_system': msg.role == 'system',
-      'send_date': _formatSTDate(DateTime.fromMillisecondsSinceEpoch(msg.timestamp ?? 0)),
+      'send_date': _formatSTDate(
+        DateTime.fromMillisecondsSinceEpoch(msg.timestamp ?? 0),
+      ),
       'mes': msg.content,
       'swipe_id': msg.swipeId,
       'swipes': msg.swipes,
@@ -68,12 +66,16 @@ Future<ChatExportResult> exportChatAsJsonl({
 
   final fileContent = lines.join('\n');
   final safeName = character.name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-  final dateStr = DateTime.now().toIso8601String().replaceAll(RegExp(r'[:T]'), '-').split('.').first;
+  final dateStr = DateTime.now()
+      .toIso8601String()
+      .replaceAll(RegExp(r'[:T]'), '-')
+      .split('.')
+      .first;
   final filename = '$safeName - $dateStr.jsonl';
   final filePath = p.join(outputDir, filename);
 
   await File(filePath).writeAsString(fileContent);
-  return ChatExportResult(filePath: filePath);
+  return FileExportResult(filePath: filePath);
 }
 
 Future<ChatImportResult> importChatFromJsonl(String filePath) async {
@@ -151,7 +153,8 @@ ChatMessage? convertStMessage(Map<String, dynamic> obj, int index) {
     }
 
     return ChatMessage(
-      id: (extra is Map ? extra['glazeMessageId'] as String? : null) ??
+      id:
+          (extra is Map ? extra['glazeMessageId'] as String? : null) ??
           'imp_${DateTime.now().millisecondsSinceEpoch}_$index',
       role: role,
       content: text,

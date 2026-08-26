@@ -57,7 +57,7 @@ class ExtBlocksPromptInjection {
     final preset = _resolveActivePreset();
     if (preset == null || messages.isEmpty) return messages;
 
-    final repo = InfoBlocksRepository(_ref.read(appDbProvider));
+    final repo = _ref.read(infoBlocksRepoProvider);
     final macroCtx = _resolveMacroContext();
     final injector = InfoBlockInjector(
       _InfoBlocksRepoReader(repo),
@@ -81,6 +81,5 @@ class _InfoBlocksRepoReader implements InfoBlockReader {
     String sessionId,
     String messageId, {
     int swipeId = 0,
-  }) =>
-      _repo.getByMessageId(sessionId, messageId, swipeId: swipeId);
+  }) => _repo.getByMessageId(sessionId, messageId, swipeId: swipeId);
 }

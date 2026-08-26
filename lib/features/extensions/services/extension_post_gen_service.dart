@@ -50,8 +50,7 @@ class ExtensionPostGenService {
 
   final BlockProcessor _blockProcessor = const BlockProcessor();
 
-  InfoBlocksRepository get _repo =>
-      InfoBlocksRepository(_ref.read(appDbProvider));
+  InfoBlocksRepository get _repo => _ref.read(infoBlocksRepoProvider);
 
   BlockStatusTracker get _statusTracker => BlockStatusTracker(
     ref: _ref,
