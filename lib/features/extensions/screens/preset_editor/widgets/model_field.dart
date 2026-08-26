@@ -2,7 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../../core/llm/sse_client.dart';
+import '../../../../../core/llm/model_fetcher.dart';
 import '../../../../../core/models/api_config.dart';
 import '../../../../../shared/theme/app_colors.dart';
 import '../../../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -44,22 +44,12 @@ class ModelField extends ConsumerWidget {
 
     onFetchStart();
     try {
-      final models = await SseClient().fetchModels(
-        endpoint: cfg.endpoint,
-        apiKey: cfg.apiKey,
-      );
+      final ids = await ModelFetcher.fetchModelIds(cfg);
       if (!context.mounted) return;
-      if (models.isEmpty) {
+      if (ids.isEmpty) {
         GlazeToast.show(context, 'Модели не найдены');
         return;
       }
-      final ids =
-          models
-              .map((m) => m['id'] as String?)
-              .where((id) => id != null)
-              .cast<String>()
-              .toList()
-            ..sort();
       String? pendingSelection;
       await GlazeBottomSheet.show<void>(
         context,
