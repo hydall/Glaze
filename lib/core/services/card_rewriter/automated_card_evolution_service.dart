@@ -23,18 +23,11 @@ import 'card_evolution_diagnostics.dart';
 import 'durable_writer_call_runner.dart';
 import 'manual_rewrite_service.dart';
 import 'observation_response_parser.dart';
+import 'writer_context_consolidator.dart';
 
 const _writerMaxTokens = 40000;
 const _writerLeaseSeconds = 600;
 const _writerCollectorBatchSize = 2;
-const _writerSnapshotCharacterLimit = 600000;
-const _writerContextCharacterLimit = 400000;
-const _historyConsolidationInstruction =
-    'Consolidate this next immutable Card Rewriter evidence segment into a '
-    'compact cumulative factual handoff. Preserve all durable character '
-    'changes, relationship developments, exact identities, supporting message '
-    'IDs, and contradictions from both the prior handoff and this segment. Do '
-    'not propose or apply card patches. Do not invent facts.';
 
 enum AutomatedCardEvolutionStage { observation, cardRewriter }
 
@@ -56,6 +49,7 @@ class AutomatedCardEvolutionService {
     LlmRequestCaptureRepo? requestCaptureRepo,
     CardEvolutionDiagnostics? diagnostics,
     DurableWriterCallRunner? writerCallRunner,
+    WriterContextConsolidator? writerContextConsolidator,
     this.observationPromotionThreshold,
     this.observationMinConfidence,
     this.observationExpiryRuns,
@@ -77,6 +71,13 @@ class AutomatedCardEvolutionService {
           timeoutMs: timeoutMs,
           leaseSeconds: leaseSeconds,
         );
+    _writerContextConsolidator =
+        writerContextConsolidator ??
+        WriterContextConsolidator(
+          writerCallRunner: _writerCallRunner,
+          discardOrRetainWriter: _discardOrRetainWriter,
+          snapshotTooLarge: _snapshotTooLarge,
+        );
   }
 
   final CardEvolutionRepo repo;
@@ -88,6 +89,7 @@ class AutomatedCardEvolutionService {
       const ObservationResponseParser();
   final CardEvolutionDiagnostics _diagnostics;
   late final DurableWriterCallRunner _writerCallRunner;
+  late final WriterContextConsolidator _writerContextConsolidator;
   final CardRewriteModelResolver resolveModel;
   final CardRewriteLlmExecutor _executor;
   final bool Function()? isEnabled;
@@ -611,7 +613,7 @@ class AutomatedCardEvolutionService {
       var nextOrdinal = 1;
       var chainIndex = 0;
       var parentCallId = chain.isEmpty ? null : chain.first.parentCallId;
-      final prepared = await _prepareDurableWriterContext(
+      final prepared = await _writerContextConsolidator.prepare(
         claim: claim,
         owner: owner,
         model: model,
@@ -639,7 +641,8 @@ class AutomatedCardEvolutionService {
       if (allowedCardFields.isNotEmpty) {
         final cardPrompt =
             '${CardRewriterPromptBuilder.buildEvolution(character: snapshot.character, instruction: 'Independently evaluate the accumulated observation candidates, the available non-empty card fields, the complete immutable chat evidence or its cumulative factual consolidation, and the current Ledger-backed factual context. Russian evidence may support an English card patch; preserve exact Ledger identities without translation. An active observation alone is an unconfirmed candidate; promoted observations are stronger confirmed evidence. If the supplied immutable chat or Ledger confirms a durable candidate that directly contradicts supplied card text, resolve it with the smallest valid patch regardless of observation status unless no writable field or valid character-boundary-preserving anchor can do so; an empty operations list is not valid for a confirmed, resolvable contradiction. Otherwise return an empty operations list when no candidate is durable enough. Change only the smallest exact fragments and do not invent canon.', accumulatedObservations: _extractAccumulatedObservations(cardContext))}\n\n# Immutable chat history and effective canon\n$cardContext';
-        if (cardPrompt.length > _writerSnapshotCharacterLimit) {
+        if (cardPrompt.length >
+            WriterContextConsolidator.snapshotCharacterLimit) {
           await _discardOrRetainWriter(
             claim,
             owner,
@@ -713,7 +716,8 @@ class AutomatedCardEvolutionService {
           _hasInjectedLoreTargets(sharedContext)) {
         final lorebookPrompt =
             '${CardRewriterPromptBuilder.buildLorebookEvolution(instruction: 'Use the shared card, chat, and Ledger context to keep only the supplied injected lorebook entries current. Prefer the card for character relationships and enduring behavior; prefer lorebook entries for their specific locations, people, objects, or setting facts. Do not duplicate a current or proposed card fact into lorebook. Return a patch whenever the chat supports a durable update that belongs in an injected entry and is not already covered by the card.')}\n\n# Shared immutable context\n$sharedContext\n\n# Proposed card operations (read-only)\n${_cardProposalContext(cardOperations)}';
-        if (lorebookPrompt.length > _writerSnapshotCharacterLimit) {
+        if (lorebookPrompt.length >
+            WriterContextConsolidator.snapshotCharacterLimit) {
           await _discardOrRetainWriter(
             claim,
             owner,
@@ -1321,185 +1325,10 @@ class AutomatedCardEvolutionService {
     }
   }
 
-  Future<_PreparedWriterContext> _prepareDurableWriterContext({
-    required CardEvolutionClaim claim,
-    required String owner,
-    required LazyWriterModel model,
-    required String selectedInputJson,
-    required CancelToken cancelToken,
-    required List<CardEvolutionWriterCallRow> chain,
-    required int chainIndex,
-    required int nextOrdinal,
-    required String? parentCallId,
-    required String? manualCallId,
-    required String? manualResponse,
-  }) async {
-    if (selectedInputJson.length <= _writerContextCharacterLimit) {
-      return _PreparedWriterContext.context(
-        selectedInputJson,
-        chainIndex: chainIndex,
-        nextOrdinal: nextOrdinal,
-        parentCallId: parentCallId,
-      );
-    }
-    Map<String, dynamic> decoded;
-    try {
-      decoded = Map<String, dynamic>.from(jsonDecode(selectedInputJson) as Map);
-    } catch (_) {
-      await _discardOrRetainWriter(
-        claim,
-        owner,
-        chain,
-        'snapshotTooLarge',
-        'Stored writer input cannot be decoded for consolidation',
-      );
-      return _PreparedWriterContext.failure(
-        _snapshotTooLarge(
-          selectedInputJson.length,
-          limit: _writerContextCharacterLimit,
-        ),
-      );
-    }
-    final history = decoded['chatHistory'];
-    if (history is! List) {
-      await _discardOrRetainWriter(
-        claim,
-        owner,
-        chain,
-        'snapshotTooLarge',
-        'Stored writer input has no valid chat history',
-      );
-      return _PreparedWriterContext.failure(
-        _snapshotTooLarge(
-          selectedInputJson.length,
-          limit: _writerContextCharacterLimit,
-        ),
-      );
-    }
-    final common = Map<String, dynamic>.from(decoded)
-      ..remove('writerCollectorMessageIds')
-      ..remove('chatHistory');
-    if (jsonEncode(common).length > _writerContextCharacterLimit) {
-      await _discardOrRetainWriter(
-        claim,
-        owner,
-        chain,
-        'snapshotTooLarge',
-        'Shared writer context exceeds the safe request limit',
-      );
-      return _PreparedWriterContext.failure(
-        _snapshotTooLarge(
-          jsonEncode(common).length,
-          stage: 'shared context',
-          limit: _writerContextCharacterLimit,
-        ),
-      );
-    }
-    String? handoff;
-    var offset = 0;
-    var stageOrdinal = 1;
-    while (offset < history.length) {
-      final chunk = <Object?>[];
-      String? prompt;
-      while (offset + chunk.length < history.length) {
-        final candidate = [...chunk, history[offset + chunk.length]];
-        final candidatePrompt = _historyConsolidationPrompt(
-          common: common,
-          priorHandoff: handoff,
-          history: candidate,
-        );
-        if (candidatePrompt.length > _writerSnapshotCharacterLimit) break;
-        chunk.add(history[offset + chunk.length]);
-        prompt = candidatePrompt;
-      }
-      if (chunk.isEmpty || prompt == null) {
-        await _discardOrRetainWriter(
-          claim,
-          owner,
-          chain,
-          'snapshotTooLarge',
-          'A history consolidation chunk exceeds the safe request limit',
-        );
-        return _PreparedWriterContext.failure(
-          _snapshotTooLarge(
-            _historyConsolidationPrompt(
-              common: common,
-              priorHandoff: handoff,
-              history: [history[offset]],
-            ).length,
-            stage: 'history message ${offset + 1}',
-          ),
-        );
-      }
-      final call = await _writerCallRunner.runTextCall(
-        claim: claim,
-        owner: owner,
-        model: model,
-        token: cancelToken,
-        chain: chain,
-        chainIndex: chainIndex,
-        ordinal: nextOrdinal,
-        stage: 'history_consolidation',
-        stageOrdinal: stageOrdinal,
-        captureStage: 'card.history_consolidation',
-        prompt: prompt,
-        parentCallId: parentCallId,
-        manualCallId: manualCallId,
-        manualResponse: manualResponse,
-      );
-      if (call.failure != null) {
-        return _PreparedWriterContext.failure(call.failure!);
-      }
-      handoff = call.call!.responseText;
-      parentCallId = call.call!.lastCallId;
-      offset += chunk.length;
-      chainIndex++;
-      nextOrdinal++;
-      stageOrdinal++;
-    }
-    final context = jsonEncode({
-      ...common,
-      'chatHistory': const <Object?>[],
-      'completeHistoryConsolidation': handoff,
-    });
-    if (context.length > _writerContextCharacterLimit) {
-      await _discardOrRetainWriter(
-        claim,
-        owner,
-        chain,
-        'snapshotTooLarge',
-        'Final consolidated writer context exceeds the safe request limit',
-      );
-      return _PreparedWriterContext.failure(
-        _snapshotTooLarge(
-          context.length,
-          stage: 'final writer context',
-          limit: _writerContextCharacterLimit,
-        ),
-      );
-    }
-    return _PreparedWriterContext.context(
-      context,
-      chainIndex: chainIndex,
-      nextOrdinal: nextOrdinal,
-      parentCallId: parentCallId,
-    );
-  }
-
-  static String _historyConsolidationPrompt({
-    required Map<String, dynamic> common,
-    required String? priorHandoff,
-    required List<Object?> history,
-  }) =>
-      '$_historyConsolidationInstruction\n\n'
-      '# Prior cumulative handoff\n${priorHandoff ?? '(none)'}\n\n'
-      '# Shared card, canon, and lorebook context\n${jsonEncode(common)}\n\n'
-      '# Next immutable chat-history segment\n${jsonEncode(history)}';
-
   static CardEvolutionFinalizeOutcome _snapshotTooLarge(
     int actual, {
     String stage = 'snapshot',
-    int limit = _writerSnapshotCharacterLimit,
+    int limit = WriterContextConsolidator.snapshotCharacterLimit,
   }) => CardEvolutionFinalizeOutcome(
     'snapshotTooLarge',
     null,
@@ -1572,26 +1401,6 @@ class AutomatedCardEvolutionService {
 
   static bool _isCardScopeTarget(String key) =>
       !key.contains('/') && CardRewriteScope.tryParse(key) != null;
-}
-
-final class _PreparedWriterContext {
-  const _PreparedWriterContext.context(
-    this.context, {
-    this.chainIndex = 0,
-    this.nextOrdinal = 1,
-    this.parentCallId,
-  }) : failure = null;
-  const _PreparedWriterContext.failure(this.failure)
-    : context = null,
-      chainIndex = 0,
-      nextOrdinal = 1,
-      parentCallId = null;
-
-  final String? context;
-  final CardEvolutionFinalizeOutcome? failure;
-  final int chainIndex;
-  final int nextOrdinal;
-  final String? parentCallId;
 }
 
 final class _CollectorFinalizeResult {
