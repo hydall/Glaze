@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/llm/game_time.dart';
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/chat_message.dart';
+import '../../core/models/tracker.dart';
 import '../../core/models/tracker_snapshot.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/db_provider.dart';
@@ -237,10 +239,32 @@ class ChatMessageService {
         messageIds: invalidatedMessageIds,
       );
       await checkpointRepo.deleteForMessages(session.id, invalidatedMessageIds);
-      await trackerRepo.replaceLedgerState(
-        session.id,
-        fallbackSnapshot?.trackers ?? const [],
-      );
+      // Rolling back before the first committed snapshot wipes all
+      // model-owned Ledger rows — including the game clock. Preserve the
+      // current complete tuple as a bootstrap seed so the next generation
+      // (e.g. regenerating after deleting the assistant reply) still stamps
+      // the opening clock and the next Ledger run sees a valid baseline.
+      var committedBase = fallbackSnapshot?.trackers ?? const <Tracker>[];
+      if (fallbackSnapshot == null) {
+        final liveLedger = await trackerRepo.getBySessionAndScope(
+          session.id,
+          'ledger',
+        );
+        final clock = GameTimeState.fromTrackers(liveLedger);
+        final time = clock.time;
+        final date = clock.date;
+        final day = clock.day;
+        if (time != null && date != null && day != null) {
+          await trackerRepo.seedInitialGameTime(
+            sessionId: session.id,
+            time: time,
+            date: date,
+            day: '$day',
+          );
+          committedBase = await trackerRepo.getInitialGameTimeSeed(session.id);
+        }
+      }
+      await trackerRepo.replaceLedgerState(session.id, committedBase);
       await chatRepo.put(updated);
       final canonRollback = await _ref
           .read(sessionCanonRollbackRepoProvider)

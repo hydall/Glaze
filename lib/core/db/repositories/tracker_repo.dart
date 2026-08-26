@@ -83,6 +83,7 @@ class TrackerRepo {
     required String sessionId,
     required String time,
     required String date,
+    String day = '0',
     Map<String, String?> expectedValues = const {},
   }) {
     return db.transaction(() async {
@@ -95,7 +96,7 @@ class TrackerRepo {
       for (final entry in {
         'world:time': time,
         'world:date': date,
-        'world:day': '0',
+        'world:day': day,
       }.entries) {
         await upsertValue(
           sessionId,

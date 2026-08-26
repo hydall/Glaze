@@ -15,6 +15,69 @@ final _messageServiceProvider = Provider(ChatMessageService.new);
 
 void main() {
   test(
+    'deleting the last assistant message preserves the game clock as a seed',
+    () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      final container = ProviderContainer(
+        overrides: [appDbProvider.overrideWithValue(db)],
+      );
+      addTearDown(() async {
+        container.dispose();
+        await db.close();
+      });
+
+      final session = ChatSession(
+        id: 's1',
+        characterId: 'c1',
+        sessionIndex: 0,
+        messages: const [
+          ChatMessage(id: 'u1', role: 'user', content: 'hi', timestamp: 1),
+          ChatMessage(
+            id: 'a1',
+            role: 'assistant',
+            content: 'reply',
+            timestamp: 2,
+          ),
+        ],
+      );
+      await container.read(chatRepoProvider).put(session);
+      // A complete clock tuple from a previous Ledger run — no committed
+      // tracker snapshot exists yet.
+      final trackerRepo = container.read(trackerRepoProvider);
+      for (final entry in {
+        'world:time': '14:15',
+        'world:date': '01.01.2027',
+        'world:day': '2',
+      }.entries) {
+        await trackerRepo.upsertValue(
+          's1',
+          entry.key,
+          entry.value,
+          scope: 'ledger',
+          provenance: 'studio_ledger',
+        );
+      }
+
+      await container.read(_messageServiceProvider).deleteMessages(session, {
+        1,
+      });
+
+      // The rollback-to-empty path must keep a complete bootstrap tuple so a
+      // following regeneration still stamps the opening clock.
+      final seed = await trackerRepo.getInitialGameTimeSeed('s1');
+      expect(seed.map((t) => t.name).toSet(), {
+        'world:time',
+        'world:date',
+        'world:day',
+      });
+      final byName = {for (final t in seed) t.name: t.value};
+      expect(byName['world:time'], '14:15');
+      expect(byName['world:date'], '01.01.2027');
+      expect(byName['world:day'], '2');
+    },
+  );
+
+  test(
     'bulk delete persists final state and clears raw-message index',
     () async {
       final db = AppDatabase.forTesting(NativeDatabase.memory());
