@@ -116,6 +116,7 @@ class _MemorySheetState extends ConsumerState<MemorySheet> {
                     : const SizedBox.shrink(),
                 _visited.contains(MemoryTab.books)
                     ? MemoryBooksTab(
+                        key: ValueKey(session.id),
                         sessionId: session.id,
                         charId: widget.charId,
                         messages: session.messages,
@@ -131,11 +132,8 @@ class _MemorySheetState extends ConsumerState<MemorySheet> {
   /// preset so the toggle is not silently overridden by the active preset.
   SheetViewAction _summaryToggle(String sessionId) {
     final enabled = ref.watch(summaryEnabledProvider(sessionId)).value ?? true;
-    void setEnabled(bool value) => syncSummaryEnabled(
-      ref,
-      charId: widget.charId,
-      enabled: value,
-    );
+    void setEnabled(bool value) =>
+        syncSummaryEnabled(ref, charId: widget.charId, enabled: value);
     return SheetViewAction(
       icon: Switch(
         value: enabled,

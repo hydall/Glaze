@@ -1,6 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:glaze_flutter/features/chat/state/magic_drawer_stats_cache.dart';
+import 'package:glaze_flutter/features/chat/widgets/magic_drawer_models.dart';
 
 void main() {
   group('Quick Access refresh contract', () {
@@ -75,6 +78,30 @@ void main() {
         source.substring(refreshStart, refreshEnd),
         contains('if (!mounted) return;'),
       );
+    });
+
+    test('keeps cached stats isolated between sessions of one character', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      const first = (charId: 'character', sessionId: 'session-a');
+      const second = (charId: 'character', sessionId: 'session-b');
+
+      container.read(magicDrawerStatsCacheProvider(first).notifier).state =
+          const MagicDrawerStats(memoryEntryCount: 13);
+
+      expect(
+        container.read(magicDrawerStatsCacheProvider(first))?.memoryEntryCount,
+        13,
+      );
+      expect(container.read(magicDrawerStatsCacheProvider(second)), isNull);
+    });
+
+    test('keys the MemoryBook controller subtree by active session', () {
+      final source = File(
+        'lib/features/chat/widgets/memory_sheet.dart',
+      ).readAsStringSync();
+
+      expect(source, contains('key: ValueKey(session.id)'));
     });
   });
 }

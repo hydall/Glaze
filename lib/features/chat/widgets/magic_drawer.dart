@@ -185,6 +185,12 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   final _scrollController = ScrollController();
   late final MagicDrawerStatsService _statsService;
 
+  MagicDrawerStatsCacheKey _statsCacheKey([String? sessionId]) => (
+    charId: widget.charId,
+    sessionId:
+        sessionId ?? ref.read(chatProvider(widget.charId)).value?.session?.id,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -198,7 +204,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       _itemIds.addAll(cachedLayout.itemIds);
       _deletedIds.addAll(cachedLayout.deletedIds);
     }
-    final cachedStats = ref.read(magicDrawerStatsCacheProvider(widget.charId));
+    final cachedStats = ref.read(
+      magicDrawerStatsCacheProvider(_statsCacheKey()),
+    );
     if (cachedStats != null) _stats = cachedStats;
     // The spinner is now only for the first open of an app run, when there is
     // genuinely nothing to show.
@@ -258,13 +266,31 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
   Future<void> _loadStats() async {
     final request = ++_statsRequest;
+    final requestedSessionId = ref
+        .read(chatProvider(widget.charId))
+        .value
+        ?.session
+        ?.id;
     final stats = await _statsService.computeStats(widget.charId);
-    if (request != _statsRequest) return;
+    final currentSessionId = ref
+        .read(chatProvider(widget.charId))
+        .value
+        ?.session
+        ?.id;
+    if (request != _statsRequest || currentSessionId != requestedSessionId) {
+      return;
+    }
     _stats = stats;
     // The drawer can be closed mid-load, which disposes this state and with it
     // `ref` — only touch the cache while still mounted.
     if (mounted) {
-      ref.read(magicDrawerStatsCacheProvider(widget.charId).notifier).state =
+      ref
+              .read(
+                magicDrawerStatsCacheProvider(
+                  _statsCacheKey(requestedSessionId),
+                ).notifier,
+              )
+              .state =
           stats;
     }
   }
@@ -290,7 +316,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       return;
     }
     if (!mounted || request != _statsRequest) return;
-    ref.read(magicDrawerStatsCacheProvider(widget.charId).notifier).state =
+    ref.read(magicDrawerStatsCacheProvider(_statsCacheKey()).notifier).state =
         updated;
     setState(() {
       _stats = updated;
@@ -709,8 +735,18 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     ref.listen(chatProvider(widget.charId), (prev, next) {
       final prevSession = prev?.value?.session;
       final nextSession = next.value?.session;
-      if (prevSession?.id != nextSession?.id ||
-          prevSession?.messages.length != nextSession?.messages.length ||
+      if (prevSession?.id != nextSession?.id) {
+        ++_statsRequest;
+        _debounceTimer?.cancel();
+        final cached = ref.read(
+          magicDrawerStatsCacheProvider(_statsCacheKey(nextSession?.id)),
+        );
+        setState(() {
+          _stats = cached ?? const MagicDrawerStats();
+          _loadingTokens = false;
+        });
+        unawaited(_refreshStats());
+      } else if (prevSession?.messages.length != nextSession?.messages.length ||
           prevSession?.messages.lastOrNull?.content !=
               nextSession?.messages.lastOrNull?.content) {
         _scheduleRefresh();
