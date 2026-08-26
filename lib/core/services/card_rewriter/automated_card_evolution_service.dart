@@ -11,18 +11,16 @@ import '../../db/repositories/card_evolution_writer_call_repo.dart';
 import '../../db/repositories/llm_request_capture_repo.dart';
 import '../../db/app_db.dart';
 import '../../llm/card_rewrite_slot_resolver.dart';
-import '../../llm/aux_retry_runner.dart';
-import '../../llm/aux_llm_client.dart';
 import '../../llm/transport/llm_capture_context.dart';
 import '../../models/agent_operation_record.dart';
 import '../../models/card_evolution_observation.dart';
 import '../../utils/id_generator.dart';
 import '../../utils/cast_helpers.dart';
 import '../../utils/time_helpers.dart';
-import 'card_rewrite_operation_parser.dart';
 import 'card_rewrite_prompt_builder.dart';
 import 'card_rewriter_contracts.dart';
 import 'card_evolution_diagnostics.dart';
+import 'durable_writer_call_runner.dart';
 import 'manual_rewrite_service.dart';
 import 'observation_response_parser.dart';
 
@@ -57,6 +55,7 @@ class AutomatedCardEvolutionService {
     CardEvolutionWriterCallRepo? writerCallRepo,
     LlmRequestCaptureRepo? requestCaptureRepo,
     CardEvolutionDiagnostics? diagnostics,
+    DurableWriterCallRunner? writerCallRunner,
     this.observationPromotionThreshold,
     this.observationMinConfidence,
     this.observationExpiryRuns,
@@ -67,7 +66,18 @@ class AutomatedCardEvolutionService {
        writerCallRepo = writerCallRepo ?? CardEvolutionWriterCallRepo(repo.db),
        requestCaptureRepo =
            requestCaptureRepo ?? LlmRequestCaptureRepo(repo.db),
-       _diagnostics = diagnostics ?? CardEvolutionDiagnostics(repo);
+       _diagnostics = diagnostics ?? CardEvolutionDiagnostics(repo) {
+    _writerCallRunner =
+        writerCallRunner ??
+        DurableWriterCallRunner(
+          repo: repo,
+          writerCallRepo: this.writerCallRepo,
+          executor: _executor,
+          diagnostics: _diagnostics,
+          timeoutMs: timeoutMs,
+          leaseSeconds: leaseSeconds,
+        );
+  }
 
   final CardEvolutionRepo repo;
   final CardEvolutionObservationRepo observationRepo;
@@ -77,6 +87,7 @@ class AutomatedCardEvolutionService {
   final ObservationResponseParser _observationResponseParser =
       const ObservationResponseParser();
   final CardEvolutionDiagnostics _diagnostics;
+  late final DurableWriterCallRunner _writerCallRunner;
   final CardRewriteModelResolver resolveModel;
   final CardRewriteLlmExecutor _executor;
   final bool Function()? isEnabled;
@@ -596,7 +607,7 @@ class AutomatedCardEvolutionService {
           snapshotOutcome.reason,
         );
       }
-      final model = _LazyWriterModel(resolveModel);
+      final model = LazyWriterModel(resolveModel);
       var nextOrdinal = 1;
       var chainIndex = 0;
       var parentCallId = chain.isEmpty ? null : chain.first.parentCallId;
@@ -638,7 +649,7 @@ class AutomatedCardEvolutionService {
           );
           return _snapshotTooLarge(cardPrompt.length, stage: 'card prompt');
         }
-        final card = await _runDurableOperationCall(
+        final card = await _writerCallRunner.runOperationCall(
           claim: claim,
           owner: owner,
           model: model,
@@ -670,7 +681,7 @@ class AutomatedCardEvolutionService {
             failure: card.call!.parserDetail ?? 'invalid output',
             selectedInputJson: cardContext,
           );
-          final repair = await _runDurableOperationCall(
+          final repair = await _writerCallRunner.runOperationCall(
             claim: claim,
             owner: owner,
             model: model,
@@ -715,7 +726,7 @@ class AutomatedCardEvolutionService {
             stage: 'lorebook prompt',
           );
         }
-        final lorebook = await _runDurableOperationCall(
+        final lorebook = await _writerCallRunner.runOperationCall(
           claim: claim,
           owner: owner,
           model: model,
@@ -737,7 +748,7 @@ class AutomatedCardEvolutionService {
         operations.addAll(lorebook.operations!);
       }
       if (chainIndex < chain.length) {
-        final failed = await _failClosed(
+        final failed = await _writerCallRunner.failClosed(
           claim,
           owner,
           'checkpointMismatch',
@@ -769,7 +780,7 @@ class AutomatedCardEvolutionService {
         operations: operations,
       );
       if (!finalized.isPersisted) {
-        await _markWriterFailure(
+        await _writerCallRunner.markWriterFailure(
           claim,
           owner,
           finalized.kind,
@@ -778,7 +789,7 @@ class AutomatedCardEvolutionService {
       }
       return finalized;
     } on CardRewriteModelNotConfigured catch (error) {
-      await _markWriterFailure(
+      await _writerCallRunner.markWriterFailure(
         claim,
         owner,
         'modelNotConfigured',
@@ -786,7 +797,7 @@ class AutomatedCardEvolutionService {
       );
       return const CardEvolutionFinalizeOutcome('modelNotConfigured');
     } catch (error) {
-      await _markWriterFailure(
+      await _writerCallRunner.markWriterFailure(
         claim,
         owner,
         'unexpectedFailure',
@@ -819,7 +830,7 @@ class AutomatedCardEvolutionService {
     String? detail,
   ) => chain.isEmpty
       ? repo.abandonClaim(claimId: claim.row.id, ownerId: owner)
-      : _markWriterFailure(claim, owner, code, detail);
+      : _writerCallRunner.markWriterFailure(claim, owner, code, detail);
 
   void cancelSession(String sessionId) {
     _tokens['observation-$sessionId']?.cancel('generationAborted');
@@ -1313,7 +1324,7 @@ class AutomatedCardEvolutionService {
   Future<_PreparedWriterContext> _prepareDurableWriterContext({
     required CardEvolutionClaim claim,
     required String owner,
-    required _LazyWriterModel model,
+    required LazyWriterModel model,
     required String selectedInputJson,
     required CancelToken cancelToken,
     required List<CardEvolutionWriterCallRow> chain,
@@ -1420,7 +1431,7 @@ class AutomatedCardEvolutionService {
           ),
         );
       }
-      final call = await _runDurableTextCall(
+      final call = await _writerCallRunner.runTextCall(
         claim: claim,
         owner: owner,
         model: model,
@@ -1473,396 +1484,6 @@ class AutomatedCardEvolutionService {
       nextOrdinal: nextOrdinal,
       parentCallId: parentCallId,
     );
-  }
-
-  Future<_DurableCallResult> _runDurableTextCall({
-    required CardEvolutionClaim claim,
-    required String owner,
-    required _LazyWriterModel model,
-    required CancelToken token,
-    required List<CardEvolutionWriterCallRow> chain,
-    required int chainIndex,
-    required int ordinal,
-    required String stage,
-    required int stageOrdinal,
-    required String captureStage,
-    required String prompt,
-    required String? parentCallId,
-    required String? manualCallId,
-    required String? manualResponse,
-  }) async {
-    final prepared = await _prepareCall(
-      claim: claim,
-      owner: owner,
-      chain: chain,
-      chainIndex: chainIndex,
-      ordinal: ordinal,
-      stage: stage,
-      stageOrdinal: stageOrdinal,
-      prompt: prompt,
-      parentCallId: parentCallId,
-    );
-    if (prepared.failure != null || prepared.call!.status == 'completed') {
-      return prepared;
-    }
-    return _executePreparedCall(
-      claim: claim,
-      owner: owner,
-      model: model,
-      token: token,
-      call: prepared.call!,
-      captureStage: captureStage,
-      manualResponse: manualCallId == prepared.call!.id ? manualResponse : null,
-      parse: (response) =>
-          _ParsedCallResult.accepted(jsonEncode({'handoff': response})),
-    );
-  }
-
-  Future<_DurableCallResult> _runDurableOperationCall({
-    required CardEvolutionClaim claim,
-    required String owner,
-    required _LazyWriterModel model,
-    required CancelToken token,
-    required List<CardEvolutionWriterCallRow> chain,
-    required int chainIndex,
-    required int ordinal,
-    required String stage,
-    required String captureStage,
-    required String prompt,
-    required String? parentCallId,
-    required String cardContext,
-    Set<CardRewriteField>? allowedCardFields,
-    required String? manualCallId,
-    required String? manualResponse,
-  }) async {
-    final prepared = await _prepareCall(
-      claim: claim,
-      owner: owner,
-      chain: chain,
-      chainIndex: chainIndex,
-      ordinal: ordinal,
-      stage: stage,
-      stageOrdinal: 1,
-      prompt: prompt,
-      parentCallId: parentCallId,
-    );
-    if (prepared.failure != null) return prepared;
-    if (prepared.call!.status == 'completed') {
-      final decoded = _decodeOperations(prepared.call!.resultJson);
-      if (prepared.call!.parserCode == 'invalidOutput' &&
-          stage == 'card_writer') {
-        return _DurableCallResult.completed(prepared.call!);
-      }
-      if (decoded == null) {
-        return _failClosed(
-          claim,
-          owner,
-          'checkpointMalformed',
-          'Stored $stage resultJson is malformed',
-        );
-      }
-      return _DurableCallResult.completed(prepared.call!, decoded);
-    }
-    return _executePreparedCall(
-      claim: claim,
-      owner: owner,
-      model: model,
-      token: token,
-      call: prepared.call!,
-      captureStage: captureStage,
-      manualResponse: manualCallId == prepared.call!.id ? manualResponse : null,
-      completeRejected: stage == 'card_writer',
-      parse: (response) {
-        final parsed = allowedCardFields == null
-            ? CardRewriteOperationParser.parseLorebookEvolutionBatch(response)
-            : CardRewriteOperationParser.parseEvolutionBatch(
-                response,
-                allowedFields: allowedCardFields,
-              );
-        final detail = parsed == null
-            ? allowedCardFields == null
-                  ? 'Lorebook response is not a valid operation batch'
-                  : CardRewriteOperationParser.explainEvolutionBatchFailure(
-                      response,
-                      allowedFields: allowedCardFields,
-                    )
-            : allowedCardFields == null
-            ? null
-            : _scopeAllowlistFailure(
-                parsed.whereType<CardRewriteOperationSnapshot>().toList(),
-                cardContext,
-              );
-        if (parsed == null || detail != null) {
-          return _ParsedCallResult.rejected(detail ?? 'invalid output');
-        }
-        return _ParsedCallResult.accepted(_encodeOperations(parsed), parsed);
-      },
-    );
-  }
-
-  Future<_DurableCallResult> _prepareCall({
-    required CardEvolutionClaim claim,
-    required String owner,
-    required List<CardEvolutionWriterCallRow> chain,
-    required int chainIndex,
-    required int ordinal,
-    required String stage,
-    required int stageOrdinal,
-    required String prompt,
-    required String? parentCallId,
-  }) async {
-    final outcome = await writerCallRepo.prepareNextCall(
-      claimId: claim.row.id,
-      ownerId: owner,
-      now: currentTimestampSeconds(),
-      ordinal: ordinal,
-      stage: stage,
-      stageOrdinal: stageOrdinal,
-      prompt: prompt,
-      parentCallId: parentCallId,
-    );
-    final call = outcome.row;
-    if (call == null) {
-      return _failClosed(
-        claim,
-        owner,
-        outcome.kind,
-        'Unable to prepare $stage',
-      );
-    }
-    if (call.ordinal != ordinal ||
-        call.stage != stage ||
-        call.stageOrdinal != stageOrdinal ||
-        call.promptHash != computeHash(prompt) ||
-        call.prompt != prompt ||
-        chainIndex < chain.length && chain[chainIndex].id != call.id) {
-      return _failClosed(
-        claim,
-        owner,
-        'checkpointMismatch',
-        'Stored writer checkpoint does not match recomputed $stage request',
-      );
-    }
-    if (call.status == 'failed') {
-      return _failClosed(
-        claim,
-        owner,
-        'writerCallFailed',
-        'Writer checkpoint ${call.id} requires explicit recovery',
-      );
-    }
-    return _DurableCallResult.completed(call);
-  }
-
-  Future<_DurableCallResult> _executePreparedCall({
-    required CardEvolutionClaim claim,
-    required String owner,
-    required _LazyWriterModel model,
-    required CancelToken token,
-    required CardEvolutionWriterCallRow call,
-    required String captureStage,
-    required _ParsedCallResult Function(String response) parse,
-    String? manualResponse,
-    bool completeRejected = false,
-  }) async {
-    final now = currentTimestampSeconds();
-    if (!await repo.renewClaimLease(
-      claimId: claim.row.id,
-      ownerId: owner,
-      now: now,
-      leaseSeconds: leaseSeconds,
-    )) {
-      await _markWriterFailure(
-        claim,
-        owner,
-        'leaseLost',
-        'Writer lease could not be renewed before ${call.stage}',
-      );
-      return const _DurableCallResult.failure(
-        CardEvolutionFinalizeOutcome('leaseLost'),
-      );
-    }
-    final context = LlmCaptureContext(
-      stage: captureStage,
-      sessionId: claim.row.sessionId,
-      pipelineRunId: claim.row.id,
-      callId: manualResponse == null ? null : 'llm-call-${generateId()}',
-      parentCallId: call.lastCallId ?? call.parentCallId ?? call.id,
-      logicalCallId: '${claim.row.id}:${call.stage}:${call.stageOrdinal}',
-      relatedArtifactId: claim.row.id,
-      stageOrdinal: call.stageOrdinal,
-    );
-    AuxCallOutcome? outcome;
-    final config = manualResponse == null ? await model.resolve() : null;
-    final response =
-        manualResponse ??
-        (outcome = await _executor(
-          config: config!,
-          prompt: call.prompt,
-          maxTokens: _writerMaxTokens,
-          temperature: 0.2,
-          timeoutMs: timeoutMs,
-          cancelToken: token,
-          captureContext: context,
-        )).text;
-    if (manualResponse == null) {
-      final modelOutcome = outcome!;
-      if (token.isCancelled ||
-          modelOutcome.status == AgentOperationStatus.aborted ||
-          !modelOutcome.isOk ||
-          response == null) {
-        final code = token.isCancelled
-            ? 'cancelled'
-            : '${call.stage}ModelFailed';
-        final detail = _modelFailureDetail(modelOutcome);
-        await writerCallRepo.failCall(
-          id: call.id,
-          claimId: claim.row.id,
-          ownerId: owner,
-          now: currentTimestampSeconds(),
-          code: code,
-          detail: detail,
-          lastCallId: modelOutcome.selectedCaptureContext?.callId ?? call.id,
-        );
-        await _diagnostics.saveModelOutcome(
-          sessionId: claim.row.sessionId,
-          stage: call.stage == 'lorebook_writer' ? 'lorebook' : 'card',
-          model: config!.model,
-          outcome: modelOutcome,
-        );
-        await _markWriterFailure(claim, owner, code, detail);
-        return _DurableCallResult.failure(
-          CardEvolutionFinalizeOutcome(
-            token.isCancelled ? 'cancelled' : _publicModelFailure(call.stage),
-            null,
-            detail,
-          ),
-        );
-      }
-    }
-    final responseText = response!;
-    final parserContext = outcome?.selectedCaptureContext ?? context;
-    final parsed = parse(responseText);
-    await _diagnostics.recordWriterParserVerdict(
-      context: parserContext,
-      accepted: parsed.accepted,
-      detail: parsed.detail,
-      responseText: manualResponse == null ? null : responseText,
-      source: manualResponse != null
-          ? 'manual_correction'
-          : call.source == 'exact_retry'
-          ? 'exact_retry'
-          : 'model',
-    );
-    if (!parsed.accepted && (!completeRejected || manualResponse != null)) {
-      await writerCallRepo.failCall(
-        id: call.id,
-        claimId: claim.row.id,
-        ownerId: owner,
-        now: currentTimestampSeconds(),
-        code: 'parserRejected',
-        detail: parsed.detail,
-        lastCallId: parserContext.callId,
-        responseText: responseText,
-        parserCode: 'invalidOutput',
-        parserDetail: parsed.detail,
-      );
-      await _markWriterFailure(claim, owner, 'parserRejected', parsed.detail);
-      return _DurableCallResult.failure(
-        CardEvolutionFinalizeOutcome(
-          call.stage == 'lorebook_writer'
-              ? 'invalidLorebookOutput'
-              : 'invalidCardOutput',
-          null,
-          parsed.detail,
-        ),
-      );
-    }
-    final completed = await writerCallRepo.completeCall(
-      id: call.id,
-      claimId: claim.row.id,
-      ownerId: owner,
-      now: currentTimestampSeconds(),
-      responseText: responseText,
-      resultJson: parsed.resultJson ?? jsonEncode({'rejected': parsed.detail}),
-      source: manualResponse != null
-          ? 'manual_correction'
-          : call.source == 'exact_retry'
-          ? 'exact_retry'
-          : 'model',
-      parserCode: parsed.accepted ? 'accepted' : 'invalidOutput',
-      parserDetail: parsed.detail,
-      lastCallId: parserContext.callId,
-    );
-    if (!completed) {
-      return _failClosed(
-        claim,
-        owner,
-        'leaseLost',
-        'Call completion lost ownership',
-      );
-    }
-    if (outcome != null) {
-      await _diagnostics.saveModelOutcome(
-        sessionId: claim.row.sessionId,
-        stage: call.stage == 'lorebook_writer' ? 'lorebook' : 'card',
-        model: config!.model,
-        outcome: outcome,
-      );
-    }
-    final stored = await writerCallRepo.getById(call.id);
-    return _DurableCallResult.completed(stored!, parsed.operations);
-  }
-
-  Future<_DurableCallResult> _failClosed(
-    CardEvolutionClaim claim,
-    String owner,
-    String code,
-    String detail,
-  ) async {
-    await _markWriterFailure(claim, owner, code, detail);
-    return _DurableCallResult.failure(
-      CardEvolutionFinalizeOutcome(code, null, detail),
-    );
-  }
-
-  Future<void> _markWriterFailure(
-    CardEvolutionClaim claim,
-    String owner,
-    String code,
-    String? detail,
-  ) => repo.markWriterFailed(
-    claimId: claim.row.id,
-    ownerId: owner,
-    now: currentTimestampSeconds(),
-    code: code,
-    detail: detail,
-  );
-
-  static String _publicModelFailure(String stage) =>
-      stage == 'lorebook_writer' ? 'lorebookModelFailed' : 'cardModelFailed';
-
-  static String _encodeOperations(List<RewriteOperationSnapshot> operations) =>
-      jsonEncode([
-        for (final operation in operations)
-          jsonDecode(RewriteOperationSnapshotCodec.encode(operation)),
-      ]);
-
-  static List<RewriteOperationSnapshot>? _decodeOperations(String? value) {
-    if (value == null) return null;
-    try {
-      final decoded = jsonDecode(value);
-      if (decoded is! List) return null;
-      final operations = <RewriteOperationSnapshot>[];
-      for (final raw in decoded) {
-        final operation = RewriteOperationSnapshotCodec.tryDecode(raw);
-        if (operation == null) return null;
-        operations.add(operation);
-      }
-      return operations;
-    } catch (_) {
-      return null;
-    }
   }
 
   static String _historyConsolidationPrompt({
@@ -1924,23 +1545,6 @@ class AutomatedCardEvolutionService {
       jsonDecode(ManualRewriteOperationSnapshotCodec.encode(operation)),
   ]);
 
-  static String? _scopeAllowlistFailure(
-    List<CardRewriteOperationSnapshot> operations,
-    String selectedInputJson,
-  ) {
-    final targets = _retrievalTargets(selectedInputJson);
-    if (targets == null || targets.isEmpty) return null;
-    final allowed = targets.keys.where(_isCardScopeTarget).toSet();
-    if (allowed.isEmpty) return null;
-    for (final operation in operations) {
-      final scope = operation.transition.scopeKey;
-      if (!allowed.contains(scope)) {
-        return 'scopeKey "$scope" is not an available retrieval target';
-      }
-    }
-    return null;
-  }
-
   static String _cardRepairPrompt({
     required String originalPrompt,
     required String failure,
@@ -1968,18 +1572,6 @@ class AutomatedCardEvolutionService {
 
   static bool _isCardScopeTarget(String key) =>
       !key.contains('/') && CardRewriteScope.tryParse(key) != null;
-
-  static String _modelFailureDetail(AuxCallOutcome outcome) {
-    final attempts = outcome.attempts;
-    if (attempts.isEmpty) return 'status: ${outcome.status.name}';
-    final last = attempts.last;
-    final error = last.error?.replaceAll(RegExp(r'\s+'), ' ').trim();
-    final compactError = error == null || error.isEmpty
-        ? ''
-        : ': ${error.length > 180 ? '${error.substring(0, 180)}...' : error}';
-    final code = last.statusCode == 0 ? '' : ' HTTP ${last.statusCode}';
-    return '${attempts.length} attempt(s), ${last.status}$code$compactError';
-  }
 }
 
 final class _PreparedWriterContext {
@@ -2000,42 +1592,6 @@ final class _PreparedWriterContext {
   final int chainIndex;
   final int nextOrdinal;
   final String? parentCallId;
-}
-
-final class _LazyWriterModel {
-  _LazyWriterModel(this._resolver);
-
-  final CardRewriteModelResolver _resolver;
-  Future<AuxApiConfig>? _value;
-
-  Future<AuxApiConfig> resolve() => _value ??= _resolver();
-}
-
-final class _DurableCallResult {
-  const _DurableCallResult.completed(this.call, [this.operations])
-    : failure = null;
-  const _DurableCallResult.failure(this.failure)
-    : call = null,
-      operations = null;
-
-  final CardEvolutionWriterCallRow? call;
-  final List<RewriteOperationSnapshot>? operations;
-  final CardEvolutionFinalizeOutcome? failure;
-}
-
-final class _ParsedCallResult {
-  const _ParsedCallResult.accepted(this.resultJson, [this.operations])
-    : accepted = true,
-      detail = null;
-  const _ParsedCallResult.rejected(this.detail)
-    : accepted = false,
-      resultJson = null,
-      operations = null;
-
-  final bool accepted;
-  final String? resultJson;
-  final List<RewriteOperationSnapshot>? operations;
-  final String? detail;
 }
 
 final class _CollectorFinalizeResult {
