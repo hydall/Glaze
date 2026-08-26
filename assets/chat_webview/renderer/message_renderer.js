@@ -1008,7 +1008,11 @@ if (messageData.isEditing) classes.push('editing');
     });
   }
 
-  setSearch(query, activeIndex = -1, _retried = false) {
+  // `scroll` brings the active match into view. A refresh pass (the messages
+  // changed under an open search) passes false: it only has to re-number the
+  // highlights, and scrolling would yank the reader away from the message they
+  // just edited.
+  setSearch(query, activeIndex = -1, scroll = true, _retried = false) {
     // Nothing highlighted and nothing to highlight: skip the full re-render.
     // This is the common path when a chat opens without an active search.
     if (!query && !this.searchQuery) {
@@ -1073,9 +1077,11 @@ if (messageData.isEditing) classes.push('editing');
     // syntax, display regexes). Rather than leaving the arrows dead when the
     // requested index overshoots, clamp into range and re-run once.
     if (!_retried && activeIndex >= total && total > 0) {
-      this.setSearch(query, total - 1, true);
+      this.setSearch(query, total - 1, scroll, true);
       return;
     }
+
+    if (!scroll) return;
 
     if (activeMessageId && window.bridge) {
       // The match may live in a message the virtual list has not mounted:

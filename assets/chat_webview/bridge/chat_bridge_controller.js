@@ -785,7 +785,7 @@ export class Bridge {
   }
   scrollToMessage(messageId, highlight = false) { this.virtualList.scrollToMessage(messageId, highlight); }
 
-  setSearch(query, activeIndex) { this.renderer.setSearch(query, activeIndex); }
+  setSearch(query, activeIndex, scroll = true) { this.renderer.setSearch(query, activeIndex, scroll); }
 
   setChatFont(fontFamily, fontDataUrl, fontSize, letterSpacing) {
     const root = document.documentElement;

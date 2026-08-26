@@ -140,6 +140,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   late final ChatDrawerController _drawerCtrl;
   late final ChatSearchDelegate _search;
 
+  /// Guards against queueing one post-frame recount per rebuild while a
+  /// search is open.
+  bool _searchRecountScheduled = false;
+
   @override
   void initState() {
     super.initState();
@@ -171,6 +175,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   void _onSearchChanged() {
     if (!mounted) return;
     setState(() {});
+  }
+
+  /// Keeps the open search in sync with the chat.
+  ///
+  /// Editing a message (or deleting one, or swiping a variation) does not go
+  /// through the search field's `onChanged`, so the delegate kept serving the
+  /// match list it built when the query was typed: the "n / m" counter and the
+  /// WebView highlights both went stale. Re-counting cannot happen inside
+  /// `build` — the delegate notifies its listeners, and this state's listener
+  /// calls `setState` — so it is deferred to the end of the frame.
+  void _scheduleSearchRecount() {
+    if (!_search.showSearch || _search.searchQuery.isEmpty) return;
+    if (_searchRecountScheduled) return;
+    _searchRecountScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _searchRecountScheduled = false;
+      if (!mounted) return;
+      final state = ref.read(chatProvider(widget.charId)).value;
+      if (state == null || state.isGenerating) return;
+      _search.syncWithMessages(state.messages);
+    });
   }
 
   @override
@@ -257,6 +282,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final charId = widget.charId;
     final chatStateAsync = ref.watch(chatProvider(charId));
     final chatState = chatStateAsync.value;
+    if (chatState != null && !chatState.isGenerating) {
+      _scheduleSearchRecount();
+    }
 
     final character = ref.watch(characterByIdProvider(charId));
     final title = character?.name ?? 'Chat';
@@ -1752,6 +1780,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         isSelectionMode: _selectionCtrl.isSelectionMode,
                         searchQuery: widget.search.searchQuery,
                         searchCurrentIndex: widget.search.searchCurrentIndex,
+                        searchRevision: widget.search.searchRevision,
                       ),
                     ),
                   ),

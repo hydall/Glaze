@@ -132,7 +132,11 @@ class ChatWebViewSyncDispatcher {
     _maybeApplyChatFont(bridge: bridge, old: old, current: current);
     _maybeApplySelectionMode(bridge: bridge, old: old, current: current);
     _maybeApplyMessageSettings(bridge: bridge, old: old, current: current);
-    _maybeApplySearch(bridge: bridge, old: old, current: current);
+    final rehighlightSearch = _maybeApplySearch(
+      bridge: bridge,
+      old: old,
+      current: current,
+    );
     _maybeApplyInsets(bridge: bridge, old: old, current: current);
 
     _maybeApplyGeneratingState(bridge: bridge, old: old, current: current);
@@ -199,6 +203,7 @@ class ChatWebViewSyncDispatcher {
       appendPlaceholder: shouldInjectPlaceholder,
       sessionSwitched: false,
       placeholder: shouldInjectPlaceholder ? buildStreamingPlaceholder() : null,
+      rehighlightSearch: rehighlightSearch,
     );
   }
 
@@ -320,21 +325,49 @@ class ChatWebViewSyncDispatcher {
     }
   }
 
-  void _maybeApplySearch({
+  /// Returns `true` when the highlight pass must run *after* the message sync
+  /// instead of now.
+  ///
+  /// A revision bump means the messages themselves changed under an open
+  /// search (an edit, a delete, a swipe). Highlighting reads the bubbles that
+  /// are currently in the DOM, and the message sync that carries the new text
+  /// is queued after this dispatch — re-highlighting here would number the
+  /// matches over the *old* text and then have the edited bubble rewritten on
+  /// top, which is exactly the stale highlight this defers around.
+  bool _maybeApplySearch({
     required ChatBridgeController bridge,
     required ChatWebViewWidgetFields old,
     required ChatWebViewWidgetFields current,
   }) {
-    if (current.searchQuery != old.searchQuery ||
-        current.searchCurrentIndex != old.searchCurrentIndex) {
-      if (current.searchQuery != null && current.searchQuery!.isNotEmpty) {
-        bridge.setSearch(
-          query: current.searchQuery!,
-          activeIndex: current.searchCurrentIndex,
-        );
-      } else {
-        bridge.setSearch(query: '', activeIndex: -1);
-      }
+    if (current.searchRevision != old.searchRevision) return true;
+    if (current.searchQuery == old.searchQuery &&
+        current.searchCurrentIndex == old.searchCurrentIndex) {
+      return false;
+    }
+    applySearch(bridge: bridge, fields: current);
+    return false;
+  }
+
+  /// Pushes the current query + active index into the page. Public so the
+  /// widget can re-run it once the deferred message sync has landed.
+  ///
+  /// [scroll] is `false` for that deferred re-run: it only re-numbers the
+  /// highlights over the new text, and scrolling to the active match would
+  /// yank the reader away from the message they just edited.
+  void applySearch({
+    required ChatBridgeController bridge,
+    required ChatWebViewWidgetFields fields,
+    bool scroll = true,
+  }) {
+    final query = fields.searchQuery;
+    if (query != null && query.isNotEmpty) {
+      bridge.setSearch(
+        query: query,
+        activeIndex: fields.searchCurrentIndex,
+        scroll: scroll,
+      );
+    } else {
+      bridge.setSearch(query: '', activeIndex: -1);
     }
   }
 
@@ -461,6 +494,7 @@ class ChatWebViewSyncResult {
     required this.appendPlaceholder,
     required this.sessionSwitched,
     this.placeholder,
+    this.rehighlightSearch = false,
   });
 
   /// `true` when the caller should call
@@ -479,6 +513,11 @@ class ChatWebViewSyncResult {
 
   /// Placeholder to append when [appendPlaceholder] is `true`.
   final ChatMessage? placeholder;
+
+  /// `true` when the search highlights must be re-applied once the queued
+  /// message mutations have landed — the message list changed under an open
+  /// search, so the page is showing highlights numbered over the old text.
+  final bool rehighlightSearch;
 }
 
 /// Pure data snapshot of all the [ChatWebViewWidget] fields that the
@@ -504,6 +543,7 @@ class ChatWebViewWidgetFields {
     this.blurRegions = const [],
     required this.searchQuery,
     required this.searchCurrentIndex,
+    this.searchRevision = 0,
     required this.chatLayout,
     required this.themeSyncKey,
     required this.elementOpacity,
@@ -565,6 +605,10 @@ class ChatWebViewWidgetFields {
   final List<ChatOverlayBlurRegion> blurRegions;
   final String? searchQuery;
   final int searchCurrentIndex;
+
+  /// Bumped when the search matches were recounted over a changed message
+  /// list. See [ChatWebViewSyncResult.rehighlightSearch].
+  final int searchRevision;
   final String? chatLayout;
   final String? themeSyncKey;
   final double elementOpacity;

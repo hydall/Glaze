@@ -234,6 +234,35 @@ void main() {
       expect(searchBlock, contains('this.allowMessageScripts'));
     });
 
+    test('search refresh pass can re-number without scrolling', () {
+      expect(
+        rendererMessageJs,
+        contains('setSearch(query, activeIndex = -1, scroll = true'),
+      );
+      final searchBlock = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('setSearch(query, activeIndex = -1'),
+      );
+      expect(searchBlock, contains('if (!scroll) return;'));
+      // The clamp retry must keep the caller's scroll choice.
+      expect(searchBlock, contains('this.setSearch(query, total - 1, scroll,'));
+      expect(
+        bridgeControllerJs,
+        contains('setSearch(query, activeIndex, scroll = true)'),
+      );
+    });
+
+    test('leaving edit mode re-numbers the open search', () {
+      expect(editControllerJs, contains('if (renderer.searchQuery) {'));
+      expect(
+        editControllerJs,
+        contains(
+          'renderer.setSearch(renderer.searchQuery, '
+          'renderer.activeSearchIndex, false);',
+        ),
+      );
+    });
+
     test('app bridge changes only the message renderer policy', () {
       expect(bridgeControllerJs, contains('setAllowMessageScripts(enabled)'));
       expect(

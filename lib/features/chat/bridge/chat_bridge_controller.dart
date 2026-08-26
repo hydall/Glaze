@@ -684,8 +684,15 @@ class ChatBridgeController {
   Future<void> applyLayout(String l) => identity.applyLayout(l);
 
   // Layout
-  Future<void> setSearch({required String query, int activeIndex = -1}) =>
-      layout.setSearch(query: query, activeIndex: activeIndex);
+  Future<void> setSearch({
+    required String query,
+    int activeIndex = -1,
+    bool scroll = true,
+  }) => layout.setSearch(
+    query: query,
+    activeIndex: activeIndex,
+    scroll: scroll,
+  );
   Future<void> setBottomPadding(double px, {double viewportHeight = 0}) =>
       layout.setBottomPadding(px, viewportHeight: viewportHeight);
   Future<void> setTopPadding(double px) => layout.setTopPadding(px);

@@ -11,9 +11,18 @@ class LayoutBridgeCommands {
 
   LayoutBridgeCommands(this._host);
 
-  Future<void> setSearch({required String query, int activeIndex = -1}) {
+  /// [scroll] brings the active match into view. Pass `false` for a refresh
+  /// pass that only has to re-number the highlights after the messages
+  /// changed — scrolling there would yank the reader away from the message
+  /// they just edited.
+  Future<void> setSearch({
+    required String query,
+    int activeIndex = -1,
+    bool scroll = true,
+  }) {
     return _host.evalJs(
-      'window.bridge?.setSearch("${_host.escape(query)}", $activeIndex)',
+      'window.bridge?.setSearch("${_host.escape(query)}", $activeIndex, '
+      '$scroll)',
     );
   }
 

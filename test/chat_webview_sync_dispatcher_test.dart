@@ -193,6 +193,85 @@ void main() {
       },
     );
 
+    test('pushes the search as soon as the query changes', () {
+      final bridge = _FakeBridge();
+      final dispatcher = ChatWebViewSyncDispatcher(state: ChatWebViewSyncState());
+
+      final result = dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(isGenerating: false, messages: const []),
+        current: _fields(
+          isGenerating: false,
+          messages: const [],
+          searchQuery: 'foo',
+          searchCurrentIndex: 0,
+        ),
+        oldMessages: const [],
+        newMessages: const [],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(bridge.searchCalls, [('foo', 0, true)]);
+      expect(result.rehighlightSearch, isFalse);
+    });
+
+    test('defers the highlight pass when the messages changed under a '
+        'search', () {
+      final bridge = _FakeBridge();
+      final dispatcher = ChatWebViewSyncDispatcher(state: ChatWebViewSyncState());
+      final edited = _assistant('a1').copyWith(content: 'edited');
+
+      final result = dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(
+          isGenerating: false,
+          messages: [_assistant('a1')],
+          searchQuery: 'foo',
+          searchCurrentIndex: 0,
+        ),
+        current: _fields(
+          isGenerating: false,
+          messages: [edited],
+          searchQuery: 'foo',
+          searchCurrentIndex: 0,
+          searchRevision: 1,
+        ),
+        oldMessages: [_assistant('a1')],
+        newMessages: [edited],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      // Highlighting now would number the matches over the pre-edit text: the
+      // message sync that carries the new text is queued after this dispatch.
+      expect(bridge.searchCalls, isEmpty);
+      expect(result.rehighlightSearch, isTrue);
+      expect(result.runMessageSync, isTrue);
+    });
+
+    test('re-numbers without scrolling on the deferred pass', () {
+      final bridge = _FakeBridge();
+      final dispatcher = ChatWebViewSyncDispatcher(state: ChatWebViewSyncState());
+
+      dispatcher.applySearch(
+        bridge: bridge,
+        fields: _fields(
+          isGenerating: false,
+          messages: const [],
+          searchQuery: 'foo',
+          searchCurrentIndex: 2,
+        ),
+        scroll: false,
+      );
+
+      expect(bridge.searchCalls, [('foo', 2, false)]);
+    });
+
     test('session switch invalidates a delayed streaming delta', () async {
       final bridge = _FakeBridge();
       final delayedAppend = Completer<void>();
@@ -468,6 +547,9 @@ ChatWebViewWidgetFields _fields({
   String? continuationTargetId,
   List<ChatOverlayBlurRegion> blurRegions = const [],
   List<dynamic> memoryDrafts = const [],
+  String? searchQuery,
+  int searchCurrentIndex = -1,
+  int searchRevision = 0,
 }) => ChatWebViewWidgetFields(
   continuationTargetId: continuationTargetId,
   blurRegions: blurRegions,
@@ -484,8 +566,9 @@ ChatWebViewWidgetFields _fields({
   bgNoiseIntensity: 0,
   bottomInset: 0,
   topInset: 0,
-  searchQuery: null,
-  searchCurrentIndex: -1,
+  searchQuery: searchQuery,
+  searchCurrentIndex: searchCurrentIndex,
+  searchRevision: searchRevision,
   chatLayout: 'default',
   themeSyncKey: 'theme',
   elementOpacity: 1,
@@ -534,6 +617,7 @@ class _FakeBridge implements ChatBridgeController {
 
   final List<List<ChatOverlayBlurRegion>> overlayBlurCalls = [];
   final List<String> evalCalls = [];
+  final List<(String, int, bool)> searchCalls = [];
   final List<ChatMessage> updatedMessages = [];
   final List<ChatMessage> appendedMessages = [];
   final List<bool> updatedIsLast = [];
@@ -557,6 +641,15 @@ class _FakeBridge implements ChatBridgeController {
 
   @override
   Future<void> removeMessage(String _) async {}
+
+  @override
+  Future<void> setSearch({
+    required String query,
+    int activeIndex = -1,
+    bool scroll = true,
+  }) async {
+    searchCalls.add((query, activeIndex, scroll));
+  }
 
   @override
   Future<void> appendMessages(

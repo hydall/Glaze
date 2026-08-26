@@ -72,6 +72,12 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final List<ChatOverlayBlurRegion> blurRegions;
   final String? searchQuery;
   final int searchCurrentIndex;
+
+  /// Bumped by `ChatSearchDelegate` whenever the match list is recounted over
+  /// a changed message list. The query and the active index can both survive
+  /// such a recount unchanged while the highlights in the page are stale, so
+  /// this is what tells the sync dispatcher to re-run the highlight pass.
+  final int searchRevision;
   final String? chatLayout;
 
   /// Changes when preset colors/layout tokens affecting the WebView change.
@@ -149,6 +155,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.blurRegions = const [],
     this.searchQuery,
     this.searchCurrentIndex = 0,
+    this.searchRevision = 0,
     this.chatLayout,
     this.themeSyncKey,
     this.elementOpacity = 0.8,
@@ -876,6 +883,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       blurRegions: w.blurRegions,
       searchQuery: w.searchQuery,
       searchCurrentIndex: w.searchCurrentIndex,
+      searchRevision: w.searchRevision,
       chatLayout: w.chatLayout,
       themeSyncKey: w.themeSyncKey,
       elementOpacity: w.elementOpacity,
@@ -977,6 +985,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     if (result.runMessageSync) unawaited(_syncExtBlockPanels());
     if (bridge != null &&
         (result.runMessageSync ||
+            result.rehighlightSearch ||
             (result.appendPlaceholder && result.placeholder != null))) {
       final charId = widget.charId;
       final sessionId = widget.sessionId;
@@ -1003,6 +1012,22 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
                 isGenerating: isGenerating,
                 sessionSwitching: sessionSwitching,
                 bridge: bridge,
+              );
+            }
+            if (result.rehighlightSearch &&
+                mounted &&
+                identical(_bridge, bridge) &&
+                _ready &&
+                !_sessionSwitching &&
+                widget.charId == charId &&
+                widget.sessionId == sessionId) {
+              // Runs after the message sync above so the highlight pass reads
+              // the edited bubbles: re-numbering the matches over the old text
+              // is what left the counter and the highlights out of step.
+              _syncDispatcher.applySearch(
+                bridge: bridge,
+                fields: _fieldsFor(widget),
+                scroll: false,
               );
             }
             if (placeholder == null || !isCurrent()) return;
