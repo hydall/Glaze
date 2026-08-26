@@ -11,21 +11,16 @@ import '../../db/repositories/card_evolution_writer_call_repo.dart';
 import '../../db/repositories/llm_request_capture_repo.dart';
 import '../../db/app_db.dart';
 import '../../llm/card_rewrite_slot_resolver.dart';
-import '../../llm/transport/llm_capture_context.dart';
-import '../../models/agent_operation_record.dart';
-import '../../models/card_evolution_observation.dart';
 import '../../utils/id_generator.dart';
-import '../../utils/cast_helpers.dart';
 import '../../utils/time_helpers.dart';
 import 'card_rewrite_prompt_builder.dart';
+import 'card_evolution_collector_coordinator.dart';
 import 'card_rewriter_contracts.dart';
 import 'card_evolution_diagnostics.dart';
 import 'durable_writer_call_runner.dart';
 import 'manual_rewrite_service.dart';
-import 'observation_response_parser.dart';
 import 'writer_context_consolidator.dart';
 
-const _writerMaxTokens = 40000;
 const _writerLeaseSeconds = 600;
 const _writerCollectorBatchSize = 2;
 
@@ -50,6 +45,7 @@ class AutomatedCardEvolutionService {
     CardEvolutionDiagnostics? diagnostics,
     DurableWriterCallRunner? writerCallRunner,
     WriterContextConsolidator? writerContextConsolidator,
+    CardEvolutionCollectorCoordinator? collectorCoordinator,
     this.observationPromotionThreshold,
     this.observationMinConfidence,
     this.observationExpiryRuns,
@@ -78,6 +74,23 @@ class AutomatedCardEvolutionService {
           discardOrRetainWriter: _discardOrRetainWriter,
           snapshotTooLarge: _snapshotTooLarge,
         );
+    _collectorCoordinator =
+        collectorCoordinator ??
+        CardEvolutionCollectorCoordinator(
+          repo: repo,
+          observationRepo: this.observationRepo,
+          collectorRunRepo: this.collectorRunRepo,
+          requestCaptureRepo: this.requestCaptureRepo,
+          resolveModel: resolveModel,
+          executor: _executor,
+          diagnostics: _diagnostics,
+          timeoutMs: timeoutMs,
+          leaseSeconds: leaseSeconds,
+          continueWriterAfterCollectors: _continueWriterAfterCollectors,
+          observationPromotionThreshold: observationPromotionThreshold,
+          observationMinConfidence: observationMinConfidence,
+          observationExpiryRuns: observationExpiryRuns,
+        );
   }
 
   final CardEvolutionRepo repo;
@@ -85,11 +98,10 @@ class AutomatedCardEvolutionService {
   final CardEvolutionCollectorRunRepo collectorRunRepo;
   final CardEvolutionWriterCallRepo writerCallRepo;
   final LlmRequestCaptureRepo requestCaptureRepo;
-  final ObservationResponseParser _observationResponseParser =
-      const ObservationResponseParser();
   final CardEvolutionDiagnostics _diagnostics;
   late final DurableWriterCallRunner _writerCallRunner;
   late final WriterContextConsolidator _writerContextConsolidator;
+  late final CardEvolutionCollectorCoordinator _collectorCoordinator;
   final CardRewriteModelResolver resolveModel;
   final CardRewriteLlmExecutor _executor;
   final bool Function()? isEnabled;
@@ -129,8 +141,12 @@ class AutomatedCardEvolutionService {
         onStage?.call(AutomatedCardEvolutionStage.observation);
         final snapshot = await repo.buildObservationSnapshot(sessionId);
         if (snapshot != null) {
-          await _runObservationPass(sessionId, snapshot, count ~/ 2);
-          await _checkPromotions(sessionId);
+          await _collectorCoordinator.runObservationPass(
+            sessionId,
+            snapshot,
+            count ~/ 2,
+          );
+          await _collectorCoordinator.checkPromotions(sessionId);
         }
       }
     } catch (_) {
@@ -323,143 +339,10 @@ class AutomatedCardEvolutionService {
   Future<CardEvolutionFinalizeOutcome> _recoverFailedCollectorUnshared(
     CardEvolutionCollectorRunRow failed, {
     String? manualResponse,
-  }) async {
-    final runs = await collectorRunRepo.runsForCollectors(failed.sessionId, [
-      failed,
-    ]);
-    if (runs.length != 2) {
-      return const CardEvolutionFinalizeOutcome('collectorEvidenceStale');
-    }
-    final pair = CardEvolutionCollectorPair(runs.first, runs.last);
-    final snapshot = await repo.buildObservationSnapshotForRuns(runs);
-    if (snapshot == null ||
-        computeHash(snapshot.selectedInputJson) != failed.inputHash) {
-      return const CardEvolutionFinalizeOutcome('staleInput');
-    }
-
-    String? prompt;
-    if (manualResponse == null) {
-      final failedCallId = failed.lastCallId;
-      if (failedCallId == null) {
-        return const CardEvolutionFinalizeOutcome('exactCaptureUnavailable');
-      }
-      final capture = await requestCaptureRepo.exactPromptForCall(
-        callId: failedCallId,
-        sessionId: failed.sessionId,
-        pipelineRunId: failed.id,
-        stage: 'card.collector',
-      );
-      if (capture == null) {
-        return const CardEvolutionFinalizeOutcome('exactCaptureUnavailable');
-      }
-      prompt = capture.prompt;
-    }
-
-    final ownerId = 'collector-recovery-${generateId()}';
-    final claim = await collectorRunRepo.claimFailed(
-      id: failed.id,
-      ownerId: ownerId,
-      now: currentTimestampSeconds(),
-      leaseSeconds: leaseSeconds,
-    );
-    if (!claim.canRun || claim.row == null) {
-      return CardEvolutionFinalizeOutcome(claim.kind);
-    }
-    final context = LlmCaptureContext(
-      stage: 'card.collector',
-      sessionId: failed.sessionId,
-      pipelineRunId: failed.id,
-      callId: manualResponse == null ? null : 'llm-call-${generateId()}',
-      parentCallId: failed.lastCallId,
-      logicalCallId:
-          '${failed.id}:${manualResponse == null ? 'retry' : 'manual'}',
-      relatedArtifactId: failed.id,
-      stageOrdinal: failed.collectorOrdinal,
-      attempt: manualResponse == null ? null : 1,
-    );
-    String? output = manualResponse;
-    LlmCaptureContext? selectedContext = context;
-    var completed = false;
-    try {
-      if (output == null) {
-        final config = await resolveModel();
-        final token = CancelToken();
-        _tokens['observation-${failed.sessionId}'] = token;
-        final outcome = await _executor(
-          config: config,
-          prompt: prompt!,
-          maxTokens: _writerMaxTokens,
-          temperature: 0.2,
-          timeoutMs: timeoutMs,
-          cancelToken: token,
-          captureContext: context,
-        );
-        selectedContext = outcome.selectedCaptureContext;
-        if (token.isCancelled || !outcome.isOk || outcome.text == null) {
-          await collectorRunRepo.markFailed(
-            id: failed.id,
-            ownerId: ownerId,
-            now: currentTimestampSeconds(),
-            code: outcome.status.name,
-            detail: outcome.lastError?.toString(),
-            callId: selectedContext?.callId ?? failed.lastCallId,
-          );
-          return CardEvolutionFinalizeOutcome(outcome.status.name);
-        }
-        output = outcome.text;
-      }
-
-      final finalized = await _finalizeCollectorOutput(
-        sessionId: failed.sessionId,
-        snapshot: snapshot,
-        runOrdinal: failed.collectorOrdinal,
-        pair: pair,
-        collectorId: failed.id,
-        ownerId: ownerId,
-        output: output!,
-        captureContext: selectedContext,
-        source: manualResponse == null ? 'exact_retry' : 'manual_correction',
-      );
-      if (!finalized.success) {
-        await collectorRunRepo.markFailed(
-          id: failed.id,
-          ownerId: ownerId,
-          now: currentTimestampSeconds(),
-          code: finalized.code,
-          detail: finalized.detail,
-          callId: manualResponse == null
-              ? selectedContext?.callId ?? failed.lastCallId
-              : failed.lastCallId,
-        );
-        return CardEvolutionFinalizeOutcome(
-          finalized.code,
-          null,
-          finalized.detail,
-        );
-      }
-      completed = true;
-      await _checkPromotions(failed.sessionId);
-      return _continueWriterAfterCollectors(failed.sessionId);
-    } catch (error) {
-      if (!completed) {
-        await collectorRunRepo.markFailed(
-          id: failed.id,
-          ownerId: ownerId,
-          now: currentTimestampSeconds(),
-          code: 'unexpectedFailure',
-          detail: error.toString(),
-          callId: selectedContext?.callId ?? failed.lastCallId,
-        );
-      }
-      return CardEvolutionFinalizeOutcome(
-        completed ? 'collectorCompleted' : 'unexpectedFailure',
-        null,
-        error.toString(),
-      );
-    } finally {
-      _tokens.remove('observation-${failed.sessionId}');
-    }
-  }
+  }) => _collectorCoordinator.recoverFailedCollectorUnshared(
+    failed,
+    manualResponse: manualResponse,
+  );
 
   Future<CardEvolutionFinalizeOutcome> _runAutomatic(
     LedgerReconciliationSuccessfulRunRow reconciliationRun, {
@@ -471,7 +354,11 @@ class AutomatedCardEvolutionService {
         currentRun: reconciliationRun,
       );
       for (final pair in pending) {
-        final collected = await _runCollector(pair, onStage: onStage);
+        final collected = await _collectorCoordinator.runCollector(
+          pair,
+          onObservationStage: () =>
+              onStage?.call(AutomatedCardEvolutionStage.observation),
+        );
         if (!collected) {
           return const CardEvolutionFinalizeOutcome('collectorUnavailable');
         }
@@ -640,7 +527,7 @@ class AutomatedCardEvolutionService {
       final cardContext = _cardWriterContext(sharedContext);
       if (allowedCardFields.isNotEmpty) {
         final cardPrompt =
-            '${CardRewriterPromptBuilder.buildEvolution(character: snapshot.character, instruction: 'Independently evaluate the accumulated observation candidates, the available non-empty card fields, the complete immutable chat evidence or its cumulative factual consolidation, and the current Ledger-backed factual context. Russian evidence may support an English card patch; preserve exact Ledger identities without translation. An active observation alone is an unconfirmed candidate; promoted observations are stronger confirmed evidence. If the supplied immutable chat or Ledger confirms a durable candidate that directly contradicts supplied card text, resolve it with the smallest valid patch regardless of observation status unless no writable field or valid character-boundary-preserving anchor can do so; an empty operations list is not valid for a confirmed, resolvable contradiction. Otherwise return an empty operations list when no candidate is durable enough. Change only the smallest exact fragments and do not invent canon.', accumulatedObservations: _extractAccumulatedObservations(cardContext))}\n\n# Immutable chat history and effective canon\n$cardContext';
+            '${CardRewriterPromptBuilder.buildEvolution(character: snapshot.character, instruction: 'Independently evaluate the accumulated observation candidates, the available non-empty card fields, the complete immutable chat evidence or its cumulative factual consolidation, and the current Ledger-backed factual context. Russian evidence may support an English card patch; preserve exact Ledger identities without translation. An active observation alone is an unconfirmed candidate; promoted observations are stronger confirmed evidence. If the supplied immutable chat or Ledger confirms a durable candidate that directly contradicts supplied card text, resolve it with the smallest valid patch regardless of observation status unless no writable field or valid character-boundary-preserving anchor can do so; an empty operations list is not valid for a confirmed, resolvable contradiction. Otherwise return an empty operations list when no candidate is durable enough. Change only the smallest exact fragments and do not invent canon.', accumulatedObservations: _collectorCoordinator.extractAccumulatedObservations(cardContext))}\n\n# Immutable chat history and effective canon\n$cardContext';
         if (cardPrompt.length >
             WriterContextConsolidator.snapshotCharacterLimit) {
           await _discardOrRetainWriter(
@@ -837,11 +724,12 @@ class AutomatedCardEvolutionService {
       : _writerCallRunner.markWriterFailure(claim, owner, code, detail);
 
   void cancelSession(String sessionId) {
-    _tokens['observation-$sessionId']?.cancel('generationAborted');
+    _collectorCoordinator.cancelSession(sessionId);
     _tokens[sessionId]?.cancel('generationAborted');
   }
 
   void dispose() {
+    _collectorCoordinator.dispose();
     for (final token in _tokens.values) {
       token.cancel('serviceDisposed');
     }
@@ -855,473 +743,6 @@ class AutomatedCardEvolutionService {
       return entries is List && entries.isNotEmpty;
     } catch (_) {
       return false;
-    }
-  }
-
-  Future<bool> _runCollector(
-    CardEvolutionCollectorPair pair, {
-    void Function(AutomatedCardEvolutionStage stage)? onStage,
-  }) async {
-    final reconciliationRun = pair.boundary;
-    final sessionId = reconciliationRun.sessionId;
-    String? claimId;
-    String? ownerId;
-    try {
-      final snapshot = await repo.buildObservationSnapshotForRuns(pair.runs);
-      if (snapshot == null) return false;
-      ownerId = 'collector-owner-${generateId()}';
-      final now = currentTimestampSeconds();
-      final claim = await collectorRunRepo.claim(
-        reconciliationRun: reconciliationRun,
-        characterId: snapshot.character.id,
-        inputHash: computeHash(snapshot.selectedInputJson),
-        ownerId: ownerId,
-        now: now,
-        leaseSeconds: leaseSeconds,
-        rangeHash: pair.rangeHash,
-      );
-      if (claim.kind == 'completed') return true;
-      if (!claim.canRun || claim.row == null) return false;
-      claimId = claim.row!.id;
-      onStage?.call(AutomatedCardEvolutionStage.observation);
-      final output = await _runObservationPass(
-        sessionId,
-        snapshot,
-        claim.row!.collectorOrdinal,
-        pipelineRunId: claim.row!.id,
-        onFailure: ({required code, detail, callId}) async {
-          await collectorRunRepo.markFailed(
-            id: claimId!,
-            ownerId: ownerId!,
-            now: currentTimestampSeconds(),
-            code: code,
-            detail: detail,
-            callId: callId,
-          );
-        },
-        finalize: (output, applyEffects) =>
-            collectorRunRepo.completeWithEffects(
-              id: claimId!,
-              ownerId: ownerId!,
-              modelOutputHash: computeHash(output),
-              now: currentTimestampSeconds(),
-              validateEvidence: () async {
-                final logical = await collectorRunRepo.runsForCollectors(
-                  sessionId,
-                  [claim.row!],
-                );
-                return logical.length == 2 &&
-                    logical[0].id == pair.first.id &&
-                    logical[1].id == pair.boundary.id;
-              },
-              applyEffects: applyEffects,
-            ),
-      );
-      if (output == null) {
-        await collectorRunRepo.markFailed(
-          id: claimId,
-          ownerId: ownerId,
-          now: currentTimestampSeconds(),
-          code: 'collectorFailed',
-          detail: 'Collector did not produce a valid response',
-        );
-        return false;
-      }
-      await _checkPromotions(sessionId);
-      claimId = null;
-      return true;
-    } catch (error) {
-      if (claimId != null && ownerId != null) {
-        await collectorRunRepo.markFailed(
-          id: claimId,
-          ownerId: ownerId,
-          now: currentTimestampSeconds(),
-          code: 'unexpectedFailure',
-          detail: error.toString(),
-        );
-      }
-      return false;
-    } finally {
-      if (claimId != null && ownerId != null) {
-        await collectorRunRepo.abandon(id: claimId, ownerId: ownerId);
-      }
-    }
-  }
-
-  Future<String?> _runObservationPass(
-    String sessionId,
-    CardEvolutionObservationSnapshot snapshot,
-    int runOrdinal, {
-    String? pipelineRunId,
-    Future<void> Function({
-      required String code,
-      String? detail,
-      String? callId,
-    })?
-    onFailure,
-    Future<bool> Function(String output, Future<void> Function() applyEffects)?
-    finalize,
-  }) async {
-    final config = await resolveModel();
-    final activeMaps = _extractAccumulatedObservations(
-      snapshot.selectedInputJson,
-    ).where((observation) => observation['status'] == 'active').toList();
-    final prompt =
-        '${CardRewriterPromptBuilder.buildObservationPass(character: snapshot.character, activeObservations: activeMaps, instruction: 'Review the last 40 immutable chat messages and the current Ledger-backed canon below. For each active observation, decide whether the chat history still supports it. Identify any new repeatedly demonstrated shift in preference, attitude, relationship dynamics, or lasting character development. Do not record one-off events or temporary state. Be conservative.')}\n\n# Immutable chat history and effective canon\n${_collectorContext(snapshot.selectedInputJson)}';
-    final token = CancelToken();
-    _tokens['observation-$sessionId'] = token;
-    try {
-      if (token.isCancelled) return null;
-      final outcome = await _executor(
-        config: config,
-        prompt: prompt,
-        maxTokens: _writerMaxTokens,
-        temperature: 0.2,
-        timeoutMs: timeoutMs,
-        cancelToken: token,
-        captureContext: LlmCaptureContext(
-          stage: 'card.collector',
-          sessionId: sessionId,
-          pipelineRunId: pipelineRunId ?? 'collector:$runOrdinal',
-          logicalCallId: pipelineRunId ?? 'collector:$runOrdinal',
-          relatedArtifactId: pipelineRunId,
-          stageOrdinal: runOrdinal,
-        ),
-      );
-      if (token.isCancelled ||
-          outcome.status == AgentOperationStatus.aborted ||
-          !outcome.isOk ||
-          outcome.text == null) {
-        await onFailure?.call(
-          code: outcome.status.name,
-          detail: outcome.lastError?.toString(),
-          callId: outcome.selectedCaptureContext?.callId,
-        );
-        return null;
-      }
-      final actions = _observationResponseParser.parse(outcome.text!);
-      if (actions == null) {
-        await _diagnostics.recordCollectorParserVerdict(
-          context: outcome.selectedCaptureContext,
-          accepted: false,
-          code: 'invalidOutput',
-          detail: 'Collector response is not valid JSON',
-          source: 'model',
-        );
-        await onFailure?.call(
-          code: 'parserRejected',
-          detail: 'Collector response is not valid JSON',
-          callId: outcome.selectedCaptureContext?.callId,
-        );
-        return null;
-      }
-      final validEvidenceIds = _chatMessageIds(snapshot.selectedInputJson);
-      if (validEvidenceIds == null) {
-        await onFailure?.call(
-          code: 'invalidSelectedInput',
-          detail: 'Collector input has no valid immutable chat history',
-          callId: outcome.selectedCaptureContext?.callId,
-        );
-        return null;
-      }
-      final retrievalTargets = _retrievalTargets(snapshot.selectedInputJson);
-      if (retrievalTargets == null) {
-        await onFailure?.call(
-          code: 'invalidSelectedInput',
-          detail: 'Collector input has no valid retrieval targets',
-          callId: outcome.selectedCaptureContext?.callId,
-        );
-        return null;
-      }
-      await _diagnostics.recordCollectorParserVerdict(
-        context: outcome.selectedCaptureContext,
-        accepted: true,
-        code: 'accepted',
-        source: 'model',
-      );
-      Future<void> applyEffects() async {
-        await _applyCollectorActions(
-          sessionId: sessionId,
-          snapshot: snapshot,
-          runOrdinal: runOrdinal,
-          actions: actions,
-          validEvidenceIds: validEvidenceIds,
-          retrievalTargets: retrievalTargets,
-        );
-      }
-
-      if (finalize != null) {
-        if (!await finalize(outcome.text!, applyEffects)) return null;
-      } else {
-        await applyEffects();
-      }
-      return outcome.text;
-    } finally {
-      if (identical(_tokens['observation-$sessionId'], token)) {
-        _tokens.remove('observation-$sessionId');
-      }
-    }
-  }
-
-  Future<_CollectorFinalizeResult> _finalizeCollectorOutput({
-    required String sessionId,
-    required CardEvolutionObservationSnapshot snapshot,
-    required int runOrdinal,
-    required CardEvolutionCollectorPair pair,
-    required String collectorId,
-    required String ownerId,
-    required String output,
-    required LlmCaptureContext? captureContext,
-    required String source,
-  }) async {
-    final actions = _observationResponseParser.parse(output);
-    if (actions == null) {
-      await _diagnostics.recordCollectorParserVerdict(
-        context: captureContext,
-        accepted: false,
-        code: 'invalidOutput',
-        detail: 'Collector response is not valid JSON',
-        responseText: source == 'manual_correction' ? output : null,
-        source: source,
-      );
-      return const _CollectorFinalizeResult.failure(
-        'parserRejected',
-        'Collector response is not valid JSON',
-      );
-    }
-    final validEvidenceIds = _chatMessageIds(snapshot.selectedInputJson);
-    final retrievalTargets = _retrievalTargets(snapshot.selectedInputJson);
-    if (validEvidenceIds == null || retrievalTargets == null) {
-      return const _CollectorFinalizeResult.failure(
-        'invalidSelectedInput',
-        'Collector input cannot be validated',
-      );
-    }
-    await _diagnostics.recordCollectorParserVerdict(
-      context: captureContext,
-      accepted: true,
-      code: 'accepted',
-      responseText: source == 'manual_correction' ? output : null,
-      source: source,
-    );
-    final completed = await collectorRunRepo.completeWithEffects(
-      id: collectorId,
-      ownerId: ownerId,
-      modelOutputHash: computeHash(output),
-      now: currentTimestampSeconds(),
-      lastCallId: captureContext?.callId,
-      validateEvidence: () async {
-        final collector = await collectorRunRepo.getById(collectorId);
-        if (collector == null) return false;
-        final logical = await collectorRunRepo.runsForCollectors(sessionId, [
-          collector,
-        ]);
-        if (logical.length != 2 ||
-            logical[0].id != pair.first.id ||
-            logical[1].id != pair.boundary.id) {
-          return false;
-        }
-        final currentSnapshot = await repo.buildObservationSnapshotForRuns(
-          logical,
-        );
-        return currentSnapshot != null &&
-            computeHash(currentSnapshot.selectedInputJson) ==
-                collector.inputHash &&
-            collector.inputHash == computeHash(snapshot.selectedInputJson);
-      },
-      applyEffects: () => _applyCollectorActions(
-        sessionId: sessionId,
-        snapshot: snapshot,
-        runOrdinal: runOrdinal,
-        actions: actions,
-        validEvidenceIds: validEvidenceIds,
-        retrievalTargets: retrievalTargets,
-      ),
-    );
-    return completed
-        ? const _CollectorFinalizeResult.success()
-        : const _CollectorFinalizeResult.failure(
-            'collectorEvidenceStale',
-            'Collector lease or reconciliation evidence changed',
-          );
-  }
-
-  Future<void> _applyCollectorActions({
-    required String sessionId,
-    required CardEvolutionObservationSnapshot snapshot,
-    required int runOrdinal,
-    required List<ParsedObservationAction> actions,
-    required Set<String> validEvidenceIds,
-    required Map<String, String> retrievalTargets,
-  }) async {
-    final now = currentTimestampSeconds();
-    for (final action in actions) {
-      if (!validEvidenceIds.containsAll(action.evidenceMessageIds)) continue;
-      if (!retrievalTargets.keys.toSet().containsAll(action.retrievalKeys)) {
-        continue;
-      }
-      final loreIdentity = action.lorebookEntryId;
-      final hasExactLoreTarget =
-          loreIdentity != null &&
-          action.retrievalKeys.contains(loreIdentity) &&
-          retrievalTargets[loreIdentity] == 'injected_lorebook_entry';
-      if ((action.targetKind == 'injected_lorebook_entry' &&
-              !hasExactLoreTarget) ||
-          (action.targetKind == 'main_character_card' &&
-              (loreIdentity != null ||
-                  action.retrievalKeys.any(
-                    (key) => retrievalTargets[key] == 'injected_lorebook_entry',
-                  )))) {
-        continue;
-      }
-      await _applyObservationAction(
-        sessionId: sessionId,
-        characterId: snapshot.character.id,
-        runOrdinal: runOrdinal,
-        now: now,
-        action: action,
-      );
-    }
-    await observationRepo.expireUnconfirmed(
-      sessionId: sessionId,
-      currentRunOrdinal: runOrdinal,
-      maxUnconfirmedRuns: observationExpiryRuns?.call() ?? 4,
-      now: now,
-    );
-  }
-
-  Future<void> _applyObservationAction({
-    required String sessionId,
-    required String characterId,
-    required int runOrdinal,
-    required int now,
-    required ParsedObservationAction action,
-  }) async {
-    switch (action.action) {
-      case 'confirm':
-        final existing = await observationRepo.findByScopeKey(
-          sessionId,
-          action.scopeKey,
-        );
-        if (existing != null &&
-            existing.status == 'active' &&
-            (existing.targetKind == null ||
-                existing.targetKind == action.targetKind) &&
-            existing.lorebookEntryId == action.lorebookEntryId) {
-          await observationRepo.confirmObservation(
-            id: existing.id,
-            runOrdinal: runOrdinal,
-            confidence: action.confidence,
-            now: now,
-            evidenceMessageIds: action.evidenceMessageIds,
-            retrievalKeys: action.retrievalKeys,
-            targetKind: action.targetKind,
-          );
-        }
-        break;
-      case 'new':
-        await observationRepo.insertOrReactivate(
-          CardEvolutionObservation(
-            id: 'observation-${generateId()}',
-            sessionId: sessionId,
-            characterId: characterId,
-            runOrdinal: runOrdinal,
-            semanticScopeKey: action.scopeKey,
-            observedChange: action.observedChange,
-            canonicalClaim: action.canonicalClaim,
-            evidenceClusters: [action.evidenceMessageIds],
-            retrievalKeys: action.retrievalKeys,
-            targetKind: action.targetKind,
-            cardFieldPath: action.cardFieldPath,
-            lorebookEntryId: action.lorebookEntryId,
-            confidence: action.confidence,
-            status: 'active',
-            firstSeenRun: runOrdinal,
-            lastConfirmedRun: runOrdinal,
-            createdAt: now,
-            updatedAt: now,
-          ),
-        );
-        break;
-      case 'no_evidence':
-        break;
-      case 'contradict':
-        final existing = await observationRepo.findByScopeKey(
-          sessionId,
-          action.scopeKey,
-        );
-        if (existing != null && existing.status == 'active') {
-          await observationRepo.contradictObservation(existing.id, now: now);
-        }
-        break;
-    }
-  }
-
-  Future<void> _checkPromotions(String sessionId) async {
-    final now = currentTimestampSeconds();
-    final threshold = observationPromotionThreshold?.call() ?? 3;
-    final minConfidence = observationMinConfidence?.call() ?? 0.7;
-    final promotable = await observationRepo.getPromotableObservations(
-      sessionId,
-      minRepeatCount: threshold,
-      minConfidence: minConfidence,
-    );
-    for (final obs in promotable) {
-      await observationRepo.promoteObservation(obs.id, now: now);
-    }
-  }
-
-  static Set<String>? _chatMessageIds(String selectedInputJson) {
-    try {
-      final decoded = jsonDecode(selectedInputJson);
-      if (decoded is! Map || decoded['chatHistory'] is! List) return null;
-      final result = <String>{};
-      for (final message in decoded['chatHistory'] as List) {
-        if (message is! Map || message['messageId'] is! String) return null;
-        result.add(message['messageId'] as String);
-      }
-      return result;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Map<String, String>? _retrievalTargets(String selectedInputJson) {
-    try {
-      final decoded = jsonDecode(selectedInputJson);
-      if (decoded is! Map ||
-          decoded['availableObservationRetrievalTargets'] is! List) {
-        return null;
-      }
-      final result = <String, String>{};
-      for (final target
-          in decoded['availableObservationRetrievalTargets'] as List) {
-        if (target is! Map ||
-            target['key'] is! String ||
-            target['kind'] is! String) {
-          return null;
-        }
-        result[target['key'] as String] = target['kind'] as String;
-      }
-      return result;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static List<Map<String, Object?>> _extractAccumulatedObservations(
-    String selectedInputJson,
-  ) {
-    try {
-      final input = jsonDecode(selectedInputJson) as Map;
-      final targets = input['accumulatedObservations'];
-      if (targets is! List) return const [];
-      return [
-        for (final target in targets)
-          if (target is Map<String, Object?>) target,
-      ];
-    } catch (_) {
-      return const [];
     }
   }
 
@@ -1356,17 +777,6 @@ class AutomatedCardEvolutionService {
     }
   }
 
-  static String _collectorContext(String selectedInputJson) {
-    try {
-      final decoded = Map<String, Object?>.from(
-        jsonDecode(selectedInputJson) as Map,
-      )..remove('card');
-      return jsonEncode(decoded);
-    } catch (_) {
-      return selectedInputJson;
-    }
-  }
-
   static String _cardProposalContext(
     List<CardRewriteOperationSnapshot> operations,
   ) => jsonEncode([
@@ -1374,13 +784,14 @@ class AutomatedCardEvolutionService {
       jsonDecode(ManualRewriteOperationSnapshotCodec.encode(operation)),
   ]);
 
-  static String _cardRepairPrompt({
+  String _cardRepairPrompt({
     required String originalPrompt,
     required String failure,
     required String selectedInputJson,
   }) {
     final allowed =
-        (_retrievalTargets(selectedInputJson)?.keys ?? const [])
+        (_collectorCoordinator.retrievalTargets(selectedInputJson)?.keys ??
+                const [])
             .where(_isCardScopeTarget)
             .toList()
           ..sort();
@@ -1401,18 +812,4 @@ class AutomatedCardEvolutionService {
 
   static bool _isCardScopeTarget(String key) =>
       !key.contains('/') && CardRewriteScope.tryParse(key) != null;
-}
-
-final class _CollectorFinalizeResult {
-  const _CollectorFinalizeResult.success()
-    : success = true,
-      code = 'completed',
-      detail = null;
-
-  const _CollectorFinalizeResult.failure(this.code, this.detail)
-    : success = false;
-
-  final bool success;
-  final String code;
-  final String? detail;
 }
