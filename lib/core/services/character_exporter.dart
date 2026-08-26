@@ -10,6 +10,9 @@ import '../models/character.dart';
 import '../models/gallery_entry.dart';
 import 'file_export_result.dart';
 
+@Deprecated('Use FileExportResult instead.')
+typedef PngExportResult = FileExportResult;
+
 Future<FileExportResult> exportCharacterAsPng({
   required Character character,
   required Uint8List avatarBytes,

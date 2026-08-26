@@ -7,6 +7,9 @@ import '../models/chat_message.dart';
 import '../models/character.dart';
 import 'file_export_result.dart';
 
+@Deprecated('Use FileExportResult instead.')
+typedef ChatExportResult = FileExportResult;
+
 class ChatImportResult {
   final List<ChatMessage> messages;
   final String? userName;
