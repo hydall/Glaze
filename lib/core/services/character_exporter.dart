@@ -261,8 +261,9 @@ bool _isPng(Uint8List bytes) =>
 Uint8List _ensurePng(Uint8List bytes) {
   if (_isPng(bytes)) return bytes;
   final decoded = img.decodeImage(bytes);
-  if (decoded == null)
+  if (decoded == null) {
     throw Exception('Could not decode avatar image for PNG export');
+  }
   return Uint8List.fromList(img.encodePng(decoded));
 }
 
