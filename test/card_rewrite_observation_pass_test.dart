@@ -577,6 +577,31 @@ void main() {
     },
   );
 
+  test('manual Collector recovery processes an unclaimed pair once', () async {
+    await fixture.seedReconciliationRun(ordinal: 1);
+    await fixture.seedReconciliationRun(ordinal: 2);
+    var collectorCalls = 0;
+    final service = fixture.service((_, prompt) async {
+      if (prompt.contains('observation journal keeper')) {
+        collectorCalls++;
+        return _ok('{"observations":[]}');
+      }
+      return _ok('{"operations":[]}');
+    });
+
+    final first = await service.runPendingCollectors('session');
+    final second = await service.runPendingCollectors('session');
+
+    expect(first.kind, 'collectorCompleted');
+    expect(second.kind, 'collectorUpToDate');
+    expect(collectorCalls, 1);
+    final collectors = await fixture.db
+        .select(fixture.db.cardEvolutionCollectorRuns)
+        .get();
+    expect(collectors, hasLength(1));
+    expect(collectors.single.status, 'completed');
+  });
+
   test(
     'unexpected automatic lane failure leaves durable diagnostics',
     () async {
@@ -1125,6 +1150,46 @@ void main() {
       await fixture.observationRepo.getActiveObservations('session'),
       hasLength(1),
     );
+  });
+
+  test('retry rebuilds prompt when exact capture is unavailable', () async {
+    final first = await fixture.seedReconciliationRun(ordinal: 1);
+    final boundary = await fixture.seedReconciliationRun(ordinal: 2);
+    final failed = await fixture.seedFailedCollector(
+      first: first,
+      boundary: boundary,
+      prompt: 'discarded collector prompt',
+    );
+    await fixture.db.delete(fixture.db.llmRequestCaptureRows).go();
+    String? receivedPrompt;
+
+    final result = await fixture
+        .service((_, prompt) async {
+          receivedPrompt = prompt;
+          return AuxCallOutcome(
+            status: AgentOperationStatus.ok,
+            text: fixture.observationNewOutput,
+            captureContext: LlmCaptureContext(
+              stage: 'card.collector',
+              sessionId: 'session',
+              pipelineRunId: failed.id,
+              callId: 'rebuilt-retry-call',
+              attempt: 1,
+            ),
+          );
+        })
+        .retryFailedCollector(failed.id);
+
+    expect(result.kind, 'collectorCompleted');
+    expect(
+      receivedPrompt,
+      contains('# Immutable chat history and effective canon'),
+    );
+    expect(receivedPrompt, isNot('discarded collector prompt'));
+    final completed = await fixture.collectorRepo.getById(failed.id);
+    expect(completed?.status, 'completed');
+    expect(completed?.collectorOrdinal, failed.collectorOrdinal);
+    expect(completed?.lastCallId, 'rebuilt-retry-call');
   });
 
   test(

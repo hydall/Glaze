@@ -23,6 +23,7 @@ final class CollectorRunView {
   final ExactLlmPromptCapture? exactCapture;
   final List<LlmCallEventRow> callEvents;
 
+  bool get canRetry => row.status == 'failed';
   bool get canRetryExact => row.status == 'failed' && exactCapture != null;
 
   String? get latestResponse {
@@ -41,10 +42,15 @@ final class CollectorRunView {
 }
 
 final class CollectorViewSnapshot {
-  const CollectorViewSnapshot({required this.runs, required this.observations});
+  const CollectorViewSnapshot({
+    required this.runs,
+    required this.observations,
+    required this.unclaimedPairCount,
+  });
 
   final List<CollectorRunView> runs;
   final List<CardEvolutionObservation> observations;
+  final int unclaimedPairCount;
 }
 
 class CollectorViewService {
@@ -72,11 +78,13 @@ class CollectorViewService {
       _collectorRepo.readSession(sessionId),
       _observationRepo.getBySessionId(sessionId),
       _reconciliationRepo.readSession(sessionId),
+      _collectorRepo.unclaimedValidPairs(sessionId),
     ]);
     final rows = values[0] as List<CardEvolutionCollectorRunRow>;
     final observations = values[1] as List<CardEvolutionObservation>;
     final reconciliations =
         values[2] as List<LedgerReconciliationSuccessfulRunRow>;
+    final unclaimedPairs = values[3] as List<CardEvolutionCollectorPair>;
     final positions = {
       for (final entry in reconciliations.indexed) entry.$2.id: entry.$1,
     };
@@ -85,6 +93,7 @@ class CollectorViewService {
     ]);
     return CollectorViewSnapshot(
       observations: observations,
+      unclaimedPairCount: unclaimedPairs.length,
       runs: [
         for (final entry in rows.indexed)
           CollectorRunView(

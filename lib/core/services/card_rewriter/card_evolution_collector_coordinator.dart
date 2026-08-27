@@ -163,11 +163,7 @@ class CardEvolutionCollectorCoordinator {
     finalize,
   }) async {
     final config = await resolveModel();
-    final activeMaps = extractAccumulatedObservations(
-      snapshot.selectedInputJson,
-    ).where((observation) => observation['status'] == 'active').toList();
-    final prompt =
-        '${CardRewriterPromptBuilder.buildObservationPass(character: snapshot.character, activeObservations: activeMaps, instruction: 'Review the last 40 immutable chat messages and the current Ledger-backed canon below. For each active observation, decide whether the chat history still supports it. Identify any new repeatedly demonstrated shift in preference, attitude, relationship dynamics, or lasting character development. Do not record one-off events or temporary state. Be conservative.')}\n\n# Immutable chat history and effective canon\n${_collectorContext(snapshot.selectedInputJson)}';
+    final prompt = _buildObservationPrompt(snapshot);
     final token = CancelToken();
     _observationTokens[sessionId] = token;
     try {
@@ -283,19 +279,16 @@ class CardEvolutionCollectorCoordinator {
     String? prompt;
     if (manualResponse == null) {
       final failedCallId = failed.lastCallId;
-      if (failedCallId == null) {
-        return const CardEvolutionFinalizeOutcome('exactCaptureUnavailable');
+      if (failedCallId != null) {
+        final capture = await requestCaptureRepo.exactPromptForCall(
+          callId: failedCallId,
+          sessionId: failed.sessionId,
+          pipelineRunId: failed.id,
+          stage: 'card.collector',
+        );
+        prompt = capture?.prompt;
       }
-      final capture = await requestCaptureRepo.exactPromptForCall(
-        callId: failedCallId,
-        sessionId: failed.sessionId,
-        pipelineRunId: failed.id,
-        stage: 'card.collector',
-      );
-      if (capture == null) {
-        return const CardEvolutionFinalizeOutcome('exactCaptureUnavailable');
-      }
-      prompt = capture.prompt;
+      prompt ??= _buildObservationPrompt(snapshot);
     }
 
     final ownerId = 'collector-recovery-${generateId()}';
@@ -626,6 +619,13 @@ class CardEvolutionCollectorCoordinator {
     } catch (_) {
       return const [];
     }
+  }
+
+  String _buildObservationPrompt(CardEvolutionObservationSnapshot snapshot) {
+    final activeMaps = extractAccumulatedObservations(
+      snapshot.selectedInputJson,
+    ).where((observation) => observation['status'] == 'active').toList();
+    return '${CardRewriterPromptBuilder.buildObservationPass(character: snapshot.character, activeObservations: activeMaps, instruction: 'Review the last 40 immutable chat messages and the current Ledger-backed canon below. For each active observation, decide whether the chat history still supports it. Identify any new repeatedly demonstrated shift in preference, attitude, relationship dynamics, or lasting character development. Do not record one-off events or temporary state. Be conservative.')}\n\n# Immutable chat history and effective canon\n${_collectorContext(snapshot.selectedInputJson)}';
   }
 
   void cancelSession(String sessionId) {

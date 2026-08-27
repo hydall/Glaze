@@ -183,6 +183,20 @@ class AutomatedCardEvolutionService {
     return future.whenComplete(() => _inFlight.remove(sessionId));
   }
 
+  /// Recovery lane for valid reconciliation pairs that automatic dispatch did
+  /// not process. Existing failed or live claims remain on their explicit
+  /// recovery paths and are never bypassed.
+  Future<CardEvolutionFinalizeOutcome> runPendingCollectors(String sessionId) {
+    if (isEnabled?.call() == false) {
+      return Future.value(const CardEvolutionFinalizeOutcome('disabled'));
+    }
+    final active = _inFlight[sessionId];
+    if (active != null) return active;
+    final future = _runPendingCollectors(sessionId);
+    _inFlight[sessionId] = future;
+    return future.whenComplete(() => _inFlight.remove(sessionId));
+  }
+
   Future<CardEvolutionFinalizeOutcome> retryFailedCollector(
     String collectorRunId,
   ) => _recoverFailedCollector(collectorRunId);
@@ -293,12 +307,25 @@ class AutomatedCardEvolutionService {
   Future<CardEvolutionFinalizeOutcome> _runAutomatic(
     LedgerReconciliationSuccessfulRunRow reconciliationRun, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
+  }) => _runPendingCollectors(
+    reconciliationRun.sessionId,
+    currentRun: reconciliationRun,
+    onStage: onStage,
+  );
+
+  Future<CardEvolutionFinalizeOutcome> _runPendingCollectors(
+    String sessionId, {
+    LedgerReconciliationSuccessfulRunRow? currentRun,
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
   }) async {
     try {
       final pending = await collectorRunRepo.pendingValidPairs(
-        reconciliationRun.sessionId,
-        currentRun: reconciliationRun,
+        sessionId,
+        currentRun: currentRun,
       );
+      if (pending.isEmpty && currentRun == null) {
+        return const CardEvolutionFinalizeOutcome('collectorUpToDate');
+      }
       for (final pair in pending) {
         final collected = await _collectorCoordinator.runCollector(
           pair,
@@ -309,21 +336,18 @@ class AutomatedCardEvolutionService {
           return const CardEvolutionFinalizeOutcome('collectorUnavailable');
         }
       }
-      return await _continueWriterAfterCollectors(
-        reconciliationRun.sessionId,
-        onStage: onStage,
-      );
+      return await _continueWriterAfterCollectors(sessionId, onStage: onStage);
     } catch (error, stackTrace) {
       debugPrint(
         '[CardRewriter] automatic lane failed before a durable writer result: '
         '$error\n$stackTrace',
       );
       await _diagnostics.saveSelectionBail(
-        sessionId: reconciliationRun.sessionId,
+        sessionId: sessionId,
         outcome: 'unexpectedFailure',
         reason: error.toString(),
         throughCollectorOrdinal: 0,
-        reconciliationRunIds: [reconciliationRun.id],
+        reconciliationRunIds: currentRun == null ? const [] : [currentRun.id],
       );
       return CardEvolutionFinalizeOutcome(
         'unexpectedFailure',

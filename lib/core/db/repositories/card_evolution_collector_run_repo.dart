@@ -377,6 +377,28 @@ class CardEvolutionCollectorRunRepo {
     return pairs;
   }
 
+  /// Valid reconciliation pairs that have never received a Collector claim.
+  /// Failed and in-flight rows use their dedicated recovery paths instead.
+  Future<List<CardEvolutionCollectorPair>> unclaimedValidPairs(
+    String sessionId,
+  ) async {
+    final runs = await _validOrLegacyRuns(sessionId);
+    final collectors = await (db.select(
+      db.cardEvolutionCollectorRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    final pairs = <CardEvolutionCollectorPair>[];
+    for (var index = 0; index + 1 < runs.length; index += 2) {
+      final pair = CardEvolutionCollectorPair(runs[index], runs[index + 1]);
+      final hasCompatibleClaim = collectors.any(
+        (collector) =>
+            collector.reconciliationRunId == pair.boundary.id &&
+            collector.rangeHash == pair.rangeHash,
+      );
+      if (!hasCompatibleClaim) pairs.add(pair);
+    }
+    return pairs;
+  }
+
   /// Resolves collector boundaries back to their exact two-run logical pairs.
   Future<List<LedgerReconciliationSuccessfulRunRow>> runsForCollectors(
     String sessionId,

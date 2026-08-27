@@ -93,12 +93,42 @@ void main() {
     final snapshot = await service.load('session');
 
     expect(snapshot.runs, hasLength(1));
+    expect(snapshot.unclaimedPairCount, 0);
     expect(snapshot.runs.single.firstReconciliationOrdinal, 1);
     expect(snapshot.runs.single.boundaryReconciliationOrdinal, 2);
     expect(snapshot.observations.map((item) => item.status), [
       'expired',
       'active',
     ]);
+  });
+
+  test('reports a valid reconciliation pair without a Collector claim', () async {
+    await db.customStatement(
+      "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES ('session', 'character', 0, '[{\"id\":\"a1\",\"role\":\"assistant\",\"content\":\"one\"},{\"id\":\"u1\",\"role\":\"user\",\"content\":\"two\"}]')",
+    );
+    final first = _run(
+      id: 'run-1',
+      ordinal: 1,
+      messageId: 'a1',
+      role: 'assistant',
+      content: 'one',
+    );
+    await reconciliationRepo.append(first);
+    await reconciliationRepo.append(
+      _run(
+        id: 'run-2',
+        ordinal: 2,
+        predecessor: first.chainHash,
+        messageId: 'u1',
+        role: 'user',
+        content: 'two',
+      ),
+    );
+
+    final snapshot = await service.load('session');
+
+    expect(snapshot.unclaimedPairCount, 1);
+    expect(snapshot.runs, isEmpty);
   });
 
   test('joins failed run with exact prompt and parser response', () async {
@@ -166,9 +196,20 @@ void main() {
     );
 
     final run = (await service.load('session')).runs.single;
+    expect(run.canRetry, isTrue);
     expect(run.canRetryExact, isTrue);
     expect(run.exactCapture?.prompt, 'exact prompt');
     expect(run.latestResponse, 'bad response');
+
+    final withoutExactCapture = CollectorRunView(
+      row: run.row,
+      firstReconciliationOrdinal: run.firstReconciliationOrdinal,
+      boundaryReconciliationOrdinal: run.boundaryReconciliationOrdinal,
+      exactCapture: null,
+      callEvents: run.callEvents,
+    );
+    expect(withoutExactCapture.canRetry, isTrue);
+    expect(withoutExactCapture.canRetryExact, isFalse);
   });
 }
 

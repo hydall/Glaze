@@ -25,9 +25,44 @@ class AgenticCollectorTab extends ConsumerStatefulWidget {
 
 class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
   String? _recoveringRunId;
+  bool _runningPending = false;
 
-  Future<void> _retryExact(CollectorRunView run) async {
-    if (_recoveringRunId != null || !run.canRetryExact) return;
+  Future<void> _runPendingCollectors() async {
+    if (_runningPending || _recoveringRunId != null) return;
+    setState(() => _runningPending = true);
+    try {
+      final outcome = await ref
+          .read(automatedCardEvolutionServiceProvider)
+          .runPendingCollectors(widget.sessionId);
+      if (!mounted) return;
+      _refresh();
+      final isFailure = const {
+        'disabled',
+        'collectorUnavailable',
+        'unexpectedFailure',
+      }.contains(outcome.kind);
+      GlazeToast.show(
+        context,
+        _pendingRunMessage(outcome.kind, outcome.detail),
+        isError: isFailure,
+      );
+    } catch (error) {
+      if (mounted) {
+        GlazeToast.show(
+          context,
+          'agent_ops_collector_run_failed'.tr(namedArgs: {'error': '$error'}),
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _runningPending = false);
+    }
+  }
+
+  Future<void> _retryCollector(CollectorRunView run) async {
+    if (_runningPending || _recoveringRunId != null || !run.canRetry) {
+      return;
+    }
     setState(() => _recoveringRunId = run.row.id);
     try {
       final outcome = await ref
@@ -49,7 +84,7 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
   }
 
   Future<void> _correct(CollectorRunView run) async {
-    if (_recoveringRunId != null) return;
+    if (_runningPending || _recoveringRunId != null) return;
     final controller = TextEditingController(text: run.latestResponse ?? '');
     String? response;
     await GlazeBottomSheet.show<void>(
@@ -122,6 +157,17 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
           'agent_ops_collector_recovery_stopped'.tr(namedArgs: {'kind': kind}),
   };
 
+  static String _pendingRunMessage(String kind, String? detail) =>
+      switch (kind) {
+        'collectorCompleted' => 'agent_ops_collector_run_completed'.tr(),
+        'collectorUpToDate' => 'agent_ops_collector_up_to_date'.tr(),
+        'persisted' ||
+        'alreadyCompleted' => 'agent_ops_collector_proposal_ready'.tr(),
+        _ =>
+          detail ??
+              'agent_ops_collector_run_stopped'.tr(namedArgs: {'kind': kind}),
+      };
+
   @override
   Widget build(BuildContext context) {
     final snapshot = ref.watch(collectorViewProvider(widget.sessionId));
@@ -180,6 +226,25 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                 ),
               ),
             ),
+            if (data.unclaimedPairCount > 0) ...[
+              const SizedBox(height: 10),
+              FilledButton.tonalIcon(
+                onPressed: _runningPending || _recoveringRunId != null
+                    ? null
+                    : _runPendingCollectors,
+                icon: _runningPending
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: GlazeSpinner(),
+                      )
+                    : const Icon(Icons.play_arrow_outlined),
+                label: Text(
+                  'agent_ops_run_collector'.tr(
+                    namedArgs: {'count': '${data.unclaimedPairCount}'},
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             Text(
               'agent_ops_collector_runs'.tr(),
@@ -267,14 +332,22 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                           children: [
                             OutlinedButton.icon(
                               onPressed:
-                                  _recoveringRunId == null && run.canRetryExact
-                                  ? () => _retryExact(run)
+                                  !_runningPending &&
+                                      _recoveringRunId == null &&
+                                      run.canRetry
+                                  ? () => _retryCollector(run)
                                   : null,
                               icon: const Icon(Icons.refresh),
-                              label: Text('agent_ops_retry_exact_prompt'.tr()),
+                              label: Text(
+                                (run.canRetryExact
+                                        ? 'agent_ops_retry_exact_prompt'
+                                        : 'agent_ops_retry_collector')
+                                    .tr(),
+                              ),
                             ),
                             FilledButton.icon(
-                              onPressed: _recoveringRunId == null
+                              onPressed:
+                                  !_runningPending && _recoveringRunId == null
                                   ? () => _correct(run)
                                   : null,
                               icon: const Icon(Icons.edit_outlined),
@@ -286,7 +359,7 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
-                              'agent_ops_exact_retry_unavailable'.tr(),
+                              'agent_ops_retry_rebuild_notice'.tr(),
                               style: TextStyle(
                                 color: context.cs.onSurfaceVariant,
                                 fontSize: 11,
