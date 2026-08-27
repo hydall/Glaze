@@ -179,6 +179,10 @@ lib/
 │   │   ├── transport_factory.dart    # ApiConfig.protocol → ChatTransport (wraps in PostProcessingChatTransport + LoggingChatTransport)
 │   │   ├── llm_request_dump.dart     # Diagnostics: dump every outgoing LLM request to JSONL (off by default)
 │   │   ├── post_processing_chat_transport.dart # Applies ApiConfig.promptPostProcessing before the protocol converter
+│   │   ├── endpoint_normalizer.dart  # User-typed endpoint → real request URL (scheme/typo/version repair)
+│   │   ├── known_api_hosts.dart      # Canonical base path per provider host (openrouter → /api/v1, perplexity → root)
+│   │   ├── endpoint_resolution_cache.dart # Remembers which candidate URL answered
+│   │   ├── endpoint_preview.dart     # "this endpoint will call …" caption for the settings field
 │   │   ├── openai_chat_transport.dart
 │   │   ├── openai_responses_transport.dart # OpenAI Responses API (`/responses`)
 │   │   ├── anthropic_chat_transport.dart

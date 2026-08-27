@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import '../../../core/llm/transport/endpoint_normalizer.dart';
 import '../image_gen_capabilities.dart';
 import 'image_gen_http.dart';
 
@@ -168,15 +169,9 @@ class OpenaiImageProvider {
       base64Decode(ImageGenHttp.stripBase64Prefix(reference));
 
   /// Appends the images path unless the endpoint already points at one.
-  static String _imagesUrl(String endpoint, String action) {
-    var url = endpoint.replaceFirst(RegExp(r'/+$'), '');
-    if (url.contains('/images/generations') || url.contains('/images/edits')) {
-      return url.replaceFirst(
-        RegExp(r'/images/(generations|edits)$'),
-        '/images/$action',
-      );
-    }
-    if (!url.contains('/v1')) return '$url/v1/images/$action';
-    return '$url/images/$action';
-  }
+  /// Same normalization as the chat transports — the image endpoint field is
+  /// the same free text, so a missing scheme, a missing `/v1` or a pasted full
+  /// `…/images/generations` all resolve here instead of 404ing.
+  static String _imagesUrl(String endpoint, String action) =>
+      EndpointNormalizer.imagesUrl(endpoint, action);
 }

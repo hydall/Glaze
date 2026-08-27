@@ -7,6 +7,8 @@ import '../../utils/error_format.dart';
 import '../converters/reasoning_effort.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
+import 'endpoint_normalizer.dart';
+import 'endpoint_resolution_cache.dart';
 import 'extra_request_parameters.dart';
 import 'llm_protocol.dart';
 import 'openai_chat_transport.dart';
@@ -28,16 +30,10 @@ class OpenAiResponsesTransport implements ChatTransport {
             ),
           );
 
-  static String buildResponsesUrl(String endpoint) {
-    var base = OpenAiChatTransport.normalizeEndpoint(endpoint);
-    final lower = base.toLowerCase();
-    if (lower.endsWith('/chat/completions')) {
-      base = base.substring(0, base.length - '/chat/completions'.length);
-    } else if (lower.endsWith('/responses')) {
-      return base;
-    }
-    return base.isEmpty ? '' : '$base/responses';
-  }
+  static const String _responsesRoute = '/responses';
+
+  static String buildResponsesUrl(String endpoint) =>
+      EndpointNormalizer.responsesUrl(endpoint);
 
   static Map<String, dynamic> buildBody(ChatTransportRequest request) {
     final body = <String, dynamic>{
@@ -144,27 +140,52 @@ class OpenAiResponsesTransport implements ChatTransport {
       onError?.call(Exception('API key is empty'));
       return;
     }
-    try {
-      if (request.stream) {
-        await _streamResponse(
-          buildResponsesUrl(request.endpoint),
-          request,
-          cancelToken,
-          onUpdate,
-          onComplete,
+    final urls = EndpointResolutionCache.order(
+      request.endpoint,
+      _responsesRoute,
+      EndpointNormalizer.responsesCandidates(request.endpoint),
+    );
+    if (urls.isEmpty) {
+      onError?.call(Exception('Endpoint is empty or not a valid URL'));
+      return;
+    }
+
+    DioException? firstError;
+
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        if (request.stream) {
+          await _streamResponse(
+            urls[i],
+            request,
+            cancelToken,
+            onUpdate,
+            onComplete,
+          );
+        } else {
+          await _oneShotResponse(urls[i], request, cancelToken, onComplete);
+        }
+        EndpointResolutionCache.record(
+          request.endpoint,
+          _responsesRoute,
+          urls[i],
         );
-      } else {
-        await _oneShotResponse(
-          buildResponsesUrl(request.endpoint),
-          request,
-          cancelToken,
-          onComplete,
-        );
+        return;
+      } on DioException catch (error) {
+        final reportable = firstError ?? error;
+        firstError = reportable;
+        final status = error.response?.statusCode;
+        if (i < urls.length - 1 &&
+            (status == 404 || status == 405) &&
+            cancelToken?.isCancelled != true) {
+          continue;
+        }
+        onError?.call(await decodeStreamingError(reportable));
+        return;
+      } catch (error) {
+        onError?.call(error);
+        return;
       }
-    } on DioException catch (error) {
-      onError?.call(await decodeStreamingError(error));
-    } catch (error) {
-      onError?.call(error);
     }
   }
 

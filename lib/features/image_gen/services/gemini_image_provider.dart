@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import '../../../core/llm/transport/endpoint_normalizer.dart';
 import 'image_gen_http.dart';
 import 'image_prompt_builder.dart';
 
@@ -55,13 +56,12 @@ class GeminiImageProvider {
     return ImageGenHttp.base64ToBytes(_extractImageBase64(json));
   }
 
+  /// `geminiBase` strips whatever the user pasted down to scheme + host (+ a
+  /// proxy path), so the version and model path are always ours to build.
   String _generationUrl(String endpoint, String model) {
-    final normalized = endpoint.replaceFirst(RegExp(r'/+$'), '');
-    if (normalized.endsWith(':generateContent')) return normalized;
-    if (normalized.endsWith('/v1beta')) {
-      return '$normalized/models/$model:generateContent';
-    }
-    return '$normalized/v1beta/models/$model:generateContent';
+    final base = EndpointNormalizer.geminiBase(endpoint);
+    if (base.isEmpty) throw Exception('Image endpoint is not a valid URL');
+    return '$base/v1beta/models/$model:generateContent';
   }
 
   String _extractImageBase64(Map<String, dynamic> json) {

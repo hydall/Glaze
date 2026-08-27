@@ -9,6 +9,7 @@ import '../converters/gemini_messages.dart';
 import '../converters/thinking_budget.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
+import 'endpoint_normalizer.dart';
 import 'extra_request_parameters.dart';
 
 /// Result of [GeminiChatTransport.buildRequest] — URL/body/headers ready to
@@ -72,15 +73,11 @@ class GeminiChatTransport implements ChatTransport {
             ),
           );
 
-  static String _normaliseBase(String endpoint) {
-    var base = endpoint.trim();
-    if (base.isEmpty) return '';
-    if (!base.startsWith(RegExp(r'https?://'))) base = 'https://$base';
-    while (base.endsWith('/')) {
-      base = base.substring(0, base.length - 1);
-    }
-    return base;
-  }
+  /// Gemini builds `{base}/v1beta/models/{model}:{action}` itself, so the base
+  /// must not carry a version segment — `EndpointNormalizer.geminiBase` strips
+  /// one the user may have pasted along with the URL.
+  static String _normaliseBase(String endpoint) =>
+      EndpointNormalizer.geminiBase(endpoint);
 
   static String buildGenerateUrl({
     required String endpoint,

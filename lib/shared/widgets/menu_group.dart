@@ -447,6 +447,13 @@ class MenuFieldItem extends StatelessWidget {
   /// into the label itself.
   final String? description;
 
+  /// Small caption *under* the field — used to show what a value resolves to
+  /// (the endpoint field previews the URL that will actually be called).
+  final String? helper;
+
+  /// Renders [helper] as a warning instead of a neutral caption.
+  final bool helperIsError;
+
   const MenuFieldItem({
     super.key,
     required this.label,
@@ -461,6 +468,8 @@ class MenuFieldItem extends StatelessWidget {
     this.maxLines = 1,
     this.onExpand,
     this.description,
+    this.helper,
+    this.helperIsError = false,
   });
 
   @override
@@ -542,6 +551,19 @@ class MenuFieldItem extends StatelessWidget {
               isDense: true,
             ),
           ),
+          if (helper != null && helper!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              helper!,
+              style: TextStyle(
+                color: helperIsError
+                    ? context.cs.error
+                    : context.cs.onSurfaceVariant.withValues(alpha: 0.7),
+                fontSize: 11.5,
+                height: 1.3,
+              ),
+            ),
+          ],
         ],
       ),
     );

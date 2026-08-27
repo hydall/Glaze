@@ -10,6 +10,8 @@ import '../converters/cache_breakpoint_marker.dart';
 import '../converters/thinking_budget.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
+import 'endpoint_normalizer.dart';
+import 'endpoint_resolution_cache.dart';
 import 'extra_request_parameters.dart';
 
 /// Result of [AnthropicChatTransport.buildRequest] — body + headers + the
@@ -70,16 +72,11 @@ class AnthropicChatTransport implements ChatTransport {
             ),
           );
 
-  static String buildMessagesUrl(String endpoint) {
-    var base = endpoint.trim();
-    if (base.isEmpty) return '';
-    if (!base.startsWith(RegExp(r'https?://'))) base = 'https://$base';
-    while (base.endsWith('/')) {
-      base = base.substring(0, base.length - 1);
-    }
-    if (base.toLowerCase().endsWith('/messages')) return base;
-    return '$base/messages';
-  }
+  static const String _messagesRoute = '/messages';
+  static const String _modelsRoute = '/models';
+
+  static String buildMessagesUrl(String endpoint) =>
+      EndpointNormalizer.messagesUrl(endpoint);
 
   @override
   Future<void> stream({
@@ -94,52 +91,85 @@ class AnthropicChatTransport implements ChatTransport {
       return;
     }
 
-    for (var attempt = 0; attempt <= _maxRetries; attempt++) {
-      try {
-        final built = buildRequest(request);
-        final url = buildMessagesUrl(request.endpoint);
-        if (request.stream) {
-          await _streamResponse(
-            url,
-            built.headers,
-            built.body,
-            prefill: built.prefill,
-            cancelToken: cancelToken,
-            onUpdate: onUpdate,
-            onComplete: onComplete,
-            omitReasoning:
-                !(request.showNativeReasoning ?? !request.omitReasoning),
-            receiveTimeoutMs: request.receiveTimeoutMs,
-          );
-        } else {
-          await _oneShotResponse(
-            url,
-            built.headers,
-            built.body,
-            prefill: built.prefill,
-            cancelToken: cancelToken,
-            onComplete: onComplete,
-            omitReasoning:
-                !(request.showNativeReasoning ?? !request.omitReasoning),
-            receiveTimeoutMs: request.receiveTimeoutMs,
-          );
+    final urls = EndpointResolutionCache.order(
+      request.endpoint,
+      _messagesRoute,
+      EndpointNormalizer.messagesCandidates(request.endpoint),
+    );
+    if (urls.isEmpty) {
+      onError?.call(Exception('Endpoint is empty or not a valid URL'));
+      return;
+    }
+
+    final AnthropicBuiltRequest built;
+    try {
+      built = buildRequest(request);
+    } catch (e) {
+      onError?.call(e);
+      return;
+    }
+    final omitReasoning =
+        !(request.showNativeReasoning ?? !request.omitReasoning);
+
+    // A 404/405 means the base path is wrong, not the request — walk the
+    // remaining candidates before surfacing the (first) failure.
+    DioException? firstError;
+
+    for (var i = 0; i < urls.length; i++) {
+      final url = urls[i];
+      for (var attempt = 0; attempt <= _maxRetries; attempt++) {
+        try {
+          if (request.stream) {
+            await _streamResponse(
+              url,
+              built.headers,
+              built.body,
+              prefill: built.prefill,
+              cancelToken: cancelToken,
+              onUpdate: onUpdate,
+              onComplete: onComplete,
+              omitReasoning: omitReasoning,
+              receiveTimeoutMs: request.receiveTimeoutMs,
+            );
+          } else {
+            await _oneShotResponse(
+              url,
+              built.headers,
+              built.body,
+              prefill: built.prefill,
+              cancelToken: cancelToken,
+              onComplete: onComplete,
+              omitReasoning: omitReasoning,
+              receiveTimeoutMs: request.receiveTimeoutMs,
+            );
+          }
+          EndpointResolutionCache.record(request.endpoint, _messagesRoute, url);
+          return; // success — no retry needed
+        } on DioException catch (e) {
+          if (attempt < _maxRetries &&
+              e.response?.statusCode == 408 &&
+              cancelToken?.isCancelled != true) {
+            debugPrint(
+              '[Anthropic] HTTP 408 on attempt ${attempt + 1}/$_maxRetries — retrying',
+            );
+            await Future<void>.delayed(const Duration(seconds: 1));
+            continue;
+          }
+          final reportable = firstError ?? e;
+          firstError = reportable;
+          final status = e.response?.statusCode;
+          if (i < urls.length - 1 &&
+              (status == 404 || status == 405) &&
+              cancelToken?.isCancelled != true) {
+            debugPrint('[Anthropic] $status on $url — trying ${urls[i + 1]}');
+            break; // next candidate URL
+          }
+          onError?.call(await decodeStreamingError(reportable));
+          return;
+        } catch (e) {
+          onError?.call(e);
+          return;
         }
-        return; // success — no retry needed
-      } on DioException catch (e) {
-        if (attempt < _maxRetries &&
-            e.response?.statusCode == 408 &&
-            cancelToken?.isCancelled != true) {
-          debugPrint(
-            '[Anthropic] HTTP 408 on attempt ${attempt + 1}/$_maxRetries — retrying',
-          );
-          await Future<void>.delayed(const Duration(seconds: 1));
-          continue;
-        }
-        onError?.call(await decodeStreamingError(e));
-        return;
-      } catch (e) {
-        onError?.call(e);
-        return;
       }
     }
   }
@@ -538,23 +568,28 @@ class AnthropicChatTransport implements ChatTransport {
     required String apiKey,
   }) async {
     if (apiKey.isEmpty || endpoint.trim().isEmpty) return const [];
-    var base = endpoint.trim();
-    if (!base.startsWith(RegExp(r'https?://'))) base = 'https://$base';
-    while (base.endsWith('/')) {
-      base = base.substring(0, base.length - 1);
+    final urls = EndpointResolutionCache.order(
+      endpoint,
+      _modelsRoute,
+      EndpointNormalizer.modelsCandidates(endpoint),
+    );
+    for (final url in urls) {
+      try {
+        final response = await _dio.get<Map<String, dynamic>>(
+          url,
+          options: Options(
+            headers: {'x-api-key': apiKey, 'anthropic-version': _apiVersion},
+          ),
+        );
+        final data = response.data?['data'] as List?;
+        if (data == null) continue;
+        EndpointResolutionCache.record(endpoint, _modelsRoute, url);
+        return data.cast<Map<String, dynamic>>();
+      } catch (_) {
+        continue;
+      }
     }
-    try {
-      final response = await _dio.get<Map<String, dynamic>>(
-        '$base/models',
-        options: Options(
-          headers: {'x-api-key': apiKey, 'anthropic-version': _apiVersion},
-        ),
-      );
-      final data = response.data?['data'] as List?;
-      return data?.cast<Map<String, dynamic>>() ?? const [];
-    } catch (_) {
-      return const [];
-    }
+    return const [];
   }
 
   // ── helpers ───────────────────────────────────────────────────────────────

@@ -4,6 +4,8 @@ import 'dart:collection';
 import 'package:dio/dio.dart';
 
 import 'embedding_request_gate.dart';
+import 'transport/endpoint_normalizer.dart';
+import 'transport/endpoint_resolution_cache.dart';
 
 class EmbeddingConfig {
   final String endpoint;
@@ -23,23 +25,12 @@ class EmbeddingConfig {
 
 /// Resolves a raw embedding endpoint into the concrete `/embeddings` URL.
 ///
-/// Mirrors the chat transport's `normalizeEndpoint`: trims whitespace and
-/// prepends `https://` when no scheme is present. Without the scheme a
-/// separate embedding endpoint entered as `api.host/v1` becomes a malformed
-/// scheme-less URL that iOS's HTTP stack rejects — which is why embeddings
-/// failed on iPhone whenever the vector endpoint differed from the (already
-/// schemed) chat endpoint, yet worked when both were shared.
-String resolveEmbeddingEndpoint(String endpoint) {
-  var normalized = endpoint.trim();
-  if (normalized.isEmpty) return normalized;
-  if (!normalized.startsWith(RegExp(r'https?://', caseSensitive: false))) {
-    normalized = 'https://$normalized';
-  }
-  if (RegExp(r'/embeddings/?$', caseSensitive: false).hasMatch(normalized)) {
-    return normalized;
-  }
-  return '${normalized.replaceFirst(RegExp(r'/+$'), '')}/embeddings';
-}
+/// Shares [EndpointNormalizer] with the chat transports, so the vector
+/// endpoint tolerates exactly what the chat endpoint tolerates: a missing
+/// scheme (which iOS's HTTP stack rejects outright), a missing or misspelled
+/// `/v1`, or a full `…/v1/embeddings` pasted from the provider's docs.
+String resolveEmbeddingEndpoint(String endpoint) =>
+    EndpointNormalizer.embeddingsUrl(endpoint);
 
 String embeddingModelSignature(EmbeddingConfig config) {
   final endpoint = config.endpoint.trim();
@@ -122,6 +113,8 @@ class _Entry {
 }
 
 class EmbeddingService {
+  static const String _embeddingsRoute = '/embeddings';
+
   final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 30),
@@ -282,7 +275,14 @@ class EmbeddingService {
   }) async {
     if (texts.isEmpty) return [];
 
-    final url = resolveEmbeddingEndpoint(config.endpoint);
+    final urls = EndpointResolutionCache.order(
+      config.endpoint,
+      _embeddingsRoute,
+      EndpointNormalizer.embeddingsCandidates(config.endpoint),
+    );
+    if (urls.isEmpty) {
+      throw 'Embedding endpoint is empty or not a valid URL';
+    }
 
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (config.apiKey.isNotEmpty) {
@@ -298,11 +298,12 @@ class EmbeddingService {
         config.requestsPerMinute,
         requestToken,
       );
-      final response = await _dio.post<Map<String, dynamic>>(
-        url,
-        data: {'model': config.model, 'input': texts},
-        options: Options(headers: headers),
-        cancelToken: requestToken,
+      final response = await _postEmbeddings(
+        urls: urls,
+        rawEndpoint: config.endpoint,
+        body: {'model': config.model, 'input': texts},
+        headers: headers,
+        requestToken: requestToken,
       );
 
       final data = response.data;
@@ -338,6 +339,42 @@ class EmbeddingService {
     } finally {
       EmbeddingRequestGate.endRequest(requestToken);
     }
+  }
+
+  /// POSTs to the first candidate URL that answers. A 404/405 means the base
+  /// path is wrong rather than the request, so the next candidate is tried
+  /// (see [EndpointNormalizer.candidates]); the winner is remembered.
+  Future<Response<Map<String, dynamic>>> _postEmbeddings({
+    required List<String> urls,
+    required String rawEndpoint,
+    required Map<String, dynamic> body,
+    required Map<String, String> headers,
+    required CancelToken requestToken,
+  }) async {
+    DioException? firstError;
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        final response = await _dio.post<Map<String, dynamic>>(
+          urls[i],
+          data: body,
+          options: Options(headers: headers),
+          cancelToken: requestToken,
+        );
+        EndpointResolutionCache.record(rawEndpoint, _embeddingsRoute, urls[i]);
+        return response;
+      } on DioException catch (e) {
+        final reportable = firstError ?? e;
+        firstError = reportable;
+        final status = e.response?.statusCode;
+        if (i < urls.length - 1 &&
+            (status == 404 || status == 405) &&
+            !requestToken.isCancelled) {
+          continue;
+        }
+        throw reportable;
+      }
+    }
+    throw firstError!;
   }
 
   List<String> _chunkText(String text, int maxTokens) {

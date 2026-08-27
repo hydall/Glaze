@@ -2661,5 +2661,8 @@
   "game_time_seed_date_label": "Дата (ДД.ММ.ГГГГ)",
   "game_time_seed_confirm": "Начать",
   "game_time_seed_invalid_time": "Введи время в формате ЧЧ:ММ (24 часа).",
-  "game_time_seed_invalid_date": "Введи дату в формате ДД.ММ.ГГГГ."
+  "game_time_seed_invalid_date": "Введи дату в формате ДД.ММ.ГГГГ.",
+  "settings_endpoint_resolves_to": "URL запроса: {url}",
+  "settings_endpoint_invalid": "Это не похоже на URL",
+  "settings_endpoint_autofixed": "Эндпоинт исправлен на {url}"
 }

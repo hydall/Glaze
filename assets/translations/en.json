@@ -2632,5 +2632,8 @@
   "game_time_seed_date_label": "Date (DD.MM.YYYY)",
   "game_time_seed_confirm": "Start",
   "game_time_seed_invalid_time": "Enter the time as HH:MM (24-hour).",
-  "game_time_seed_invalid_date": "Enter the date as DD.MM.YYYY."
+  "game_time_seed_invalid_date": "Enter the date as DD.MM.YYYY.",
+  "settings_endpoint_resolves_to": "Request URL: {url}",
+  "settings_endpoint_invalid": "This does not look like a URL",
+  "settings_endpoint_autofixed": "Endpoint corrected to {url}"
 }

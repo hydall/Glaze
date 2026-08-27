@@ -8,6 +8,8 @@ import '../../utils/error_format.dart';
 import '../converters/reasoning_effort.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
+import 'endpoint_normalizer.dart';
+import 'endpoint_resolution_cache.dart';
 import 'extra_request_parameters.dart';
 import 'llm_protocol.dart';
 
@@ -44,24 +46,18 @@ class OpenAiChatTransport implements ChatTransport {
            ),
        _extraHeaders = extraHeaders ?? const {};
 
-  static String normalizeEndpoint(String endpoint) {
-    var normalized = endpoint.trim();
-    if (normalized.isEmpty) return '';
-    if (!normalized.startsWith(RegExp(r'https?://'))) {
-      normalized = 'https://$normalized';
-    }
-    while (normalized.endsWith('/')) {
-      normalized = normalized.substring(0, normalized.length - 1);
-    }
-    return normalized;
-  }
+  static const String _chatRoute = '/chat/completions';
+  static const String _modelsRoute = '/models';
 
-  static String buildChatUrl(String endpoint) {
-    final base = normalizeEndpoint(endpoint);
-    if (base.isEmpty) return '';
-    if (base.toLowerCase().endsWith('/chat/completions')) return base;
-    return '$base/chat/completions';
-  }
+  /// HTTP statuses that mean "wrong URL, not wrong request" — the endpoint is
+  /// retried against the next candidate instead of failing the generation.
+  static const Set<int> _routeMismatchStatuses = {404, 405};
+
+  static String normalizeEndpoint(String endpoint) =>
+      EndpointNormalizer.baseUrl(endpoint);
+
+  static String buildChatUrl(String endpoint) =>
+      EndpointNormalizer.chatCompletionsUrl(endpoint);
 
   @override
   Future<void> stream({
@@ -75,9 +71,76 @@ class OpenAiChatTransport implements ChatTransport {
       onError?.call(Exception('API key is empty'));
       return;
     }
-    final url = buildChatUrl(request.endpoint);
+    final urls = EndpointResolutionCache.order(
+      request.endpoint,
+      _chatRoute,
+      EndpointNormalizer.chatCompletionsCandidates(request.endpoint),
+    );
+    if (urls.isEmpty) {
+      onError?.call(Exception('Endpoint is empty or not a valid URL'));
+      return;
+    }
 
-    final body = buildBody(request, protocol: _protocol);
+    final Map<String, dynamic> body;
+    try {
+      body = buildBody(request, protocol: _protocol);
+    } catch (e) {
+      onError?.call(e);
+      return;
+    }
+
+    // The first failure is the one worth reporting: later candidates exist
+    // only to rescue a mistyped base path, and their errors describe a URL
+    // the user never entered.
+    DioException? firstError;
+
+    for (var i = 0; i < urls.length; i++) {
+      final url = urls[i];
+      try {
+        await _send(
+          url: url,
+          request: request,
+          body: body,
+          cancelToken: cancelToken,
+          onUpdate: onUpdate,
+          onComplete: onComplete,
+        );
+        EndpointResolutionCache.record(request.endpoint, _chatRoute, url);
+        return;
+      } on DioException catch (e) {
+        final reportable = firstError ?? e;
+        firstError = reportable;
+        final canFallBack =
+            i < urls.length - 1 &&
+            _routeMismatchStatuses.contains(e.response?.statusCode) &&
+            cancelToken?.isCancelled != true;
+        if (canFallBack) {
+          debugPrint(
+            '[OpenAI] ${e.response?.statusCode} on $url — '
+            'trying ${urls[i + 1]}',
+          );
+          continue;
+        }
+        onError?.call(await decodeStreamingError(reportable));
+        return;
+      } catch (e) {
+        onError?.call(e);
+        return;
+      }
+    }
+  }
+
+  /// One POST against [url], with the 408 retry that slow mobile uploads need.
+  Future<void> _send({
+    required String url,
+    required ChatTransportRequest request,
+    required Map<String, dynamic> body,
+    required CancelToken? cancelToken,
+    required ChatTransportOnUpdate? onUpdate,
+    required ChatTransportOnComplete? onComplete,
+  }) async {
+    final omitReasoning =
+        !(request.showNativeReasoning ?? !request.omitReasoning);
 
     for (var attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
@@ -89,8 +152,7 @@ class OpenAiChatTransport implements ChatTransport {
             cancelToken,
             onUpdate,
             onComplete,
-            omitReasoning:
-                !(request.showNativeReasoning ?? !request.omitReasoning),
+            omitReasoning: omitReasoning,
             receiveTimeoutMs: request.receiveTimeoutMs,
           );
         } else {
@@ -100,12 +162,11 @@ class OpenAiChatTransport implements ChatTransport {
             body,
             cancelToken,
             onComplete,
-            omitReasoning:
-                !(request.showNativeReasoning ?? !request.omitReasoning),
+            omitReasoning: omitReasoning,
             receiveTimeoutMs: request.receiveTimeoutMs,
           );
         }
-        return; // success — no retry needed
+        return;
       } on DioException catch (e) {
         if (attempt < _maxRetries &&
             e.response?.statusCode == 408 &&
@@ -116,11 +177,7 @@ class OpenAiChatTransport implements ChatTransport {
           await Future<void>.delayed(const Duration(seconds: 1));
           continue;
         }
-        onError?.call(await decodeStreamingError(e));
-        return;
-      } catch (e) {
-        onError?.call(e);
-        return;
+        rethrow;
       }
     }
   }
@@ -556,18 +613,26 @@ class OpenAiChatTransport implements ChatTransport {
     required String endpoint,
     required String apiKey,
   }) async {
-    final base = normalizeEndpoint(endpoint);
-    final url = '$base/models';
+    final urls = EndpointResolutionCache.order(
+      endpoint,
+      _modelsRoute,
+      EndpointNormalizer.modelsCandidates(endpoint),
+    );
 
-    try {
-      final response = await _dio.get<Map<String, dynamic>>(
-        url,
-        options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
-      );
-      final data = response.data?['data'] as List?;
-      return data?.cast<Map<String, dynamic>>() ?? [];
-    } catch (_) {
-      return [];
+    for (final url in urls) {
+      try {
+        final response = await _dio.get<Map<String, dynamic>>(
+          url,
+          options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
+        );
+        final data = response.data?['data'] as List?;
+        if (data == null) continue;
+        EndpointResolutionCache.record(endpoint, _modelsRoute, url);
+        return data.cast<Map<String, dynamic>>();
+      } catch (_) {
+        continue;
+      }
     }
+    return [];
   }
 }

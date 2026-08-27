@@ -52,7 +52,14 @@ void main() {
       );
       expect(
         resolveEmbeddingEndpoint('api.host/v1/embeddings/'),
-        'https://api.host/v1/embeddings/',
+        'https://api.host/v1/embeddings',
+      );
+    });
+
+    test('adds the missing /v1 instead of 404ing on the host root', () {
+      expect(
+        resolveEmbeddingEndpoint('https://api.openai.com'),
+        'https://api.openai.com/v1/embeddings',
       );
     });
 

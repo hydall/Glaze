@@ -7,6 +7,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/converters/prompt_post_processing.dart';
+import '../../core/llm/transport/endpoint_normalizer.dart';
+import '../../core/llm/transport/endpoint_preview.dart';
+import '../../core/llm/transport/endpoint_resolution_cache.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/llm/transport/transport_factory.dart';
 import '../../core/services/api_connection_tester.dart';
@@ -627,10 +630,23 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           onTap: _openProtocolSelector,
         ),
         if (_protocol != LlmProtocol.openrouter)
-          MenuFieldItem(
-            label: 'onboarding_label_endpoint'.tr(),
-            controller: _endpointCtrl,
-            placeholder: 'https://your-endpoint.example',
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _endpointCtrl,
+            builder: (context, value, _) {
+              final preview = EndpointPreview.resolve(
+                rawEndpoint: value.text,
+                protocol: _protocol,
+                useResponsesApi: _useResponsesApi,
+                model: _modelCtrl.text,
+              );
+              return MenuFieldItem(
+                label: 'onboarding_label_endpoint'.tr(),
+                controller: _endpointCtrl,
+                placeholder: 'https://your-endpoint.example',
+                helper: _endpointHelper(preview),
+                helperIsError: preview.isInvalid,
+              );
+            },
           ),
         MenuFieldItem(
           label: 'onboarding_label_model'.tr(),
@@ -1039,10 +1055,20 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   },
                 ),
                 if (!_embeddingUseSame) ...[
-                  MenuFieldItem(
-                    label: 'settings_embedding_endpoint'.tr(),
-                    controller: _embEndpointCtrl,
-                    placeholder: 'http://127.0.0.1:11434/v1',
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _embEndpointCtrl,
+                    builder: (context, value, _) {
+                      final preview = EndpointPreview.resolveEmbedding(
+                        value.text,
+                      );
+                      return MenuFieldItem(
+                        label: 'settings_embedding_endpoint'.tr(),
+                        controller: _embEndpointCtrl,
+                        placeholder: 'http://127.0.0.1:11434/v1',
+                        helper: _endpointHelper(preview),
+                        helperIsError: preview.isInvalid,
+                      );
+                    },
                   ),
                   MenuFieldItem(
                     label: 'settings_embedding_model'.tr(),
@@ -1649,6 +1675,44 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     );
   }
 
+  /// Caption under an endpoint field: the URL the request will actually go
+  /// to, or a warning when the text is not a URL at all.
+  String? _endpointHelper(EndpointPreview preview) {
+    if (preview.isInvalid) return 'settings_endpoint_invalid'.tr();
+    if (preview.isEmpty) return null;
+    return 'settings_endpoint_resolves_to'.tr(namedArgs: {'url': preview.url});
+  }
+
+  /// After a successful test, adopt the URL the transport actually reached.
+  ///
+  /// The candidate walk that rescued a wrong base path lives in memory only,
+  /// so writing the working URL back into the field makes the fix permanent —
+  /// a complete URL is used verbatim by the normalizer, no path guessing.
+  void _adoptResolvedEndpoint() {
+    final raw = _endpointCtrl.text.trim();
+    if (raw.isEmpty || _protocol == LlmProtocol.openrouter) return;
+    final resolvedBase = EndpointResolutionCache.resolvedBase(raw);
+    if (resolvedBase == null) return;
+    if (resolvedBase == EndpointNormalizer.parse(raw).base) return;
+
+    final route = switch (_protocol) {
+      LlmProtocol.anthropic => '/messages',
+      LlmProtocol.gemini => '',
+      _ => _useResponsesApi ? '/responses' : '/chat/completions',
+    };
+    if (route.isEmpty) return;
+
+    _endpointCtrl.text = '$resolvedBase$route';
+    if (mounted) {
+      GlazeToast.show(
+        context,
+        'settings_endpoint_autofixed'.tr(
+          namedArgs: {'url': _endpointCtrl.text},
+        ),
+      );
+    }
+  }
+
   Future<void> _fetchModels() async {
     final endpoint = _endpointCtrl.text.trim();
     final apiKey = _keyCtrl.text.trim();
@@ -1704,6 +1768,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     switch (result) {
       case ApiTestSuccess(:final message):
         setState(() => _llmStatus = ApiConnectionStatus.connected);
+        _adoptResolvedEndpoint();
         GlazeToast.show(context, message);
       case ApiTestFailure(:final error):
         setState(() {

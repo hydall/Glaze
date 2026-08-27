@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
+import '../../../core/llm/transport/endpoint_normalizer.dart';
 import '../image_gen_models.dart';
 
 /// Lightweight connectivity and model-discovery requests for the image-gen
@@ -294,24 +295,15 @@ class ImageGenConnectionService {
     return response.data;
   }
 
-  static String _openAiModelsUrl(String endpoint) {
-    final normalized = endpoint.replaceFirst(RegExp(r'/+$'), '');
-    if (normalized.endsWith('/v1/models')) return normalized;
-    if (normalized.endsWith('/v1/images/generations')) {
-      return normalized.replaceFirst(
-        RegExp(r'/images/generations$'),
-        '/models',
-      );
-    }
-    if (normalized.endsWith('/v1')) return '$normalized/models';
-    return '$normalized/v1/models';
-  }
+  /// Both probes reuse the chat transports' normalization, so an endpoint
+  /// typed without a scheme or without `/v1` is checked at the URL the
+  /// provider will actually be called on.
+  static String _openAiModelsUrl(String endpoint) =>
+      EndpointNormalizer.modelsUrl(endpoint);
 
   static String _geminiModelsUrl(String endpoint) {
-    final normalized = endpoint.replaceFirst(RegExp(r'/+$'), '');
-    if (normalized.endsWith('/v1beta/models')) return normalized;
-    if (normalized.endsWith('/v1beta')) return '$normalized/models';
-    return '$normalized/v1beta/models';
+    final base = EndpointNormalizer.geminiBase(endpoint);
+    return base.isEmpty ? '' : '$base/v1beta/models';
   }
 
   void dispose() => _dio.close();
