@@ -6,9 +6,14 @@ import 'package:easy_localization/easy_localization.dart';
 /// Returns a short, human-readable error string.
 ///
 /// DioExceptions are translated to HTTP status codes or network descriptions.
-/// API JSON error bodies (OpenAI / Anthropic / Gemini shape) are extracted
-/// when available so the user sees "HTTP 401: Invalid API key" instead of
-/// the full Dio verbose dump.
+/// The status line always carries the HTTP description ("HTTP 404 - Not
+/// Found"); a provider error body (OpenAI / Anthropic / Gemini shape) is
+/// appended on its own line instead of replacing it, so the user sees
+///
+///     HTTP 404 - Not Found
+///     Unknown page - v1beta/v1
+///
+/// instead of the full Dio verbose dump.
 String formatError(Object err) {
   if (err is DioException) {
     if (err.type == DioExceptionType.cancel) {
@@ -16,15 +21,7 @@ String formatError(Object err) {
     }
 
     final response = err.response;
-    if (response != null) {
-      final code = response.statusCode ?? '?';
-      final apiMsg = _extractApiMessage(response.data);
-      final fallbackMsg = apiMsg == null && response.statusCode != null
-          ? _defaultHttpMessage(response.statusCode!)
-          : null;
-      final message = apiMsg ?? fallbackMsg;
-      return message != null ? 'HTTP $code: $message' : 'HTTP $code';
-    }
+    if (response != null) return _formatHttpError(response);
 
     return switch (err.type) {
       DioExceptionType.connectionTimeout => 'error_connection_timed_out'.tr(),
@@ -76,6 +73,33 @@ Future<DioException> decodeStreamingError(DioException err) async {
     stackTrace: err.stackTrace,
     message: err.message,
   );
+}
+
+/// Builds "HTTP <code> - <description>" and appends the provider message on a
+/// second line when the body carries one.
+String _formatHttpError(Response<dynamic> response) {
+  final code = response.statusCode;
+  final known = code != null ? _defaultHttpMessage(code) : null;
+  final description = known ?? _statusMessage(response);
+  final status = code?.toString() ?? '?';
+  final header = description != null
+      ? 'HTTP $status - $description'
+      : 'HTTP $status';
+
+  final apiMsg = _extractApiMessage(response.data);
+  if (apiMsg == null) return header;
+  // Providers that just echo the status text add nothing to the header.
+  if (description != null &&
+      apiMsg.toLowerCase() == description.toLowerCase()) {
+    return header;
+  }
+  return '$header\n$apiMsg';
+}
+
+/// The server-supplied reason phrase, when it is not blank.
+String? _statusMessage(Response<dynamic> response) {
+  final message = response.statusMessage?.trim();
+  return (message == null || message.isEmpty) ? null : message;
 }
 
 String? _defaultHttpMessage(int code) {
