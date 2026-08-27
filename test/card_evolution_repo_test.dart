@@ -135,6 +135,58 @@ void main() {
   });
 
   test(
+    'completed boundary prevents reclaiming an older failed writer',
+    () async {
+      final claimed = (await evolution.claim(
+        sessionId: 'session',
+        ownerId: 'owner',
+        now: 10,
+        leaseSeconds: 30,
+        throughCollectorOrdinal: 2,
+        collectorBoundaryHash: 'shared-boundary',
+      )).claim!;
+      expect(
+        await evolution.markWriterFailed(
+          claimId: claimed.row.id,
+          ownerId: 'owner',
+          now: 11,
+          code: 'cardWriterFailed',
+        ),
+        isTrue,
+      );
+      await db
+          .into(db.cardEvolutionClaims)
+          .insert(
+            CardEvolutionClaimsCompanion.insert(
+              id: 'completed-successor',
+              sessionId: 'session',
+              characterId: 'character',
+              ownerId: 'cloud-sync',
+              status: 'completed',
+              leaseExpiresAt: 0,
+              chatHistoryHash: 'completed-history',
+              effectiveCanonIdentity: 'completed-canon',
+              predecessorCursorHash: 'shared-boundary',
+              predecessorRunOrdinal: 2,
+              inputHash: 'completed-input',
+              createdAt: 12,
+              completedAt: const Value(13),
+            ),
+          );
+
+      final recovered = await evolution.claimFailedWriter(
+        claimId: claimed.row.id,
+        ownerId: 'recovery',
+        now: 14,
+        leaseSeconds: 30,
+      );
+
+      expect(recovered.kind, 'notFailed');
+      expect((await evolution.getClaimById(claimed.row.id))?.status, 'failed');
+    },
+  );
+
+  test(
     'an unreproducible failed claim is dropped and replaced fresh',
     () async {
       final dead = (await evolution.claim(

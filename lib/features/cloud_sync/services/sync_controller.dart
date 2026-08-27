@@ -12,6 +12,11 @@ import '../../../core/state/shared_prefs_provider.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../personas/persona_list_provider.dart';
 import '../../settings/api_list_provider.dart';
+import '../../card_rewrite/card_rewriter_recovery_view_service.dart';
+import '../../chat/chat_provider.dart';
+import '../../chat/chat_session_service.dart';
+import '../../chat/services/collector_view_service.dart';
+import '../../chat/services/reconciler_view_service.dart';
 import '../../chat_history/chat_history_provider.dart';
 import '../sync_provider.dart';
 import '../sync_models.dart';
@@ -340,6 +345,15 @@ class SyncController {
     // Evict all cached avatar images so that Image.file widgets re-read the
     // updated files from disk immediately (without a full app restart).
     _evictAvatarImageCache();
+
+    // Chat sessions are replaced directly in the database during pull. Drop
+    // both in-memory layers before rebuilding providers so ownership changes
+    // (for example a Card Rewriter variant fork) become visible immediately.
+    ChatSessionService.clearCache();
+    _ref.invalidate(chatProvider, asReload: true);
+    _ref.invalidate(reconcilerViewProvider, asReload: true);
+    _ref.invalidate(collectorViewProvider, asReload: true);
+    _ref.invalidate(cardRewriterRecoveryViewsProvider, asReload: true);
 
     _ref.invalidate(charactersProvider);
     _ref.invalidate(personaListProvider);

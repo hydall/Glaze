@@ -18,17 +18,32 @@ class CardEvolutionWriterCallRepo {
 
   final AppDatabase db;
 
-  Future<List<CardEvolutionClaimRow>> readFailedClaims(String sessionId) =>
-      (db.select(db.cardEvolutionClaims)
-            ..where(
-              (row) =>
-                  row.sessionId.equals(sessionId) & row.status.equals('failed'),
-            )
-            ..orderBy([
-              (row) => OrderingTerm.desc(row.failedAt),
-              (row) => OrderingTerm.desc(row.createdAt),
-            ]))
-          .get();
+  Future<List<CardEvolutionClaimRow>> readFailedClaims(String sessionId) async {
+    final claims =
+        await (db.select(db.cardEvolutionClaims)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..orderBy([
+                (row) => OrderingTerm.desc(row.failedAt),
+                (row) => OrderingTerm.desc(row.createdAt),
+              ]))
+            .get();
+    final completedBoundaries = {
+      for (final claim in claims)
+        if (claim.status == 'completed' && claim.predecessorRunOrdinal > 0)
+          (claim.predecessorRunOrdinal, claim.predecessorCursorHash),
+    };
+    return claims
+        .where(
+          (claim) =>
+              claim.status == 'failed' &&
+              (claim.predecessorRunOrdinal <= 0 ||
+                  !completedBoundaries.contains((
+                    claim.predecessorRunOrdinal,
+                    claim.predecessorCursorHash,
+                  ))),
+        )
+        .toList();
+  }
 
   Future<List<CardEvolutionWriterCallRow>> readChain(String claimId) =>
       (db.select(db.cardEvolutionWriterCalls)

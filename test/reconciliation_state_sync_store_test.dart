@@ -687,6 +687,71 @@ void main() {
     expect(observation, containsPair('status', 'promoted'));
   });
 
+  test(
+    'incoming completed claim replaces failed claim with same input',
+    () async {
+      final runs = await _appendChain(sourceDb, 2);
+      await _appendChain(targetDb, 2);
+      final collector = await _completeCollector(sourceDb, runs);
+      await _insertCompletedClaim(sourceDb, collector);
+      await targetDb
+          .into(targetDb.cardEvolutionClaims)
+          .insert(
+            CardEvolutionClaimsCompanion.insert(
+              id: 'failed-claim',
+              sessionId: 'session',
+              characterId: 'character',
+              ownerId: 'local',
+              status: 'failed',
+              leaseExpiresAt: 0,
+              chatHistoryHash: 'old-history',
+              effectiveCanonIdentity: 'old-canon',
+              predecessorCursorHash: collector.reconciliationChainHash,
+              predecessorRunOrdinal: collector.collectorOrdinal,
+              inputHash: 'claim-input',
+              selectedInputJson: const Value('{"local":true}'),
+              failureCode: const Value('parserRejected'),
+              createdAt: 10,
+              failedAt: const Value(11),
+            ),
+          );
+      await targetDb
+          .into(targetDb.cardEvolutionWriterCalls)
+          .insert(
+            CardEvolutionWriterCallsCompanion.insert(
+              id: 'failed-call',
+              claimId: 'failed-claim',
+              sessionId: 'session',
+              ordinal: 1,
+              stage: 'card_writer',
+              stageOrdinal: 1,
+              status: 'failed',
+              prompt: 'old prompt',
+              promptHash: 'old-prompt-hash',
+              failureCode: const Value('parserRejected'),
+              createdAt: 10,
+              updatedAt: 11,
+              failedAt: const Value(11),
+            ),
+          );
+
+      await targetStore.mergeBySessionId(
+        'session',
+        (await sourceStore.getBySessionId('session'))!,
+      );
+
+      final claims = await targetDb.select(targetDb.cardEvolutionClaims).get();
+      expect(claims, hasLength(1));
+      expect(claims.single.id, 'completed-claim');
+      expect(claims.single.status, 'completed');
+      expect(claims.single.ownerId, 'cloud-sync');
+      expect(
+        await targetDb.select(targetDb.cardEvolutionWriterCalls).get(),
+        isEmpty,
+      );
+    },
+  );
+
   test('synced invalidation clears derived lane without deleting claims or '
       'resurrecting stale collectors', () async {
     final runs = await _appendChain(sourceDb, 2);

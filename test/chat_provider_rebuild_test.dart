@@ -66,4 +66,64 @@ void main() {
       );
     },
   );
+
+  test(
+    'family invalidation reloads rebound sessions after cache clear',
+    () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      final container = ProviderContainer(
+        overrides: [appDbProvider.overrideWithValue(db)],
+      );
+      addTearDown(() async {
+        container.dispose();
+        ChatSessionService.clearCache();
+        await db.close();
+      });
+      final characters = container.read(characterRepoProvider);
+      final chats = container.read(chatRepoProvider);
+      await characters.put(const Character(id: 'mother', name: 'Mother'));
+      await characters.put(const Character(id: 'variant', name: 'Variant'));
+      final original = ChatSession(
+        id: 'mother_0',
+        characterId: 'mother',
+        sessionIndex: 0,
+        messages: const [
+          ChatMessage(
+            id: 'old',
+            role: 'assistant',
+            content: 'Old',
+            timestamp: 0,
+          ),
+        ],
+      );
+      await chats.put(original);
+      ChatSessionService.updateCache(original);
+      expect(
+        (await container.read(chatProvider('mother').future)).session?.id,
+        'mother_0',
+      );
+
+      await chats.put(
+        original.copyWith(
+          characterId: 'variant',
+          messages: const [
+            ChatMessage(
+              id: 'fresh',
+              role: 'assistant',
+              content: 'Imported',
+              timestamp: 1,
+            ),
+          ],
+        ),
+      );
+      ChatSessionService.clearCache();
+      container.invalidate(chatProvider, asReload: true);
+
+      final mother = await container.read(chatProvider('mother').future);
+      final variant = await container.read(chatProvider('variant').future);
+      expect(mother.session?.id, isNot('mother_0'));
+      expect(variant.session?.id, 'mother_0');
+      expect(variant.session?.messages.single.id, 'fresh');
+    },
+  );
 }

@@ -436,6 +436,30 @@ class CardEvolutionRepo {
     if (ownerId.isEmpty || leaseSeconds <= 0) {
       return const CardEvolutionClaimOutcome('invalidRequest');
     }
+    final failed = await getClaimById(claimId);
+    if (failed == null || failed.status != 'failed') {
+      return const CardEvolutionClaimOutcome('notFailed');
+    }
+    if (failed.predecessorRunOrdinal > 0) {
+      final completedBoundary =
+          await (db.select(db.cardEvolutionClaims)
+                ..where(
+                  (row) =>
+                      row.sessionId.equals(failed.sessionId) &
+                      row.status.equals('completed') &
+                      row.predecessorRunOrdinal.equals(
+                        failed.predecessorRunOrdinal,
+                      ) &
+                      row.predecessorCursorHash.equals(
+                        failed.predecessorCursorHash,
+                      ),
+                )
+                ..limit(1))
+              .getSingleOrNull();
+      if (completedBoundary != null) {
+        return const CardEvolutionClaimOutcome('notFailed');
+      }
+    }
     final changed =
         await (db.update(db.cardEvolutionClaims)..where(
               (row) => row.id.equals(claimId) & row.status.equals('failed'),

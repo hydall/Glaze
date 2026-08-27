@@ -51,12 +51,59 @@ void main() {
       expect(views.last.frontier, isNull);
     },
   );
+
+  test(
+    'completed boundary suppresses an older failed recovery chain',
+    () async {
+      await _insertClaim(
+        db,
+        id: 'failed',
+        failedAt: 20,
+        predecessorRunOrdinal: 3,
+        predecessorCursorHash: 'shared-boundary',
+      );
+      await _insertClaim(
+        db,
+        id: 'completed',
+        failedAt: 0,
+        status: 'completed',
+        predecessorRunOrdinal: 3,
+        predecessorCursorHash: 'shared-boundary',
+      );
+
+      expect(await service.load('session'), isEmpty);
+    },
+  );
+
+  test('same ordinal on another boundary remains recoverable', () async {
+    await _insertClaim(
+      db,
+      id: 'failed',
+      failedAt: 20,
+      predecessorRunOrdinal: 3,
+      predecessorCursorHash: 'failed-boundary',
+    );
+    await _insertClaim(
+      db,
+      id: 'completed',
+      failedAt: 0,
+      status: 'completed',
+      predecessorRunOrdinal: 3,
+      predecessorCursorHash: 'completed-boundary',
+    );
+
+    final views = await service.load('session');
+    expect(views.map((view) => view.claim.id), ['failed']);
+  });
 }
 
 Future<void> _insertClaim(
   AppDatabase db, {
   required String id,
   required int failedAt,
+  String status = 'failed',
+  int predecessorRunOrdinal = 1,
+  String? predecessorCursorHash,
 }) => db
     .into(db.cardEvolutionClaims)
     .insert(
@@ -65,17 +112,20 @@ Future<void> _insertClaim(
         sessionId: 'session',
         characterId: 'character',
         ownerId: 'owner',
-        status: 'failed',
+        status: status,
         leaseExpiresAt: 0,
         chatHistoryHash: 'history-$id',
         effectiveCanonIdentity: 'canon-$id',
-        predecessorCursorHash: 'cursor-$id',
-        predecessorRunOrdinal: 1,
+        predecessorCursorHash: predecessorCursorHash ?? 'cursor-$id',
+        predecessorRunOrdinal: predecessorRunOrdinal,
         inputHash: computeHash('{"claim":"$id"}'),
         selectedInputJson: Value('{"claim":"$id"}'),
-        failureCode: const Value('transportFailure'),
+        failureCode: status == 'failed'
+            ? const Value('transportFailure')
+            : const Value(null),
         createdAt: 1,
-        failedAt: Value(failedAt),
+        completedAt: status == 'completed' ? const Value(2) : const Value(null),
+        failedAt: status == 'failed' ? Value(failedAt) : const Value(null),
       ),
     );
 

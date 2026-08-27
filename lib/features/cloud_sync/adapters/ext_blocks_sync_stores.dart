@@ -1299,7 +1299,10 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
                     item.inputHash.equals(row.inputHash),
               ))
               .getSingleOrNull();
-      if (existing != null && existing.status == 'claimed') {
+      if (existing != null && existing.status != 'completed') {
+        await (_db.delete(
+          _db.cardEvolutionWriterCalls,
+        )..where((item) => item.claimId.equals(existing.id))).go();
         await (_db.delete(
           _db.cardEvolutionClaims,
         )..where((item) => item.id.equals(existing.id))).go();
