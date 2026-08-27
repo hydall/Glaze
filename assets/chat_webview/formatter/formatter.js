@@ -44,6 +44,9 @@ export function parseImageResultPayload(payload) {
  */
 const IIG_ELEMENT_REGEX = /<img\s[^>]*?data-iig-instruction\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/gi;
 
+/** A paragraph holding only tag placeholders and whitespace (see step 11). */
+const ONLY_TAG_PLACEHOLDERS = /^(?:\x01T_(?:BLOCK_)?\d+\x01|\s)+$/;
+
 const ATTRIBUTE_PAIR_REGEX = /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]*))/g;
 
 /** Attributes of one `<img …>` element, lower-cased names to raw values. */
@@ -427,6 +430,16 @@ export class Formatter {
         if (!trimmed) return '';
 
         if (new RegExp(`^(${allBlockPh})$`).test(trimmed)) return trimmed;
+
+        // A paragraph made of nothing but HTML tags — a bare `<input>` on its
+        // own line, say — is left unwrapped. A `<p>` around it would reparent
+        // the tag, and CSS-only cards are built on exactly that adjacency:
+        // `#toggle:checked ~ .overlay` stops matching the moment the checkbox
+        // and its target stop being siblings, so the card's button goes dead
+        // while the checkbox itself still toggles.
+        if (ONLY_TAG_PLACEHOLDERS.test(trimmed)) {
+          return trimmed.replace(/\s*\n\s*/g, '');
+        }
 
         const startsWithBlock = new RegExp(`^(${blockPh}|${stylePh}|${scriptPh})`).test(trimmed);
         trimmed = trimmed.replace(new RegExp(`(\x01T_(?:BLOCK_)?\\d+\x01)\\s*\\n\\s*`, 'g'), '$1 ');

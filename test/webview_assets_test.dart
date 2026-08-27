@@ -838,6 +838,30 @@ void main() {
   });
 
   // ─── markdown image options button ────────────────────────────────────────
+  group('CSS-only card adjacency (formatter/formatter.js)', () {
+    test('a paragraph of bare tags is never wrapped in <p>', () {
+      // `#toggle:checked ~ .overlay` — the sibling selector every CSS-only
+      // card is built on — stops matching the moment a `<p>` reparents the
+      // checkbox, so a lone `<input>` on its own line must stay where the
+      // message put it.
+      expect(
+        formatterFormatterJs,
+        contains(
+          r"const ONLY_TAG_PLACEHOLDERS = "
+          r"/^(?:T_(?:BLOCK_)?\d+|\s)+$/;",
+        ),
+      );
+      final paragraphs = formatterFormatterJs.indexOf('const paragraphs =');
+      final guard = formatterFormatterJs.indexOf(
+        'ONLY_TAG_PLACEHOLDERS.test(trimmed)',
+      );
+      final wrap = formatterFormatterJs.indexOf(r'`<p>${trimmed}</p>`');
+      expect(paragraphs, isNonNegative);
+      expect(guard, greaterThan(paragraphs));
+      expect(guard, lessThan(wrap));
+    });
+  });
+
   group('generated image (formatter/formatter.js, renderer/markdown.js)', () {
     test('the result image loads eagerly', () {
       // A lazy image at the bottom edge of the WebView can be evaluated while
