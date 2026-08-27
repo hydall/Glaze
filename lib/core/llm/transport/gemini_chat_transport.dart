@@ -81,17 +81,18 @@ class GeminiChatTransport implements ChatTransport {
 
   static String buildGenerateUrl({
     required String endpoint,
-    required String model,
     required String apiKey,
-    required bool stream,
   }) {
-    final base = _normaliseBase(endpoint);
-    final responseType = stream ? 'streamGenerateContent' : 'generateContent';
-    final params = <String>[
-      'key=${Uri.encodeQueryComponent(apiKey)}',
-      if (stream) 'alt=sse',
-    ];
-    return '$base/$_apiVersion/models/$model:$responseType?${params.join('&')}';
+    final uri = Uri.parse(endpoint.trim());
+    return uri
+        .replace(
+          queryParameters: {
+            ...uri.queryParameters,
+            'key': apiKey,
+            if (endpoint.contains(':streamGenerateContent')) 'alt': 'sse',
+          },
+        )
+        .toString();
   }
 
   /// Pure: build URL + body + headers from a [ChatTransportRequest]. Exposed
@@ -155,9 +156,7 @@ class GeminiChatTransport implements ChatTransport {
 
     final url = buildGenerateUrl(
       endpoint: request.endpoint,
-      model: request.model,
       apiKey: request.apiKey,
-      stream: request.stream,
     );
 
     return GeminiBuiltRequest(

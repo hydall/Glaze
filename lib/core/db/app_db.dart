@@ -12,6 +12,7 @@ import '../models/studio_preset_codec.dart';
 import '../models/studio_agent_codec.dart';
 import '../models/studio_config.dart';
 import '../llm/studio_controller_ontology.dart';
+import '../llm/transport/endpoint_normalizer.dart';
 import '../utils/platform_paths.dart';
 import '../utils/time_helpers.dart';
 import 'tables.dart';
@@ -22,7 +23,7 @@ part 'migrations/studio_legacy.dart';
 part 'studio_preset_seed.dart';
 part 'migrations/upgrade_v2_v50.dart';
 part 'migrations/upgrade_v51_v100.dart';
-part 'migrations/upgrade_v101_v130.dart';
+part 'migrations/upgrade_v101_v131.dart';
 
 @DriftDatabase(
   tables: [
@@ -90,7 +91,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 130;
+  int get schemaVersion => 131;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -125,7 +126,7 @@ class AppDatabase extends _$AppDatabase {
     onUpgrade: (Migrator m, int from, int to) async {
       await _upgradeV2ToV50(m, from);
       await _upgradeV51ToV100(m, from);
-      await _upgradeV101ToV130(m, from);
+      await _upgradeV101ToV131(m, from);
     },
   );
 

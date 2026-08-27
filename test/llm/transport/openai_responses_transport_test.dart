@@ -20,7 +20,7 @@ ChatTransportRequest _request({
   String sessionIdMode = 'openrouter',
   String reasoningEffort = 'high',
 }) => ChatTransportRequest(
-  endpoint: 'https://api.rout.my/v1/chat/completions',
+  endpoint: 'https://api.rout.my/v1/responses',
   apiKey: 'test-key',
   model: 'openai/gpt-5.6-sol',
   messages: const [

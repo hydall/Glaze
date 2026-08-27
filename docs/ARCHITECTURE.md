@@ -1091,7 +1091,7 @@ lorebook execution, and finalization. Supporting ownership is split among
 
 ## 5. Database Layer
 
-`AppDatabase` is at schema **v130** and registers **56 tables**. The current
+`AppDatabase` is at schema **v131** and registers **56 tables**. The current
 source of truth is the `@DriftDatabase(tables: [...])` list in
 `lib/core/db/app_db.dart`; generated `app_db.g.dart` reflects that declaration.
 Do not maintain a hand-copied table-by-table inventory here.
@@ -1099,7 +1099,7 @@ Do not maintain a hand-copied table-by-table inventory here.
 `app_db.dart` is the composition root. Its implementation is split into
 `migrations/database_integrity.dart`, `migrations/studio_legacy.dart`,
 `migrations/upgrade_v2_v50.dart`, `migrations/upgrade_v51_v100.dart`,
-`migrations/upgrade_v101_v130.dart`, and `studio_preset_seed.dart`. The versioned
+`migrations/upgrade_v101_v131.dart`, and `studio_preset_seed.dart`. The versioned
 files preserve historical upgrades; current schema declarations live behind the
 `tables.dart` barrel in seven domain parts:
 

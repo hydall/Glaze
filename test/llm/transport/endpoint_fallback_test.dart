@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
-import 'package:glaze_flutter/core/llm/transport/endpoint_resolution_cache.dart';
 import 'package:glaze_flutter/core/llm/transport/openai_chat_transport.dart';
 
 /// Answers only for [servedUrl]; every other URL 404s the way a provider does
@@ -68,10 +67,7 @@ ChatTransportRequest _req(String endpoint) => ChatTransportRequest(
 );
 
 void main() {
-  setUp(EndpointResolutionCache.clear);
-  tearDown(EndpointResolutionCache.clear);
-
-  test('falls back to the version-less URL when /v1 404s', () async {
+  test('uses the persisted endpoint without appending a route', () async {
     final adapter = _RoutingAdapter(
       servedUrl: 'https://proxy.tld/chat/completions',
     );
@@ -81,73 +77,29 @@ void main() {
     String? completed;
     Object? failed;
     await transport.stream(
-      request: _req('https://proxy.tld'),
+      request: _req('https://proxy.tld/chat/completions'),
       onComplete: (text, _, {rawResponseJson}) => completed = text,
       onError: (e) => failed = e,
     );
 
     expect(failed, isNull);
     expect(completed, 'pong');
-    expect(adapter.requested, [
-      'https://proxy.tld/v1/chat/completions',
-      'https://proxy.tld/chat/completions',
-    ]);
-  });
-
-  test('adds the missing /v1 when the pasted URL 404s', () async {
-    final adapter = _RoutingAdapter(
-      servedUrl: 'https://proxy.tld/v1/chat/completions',
-    );
-    final dio = Dio()..httpClientAdapter = adapter;
-    final transport = OpenAiChatTransport(dio: dio);
-
-    String? completed;
-    await transport.stream(
-      request: _req('https://proxy.tld/chat/completions'),
-      onComplete: (text, _, {rawResponseJson}) => completed = text,
-    );
-
-    expect(completed, 'pong');
-    expect(adapter.requested, [
-      'https://proxy.tld/chat/completions',
-      'https://proxy.tld/v1/chat/completions',
-    ]);
-  });
-
-  test('the resolved URL is reused, so the walk is paid once', () async {
-    final adapter = _RoutingAdapter(
-      servedUrl: 'https://proxy.tld/chat/completions',
-    );
-    final dio = Dio()..httpClientAdapter = adapter;
-    final transport = OpenAiChatTransport(dio: dio);
-
-    await transport.stream(request: _req('https://proxy.tld'));
-    adapter.requested.clear();
-    await transport.stream(request: _req('https://proxy.tld'));
-
     expect(adapter.requested, ['https://proxy.tld/chat/completions']);
   });
 
-  test('when every candidate 404s the first failure is reported', () async {
+  test('does not probe alternative endpoints after a 404', () async {
     final adapter = _RoutingAdapter();
     final dio = Dio()..httpClientAdapter = adapter;
     final transport = OpenAiChatTransport(dio: dio);
 
     Object? failed;
     await transport.stream(
-      request: _req('https://proxy.tld'),
-      onError: (e) => failed = e,
+      request: _req('https://proxy.tld/chat/completions'),
+      onError: (error) => failed = error,
     );
 
-    expect(adapter.requested, [
-      'https://proxy.tld/v1/chat/completions',
-      'https://proxy.tld/chat/completions',
-    ]);
+    expect(adapter.requested, ['https://proxy.tld/chat/completions']);
     expect(failed, isA<DioException>());
-    expect(
-      (failed as DioException).requestOptions.uri.toString(),
-      'https://proxy.tld/v1/chat/completions',
-    );
   });
 
   test('an unparseable endpoint fails without any request', () async {

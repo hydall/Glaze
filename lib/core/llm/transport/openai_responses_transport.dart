@@ -8,7 +8,6 @@ import '../converters/reasoning_effort.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
 import 'endpoint_normalizer.dart';
-import 'endpoint_resolution_cache.dart';
 import 'extra_request_parameters.dart';
 import 'llm_protocol.dart';
 import 'openai_chat_transport.dart';
@@ -29,8 +28,6 @@ class OpenAiResponsesTransport implements ChatTransport {
               receiveTimeout: const Duration(seconds: 120),
             ),
           );
-
-  static const String _responsesRoute = '/responses';
 
   static String buildResponsesUrl(String endpoint) =>
       EndpointNormalizer.responsesUrl(endpoint);
@@ -140,52 +137,22 @@ class OpenAiResponsesTransport implements ChatTransport {
       onError?.call(Exception('API key is empty'));
       return;
     }
-    final urls = EndpointResolutionCache.order(
-      request.endpoint,
-      _responsesRoute,
-      EndpointNormalizer.responsesCandidates(request.endpoint),
-    );
-    if (urls.isEmpty) {
+    final url = request.endpoint.trim();
+    if (url.isEmpty) {
       onError?.call(Exception('Endpoint is empty or not a valid URL'));
       return;
     }
 
-    DioException? firstError;
-
-    for (var i = 0; i < urls.length; i++) {
-      try {
-        if (request.stream) {
-          await _streamResponse(
-            urls[i],
-            request,
-            cancelToken,
-            onUpdate,
-            onComplete,
-          );
-        } else {
-          await _oneShotResponse(urls[i], request, cancelToken, onComplete);
-        }
-        EndpointResolutionCache.record(
-          request.endpoint,
-          _responsesRoute,
-          urls[i],
-        );
-        return;
-      } on DioException catch (error) {
-        final reportable = firstError ?? error;
-        firstError = reportable;
-        final status = error.response?.statusCode;
-        if (i < urls.length - 1 &&
-            (status == 404 || status == 405) &&
-            cancelToken?.isCancelled != true) {
-          continue;
-        }
-        onError?.call(await decodeStreamingError(reportable));
-        return;
-      } catch (error) {
-        onError?.call(error);
-        return;
+    try {
+      if (request.stream) {
+        await _streamResponse(url, request, cancelToken, onUpdate, onComplete);
+      } else {
+        await _oneShotResponse(url, request, cancelToken, onComplete);
       }
+    } on DioException catch (error) {
+      onError?.call(await decodeStreamingError(error));
+    } catch (error) {
+      onError?.call(error);
     }
   }
 

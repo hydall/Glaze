@@ -321,7 +321,10 @@ void main() {
       repo,
       'book',
       entry,
-      config: const EmbeddingConfig(endpoint: 'old', model: 'model'),
+      config: const EmbeddingConfig(
+        endpoint: 'https://old.example',
+        model: 'model',
+      ),
     );
 
     final results = await search.search(
@@ -331,7 +334,7 @@ void main() {
         Lorebook(id: 'book', name: 'Book', entries: [entry]),
       ],
       const LorebookGlobalSettings(searchType: 'vector', vectorThreshold: 0),
-      const EmbeddingConfig(endpoint: 'new', model: 'model'),
+      const EmbeddingConfig(endpoint: 'https://new.example', model: 'model'),
     );
     expect(results, isEmpty);
     expect(embeddings.queries, isEmpty);

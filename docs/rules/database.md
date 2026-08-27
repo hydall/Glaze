@@ -83,14 +83,14 @@ integrity helpers are split into these `app_db.dart` parts:
 
 - `migrations/upgrade_v2_v50.dart`
 - `migrations/upgrade_v51_v100.dart`
-- `migrations/upgrade_v101_v130.dart`
+- `migrations/upgrade_v101_v131.dart`
 - `migrations/database_integrity.dart`
 - `migrations/studio_legacy.dart`
 
 All schema changes must update the registration/migration path in
 `app_db.dart`. Bump the schema version and add a guarded `from -> to` migration
 step; never modify existing column types without a migration. The current
-schema is **v130** with **56 registered tables**.
+schema is **v131** with **56 registered tables**.
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -233,6 +233,8 @@ Migration history:
   operation revisions, rewrite evidence, and LLM request captures update-immutable.
 - v130: added local-only `ledger_reconciliation_leases` for durable per-session
   reconciliation mutual exclusion across processes.
+- v131: normalized saved LLM and embedding endpoints to their concrete request
+  URLs.
 
 ---
 

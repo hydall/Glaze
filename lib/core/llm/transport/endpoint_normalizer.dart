@@ -1,4 +1,5 @@
 import 'known_api_hosts.dart';
+import 'llm_protocol.dart';
 
 /// A user-entered endpoint parsed into the pieces needed to build a request
 /// URL: `origin` (scheme + host + port), `path` (the API base path) and the
@@ -262,10 +263,66 @@ class EndpointNormalizer {
 
   /// Gemini's base: the version segment is added by the transport
   /// (`/v1beta/models/…`), so it must not be part of the base.
-  static String geminiBase(String raw) =>
-      parse(raw, gemini: true, insertVersion: false)
-          .withoutVersionSegments()
-          .base;
+  static String geminiBase(String raw) => parse(
+    raw,
+    gemini: true,
+    insertVersion: false,
+  ).withoutVersionSegments().base;
+
+  /// Canonical URL stored in `ApiConfig.endpoint` for an LLM connection.
+  ///
+  /// Request transports consume this value as-is. Route completion belongs at
+  /// the persistence boundary so the endpoint shown to the user is the endpoint
+  /// that will actually receive generation requests.
+  static String persistedLlmEndpoint({
+    required String raw,
+    required String protocol,
+    required String model,
+    required bool stream,
+    bool useResponsesApi = false,
+  }) {
+    final trimmed = raw.trim();
+    if (protocol == LlmProtocol.openrouter) {
+      return 'https://openrouter.ai/api/v1/chat/completions';
+    }
+    if (trimmed.isEmpty) return '';
+
+    final resolved = switch (protocol) {
+      LlmProtocol.openaiResponses => responsesUrl(trimmed),
+      LlmProtocol.anthropic => messagesUrl(trimmed),
+      LlmProtocol.gemini => _geminiGenerationUrl(
+        trimmed,
+        model: model,
+        stream: stream,
+      ),
+      LlmProtocol.customChatCompletion when useResponsesApi => responsesUrl(
+        trimmed,
+      ),
+      _ => chatCompletionsUrl(trimmed),
+    };
+    return resolved.isEmpty ? trimmed : resolved;
+  }
+
+  /// Canonical URL stored in `ApiConfig.embeddingEndpoint`.
+  static String persistedEmbeddingEndpoint(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return '';
+    final resolved = embeddingsUrl(trimmed);
+    return resolved.isEmpty ? trimmed : resolved;
+  }
+
+  static String _geminiGenerationUrl(
+    String raw, {
+    required String model,
+    required bool stream,
+  }) {
+    final base = geminiBase(raw);
+    if (base.isEmpty) return '';
+    final modelName = model.trim();
+    if (modelName.isEmpty) return '$base/v1beta/models';
+    final action = stream ? 'streamGenerateContent' : 'generateContent';
+    return '$base/v1beta/models/$modelName:$action';
+  }
 
   /// Ordered URLs to try for [suffix]: the normalized one first, then the
   /// plausible alternatives (version forced on / stripped off). Transports

@@ -284,7 +284,7 @@ void main() {
       final cleanerConfig = snapshot.resolveCleanerConfig(
         errorLabel: 'test-cleaner',
       );
-      expect(cleanerConfig.endpoint, 'https://old.example');
+      expect(cleanerConfig.endpoint, 'https://old.example/v1/chat/completions');
       expect(cleanerConfig.model, 'old-model');
     },
   );

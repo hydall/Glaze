@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../db/app_db.dart';
 import '../../db/repositories/session_lorebook_embedding_job_repo.dart';
+import '../../llm/transport/endpoint_normalizer.dart';
 import '../../models/studio_agent_codec.dart';
 import '../../models/studio_preset_codec.dart';
 import '../image_storage_service.dart';
@@ -308,7 +309,7 @@ class FlutterBackupImporter extends BackupHelpers {
           try {
             r = jsonDecode(line) as Map<String, dynamic>;
             _stageLegacyStudioRuntimeRow(tableName, r);
-            r = _canonicalizeStudioRow(tableName, r);
+            r = _canonicalizeRow(tableName, r);
           } catch (_) {
             continue;
           }
@@ -406,7 +407,7 @@ class FlutterBackupImporter extends BackupHelpers {
               if ((++i % _batchSize) == 0) _cancel.check();
               final source = Map<String, dynamic>.from(row as Map);
               _stageLegacyStudioRuntimeRow(tableName, source);
-              final r = _canonicalizeStudioRow(tableName, source);
+              final r = _canonicalizeRow(tableName, source);
               final columns = r.keys.where(knownCols.contains).toList();
               if (columns.isEmpty) continue;
               final placeholders = columns.map((_) => '?').join(', ');
@@ -434,11 +435,33 @@ class FlutterBackupImporter extends BackupHelpers {
     }
   }
 
-  Map<String, dynamic> _canonicalizeStudioRow(
+  Map<String, dynamic> _canonicalizeRow(
     String tableName,
     Map<String, dynamic> row,
   ) {
     try {
+      if (tableName == 'api_configs') {
+        bool readBool(String key, {required bool fallback}) {
+          final value = row[key];
+          if (value is bool) return value;
+          if (value is num) return value != 0;
+          return fallback;
+        }
+
+        return {
+          ...row,
+          'endpoint': EndpointNormalizer.persistedLlmEndpoint(
+            raw: row['endpoint']?.toString() ?? '',
+            protocol: row['protocol']?.toString() ?? 'openai',
+            model: row['model']?.toString() ?? '',
+            stream: readBool('stream', fallback: true),
+            useResponsesApi: readBool('use_responses_api', fallback: false),
+          ),
+          'embedding_endpoint': EndpointNormalizer.persistedEmbeddingEndpoint(
+            row['embedding_endpoint']?.toString() ?? '',
+          ),
+        };
+      }
       if (tableName == 'studio_preset_rows') {
         final blocks = row['blocks_json'];
         final source = blocks is String ? blocks : jsonEncode(blocks);

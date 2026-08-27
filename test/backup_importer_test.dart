@@ -71,7 +71,7 @@ void main() {
       expect(configs.length, 1);
       final c = configs.first;
       expect(c.name, equals('Default'));
-      expect(c.endpoint, equals('https://api.openai.com/v1'));
+      expect(c.endpoint, equals('https://api.openai.com/v1/chat/completions'));
       expect(c.apiKey, equals('sk-test123'));
       expect(c.model, equals('gpt-4'));
       expect(c.maxTokens, equals(4096));
@@ -123,10 +123,13 @@ void main() {
       final c = configs.first;
       expect(c.configId, equals('llm1'));
       expect(c.name, equals('My LLM'));
-      expect(c.endpoint, equals('https://llm.example.com'));
+      expect(c.endpoint, equals('https://llm.example.com/v1/chat/completions'));
       expect(c.embeddingEnabled, isTrue);
       expect(c.embeddingUseSame, isFalse);
-      expect(c.embeddingEndpoint, equals('https://emb.example.com'));
+      expect(
+        c.embeddingEndpoint,
+        equals('https://emb.example.com/v1/embeddings'),
+      );
       expect(c.embeddingApiKey, equals('sk-emb'));
       expect(c.embeddingModel, equals('text-embedding-3'));
     });
@@ -242,17 +245,26 @@ void main() {
       expect(names, containsAll(['GPT-4', 'Claude', 'Local LLM']));
 
       final gpt4 = configs.firstWhere((c) => c.configId == 'p1');
-      expect(gpt4.endpoint, equals('https://api.openai.com/v1'));
+      expect(
+        gpt4.endpoint,
+        equals('https://api.openai.com/v1/chat/completions'),
+      );
       expect(gpt4.maxTokens, equals(4096));
       expect(gpt4.contextSize, equals(16000));
 
       final claude = configs.firstWhere((c) => c.configId == 'p2');
-      expect(claude.endpoint, equals('https://api.anthropic.com/v1'));
+      expect(
+        claude.endpoint,
+        equals('https://api.anthropic.com/v1/chat/completions'),
+      );
       expect(claude.maxTokens, equals(8000));
       expect(claude.contextSize, equals(100000));
 
       final local = configs.firstWhere((c) => c.configId == 'p3');
-      expect(local.endpoint, equals('http://localhost:8080/v1'));
+      expect(
+        local.endpoint,
+        equals('http://localhost:8080/v1/chat/completions'),
+      );
       expect(local.apiKey, isEmpty);
     });
 
@@ -319,11 +331,17 @@ void main() {
         expect(llm1.name, equals('Main LLM'));
         expect(llm1.embeddingEnabled, isTrue);
         expect(llm1.embeddingUseSame, isFalse);
-        expect(llm1.embeddingEndpoint, equals('https://emb.example.com'));
+        expect(
+          llm1.embeddingEndpoint,
+          equals('https://emb.example.com/v1/embeddings'),
+        );
 
         final llm2 = configs.firstWhere((c) => c.configId == 'llm2');
         expect(llm2.name, equals('Secondary LLM'));
-        expect(llm2.endpoint, equals('https://backup.example.com'));
+        expect(
+          llm2.endpoint,
+          equals('https://backup.example.com/v1/chat/completions'),
+        );
         expect(llm2.model, equals('claude-3.5'));
         expect(llm2.maxTokens, equals(4096));
         expect(llm2.contextSize, equals(200000));
@@ -466,10 +484,16 @@ void main() {
 
         final llm1 = configs.firstWhere((c) => c.configId == 'llm1');
         expect(llm1.name, equals('Main LLM'));
-        expect(llm1.endpoint, equals('https://llm.example.com'));
+        expect(
+          llm1.endpoint,
+          equals('https://llm.example.com/v1/chat/completions'),
+        );
         expect(llm1.embeddingEnabled, isTrue);
         expect(llm1.embeddingUseSame, isFalse);
-        expect(llm1.embeddingEndpoint, equals('https://emb.example.com'));
+        expect(
+          llm1.embeddingEndpoint,
+          equals('https://emb.example.com/v1/embeddings'),
+        );
         expect(llm1.embeddingApiKey, equals('sk-emb'));
         expect(llm1.embeddingModel, equals('text-embedding-3'));
 

@@ -77,6 +77,27 @@ void main() {
   });
 
   group('EmbeddingConfig', () {
+    test('signature uses the effective embedding URL', () {
+      const base = EmbeddingConfig(
+        endpoint: 'https://api.openai.com/v1',
+        model: 'text-embedding-3-small',
+      );
+      const chat = EmbeddingConfig(
+        endpoint: 'https://api.openai.com/v1/chat/completions',
+        model: 'text-embedding-3-small',
+      );
+      const embeddings = EmbeddingConfig(
+        endpoint: 'https://api.openai.com/v1/embeddings',
+        model: 'text-embedding-3-small',
+      );
+
+      expect(embeddingModelSignature(chat), embeddingModelSignature(base));
+      expect(
+        embeddingModelSignature(embeddings),
+        embeddingModelSignature(base),
+      );
+    });
+
     test('defaults are sensible', () {
       const config = EmbeddingConfig(endpoint: 'https://x');
       expect(config.endpoint, 'https://x');

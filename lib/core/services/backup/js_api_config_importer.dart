@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../db/app_db.dart';
+import '../../llm/transport/endpoint_normalizer.dart';
 import '../../llm/transport/llm_protocol.dart';
 import '../image_storage_service.dart';
 import 'backup_helpers.dart';
@@ -273,7 +274,9 @@ class JsApiConfigImporter extends BackupHelpers {
             ApiConfigsCompanion(
               embeddingUseSame: const Value(false),
               embeddingEnabled: const Value(true),
-              embeddingEndpoint: Value(embEndpoint),
+              embeddingEndpoint: Value(
+                EndpointNormalizer.persistedEmbeddingEndpoint(embEndpoint),
+              ),
               embeddingApiKey: Value(embApiKey),
               embeddingModel: Value(embModel),
             ),
@@ -348,6 +351,12 @@ class JsApiConfigImporter extends BackupHelpers {
     String embeddingModel = '',
     int embeddingMaxChunkTokens = 512,
   }) async {
+    final useResponsesApi =
+        preset['useResponsesApi'] == true ||
+        preset['use_responses_api'] == true;
+    final endpoint = preset['endpoint'] as String?;
+    final model = preset['model'] as String? ?? '';
+    final stream = preset['stream'] as bool? ?? true;
     await db
         .into(db.apiConfigs)
         .insertOnConflictUpdate(
@@ -356,17 +365,22 @@ class JsApiConfigImporter extends BackupHelpers {
             name: preset['name'] as String? ?? '',
             providerId: const Value('custom_chat_completion'),
             protocol: const Value(LlmProtocol.customChatCompletion),
-            useResponsesApi: Value(
-              preset['useResponsesApi'] == true ||
-                  preset['use_responses_api'] == true,
-            ),
-            endpoint: preset['endpoint'] != null
-                ? Value(preset['endpoint'] as String)
+            useResponsesApi: Value(useResponsesApi),
+            endpoint: endpoint != null
+                ? Value(
+                    EndpointNormalizer.persistedLlmEndpoint(
+                      raw: endpoint,
+                      protocol: LlmProtocol.customChatCompletion,
+                      model: model,
+                      stream: stream,
+                      useResponsesApi: useResponsesApi,
+                    ),
+                  )
                 : const Value.absent(),
             apiKey: Value(
               preset['apiKey'] as String? ?? preset['key'] as String?,
             ),
-            model: Value(preset['model'] as String?),
+            model: Value(model),
             mode: Value(mode),
             maxTokens: Value(toInt(preset['max_tokens']) ?? 8000),
             contextSize: Value(toInt(preset['context']) ?? 32000),
@@ -377,7 +391,7 @@ class JsApiConfigImporter extends BackupHelpers {
               toDouble(preset['frequency_penalty']) ?? 0.0,
             ),
             presencePenalty: Value(toDouble(preset['presence_penalty']) ?? 0.0),
-            stream: Value(preset['stream'] as bool? ?? true),
+            stream: Value(stream),
             reasoningEffort: Value(
               preset['reasoningEffort'] as String? ??
                   preset['reasoning_effort'] as String? ??
@@ -408,7 +422,9 @@ class JsApiConfigImporter extends BackupHelpers {
             ),
             embeddingUseSame: Value(embeddingUseSame),
             embeddingEnabled: Value(embeddingEnabled),
-            embeddingEndpoint: Value(embeddingEndpoint),
+            embeddingEndpoint: Value(
+              EndpointNormalizer.persistedEmbeddingEndpoint(embeddingEndpoint),
+            ),
             embeddingApiKey: Value(embeddingApiKey),
             embeddingModel: Value(embeddingModel),
             embeddingMaxChunkTokens: Value(embeddingMaxChunkTokens),

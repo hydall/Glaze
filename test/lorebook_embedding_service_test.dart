@@ -87,7 +87,7 @@ void main() {
       ],
       textHash: hash,
       retrievalMetadata: embeddingMetadataForConfig(
-        const EmbeddingConfig(endpoint: 'old', model: 'model'),
+        const EmbeddingConfig(endpoint: 'https://old.example', model: 'model'),
         const [
           [1, 0],
         ],
@@ -96,7 +96,7 @@ void main() {
 
     final result = await service.indexLorebookEntries('book', const [
       entry,
-    ], const EmbeddingConfig(endpoint: 'new', model: 'model'));
+    ], const EmbeddingConfig(endpoint: 'https://new.example', model: 'model'));
     expect(result.indexed, 1);
     expect(embeddingService.requestedTexts, ['content']);
   });

@@ -33,7 +33,7 @@ String resolveEmbeddingEndpoint(String endpoint) =>
     EndpointNormalizer.embeddingsUrl(endpoint);
 
 String embeddingModelSignature(EmbeddingConfig config) {
-  final endpoint = config.endpoint.trim();
+  final endpoint = resolveEmbeddingEndpoint(config.endpoint);
   final model = config.model.trim();
   return '${endpoint.isEmpty ? '<endpoint>' : endpoint}|'
       '${model.isEmpty ? '<model>' : model}|chunks:${config.maxChunkTokens}';
@@ -50,7 +50,7 @@ Map<String, dynamic> embeddingMetadataForConfig(
   if (hints != null) metadata['hints'] = hints;
   if (chunks != null) metadata['chunks'] = chunks;
   metadata['embeddingModel'] = config.model.trim();
-  metadata['embeddingEndpoint'] = config.endpoint.trim();
+  metadata['embeddingEndpoint'] = resolveEmbeddingEndpoint(config.endpoint);
   metadata['embeddingSignature'] = embeddingModelSignature(config);
   metadata['embeddingDimension'] = vectors.isEmpty ? 0 : vectors.first.length;
   return metadata;
@@ -81,7 +81,8 @@ class _EmbeddingCache {
   final LinkedHashMap<String, _Entry> _store = LinkedHashMap();
 
   String _key(String text, EmbeddingConfig config) =>
-      '${config.endpoint}|${config.model}|${text.hashCode}|$text';
+      '${resolveEmbeddingEndpoint(config.endpoint)}|${config.model}|'
+      '${text.hashCode}|$text';
 
   List<double>? get(String text, EmbeddingConfig config) {
     final entry = _store[_key(text, config)];

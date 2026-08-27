@@ -1,6 +1,7 @@
 import '../llm/embedding_service.dart';
 import '../llm/transport/chat_transport.dart';
 import '../llm/transport/chat_transport_request.dart';
+import '../llm/transport/endpoint_normalizer.dart';
 import '../llm/transport/llm_protocol.dart';
 import '../llm/transport/transport_factory.dart';
 
@@ -34,15 +35,22 @@ class ApiConnectionTester {
     try {
       final effectiveProtocol = _normalizedProtocol(protocol);
       final transport = _pickTransport(effectiveProtocol);
+      final requestEndpoint = EndpointNormalizer.persistedLlmEndpoint(
+        raw: endpoint,
+        protocol: effectiveProtocol,
+        model: model,
+        stream: false,
+        useResponsesApi: useResponsesApi,
+      );
       final models = await transport.fetchModels(
-        endpoint: endpoint,
+        endpoint: requestEndpoint,
         apiKey: apiKey,
       );
       if (models.isEmpty) {
         String? responseText;
         await transport.stream(
           request: ChatTransportRequest(
-            endpoint: endpoint,
+            endpoint: requestEndpoint,
             apiKey: apiKey,
             model: model,
             messages: const [

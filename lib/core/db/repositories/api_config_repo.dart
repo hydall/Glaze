@@ -6,6 +6,7 @@ import '../app_db.dart';
 import '../../models/api_config.dart';
 import '../../application/sync_repo_interfaces.dart';
 import '../../models/extra_request_parameter.dart';
+import '../../llm/transport/endpoint_normalizer.dart';
 
 class ApiConfigRepo implements SyncApiConfigStore {
   final AppDatabase _db;
@@ -27,7 +28,21 @@ class ApiConfigRepo implements SyncApiConfigStore {
 
   @override
   Future<void> put(ApiConfig config) async {
-    await _db.into(_db.apiConfigs).insertOnConflictUpdate(_toCompanion(config));
+    final persisted = config.copyWith(
+      endpoint: EndpointNormalizer.persistedLlmEndpoint(
+        raw: config.endpoint,
+        protocol: config.protocol,
+        model: config.model,
+        stream: config.stream,
+        useResponsesApi: config.useResponsesApi,
+      ),
+      embeddingEndpoint: EndpointNormalizer.persistedEmbeddingEndpoint(
+        config.embeddingEndpoint,
+      ),
+    );
+    await _db
+        .into(_db.apiConfigs)
+        .insertOnConflictUpdate(_toCompanion(persisted));
   }
 
   @override

@@ -1,7 +1,7 @@
 part of '../app_db.dart';
 
-extension _AppDatabaseUpgradeV101ToV130 on AppDatabase {
-  Future<void> _upgradeV101ToV130(Migrator m, int from) async {
+extension _AppDatabaseUpgradeV101ToV131 on AppDatabase {
+  Future<void> _upgradeV101ToV131(Migrator m, int from) async {
     if (from < 101) {
       await _retireStudioConfigProfiles();
     }
@@ -400,6 +400,39 @@ extension _AppDatabaseUpgradeV101ToV130 on AppDatabase {
     }
     if (from < 130) {
       await m.createTable(ledgerReconciliationLeases);
+    }
+    if (from < 131) {
+      final rows = await customSelect(
+        'SELECT config_id, protocol, endpoint, model, stream, '
+        'use_responses_api, embedding_endpoint FROM api_configs',
+      ).get();
+      for (final row in rows) {
+        final endpoint = row.readNullable<String>('endpoint') ?? '';
+        final embeddingEndpoint =
+            row.readNullable<String>('embedding_endpoint') ?? '';
+        final persistedEndpoint = EndpointNormalizer.persistedLlmEndpoint(
+          raw: endpoint,
+          protocol: row.read<String>('protocol'),
+          model: row.readNullable<String>('model') ?? '',
+          stream: row.read<int>('stream') != 0,
+          useResponsesApi: row.read<int>('use_responses_api') != 0,
+        );
+        final persistedEmbeddingEndpoint =
+            EndpointNormalizer.persistedEmbeddingEndpoint(embeddingEndpoint);
+        if (persistedEndpoint == endpoint &&
+            persistedEmbeddingEndpoint == embeddingEndpoint) {
+          continue;
+        }
+        await customStatement(
+          'UPDATE api_configs SET endpoint = ?, embedding_endpoint = ? '
+          'WHERE config_id = ?',
+          [
+            persistedEndpoint,
+            persistedEmbeddingEndpoint,
+            row.read<String>('config_id'),
+          ],
+        );
+      }
     }
   }
 }

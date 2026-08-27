@@ -72,7 +72,6 @@ class AnthropicChatTransport implements ChatTransport {
             ),
           );
 
-  static const String _messagesRoute = '/messages';
   static const String _modelsRoute = '/models';
 
   static String buildMessagesUrl(String endpoint) =>
@@ -91,12 +90,8 @@ class AnthropicChatTransport implements ChatTransport {
       return;
     }
 
-    final urls = EndpointResolutionCache.order(
-      request.endpoint,
-      _messagesRoute,
-      EndpointNormalizer.messagesCandidates(request.endpoint),
-    );
-    if (urls.isEmpty) {
+    final url = request.endpoint.trim();
+    if (url.isEmpty) {
       onError?.call(Exception('Endpoint is empty or not a valid URL'));
       return;
     }
@@ -111,65 +106,48 @@ class AnthropicChatTransport implements ChatTransport {
     final omitReasoning =
         !(request.showNativeReasoning ?? !request.omitReasoning);
 
-    // A 404/405 means the base path is wrong, not the request — walk the
-    // remaining candidates before surfacing the (first) failure.
-    DioException? firstError;
-
-    for (var i = 0; i < urls.length; i++) {
-      final url = urls[i];
-      for (var attempt = 0; attempt <= _maxRetries; attempt++) {
-        try {
-          if (request.stream) {
-            await _streamResponse(
-              url,
-              built.headers,
-              built.body,
-              prefill: built.prefill,
-              cancelToken: cancelToken,
-              onUpdate: onUpdate,
-              onComplete: onComplete,
-              omitReasoning: omitReasoning,
-              receiveTimeoutMs: request.receiveTimeoutMs,
-            );
-          } else {
-            await _oneShotResponse(
-              url,
-              built.headers,
-              built.body,
-              prefill: built.prefill,
-              cancelToken: cancelToken,
-              onComplete: onComplete,
-              omitReasoning: omitReasoning,
-              receiveTimeoutMs: request.receiveTimeoutMs,
-            );
-          }
-          EndpointResolutionCache.record(request.endpoint, _messagesRoute, url);
-          return; // success — no retry needed
-        } on DioException catch (e) {
-          if (attempt < _maxRetries &&
-              e.response?.statusCode == 408 &&
-              cancelToken?.isCancelled != true) {
-            debugPrint(
-              '[Anthropic] HTTP 408 on attempt ${attempt + 1}/$_maxRetries — retrying',
-            );
-            await Future<void>.delayed(const Duration(seconds: 1));
-            continue;
-          }
-          final reportable = firstError ?? e;
-          firstError = reportable;
-          final status = e.response?.statusCode;
-          if (i < urls.length - 1 &&
-              (status == 404 || status == 405) &&
-              cancelToken?.isCancelled != true) {
-            debugPrint('[Anthropic] $status on $url — trying ${urls[i + 1]}');
-            break; // next candidate URL
-          }
-          onError?.call(await decodeStreamingError(reportable));
-          return;
-        } catch (e) {
-          onError?.call(e);
-          return;
+    for (var attempt = 0; attempt <= _maxRetries; attempt++) {
+      try {
+        if (request.stream) {
+          await _streamResponse(
+            url,
+            built.headers,
+            built.body,
+            prefill: built.prefill,
+            cancelToken: cancelToken,
+            onUpdate: onUpdate,
+            onComplete: onComplete,
+            omitReasoning: omitReasoning,
+            receiveTimeoutMs: request.receiveTimeoutMs,
+          );
+        } else {
+          await _oneShotResponse(
+            url,
+            built.headers,
+            built.body,
+            prefill: built.prefill,
+            cancelToken: cancelToken,
+            onComplete: onComplete,
+            omitReasoning: omitReasoning,
+            receiveTimeoutMs: request.receiveTimeoutMs,
+          );
         }
+        return;
+      } on DioException catch (e) {
+        if (attempt < _maxRetries &&
+            e.response?.statusCode == 408 &&
+            cancelToken?.isCancelled != true) {
+          debugPrint(
+            '[Anthropic] HTTP 408 on attempt ${attempt + 1}/$_maxRetries — retrying',
+          );
+          await Future<void>.delayed(const Duration(seconds: 1));
+          continue;
+        }
+        onError?.call(await decodeStreamingError(e));
+        return;
+      } catch (e) {
+        onError?.call(e);
+        return;
       }
     }
   }

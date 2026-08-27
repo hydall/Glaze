@@ -115,19 +115,21 @@ provider disposal is not a cleanup path.
 
 ---
 
-## Endpoint URLs — never hand-build them
+## Endpoint URLs — normalize when persisting
 
-Every request URL comes from `EndpointNormalizer` (`core/llm/transport/endpoint_normalizer.dart`).
-Never concatenate `'$endpoint/chat/completions'` in a transport, service or provider:
-the field is free text and arrives as `api.openai.com`, `htp:/api…`, a pasted
-`…/v1/chat/compeltions`, or a URL wrapped in quotes.
+`ApiConfig.endpoint` stores the concrete generation URL. Normalize free-text
+input with `EndpointNormalizer.persistedLlmEndpoint` at every persistence
+boundary. Generation transports use the stored endpoint as-is and must not
+append operation routes or probe alternatives after a 404/405.
 
 | Need | Call |
 |------|------|
+| Persisted generation URL | `EndpointNormalizer.persistedLlmEndpoint(...)` |
+| Persisted embeddings URL | `EndpointNormalizer.persistedEmbeddingEndpoint(endpoint)` |
 | Chat Completions URL | `EndpointNormalizer.chatCompletionsUrl(endpoint)` |
 | Responses / Messages / Embeddings / Models | `responsesUrl` / `messagesUrl` / `embeddingsUrl` / `modelsUrl` |
 | OpenAI images | `EndpointNormalizer.imagesUrl(endpoint, 'generations' \| 'edits')` |
-| Gemini base (caller appends `/v1beta/models/…`) | `EndpointNormalizer.geminiBase(endpoint)` |
+| Gemini base for sibling routes such as model listing | `EndpointNormalizer.geminiBase(endpoint)` |
 | Base only | `EndpointNormalizer.baseUrl(endpoint)` |
 
 Rules:
@@ -135,12 +137,11 @@ Rules:
 - The normalizer repairs scheme, typos and version segments and rewrites the
   base path for hosts in `KnownApiHosts`. A pasted **complete** operation URL is
   honoured verbatim — that is the escape hatch for providers with an unusual base.
-- A transport must treat **404/405 as a wrong URL, not a failed request**: walk
-  `EndpointNormalizer.candidates(...)` (via `<route>Candidates`), then report the
-  **first** error, never the last — later candidates describe URLs the user never typed.
-- Record the winner with `EndpointResolutionCache.record` and start from
-  `EndpointResolutionCache.order` so the walk is paid once per process.
-- An unparseable endpoint fails fast through `onError` before any HTTP call.
+- Model-list and embedding calls derive sibling URLs through the normalizer.
+- Unsaved settings input is normalized temporarily before connection tests and
+  model listing.
+- Gemini stores the concrete model action URL; its transport only adds auth and
+  streaming query parameters.
 
 ---
 

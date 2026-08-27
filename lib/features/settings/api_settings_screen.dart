@@ -1723,9 +1723,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     }
     setState(() => _isLoadingModels = true);
     try {
+      final persistedEndpoint = EndpointNormalizer.persistedLlmEndpoint(
+        raw: endpoint,
+        protocol: _protocol,
+        model: _modelCtrl.text,
+        stream: _stream,
+        useResponsesApi: _useResponsesApi,
+      );
       final models = await pickChatTransport(
         _protocol,
-      ).fetchModels(endpoint: endpoint, apiKey: apiKey);
+      ).fetchModels(endpoint: persistedEndpoint, apiKey: apiKey);
       if (!mounted) return;
       setState(() {
         _fetchedModels = models;

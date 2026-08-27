@@ -1,7 +1,69 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/transport/endpoint_normalizer.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 
 void main() {
+  group('persisted endpoints', () {
+    test('stores the concrete generation route for every protocol', () {
+      String endpoint(
+        String protocol, {
+        bool useResponsesApi = false,
+        bool stream = true,
+      }) => EndpointNormalizer.persistedLlmEndpoint(
+        raw: 'https://example.com/v1/',
+        protocol: protocol,
+        model: 'model-name',
+        stream: stream,
+        useResponsesApi: useResponsesApi,
+      );
+
+      expect(
+        endpoint(LlmProtocol.openai),
+        'https://example.com/v1/chat/completions',
+      );
+      expect(
+        endpoint(LlmProtocol.customChatCompletion, useResponsesApi: true),
+        'https://example.com/v1/responses',
+      );
+      expect(
+        endpoint(LlmProtocol.openaiResponses),
+        'https://example.com/v1/responses',
+      );
+      expect(
+        endpoint(LlmProtocol.anthropic),
+        'https://example.com/v1/messages',
+      );
+      expect(
+        endpoint(LlmProtocol.gemini),
+        'https://example.com/v1beta/models/model-name:streamGenerateContent',
+      );
+      expect(
+        endpoint(LlmProtocol.gemini, stream: false),
+        'https://example.com/v1beta/models/model-name:generateContent',
+      );
+      expect(
+        endpoint(LlmProtocol.openrouter),
+        'https://openrouter.ai/api/v1/chat/completions',
+      );
+    });
+
+    test('preserves invalid text and completes embedding routes', () {
+      expect(
+        EndpointNormalizer.persistedLlmEndpoint(
+          raw: '  not a url  ',
+          protocol: LlmProtocol.openai,
+          model: '',
+          stream: true,
+        ),
+        'not a url',
+      );
+      expect(
+        EndpointNormalizer.persistedEmbeddingEndpoint('example.com/v1'),
+        'https://example.com/v1/embeddings',
+      );
+    });
+  });
+
   group('bare host → full chat URL', () {
     test('adds scheme and the version the provider serves', () {
       expect(
@@ -193,9 +255,7 @@ void main() {
   group('a complete URL for another route', () {
     test('an /embeddings or /models URL still yields the chat URL', () {
       expect(
-        EndpointNormalizer.chatCompletionsUrl(
-          'https://api.host/v1/embeddings',
-        ),
+        EndpointNormalizer.chatCompletionsUrl('https://api.host/v1/embeddings'),
         'https://api.host/v1/chat/completions',
       );
       expect(
@@ -306,10 +366,7 @@ void main() {
         'https://api.openai.com/v1/images/edits',
       );
       expect(
-        EndpointNormalizer.imagesUrl(
-          'http://127.0.0.1:8080',
-          'generations',
-        ),
+        EndpointNormalizer.imagesUrl('http://127.0.0.1:8080', 'generations'),
         'http://127.0.0.1:8080/v1/images/generations',
       );
     });

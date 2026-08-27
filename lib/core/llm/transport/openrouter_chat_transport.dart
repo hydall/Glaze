@@ -21,7 +21,7 @@ import 'openai_chat_transport.dart';
 /// Streaming/parsing reuses [OpenAiChatTransport] verbatim — OR's SSE chunks
 /// are OpenAI-compatible.
 class OpenRouterChatTransport implements ChatTransport {
-  static const String baseUrl = 'https://openrouter.ai/api/v1';
+  static const String baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
   static const String referer = 'https://github.com/hydall/Glaze';
   static const String title = 'Glaze';
 

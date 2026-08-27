@@ -41,10 +41,10 @@ void main() {
   group('buildGenerateUrl', () {
     test('streaming URL has streamGenerateContent + alt=sse', () {
       final url = GeminiChatTransport.buildGenerateUrl(
-        endpoint: 'https://generativelanguage.googleapis.com',
-        model: 'gemini-2.5-flash',
+        endpoint:
+            'https://generativelanguage.googleapis.com/v1beta/models/'
+            'gemini-2.5-flash:streamGenerateContent',
         apiKey: 'k',
-        stream: true,
       );
       expect(
         url,
@@ -55,10 +55,10 @@ void main() {
 
     test('non-stream URL uses generateContent', () {
       final url = GeminiChatTransport.buildGenerateUrl(
-        endpoint: 'https://generativelanguage.googleapis.com',
-        model: 'gemini-2.5-pro',
+        endpoint:
+            'https://generativelanguage.googleapis.com/v1beta/models/'
+            'gemini-2.5-pro:generateContent',
         apiKey: 'k',
-        stream: false,
       );
       expect(
         url,
@@ -69,22 +69,23 @@ void main() {
 
     test('api key with special chars is URL-encoded', () {
       final url = GeminiChatTransport.buildGenerateUrl(
-        endpoint: 'https://generativelanguage.googleapis.com',
-        model: 'gemini-2.5-flash',
+        endpoint:
+            'https://generativelanguage.googleapis.com/v1beta/models/'
+            'gemini-2.5-flash:generateContent',
         apiKey: 'k/with+chars',
-        stream: false,
       );
       expect(url, contains('key=k%2Fwith%2Bchars'));
     });
 
-    test('schemeless endpoint gets https prefix', () {
+    test('existing query parameters are preserved', () {
       final url = GeminiChatTransport.buildGenerateUrl(
-        endpoint: 'example.com',
-        model: 'gemini-2.5-flash',
+        endpoint:
+            'https://example.com/v1beta/models/'
+            'gemini-2.5-flash:generateContent?region=eu',
         apiKey: 'k',
-        stream: false,
       );
-      expect(url.startsWith('https://example.com/'), isTrue);
+      expect(url, contains('region=eu'));
+      expect(url, contains('key=k'));
     });
   });
 

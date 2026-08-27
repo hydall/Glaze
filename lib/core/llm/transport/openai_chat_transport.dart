@@ -46,12 +46,7 @@ class OpenAiChatTransport implements ChatTransport {
            ),
        _extraHeaders = extraHeaders ?? const {};
 
-  static const String _chatRoute = '/chat/completions';
   static const String _modelsRoute = '/models';
-
-  /// HTTP statuses that mean "wrong URL, not wrong request" — the endpoint is
-  /// retried against the next candidate instead of failing the generation.
-  static const Set<int> _routeMismatchStatuses = {404, 405};
 
   static String normalizeEndpoint(String endpoint) =>
       EndpointNormalizer.baseUrl(endpoint);
@@ -71,12 +66,12 @@ class OpenAiChatTransport implements ChatTransport {
       onError?.call(Exception('API key is empty'));
       return;
     }
-    final urls = EndpointResolutionCache.order(
-      request.endpoint,
-      _chatRoute,
-      EndpointNormalizer.chatCompletionsCandidates(request.endpoint),
-    );
-    if (urls.isEmpty) {
+    final url = request.endpoint.trim();
+    final uri = Uri.tryParse(url);
+    if (url.isEmpty ||
+        uri == null ||
+        !uri.hasAuthority ||
+        (uri.scheme != 'http' && uri.scheme != 'https')) {
       onError?.call(Exception('Endpoint is empty or not a valid URL'));
       return;
     }
@@ -89,44 +84,19 @@ class OpenAiChatTransport implements ChatTransport {
       return;
     }
 
-    // The first failure is the one worth reporting: later candidates exist
-    // only to rescue a mistyped base path, and their errors describe a URL
-    // the user never entered.
-    DioException? firstError;
-
-    for (var i = 0; i < urls.length; i++) {
-      final url = urls[i];
-      try {
-        await _send(
-          url: url,
-          request: request,
-          body: body,
-          cancelToken: cancelToken,
-          onUpdate: onUpdate,
-          onComplete: onComplete,
-        );
-        EndpointResolutionCache.record(request.endpoint, _chatRoute, url);
-        return;
-      } on DioException catch (e) {
-        final reportable = firstError ?? e;
-        firstError = reportable;
-        final canFallBack =
-            i < urls.length - 1 &&
-            _routeMismatchStatuses.contains(e.response?.statusCode) &&
-            cancelToken?.isCancelled != true;
-        if (canFallBack) {
-          debugPrint(
-            '[OpenAI] ${e.response?.statusCode} on $url — '
-            'trying ${urls[i + 1]}',
-          );
-          continue;
-        }
-        onError?.call(await decodeStreamingError(reportable));
-        return;
-      } catch (e) {
-        onError?.call(e);
-        return;
-      }
+    try {
+      await _send(
+        url: url,
+        request: request,
+        body: body,
+        cancelToken: cancelToken,
+        onUpdate: onUpdate,
+        onComplete: onComplete,
+      );
+    } on DioException catch (e) {
+      onError?.call(await decodeStreamingError(e));
+    } catch (e) {
+      onError?.call(e);
     }
   }
 
