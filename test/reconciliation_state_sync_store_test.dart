@@ -565,6 +565,47 @@ void main() {
     },
   );
 
+  test(
+    'incoming completed collector replaces failed boundary at another ordinal',
+    () async {
+      final sourceRuns = await _appendChain(sourceDb, 2);
+      final targetRuns = await _appendChain(targetDb, 2);
+      await _insertFailedCollectorPlaceholder(sourceDb);
+      final completed = await _completeCollector(sourceDb, sourceRuns);
+      final local = await _claimCollector(
+        targetDb,
+        targetRuns,
+        ownerId: 'local',
+      );
+      expect(
+        await CardEvolutionCollectorRunRepo(targetDb).markFailed(
+          id: local.id,
+          ownerId: 'local',
+          now: 12,
+          code: 'httpError',
+        ),
+        isTrue,
+      );
+      expect(local.collectorOrdinal, 1);
+      expect(completed.collectorOrdinal, 2);
+      expect(local.reconciliationRunId, completed.reconciliationRunId);
+
+      await targetStore.mergeBySessionId(
+        'session',
+        (await sourceStore.getBySessionId('session'))!,
+      );
+
+      final stored = await targetDb
+          .select(targetDb.cardEvolutionCollectorRuns)
+          .get();
+      expect(stored, hasLength(1));
+      expect(stored.single.id, completed.id);
+      expect(stored.single.collectorOrdinal, 2);
+      expect(stored.single.status, 'completed');
+      expect(stored.single.ownerId, 'cloud-sync');
+    },
+  );
+
   test('conflicting manifest entry evidence rolls back the merge', () async {
     await _appendChain(sourceDb, 1);
     await _appendChain(targetDb, 1);
@@ -788,6 +829,28 @@ Future<CardEvolutionCollectorRunRow> _completeCollector(
     db.cardEvolutionCollectorRuns,
   )..where((item) => item.id.equals(row.id))).getSingle();
 }
+
+Future<void> _insertFailedCollectorPlaceholder(AppDatabase db) => db
+    .into(db.cardEvolutionCollectorRuns)
+    .insert(
+      CardEvolutionCollectorRunsCompanion.insert(
+        id: 'failed-placeholder',
+        sessionId: 'session',
+        characterId: 'character',
+        collectorOrdinal: 1,
+        reconciliationRunId: 'obsolete-reconciliation',
+        reconciliationRunOrdinal: 1,
+        reconciliationChainHash: 'obsolete-chain',
+        rangeHash: 'obsolete-range',
+        inputHash: 'obsolete-input',
+        ownerId: 'owner',
+        status: 'failed',
+        leaseExpiresAt: 0,
+        failureCode: const Value('httpError'),
+        createdAt: 9,
+        failedAt: const Value(10),
+      ),
+    );
 
 Future<void> _insertManifestEvidence(
   AppDatabase db, {

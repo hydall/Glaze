@@ -1129,21 +1129,32 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       }
     }
     for (final row in rows) {
-      final existing =
+      final conflicts =
           await (_db.select(_db.cardEvolutionCollectorRuns)..where(
                 (table) =>
                     table.sessionId.equals(sessionId) &
-                    table.collectorOrdinal.equals(row.collectorOrdinal),
+                    (table.collectorOrdinal.equals(row.collectorOrdinal) |
+                        table.reconciliationRunId.equals(
+                          row.reconciliationRunId,
+                        )),
               ))
-              .getSingleOrNull();
-      if (existing != null && existing.status == 'claimed') {
+              .get();
+      final completed = conflicts
+          .where((existing) => existing.status == 'completed')
+          .toList();
+      for (final existing in completed) {
+        _requireExact(existing, row, normalize: _collectorForSync);
+      }
+      final replaceableIds = conflicts
+          .where((existing) => existing.status != 'completed')
+          .map((existing) => existing.id)
+          .toList();
+      if (replaceableIds.isNotEmpty) {
         await (_db.delete(
           _db.cardEvolutionCollectorRuns,
-        )..where((item) => item.id.equals(existing.id))).go();
+        )..where((item) => item.id.isIn(replaceableIds))).go();
       }
-      final completed = existing?.status == 'completed' ? existing : null;
-      _requireExact(completed, row, normalize: _collectorForSync);
-      if (completed == null) {
+      if (completed.isEmpty) {
         await _db
             .into(_db.cardEvolutionCollectorRuns)
             .insert(row.copyWith(ownerId: 'cloud-sync', leaseExpiresAt: 0));
