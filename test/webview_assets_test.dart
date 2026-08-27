@@ -892,7 +892,7 @@ void main() {
       // Emitting raw HTML here would leave it as text for the paragraph pass,
       // which would wrap it in <p> (invalid around <hr> and <table>).
       for (final marker in [
-        r'/^(#{1,6})[ 	]+(.+?)[ 	]*#*$/gm',
+        r'/^(#{1,6})[ \t]+(.+?)[ \t]*#*$/gm',
         'const TABLE_RUN',
         r"tagBlocks.push('<hr>');",
       ]) {
@@ -900,7 +900,7 @@ void main() {
       }
       // A table needs its separator row — otherwise a line of prose that uses
       // pipes would become a table.
-      expect(formatterFormatterJs, contains(r'\|[ 	:|-]+\|'));
+      expect(formatterFormatterJs, contains(r'\|[ \t:|-]+\|'));
     });
 
     test('an indented list item nests inside the item above it', () {
@@ -931,7 +931,7 @@ void main() {
         formatterFormatterJs,
         contains(
           r"const ONLY_TAG_PLACEHOLDERS = "
-          r"/^(?:T_(?:BLOCK_)?\d+|\s)+$/;",
+          r"/^(?:\x01T_(?:BLOCK_)?\d+\x01|\s)+$/;",
         ),
       );
       final paragraphs = formatterFormatterJs.indexOf('const paragraphs =');
