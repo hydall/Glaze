@@ -129,6 +129,15 @@ abstract class SyncCharacterKnowledgeStore {
   Future<void> deleteBySessionId(String sessionId);
 }
 
+/// Current session-local lorebook projection. Immutable rewrite provenance is
+/// intentionally local unless its complete canon graph can be synchronized.
+abstract class SyncSessionLorebookOverlayStore {
+  Future<List<String>> getAllSessionIds();
+  Future<Map<String, dynamic>?> getBySessionId(String sessionId);
+  Future<void> applyBySessionId(String sessionId, Map<String, dynamic> data);
+  Future<void> deleteBySessionId(String sessionId);
+}
+
 /// Merge-only reconciliation and Card Evolution provenance for one session.
 /// Implementations must never replace a longer immutable chain with a stale
 /// device's shorter copy.

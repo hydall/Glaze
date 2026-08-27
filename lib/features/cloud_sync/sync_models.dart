@@ -109,7 +109,8 @@ class SyncManifest {
   ///  11 — added `character_knowledge` (atomic facts + session baseline).
   ///  12 — added merge-only `reconciliation_state` provenance.
   ///  13 — added immutable reconciliation effects to reconciliation state.
-  static const int currentVersion = 13;
+  ///  14 — added current session-local lorebook overlay projections.
+  static const int currentVersion = 14;
 
   final int version;
   final String deviceId;
@@ -224,6 +225,8 @@ String cloudPath(String type, String id) {
       return '$cloudBase/memory_graphs/$id.json';
     case 'character_knowledge':
       return '$cloudBase/character_knowledge/$id.json';
+    case 'session_lorebook_overlays':
+      return '$cloudBase/session_lorebook_overlays/$id.json';
     case 'reconciliation_state':
       return '$cloudBase/reconciliation_state/$id.json';
     case 'lorebooks':

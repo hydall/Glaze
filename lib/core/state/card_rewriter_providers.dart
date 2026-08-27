@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../db/app_db.dart' show CardEvolutionDebugRunRow, RewriteJobRow;
+import '../db/app_db.dart'
+    show CardEvolutionDebugRunRow, RewriteJobRow, SessionLorebookEvolutionRow;
 import '../../features/settings/api_list_provider.dart';
 import '../llm/card_rewrite_slot_resolver.dart';
 import '../llm/aux_llm_client.dart';
@@ -109,6 +110,14 @@ final cardRewriteJobsBySessionProvider =
       return ref
           .watch(manualRewriteJobRepoProvider)
           .watchJobsBySessionId(sessionId);
+    });
+
+/// Effective session-local lorebook changes, including cloud-imported state.
+final cardRewriteLorebookOverlaysProvider = StreamProvider.autoDispose
+    .family<List<SessionLorebookEvolutionRow>, String>((ref, sessionId) {
+      return ref
+          .watch(sessionLorebookEvolutionRepoProvider)
+          .watchBySessionId(sessionId);
     });
 
 final cardRewriteDebugRunsProvider = FutureProvider.autoDispose

@@ -71,6 +71,8 @@ class SyncConflictDetector {
         return 'Studio session $id';
       case 'studio_preset':
         return (localEntity?['name'] ?? cloudEntity?['name'] ?? id) as String;
+      case 'session_lorebook_overlays':
+        return 'Session lorebook changes — Chat $id';
       default:
         return '$type $id';
     }

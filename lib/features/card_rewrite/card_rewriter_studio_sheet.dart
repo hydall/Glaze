@@ -316,6 +316,9 @@ class _CardRewriterStudioSheetState
     }.toList()..sort();
     final configured = settings.apiConfigId.isNotEmpty && config != null;
     final jobs = ref.watch(cardRewriteJobsBySessionProvider(widget.sessionId));
+    final lorebookOverlays = ref.watch(
+      cardRewriteLorebookOverlaysProvider(widget.sessionId),
+    );
     final debugRuns = ref.watch(cardRewriteDebugRunsProvider(widget.sessionId));
     final recoveryViews = ref.watch(
       cardRewriterRecoveryViewsProvider(widget.sessionId),
@@ -581,6 +584,26 @@ class _CardRewriterStudioSheetState
             style: Theme.of(context).textTheme.titleSmall,
           ),
           const SizedBox(height: 4),
+          lorebookOverlays.when(
+            loading: () => const SizedBox.shrink(),
+            error: (_, _) => const SizedBox.shrink(),
+            data: (items) => items.isEmpty
+                ? const SizedBox.shrink()
+                : Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: const Icon(Icons.menu_book_outlined),
+                      title: Text(
+                        'card_rewriter_studio_active_lorebook_changes'.tr(
+                          namedArgs: {'count': '${items.length}'},
+                        ),
+                      ),
+                      subtitle: Text(
+                        'card_rewriter_studio_synced_history_note'.tr(),
+                      ),
+                    ),
+                  ),
+          ),
           jobs.when(
             loading: () => const Padding(
               padding: EdgeInsets.all(12),
@@ -593,7 +616,11 @@ class _CardRewriterStudioSheetState
               if (automated.isEmpty) {
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text('card_rewriter_studio_no_proposals'.tr()),
+                  child: Text(
+                    lorebookOverlays.value?.isNotEmpty == true
+                        ? 'card_rewriter_studio_no_local_proposals'.tr()
+                        : 'card_rewriter_studio_no_proposals'.tr(),
+                  ),
                 );
               }
               return Column(

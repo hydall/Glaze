@@ -426,6 +426,33 @@ class FakeReconciliationStateStore implements SyncReconciliationStateStore {
   }
 }
 
+class FakeSessionLorebookOverlayStore
+    implements SyncSessionLorebookOverlayStore {
+  final Map<String, Map<String, dynamic>> data = {};
+  Future<void> Function(String sessionId)? beforeApply;
+
+  @override
+  Future<List<String>> getAllSessionIds() async => data.keys.toList()..sort();
+
+  @override
+  Future<Map<String, dynamic>?> getBySessionId(String sessionId) async =>
+      data[sessionId];
+
+  @override
+  Future<void> applyBySessionId(
+    String sessionId,
+    Map<String, dynamic> incoming,
+  ) async {
+    await beforeApply?.call(sessionId);
+    data[sessionId] = Map<String, dynamic>.from(incoming);
+  }
+
+  @override
+  Future<void> deleteBySessionId(String sessionId) async {
+    data.remove(sessionId);
+  }
+}
+
 class FakeCloudAdapter implements CloudAdapter {
   final Map<String, String> files = {};
   final List<String> listFolderCalls = [];
@@ -551,27 +578,29 @@ class InMemoryManifestProvider implements SyncManifestProvider {
     SyncTrackerValueStore? trackerValueStore,
     SyncStudioConfigStore? studioConfigStore,
     SyncStudioPresetStore? studioPresetStore,
+    SyncSessionLorebookOverlayStore? sessionLorebookOverlayStore,
     SyncReconciliationStateStore? reconciliationStateStore,
   }) : _builder = SyncManifestBuilder(
-          characterRepo: characterRepo,
-          chatRepo: chatRepo,
-          personaRepo: personaRepo,
-          presetRepo: presetRepo,
-          apiRepo: apiRepo,
-          memoryBookRepo: memoryBookRepo,
-          lorebookRepo: lorebookRepo,
-          themePresetRepo: themePresetRepo,
-          extensionPresetRepo: extensionPresetRepo ?? FakeExtensionPresetStore(),
-          extensionsSettingsStore:
-              extensionsSettingsStore ?? FakeExtensionsSettingsStore(),
-          infoBlockStore: infoBlockStore ?? FakeInfoBlockStore(),
-          trackerSnapshotStore:
-              trackerSnapshotStore ?? FakeTrackerSnapshotStore(),
-          trackerValueStore: trackerValueStore ?? FakeTrackerValueStore(),
-          studioConfigStore: studioConfigStore ?? FakeStudioConfigStore(),
-          studioPresetStore: studioPresetStore,
-          reconciliationStateStore: reconciliationStateStore,
-        );
+         characterRepo: characterRepo,
+         chatRepo: chatRepo,
+         personaRepo: personaRepo,
+         presetRepo: presetRepo,
+         apiRepo: apiRepo,
+         memoryBookRepo: memoryBookRepo,
+         lorebookRepo: lorebookRepo,
+         themePresetRepo: themePresetRepo,
+         extensionPresetRepo: extensionPresetRepo ?? FakeExtensionPresetStore(),
+         extensionsSettingsStore:
+             extensionsSettingsStore ?? FakeExtensionsSettingsStore(),
+         infoBlockStore: infoBlockStore ?? FakeInfoBlockStore(),
+         trackerSnapshotStore:
+             trackerSnapshotStore ?? FakeTrackerSnapshotStore(),
+         trackerValueStore: trackerValueStore ?? FakeTrackerValueStore(),
+         studioConfigStore: studioConfigStore ?? FakeStudioConfigStore(),
+         studioPresetStore: studioPresetStore,
+         sessionLorebookOverlayStore: sessionLorebookOverlayStore,
+         reconciliationStateStore: reconciliationStateStore,
+       );
 
   @override
   Future<SyncManifest> buildLocalManifest({SyncManifest? cloudManifest}) async {
@@ -636,8 +665,12 @@ class SyncWorld {
   late final FakeSessionDeletionStore sessionDeletions;
   late final FakeCharacterDeletionStore characterDeletions;
   late final FakeReconciliationStateStore? reconciliationStates;
+  late final FakeSessionLorebookOverlayStore? sessionLorebookOverlays;
 
-  SyncWorld({FakeReconciliationStateStore? reconciliationStateStore}) {
+  SyncWorld({
+    FakeReconciliationStateStore? reconciliationStateStore,
+    FakeSessionLorebookOverlayStore? sessionLorebookOverlayStore,
+  }) {
     characters = FakeCharacterStore();
     chats = FakeChatStore();
     personas = FakePersonaStore();
@@ -654,6 +687,7 @@ class SyncWorld {
     sessionDeletions = FakeSessionDeletionStore(chats);
     characterDeletions = FakeCharacterDeletionStore(characters);
     reconciliationStates = reconciliationStateStore;
+    sessionLorebookOverlays = sessionLorebookOverlayStore;
     manifestProvider = InMemoryManifestProvider(
       characterRepo: characters,
       chatRepo: chats,
@@ -665,6 +699,7 @@ class SyncWorld {
       themePresetRepo: uiThemes,
       studioConfigStore: studioConfigs,
       studioPresetStore: studioPresets,
+      sessionLorebookOverlayStore: sessionLorebookOverlays,
       reconciliationStateStore: reconciliationStates,
     );
   }
@@ -697,6 +732,7 @@ class SyncWorld {
     characterDeletions,
     (_) async {},
     reconciliationStates,
+    sessionLorebookOverlays,
   );
 }
 
@@ -879,6 +915,68 @@ void main() {
 
     expect(world.chats.data[sessionId], cloudChat);
     expect(reconciliationStates.data[sessionId], statePayload);
+  });
+
+  test('pull applies chat before session lorebook overlays', () async {
+    final overlays = FakeSessionLorebookOverlayStore();
+    final world = SyncWorld(sessionLorebookOverlayStore: overlays);
+    const sessionId = 'overlay-pull-session';
+    const cloudChat = ChatSession(
+      id: sessionId,
+      characterId: 'character',
+      sessionIndex: 0,
+      updatedAt: 2000,
+    );
+    final overlayPayload = <String, dynamic>{
+      '__sessionLorebookOverlays': true,
+      'schemaVersion': 1,
+      'sessionId': sessionId,
+      'overlays': <dynamic>[],
+    };
+    overlays.beforeApply = (_) async {
+      if (world.chats.data[sessionId] != cloudChat) {
+        throw StateError('Lorebook overlay saw a stale owning chat');
+      }
+    };
+    final chatEntry = SyncManifestEntry(
+      type: 'chat',
+      id: sessionId,
+      path: cloudPath('chat', sessionId),
+      updatedAt: 2000,
+      hash: SyncSerialization.computeChatMetadataHash(
+        const SessionMetadata(
+          sessionId: sessionId,
+          characterId: 'character',
+          sessionIndex: 0,
+          updatedAt: 2000,
+          messageCount: 0,
+          lastMessageContent: '',
+          lastMessageTimestamp: 0,
+        ),
+      ),
+    );
+    final overlayEntry = SyncManifestEntry(
+      type: 'session_lorebook_overlays',
+      id: sessionId,
+      path: cloudPath('session_lorebook_overlays', sessionId),
+      updatedAt: 2000,
+      hash: SyncSerialization.computeSyncHash(overlayPayload),
+    );
+    final cloudManifest = SyncManifest(
+      deviceId: 'cloud-device',
+      createdAt: 1,
+      lastSync: 2000,
+      entries: {overlayEntry.key: overlayEntry, chatEntry.key: chatEntry},
+    );
+    world.cloud.files[overlayEntry.path] = jsonEncode(overlayPayload);
+    world.cloud.files[chatEntry.path] = jsonEncode(cloudChat.toJson());
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      cloudManifest.toJson(),
+    );
+
+    await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    expect(overlays.data[sessionId], overlayPayload);
   });
 
   test(
@@ -2902,6 +3000,49 @@ void main() {
   });
 
   test(
+    'session lorebook overlays push and pull as one session aggregate',
+    () async {
+      final sourceOverlays = FakeSessionLorebookOverlayStore();
+      final deviceA = SyncWorld(sessionLorebookOverlayStore: sourceOverlays);
+      const sessionId = 's1';
+      final payload = <String, dynamic>{
+        '__sessionLorebookOverlays': true,
+        'schemaVersion': 1,
+        'sessionId': sessionId,
+        'overlays': [
+          {
+            'chatSessionId': sessionId,
+            'lorebookId': 'book',
+            'entryId': 'entry',
+            'baseContent': 'base',
+            'baseContentHash': 'base-hash',
+            'content': 'evolved',
+            'contentHash': 'content-hash',
+          },
+        ],
+      };
+      sourceOverlays.data[sessionId] = payload;
+      await deviceA.chats.put(makeChat(sessionId, charId: 'char1'));
+
+      await deviceA.engine.pushEntities(onProgress: (_) {});
+
+      final path = cloudPath('session_lorebook_overlays', sessionId);
+      expect(deviceA.cloud.files[path], jsonEncode(payload));
+      expect(
+        deviceA.cloud.ensuredFolders,
+        contains('$cloudBase/session_lorebook_overlays'),
+      );
+
+      final targetOverlays = FakeSessionLorebookOverlayStore();
+      final deviceB = SyncWorld(sessionLorebookOverlayStore: targetOverlays);
+      deviceB.cloud.files.addAll(deviceA.cloud.files);
+      await deviceB.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+      expect(targetOverlays.data[sessionId], payload);
+    },
+  );
+
+  test(
     'memory_book deletion tombstone propagates to cloud on next push',
     () async {
       final world = SyncWorld();
@@ -3244,8 +3385,8 @@ void main() {
       final cloudManifest = SyncManifest.fromJson(
         jsonDecode(
               world.cloud.files[cloudPath('manifest', 'manifest')]!,
-            ) as
-            Map<String, dynamic>,
+            )
+            as Map<String, dynamic>,
       );
       expect(
         cloudManifest.entries.containsKey(entryKey('studio_preset', 'doomed')),

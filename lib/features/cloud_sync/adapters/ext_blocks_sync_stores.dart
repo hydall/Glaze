@@ -9,11 +9,13 @@ import '../../../core/db/repositories/extension_presets_repository.dart';
 import '../../../core/db/repositories/info_blocks_repository.dart';
 import '../../../core/db/repositories/card_evolution_collector_run_repo.dart';
 import '../../../core/db/repositories/ledger_reconciliation_run_repo.dart';
+import '../../../core/db/repositories/session_lorebook_embedding_job_repo.dart';
 import '../../../core/db/repositories/summary_repo.dart';
 import '../../../core/db/repositories/tracker_snapshot_repo.dart';
 import '../../../core/db/repositories/tracker_repo.dart';
 import '../../../core/models/tracker.dart';
 import '../../../core/models/tracker_snapshot.dart';
+import '../../../core/services/card_rewriter/card_rewriter_contracts.dart';
 import '../../../core/utils/cast_helpers.dart';
 import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/extensions_settings.dart';
@@ -528,6 +530,282 @@ class CharacterKnowledgeSyncStore implements SyncCharacterKnowledgeStore {
       _db.characterSessionBaselineRows,
     )..where((row) => row.chatSessionId.equals(sessionId))).go();
   }
+}
+
+/// Syncs the current session-local lorebook projection without manufacturing
+/// rewrite history that does not exist on the receiving device.
+class SessionLorebookOverlaySyncStore
+    implements SyncSessionLorebookOverlayStore {
+  SessionLorebookOverlaySyncStore(this._db)
+    : _embeddingJobs = SessionLorebookEmbeddingJobRepo(_db);
+
+  static const _marker = '__sessionLorebookOverlays';
+  static const _schemaVersion = 1;
+
+  final AppDatabase _db;
+  final SessionLorebookEmbeddingJobRepo _embeddingJobs;
+
+  @override
+  Future<List<String>> getAllSessionIds() async {
+    final rows = await _db
+        .customSelect(
+          'SELECT DISTINCT chat_session_id '
+          'FROM session_lorebook_evolution_rows '
+          'ORDER BY chat_session_id',
+        )
+        .get();
+    return rows
+        .map((row) => row.read<String>('chat_session_id'))
+        .toList(growable: false);
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getBySessionId(String sessionId) async {
+    final rows = await _readRows(sessionId);
+    return rows.isEmpty ? null : _payload(sessionId, rows);
+  }
+
+  @override
+  Future<void> applyBySessionId(
+    String sessionId,
+    Map<String, dynamic> data,
+  ) async {
+    await _db.transaction(() async {
+      final incoming = await _decodeAndValidate(sessionId, data);
+      final owner = await (_db.select(
+        _db.chatSessions,
+      )..where((row) => row.sessionId.equals(sessionId))).getSingleOrNull();
+      if (owner == null) {
+        throw StateError(
+          'Session lorebook overlays have no owning chat: $sessionId',
+        );
+      }
+
+      final local = await _readRows(sessionId);
+      if (_canonicalRows(local) == _canonicalRows(incoming)) return;
+
+      await _deleteProjection(sessionId, clearLoreHistory: true);
+      for (final row in incoming) {
+        await _db.into(_db.sessionLorebookEvolutionRows).insert(row);
+      }
+
+      final projectionHash = CardCanonicalizer.scalarSha256(
+        _canonicalRows(incoming),
+      );
+      final rootCheckpoint =
+          await (_db.select(_db.sessionCanonCheckpointRows)
+                ..where((row) => row.chatSessionId.equals(sessionId))
+                ..orderBy([(row) => OrderingTerm.asc(row.sequence)])
+                ..limit(1))
+              .getSingleOrNull();
+      if (rootCheckpoint != null) {
+        for (final row in incoming) {
+          await _db
+              .into(_db.sessionLorebookRevisionRows)
+              .insert(
+                SessionLorebookRevisionRowsCompanion.insert(
+                  checkpointId: rootCheckpoint.id,
+                  chatSessionId: sessionId,
+                  lorebookId: row.lorebookId,
+                  entryId: row.entryId,
+                  baseContentHash: row.baseContentHash,
+                  previousContentHash: row.contentHash,
+                  content: row.content,
+                  contentHash: row.contentHash,
+                  rewriteOperationId: 'cloud-overlay@$projectionHash',
+                  createdAt: rootCheckpoint.createdAt,
+                ),
+              );
+        }
+      }
+
+      final workToken = 'cloud-overlay:$projectionHash';
+      for (final row in incoming) {
+        await _embeddingJobs.enqueueInTransaction(
+          sessionId: sessionId,
+          checkpointId: workToken,
+          lorebookId: row.lorebookId,
+          entryId: row.entryId,
+          expectedContentHash: row.contentHash,
+        );
+      }
+    });
+  }
+
+  @override
+  Future<void> deleteBySessionId(String sessionId) => _db.transaction(
+    () => _deleteProjection(sessionId, clearLoreHistory: true),
+  );
+
+  Future<List<SessionLorebookEvolutionRow>> _readRows(String sessionId) =>
+      (_db.select(_db.sessionLorebookEvolutionRows)
+            ..where((row) => row.chatSessionId.equals(sessionId))
+            ..orderBy([
+              (row) => OrderingTerm.asc(row.lorebookId),
+              (row) => OrderingTerm.asc(row.entryId),
+            ]))
+          .get();
+
+  Future<List<SessionLorebookEvolutionRow>> _decodeAndValidate(
+    String sessionId,
+    Map<String, dynamic> data,
+  ) async {
+    if (sessionId.isEmpty ||
+        data[_marker] != true ||
+        data['schemaVersion'] != _schemaVersion ||
+        data['sessionId'] != sessionId) {
+      throw const FormatException('Invalid session lorebook overlay payload');
+    }
+    final rawOverlays = data['overlays'];
+    if (rawOverlays is! List) {
+      throw const FormatException('Lorebook overlays must be a list');
+    }
+
+    final lorebooks = <String, Set<String>>{};
+    final rows = <SessionLorebookEvolutionRow>[];
+    final targets = <String>{};
+    for (final raw in rawOverlays) {
+      if (raw is! Map<Object?, Object?>) {
+        throw const FormatException('Lorebook overlay must be an object');
+      }
+      final json = Map<String, dynamic>.from(raw);
+      final SessionLorebookEvolutionRow row;
+      try {
+        row = SessionLorebookEvolutionRow(
+          chatSessionId: json['chatSessionId'] as String,
+          lorebookId: json['lorebookId'] as String,
+          entryId: json['entryId'] as String,
+          baseContent: json['baseContent'] as String,
+          baseContentHash: json['baseContentHash'] as String,
+          content: json['content'] as String,
+          contentHash: json['contentHash'] as String,
+          createdAt: 0,
+          updatedAt: 0,
+        );
+      } catch (error) {
+        throw FormatException('Invalid lorebook overlay row', error);
+      }
+      if (row.chatSessionId != sessionId ||
+          row.lorebookId.isEmpty ||
+          row.entryId.isEmpty ||
+          row.baseContentHash !=
+              CardCanonicalizer.scalarSha256(row.baseContent) ||
+          row.contentHash != CardCanonicalizer.scalarSha256(row.content)) {
+        throw const FormatException(
+          'Invalid lorebook overlay identity or hash',
+        );
+      }
+      final target = _targetKey(row.lorebookId, row.entryId);
+      if (!targets.add(target)) {
+        throw const FormatException('Duplicate lorebook overlay target');
+      }
+
+      var entryIds = lorebooks[row.lorebookId];
+      if (entryIds == null) {
+        final source =
+            await (_db.select(_db.lorebooks)
+                  ..where((book) => book.lorebookId.equals(row.lorebookId)))
+                .getSingleOrNull();
+        if (source == null) {
+          throw FormatException('Missing source lorebook ${row.lorebookId}');
+        }
+        final rawEntries = jsonDecode(source.entriesJson);
+        if (rawEntries is! List) {
+          throw FormatException('Invalid source lorebook ${row.lorebookId}');
+        }
+        entryIds = rawEntries
+            .whereType<Map<Object?, Object?>>()
+            .map((entry) => entry['id']?.toString() ?? '')
+            .where((id) => id.isNotEmpty)
+            .toSet();
+        lorebooks[row.lorebookId] = entryIds;
+      }
+      if (!entryIds.contains(row.entryId)) {
+        throw FormatException(
+          'Missing source lorebook entry ${row.lorebookId}:${row.entryId}',
+        );
+      }
+      rows.add(row);
+    }
+    rows.sort(_compareRows);
+    return rows;
+  }
+
+  Future<void> _deleteProjection(
+    String sessionId, {
+    required bool clearLoreHistory,
+  }) async {
+    await (_db.delete(
+      _db.sessionLorebookEmbeddingJobRows,
+    )..where((row) => row.chatSessionId.equals(sessionId))).go();
+    await (_db.delete(_db.embeddings)..where(
+          (row) =>
+              row.sourceType.equals('session_lorebook_entry') &
+              row.sourceId.equals(sessionId),
+        ))
+        .go();
+    if (clearLoreHistory) {
+      // Checkpoints also own card transitions. Preserve them and reset only
+      // lore history so the imported projection becomes the new lore root.
+      await (_db.delete(
+        _db.sessionLorebookRevisionRows,
+      )..where((row) => row.chatSessionId.equals(sessionId))).go();
+    }
+    await (_db.delete(
+      _db.sessionLorebookEvolutionRows,
+    )..where((row) => row.chatSessionId.equals(sessionId))).go();
+  }
+
+  static Map<String, dynamic> _payload(
+    String sessionId,
+    Iterable<SessionLorebookEvolutionRow> source,
+  ) {
+    final rows = source.toList()..sort(_compareRows);
+    return {
+      _marker: true,
+      'schemaVersion': _schemaVersion,
+      'sessionId': sessionId,
+      'overlays': [
+        for (final row in rows)
+          {
+            'chatSessionId': row.chatSessionId,
+            'lorebookId': row.lorebookId,
+            'entryId': row.entryId,
+            'baseContent': row.baseContent,
+            'baseContentHash': row.baseContentHash,
+            'content': row.content,
+            'contentHash': row.contentHash,
+          },
+      ],
+    };
+  }
+
+  static String _canonicalRows(Iterable<SessionLorebookEvolutionRow> source) {
+    final rows = source.toList()..sort(_compareRows);
+    return jsonEncode([
+      for (final row in rows)
+        {
+          'chatSessionId': row.chatSessionId,
+          'lorebookId': row.lorebookId,
+          'entryId': row.entryId,
+          'baseContent': row.baseContent,
+          'baseContentHash': row.baseContentHash,
+          'content': row.content,
+          'contentHash': row.contentHash,
+        },
+    ]);
+  }
+
+  static int _compareRows(
+    SessionLorebookEvolutionRow first,
+    SessionLorebookEvolutionRow second,
+  ) {
+    final lorebook = first.lorebookId.compareTo(second.lorebookId);
+    return lorebook != 0 ? lorebook : first.entryId.compareTo(second.entryId);
+  }
+
+  static String _targetKey(String lorebookId, String entryId) =>
+      '$lorebookId\u0000$entryId';
 }
 
 /// Merge-only adapter for immutable reconciliation history and its derived

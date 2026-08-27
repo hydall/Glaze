@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
@@ -8,6 +9,7 @@ import '../../../core/state/character_provider.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/chat_session_ops_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/shared_prefs_provider.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../personas/persona_list_provider.dart';
@@ -363,6 +365,7 @@ class SyncController {
     _ref.invalidate(chatHistoryProvider);
     _ref.invalidate(activeStudioPresetProvider);
     _ref.invalidate(studioPresetProvider);
+    unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
     _ref.read(themeProvider.notifier).reload();
 
     // Bump the version counter so widgets that watch avatarVersionProvider

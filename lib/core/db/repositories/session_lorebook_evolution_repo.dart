@@ -37,6 +37,16 @@ class SessionLorebookEvolutionRepo {
 
   final AppDatabase db;
 
+  Stream<List<SessionLorebookEvolutionRow>> watchBySessionId(String sessionId) {
+    return (db.select(db.sessionLorebookEvolutionRows)
+          ..where((row) => row.chatSessionId.equals(sessionId))
+          ..orderBy([
+            (row) => OrderingTerm.asc(row.lorebookId),
+            (row) => OrderingTerm.asc(row.entryId),
+          ]))
+        .watch();
+  }
+
   Future<List<Lorebook>> applyOverlays({
     required String sessionId,
     required List<Lorebook> lorebooks,

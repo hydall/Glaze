@@ -50,6 +50,9 @@ final syncServiceProvider = FutureProvider<SyncService>((ref) async {
     characterKnowledgeStore: CharacterKnowledgeSyncStore(
       ref.watch(appDbProvider),
     ),
+    sessionLorebookOverlayStore: SessionLorebookOverlaySyncStore(
+      ref.watch(appDbProvider),
+    ),
     reconciliationStateStore: ReconciliationStateSyncStore(
       ref.watch(appDbProvider),
     ),

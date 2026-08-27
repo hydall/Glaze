@@ -60,6 +60,7 @@ class SyncEngine {
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
   final SyncReconciliationStateStore? _reconciliationStateStore;
+  final SyncSessionLorebookOverlayStore? _sessionLorebookOverlayStore;
   final SessionDeletionStore _sessionDeletionStore;
   final CharacterDeletionStore _characterDeletionStore;
   final Future<void> Function(LorebookActivations) _saveLorebookActivations;
@@ -95,6 +96,7 @@ class SyncEngine {
     this._characterDeletionStore,
     this._saveLorebookActivations, [
     this._reconciliationStateStore,
+    this._sessionLorebookOverlayStore,
   ]) {
     _binarySyncer = SyncBinaryAssetSyncer(
       _adapter,
@@ -126,6 +128,7 @@ class SyncEngine {
     await _adapter.ensureFolder('$cloudBase/chat_summaries');
     await _adapter.ensureFolder('$cloudBase/memory_graphs');
     await _adapter.ensureFolder('$cloudBase/character_knowledge');
+    await _adapter.ensureFolder('$cloudBase/session_lorebook_overlays');
     await _adapter.ensureFolder('$cloudBase/reconciliation_state');
 
     onProgress(const SyncProgress(message: 'Building sync manifest...'));
@@ -524,7 +527,14 @@ class SyncEngine {
     final appliedEntries = <SyncManifestEntry>[];
     var processed = 0;
     final primaryEntries = pullEntries
-        .where((entry) => entry.type != 'reconciliation_state')
+        .where(
+          (entry) =>
+              entry.type != 'session_lorebook_overlays' &&
+              entry.type != 'reconciliation_state',
+        )
+        .toList(growable: false);
+    final overlayEntries = pullEntries
+        .where((entry) => entry.type == 'session_lorebook_overlays')
         .toList(growable: false);
     final reconciliationEntries = pullEntries
         .where((entry) => entry.type == 'reconciliation_state')
@@ -563,11 +573,12 @@ class SyncEngine {
       ),
     );
 
-    // Reconciliation anchors are validated against the local chat transcript.
-    // Apply chat and other primary entities first so concurrent pull workers
-    // cannot validate a newer reconciliation chain against an older chat.
+    // Both dependent aggregates validate against chats/base lorebooks. Apply
+    // primary entities first, current lore projections second, and immutable
+    // reconciliation provenance last.
     final taskErrors = <Object>[
       ...await applyEntries(primaryEntries),
+      ...await applyEntries(overlayEntries),
       ...await applyEntries(reconciliationEntries),
     ];
 
@@ -592,7 +603,8 @@ class SyncEngine {
     );
     final entries = Map<String, SyncManifestEntry>.from(rebuilt.entries);
     for (final entry in acceptedCloudEntries) {
-      if (entry.type == 'reconciliation_state') {
+      if (entry.type == 'reconciliation_state' ||
+          entry.type == 'session_lorebook_overlays') {
         entries[entry.key] = entry;
       }
     }
@@ -617,7 +629,8 @@ class SyncEngine {
         cloudEntry.deleted == localEntry?.deleted) {
       return true;
     }
-    return cloudEntry.type == 'reconciliation_state' &&
+    return (cloudEntry.type == 'reconciliation_state' ||
+            cloudEntry.type == 'session_lorebook_overlays') &&
         cloudEntry.hash == previouslyAccepted?.hash &&
         cloudEntry.deleted == previouslyAccepted?.deleted;
   }
@@ -655,7 +668,9 @@ class SyncEngine {
   }
 
   Future<void> resolveConflict(SyncConflict conflict, String choice) async {
-    if (choice == 'cloud') {
+    final deferCloudApply =
+        conflict.type == 'session_lorebook_overlays' && choice == 'cloud';
+    if (choice == 'cloud' && !deferCloudApply) {
       await _pullEntry(conflict.cloudEntry);
     }
 
@@ -665,7 +680,7 @@ class SyncEngine {
     );
     final rebuiltEntry = updatedEntries[conflict.key];
 
-    if (choice == 'cloud') {
+    if (choice == 'cloud' && !deferCloudApply) {
       // Align manifest with cloud so the same conflict does not reappear.
       updatedEntries[conflict.key] = conflict.cloudEntry;
     } else if (choice == 'local' && rebuiltEntry != null) {
@@ -932,6 +947,9 @@ class SyncEngine {
         case 'character_knowledge':
           if (_characterKnowledgeStore == null) return null;
           return _characterKnowledgeStore.getBySessionId(id);
+        case 'session_lorebook_overlays':
+          if (_sessionLorebookOverlayStore == null) return null;
+          return _sessionLorebookOverlayStore.getBySessionId(id);
         case 'reconciliation_state':
           if (_reconciliationStateStore == null) return null;
           return _reconciliationStateStore.getBySessionId(id);
@@ -1032,6 +1050,11 @@ class SyncEngine {
             await _characterKnowledgeStore.applyBySessionId(id, data);
           }
           break;
+        case 'session_lorebook_overlays':
+          if (_sessionLorebookOverlayStore != null) {
+            await _sessionLorebookOverlayStore.applyBySessionId(id, data);
+          }
+          break;
         case 'reconciliation_state':
           if (_reconciliationStateStore != null) {
             await _reconciliationStateStore.mergeBySessionId(id, data);
@@ -1039,7 +1062,10 @@ class SyncEngine {
           break;
       }
     } catch (_) {
-      if (type == 'reconciliation_state') rethrow;
+      if (type == 'reconciliation_state' ||
+          type == 'session_lorebook_overlays') {
+        rethrow;
+      }
     }
   }
 
@@ -1366,6 +1392,11 @@ class SyncEngine {
         case 'character_knowledge':
           if (_characterKnowledgeStore != null) {
             await _characterKnowledgeStore.deleteBySessionId(id);
+          }
+          break;
+        case 'session_lorebook_overlays':
+          if (_sessionLorebookOverlayStore != null) {
+            await _sessionLorebookOverlayStore.deleteBySessionId(id);
           }
           break;
         case 'reconciliation_state':

@@ -28,6 +28,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
   final SyncCharacterFolderStore? _characterFolderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
+  final SyncSessionLorebookOverlayStore? _sessionLorebookOverlayStore;
   final SyncReconciliationStateStore? _reconciliationStateStore;
   final SyncImageStore? _imageStore;
 
@@ -55,6 +56,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
     this._characterFolderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
+    this._sessionLorebookOverlayStore,
     this._reconciliationStateStore,
     this._imageStore,
   });
@@ -404,6 +406,51 @@ class SyncManifestBuilder implements SyncManifestProvider {
           updatedAt: updatedAt,
           hash: hash,
         );
+      }
+    }
+
+    if (_sessionLorebookOverlayStore != null) {
+      final sessionIds = await _sessionLorebookOverlayStore.getAllSessionIds();
+      for (final sessionId in sessionIds) {
+        final overlays = await _sessionLorebookOverlayStore.getBySessionId(
+          sessionId,
+        );
+        if (overlays == null) continue;
+        final hash = SyncSerialization.computeSyncHash(overlays);
+        final key = entryKey('session_lorebook_overlays', sessionId);
+        final updatedAt = _resolveUpdatedAt(
+          hash: hash,
+          prevEntry: previous.entries[key],
+          cloudEntry: cloudManifest?.entries[key],
+          now: now,
+        );
+        entries[key] = SyncManifestEntry(
+          type: 'session_lorebook_overlays',
+          id: sessionId,
+          path: cloudPath('session_lorebook_overlays', sessionId),
+          updatedAt: updatedAt,
+          hash: hash,
+        );
+      }
+      final chatSessionIds = sessions
+          .map((session) => session.sessionId)
+          .toSet();
+      for (final previousEntry in previous.entries.values) {
+        if (previousEntry.type != 'session_lorebook_overlays' ||
+            entries.containsKey(previousEntry.key) ||
+            !chatSessionIds.contains(previousEntry.id)) {
+          continue;
+        }
+        final cloudEntry = cloudManifest?.entries[previousEntry.key];
+        if (cloudEntry == null ||
+            cloudEntry.deleted ||
+            cloudEntry.hash != previousEntry.hash ||
+            await isDeleted(previousEntry.type, previousEntry.id) ||
+            await isDeleted('chat', previousEntry.id)) {
+          continue;
+        }
+        // An accepted empty aggregate has no local rows to rebuild from.
+        entries[previousEntry.key] = cloudEntry;
       }
     }
 
