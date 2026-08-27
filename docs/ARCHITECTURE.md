@@ -407,7 +407,7 @@ GoRouter lives in `router.dart`, not `app.dart`. Shell tabs and overlay routes:
 | `/` | `ChatHistoryScreen` (mobile); redirects to `/characters` on desktop (width ≥ 768, non-mobile force) |
 | `/characters` | `CharacterListScreen` |
 | `/tools` (+ nested `api`, `personas`, `presets`, `regex`, `lorebooks`, `lorebooks/settings`, `embeddings`) | `ToolsScreen` |
-| `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` |
+| `/menu` (+ `settings`, `themes`, `about`, `glossary`) | `MenuScreen` — the header search filters the tab's nested settings; `settings` takes `?section=interface` and `?highlight=<row id>` so a hit deep-links to the row (`features/menu/search/`) |
 | `/chat/:charId` | `ChatScreen` (query params: `?session=`, `?new=1`, `?msg=`) |
 | `/character/create`, `/character/:charId`, `…/edit`, `…/gallery` | Character CRUD overlays |
 | `/sync` | `SyncSheet` |

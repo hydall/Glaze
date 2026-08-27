@@ -65,6 +65,7 @@
   "btn_later": "Later",
   "menu_app_settings": "App Settings",
   "menu_app_settings_hint": "Generation, theme, language and other settings",
+  "menu_search_hint": "Search settings",
   "hint_generation_settings": "Looking for generation settings? You will find them in the chat by clicking the icon",
   "menu_backup": "Backup Data",
   "menu_restore": "Restore Data",
