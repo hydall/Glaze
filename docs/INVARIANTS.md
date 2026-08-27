@@ -1160,6 +1160,26 @@ per-tick cancel token and executes directly through the visual bridge without
 creating an `InfoBlock` row. The `debugLifecycleState` test seam in
 `periodic_lifecycle_test.dart` exercises the pause/resume contract.
 
+### INV-JS7: The message-scripts toggle changes execution only, never rendering ✅ ENFORCED
+
+Every message body goes through `sanitizeMessageHtml` before insertion —
+`writeShadowContent` (`renderer/markdown.js`) and the search re-render
+(`message_renderer.js`) both call it with
+`{ allowScripts: allowMessageScripts }`, and neither keeps a raw-insertion
+branch.
+
+Inside `html_sanitizer.js` the flag reaches three places only: `<script>`
+elements, `on…=` attributes and `javascript:` / `vbscript:` URLs. The element
+policy (`BLOCKED_ELEMENTS`), the URL policy and the whole CSS policy
+(`css_sanitizer.js` — no `url()`, no `@import` / `@font-face`, no
+`position: fixed`) apply identically with scripts on and off.
+
+So a card built from HTML and CSS alone renders the same before and after the
+user enables message scripts: turning execution on must not silently hand
+every message fixed-position overlays, network-loading backgrounds or the
+elements the policy drops. `test/webview_assets_test.dart` pins both halves
+(`the script toggle never reaches the rendering policy`).
+
 ---
 
 ## Refactor PR Checklist

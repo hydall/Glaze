@@ -14,9 +14,10 @@ const LOCAL_IMAGE_RETRY_DELAY_MS = 350;
 /**
  * Tell Flutter that a message wanted to run JS while execution is off, so the
  * app can offer to turn it on. The check has to run on the *formatted* HTML:
- * `sanitizeMessageHtml` drops every `<script>` before insertion, so by the time
- * `executeInlineScripts` looks at the DOM there is nothing left to see. The
- * bridge de-duplicates, so calling this on every render is fine.
+ * with execution off `sanitizeMessageHtml` drops every `<script>` before
+ * insertion, so by the time `executeInlineScripts` looks at the DOM there is
+ * nothing left to see. The bridge de-duplicates, so calling this on every
+ * render is fine.
  */
 function notifyMessageScriptBlocked() {
   try {
@@ -50,10 +51,13 @@ export function writeShadowContent({
       notifyMessageScriptBlocked();
     }
     // Sanitize before insertion: assigning active HTML first can fire load/error
-    // handlers before a later cleanup gets a chance to remove them.
-    root.innerHTML = allowMessageScripts
-      ? formatted
-      : sanitizeMessageHtml(formatted);
+    // handlers before a later cleanup gets a chance to remove them. The same
+    // pass runs with scripts on — it only stops stripping `<script>` there, so
+    // the rendered HTML/CSS of a message does not change under the user when
+    // they enable execution.
+    root.innerHTML = sanitizeMessageHtml(formatted, {
+      allowScripts: allowMessageScripts,
+    });
     syncCodeBlockMetadata(root);
     executeInlineScripts(root, allowMessageScripts);
     fixDetailsSummaryArrows(root);

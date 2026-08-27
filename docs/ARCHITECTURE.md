@@ -1453,8 +1453,8 @@ Active chat WebView JS is loaded as ES modules from `assets/chat_webview/index.h
 * `assets/chat_webview/bridge/index.js` — imports `Formatter` and `Renderer`, creates `window.bridge`, registers scaled wheel handling and `onWebViewReady`
 * `assets/chat_webview/bridge/chat_bridge_controller.js` — main JS bridge facade, Flutter transport, message list API, ext-block panel, sandbox runner
 * `assets/chat_webview/bridge/panel_host.js` — sandboxed interactive iframe lifecycle and `glaze:*` relay
-* `assets/chat_webview/bridge/html_sanitizer.js` — element/attribute policy for message and ExtBlock HTML (the path used whenever message scripts are disabled)
-* `assets/chat_webview/bridge/css_sanitizer.js` — CSS policy behind it: `<style>` blocks and `style="…"` keep working with JS off, minus `url()`/`@import`/`expression()`/`position: fixed`; ExtBlock rules are scoped to `.ext-block-content` because they land in the light DOM, message rules are already scoped by the per-message shadow root
+* `assets/chat_webview/bridge/html_sanitizer.js` — element/attribute policy for message and ExtBlock HTML (every insertion goes through it; the message-scripts toggle only decides whether `<script>` bodies, `on…=` handlers and `javascript:` URLs survive, so enabling execution never changes how a message renders)
+* `assets/chat_webview/bridge/css_sanitizer.js` — CSS policy behind it: `<style>` blocks and `style="…"` keep working, minus `url()`/`@import`/`expression()`/`position: fixed` — with message scripts on or off alike; ExtBlock rules are scoped to `.ext-block-content` because they land in the light DOM, message rules are already scoped by the per-message shadow root
 * `assets/chat_webview/headless.html` — retained unused headless-engine asset
 
 Legacy single-file paths (`bridge.js`, `renderer.js`, `formatter.js`) are

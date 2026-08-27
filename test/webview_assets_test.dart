@@ -240,7 +240,7 @@ void main() {
       );
     });
 
-    test('disabled path sanitizes active HTML before innerHTML insertion', () {
+    test('every render sanitizes active HTML before innerHTML insertion', () {
       expect(
         rendererJs,
         contains(
@@ -248,11 +248,14 @@ void main() {
         ),
       );
       final writeBlock = _extractWriteShadowContent(rendererJs);
-      final sanitize = writeBlock.indexOf('sanitizeMessageHtml(formatted)');
+      final sanitize = writeBlock.indexOf('sanitizeMessageHtml(formatted, {');
       final insertion = writeBlock.indexOf('root.innerHTML =');
       expect(sanitize, isNonNegative);
       expect(insertion, isNonNegative);
-      expect(writeBlock, contains('allowMessageScripts'));
+      expect(writeBlock, contains('allowScripts: allowMessageScripts'));
+      // No raw-insertion branch: enabling message scripts must not hand the
+      // message a different HTML/CSS policy, only script execution.
+      expect(writeBlock, isNot(contains('? formatted')));
     });
 
     test('search re-render sanitizes active HTML before insertion', () {
@@ -266,11 +269,14 @@ void main() {
         rendererMessageJs,
         rendererMessageJs.indexOf('setSearch(query, activeIndex = -1'),
       );
-      final sanitize = searchBlock.indexOf('sanitizeMessageHtml(highlighted)');
+      final sanitize = searchBlock.indexOf(
+        'sanitizeMessageHtml(highlighted, {',
+      );
       final insertion = searchBlock.indexOf('root.innerHTML =');
       expect(sanitize, isNonNegative);
       expect(insertion, isNonNegative);
-      expect(searchBlock, contains('this.allowMessageScripts'));
+      expect(searchBlock, contains('allowScripts: this.allowMessageScripts'));
+      expect(searchBlock, isNot(contains('? highlighted')));
     });
 
     test('search refresh pass can re-number without scrolling', () {
@@ -314,7 +320,7 @@ void main() {
     test('blocked scripts are detected before the sanitizer strips them', () {
       final writeBlock = _extractWriteShadowContent(rendererJs);
       final detect = writeBlock.indexOf('SCRIPT_TAG.test(formatted)');
-      final sanitize = writeBlock.indexOf('sanitizeMessageHtml(formatted)');
+      final sanitize = writeBlock.indexOf('sanitizeMessageHtml(formatted, {');
       expect(detect, isNonNegative);
       expect(detect, lessThan(sanitize));
       expect(writeBlock, contains('!allowMessageScripts'));
@@ -425,11 +431,36 @@ void main() {
         htmlSanitizerJs,
         contains("const EXT_BLOCK_CSS_SCOPE = '.ext-block-content'"),
       );
-      expect(htmlSanitizerJs, contains("return sanitizeHtml(html, '')"));
       expect(
         htmlSanitizerJs,
-        contains('return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE)'),
+        contains("return sanitizeHtml(html, '', allowScripts)"),
       );
+      expect(
+        htmlSanitizerJs,
+        contains('return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE, false)'),
+      );
+    });
+
+    test('the script toggle never reaches the rendering policy', () {
+      expect(
+        htmlSanitizerJs,
+        contains('sanitizeMessageHtml(html, { allowScripts = false } = {})'),
+      );
+      final body = _extractBlockBody(
+        htmlSanitizerJs,
+        htmlSanitizerJs.indexOf('function sanitizeHtml('),
+      );
+      // `allowScripts` gates code only: script bodies, `on…=` handlers and
+      // `javascript:` URLs. Elements, `<style>`, `style="…"` and other URLs are
+      // filtered the same way in both modes, so a card that carries no JS
+      // renders identically before and after the user enables execution.
+      expect(body, contains('if (!allowScripts) element.remove();'));
+      expect(
+        body,
+        contains('if (!allowScripts) element.removeAttribute(attribute.name);'),
+      );
+      expect(body, contains('isScriptUrl ? !allowScripts'));
+      expect('allowScripts'.allMatches(body).length, 3);
     });
 
     test('inline styles are filtered by policy, not an allowlist', () {
