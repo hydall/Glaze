@@ -28,7 +28,7 @@ void main() {
       );
 
       expect(labelled.source, CatalogErrorSource.provider);
-      expect(labelled.message, 'HTTP 401: Invalid API key');
+      expect(labelled.message, 'HTTP 401 - error_http_401\nInvalid API key');
       // Never the raw Dio dump the sheet used to show.
       expect(labelled.message, isNot(contains('DioException')));
       expect(labelled.label, 'error_source_provider');
@@ -62,7 +62,7 @@ void main() {
       );
 
       expect(labelled.source, CatalogErrorSource.provider);
-      expect(labelled.message, 'HTTP 429: Slow down');
+      expect(labelled.message, 'HTTP 429 - error_http_429\nSlow down');
     });
 
     test('an unlabelled failure takes the stage it happened in', () {
