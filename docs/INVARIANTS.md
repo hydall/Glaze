@@ -1160,25 +1160,29 @@ per-tick cancel token and executes directly through the visual bridge without
 creating an `InfoBlock` row. The `debugLifecycleState` test seam in
 `periodic_lifecycle_test.dart` exercises the pause/resume contract.
 
-### INV-JS7: The message-scripts toggle changes execution only, never rendering ✅ ENFORCED
+### INV-JS7: The message-scripts toggle stops JS and nothing else ✅ ENFORCED
 
 Every message body goes through `sanitizeMessageHtml` before insertion —
 `writeShadowContent` (`renderer/markdown.js`) and the search re-render
 (`message_renderer.js`) both call it with
-`{ allowScripts: allowMessageScripts }`, and neither keeps a raw-insertion
-branch.
+`{ allowScripts: allowMessageScripts }`, and neither keeps a second path.
 
-Inside `html_sanitizer.js` the flag reaches three places only: `<script>`
-elements, `on…=` attributes and `javascript:` / `vbscript:` URLs. The element
-policy (`BLOCKED_ELEMENTS`), the URL policy and the whole CSS policy
-(`css_sanitizer.js` — no `url()`, no `@import` / `@font-face`, no
-`position: fixed`) apply identically with scripts on and off.
+With execution **on** the formatted HTML is inserted verbatim. With execution
+**off** `stripMessageCode` removes exactly what runs code — `<script>`,
+`<iframe>` / `<object>` / `<embed>`, `on…=` attributes, `srcdoc`, and
+`javascript:` / `vbscript:` / non-image `data:` URLs — and touches nothing
+else. No element is dropped for how it looks, and `<style>` blocks and
+`style="…"` attributes reach the per-message shadow root byte-identical: the
+CSS policy in `css_sanitizer.js` belongs to the ExtBlock path, which lands in
+the light DOM, and is never applied to a message.
 
-So a card built from HTML and CSS alone renders the same before and after the
-user enables message scripts: turning execution on must not silently hand
-every message fixed-position overlays, network-loading backgrounds or the
-elements the policy drops. `test/webview_assets_test.dart` pins both halves
-(`the script toggle never reaches the rendering policy`).
+So an HTML/CSS card renders the same before and after the user enables message
+scripts — `position: fixed`, `url()` backgrounds, `@font-face`, `<form>` and
+SVG animation all behave identically in both modes; only script execution (and
+the frame elements that host it) follows the toggle.
+`test/webview_assets_test.dart` pins both halves (`message HTML is filtered for
+code only, never for markup`, `a message may not run code while execution is
+off`).
 
 ---
 

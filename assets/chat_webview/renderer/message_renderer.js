@@ -1083,8 +1083,8 @@ if (messageData.isEditing) classes.push('editing');
             const prevMatchIndex = globalState.matchIndex;
             const highlighted = this._applySearchHighlight(formatted, globalState);
             // Same policy as a normal render (see writeShadowContent), so a
-            // search pass never restyles a message: the scripts it keeps are
-            // dropped right after, unexecuted.
+            // search pass renders the message exactly like the pass before it:
+            // the scripts it keeps are dropped right after, unexecuted.
             root.innerHTML = sanitizeMessageHtml(highlighted, {
               allowScripts: this.allowMessageScripts,
             });

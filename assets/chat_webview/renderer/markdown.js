@@ -50,11 +50,10 @@ export function writeShadowContent({
     if (!allowMessageScripts && SCRIPT_TAG.test(formatted)) {
       notifyMessageScriptBlocked();
     }
-    // Sanitize before insertion: assigning active HTML first can fire load/error
-    // handlers before a later cleanup gets a chance to remove them. The same
-    // pass runs with scripts on — it only stops stripping `<script>` there, so
-    // the rendered HTML/CSS of a message does not change under the user when
-    // they enable execution.
+    // Strip the code before insertion: assigning active HTML first can fire
+    // load/error handlers before a later cleanup gets a chance to remove them.
+    // Markup and CSS are never touched — with execution off the message is
+    // still rendered exactly as written, it just cannot run anything.
     root.innerHTML = sanitizeMessageHtml(formatted, {
       allowScripts: allowMessageScripts,
     });

@@ -407,7 +407,18 @@ void main() {
   });
 
   group('CSS survives with message scripts disabled', () {
-    test('sanitizers keep <style> and delegate CSS to the CSS policy', () {
+    test('message CSS reaches the shadow root untouched', () {
+      // No CSS policy on the message path at all: `<style>` blocks and
+      // `style="…"` attributes are inserted verbatim whether or not message
+      // scripts are enabled.
+      final body = _extractBlockBody(
+        htmlSanitizerJs,
+        htmlSanitizerJs.indexOf('function stripMessageCode('),
+      );
+      expect(body, isNot(contains('style')));
+    });
+
+    test('ExtBlock sanitizer keeps <style> and delegates CSS to its policy', () {
       expect(
         htmlSanitizerJs,
         contains(
@@ -433,34 +444,64 @@ void main() {
       );
       expect(
         htmlSanitizerJs,
-        contains("return sanitizeHtml(html, '', allowScripts)"),
-      );
-      expect(
-        htmlSanitizerJs,
-        contains('return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE, false)'),
+        contains('return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE)'),
       );
     });
 
-    test('the script toggle never reaches the rendering policy', () {
+    test('message HTML is filtered for code only, never for markup', () {
       expect(
         htmlSanitizerJs,
         contains('sanitizeMessageHtml(html, { allowScripts = false } = {})'),
       );
+      // Scripts on: the message HTML is inserted exactly as written.
+      expect(
+        htmlSanitizerJs,
+        contains("if (allowScripts) return String(html == null ? '' : html);"),
+      );
+      expect(htmlSanitizerJs, contains('return stripMessageCode(html);'));
+      // Scripts off: only the things that run code are removed. The strict
+      // element / CSS policy is the ExtBlock path's, and must not be reached
+      // from here — a card renders the same with execution on and off.
       final body = _extractBlockBody(
         htmlSanitizerJs,
-        htmlSanitizerJs.indexOf('function sanitizeHtml('),
+        htmlSanitizerJs.indexOf('function stripMessageCode('),
       );
-      // `allowScripts` gates code only: script bodies, `on…=` handlers and
-      // `javascript:` URLs. Elements, `<style>`, `style="…"` and other URLs are
-      // filtered the same way in both modes, so a card that carries no JS
-      // renders identically before and after the user enables execution.
-      expect(body, contains('if (!allowScripts) element.remove();'));
       expect(
-        body,
-        contains('if (!allowScripts) element.removeAttribute(attribute.name);'),
+        htmlSanitizerJs,
+        contains(
+          "const MESSAGE_CODE_ELEMENTS = new Set("
+          "['script', 'iframe', 'object', 'embed']);",
+        ),
       );
-      expect(body, contains('isScriptUrl ? !allowScripts'));
-      expect('allowScripts'.allMatches(body).length, 3);
+      expect(body, contains('MESSAGE_CODE_ELEMENTS.has('));
+      expect(body, contains("name.startsWith('on') || name === 'srcdoc'"));
+      expect(body, contains('isMessageCodeUrl(compact)'));
+      for (final forbidden in [
+        'BLOCKED_ELEMENTS',
+        'sanitizeStyleElement',
+        'sanitizeStyleAttribute',
+        'sanitizeCssText',
+        'sanitizeStyleDeclaration',
+      ]) {
+        expect(
+          body,
+          isNot(contains(forbidden)),
+          reason: 'message HTML/CSS must reach the shadow root untouched',
+        );
+      }
+    });
+
+    test('a message may not run code while execution is off', () {
+      final body = _extractBlockBody(
+        htmlSanitizerJs,
+        htmlSanitizerJs.indexOf('function isMessageCodeUrl('),
+      );
+      expect(body, contains("compact.startsWith('javascript:')"));
+      expect(body, contains("compact.startsWith('vbscript:')"));
+      // A `data:` document runs script on navigation; a `data:image/…` is a
+      // picture and stays, like the rest of the markup.
+      expect(body, contains("compact.startsWith('data:')"));
+      expect(body, contains("!compact.startsWith('data:image/')"));
     });
 
     test('inline styles are filtered by policy, not an allowlist', () {
