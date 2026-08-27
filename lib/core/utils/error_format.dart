@@ -106,17 +106,23 @@ String? _defaultHttpMessage(int code) {
   final key = switch (code) {
     400 => 'error_http_400',
     401 => 'error_http_401',
+    402 => 'error_http_402',
     403 => 'error_http_403',
     404 => 'error_http_404',
+    405 => 'error_http_405',
     408 => 'error_http_408',
     409 => 'error_http_409',
     413 => 'error_http_413',
     422 => 'error_http_422',
     429 => 'error_http_429',
+    451 => 'error_http_451',
     500 => 'error_http_500',
     502 => 'error_http_502',
     503 => 'error_http_503',
     504 => 'error_http_504',
+    522 => 'error_http_522',
+    524 => 'error_http_524',
+    529 => 'error_http_529',
     _ => null,
   };
   return key?.tr();

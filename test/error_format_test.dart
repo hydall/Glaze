@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/utils/error_format.dart';
@@ -139,4 +142,25 @@ void main() {
 
     expect(formatError(error), 'HTTP 599\nupstream exploded');
   });
+
+  test('every mapped HTTP status has an EN and RU description', () {
+    final source = File(
+      'lib/core/utils/error_format.dart',
+    ).readAsStringSync();
+    final keys = RegExp(r"'(error_http_\d+)'")
+        .allMatches(source)
+        .map((match) => match.group(1)!)
+        .toSet();
+    final en = loadTranslations('assets/translations/en.json');
+    final ru = loadTranslations('assets/translations/ru.json');
+
+    expect(keys, isNotEmpty);
+    for (final key in keys) {
+      expect(en, contains(key), reason: '$key is missing from en.json');
+      expect(ru, contains(key), reason: '$key is missing from ru.json');
+    }
+  });
 }
+
+Map<String, dynamic> loadTranslations(String path) =>
+    jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
