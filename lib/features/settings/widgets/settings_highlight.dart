@@ -72,3 +72,9 @@ class _SettingsHighlightState extends State<SettingsHighlight>
     );
   }
 }
+
+/// Wraps [child] in a [SettingsHighlight] when it is the row a deep link asked
+/// for, and returns it untouched otherwise. Keeps the call sites in the
+/// settings groups down to one expression.
+Widget highlightIf(String id, String? highlightId, Widget child) =>
+    id == highlightId ? SettingsHighlight(child: child) : child;

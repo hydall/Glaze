@@ -12,11 +12,16 @@ class MenuSearchResults extends StatelessWidget {
   final EdgeInsets padding;
   final ScrollController? controller;
 
+  /// What tapping a hit does. Defaults to the entry's own navigation; the
+  /// settings screen overrides it to flash a row it already shows.
+  final void Function(MenuSearchEntry entry)? onTap;
+
   const MenuSearchResults({
     super.key,
     required this.results,
     required this.padding,
     this.controller,
+    this.onTap,
   });
 
   @override
@@ -65,7 +70,8 @@ class MenuSearchResults extends StatelessWidget {
                     size: 20,
                     color: Color(0xFF99A2AD),
                   ),
-                  onTap: () => entry.open(context),
+                  onTap: () =>
+                      onTap != null ? onTap!(entry) : entry.open(context),
                 ),
             ],
           ),

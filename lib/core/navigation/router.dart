@@ -253,18 +253,14 @@ GoRouter buildRouter(
                   routes: [
                     GoRoute(
                       path: 'settings',
-                      pageBuilder: (_, state) {
-                        // `?section=` / `?highlight=` deep-link the More-tab
-                        // search straight to the row that matched.
-                        final q = state.uri.queryParameters;
-                        return _fadePage(
-                          state: state,
-                          child: AppSettingsScreen(
-                            initialSection: q['section'] ?? 'main',
-                            highlightId: q['highlight'],
-                          ),
-                        );
-                      },
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        // `?highlight=` deep-links a More-tab search hit
+                        // straight to the row that matched.
+                        child: AppSettingsScreen(
+                          highlightId: state.uri.queryParameters['highlight'],
+                        ),
+                      ),
                     ),
                     GoRoute(
                       path: 'themes',

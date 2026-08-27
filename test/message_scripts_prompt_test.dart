@@ -85,7 +85,9 @@ void main() {
     });
 
     test('the settings switch records the choice before saving', () {
-      final settings = _source('lib/features/settings/app_settings_screen.dart');
+      final settings = _source(
+        'lib/features/settings/widgets/app_settings_behavior_groups.dart',
+      );
       final mark = settings.indexOf('await markMessageScriptsChoiceMade(ref);');
       final save = settings.indexOf('allowMessageScripts: false');
       expect(mark, isNonNegative);

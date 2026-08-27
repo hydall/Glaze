@@ -876,21 +876,46 @@ class _ChatColorsTab extends ConsumerWidget {
         MenuGroup(
           header: 'theme_message_meta'.tr(),
           items: [
-            _SwitchRow(
-              label: 'menu_hide_msg_id'.tr(),
-              value: hideMessageId,
-              onChanged: (v) => onUpdate((p) => p.copyWith(hideMessageId: v)),
+            // Tri-state, because these three also exist as app settings and the
+            // preset wins over them (see chat_screen's `preset.x ?? app.x`).
+            // The include switch is what "this preset overrides it" looks like;
+            // turning it off clears the override and hands the row back to the
+            // app setting, which is otherwise unreachable from the UI.
+            _MetaOverrideRow(
+              label: 'menu_show_msg_id'.tr(),
+              overridden: preset.hideMessageId != null,
+              shown: !hideMessageId,
+              onOverrideChanged: (on) => onUpdate(
+                (p) => p.copyWith(
+                  hideMessageId: on ? appSettings.hideMessageId : null,
+                ),
+              ),
+              onChanged: (show) =>
+                  onUpdate((p) => p.copyWith(hideMessageId: !show)),
             ),
-            _SwitchRow(
-              label: 'menu_hide_gen_time'.tr(),
-              value: hideGenerationTime,
-              onChanged: (v) =>
-                  onUpdate((p) => p.copyWith(hideGenerationTime: v)),
+            _MetaOverrideRow(
+              label: 'menu_show_gen_time'.tr(),
+              overridden: preset.hideGenerationTime != null,
+              shown: !hideGenerationTime,
+              onOverrideChanged: (on) => onUpdate(
+                (p) => p.copyWith(
+                  hideGenerationTime: on ? appSettings.hideGenerationTime : null,
+                ),
+              ),
+              onChanged: (show) =>
+                  onUpdate((p) => p.copyWith(hideGenerationTime: !show)),
             ),
-            _SwitchRow(
-              label: 'menu_hide_token_count'.tr(),
-              value: hideTokenCount,
-              onChanged: (v) => onUpdate((p) => p.copyWith(hideTokenCount: v)),
+            _MetaOverrideRow(
+              label: 'menu_show_token_count'.tr(),
+              overridden: preset.hideTokenCount != null,
+              shown: !hideTokenCount,
+              onOverrideChanged: (on) => onUpdate(
+                (p) => p.copyWith(
+                  hideTokenCount: on ? appSettings.hideTokenCount : null,
+                ),
+              ),
+              onChanged: (show) =>
+                  onUpdate((p) => p.copyWith(hideTokenCount: !show)),
             ),
           ],
         ),
@@ -1047,6 +1072,42 @@ class _SliderRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A message-metadata row that can either follow the app setting or override it
+/// for this preset.
+///
+/// The small include switch on the left is the override; the trailing switch is
+/// the value, disabled while the row follows the app setting so it reads as
+/// inherited rather than editable.
+class _MetaOverrideRow extends StatelessWidget {
+  final String label;
+  final bool overridden;
+  final bool shown;
+  final ValueChanged<bool> onOverrideChanged;
+  final ValueChanged<bool> onChanged;
+
+  const _MetaOverrideRow({
+    required this.label,
+    required this.overridden,
+    required this.shown,
+    required this.onOverrideChanged,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return MenuSwitchItem(
+      label: label,
+      description: overridden
+          ? 'theme_override_app_setting'.tr()
+          : 'theme_follows_app_setting'.tr(),
+      included: overridden,
+      onIncludedChanged: onOverrideChanged,
+      value: shown,
+      onChanged: onChanged,
     );
   }
 }

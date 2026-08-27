@@ -28,6 +28,12 @@ class MenuSearchEntry {
 
   final void Function(BuildContext context) open;
 
+  /// Set when the entry is a row on the App Settings screen: its highlight id.
+  /// The settings screen uses it to flash the row in place instead of pushing
+  /// itself a second time; the More tab passes it as the `?highlight=` deep
+  /// link. Null for entries that are a screen or a sheet of their own.
+  final String? settingId;
+
   const MenuSearchEntry({
     required this.title,
     required this.breadcrumb,
@@ -35,6 +41,7 @@ class MenuSearchEntry {
     required this.open,
     this.description,
     this.keywords = const [],
+    this.settingId,
   });
 
   String get breadcrumbLabel => breadcrumb.join(' › ');

@@ -28,8 +28,18 @@ class DesktopScope extends InheritedWidget {
       isDesktop != oldWidget.isDesktop;
 }
 
-bool isDesktopLayout(BuildContext context) =>
-    DesktopScope.isDesktopOf(context);
+bool isDesktopLayout(BuildContext context) => DesktopScope.isDesktopOf(context);
+
+/// Width at which the app switches to its desktop layout.
+const double kDesktopWidthBreakpoint = 768;
+
+/// Whether the *window* is wide, ignoring the "force mobile layout" setting.
+///
+/// Use this for UI that must stay reachable regardless of that setting — the
+/// settings group holding the switch itself, for one. Everything that should
+/// follow the user's choice wants [isDesktopLayout].
+bool isWideViewport(BuildContext context) =>
+    MediaQuery.sizeOf(context).width >= kDesktopWidthBreakpoint;
 
 class DesktopDetection extends StatelessWidget {
   final Widget child;
@@ -43,7 +53,7 @@ class DesktopDetection extends StatelessWidget {
         final width = constraints.maxWidth;
         // We can't read forceMobileLayout here without Consumer,
         // so this is used only where force check isn't needed.
-        final isDesktop = width >= 768;
+        final isDesktop = width >= kDesktopWidthBreakpoint;
         return DesktopScope(isDesktop: isDesktop, child: child);
       },
     );
