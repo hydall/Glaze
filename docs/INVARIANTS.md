@@ -1176,6 +1176,10 @@ else. No element is dropped for how it looks, and `<style>` blocks and
 CSS policy in `css_sanitizer.js` belongs to the ExtBlock path, which lands in
 the light DOM, and is never applied to a message.
 
+`renderer/css_diagnostics.js` is the one other pass that looks at message CSS,
+and it only reads: it appends a `CSS ERROR` report next to a broken `<style>`
+without changing a byte of it.
+
 So an HTML/CSS card renders the same before and after the user enables message
 scripts — `position: fixed`, `url()` backgrounds, `@font-face`, `<form>` and
 SVG animation all behave identically in both modes; only script execution (and

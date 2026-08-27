@@ -1,5 +1,6 @@
 import { syncCodeBlockMetadata } from './code_highlight.js';
 import { formatMessageBody } from './macros_in_message.js';
+import { reportCssErrors } from './css_diagnostics.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
 
 /** Cheap pre-sanitize probe for an embedded `<script>` in formatted HTML. */
@@ -58,6 +59,10 @@ export function writeShadowContent({
       allowScripts: allowMessageScripts,
     });
     syncCodeBlockMetadata(root);
+    // A reply still arriving is half a stylesheet, and every unclosed brace in
+    // it is on its way to being closed — report only what the message settled
+    // on. `isGenerating` covers the whole reply, `isTyping` its first chunks.
+    if (!isTyping && !window.bridge?.isGenerating) reportCssErrors(root);
     executeInlineScripts(root, allowMessageScripts);
     fixDetailsSummaryArrows(root);
     retryFailedLocalImages(root);

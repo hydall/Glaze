@@ -1,3 +1,4 @@
+import { reportCssErrors } from './css_diagnostics.js';
 import { ICON } from './icon_library.js';
 import { createImageAttachment, setImageAttachmentHidden } from './image_embed.js';
 import { writeShadowContent } from './markdown.js';
@@ -1089,6 +1090,9 @@ if (messageData.isEditing) classes.push('editing');
               allowScripts: this.allowMessageScripts,
             });
             root.querySelectorAll('script').forEach(script => script.remove());
+            // The rewrite dropped the CSS report with the rest of the body;
+            // put it back so searching does not hide a broken stylesheet.
+            if (!window.bridge?.isGenerating) reportCssErrors(root);
             
             if (activeIndex >= prevMatchIndex && activeIndex < globalState.matchIndex) {
               activeMessageId = section.dataset.messageId || section.dataset.vlId;

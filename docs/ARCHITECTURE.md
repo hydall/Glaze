@@ -1450,6 +1450,7 @@ Active chat WebView JS is loaded as ES modules from `assets/chat_webview/index.h
 * `assets/chat_webview/glaze_sdk.js` — `window.glaze` SDK loaded before bridge bootstrap
 * `assets/chat_webview/formatter/index.js` — exports/exposes `Formatter`; implementation in `formatter/formatter.js`, marker rendering in `formatter/text_format.js`
 * `assets/chat_webview/renderer/index.js` — exports/exposes `Renderer`; message DOM in `renderer/message_renderer.js`, Shadow DOM CSS in `renderer/shadow_style.js`
+* `assets/chat_webview/renderer/css_diagnostics.js` — reads the `<style>` blocks a settled message carries and appends a short `CSS ERROR` report (unclosed brace, unterminated comment/string, rules the engine ignored). Read-only: the CSS itself is still inserted verbatim
 * `assets/chat_webview/bridge/index.js` — imports `Formatter` and `Renderer`, creates `window.bridge`, registers scaled wheel handling and `onWebViewReady`
 * `assets/chat_webview/bridge/chat_bridge_controller.js` — main JS bridge facade, Flutter transport, message list API, ext-block panel, sandbox runner
 * `assets/chat_webview/bridge/panel_host.js` — sandboxed interactive iframe lifecycle and `glaze:*` relay

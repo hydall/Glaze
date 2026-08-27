@@ -38,6 +38,7 @@ void main() {
   late String interactionDispatchJs;
   late String panelHostJs;
   late String htmlSanitizerJs;
+  late String cssDiagnosticsJs;
   late String cssSanitizerJs;
   late String selectionManagerJs;
   late String swipeHandlerJs;
@@ -67,6 +68,7 @@ void main() {
     interactionDispatchJs = _bridgeAsset('interaction_dispatch.js');
     panelHostJs = _bridgeAsset('panel_host.js');
     htmlSanitizerJs = _bridgeAsset('html_sanitizer.js');
+    cssDiagnosticsJs = _rendererAsset('css_diagnostics.js');
     cssSanitizerJs = _bridgeAsset('css_sanitizer.js');
     selectionManagerJs = _bridgeAsset('selection_manager.js');
     swipeHandlerJs = _bridgeAsset('swipe_gesture_handler.js');
@@ -403,6 +405,79 @@ void main() {
       expect(bridgeControllerJs, contains('data-action="image-click"'));
       expect(bridgeControllerJs, contains('data-action="img-download"'));
       expect(htmlSanitizerJs, contains('SAFE_IMAGE_DATA_URL'));
+    });
+  });
+
+  group('message CSS diagnostics', () {
+    test('a render reports broken message CSS after the body is in place', () {
+      expect(
+        rendererJs,
+        contains("import { reportCssErrors } from './css_diagnostics.js'"),
+      );
+      final writeBlock = _extractWriteShadowContent(rendererJs);
+      final insertion = writeBlock.indexOf('root.innerHTML =');
+      final report = writeBlock.indexOf('reportCssErrors(root)');
+      expect(insertion, isNonNegative);
+      expect(report, greaterThan(insertion));
+      // A reply still arriving is half a stylesheet: every unclosed brace in it
+      // is on its way to being closed, so only a settled message is reported.
+      expect(
+        writeBlock,
+        contains(
+          'if (!isTyping && !window.bridge?.isGenerating) '
+          'reportCssErrors(root);',
+        ),
+      );
+    });
+
+    test('the search re-render puts the report back', () {
+      final searchBlock = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('setSearch(query, activeIndex = -1'),
+      );
+      expect(searchBlock, contains('reportCssErrors(root)'));
+    });
+
+    test('the report reads the stylesheet and never rewrites it', () {
+      expect(cssDiagnosticsJs, contains('inspectCss(style.textContent)'));
+      // Reading only: no assignment back into a <style>, and no innerHTML
+      // anywhere — the report quotes selectors the message wrote.
+      expect(cssDiagnosticsJs, isNot(contains('style.textContent =')));
+      expect(cssDiagnosticsJs, isNot(contains('innerHTML')));
+      expect(cssDiagnosticsJs, contains('item.textContent = problem;'));
+      expect(
+        cssSanitizerJs,
+        contains('export function withParsedSheet(css, read)'),
+      );
+    });
+
+    test('the scan names the failures a generated card actually makes', () {
+      for (final token in [
+        'unclosed',
+        'unexpected',
+        'unterminated comment',
+        'unterminated string',
+        'rule ignored',
+        'const MAX_REPORTED = 5',
+      ]) {
+        expect(cssDiagnosticsJs, contains(token));
+      }
+      // Memoized like the CSS parser cache: a streaming reply re-renders the
+      // same <style> on every chunk.
+      expect(
+        cssDiagnosticsJs,
+        contains('cache.delete(cache.keys().next().value)'),
+      );
+    });
+
+    test('the report has shadow-root styling of its own', () {
+      for (final selector in [
+        '.glaze-message .glaze-css-error {',
+        '.glaze-message .glaze-css-error-head {',
+        '.glaze-message .glaze-css-error-item',
+      ]) {
+        expect(rendererJs, contains(selector));
+      }
     });
   });
 

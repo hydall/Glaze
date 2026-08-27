@@ -214,6 +214,14 @@ function withInertSheet(css, read) {
   }
 }
 
+// Parses [css] the safe way and hands the stylesheet to [read]: a constructed
+// stylesheet when the engine has them, the inert document otherwise. Returns
+// null when neither is available. Shared with the message CSS diagnostics,
+// which reads a sheet without rewriting anything.
+export function withParsedSheet(css, read) {
+  return withConstructedSheet(css, read) ?? withInertSheet(css, read);
+}
+
 // A streaming reply re-renders its message on every chunk, and the `<style>`
 // block it opens with is identical every time — parsing it once per chunk is
 // pure waste, so results are memoized (FIFO, same shape as the formatter cache).
@@ -229,9 +237,7 @@ export function sanitizeCssText(css, scope = '') {
   if (cache.has(key)) return cache.get(key);
 
   const read = sheet => serializeRules(sheet.cssRules, scope);
-  const parsed = withConstructedSheet(source, read) ??
-    withInertSheet(source, read);
-  const result = parsed || '';
+  const result = withParsedSheet(source, read) || '';
 
   if (cache.size >= CACHE_MAX_SIZE) cache.delete(cache.keys().next().value);
   cache.set(key, result);

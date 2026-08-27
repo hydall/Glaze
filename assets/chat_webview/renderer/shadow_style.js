@@ -184,6 +184,28 @@ export const SHADOW_STYLE = `
     100% { background-position: -100% 0; }
   }
 
+  /* ── Broken message CSS: author-facing report ── */
+  .glaze-message .glaze-css-error {
+    margin: 8px 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    box-sizing: border-box;
+    max-width: 100%;
+    background: rgba(255,59,48,0.1);
+    border: 1px solid rgba(255,59,48,0.28);
+    font-family: 'Consolas','Monaco','Courier New',monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: rgba(255,59,48,0.9);
+    word-break: break-word;
+  }
+  .glaze-message .glaze-css-error-head {
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    margin-bottom: 3px;
+  }
+  .glaze-message .glaze-css-error-item { opacity: 0.85; }
+
   /* ── Imagen: error card ── */
   .glaze-message .imggen-error {
     display: flex;
