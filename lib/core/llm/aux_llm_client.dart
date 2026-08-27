@@ -168,6 +168,7 @@ class AuxLlmClient {
     bool omitTopP = true,
     LlmCaptureContext? captureContext,
     AuxRawResponseSink? onRawResponse,
+    FutureOr<void> Function(int attempt, int maxAttempts)? onAttemptStart,
   }) async {
     if (config.endpoint.isEmpty || config.model.isEmpty) {
       throw Exception('Aux API not configured');
@@ -180,6 +181,7 @@ class AuxLlmClient {
     return runner.run(
       cancelToken: cancelToken,
       captureContext: identifiedContext,
+      onAttemptStart: onAttemptStart,
       onAttemptComplete: identifiedContext == null
           ? null
           : (attempt, responseText) => LlmCallEventCapture.record(

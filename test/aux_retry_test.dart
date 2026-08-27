@@ -26,7 +26,11 @@ void main() {
         ),
       );
       var calls = 0;
+      final starts = <(int, int)>[];
       final outcome = await runner.run(
+        onAttemptStart: (attempt, maxAttempts) {
+          starts.add((attempt, maxAttempts));
+        },
         attempt: (_) async {
           calls++;
           if (calls < 3) {
@@ -50,6 +54,34 @@ void main() {
       expect(outcome.attempts[1].status, 'http_5xx');
       expect(outcome.attempts[2].status, 'ok');
       expect(calls, 3);
+      expect(starts, [(1, 3), (2, 3), (3, 3)]);
+    });
+
+    test('attempt progress failure does not break the request', () async {
+      final outcome = await const AuxRetryRunner().run(
+        onAttemptStart: (_, _) => throw StateError('detached UI'),
+        attempt: (_) async => 'ok',
+      );
+
+      expect(outcome.isOk, isTrue);
+      expect(outcome.text, 'ok');
+    });
+
+    test('attempt diagnostics do not delay the outcome', () async {
+      final diagnosticStarted = Completer<void>();
+      final diagnosticRelease = Completer<void>();
+
+      final outcome = await const AuxRetryRunner().run(
+        onAttemptComplete: (_, _) async {
+          diagnosticStarted.complete();
+          await diagnosticRelease.future;
+        },
+        attempt: (_) async => 'ok',
+      );
+
+      expect(outcome.isOk, isTrue);
+      expect(diagnosticStarted.isCompleted, isTrue);
+      diagnosticRelease.complete();
     });
 
     test('fails fast on 4xx (no retry)', () async {

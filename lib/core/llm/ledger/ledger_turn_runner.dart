@@ -24,6 +24,11 @@ import 'ledger_run_diagnostics.dart';
 import 'ledger_run_result.dart';
 import 'ledger_turn_committer.dart';
 
+enum LedgerAttemptPhase { initial, parserRepair }
+
+typedef LedgerAttemptCallback =
+    void Function(LedgerAttemptPhase phase, int attempt, int maxAttempts);
+
 class LedgerTurnRequest {
   const LedgerTurnRequest({
     required this.sessionId,
@@ -41,6 +46,7 @@ class LedgerTurnRequest {
     required this.macroCtx,
     required this.commitSnapshot,
     required this.engine,
+    this.onAttemptStart,
   });
 
   final String sessionId;
@@ -58,6 +64,7 @@ class LedgerTurnRequest {
   final MacroContext? macroCtx;
   final bool commitSnapshot;
   final StudioLedgerEngine engine;
+  final LedgerAttemptCallback? onAttemptStart;
 }
 
 class LedgerTurnRunner {
@@ -114,7 +121,7 @@ class LedgerTurnRunner {
       agentSwipeId: request.agentSwipeId,
     );
     final result = await _runTraced(trace, request);
-    await _runDiagnostics.recordDebugRun(trace, result);
+    unawaited(_runDiagnostics.recordDebugRun(trace, result));
     return result;
   }
 
@@ -213,6 +220,11 @@ class LedgerTurnRunner {
         timeoutMs: timeoutMs,
         cancelToken: token,
         omitReasoning: true,
+        onAttemptStart: (attempt, maxAttempts) => request.onAttemptStart?.call(
+          LedgerAttemptPhase.initial,
+          attempt,
+          maxAttempts,
+        ),
         captureContext: LlmCaptureContext(
           stage: 'ledger.turn',
           sessionId: request.sessionId,
@@ -317,6 +329,8 @@ class LedgerTurnRunner {
           timeoutMs: timeoutMs,
           cancelToken: token,
           omitReasoning: true,
+          onAttemptStart: (attempt, maxAttempts) => request.onAttemptStart
+              ?.call(LedgerAttemptPhase.parserRepair, attempt, maxAttempts),
           captureContext: LlmCaptureContext(
             stage: 'ledger.turn_repair',
             sessionId: request.sessionId,

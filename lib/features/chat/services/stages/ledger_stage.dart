@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/llm/aux_llm_client.dart' show AuxApiConfig;
 import '../../../../core/llm/game_time.dart';
+import '../../../../core/llm/ledger/ledger_turn_runner.dart';
 import '../../../../core/llm/macro_engine.dart';
 import '../../../../core/llm/studio_ledger_service.dart';
 import '../../../../core/llm/studio_ledger_reconciliation.dart';
@@ -106,6 +107,17 @@ class LedgerStage {
       ctx.ref.read(postGenStatusProvider.notifier).state =
           const PostGenStatusState.idle();
       ownedRunningStatus = null;
+    }
+
+    void updateOwnedStatusDetail(String detail) {
+      if (!ownsRunningStatus()) return;
+      final status = PostGenStatusState.running(
+        sessionId: sessionId,
+        task: ownedRunningStatus!.task,
+        detail: detail,
+      );
+      ownedRunningStatus = status;
+      ctx.ref.read(postGenStatusProvider.notifier).state = status;
     }
 
     final isCurrent = isManualRerun
@@ -268,13 +280,6 @@ class LedgerStage {
             cancelToken: cancelToken,
             operationIdentity: 'automatic:$genId',
           );
-          await _recordReconciliationDiag(
-            sessionId: sessionId,
-            targetMessage: targetMessage,
-            startMessageId: plan.startMessageId,
-            endMessageId: plan.endMessage.id,
-            result: reconciliationResult,
-          );
           _recordOperation(
             sessionId: sessionId,
             targetMessage: targetMessage,
@@ -308,6 +313,15 @@ class LedgerStage {
               );
             }
           }
+          unawaited(
+            _recordReconciliationDiag(
+              sessionId: sessionId,
+              targetMessage: targetMessage,
+              startMessageId: plan.startMessageId,
+              endMessageId: plan.endMessage.id,
+              result: reconciliationResult,
+            ),
+          );
           debugPrint(
             '[StudioLedger] reconciliation session=$sessionId '
             'range=${plan.startMessageId}..${plan.endMessage.id} '
@@ -408,17 +422,24 @@ class LedgerStage {
         macroCtx: ledgerMacroCtx,
         engine: StudioLedgerEngine.currentReconciled,
         operationIdentity: 'automatic:$genId',
-      );
-
-      await _recordDiag(
-        sessionId: sessionId,
-        targetMessage: targetMessage,
-        reason:
-            '${reconciliationResult == null ? '' : 'reconcile=${reconciliationResult.status} '
-                      '(ops=${reconciliationResult.opsApplied}); '}'
-            'ran, ${result.status} '
-            '(ops=${result.opsApplied})'
-            '${result.error == null ? '' : ': ${result.error}'}',
+        onAttemptStart: (phase, attempt, maxAttempts) {
+          if (!ctx.ref.mounted || !isCurrent()) return;
+          switch (phase) {
+            case LedgerAttemptPhase.initial:
+              if (attempt > 1) {
+                updateOwnedStatusDetail(
+                  'Ledger running ${_ordinal(attempt)} attempt...',
+                );
+              }
+            case LedgerAttemptPhase.parserRepair:
+              updateOwnedStatusDetail(
+                attempt == 1
+                    ? 'Ledger repairing rejected response...'
+                    : 'Ledger repair running '
+                          '${_ordinal(attempt)} attempt...',
+              );
+          }
+        },
       );
 
       _recordOperation(
@@ -447,6 +468,19 @@ class LedgerStage {
           );
         }
       }
+
+      unawaited(
+        _recordDiag(
+          sessionId: sessionId,
+          targetMessage: targetMessage,
+          reason:
+              '${reconciliationResult == null ? '' : 'reconcile=${reconciliationResult.status} '
+                        '(ops=${reconciliationResult.opsApplied}); '}'
+              'ran, ${result.status} '
+              '(ops=${result.opsApplied})'
+              '${result.error == null ? '' : ': ${result.error}'}',
+        ),
+      );
 
       if (ledgerStatusToOp(result.status).isFailure) {
         GlazeToast.showWithoutContext(
@@ -479,16 +513,6 @@ class LedgerStage {
       debugPrint(
         '[StudioLedger] pipeline trigger failed session=$sessionId: $e',
       );
-      await _recordDiag(
-        sessionId: sessionId,
-        targetMessage: targetMessage,
-        reason: 'skipped, trigger error: $e',
-      );
-      _recordOperation(
-        sessionId: sessionId,
-        targetMessage: targetMessage,
-        result: LedgerRunResult(status: 'error', error: 'trigger error: $e'),
-      );
       if (ownedRunningStatus != null) {
         finishOwnedStatus(
           PostGenStatusState.error(
@@ -498,6 +522,18 @@ class LedgerStage {
           ),
         );
       }
+      unawaited(
+        _recordDiag(
+          sessionId: sessionId,
+          targetMessage: targetMessage,
+          reason: 'skipped, trigger error: $e',
+        ),
+      );
+      _recordOperation(
+        sessionId: sessionId,
+        targetMessage: targetMessage,
+        result: LedgerRunResult(status: 'error', error: 'trigger error: $e'),
+      );
       GlazeToast.showWithoutContext(
         'Studio Ledger failed. Open Agentic Ops -> Last turn to inspect or rerun.',
         duration: 5000,
@@ -519,6 +555,12 @@ class LedgerStage {
       }
     }
   }
+
+  static String _ordinal(int value) => switch (value) {
+    2 => '2nd',
+    3 => '3rd',
+    _ => '${value}th',
+  };
 
   void _invalidateAgentOpsViews(String sessionId) {
     if (!ctx.ref.mounted) return;

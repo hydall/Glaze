@@ -23,6 +23,7 @@ import 'package:glaze_flutter/core/db/repositories/memory_book_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_snapshot_repo.dart';
 import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
+import 'package:glaze_flutter/core/llm/ledger/ledger_turn_runner.dart';
 import 'package:glaze_flutter/core/llm/studio_ledger_reconciliation.dart';
 import 'package:glaze_flutter/core/llm/studio_ledger_service.dart';
 import 'package:glaze_flutter/core/models/character.dart';
@@ -83,6 +84,7 @@ void main() {
   late Future<LedgerRunResult> Function(
     String, {
     FutureOr<bool> Function()? isStillCurrent,
+    LedgerAttemptCallback? onAttemptStart,
   })
   run;
   late CharacterKnowledgeFact Function(String) fact;
@@ -143,7 +145,7 @@ void main() {
       chatRepo: chats,
       canonContextLoader: loader,
     );
-    run = (url, {isStillCurrent}) => service.run(
+    run = (url, {isStillCurrent, onAttemptStart}) => service.run(
       sessionId: 'session',
       settings: const PipelineSettings(),
       config: _config(url),
@@ -153,6 +155,7 @@ void main() {
       swipeId: 0,
       agentSwipeId: 0,
       isStillCurrent: isStillCurrent,
+      onAttemptStart: onAttemptStart,
     );
     fact = (id) => CharacterKnowledgeFact(
       id: id,
@@ -1209,13 +1212,23 @@ void main() {
     test('malformed first response repairs once and commits once', () async {
       final endpoint = await _serveSequence([malformed, _repairResponse]);
       addTearDown(endpoint.close);
+      final attempts = <(LedgerAttemptPhase, int, int)>[];
 
-      final result = await run(endpoint.url);
+      final result = await run(
+        endpoint.url,
+        onAttemptStart: (phase, attempt, maxAttempts) {
+          attempts.add((phase, attempt, maxAttempts));
+        },
+      );
 
       expect(result.status, 'ok');
       expect(result.repairAttempted, isTrue);
       expect(result.attempts, hasLength(2));
       expect(endpoint.requests(), 2);
+      expect(attempts, [
+        (LedgerAttemptPhase.initial, 1, 3),
+        (LedgerAttemptPhase.parserRepair, 1, 3),
+      ]);
       expect((await trackers.get('session', 'world:time'))?.value, '01:00');
       expect(
         await snapshots.getByAnchor(

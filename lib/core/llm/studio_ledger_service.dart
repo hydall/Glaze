@@ -306,6 +306,7 @@ class StudioLedgerService {
     bool commitSnapshot = false,
     StudioLedgerEngine engine = StudioLedgerEngine.currentReconciled,
     String? operationIdentity,
+    LedgerAttemptCallback? onAttemptStart,
   }) {
     final request = LedgerTurnRequest(
       sessionId: sessionId,
@@ -323,6 +324,7 @@ class StudioLedgerService {
       macroCtx: macroCtx,
       commitSnapshot: commitSnapshot,
       engine: engine,
+      onAttemptStart: onAttemptStart,
     );
     if (operationIdentity == null) {
       return _turnRunner.run(request);

@@ -119,6 +119,7 @@ class AuxRetryRunner {
       String? responseText,
     )?
     onAttemptComplete,
+    FutureOr<void> Function(int attempt, int maxAttempts)? onAttemptStart,
     LlmCaptureContext? captureContext,
   }) async {
     if ((attempt == null) == (attemptWithCancelToken == null)) {
@@ -165,6 +166,7 @@ class AuxRetryRunner {
         }
       }
 
+      await _notifyAttemptStart(onAttemptStart, i + 1, policy.maxAttempts);
       final attemptStartedAtMs = DateTime.now().millisecondsSinceEpoch;
       final attemptSw = Stopwatch()..start();
       // Every attempt gets its own token. This lets an attempt cancel only its
@@ -193,7 +195,7 @@ class AuxRetryRunner {
           elapsedMs: attemptSw.elapsedMilliseconds,
         );
         attemptsLog.add(loggedAttempt);
-        await _notifyAttempt(onAttemptComplete, loggedAttempt, text);
+        unawaited(_notifyAttempt(onAttemptComplete, loggedAttempt, text));
         return _finishOk(
           text,
           attemptsLog,
@@ -210,7 +212,7 @@ class AuxRetryRunner {
           attemptSw.elapsedMilliseconds,
         );
         attemptsLog.add(loggedAttempt);
-        await _notifyAttempt(onAttemptComplete, loggedAttempt, null);
+        unawaited(_notifyAttempt(onAttemptComplete, loggedAttempt, null));
         if (cancelToken?.isCancelled ?? false) {
           return _finish(
             AgentOperationStatus.aborted,
@@ -285,6 +287,19 @@ class AuxRetryRunner {
       await callback(attempt, responseText);
     } catch (error) {
       debugPrint('[AuxRetry] attempt diagnostic failed: $error');
+    }
+  }
+
+  static Future<void> _notifyAttemptStart(
+    FutureOr<void> Function(int attempt, int maxAttempts)? callback,
+    int attempt,
+    int maxAttempts,
+  ) async {
+    if (callback == null) return;
+    try {
+      await callback(attempt, maxAttempts);
+    } catch (error) {
+      debugPrint('[AuxRetry] attempt progress callback failed: $error');
     }
   }
 

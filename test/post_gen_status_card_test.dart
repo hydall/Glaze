@@ -32,6 +32,54 @@ void main() {
     expect(find.byType(GlazeSpinner), findsOneWidget);
   });
 
+  testWidgets('shows Ledger transport retry progress', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container
+        .read(postGenStatusProvider.notifier)
+        .state = const PostGenStatusState.running(
+      sessionId: 'session-1',
+      task: PostGenTask.ledger,
+      detail: 'Ledger running 2nd attempt...',
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(body: PostGenStatusCard(sessionId: 'session-1')),
+        ),
+      ),
+    );
+
+    expect(find.text('Ledger running 2nd attempt...'), findsOneWidget);
+    expect(find.byType(GlazeSpinner), findsOneWidget);
+  });
+
+  testWidgets('shows Ledger parser repair progress', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container
+        .read(postGenStatusProvider.notifier)
+        .state = const PostGenStatusState.running(
+      sessionId: 'session-1',
+      task: PostGenTask.ledger,
+      detail: 'Ledger repairing rejected response...',
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(body: PostGenStatusCard(sessionId: 'session-1')),
+        ),
+      ),
+    );
+
+    expect(find.text('Ledger repairing rejected response...'), findsOneWidget);
+    expect(find.byType(GlazeSpinner), findsOneWidget);
+  });
+
   testWidgets('shows the Card evolution observation pass', (tester) async {
     final container = ProviderContainer();
     addTearDown(container.dispose);

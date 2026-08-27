@@ -95,7 +95,7 @@ class _PostGenStatusCardState extends ConsumerState<PostGenStatusCard> {
         }
       case PostGenTask.ledger:
         if (state.phase == PostGenTaskPhase.running) {
-          label = 'Ledger running...';
+          label = state.detail ?? 'Ledger running...';
           icon = Icons.menu_book_outlined;
           accent = cs.primary;
           showSpinner = true;
