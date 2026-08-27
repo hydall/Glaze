@@ -9,6 +9,33 @@ import '../theme/app_colors.dart';
 import 'glass_surface.dart';
 import 'glaze_background.dart';
 
+/// Hide-on-scroll animation of the floating header. Exposed so overlays that
+/// belong TO the header but cannot live inside it (the chat's triggered-entries
+/// panel, which is measured by the chat body to inset the message list) can run
+/// the exact same curve and travel the exact same distance — header and panel
+/// then slide away and come back as one unit instead of drifting apart.
+const Duration kGlazeHeaderHideDuration = Duration(milliseconds: 300);
+const Curve kGlazeHeaderHideCurve = Curves.easeOutCubic;
+
+/// How far the header slides up when hidden, as a fraction of its own height.
+const double kGlazeHeaderHideSlideFactor = 1.5;
+
+/// Fractional [AnimatedSlide] offset for an overlay that hides *with* the
+/// header: the y-offset an overlay of [overlayHeight] needs so it travels the
+/// same number of PIXELS as a header of [headerHeight].
+///
+/// [AnimatedSlide] measures its offset in fractions of the child's own size, so
+/// reusing [kGlazeHeaderHideSlideFactor] directly would make a tall overlay
+/// shoot off proportionally faster than the header and the two would visibly
+/// come apart mid-animation. Falls back to the header's own factor until the
+/// overlay has been measured ([overlayHeight] still 0).
+double glazeHeaderHideSlideFor({
+  required double headerHeight,
+  required double overlayHeight,
+}) => overlayHeight <= 0
+    ? kGlazeHeaderHideSlideFactor
+    : (headerHeight * kGlazeHeaderHideSlideFactor) / overlayHeight;
+
 /// Scaffold with a floating glassmorphic header — use for screens OUTSIDE
 /// the shell (character editor, chat screen, etc.) that need a back button.
 ///
@@ -93,13 +120,15 @@ class GlazeScaffold extends StatelessWidget {
     );
 
     final animatedHeader = AnimatedSlide(
-      offset: hideHeader ? const Offset(0, -1.5) : Offset.zero,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
+      offset: hideHeader
+          ? const Offset(0, -kGlazeHeaderHideSlideFactor)
+          : Offset.zero,
+      duration: kGlazeHeaderHideDuration,
+      curve: kGlazeHeaderHideCurve,
       child: AnimatedOpacity(
         opacity: hideHeader ? 0.0 : 1.0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic,
+        duration: kGlazeHeaderHideDuration,
+        curve: kGlazeHeaderHideCurve,
         child: header,
       ),
     );

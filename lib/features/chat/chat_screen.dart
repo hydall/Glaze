@@ -1867,31 +1867,66 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 ),
               ),
             ),
-            // Memory activity card: floats under the header, over the chat.
+            // Triggered-entries panel: part of the chat header. It sits flush
+            // under the header and rides the header's own hide-on-scroll
+            // animation (same curve, same pixel travel — see
+            // [kGlazeHeaderHideDuration]), so the two slide away and come back
+            // as one unit. It cannot live inside GlazeScaffold's header itself:
+            // its measured height is what insets the top of the message list
+            // (see [_memoryCardHeight]), and that measurement belongs to this
+            // body. The animation wrappers stay OUTSIDE the size notifier so
+            // the reserved space is the panel's natural height — the reserve
+            // does not collapse while the header is hidden, exactly like the
+            // header's own reserved strip.
             if (showMemoryCard)
               Positioned(
                 top: messageListTop,
                 left: 12,
                 right: 12,
-                child: NotificationListener<SizeChangedLayoutNotification>(
-                  onNotification: (n) {
-                    WidgetsBinding.instance.addPostFrameCallback(
-                      (_) => _checkHeight(),
-                    );
-                    return true;
-                  },
-                  child: SizeChangedLayoutNotifier(
-                    child: Container(
-                      key: _memoryCardKey,
-                      child: MemoryActivityCard(
-                        activity: memoryActivity,
-                        expanded: _showMemoryActivity,
-                        sessionId: widget.state.session?.id,
-                        onToggle: () {
-                          setState(() {
-                            _showMemoryActivity = !_showMemoryActivity;
-                          });
+                child: IgnorePointer(
+                  ignoring: widget.isHeaderHidden,
+                  child: AnimatedSlide(
+                    offset: widget.isHeaderHidden
+                        ? Offset(
+                            0,
+                            -glazeHeaderHideSlideFor(
+                              // The panel is anchored right below the header,
+                              // so `messageListTop` (safe-area top + 10px
+                              // padding + the 56px app bar) IS the header
+                              // strip's height.
+                              headerHeight: messageListTop,
+                              overlayHeight: _memoryCardHeight,
+                            ),
+                          )
+                        : Offset.zero,
+                    duration: kGlazeHeaderHideDuration,
+                    curve: kGlazeHeaderHideCurve,
+                    child: AnimatedOpacity(
+                      opacity: widget.isHeaderHidden ? 0.0 : 1.0,
+                      duration: kGlazeHeaderHideDuration,
+                      curve: kGlazeHeaderHideCurve,
+                      child: NotificationListener<SizeChangedLayoutNotification>(
+                        onNotification: (n) {
+                          WidgetsBinding.instance.addPostFrameCallback(
+                            (_) => _checkHeight(),
+                          );
+                          return true;
                         },
+                        child: SizeChangedLayoutNotifier(
+                          child: Container(
+                            key: _memoryCardKey,
+                            child: MemoryActivityCard(
+                              activity: memoryActivity,
+                              expanded: _showMemoryActivity,
+                              sessionId: widget.state.session?.id,
+                              onToggle: () {
+                                setState(() {
+                                  _showMemoryActivity = !_showMemoryActivity;
+                                });
+                              },
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
