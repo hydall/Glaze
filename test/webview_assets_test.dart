@@ -838,6 +838,89 @@ void main() {
   });
 
   // ─── markdown image options button ────────────────────────────────────────
+  group('markdown parity with the reference renderers', () {
+    test('every void element is exempt from the orphan-tag rule', () {
+      // A void element is written once and never closed, so the orphan rule
+      // would turn `<source>` inside a `<video>` into visible text.
+      for (final tag in [
+        "'area'",
+        "'base'",
+        "'br'",
+        "'col'",
+        "'embed'",
+        "'hr'",
+        "'img'",
+        "'input'",
+        "'link'",
+        "'meta'",
+        "'param'",
+        "'source'",
+        "'track'",
+        "'wbr'",
+      ]) {
+        expect(
+          formatterFormatterJs.substring(
+            formatterFormatterJs.indexOf('const selfClosing = new Set('),
+            formatterFormatterJs.indexOf('const isExplicitSelfClosing'),
+          ),
+          contains(tag),
+        );
+      }
+    });
+
+    test('<br> is inline, so it cannot split a paragraph', () {
+      final blockTags = formatterFormatterJs.substring(
+        formatterFormatterJs.indexOf('const blockTags = new Set('),
+        formatterFormatterJs.indexOf('const TAG_REGEX'),
+      );
+      expect(blockTags, isNot(contains("'br'")));
+    });
+
+    test('inline code is extracted before the tag pass reads it', () {
+      final extract = formatterFormatterJs.indexOf("this._ph('IC_'");
+      final tagPass = formatterFormatterJs.indexOf('const TAG_REGEX');
+      expect(extract, isNonNegative);
+      expect(extract, lessThan(tagPass));
+      // Restored escaped: a tag written inside backticks is shown, not run.
+      expect(
+        formatterFormatterJs,
+        contains(r'return `<code>${this._escapeHtml(code)}</code>`;'),
+      );
+    });
+
+    test('headings, tables and dinkus lines are block placeholders', () {
+      // Emitting raw HTML here would leave it as text for the paragraph pass,
+      // which would wrap it in <p> (invalid around <hr> and <table>).
+      for (final marker in [
+        r'/^(#{1,6})[ 	]+(.+?)[ 	]*#*$/gm',
+        'const TABLE_RUN',
+        r"tagBlocks.push('<hr>');",
+      ]) {
+        expect(formatterFormatterJs, contains(marker));
+      }
+      // A table needs its separator row — otherwise a line of prose that uses
+      // pipes would become a table.
+      expect(formatterFormatterJs, contains(r'\|[ 	:|-]+\|'));
+    });
+
+    test('an indented list item nests inside the item above it', () {
+      final body = _extractBlockBody(
+        formatterFormatterJs,
+        formatterFormatterJs.indexOf('const listBlocks = [];'),
+      );
+      expect(body, contains('depth'));
+      expect(body, contains(r'rendered += `<li>${item.text}</li>`;'));
+    });
+
+    test('markdown image dimensions never reach the URL', () {
+      expect(
+        formatterFormatterJs,
+        contains(r'const sized = url.match(/^(.*?)\s+=(\d+)?x(\d+)?$/);'),
+      );
+      expect(formatterFormatterJs, contains('sized ? sized[1] : url'));
+    });
+  });
+
   group('CSS-only card adjacency (formatter/formatter.js)', () {
     test('a paragraph of bare tags is never wrapped in <p>', () {
       // `#toggle:checked ~ .overlay` — the sibling selector every CSS-only

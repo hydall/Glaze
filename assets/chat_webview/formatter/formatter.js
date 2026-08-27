@@ -199,6 +199,15 @@ export class Formatter {
       return id;
     });
 
+    // 2b. Extract inline code spans, before the tag pass can read what is
+    //     inside them as HTML. `Пиши `<div>`` is prose about a tag, not a tag.
+    const inlineCode = [];
+    html = html.replace(/`([^`\n]+)`/g, (match, code) => {
+      const id = this._ph('IC_', inlineCode.length);
+      inlineCode.push(code);
+      return id;
+    });
+
     // 3. Extract CSS comments inside code blocks are already protected
     //    Extract standalone CSS comments (outside code blocks)
     const cssComments = [];
@@ -244,9 +253,18 @@ export class Formatter {
     // of the whole message instead of the top of the image.
     const mdImages = [];
     html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, url) => {
-      const safeUrl = this._escapeHtml(this._normalizeMdUrl(url));
+      // `![alt](url =100x50)` — the dimension suffix is markdown, not part of
+      // the address; leaving it in `src` requests a URL that cannot resolve.
+      const sized = url.match(/^(.*?)\s+=(\d+)?x(\d+)?$/);
+      const size = sized
+        ? `${sized[2] ? ` width="${sized[2]}"` : ''}` +
+          `${sized[3] ? ` height="${sized[3]}"` : ''}`
+        : '';
+      const safeUrl = this._escapeHtml(
+        this._normalizeMdUrl(sized ? sized[1] : url),
+      );
       const id = this._ph('MI_', mdImages.length);
-      mdImages.push(`<span class="janitor-img-wrapper"><img src="${safeUrl}" alt="${this._escapeHtml(alt)}" class="janitor-img" loading="lazy" data-action="image-click" data-src="${safeUrl}"><button class="janitor-options-btn" type="button" data-action="img-options" data-src="${safeUrl}" title="Options">${OPTIONS_SVG}</button></span>`);
+      mdImages.push(`<span class="janitor-img-wrapper"><img${size} src="${safeUrl}" alt="${this._escapeHtml(alt)}" class="janitor-img" loading="lazy" data-action="image-click" data-src="${safeUrl}"><button class="janitor-options-btn" type="button" data-action="img-options" data-src="${safeUrl}" title="Options">${OPTIONS_SVG}</button></span>`);
       return id;
     });
 
@@ -297,7 +315,7 @@ export class Formatter {
     //    Skip orphan tags (no matching pair) so they render as visible text
     //    instead of being interpreted as real HTML elements.
     const tagBlocks = [];
-    const blockTags = new Set(['div','p','style','pre','table','ul','ol','li','h1','h2','h3','h4','h5','h6','blockquote','section','article','header','footer','hr','details','summary','figure','figcaption','svg','path','math','canvas','video','audio','form','fieldset','nav','aside','main','img','br','loomledger']);
+    const blockTags = new Set(['div','p','style','pre','table','ul','ol','li','h1','h2','h3','h4','h5','h6','blockquote','section','article','header','footer','hr','details','summary','figure','figcaption','svg','path','math','canvas','video','audio','form','fieldset','nav','aside','main','img','loomledger']);
     const TAG_REGEX = /<(?:[^"'>]|"[^"]*"|'[^']*')*>/g;
 
     const allTagMatches = [...html.matchAll(TAG_REGEX)];
@@ -317,7 +335,13 @@ export class Formatter {
       const count = tagCounts.get(name) || 0;
       // Self-closing tags (br, hr, img) and paired tags are fine;
       // single occurrence of a non-self-closing tag is orphan — escape it.
-      const selfClosing = new Set(['br', 'hr', 'img', 'input', 'meta', 'link']);
+      // Every HTML void element: it is written once, with no closing tag, so
+      // the orphan rule below would turn `<source>` inside a `<video>` into
+      // visible `&lt;source&gt;` text.
+      const selfClosing = new Set([
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+        'meta', 'param', 'source', 'track', 'wbr',
+      ]);
       const isExplicitSelfClosing = /\/\s*>$/.test(match);
       if (count === 1 && !selfClosing.has(name) && !isExplicitSelfClosing) {
         return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -382,7 +406,12 @@ export class Formatter {
     // 10. Markdown Parsing
     html = html.replace(/^>\s?(.*)$/gm, '<blockquote class="chat-blockquote">$1</blockquote>');
     html = html.replace(/<\/blockquote>\n*<blockquote class="chat-blockquote">/g, '<br>');
-    html = html.replace(/^(_{3,}|-{3,}|\*{3,})$/gm, '<hr>');
+    html = html.replace(/^(_{3,}|-{3,}|\*{3,})$/gm, () => {
+      // A raw `<hr>` here would be plain text to step 11 and end up inside a
+      // paragraph; as a tag placeholder it keeps its own line.
+      tagBlocks.push('<hr>');
+      return `\n\n${this._ph('T_', tagBlocks.length - 1, true)}\n\n`;
+    });
     html = html.replace(/~~([^~\n]+?)~~/g, '<del>$1</del>');
     html = html.replace(/\*\*\*([^*\n]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
     html = html.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
@@ -392,15 +421,65 @@ export class Formatter {
 
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 
+    // 10a0. Markdown tables — header row, a `---` separator, then body rows.
+    //       The separator is what tells a table from a line of prose that
+    //       happens to use pipes, so it is required.
+    const TABLE_RUN =
+      /(?:^|\n)([ \t]*\|[^\n]*\|[ \t]*\n[ \t]*\|[ \t:|-]+\|[ \t]*(?:\n[ \t]*\|[^\n]*\|[ \t]*)*)/g;
+    html = html.replace(TABLE_RUN, (match, run) => {
+      const rows = run.trim().split('\n').map(line => line.trim());
+      const cells = row => row.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const head = cells(rows[0]).map(c => `<th>${c}</th>`).join('');
+      const body = rows.slice(2)
+        .map(row => `<tr>${cells(row).map(c => `<td>${c}</td>`).join('')}</tr>`)
+        .join('');
+      tagBlocks.push(
+        `<table class="chat-table"><thead><tr>${head}</tr></thead>` +
+        `${body ? `<tbody>${body}</tbody>` : ''}</table>`,
+      );
+      return `\n\n${this._ph('T_', tagBlocks.length - 1, true)}\n\n`;
+    });
+
+    // 10a. Headings — `#` through `######`, the way every markdown renderer
+    //      spells them. Left as text they show up as literal hashes.
+    html = html.replace(/^(#{1,6})[ \t]+(.+?)[ \t]*#*$/gm, (match, hashes, body) => {
+      const level = hashes.length;
+      tagBlocks.push(`<h${level} class="chat-heading">${body}</h${level}>`);
+      return `\n\n${this._ph('T_', tagBlocks.length - 1, true)}\n\n`;
+    });
+
     // 10b. Markdown lists
     const listBlocks = [];
-    html = html.replace(/((?:^|\n)((?:[-*] .+(?:\n|$))+))/g, (match) => {
+    html = html.replace(/((?:^|\n)((?:[ \t]*[-*] .+(?:\n|$))+))/g, (match) => {
       const id = this._ph('LB_', listBlocks.length, true);
+      // An indented item belongs to the list above it. Splitting the run at
+      // the first indented line left it stranded as its own paragraph between
+      // two lists; nesting it keeps the run one list.
       const items = match.trim().split('\n')
-        .filter(line => line.match(/^[-*] /))
-        .map(line => `<li>${line.replace(/^[-*] /, '')}</li>`)
-        .join('');
-      listBlocks.push(`<ul class="chat-list">${items}</ul>`);
+        .filter(line => /^[ \t]*[-*] /.test(line))
+        .map(line => ({
+          depth: /^[ \t]+/.test(line) ? 1 : 0,
+          text: line.replace(/^[ \t]*[-*] /, ''),
+        }));
+      let rendered = '';
+      let nested = false;
+      let open = false;
+      for (const item of items) {
+        if (item.depth) {
+          // The sub-list lives inside the item above it, which stays open
+          // until the run ends or the next top-level item starts.
+          if (!nested) { rendered += '<ul class="chat-list">'; nested = true; }
+          rendered += `<li>${item.text}</li>`;
+          continue;
+        }
+        if (nested) { rendered += '</ul>'; nested = false; }
+        if (open) rendered += '</li>';
+        rendered += `<li>${item.text}`;
+        open = true;
+      }
+      if (nested) rendered += '</ul>';
+      if (open) rendered += '</li>';
+      listBlocks.push(`<ul class="chat-list">${rendered}</ul>`);
       return '\n\n' + id + '\n\n';
     });
     html = html.replace(/((?:^|\n)((?:\d+\. .+(?:\n|$))+))/g, (match) => {
@@ -460,6 +539,13 @@ export class Formatter {
     // 12c. Restore markdown image cards — kept whole so the options button
     //      stays inside its positioned .janitor-img-wrapper (see step 5b).
     html = html.replace(/\x01MI_(\d+)\x01/g, (_, i) => mdImages[parseInt(i)]);
+
+    // 12d. Restore inline code — escaped, so a tag written inside backticks
+    //      is shown, not rendered.
+    html = html.replace(/\x01IC_(\d+)\x01/g, (_, i) => {
+      const code = inlineCode[parseInt(i)];
+      return `<code>${this._escapeHtml(code)}</code>`;
+    });
 
     // 13. Restore CSS comments
     html = html.replace(/\x01CC_(\d+)\x01/g, (_, i) => cssComments[parseInt(i)]);

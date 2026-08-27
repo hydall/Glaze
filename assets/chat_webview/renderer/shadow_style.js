@@ -330,6 +330,31 @@ export const SHADOW_STYLE = `
   }
   .glaze-message table tbody tr:nth-child(even) { background-color: rgba(255,255,255,0.02); }
   .glaze-message table td { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .glaze-message .chat-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 10px 0;
+    font-size: 0.95em;
+  }
+  .glaze-message .chat-table th {
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 1px solid rgba(255,255,255,0.18);
+  }
+  /* Message headings stay close to body text — a bubble is not a document. */
+  .glaze-message .chat-heading {
+    margin: 12px 0 6px;
+    line-height: 1.25;
+    font-weight: 700;
+  }
+  .glaze-message .chat-heading:first-child { margin-top: 0; }
+  .glaze-message h1.chat-heading { font-size: 1.35em; }
+  .glaze-message h2.chat-heading { font-size: 1.22em; }
+  .glaze-message h3.chat-heading { font-size: 1.12em; }
+  .glaze-message h4.chat-heading,
+  .glaze-message h5.chat-heading,
+  .glaze-message h6.chat-heading { font-size: 1em; }
   .search-highlight-text {
     background-color: rgba(255, 215, 0, 0.4);
     color: #fff;
