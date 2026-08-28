@@ -11,9 +11,6 @@ test.beforeEach(async ({ page }) => {
 
 for (const id of streamingCards) {
   test(`${id} renders as markup at every prefix`, async ({ page }) => {
-    // Baseline: the string formatter cannot keep this. Stage 1 of the
-    // rendering plan (parse, then format text nodes) is what makes it pass.
-    test.fail();
     const entry = card(id);
     for (const prefix of prefixes(entry.text)) {
       await render(page, prefix, { isTyping: true });
@@ -28,9 +25,6 @@ for (const id of streamingCards) {
 }
 
 test('a card is a real element before its closing tag arrives', async ({ page }) => {
-  // Baseline: the string formatter cannot keep this. Stage 1 of the
-  // rendering plan (parse, then format text nodes) is what makes it pass.
-  test.fail();
   const body = '<div class="card"><b>Sandrone</b>\nещё печатает';
   await render(page, body, { isTyping: true });
   const shape = await page.evaluate(() => {
@@ -47,9 +41,6 @@ test('a card is a real element before its closing tag arrives', async ({ page })
 });
 
 test('a half-written tag never reaches the reader as text', async ({ page }) => {
-  // Baseline: the string formatter cannot keep this. Stage 1 of the
-  // rendering plan (parse, then format text nodes) is what makes it pass.
-  test.fail();
   for (const body of ['<div clas', '<tab', 'обычный текст <', '<style>.a{col']) {
     await render(page, body, { isTyping: true });
     const visible = await text(page);

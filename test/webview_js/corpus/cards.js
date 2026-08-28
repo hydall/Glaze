@@ -201,6 +201,20 @@ loomledger { display: block; font-family: 'Card', cursive; }
     text: `«Он сказал «тихо» и вышел», — а потом "добавил вслух".`,
   },
   {
+    id: 'inline-tags-in-prose',
+    title: 'Prose with inline tags, quotes and markers across them',
+    origin: 'audit 28.08 — the string formatter matched these across live HTML',
+    text: `Привет <b>мир</b>
+
+"Диалог с <b>тегом</b> внутри", ==hc:#ff0066==<i>цветной курсив</i>== и всё.`,
+  },
+  {
+    id: 'font-gradient',
+    title: '<font> gradient fill with the text in a nested span',
+    origin: 'formatter step 18 — background-clip:text had nothing to clip',
+    text: `<font style="background-image:linear-gradient(90deg,#ff0000,#0000ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent"><span style="letter-spacing:1px">Градиент</span></font>`,
+  },
+  {
     id: 'form-controls',
     title: 'A card built out of form controls',
     origin: 'html_sanitizer keeps <form> for message HTML',

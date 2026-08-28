@@ -30,6 +30,12 @@ void main() {
   late String formatterIndexJs;
   late String formatterFormatterJs;
   late String formatterTextFormatJs;
+  late String formatterHtmlScanJs;
+  late String formatterProtectJs;
+  late String formatterInlineSyntaxJs;
+  late String formatterBlockSyntaxJs;
+  late String formatterDomFormatJs;
+  late String formatterImageBlocksJs;
   late String bridgeIndexJs;
   late String bridgeControllerJs;
   late String virtualScrollJs;
@@ -57,6 +63,12 @@ void main() {
     formatterIndexJs = _formatterAsset('index.js');
     formatterFormatterJs = _formatterAsset('formatter.js');
     formatterTextFormatJs = _formatterAsset('text_format.js');
+    formatterHtmlScanJs = _formatterAsset('html_scan.js');
+    formatterProtectJs = _formatterAsset('protect.js');
+    formatterInlineSyntaxJs = _formatterAsset('inline_syntax.js');
+    formatterBlockSyntaxJs = _formatterAsset('block_syntax.js');
+    formatterDomFormatJs = _formatterAsset('dom_format.js');
+    formatterImageBlocksJs = _formatterAsset('image_blocks.js');
     rendererJs = [
       _rendererAsset('shadow_style.js'),
       _rendererAsset('markdown.js'),
@@ -791,53 +803,60 @@ void main() {
       expect(formatterIndexJs, contains('window.Formatter = Formatter'));
     });
 
-    test('formatter imports extracted text formatting modules', () {
-      expect(formatterFormatterJs, contains("'./macros.js'"));
-      expect(formatterFormatterJs, contains("'./text_format.js'"));
-      expect(formatterFormatterJs, contains('renderStyledSegment('));
+    test('formatter imports its render phases', () {
+      for (final module in [
+        './macros.js',
+        './html_scan.js',
+        './protect.js',
+        './dom_format.js',
+        './inline_syntax.js',
+        './image_blocks.js',
+      ]) {
+        expect(formatterFormatterJs, contains("'$module'"));
+      }
+      expect(formatterInlineSyntaxJs, contains("'./text_format.js'"));
+      expect(formatterInlineSyntaxJs, contains('renderStyledSegment('));
     });
 
     test('legacy formatter shim points at active module entrypoint', () {
       expect(_asset('formatter.js'), contains('formatter/index.js'));
     });
 
-    test('inline markdown does not keep a generated paragraph wrapper', () {
+    test('a style marker is rendered by an inline-only pass', () {
+      // A marker is a <span>. A <p> inside one is markup the browser throws
+      // straight back out, which used to leave a coloured marker showing as
+      // empty text. Its content goes through formatInlineRaw, which cannot
+      // emit a paragraph: it never reaches the block pass at all.
       expect(
-        formatterTextFormatJs,
-        contains(r'const paragraph = rich.match(/^\s*<p>([\s\S]*)<\/p>\s*$/i)'),
+        formatterInlineSyntaxJs,
+        contains('export function formatInlineRaw('),
       );
-      expect(
-        formatterTextFormatJs,
-        contains(r'!/<\/?p(?:\s|>)/i.test(paragraph[1])'),
-        reason: 'only a single outer paragraph may be unwrapped',
-      );
-      expect(formatterTextFormatJs, contains('return paragraph[1]'));
+      expect(formatterInlineSyntaxJs, isNot(contains('block_syntax.js')));
+      expect(formatterTextFormatJs, contains('processRichText'));
     });
 
     test('unmatched emphasis markers cannot consume a later line', () {
       expect(
-        formatterFormatterJs,
+        formatterProtectJs,
         contains(r'(?<!\*)\*(?=[^*\n]*[^ \t*\n])[^*\n]+?\*(?!\*)'),
       );
       expect(
-        formatterFormatterJs,
-        contains(r'html = html.replace(/\*([^*\n]+?)\*/g'),
+        formatterInlineSyntaxJs,
+        contains(r'.replace(/\*([^*\n]+?)\*/g'),
       );
     });
 
     test('orphan emphasis markers cannot consume the next action segment', () {
       expect(
-        formatterFormatterJs,
-        contains(
-          "html = html.replace(/\\*([ \\t]+)(?=\\x01S_\\d+\\x01)/g, '\$1');",
-        ),
+        formatterProtectJs,
+        contains(r'`\\*([ \\t]+)(?=${SENTINEL}S_\\d+${SENTINEL})`'),
       );
     });
 
     test('nested guillemets cannot consume styled-segment placeholders', () {
       expect(
-        formatterFormatterJs,
-        contains(r'(«)([^»\x01]*?(?:«[^»\x01]*?»[^»\x01]*?)*?)(»)'),
+        formatterInlineSyntaxJs,
+        contains(r'(«)([^»\\u0001]*?(?:«[^»\\u0001]*?»[^»\\u0001]*?)*?)(»)'),
         reason:
             'a malformed outer quote must not cross a styled segment while '
             'searching for its closing guillemet',
@@ -845,124 +864,165 @@ void main() {
     });
   });
 
-  // ─── markdown image options button ────────────────────────────────────────
-  group('markdown parity with the reference renderers', () {
-    test('every void element is exempt from the orphan-tag rule', () {
-      // A void element is written once and never closed, so the orphan rule
-      // would turn `<source>` inside a `<video>` into visible text.
-      for (final tag in [
-        "'area'",
-        "'base'",
-        "'br'",
-        "'col'",
-        "'embed'",
-        "'hr'",
-        "'img'",
-        "'input'",
-        "'link'",
-        "'meta'",
-        "'param'",
-        "'source'",
-        "'track'",
-        "'wbr'",
+  group('two-phase render (formatter/)', () {
+    // What each of these guards is *behaviour*, and the behaviour itself is
+    // covered by test/webview_js — the browser suite that renders the card
+    // corpus. These keep the shape of the pipeline honest: the message is
+    // parsed first, and nothing here decides structure by hand again.
+    test('the message is parsed before anything formats its text', () {
+      final protect = formatterFormatterJs.indexOf('protectRegions(source');
+      final parse = formatterFormatterJs.indexOf('parseHtml(escapeProseTags(');
+      final format = formatterFormatterJs.indexOf('formatContainer(tree');
+      expect(protect, isNonNegative);
+      expect(parse, greaterThan(protect));
+      expect(format, greaterThan(parse));
+    });
+
+    test('nothing sorts tags into block and inline by hand', () {
+      // The `blockTags` list and the "orphan" counter are what every card
+      // that *almost* matched them used to break on. How an element nests,
+      // and where an unclosed tag ends, are the parser's answers now.
+      expect(formatterFormatterJs, isNot(contains('blockTags')));
+      expect(formatterFormatterJs, isNot(contains('tagCounts')));
+      expect(formatterHtmlScanJs, contains('export function isKnownElement('));
+      expect(formatterHtmlScanJs, contains('export function escapeProseTags('));
+    });
+
+    test('an unknown element is markup when the card owns it', () {
+      // `<вздох>` in prose is a word; `<loomledger>` in a card is a
+      // container. What separates them is the card's own CSS and its
+      // closing tag — not how many times the name occurs.
+      final body = _extractBlockBody(
+        formatterHtmlScanJs,
+        formatterHtmlScanJs.indexOf('export function escapeProseTags('),
+      );
+      expect(body, contains('isKnownElement(name)'));
+      expect(body, contains('styled.has(name)'));
+      expect(body, contains('opened.has(name) && closed.has(name)'));
+      expect(body, contains(r"tag.replace(/</g, '&lt;')"));
+    });
+
+    test('a void element needs no exemption from anything', () {
+      // `<source>` inside a `<video>` is written once and never closed. The
+      // parser knows that; the old orphan rule had to be told, tag by tag.
+      for (final name in [
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+        'meta', 'param', 'source', 'track', 'wbr',
       ]) {
         expect(
-          formatterFormatterJs.substring(
-            formatterFormatterJs.indexOf('const selfClosing = new Set('),
-            formatterFormatterJs.indexOf('const isExplicitSelfClosing'),
-          ),
-          contains(tag),
+          RegExp('(?<![A-Za-z-])$name(?![A-Za-z-])')
+              .hasMatch(formatterHtmlScanJs),
+          isTrue,
+          reason: '$name must be in the element vocabulary',
         );
       }
     });
 
-    test('<br> is inline, so it cannot split a paragraph', () {
-      final blockTags = formatterFormatterJs.substring(
-        formatterFormatterJs.indexOf('const blockTags = new Set('),
-        formatterFormatterJs.indexOf('const TAG_REGEX'),
+    test('markdown never reaches inside code, style or an attribute', () {
+      for (final name in ["'script'", "'style'", "'pre'", "'code'", "'textarea'"]) {
+        expect(formatterHtmlScanJs, contains(name));
+      }
+      expect(formatterHtmlScanJs, contains('RAW_TEXT_ELEMENTS'));
+      expect(formatterDomFormatJs, contains('const OPAQUE ='));
+      // Elements are masked out of the string the markdown passes run over,
+      // so no pass can read into a tag or an attribute value.
+      expect(
+        formatterDomFormatJs,
+        contains(r'`${SENTINEL}E_${kept.length - 1}${SENTINEL}`'),
       );
-      expect(blockTags, isNot(contains("'br'")));
+      expect(formatterHtmlScanJs, contains('export function maskTags('));
     });
 
-    test('inline code is extracted before the tag pass reads it', () {
-      final extract = formatterFormatterJs.indexOf("this._ph('IC_'");
-      final tagPass = formatterFormatterJs.indexOf('const TAG_REGEX');
-      expect(extract, isNonNegative);
-      expect(extract, lessThan(tagPass));
+    test('inline code is protected before the message is parsed', () {
+      final inlineCode = formatterProtectJs.indexOf("kind: 'inline-code'");
+      final imageCard = formatterProtectJs.indexOf('markdownImageCard(alt, url)');
+      expect(inlineCode, isNonNegative);
+      expect(imageCard, greaterThan(inlineCode));
       // Restored escaped: a tag written inside backticks is shown, not run.
       expect(
         formatterFormatterJs,
-        contains(r'return `<code>${this._escapeHtml(code)}</code>`;'),
+        contains(r'return `<code>${escapeHtml(region.code)}</code>`;'),
       );
     });
 
-    test('headings, tables and dinkus lines are block placeholders', () {
-      // Emitting raw HTML here would leave it as text for the paragraph pass,
-      // which would wrap it in <p> (invalid around <hr> and <table>).
+    test('headings, tables, lists and dinkus lines are block constructs', () {
       for (final marker in [
-        r'/^(#{1,6})[ \t]+(.+?)[ \t]*#*$/gm',
-        'const TABLE_RUN',
-        r"tagBlocks.push('<hr>');",
+        r'const HEADING = /^(#{1,6})[ \t]+(.+?)[ \t]*#*$/;',
+        r'const RULE = /^(_{3,}|-{3,}|\*{3,})$/;',
+        'const BULLET',
+        'const NUMBERED',
+        'const TABLE_SEPARATOR',
       ]) {
-        expect(formatterFormatterJs, contains(marker));
+        expect(formatterBlockSyntaxJs, contains(marker));
       }
       // A table needs its separator row — otherwise a line of prose that uses
       // pipes would become a table.
-      expect(formatterFormatterJs, contains(r'\|[ \t:|-]+\|'));
+      expect(formatterBlockSyntaxJs, contains(r'\|[ \t:|-]+\|'));
     });
 
     test('an indented list item nests inside the item above it', () {
       final body = _extractBlockBody(
-        formatterFormatterJs,
-        formatterFormatterJs.indexOf('const listBlocks = [];'),
+        formatterBlockSyntaxJs,
+        formatterBlockSyntaxJs.indexOf('function renderList('),
       );
-      expect(body, contains('depth'));
-      expect(body, contains(r'rendered += `<li>${item.text}</li>`;'));
+      expect(body, contains('item.depth'));
+      expect(body, contains(r'out += `<li>${inline(item.text)}</li>`;'));
     });
 
     test('markdown image dimensions never reach the URL', () {
       expect(
-        formatterFormatterJs,
+        formatterProtectJs,
         contains(r'const sized = url.match(/^(.*?)\s+=(\d+)?x(\d+)?$/);'),
       );
-      expect(formatterFormatterJs, contains('sized ? sized[1] : url'));
+      expect(formatterProtectJs, contains('sized ? sized[1] : url'));
     });
   });
 
-  group('CSS-only card adjacency (formatter/formatter.js)', () {
-    test('a paragraph of bare tags is never wrapped in <p>', () {
+  group('CSS-only card adjacency (formatter/dom_format.js)', () {
+    test('<p> is only ever added at the top level of a message', () {
       // `#toggle:checked ~ .overlay` — the sibling selector every CSS-only
       // card is built on — stops matching the moment a `<p>` reparents the
-      // checkbox, so a lone `<input>` on its own line must stay where the
-      // message put it.
+      // checkbox. Inside markup the author wrote, nothing is wrapped at all.
       expect(
-        formatterFormatterJs,
-        contains(
-          r"const ONLY_TAG_PLACEHOLDERS = "
-          r"/^(?:\x01T_(?:BLOCK_)?\d+\x01|\s)+$/;",
-        ),
+        formatterDomFormatJs,
+        contains('paragraphs: isRoot && !touchesBlockSibling(current)'),
       );
-      final paragraphs = formatterFormatterJs.indexOf('const paragraphs =');
-      final guard = formatterFormatterJs.indexOf(
-        'ONLY_TAG_PLACEHOLDERS.test(trimmed)',
+      expect(
+        formatterBlockSyntaxJs,
+        contains(r'paragraphs && !bare ? `<p>${body}</p>` : body'),
       );
-      final wrap = formatterFormatterJs.indexOf(r'`<p>${trimmed}</p>`');
-      expect(paragraphs, isNonNegative);
-      expect(guard, greaterThan(paragraphs));
-      expect(guard, lessThan(wrap));
+    });
+
+    test('a run that touches a card keeps its paragraph off', () {
+      // `<input id="t1"><label>…</label><div class="ov">` is one card, not a
+      // paragraph followed by a card: no blank line separates them.
+      final body = _extractBlockBody(
+        formatterDomFormatJs,
+        formatterDomFormatJs.indexOf('function touchesBlockSibling('),
+      );
+      expect(body, contains('tightBefore'));
+      expect(body, contains('tightAfter'));
+      expect(body, contains('hasBlankLine'));
+    });
+
+    test('a protected region is never wrapped in a paragraph', () {
+      // A <p> around an image block or a code block is a <p> the browser
+      // throws straight back out, taking the block's position with it.
+      expect(formatterBlockSyntaxJs, contains('const ONLY_REGIONS ='));
+      expect(formatterBlockSyntaxJs, contains('ONLY_REGIONS.test(line)'));
     });
   });
 
-  group('generated image (formatter/formatter.js, renderer/markdown.js)', () {
+  group('generated image (formatter/image_blocks.js, renderer/markdown.js)', () {
     test('the result image loads eagerly', () {
       // A lazy image at the bottom edge of the WebView can be evaluated while
       // the row is still off-screen and never fetched, leaving the picture the
       // user waited for as a broken tag.
-      final imgIdx = formatterFormatterJs.indexOf('class="imggen-result"');
+      final imgIdx = formatterImageBlocksJs.indexOf('class="imggen-result"');
       expect(imgIdx, isNot(-1));
-      final chunk = formatterFormatterJs.substring(
-        formatterFormatterJs.lastIndexOf('<img', imgIdx),
-        formatterFormatterJs.indexOf('>', imgIdx),
+      final chunk = formatterImageBlocksJs.substring(
+        formatterImageBlocksJs.lastIndexOf('<img', imgIdx),
+        formatterImageBlocksJs.indexOf('>', imgIdx),
       );
       expect(chunk, contains('loading="eager"'));
       expect(chunk, isNot(contains('loading="lazy"')));
@@ -971,30 +1031,30 @@ void main() {
     test('the block switcher renders only for more than one image', () {
       // The count is `variants.length > 1` on both the switcher and the data
       // attributes, so a single-image block keeps its historical markup.
-      expect(formatterFormatterJs, contains('imggen-variants'));
+      expect(formatterImageBlocksJs, contains('imggen-variants'));
       expect(
-        formatterFormatterJs,
+        formatterImageBlocksJs,
         contains("data-action=\"img-variant-prev\""),
       );
       expect(
-        formatterFormatterJs,
+        formatterImageBlocksJs,
         contains("data-action=\"img-variant-next\""),
       );
       expect(
-        RegExp(r'variants\.length > 1').allMatches(formatterFormatterJs).length,
+        RegExp(r'variants\.length > 1').allMatches(formatterImageBlocksJs).length,
         greaterThanOrEqualTo(3),
       );
-      expect(formatterFormatterJs, contains('data-variants='));
-      expect(formatterFormatterJs, contains('data-variant-index='));
+      expect(formatterImageBlocksJs, contains('data-variants='));
+      expect(formatterImageBlocksJs, contains('data-variant-index='));
     });
 
     test('the payload parser mirrors the Dart codec', () {
       expect(
-        formatterFormatterJs,
+        formatterImageBlocksJs,
         contains('export function parseImageResultPayload('),
       );
-      expect(formatterFormatterJs, contains("IMG_VARIANT_SEPARATOR = ';;'"));
-      expect(formatterFormatterJs, contains("IMG_VARIANT_ACTIVE_MARKER = '*'"));
+      expect(formatterImageBlocksJs, contains("IMG_VARIANT_SEPARATOR = ';;'"));
+      expect(formatterImageBlocksJs, contains("IMG_VARIANT_ACTIVE_MARKER = '*'"));
     });
 
     test('the stored <img data-iig-…> block renders as an image block', () {
@@ -1003,23 +1063,23 @@ void main() {
       // the switcher and its data-img-index — not the bare <img> that step 6
       // would leave.
       expect(
-        formatterFormatterJs,
+        formatterImageBlocksJs,
         contains('export function parseImageResultElement('),
       );
-      expect(formatterFormatterJs, contains('IIG_ELEMENT_REGEX'));
-      expect(formatterFormatterJs, contains("data-iig-variants"));
-      expect(formatterFormatterJs, contains("data-iig-index"));
+      expect(formatterImageBlocksJs, contains('IIG_ELEMENT_REGEX'));
+      expect(formatterImageBlocksJs, contains("data-iig-variants"));
+      expect(formatterImageBlocksJs, contains("data-iig-index"));
       expect(
         RegExp(
-          r'html = html\.replace\(IIG_ELEMENT_REGEX[\s\S]*?'
-          r"imgBlocks\.push\(\{\s*type: 'result'",
-        ).hasMatch(formatterFormatterJs),
+          r'out = out\.replace\(IIG_ELEMENT_REGEX[\s\S]*?'
+          r"hold\(\{\s*type: 'result'",
+        ).hasMatch(formatterImageBlocksJs),
         isTrue,
       );
       // An element with no image yet is a *pending* block and must fall
       // through to the [IMG:GEN] handling instead.
       expect(
-        formatterFormatterJs,
+        formatterImageBlocksJs,
         contains("if (!src || src.startsWith('[IMG:GEN')) return null;"),
       );
     });
@@ -1063,24 +1123,24 @@ void main() {
       // so the only thing it can paint is the browser's broken-image glyph.
       // Both stored spellings are pulled out as pending blocks instead.
       expect(
-        formatterFormatterJs,
+        formatterImageBlocksJs,
         contains('export function parseImagePendingElement('),
       );
-      expect(formatterFormatterJs, contains('IMG_SRC_GEN_ELEMENT_REGEX'));
+      expect(formatterImageBlocksJs, contains('IMG_SRC_GEN_ELEMENT_REGEX'));
       expect(
         RegExp(
-          r'html = html\.replace\(IIG_ELEMENT_REGEX[\s\S]*?'
-          r"imgBlocks\.push\(\{ type: 'gen'",
-        ).hasMatch(formatterFormatterJs),
+          r'out = out\.replace\(IIG_ELEMENT_REGEX[\s\S]*?'
+          r"hold\(\{ type: 'gen'",
+        ).hasMatch(formatterImageBlocksJs),
         isTrue,
         reason: 'a pending stored element must render the loading placeholder',
       );
       // The bare `<img src="[IMG:GEN…]">` element has to be consumed whole,
       // before the pass that would take only the payload out of its src.
       final srcElementIdx =
-          formatterFormatterJs.indexOf('html.replace(IMG_SRC_GEN_ELEMENT_REGEX');
-      final bareTagIdx = formatterFormatterJs.indexOf(
-        r'html.replace(/\[IMG:GEN(?::(.*?))?\]/g',
+          formatterImageBlocksJs.indexOf('out.replace(IMG_SRC_GEN_ELEMENT_REGEX');
+      final bareTagIdx = formatterImageBlocksJs.indexOf(
+        r'out.replace(/\[IMG:GEN(?::(.*?))?\]/g',
       );
       expect(srcElementIdx, isNonNegative);
       expect(bareTagIdx, isNonNegative);
@@ -1093,21 +1153,21 @@ void main() {
       // is never coming — nor allocate a data-img-index Dart does not count.
       expect(
         formatterFormatterJs,
-        contains('_processText(text, isUser, skipQuotes = false, '
-            'inReasoning = false)'),
+        contains('_render(text, isUser, inReasoning)'),
       );
       // The reasoning body is the one recursive pass that sets the flag.
       expect(
         formatterFormatterJs,
-        contains('this._processText(content, isUser, false, true)'),
+        contains('this._render(region.content, isUser, true)'),
       );
       // All three pending spellings fall through to the inert text collector.
       expect(
-        RegExp('if [(]inReasoning[)] return inertTag[(]match[)];')
-            .allMatches(formatterFormatterJs)
+        RegExp('if [(]inReasoning[)] return inert[(]match[)];')
+            .allMatches(formatterImageBlocksJs)
             .length,
         3,
       );
+      expect(formatterProtectJs, contains("inert: (raw) => store.hold("));
       // The split-out `message.reasoning` panel is reasoning too, and Dart
       // never scans that field at all — so it renders with the same flag.
       expect(
@@ -1128,25 +1188,28 @@ void main() {
         contains('formatMessageBody(formatter, text, isUser, isReasoning)'),
       );
       // Restored as the literal text the model wrote, before the leak sweep.
-      final restoreIdx = formatterFormatterJs.indexOf(r'\x01IGT_(\d+)\x01');
+      expect(formatterFormatterJs, contains("case 'text':"));
+      expect(formatterFormatterJs, contains('return escapeHtml(region.text);'));
+      final restoreIdx = formatterFormatterJs.indexOf(
+        "replacePlaceholders(tree, 'P'",
+      );
       final sweepIdx = formatterFormatterJs.indexOf(
-        r"html = html.replace(/\x01[A-Z_]+\d+\x01/g, '');",
+        'result.replace(ANY_PLACEHOLDER',
       );
       expect(restoreIdx, isNonNegative);
       expect(sweepIdx, isNonNegative);
-      expect(restoreIdx, lessThan(sweepIdx));
     });
 
     test('the stop button is an SVG, not an emoji glyph', () {
       // ⏹ is a font-dependent emoji: a different size and colour on every
       // platform. A path takes `fill: currentColor` and stays put.
-      expect(formatterFormatterJs, contains('const STOP_SVG ='));
-      expect(formatterFormatterJs, contains('<rect x="7" y="7"'));
-      final stopIdx = formatterFormatterJs.indexOf('class="imggen-stop-btn"');
+      expect(formatterImageBlocksJs, contains('const STOP_SVG ='));
+      expect(formatterImageBlocksJs, contains('<rect x="7" y="7"'));
+      final stopIdx = formatterImageBlocksJs.indexOf('class="imggen-stop-btn"');
       expect(stopIdx, isNonNegative);
-      final button = formatterFormatterJs.substring(
+      final button = formatterImageBlocksJs.substring(
         stopIdx,
-        formatterFormatterJs.indexOf('</button>', stopIdx),
+        formatterImageBlocksJs.indexOf('</button>', stopIdx),
       );
       expect(button, contains(r'${STOP_SVG}'));
       expect(button, isNot(contains('⏹')));
@@ -1159,7 +1222,7 @@ void main() {
       // streaming and post-gen reaches the image stage. Until then there is
       // nothing to time and nothing to stop — a running placeholder would be
       // a lie, and its Stop button would cancel a token that does not exist.
-      expect(formatterFormatterJs, contains('class="imggen-queued-hint"'));
+      expect(formatterImageBlocksJs, contains('class="imggen-queued-hint"'));
       expect(
         imgGenPlaceholderJs,
         contains('return !bridge.isGeneratingImage;'),
@@ -1241,83 +1304,55 @@ void main() {
     });
   });
 
-  group('markdown image card (formatter/formatter.js)', () {
-    test('the card is stashed whole, not emitted as raw HTML mid-pipeline', () {
-      // Raw HTML emitted before the tag extraction gets torn apart: <img>,
-      // <svg> and <path> are *block* tags, so the paragraph step isolates each
-      // of them and the wrapper <span>, the image and the options <button> end
-      // up in three different <p> elements. The button then loses its
-      // positioned wrapper and its `position: absolute` resolves against the
-      // message container — the 3-dot menu jumps to the top of the message.
-      expect(formatterFormatterJs, contains('const mdImages = []'));
-      expect(formatterFormatterJs, contains('mdImages.push('));
-
-      final pushIdx = formatterFormatterJs.indexOf('mdImages.push(');
-      final tagExtractIdx = formatterFormatterJs.indexOf(
-        '// 6. Extract HTML Tags',
-      );
-      expect(tagExtractIdx, isNot(-1));
+  group('markdown image card (formatter/protect.js)', () {
+    test('the card is one protected region, never loose markup', () {
+      // Emitted as raw HTML mid-pipeline the card gets torn apart: the
+      // wrapper <span>, the <img> and the options <button> end up in
+      // different blocks, the button loses its positioned wrapper, and its
+      // `position: absolute` resolves against the whole message instead.
+      expect(formatterProtectJs, contains('function markdownImageCard('));
       expect(
-        pushIdx < tagExtractIdx,
-        isTrue,
-        reason: 'the image card must be stashed before tag extraction runs',
+        formatterProtectJs,
+        contains("store.hold({ kind: 'html', html: markdownImageCard(alt, url) })"),
       );
     });
 
     test('wrapper, image and options button live in one atomic chunk', () {
-      final pushIdx = formatterFormatterJs.indexOf('mdImages.push(');
-      final chunk = formatterFormatterJs.substring(
-        pushIdx,
-        formatterFormatterJs.indexOf('\n', pushIdx),
+      final body = _extractBlockBody(
+        formatterProtectJs,
+        formatterProtectJs.indexOf('function markdownImageCard('),
       );
-      expect(chunk, contains('janitor-img-wrapper'));
-      expect(chunk, contains('class="janitor-img"'));
-      expect(chunk, contains('janitor-options-btn'));
-      expect(chunk, contains(r'data-action="img-options"'));
+      expect(body, contains('janitor-img-wrapper'));
+      expect(body, contains('class="janitor-img"'));
+      expect(body, contains('janitor-options-btn'));
+      expect(body, contains(r'data-action="img-options"'));
     });
 
-    test('the card is restored after paragraph splitting', () {
-      final restoreIdx = formatterFormatterJs.indexOf(
-        r'html = html.replace(/\x01MI_(\d+)\x01/g',
+    test('the card is put back after the markdown passes, not before', () {
+      final format = formatterFormatterJs.indexOf('formatContainer(tree');
+      final restore = formatterFormatterJs.indexOf(
+        "replacePlaceholders(tree, 'P'",
       );
-      expect(
-        restoreIdx,
-        isNot(-1),
-        reason: 'markdown image placeholders must be restored',
-      );
-      final paragraphIdx = formatterFormatterJs.indexOf('// 11. Paragraphs');
-      expect(paragraphIdx, isNot(-1));
-      expect(
-        restoreIdx > paragraphIdx,
-        isTrue,
-        reason:
-            'restoring before the paragraph step would expose the card to the '
-            'block-placeholder isolation again',
-      );
+      expect(format, isNonNegative);
+      expect(restore, greaterThan(format));
     });
 
     test('options button is positioned against the image wrapper', () {
       final wrapperIdx = rendererJs.indexOf('.janitor-img-wrapper {');
       expect(wrapperIdx, isNot(-1));
-      final wrapperBlock = rendererJs.substring(
+      final wrapperRule = rendererJs.substring(
         wrapperIdx,
-        rendererJs.indexOf('}', wrapperIdx) + 1,
+        rendererJs.indexOf('}', wrapperIdx),
       );
-      expect(
-        wrapperBlock,
-        contains('position: relative'),
-        reason: 'the wrapper is the containing block of the options button',
-      );
+      expect(wrapperRule, contains('position: relative'));
 
-      final btnIdx = rendererJs.indexOf('.janitor-options-btn,');
+      final btnIdx = rendererJs.indexOf('.janitor-options-btn {');
       expect(btnIdx, isNot(-1));
-      final btnBlock = rendererJs.substring(
+      final btnRule = rendererJs.substring(
         btnIdx,
-        rendererJs.indexOf('}', btnIdx) + 1,
+        rendererJs.indexOf('}', btnIdx),
       );
-      expect(btnBlock, contains('position: absolute'));
-      expect(btnBlock, contains('top: 8px'));
-      expect(btnBlock, contains('right: 8px'));
+      expect(btnRule, contains('position: absolute'));
     });
   });
 

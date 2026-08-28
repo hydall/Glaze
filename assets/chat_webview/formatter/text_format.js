@@ -1,3 +1,9 @@
+// One style marker, rendered.
+//
+// [processRichText] formats the marker's own content, and it is always an
+// *inline* pass: a marker is a `<span>`, and a `<p>` inside one is markup the
+// browser throws straight back out — which used to leave a coloured marker
+// showing as empty text on screen.
 export function renderStyledSegment(seg, processRichText) {
   // Variant C support: the captured inner content may contain raw HTML/Markdown
   // because html_to_markdown emits rich content inside ==hc:...== markers.
@@ -51,21 +57,7 @@ export function renderStyledSegment(seg, processRichText) {
   // dialogue inside *"..."* gets the quote color (colored italic), not the
   // gray italic default. Color markers above keep skipQuotes=true (default)
   // so chat-quote color does not override their fill.
-  const rq = (raw) => {
-    if (!processRichText) return raw;
-    const rich = processRichText(raw, false);
-    // _processText treats every standalone fragment as a paragraph. Styled
-    // markers are inline, though, so keeping that wrapper would produce
-    // invalid block-in-inline markup such as <em><p>action</p></em>. Browsers
-    // then lay every *action* out on its own line even when the source contains
-    // no newline. Unwrap only a single paragraph; preserve genuinely
-    // multi-paragraph content as-is.
-    const paragraph = rich.match(/^\s*<p>([\s\S]*)<\/p>\s*$/i);
-    if (paragraph && !/<\/?p(?:\s|>)/i.test(paragraph[1])) {
-      return paragraph[1];
-    }
-    return rich;
-  };
+  const rq = (raw) => (processRichText ? processRichText(raw, false) : raw);
   m = seg.match(/^\*\*\*(.+?)\*\*\*$/s);
   if (m) return `<strong><em>${rq(m[1])}</em></strong>`;
   m = seg.match(/^\*\*(.+?)\*\*$/s);

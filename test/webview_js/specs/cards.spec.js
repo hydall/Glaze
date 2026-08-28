@@ -18,9 +18,6 @@ test('no card leaves formatter bookkeeping or a page error behind', async ({ pag
 });
 
 test('an HTML table keeps its own structure', async ({ page }) => {
-  // Baseline: the string formatter cannot keep this. Stage 1 of the
-  // rendering plan (parse, then format text nodes) is what makes it pass.
-  test.fail();
   await render(page, card('html-table').text);
   const shape = await page.evaluate(() => {
     const root = window.harness.currentRoot();
@@ -50,9 +47,6 @@ test('an HTML table keeps its own structure', async ({ page }) => {
 });
 
 test('a CSS-only card keeps the checkbox and its target siblings', async ({ page }) => {
-  // Baseline: the string formatter cannot keep this. Stage 1 of the
-  // rendering plan (parse, then format text nodes) is what makes it pass.
-  test.fail();
   await render(page, card('css-only-checkbox').text);
   const before = await page.evaluate(() => {
     const root = window.harness.currentRoot();
@@ -130,9 +124,6 @@ test('a <br> inside a card stays inside that card', async ({ page }) => {
 });
 
 test('a composite card keeps its structure and its styling', async ({ page }) => {
-  // Baseline: the string formatter cannot keep this. Stage 1 of the
-  // rendering plan (parse, then format text nodes) is what makes it pass.
-  test.fail();
   await render(page, card('stat-card').text);
   const shape = await page.evaluate(() => {
     const root = window.harness.currentRoot();
@@ -277,9 +268,6 @@ test('quotes keep their spans, nested guillemets included', async ({ page }) => 
 });
 
 test('Glaze colour markers render as styled spans', async ({ page }) => {
-  // Baseline: the string formatter cannot keep this. Stage 1 of the
-  // rendering plan (parse, then format text nodes) is what makes it pass.
-  test.fail();
   await render(page, card('glaze-markers').text);
   const shape = await page.evaluate(() => {
     const root = window.harness.currentRoot();
@@ -355,4 +343,58 @@ test('a finished image block renders its variant switcher', async ({ page }) => 
   expect(shape.variants).toContain(';;');
   expect(shape.count).toBe('1/2');
   expect(shape.brokenImg).toBe(1);
+});
+
+test('inline tags in prose keep their paragraphs and their markdown', async ({ page }) => {
+  await render(page, card('inline-tags-in-prose').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const quote = root.querySelector('.chat-quote-text');
+    const marker = root.querySelector('.glaze-hc');
+    return {
+      paragraphs: root.querySelectorAll('p').length,
+      bold: root.querySelectorAll('b').length,
+      // A quote that opens before a tag and closes after it is one quote.
+      quoteHoldsTag: !!quote && !!quote.querySelector('b'),
+      // Same for a colour marker: html_to_markdown writes rich content in one.
+      markerHoldsTag: !!marker && !!marker.querySelector('i'),
+    };
+  });
+  expect(shape.paragraphs).toBe(2);
+  expect(shape.bold).toBe(2);
+  expect(shape.quoteHoldsTag).toBe(true);
+  expect(shape.markerHoldsTag).toBe(true);
+});
+
+test('a gradient <font> carries its fill down to the text', async ({ page }) => {
+  await render(page, card('font-gradient').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const outer = root.querySelector('.font-style-block');
+    const inner = outer?.firstElementChild;
+    return {
+      outer: !!outer,
+      // Without this the outer span clips a gradient over no text at all.
+      innerFill: inner ? getComputedStyle(inner).webkitTextFillColor : '',
+      innerSpacing: inner ? getComputedStyle(inner).letterSpacing : '',
+    };
+  });
+  expect(shape.outer).toBe(true);
+  expect(shape.innerFill).toBe('rgba(0, 0, 0, 0)');
+  expect(shape.innerSpacing, 'the author\'s own style survives').toBe('1px');
+});
+
+test('an image tag inside a reasoning panel stays text', async ({ page }) => {
+  // INV-IG11: Dart never generates from a tag written while thinking, so the
+  // renderer must not show a placeholder whose picture is never coming.
+  await render(page, 'Думаю: [IMG:GEN:лес]', { isReasoning: true });
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    return {
+      placeholders: root.querySelectorAll('.imggen-loading').length,
+      text: root.textContent,
+    };
+  });
+  expect(shape.placeholders).toBe(0);
+  expect(shape.text).toContain('[IMG:GEN:лес]');
 });
