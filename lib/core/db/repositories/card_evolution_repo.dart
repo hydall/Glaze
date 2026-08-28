@@ -209,6 +209,30 @@ class CardEvolutionRepo {
         return const CardEvolutionDeleteOutcome('deleted');
       });
 
+  /// Discards a failed automated writer chain so its collector boundary may be
+  /// attempted again. Completed claims and review proposals are never touched.
+  Future<CardEvolutionDeleteOutcome> deleteFailedWriterClaim(String claimId) =>
+      db.transaction(() async {
+        final claim = await (db.select(
+          db.cardEvolutionClaims,
+        )..where((row) => row.id.equals(claimId))).getSingleOrNull();
+        if (claim == null) return const CardEvolutionDeleteOutcome('notFound');
+        if (claim.status != 'failed') {
+          return const CardEvolutionDeleteOutcome('invalidState');
+        }
+        await (db.delete(
+          db.cardEvolutionWriterCalls,
+        )..where((row) => row.claimId.equals(claimId))).go();
+        final deleted =
+            await (db.delete(db.cardEvolutionClaims)..where(
+                  (row) => row.id.equals(claimId) & row.status.equals('failed'),
+                ))
+                .go();
+        return CardEvolutionDeleteOutcome(
+          deleted == 1 ? 'deleted' : 'invalidState',
+        );
+      });
+
   /// Diagnostic variant of [isEligible]: reports why the session cannot be
   /// selected instead of collapsing every cause into `false`.
   @visibleForTesting

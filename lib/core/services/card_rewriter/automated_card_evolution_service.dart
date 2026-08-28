@@ -204,6 +204,15 @@ class AutomatedCardEvolutionService {
   Future<CardEvolutionFinalizeOutcome> resumeFailedWriter(String claimId) =>
       _recoverWriter(claimId);
 
+  Future<CardEvolutionDeleteOutcome> deleteFailedWriter(String claimId) async {
+    final claim = await repo.getClaimById(claimId);
+    if (claim == null) return const CardEvolutionDeleteOutcome('notFound');
+    if (_inFlight.containsKey(claim.sessionId)) {
+      return const CardEvolutionDeleteOutcome('busy');
+    }
+    return repo.deleteFailedWriterClaim(claimId);
+  }
+
   Future<CardEvolutionFinalizeOutcome> retryFailedWriterCall(String callId) =>
       _recoverWriterCall(callId);
 

@@ -250,6 +250,45 @@ class _CardRewriterStudioSheetState
     }
   }
 
+  Future<void> _deleteWriterRecovery(CardRewriterRecoveryView recovery) async {
+    if (_running || _recoveringCallId != null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('card_rewriter_studio_delete_chain_title'.tr()),
+        content: Text('card_rewriter_studio_delete_chain_body'.tr()),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text('common_cancel'.tr()),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text('rewrite_delete'.tr()),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _recoveringCallId = recovery.claim.id);
+    try {
+      final outcome = await ref
+          .read(automatedCardEvolutionServiceProvider)
+          .deleteFailedWriter(recovery.claim.id);
+      if (!mounted) return;
+      _refreshRecovery();
+      GlazeToast.show(
+        context,
+        (outcome.isDeleted
+                ? 'card_rewriter_studio_delete_chain_done'
+                : 'card_rewriter_studio_delete_chain_failed')
+            .tr(namedArgs: {'result': outcome.kind}),
+      );
+    } finally {
+      if (mounted) setState(() => _recoveringCallId = null);
+    }
+  }
+
   void _refreshRecovery() {
     ref.invalidate(cardRewriterRecoveryViewsProvider(widget.sessionId));
     ref.invalidate(cardRewriteDebugRunsProvider(widget.sessionId));
@@ -513,6 +552,7 @@ class _CardRewriterStudioSheetState
                           onContinue: () => _run(settings, recovery: recovery),
                           onRetry: _retryWriterCall,
                           onCorrect: _correctWriterCall,
+                          onDelete: () => _deleteWriterRecovery(recovery),
                         ),
                     ],
                   ),
@@ -659,6 +699,7 @@ class _WriterRecoveryTile extends StatelessWidget {
     required this.onContinue,
     required this.onRetry,
     required this.onCorrect,
+    required this.onDelete,
   });
 
   final CardRewriterRecoveryView recovery;
@@ -666,6 +707,7 @@ class _WriterRecoveryTile extends StatelessWidget {
   final VoidCallback onContinue;
   final ValueChanged<CardEvolutionWriterCallRow> onRetry;
   final ValueChanged<CardEvolutionWriterCallRow> onCorrect;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -733,6 +775,14 @@ class _WriterRecoveryTile extends StatelessWidget {
                   label: Text('card_rewriter_studio_correct_response'.tr()),
                 ),
               ],
+              OutlinedButton.icon(
+                onPressed: busy ? null : onDelete,
+                icon: const Icon(Icons.delete_outline_rounded),
+                label: Text('rewrite_delete'.tr()),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: context.cs.error,
+                ),
+              ),
             ],
           ),
         ],

@@ -520,7 +520,28 @@ class GenerationPipeline {
           generatedSession: sessionToCommit,
           regenTargetId: regenTargetId,
           manifest: manifest,
-          beforeWrite: (_, after) async {
+          beforeWrite: (before, after) async {
+            final changedIds = changedRegenerationEvidenceIds(
+              before: before,
+              after: after,
+              regenTargetId: regenTargetId,
+            );
+            if (changedIds.isNotEmpty) {
+              await ctx.ref
+                  .read(cardEvolutionProposalRunRepoProvider)
+                  .cancelPendingForMessageMutationInTransaction(
+                    sessionId: after.id,
+                    messageIds: changedIds,
+                  );
+              await ctx.ref
+                  .read(ledgerReconciliationRunRepoProvider)
+                  .invalidateForMessageMutation(
+                    sessionId: after.id,
+                    messageIds: changedIds,
+                    reason: 'message_evidence_changed',
+                    createdAt: currentTimestampSeconds(),
+                  );
+            }
             final canonRollback = await ctx.ref
                 .read(sessionCanonRollbackRepoProvider)
                 .reconcileInTransaction(
@@ -725,6 +746,33 @@ class GenerationPipeline {
     }
     return latest.copyWith(messages: [...latest.messages, restoration]);
   }
+}
+
+@visibleForTesting
+Set<String> changedRegenerationEvidenceIds({
+  required ChatSession before,
+  required ChatSession after,
+  required String? regenTargetId,
+}) {
+  if (regenTargetId == null || regenTargetId.isEmpty) return const {};
+  final previous = before.messages
+      .where((message) => message.id == regenTargetId)
+      .firstOrNull;
+  final current = after.messages
+      .where((message) => message.id == regenTargetId)
+      .firstOrNull;
+  if (previous == null ||
+      current == null ||
+      previous.role != current.role ||
+      previous.content != current.content ||
+      previous.swipeId != current.swipeId ||
+      previous.agentSwipeId != current.agentSwipeId ||
+      previous.isHidden != current.isHidden ||
+      previous.isError != current.isError ||
+      previous.isTyping != current.isTyping) {
+    return {regenTargetId};
+  }
+  return const {};
 }
 
 @visibleForTesting

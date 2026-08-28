@@ -571,6 +571,72 @@ void main() {
     expect(await db.select(db.cardEvolutionClaims).get(), hasLength(1));
   });
 
+  test('deletes a failed writer claim and its call checkpoints', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+    await (db.update(
+      db.cardEvolutionClaims,
+    )..where((row) => row.id.equals(claim.row.id))).write(
+      const CardEvolutionClaimsCompanion(
+        status: Value('failed'),
+        leaseExpiresAt: Value(0),
+        failureCode: Value('snapshotUnavailable'),
+        failedAt: Value(11),
+      ),
+    );
+    await db
+        .into(db.cardEvolutionWriterCalls)
+        .insert(
+          CardEvolutionWriterCallsCompanion.insert(
+            id: 'call',
+            claimId: claim.row.id,
+            sessionId: 'session',
+            ordinal: 1,
+            stage: 'card_writer',
+            stageOrdinal: 1,
+            status: 'failed',
+            prompt: 'prompt',
+            promptHash: 'prompt-hash',
+            failureCode: const Value('snapshotUnavailable'),
+            createdAt: 10,
+            updatedAt: 11,
+          ),
+        );
+
+    final outcome = await evolution.deleteFailedWriterClaim(claim.row.id);
+
+    expect(outcome.kind, 'deleted');
+    expect(await db.select(db.cardEvolutionClaims).get(), isEmpty);
+    expect(await db.select(db.cardEvolutionWriterCalls).get(), isEmpty);
+  });
+
+  test('refuses to delete a completed writer claim', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+    await (db.update(
+      db.cardEvolutionClaims,
+    )..where((row) => row.id.equals(claim.row.id))).write(
+      const CardEvolutionClaimsCompanion(
+        status: Value('completed'),
+        leaseExpiresAt: Value(0),
+        completedAt: Value(11),
+      ),
+    );
+
+    final outcome = await evolution.deleteFailedWriterClaim(claim.row.id);
+
+    expect(outcome.kind, 'invalidState');
+    expect(await db.select(db.cardEvolutionClaims).get(), hasLength(1));
+  });
+
   test('finalize reports the exact rejected card patch validation', () async {
     final claim = (await evolution.claim(
       sessionId: 'session',
