@@ -38,6 +38,7 @@ export function writeShadowContent({
   searchQuery,
   applySearchHighlight,
   allowMessageScripts = false,
+  isReasoning = false,
 }) {
   if (!host || !host.shadowRoot) return;
   const root = host.shadowRoot.querySelector('.glaze-message');
@@ -47,7 +48,7 @@ export function writeShadowContent({
       root.innerHTML = '';
       return;
     }
-    let formatted = formatMessageBody(formatter, text, isUser);
+    let formatted = formatMessageBody(formatter, text, isUser, isReasoning);
     if (searchQuery) formatted = applySearchHighlight(formatted);
     if (!allowMessageScripts && SCRIPT_TAG.test(formatted)) {
       notifyMessageScriptBlocked();

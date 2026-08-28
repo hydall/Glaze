@@ -1,3 +1,3 @@
-export function formatMessageBody(formatter, text, isUser) {
-  return formatter.format(text || '', isUser);
+export function formatMessageBody(formatter, text, isUser, isReasoning = false) {
+  return formatter.format(text || '', isUser, isReasoning);
 }

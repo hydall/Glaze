@@ -66,6 +66,37 @@ class ImgGenPatterns {
     r'''|([^\s"'>]*))''',
   );
 
+  /// A folded-away reasoning block: `<think>…</think>` and
+  /// `<thinking>…</thinking>`, the shapes the WebView formatter matches (see
+  /// `formatter.js` step 1a). Only a *closed* block counts, exactly as it does
+  /// there — an unclosed tag is not yet a reasoning block on either side.
+  static final reasoningBlockRegex = RegExp(
+    r'<(think|thinking)\b[\s\S]*?<\/\1\b[^>]*(?:>|$)',
+    caseSensitive: false,
+  );
+
+  /// Cheap probe: most messages carry no reasoning at all, and the scan below
+  /// only has to run for the ones that do.
+  static final _reasoningProbe = RegExp('<think', caseSensitive: false);
+
+  /// Character spans of [text] covered by a reasoning block, in document order.
+  ///
+  /// A model plans its images out loud — "then I'll put [IMG:GEN:…] here" — and
+  /// a tag written inside its own reasoning is a note to itself, not a request.
+  /// Generating from it produces a picture nobody asked for, so every scan that
+  /// can start a generation walks past these spans (INV-IG11).
+  static List<(int, int)> reasoningSpans(String text) {
+    if (!_reasoningProbe.hasMatch(text)) return const [];
+    return [
+      for (final match in reasoningBlockRegex.allMatches(text))
+        (match.start, match.end),
+    ];
+  }
+
+  /// Whether `[start, end)` falls in any of [spans].
+  static bool overlapsSpan(List<(int, int)> spans, int start, int end) =>
+      spans.any((span) => start < span.$2 && span.$1 < end);
+
   /// Whether an `<img …data-iig-instruction…>` element is still waiting for its
   /// image: it has no `src`, or only the `[IMG:GEN…]` placeholder in it. The
   /// same element with a stored image path in its `src` is the finished form.

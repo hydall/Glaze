@@ -153,5 +153,42 @@ void main() {
         );
       });
     });
+
+    group('reasoningSpans', () {
+      test('covers <think> and <thinking>, whatever the case', () {
+        expect(ImgGenPatterns.reasoningSpans('a <think>x</think> b'), [
+          (2, 18),
+        ]);
+        expect(ImgGenPatterns.reasoningSpans('<thinking>x</thinking>'), [
+          (0, 22),
+        ]);
+        expect(ImgGenPatterns.reasoningSpans('<THINK>x</THINK>'), [(0, 16)]);
+      });
+
+      test('stops at the first close, so two blocks stay two', () {
+        expect(
+          ImgGenPatterns.reasoningSpans('<think>a</think> mid <think>b</think>'),
+          [(0, 16), (21, 37)],
+        );
+      });
+
+      test('an unclosed block is not a span', () {
+        // The WebView formatter folds a block only once it closes; a tag after
+        // an unterminated <think> still belongs to the message (INV-IG11).
+        expect(ImgGenPatterns.reasoningSpans('<think>drafting'), isEmpty);
+      });
+
+      test('text with no reasoning costs nothing', () {
+        expect(ImgGenPatterns.reasoningSpans('plain [IMG:GEN]'), isEmpty);
+      });
+
+      test('overlapsSpan is true for any intersection', () {
+        const spans = [(10, 20)];
+        expect(ImgGenPatterns.overlapsSpan(spans, 12, 15), isTrue);
+        expect(ImgGenPatterns.overlapsSpan(spans, 5, 12), isTrue);
+        expect(ImgGenPatterns.overlapsSpan(spans, 0, 10), isFalse);
+        expect(ImgGenPatterns.overlapsSpan(spans, 20, 25), isFalse);
+      });
+    });
   });
 }

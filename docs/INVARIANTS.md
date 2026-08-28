@@ -184,6 +184,32 @@ properties cross a shadow boundary, so the wrapper inside starts from
 stop button through `composedPath()` and `ImgGenTimer` descends into it for the
 elapsed-time ticker, both of which a closed root would break.
 
+### INV-IG11: A tag inside a reasoning block never generates
+
+A model plans its images out loud — "then I'll put `[IMG:GEN:…]` here" — and a
+tag it writes inside `<think>…</think>` is a note to itself, not a request.
+Generating from it produces a picture nobody asked for, in the middle of the
+model's own scratchpad.
+
+`ImgGenPatterns.reasoningSpans()` marks those spans and
+`ImageTagMarkup.scanPendingTags()` walks past them. That scan is the single
+gate every generation goes through — `hasImageGenTags`, `scanImageBlocks`, the
+replace/reset helpers and `ImageGenProcessor` all read a message through it —
+so a reasoning tag is never generated, never rewritten into an error or
+"disabled" card, and never counted in the block numbering.
+
+The WebView agrees on both halves, which is what keeps `data-img-index`
+addressing the same block on either side: `_processText` carries an
+`inReasoning` flag into the recursive pass over a think block, and the three
+pending spellings there are restored as the literal text the model wrote (step
+19b) instead of becoming an image block. Only a **closed** block counts as
+reasoning, on both sides — an unclosed `<think>` is not folded away by the
+formatter either, so a tag after one still generates.
+
+Finished `<img data-iig-…>` blocks are deliberately *not* filtered: they are
+pictures that already exist, and `scanResultElements()` is what keeps their
+paths resolving and strips them from a sync payload.
+
 ### INV-IG7: Regenerating an image never adds a message swipe
 
 `ImageRecoveryService` resets the retried blocks through

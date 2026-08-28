@@ -47,6 +47,48 @@ void main() {
       expect(ImageTagMarkup.hasImageGenTags(''), isFalse);
     });
 
+    test('ignores a tag inside a reasoning block', () {
+      // INV-IG11: a model planning "then I'll put [IMG:GEN:…] here" is talking
+      // to itself, not asking for a picture.
+      expect(
+        ImageTagMarkup.hasImageGenTags(
+          '<think>next I add [IMG:GEN:{"prompt":"cat"}] here</think>She smiled.',
+        ),
+        isFalse,
+      );
+      expect(
+        ImageTagMarkup.hasImageGenTags(
+          "<thinking>plan: <img data-iig-instruction='{\"prompt\":\"x\"}' "
+          'src="[IMG:GEN]"></thinking>Body.',
+        ),
+        isFalse,
+      );
+      expect(
+        ImageTagMarkup.hasImageGenTags(
+          '<THINK>maybe [IMG:GEN]</THINK> body',
+        ),
+        isFalse,
+      );
+    });
+
+    test('a tag outside the reasoning block still generates', () {
+      expect(
+        ImageTagMarkup.hasImageGenTags(
+          '<think>I will add one</think>Now: [IMG:GEN:{"prompt":"real"}]',
+        ),
+        isTrue,
+      );
+    });
+
+    test('an unclosed reasoning tag is not a reasoning block', () {
+      // The WebView formatter folds a block only once it closes, and the two
+      // sides have to agree on what counts as reasoning.
+      expect(
+        ImageTagMarkup.hasImageGenTags('<think>drafting [IMG:GEN]'),
+        isTrue,
+      );
+    });
+
     test('detects tag inside full HTML card', () {
       const html = """<div style="max-width:680px; padding:18px;">
   <img data-iig-instruction='{"style":"cinematic manga","prompt":"SCENE_PROMPT: test","aspect_ratio":"9:16","image_size":"1K"}' src="[IMG:GEN]" style="display:block; width:100%; border-radius:15px;">
@@ -485,6 +527,38 @@ void main() {
       );
       expect(result, contains('[IMG:RESULT:/one.png|{"prompt":"one"}]'));
       expect(result, contains('[IMG:GEN:{"prompt":"three"}]'));
+    });
+
+    test('a reasoning block is outside the numbering', () {
+      // The WebView renders a tag inside `<think>` as the text the model wrote
+      // and never allocates a data-img-index for it, so Dart must not count it
+      // either — otherwise a tap on the body's only picture addresses nothing.
+      const withReasoning =
+          '<think>first I will do [IMG:GEN:{"prompt":"planned"}]</think>'
+          'She smiled. [IMG:GEN:{"prompt":"real"}]';
+
+      final blocks = ImageTagMarkup.scanImageBlocks(withReasoning);
+      expect(blocks.map((b) => b.kind), [ImageBlockKind.pending]);
+      expect(blocks.single.asPendingTag, '[IMG:GEN:{"prompt":"real"}]');
+      expect(ImageTagMarkup.pendingImageGenTagCount(withReasoning), 1);
+    });
+
+    test('the reasoning block survives a generation untouched', () {
+      const withReasoning =
+          '<think>plan: [IMG:GEN:{"prompt":"planned"}]</think>'
+          'Body. [IMG:GEN:{"prompt":"real"}]';
+
+      final resolved = ImageTagMarkup.replaceImageBlockWithResult(
+        withReasoning,
+        0,
+        '/real.png',
+      );
+
+      expect(
+        resolved,
+        contains('<think>plan: [IMG:GEN:{"prompt":"planned"}]</think>'),
+      );
+      expect(resolved, contains('src="/real.png"'));
     });
 
     test('block numbering survives HTML tags that have not resolved yet', () {

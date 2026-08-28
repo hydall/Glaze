@@ -316,7 +316,7 @@ if (messageData.isEditing) classes.push('editing');
 
     const shadowHost = this._createContentContainer();
     inner.appendChild(shadowHost);
-    this._writeShadowContent(shadowHost, reasoning, isUser, false);
+    this._writeShadowContent(shadowHost, reasoning, isUser, false, true);
 
     wrap.appendChild(inner);
     content.appendChild(wrap);
@@ -650,12 +650,15 @@ if (messageData.isEditing) classes.push('editing');
     return host;
   }
 
-  _writeShadowContent(host, text, isUser, isTyping) {
+  // [isReasoning] marks the split-out `message.reasoning` panel: the same
+  // formatter, but image tags there stay text (INV-IG11).
+  _writeShadowContent(host, text, isUser, isTyping, isReasoning = false) {
     writeShadowContent({
       host,
       text,
       isUser,
       isTyping,
+      isReasoning,
       formatter: this.formatter,
       searchQuery: this.searchQuery,
       applySearchHighlight: (html) => this._applySearchHighlight(html),
@@ -688,7 +691,7 @@ if (messageData.isEditing) classes.push('editing');
             let reasoningEl = sectionEl.querySelector('.msg-reasoning');
             if (reasoningEl) {
               const rHost = reasoningEl.querySelector('.msg-reasoning-inner .message-content');
-              if (rHost) this._writeShadowContent(rHost, reasoning, isUser, false);
+              if (rHost) this._writeShadowContent(rHost, reasoning, isUser, false, true);
             }
           }
           return;
@@ -726,7 +729,7 @@ if (messageData.isEditing) classes.push('editing');
         contentStack.insertBefore(reasoningEl, contentStack.firstChild);
       } else {
         const host = reasoningEl.querySelector('.msg-reasoning-inner .message-content');
-        if (host) this._writeShadowContent(host, reasoning, isUser, false);
+        if (host) this._writeShadowContent(host, reasoning, isUser, false, true);
       }
     } else if (reasoningEl) {
       reasoningEl.remove();
@@ -1020,7 +1023,7 @@ if (messageData.isEditing) classes.push('editing');
 
       const reasoningHost = section.querySelector('.msg-reasoning-inner .message-content');
       if (reasoningHost) {
-        this._writeShadowContent(reasoningHost, section.dataset.reasoning || '', isUser, false);
+        this._writeShadowContent(reasoningHost, section.dataset.reasoning || '', isUser, false, true);
       }
 
       const bodyHost = section.querySelector('.msg-body .message-content');
@@ -1077,11 +1080,11 @@ if (messageData.isEditing) classes.push('editing');
       if (!section) return;
       const isUser = section.classList.contains('user');
       
-      const processHost = (host, rawText) => {
+      const processHost = (host, rawText, isReasoning = false) => {
         if (host && host.shadowRoot) {
           const root = host.shadowRoot.querySelector('.glaze-message');
           if (root) {
-            const formatted = this.formatter.format(rawText, isUser);
+            const formatted = this.formatter.format(rawText, isUser, isReasoning);
             const prevMatchIndex = globalState.matchIndex;
             const highlighted = this._applySearchHighlight(formatted, globalState);
             // Same policy as a normal render (see writeShadowContent), so a
@@ -1108,7 +1111,7 @@ if (messageData.isEditing) classes.push('editing');
 
       const reasoningHost = section.querySelector('.msg-reasoning-inner .message-content');
       if (reasoningHost) {
-        processHost(reasoningHost, section.dataset.reasoning || '');
+        processHost(reasoningHost, section.dataset.reasoning || '', true);
       }
 
       const bodyHost = section.querySelector('.msg-body .message-content');

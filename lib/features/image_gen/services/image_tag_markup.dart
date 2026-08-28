@@ -256,11 +256,20 @@ class ImageTagMarkup {
   /// HTML forms win over the bare `[IMG:GEN…]` they wrap, so an
   /// `<img data-iig-instruction='…' src="[IMG:GEN]">` counts once and is
   /// replaced as a whole element.
+  ///
+  /// A tag inside a reasoning block is skipped (INV-IG11): the model writing
+  /// "then I'll put [IMG:GEN:…] here" while it thinks is planning aloud, not
+  /// asking for a picture. This is the single gate every generation goes
+  /// through — [hasImageGenTags], [scanImageBlocks], the replace/reset helpers
+  /// and `ImageGenProcessor` all read the message through it — so a reasoning
+  /// tag is not generated, not turned into an error card, and not counted in
+  /// the block numbering the WebView addresses.
   static List<PendingImageTag> scanPendingTags(String text) {
     if (!text.contains('[IMG:GEN') && !text.contains('data-iig-instruction')) {
       return const [];
     }
 
+    final reasoning = ImgGenPatterns.reasoningSpans(text);
     final tags = <PendingImageTag>[];
     bool overlapsExisting(int start, int end) =>
         tags.any((tag) => start < tag.end && tag.start < end);
@@ -272,6 +281,9 @@ class ImageTagMarkup {
     }) {
       for (final match in pattern.allMatches(text)) {
         if (overlapsExisting(match.start, match.end)) continue;
+        if (ImgGenPatterns.overlapsSpan(reasoning, match.start, match.end)) {
+          continue;
+        }
         if (accept != null && !accept(match.group(0)!)) continue;
         tags.add(
           PendingImageTag(match.start, match.end, payloadOf(match) ?? ''),

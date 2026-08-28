@@ -166,13 +166,18 @@ export class Formatter {
     this.cacheMaxSize = 500;
   }
 
-  format(text, isUser = false) {
-    const key = `${text}:${isUser}`;
+  // [inReasoning] formats a body that *is* a reasoning block — the split-out
+  // `message.reasoning`, which the renderer shows in its own panel. Dart never
+  // scans that field for image tags, so a tag in it must not render as a block
+  // here either (INV-IG11); the same flag covers a `<think>` block found inline
+  // in the message body, from step 17.
+  format(text, isUser = false, inReasoning = false) {
+    const key = `${text}:${isUser}:${inReasoning}`;
     if (this.cache.has(key)) return this.cache.get(key);
 
     let result;
     try {
-      result = this._processText(text, isUser);
+      result = this._processText(text, isUser, false, inReasoning);
     } catch (e) {
       console.error('Formatter error:', e);
       result = (text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
@@ -196,7 +201,12 @@ export class Formatter {
     return `\x01${prefix}${isBlock ? 'BLOCK_' : ''}${i}\x01`;
   }
 
-  _processText(text, isUser, skipQuotes = false) {
+  // [inReasoning] marks the recursive pass over a `<think>…</think>` body. A
+  // model plans its images out loud there, and Glaze does not generate from a
+  // tag it finds in that plan (INV-IG11) — so the tag must not render as a
+  // block either: a placeholder whose picture is never coming, or an <img>
+  // with no loadable source, would both be a lie about what the app is doing.
+  _processText(text, isUser, skipQuotes = false, inReasoning = false) {
     if (!text) return '';
     text = expandMacros(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 
@@ -328,6 +338,15 @@ export class Formatter {
     // letting step 6 treat it as an ordinary HTML tag) is what gives it the
     // options button, the variant switcher and its `data-img-index`.
     const imgBlocks = [];
+    // Tags a reasoning block only talks about: kept as their own literal text,
+    // restored in step 19b. Inline (not a block placeholder) so a tag written
+    // mid-sentence does not break the sentence in two.
+    const inertImgTags = [];
+    const inertTag = (match) => {
+      const id = this._ph('IGT_', inertImgTags.length);
+      inertImgTags.push(match);
+      return id;
+    };
     html = html.replace(IIG_ELEMENT_REGEX, (match) => {
       const parsed = parseImageResultElement(match);
       if (!parsed) {
@@ -337,6 +356,7 @@ export class Formatter {
         // broken-image icon for the whole generation.
         const pending = parseImagePendingElement(match);
         if (!pending) return match;
+        if (inReasoning) return inertTag(match);
         const id = this._ph('IG_', imgBlocks.length, true);
         imgBlocks.push({ type: 'gen', instruction: pending.instruction });
         return '\n\n' + id + '\n\n';
@@ -358,11 +378,13 @@ export class Formatter {
     html = html.replace(IMG_SRC_GEN_ELEMENT_REGEX, (match) => {
       const pending = parseImagePendingElement(match);
       if (!pending) return match;
+      if (inReasoning) return inertTag(match);
       const id = this._ph('IG_', imgBlocks.length, true);
       imgBlocks.push({ type: 'gen', instruction: pending.instruction });
       return '\n\n' + id + '\n\n';
     });
     html = html.replace(/\[IMG:GEN(?::(.*?))?\]/g, (match, instruction) => {
+      if (inReasoning) return inertTag(match);
       const id = this._ph('IG_', imgBlocks.length, true);
       imgBlocks.push({ type: 'gen', instruction: instruction || '' });
       return '\n\n' + id + '\n\n';
@@ -474,7 +496,7 @@ export class Formatter {
       const seg = styledSegments[parseInt(i)];
       // skipQuotes defaults to true (preserve color markers' fills);
       // plain formatting (italic/bold/strike) opts out via the second arg.
-      return renderStyledSegment(seg, (innerRaw, skipQuotes = true) => this._processText(innerRaw, false, skipQuotes));
+      return renderStyledSegment(seg, (innerRaw, skipQuotes = true) => this._processText(innerRaw, false, skipQuotes, inReasoning));
     });
 
     // 10. Markdown Parsing
@@ -647,7 +669,7 @@ export class Formatter {
     // 17. Restore think blocks
     html = html.replace(/\x01TB_BLOCK_(\d+)\x01/g, (_, i) => {
       const content = thinkBlocks[parseInt(i)];
-      const formatted = this._processText(content, isUser);
+      const formatted = this._processText(content, isUser, false, true);
       return `<details class="reasoning-block"><summary class="reasoning-summary">💭 Reasoning</summary><div class="reasoning-content">${formatted}</div></details>`;
     });
 
@@ -657,7 +679,7 @@ export class Formatter {
     html = html.replace(/\x01FC_(\d+)\x01/g, (_, i) => {
       const block = fontBlocks[parseInt(i)];
       if (block.type === 'style') {
-        let formatted = this._processText(block.content, isUser, true);
+        let formatted = this._processText(block.content, isUser, true, inReasoning);
         formatted = formatted.replace(/^\s*<p>([\s\S]*?)<\/p>\s*$/i, '$1');
 
         // Propagate gradient / text-fill / clip styles down to the first nested inline element
@@ -685,7 +707,7 @@ export class Formatter {
 
         return `<span class="font-style-block" style="${block.style}">${formatted}</span>`;
       }
-      let formatted = this._processText(block.content, isUser, true);
+      let formatted = this._processText(block.content, isUser, true, inReasoning);
       formatted = formatted.replace(/^\s*<p>([\s\S]*?)<\/p>\s*$/i, '$1');
       return `<span class="font-color-block" style="color:${block.color}">${formatted}</span>`;
     });
@@ -754,6 +776,12 @@ export class Formatter {
       }
       return '';
     });
+
+    // 19b. Restore the tags a reasoning block only talked about, as the text
+    // the model wrote. Nothing here loads, spins or generates.
+    html = html.replace(/\x01IGT_(\d+)\x01/g, (_, i) =>
+      this._escapeHtml(inertImgTags[parseInt(i)]),
+    );
 
     html = html.replace(/\x01[A-Z_]+\d+\x01/g, '');
 

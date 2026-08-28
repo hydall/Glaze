@@ -1083,6 +1083,56 @@ void main() {
       expect(srcElementIdx, lessThan(bareTagIdx));
     });
 
+    test('a tag inside a reasoning block never becomes a block', () {
+      // INV-IG11: Dart does not generate from a tag the model wrote while
+      // thinking, so the WebView must not render a placeholder whose picture
+      // is never coming — nor allocate a data-img-index Dart does not count.
+      expect(
+        formatterFormatterJs,
+        contains('_processText(text, isUser, skipQuotes = false, '
+            'inReasoning = false)'),
+      );
+      // The reasoning body is the one recursive pass that sets the flag.
+      expect(
+        formatterFormatterJs,
+        contains('this._processText(content, isUser, false, true)'),
+      );
+      // All three pending spellings fall through to the inert text collector.
+      expect(
+        RegExp('if [(]inReasoning[)] return inertTag[(]match[)];')
+            .allMatches(formatterFormatterJs)
+            .length,
+        3,
+      );
+      // The split-out `message.reasoning` panel is reasoning too, and Dart
+      // never scans that field at all — so it renders with the same flag.
+      expect(
+        formatterFormatterJs,
+        contains(r'const key = `${text}:${isUser}:${inReasoning}`'),
+        reason: 'the format cache must not serve a body render to a '
+            'reasoning panel, or the other way round',
+      );
+      expect(
+        rendererMessageJs,
+        contains(
+          "this._writeShadowContent(shadowHost, reasoning, isUser, "
+          "false, true)",
+        ),
+      );
+      expect(
+        rendererJs,
+        contains('formatMessageBody(formatter, text, isUser, isReasoning)'),
+      );
+      // Restored as the literal text the model wrote, before the leak sweep.
+      final restoreIdx = formatterFormatterJs.indexOf(r'\x01IGT_(\d+)\x01');
+      final sweepIdx = formatterFormatterJs.indexOf(
+        r"html = html.replace(/\x01[A-Z_]+\d+\x01/g, '');",
+      );
+      expect(restoreIdx, isNonNegative);
+      expect(sweepIdx, isNonNegative);
+      expect(restoreIdx, lessThan(sweepIdx));
+    });
+
     test('the stop button is an SVG, not an emoji glyph', () {
       // ⏹ is a font-dependent emoji: a different size and colour on every
       // platform. A path takes `fill: currentColor` and stays put.
