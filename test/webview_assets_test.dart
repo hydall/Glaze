@@ -442,18 +442,13 @@ void main() {
       );
       final writeBlock = _extractWriteShadowContent(rendererJs);
       final insertion = writeBlock.indexOf('root.innerHTML =');
-      final report = writeBlock.indexOf('reportCssErrors(root)');
+      final report = writeBlock.indexOf('reportCssErrors(root, blockedAtRules(');
       expect(insertion, isNonNegative);
       expect(report, greaterThan(insertion));
       // A reply still arriving is half a stylesheet: every unclosed brace in it
       // is on its way to being closed, so only a settled message is reported.
-      expect(
-        writeBlock,
-        contains(
-          'if (!isTyping && !window.bridge?.isGenerating) '
-          'reportCssErrors(root);',
-        ),
-      );
+      expect(writeBlock, contains('if (!isTyping && !window.bridge?.isGenerating) {'));
+      expect(writeBlock, contains('reportCssErrors(root, blockedAtRules(formatted));'));
     });
 
     test('the search re-render puts the report back', () {
@@ -877,7 +872,9 @@ void main() {
     // parsed first, and nothing here decides structure by hand again.
     test('the message is parsed before anything formats its text', () {
       final protect = formatterFormatterJs.indexOf('protectRegions(source');
-      final parse = formatterFormatterJs.indexOf('parseHtml(escapeProseTags(');
+      final parse = formatterFormatterJs.indexOf(
+        'parseHtml(code.unmask(escapeProseTags(',
+      );
       final format = formatterFormatterJs.indexOf('formatContainer(tree');
       expect(protect, isNonNegative);
       expect(parse, greaterThan(protect));
@@ -959,7 +956,9 @@ void main() {
 
     test('inline code is protected before the message is parsed', () {
       final inlineCode = formatterProtectJs.indexOf("kind: 'inline-code'");
-      final imageCard = formatterProtectJs.indexOf('markdownImageCard(alt, url)');
+      final imageCard = formatterProtectJs.indexOf(
+        "store.hold({ kind: 'html', html: markdownImageCard(alt, url) })",
+      );
       expect(inlineCode, isNonNegative);
       expect(imageCard, greaterThan(inlineCode));
       // Restored escaped: a tag written inside backticks is shown, not run.
@@ -1364,19 +1363,25 @@ void main() {
     test('options button is positioned against the image wrapper', () {
       final wrapperIdx = rendererJs.indexOf('.janitor-img-wrapper {');
       expect(wrapperIdx, isNot(-1));
-      final wrapperRule = rendererJs.substring(
+      final wrapperBlock = rendererJs.substring(
         wrapperIdx,
-        rendererJs.indexOf('}', wrapperIdx),
+        rendererJs.indexOf('}', wrapperIdx) + 1,
       );
-      expect(wrapperRule, contains('position: relative'));
+      expect(
+        wrapperBlock,
+        contains('position: relative'),
+        reason: 'the wrapper is the containing block of the options button',
+      );
 
-      final btnIdx = rendererJs.indexOf('.janitor-options-btn {');
+      final btnIdx = rendererJs.indexOf('.janitor-options-btn,');
       expect(btnIdx, isNot(-1));
-      final btnRule = rendererJs.substring(
+      final btnBlock = rendererJs.substring(
         btnIdx,
-        rendererJs.indexOf('}', btnIdx),
+        rendererJs.indexOf('}', btnIdx) + 1,
       );
-      expect(btnRule, contains('position: absolute'));
+      expect(btnBlock, contains('position: absolute'));
+      expect(btnBlock, contains('top: 8px'));
+      expect(btnBlock, contains('right: 8px'));
     });
   });
 
