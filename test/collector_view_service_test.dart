@@ -131,6 +131,53 @@ void main() {
     expect(snapshot.runs, isEmpty);
   });
 
+  test('reports a valid pair when its Collector lease expired', () async {
+    await db.customStatement(
+      "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES ('session', 'character', 0, '[{\"id\":\"a1\",\"role\":\"assistant\",\"content\":\"one\"},{\"id\":\"u1\",\"role\":\"user\",\"content\":\"two\"}]')",
+    );
+    final first = _run(
+      id: 'run-1',
+      ordinal: 1,
+      messageId: 'a1',
+      role: 'assistant',
+      content: 'one',
+    );
+    final second = _run(
+      id: 'run-2',
+      ordinal: 2,
+      predecessor: first.chainHash,
+      messageId: 'u1',
+      role: 'user',
+      content: 'two',
+    );
+    await reconciliationRepo.append(first);
+    await reconciliationRepo.append(second);
+    await db
+        .into(db.cardEvolutionCollectorRuns)
+        .insert(
+          CardEvolutionCollectorRunsCompanion.insert(
+            id: 'collector-expired',
+            sessionId: 'session',
+            characterId: 'character',
+            collectorOrdinal: 1,
+            reconciliationRunId: second.id,
+            reconciliationRunOrdinal: second.ordinal,
+            reconciliationChainHash: second.chainHash,
+            rangeHash: _pairHash(first, second),
+            inputHash: 'input',
+            ownerId: 'interrupted-owner',
+            status: 'claimed',
+            leaseExpiresAt: 1,
+            createdAt: 1,
+          ),
+        );
+
+    final snapshot = await service.load('session');
+
+    expect(snapshot.unclaimedPairCount, 1);
+    expect(snapshot.runs.single.row.id, 'collector-expired');
+  });
+
   test('joins failed run with exact prompt and parser response', () async {
     await db.customStatement(
       "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES ('session', 'character', 0, '[]')",

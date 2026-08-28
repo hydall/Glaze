@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
 
 import '../../utils/id_generator.dart';
+import '../../utils/time_helpers.dart';
 import '../app_db.dart';
 import 'ledger_reconciliation_run_repo.dart';
 
@@ -377,8 +378,8 @@ class CardEvolutionCollectorRunRepo {
     return pairs;
   }
 
-  /// Valid reconciliation pairs that have never received a Collector claim.
-  /// Failed and in-flight rows use their dedicated recovery paths instead.
+  /// Valid reconciliation pairs that can be started from the Collector UI.
+  /// Failed and live in-flight rows use their dedicated recovery paths.
   Future<List<CardEvolutionCollectorPair>> unclaimedValidPairs(
     String sessionId,
   ) async {
@@ -386,13 +387,15 @@ class CardEvolutionCollectorRunRepo {
     final collectors = await (db.select(
       db.cardEvolutionCollectorRuns,
     )..where((row) => row.sessionId.equals(sessionId))).get();
+    final now = currentTimestampSeconds();
     final pairs = <CardEvolutionCollectorPair>[];
     for (var index = 0; index + 1 < runs.length; index += 2) {
       final pair = CardEvolutionCollectorPair(runs[index], runs[index + 1]);
       final hasCompatibleClaim = collectors.any(
         (collector) =>
             collector.reconciliationRunId == pair.boundary.id &&
-            collector.rangeHash == pair.rangeHash,
+            collector.rangeHash == pair.rangeHash &&
+            (collector.status != 'claimed' || collector.leaseExpiresAt > now),
       );
       if (!hasCompatibleClaim) pairs.add(pair);
     }
