@@ -281,13 +281,24 @@ document.getElementById('sc-out').textContent='ok'+o;
   },
   {
     id: 'import-font-card',
-    title: 'Card whose CSS tries to @import a font',
-    origin: 'INV-MR5 — the policy drops it, and used to drop it silently',
+    title: 'Card whose CSS imports a web font',
+    origin: 'INV-MR5 — @import is ignored inside a shadow root',
     text: `<style>
 @import url('https://fonts.example/css2?family=Card');
 .if-title { font-family: 'Card', cursive; }
 </style>
 <div class="if-title">Заголовок</div>`,
+  },
+  {
+    id: 'import-insecure-card',
+    title: 'Card that imports over http, and one that imports a data: sheet',
+    origin: 'INV-MR5 — only https is hoisted',
+    text: `<style>
+@import url('http://fonts.example/plain.css');
+@import "data:text/css,body{display:none}";
+.ii-title { color: rgb(3, 4, 5); }
+</style>
+<div class="ii-title">Заголовок</div>`,
   },
 ];
 

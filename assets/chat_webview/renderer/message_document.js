@@ -45,6 +45,64 @@ export function appBody() {
   return REAL_BODY;
 }
 
+/**
+ * A stylesheet a message imported, hoisted into the document.
+ *
+ * `@import` inside a shadow root is ignored by the browser, so a card that
+ * pulls a web font this way used to fall back to `cursive` with nothing on
+ * screen to say why. The rule is lifted to a `<link>` in the document head,
+ * which is the only place a `@font-face` can be registered from.
+ *
+ * The cost is real and deliberate: the sheet is fetched from a third party
+ * (which learns the reader's IP), and its rules apply to the whole document,
+ * app chrome included. Only `https:` is loaded, each URL once, and no more
+ * than MAX_HOISTED per session — a message cannot turn the app into a
+ * request generator. See INV-MR5.
+ */
+const MAX_HOISTED = 32;
+const hoisted = new Set();
+
+// `@import url(x)`, `@import url("x")`, `@import "x"` — the three spellings.
+const IMPORT_RULE =
+  /@import\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"]*))\s*\)|"([^"]*)"|'([^']*)')/gi;
+
+/**
+ * Hoists every `@import` in [styleSources] and returns the URLs it refused.
+ *
+ * [styleSources] are the `<style>` bodies as the message wrote them: the CSS
+ * policy strips the rule before insertion, so by the time the message is in
+ * the DOM there is nothing left to read.
+ */
+export function hoistStyleImports(styleSources) {
+  const refused = [];
+  for (const css of styleSources) {
+    IMPORT_RULE.lastIndex = 0;
+    let match;
+    while ((match = IMPORT_RULE.exec(css)) !== null) {
+      const url = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '').trim();
+      if (!url) continue;
+      // https only: `http:` is a downgrade, and `data:`/`javascript:` in a
+      // stylesheet href is a rule-injection vector rather than a font.
+      if (!/^https:\/\//i.test(url)) {
+        refused.push(url);
+        continue;
+      }
+      if (hoisted.has(url)) continue;
+      if (hoisted.size >= MAX_HOISTED) {
+        refused.push(url);
+        continue;
+      }
+      hoisted.add(url);
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = url;
+      link.dataset.glazeImport = '';
+      REAL_HEAD.appendChild(link);
+    }
+  }
+  return refused;
+}
+
 function escapeSelector(value) {
   const text = String(value == null ? '' : value);
   if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(text);

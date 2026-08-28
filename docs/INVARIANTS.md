@@ -1339,16 +1339,28 @@ keeps app-level code called from a card working.
 `document.forms`, `document.images`, `document.links` and `document.styleSheets`
 return the message's own, for the same reason.
 
-### INV-MR5: Message CSS never reaches the network — and says so
+### INV-MR5: An `@import` is hoisted into the document head
 
-`@import`, `@font-face`, `@page` and `@namespace` are dropped by the CSS policy
-(`bridge/css_sanitizer.js`), together with every `url()`. This is deliberate:
-inline CSS in an untrusted message must not fetch, and a background image is a
-working beacon. Hoisting `@import` into the document would undo that.
+`@import` inside a shadow root is ignored by the browser, and a `@font-face`
+can only be registered from the document — so a card that pulls a web font
+this way rendered in `cursive` with nothing on screen to say why.
 
-What changed is that the drop is **reported**: `inspectBlockedAtRules` reads the
-pre-sanitize `<style>` source and the message shows a CSS-error line, so a card
-whose font silently fell back to `cursive` now says why.
+`hoistStyleImports` reads the `<style>` bodies as the message wrote them
+(before the CSS policy strips the rule) and lifts each sheet to a
+`<link rel="stylesheet" data-glaze-import>` in the document head.
+
+The cost is deliberate and bounded:
+
+- **only `https:`** — `http:` is a downgrade, and a `data:`/`javascript:`
+  stylesheet href is rule injection rather than a font. Anything else is
+  refused and reported in the message's CSS-error box.
+- **each URL once**, and at most 32 per session, so a message cannot turn the
+  app into a request generator.
+- what remains is accepted knowingly: the sheet is fetched from a third party,
+  which learns the reader's IP, and its rules apply to the whole document —
+  app chrome included. `bridge/css_sanitizer.js` still rejects every `url()`
+  *inside* message CSS, and `@font-face`, `@page` and `@namespace` are still
+  dropped and reported (`inspectBlockedAtRules`).
 
 ### INV-MR6: `document.body` is the message's overlay layer
 

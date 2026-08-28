@@ -3,7 +3,7 @@ import { formatMessageBody } from './macros_in_message.js';
 import { inspectBlockedAtRules, reportCssErrors } from './css_diagnostics.js';
 import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
-import { installMessageDocument } from './message_document.js';
+import { hoistStyleImports, installMessageDocument } from './message_document.js';
 
 /** Cheap pre-sanitize probe for an embedded `<script>` in formatted HTML. */
 const SCRIPT_TAG = /<script\b/i;
@@ -34,20 +34,27 @@ function notifyMessageScriptBlocked() {
 const STYLE_BLOCK = /<style\b[^>]*>([\s\S]*?)(?:<\/style\s*>|$)/gi;
 
 /**
- * At-rules the CSS policy dropped, read off the formatted HTML.
+ * The message's own CSS, as written.
  *
- * The sanitizer removes them, so by the time the message is in the DOM there
- * is nothing left to notice — which is how a card's `@import`ed font came to
- * fall back to `cursive` with no explanation anywhere.
+ * Read off the formatted HTML rather than the DOM: the sanitizer rewrites
+ * every `<style>` before insertion, so by the time the message is on screen
+ * the at-rules it carried are already gone.
  */
-function blockedAtRules(formatted) {
-  const problems = [];
+function styleSources(formatted) {
+  const sources = [];
   STYLE_BLOCK.lastIndex = 0;
   let match;
-  while ((match = STYLE_BLOCK.exec(formatted)) !== null) {
-    problems.push(...inspectBlockedAtRules(match[1]));
-  }
-  return problems;
+  while ((match = STYLE_BLOCK.exec(formatted)) !== null) sources.push(match[1]);
+  return sources;
+}
+
+/** What the CSS policy did to the message's at-rules, as report lines. */
+function cssPolicyNotes(sources, refusedImports) {
+  const notes = refusedImports.map(
+    (url) => `@import ignored: ${url} (only https is loaded)`,
+  );
+  for (const css of sources) notes.push(...inspectBlockedAtRules(css));
+  return notes;
 }
 
 export function writeShadowContent({
@@ -88,8 +95,13 @@ export function writeShadowContent({
     // A reply still arriving is half a stylesheet, and every unclosed brace in
     // it is on its way to being closed — report only what the message settled
     // on. `isGenerating` covers the whole reply, `isTyping` its first chunks.
+    // `@import` cannot work inside a shadow root, so the sheets a card pulls
+    // are lifted to the document head (INV-MR5). Everything the CSS policy
+    // still refuses is reported instead of failing silently.
+    const styles = styleSources(formatted);
+    const refusedImports = hoistStyleImports(styles);
     if (!isTyping && !window.bridge?.isGenerating) {
-      reportCssErrors(root, blockedAtRules(formatted));
+      reportCssErrors(root, cssPolicyNotes(styles, refusedImports));
     }
     // The message's document: `:target` re-keyed, the scoped `document.*`
     // lookups installed for later events, and the card's own scripts run.

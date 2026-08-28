@@ -442,13 +442,16 @@ void main() {
       );
       final writeBlock = _extractWriteShadowContent(rendererJs);
       final insertion = writeBlock.indexOf('root.innerHTML =');
-      final report = writeBlock.indexOf('reportCssErrors(root, blockedAtRules(');
+      final report = writeBlock.indexOf('reportCssErrors(root, cssPolicyNotes(');
       expect(insertion, isNonNegative);
       expect(report, greaterThan(insertion));
       // A reply still arriving is half a stylesheet: every unclosed brace in it
       // is on its way to being closed, so only a settled message is reported.
       expect(writeBlock, contains('if (!isTyping && !window.bridge?.isGenerating) {'));
-      expect(writeBlock, contains('reportCssErrors(root, blockedAtRules(formatted));'));
+      expect(
+        writeBlock,
+        contains('reportCssErrors(root, cssPolicyNotes(styles, refusedImports));'),
+      );
     });
 
     test('the search re-render puts the report back', () {
@@ -1978,7 +1981,10 @@ void main() {
       // contract; the search re-render rewrites innerHTML on its own.
       expect(
         markdownJs,
-        contains("import { installMessageDocument } from './message_document.js';"),
+        contains(
+          "import { hoistStyleImports, installMessageDocument } from "
+          "'./message_document.js';",
+        ),
       );
       expect(markdownJs, contains('installMessageDocument(root, { allowMessageScripts })'));
       expect(
@@ -2135,20 +2141,34 @@ void main() {
       expect(messageDocumentJs, contains('scripted.has(root)'));
     });
 
-    test('a dropped @import is reported instead of failing silently', () {
-      // INV-MR5: message CSS may not reach the network (css_sanitizer.js), so
-      // the rule is dropped — but the card author used to see only a font
-      // that fell back to cursive, with nothing on screen to say why.
+    test('an @import is hoisted, and only over https', () {
+      // INV-MR5: `@import` cannot work inside a shadow root, and a @font-face
+      // can only be registered from the document — so the sheet is lifted to
+      // a <link> in the head. `http:` and `data:` are refused there, and the
+      // rest of the CSS policy is unchanged.
+      expect(messageDocumentJs, contains('export function hoistStyleImports('));
+      final body = _extractBlockBody(
+        messageDocumentJs,
+        messageDocumentJs.indexOf('export function hoistStyleImports('),
+      );
+      expect(body, contains(r"if (!/^https:\/\//i.test(url))"));
+      expect(body, contains('hoisted.has(url)'));
+      expect(body, contains('hoisted.size >= MAX_HOISTED'));
+      expect(body, contains("link.dataset.glazeImport = ''"));
+      expect(body, contains('REAL_HEAD.appendChild(link)'));
+      expect(markdownJs, contains('hoistStyleImports(styles)'));
+
+      // The rules with nowhere to go are still dropped, and still reported.
       expect(
         cssDiagnosticsJs,
         contains('export function inspectBlockedAtRules('),
       );
-      expect(cssDiagnosticsJs, contains('@(import|font-face|page|namespace)'));
+      expect(cssDiagnosticsJs, contains('@(font-face|page|namespace)'));
       expect(
-        markdownJs,
-        contains('reportCssErrors(root, blockedAtRules(formatted))'),
-        reason: 'the at-rule is read off the pre-sanitize HTML; by insertion '
-            'time it is already gone',
+        cssSanitizerJs,
+        contains('// @import, @font-face, @page, @namespace, @charset and anything unknown.'),
+        reason: 'the sanitizer still strips the rule from message CSS itself; '
+            'the hoist reads the source before it runs',
       );
     });
   });

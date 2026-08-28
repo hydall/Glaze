@@ -75,19 +75,55 @@ test('INV-MR7 the load events a card waits for still arrive', async ({ page }) =
   expect(out).toBe('готово+load');
 });
 
-test('INV-MR5 a dropped @import is reported, not silent', async ({ page }) => {
+test('INV-MR5 an @import is hoisted into the document head', async ({ page }) => {
+  // `@import` inside a shadow root is ignored by the browser, and a
+  // `@font-face` can only be registered from the document — so the sheet is
+  // lifted to a <link> in the head, where the card's font can reach it.
   await render(page, card('import-font-card').text);
-  const report = await page.evaluate(() => {
+  const shape = await page.evaluate(() => {
     const root = window.harness.currentRoot();
+    const links = Array.from(document.head.querySelectorAll('link[data-glaze-import]'));
     return {
-      shown: root.querySelector('.glaze-css-error')?.textContent || '',
+      hrefs: links.map((l) => l.getAttribute('href')),
+      rel: links[0]?.getAttribute('rel'),
+      report: root.querySelector('.glaze-css-error')?.textContent || '',
       styleKept: !!root.querySelector('style'),
       titleStyled: getComputedStyle(root.querySelector('.if-title')).fontFamily,
     };
   });
-  expect(report.shown).toContain('@import');
-  expect(report.styleKept, 'the rest of the card CSS still applies').toBe(true);
-  expect(report.titleStyled).toContain('cursive');
+  expect(shape.hrefs).toEqual(['https://fonts.example/css2?family=Card']);
+  expect(shape.rel).toBe('stylesheet');
+  expect(shape.report, 'a hoisted import is not a problem to report').toBe('');
+  expect(shape.styleKept, 'the rest of the card CSS still applies').toBe(true);
+  expect(shape.titleStyled).toContain('Card');
+});
+
+test('INV-MR5 the same sheet is hoisted once, however many renders', async ({ page }) => {
+  const body = card('import-font-card').text;
+  await render(page, body);
+  await render(page, body);
+  await render(page, body, { keep: true });
+  const count = await page.evaluate(
+    () => document.head.querySelectorAll('link[data-glaze-import]').length,
+  );
+  expect(count).toBe(1);
+});
+
+test('INV-MR5 only https is hoisted; the rest is reported', async ({ page }) => {
+  await render(page, card('import-insecure-card').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    return {
+      links: document.head.querySelectorAll('link[data-glaze-import]').length,
+      report: root.querySelector('.glaze-css-error')?.textContent || '',
+      colour: getComputedStyle(root.querySelector('.ii-title')).color,
+    };
+  });
+  expect(shape.links, 'http: and data: are refused').toBe(0);
+  expect(shape.report).toContain('@import ignored');
+  expect(shape.report).toContain('http://fonts.example/plain.css');
+  expect(shape.report).toContain('data:text/css');
+  expect(shape.colour, 'the rest of the card CSS still applies').toBe('rgb(3, 4, 5)');
 });
 
 test('INV-MR2 the app keeps its own document while a message runs', async ({ page }) => {

@@ -148,13 +148,13 @@ function droppedRules(css, blocks) {
 /**
  * At-rules the CSS policy drops before the message is rendered.
  *
- * `@import` is rejected on purpose (css_sanitizer.js: message CSS never
- * reaches the network), and `@font-face` with it. The card author saw only a
- * font that silently fell back, so the drop is reported instead of hidden.
- * Read from the *pre-sanitize* source — by the time the style element exists,
- * the rule is already gone.
+ * Not `@import`: that one is lifted into the document head instead
+ * (renderer/message_document.js, INV-MR5). These three have nowhere to go —
+ * the card author saw only a rule that did nothing, so the drop is reported
+ * rather than hidden. Read from the *pre-sanitize* source: by the time the
+ * style element exists, the rule is already gone.
  */
-const BLOCKED_AT_RULE = /@(import|font-face|page|namespace)\b/gi;
+const BLOCKED_AT_RULE = /@(font-face|page|namespace)\b/gi;
 
 export function inspectBlockedAtRules(css) {
   const source = String(css == null ? '' : css);
