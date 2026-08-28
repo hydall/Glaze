@@ -924,6 +924,24 @@ void main() {
       }
     });
 
+    test('a <style> or <script> body is never read as prose', () {
+      // Both string passes before the parse would misread code: a `*` in a
+      // selector is not an italic marker, and `i<n; i++) { if (i>` in a
+      // script is not a tag. They are masked for the length of both.
+      final mask = formatterFormatterJs.indexOf('maskCodeElements(staged)');
+      final markers = formatterFormatterJs.indexOf('extractMarkers(code.masked');
+      final escape = formatterFormatterJs.indexOf(
+        'code.unmask(escapeProseTags(staged, styled))',
+      );
+      expect(mask, isNonNegative);
+      expect(markers, greaterThan(mask));
+      expect(escape, greaterThan(markers));
+      expect(
+        formatterProtectJs,
+        contains(r'/<(style|script)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi'),
+      );
+    });
+
     test('markdown never reaches inside code, style or an attribute', () {
       for (final name in ["'script'", "'style'", "'pre'", "'code'", "'textarea'"]) {
         expect(formatterHtmlScanJs, contains(name));

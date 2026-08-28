@@ -112,3 +112,17 @@ test('INV-MR8 message scripts stay off when the toggle is off', async ({ page })
   expect(shape.modal).toBe(false);
   expect(shape.scripts).toBe(0);
 });
+
+test('a card script survives its own comparisons', async ({ page }) => {
+  // `i<n; i++) { if (i>` looks exactly like a tag to a scan that works on the
+  // message as a string, and escaping it leaves the script unparseable. The
+  // scan never sees a <script> body: it is masked for the length of it.
+  await render(page, card('script-comparison').text);
+  const shape = await page.evaluate((body) => ({
+    out: window.harness.currentRoot().querySelector('#sc-out').textContent,
+    formatted: window.harness.format(body),
+  }), card('script-comparison').text);
+  expect(shape.out, 'the script ran').toBe('ok2');
+  expect(shape.formatted).toContain('i<n');
+  expect(shape.formatted).not.toContain('&lt;n');
+});

@@ -18,7 +18,7 @@
 // afterwards. See docs/rules/message-rendering.md.
 
 import { expandMacros } from './macros.js';
-import { escapeProseTags } from './html_scan.js';
+import { escapeProseTags, styledElementNames } from './html_scan.js';
 import {
   ANY_PLACEHOLDER,
   createStore,
@@ -97,14 +97,18 @@ export class Formatter {
     const markers = createStore('S');
 
     let staged = protectRegions(source, { store: regions, inReasoning });
+    // `<style>` and `<script>` bodies are code, and both string passes below
+    // would read them as prose: a `*` in a selector is not an italic marker,
+    // and `i<n; i++) { if (i>` in a script is not a tag. They are masked for
+    // the length of both, and put back for the parser.
+    const styled = styledElementNames(staged);
+    const code = maskCodeElements(staged);
     // Style markers come out before the parse, because html_to_markdown writes
     // rich content inside them and a parsed marker is two text nodes with an
-    // element between. `<style>`/`<script>` bodies are hidden for that scan:
-    // a `*` in a selector is not an italic marker.
-    const code = maskCodeElements(staged);
-    staged = code.unmask(extractMarkers(code.masked, markers));
+    // element between them.
+    staged = extractMarkers(code.masked, markers);
 
-    const tree = parseHtml(escapeProseTags(staged), document);
+    const tree = parseHtml(code.unmask(escapeProseTags(staged, styled)), document);
 
     formatContainer(tree, {
       isRoot: true,

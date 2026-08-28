@@ -73,7 +73,7 @@ export const RAW_TEXT_ELEMENTS = new Set([
 ]);
 
 /** Element names a `<style>` block in the message uses as a type selector. */
-function styledElementNames(text) {
+export function styledElementNames(text) {
   const names = new Set();
   const styles = text.match(/<style\b[^>]*>[\s\S]*?(?:<\/style>|$)/gi) || [];
   for (const block of styles) {
@@ -98,9 +98,14 @@ function styledElementNames(text) {
 /**
  * Escapes the tags in [text] that are prose rather than markup, and leaves
  * every other character untouched. The result is what gets parsed.
+ *
+ * [styledNames] is the set of element names the message's CSS styles. The
+ * caller passes it in when `<style>` and `<script>` bodies are masked out of
+ * [text] — which they must be, because `i<n; i++) { if (i>` inside a script is
+ * a tag to this scan, and escaping it corrupts the script.
  */
-export function escapeProseTags(text) {
-  const styled = styledElementNames(text);
+export function escapeProseTags(text, styledNames) {
+  const styled = styledNames || styledElementNames(text);
   const opened = new Set();
   const closed = new Set();
   TAG_REGEX.lastIndex = 0;

@@ -269,6 +269,17 @@ window.onload = function () {
 </script>`,
   },
   {
+    id: 'script-comparison',
+    title: 'Card script that compares with < and > and no spaces',
+    origin: 'audit 28.08 — the tag scan read `i<n; i++) { if (i>` as a tag',
+    text: `<div id="sc-out">-</div>
+<script>
+var n=3,o='';
+for(var i=0;i<n;i++){if(i>1)o+=i;}
+document.getElementById('sc-out').textContent='ok'+o;
+</script>`,
+  },
+  {
     id: 'import-font-card',
     title: 'Card whose CSS tries to @import a font',
     origin: 'INV-MR5 — the policy drops it, and used to drop it silently',
