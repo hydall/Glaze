@@ -71,6 +71,34 @@ jobs:
       - name: Test
         run: flutter test --reporter expanded
 
+  webview-render:
+    name: WebView render tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: test/webview_js/package-lock.json
+
+      - name: Install dependencies
+        working-directory: test/webview_js
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: test/webview_js
+        run: npx playwright install --with-deps chromium
+
+      # Renders the card corpus in a real browser and asserts on the DOM, the
+      # resolved CSS and what a click does — the checks the Dart asset tests
+      # cannot make, because they only read the sources as strings.
+      - name: Test
+        working-directory: test/webview_js
+        run: npm test
+
   bug-triage:
     name: Bug-triage agent (unit tests)
     runs-on: ubuntu-latest

@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Glaze message render harness</title>
+  <style>
+    /* Deliberately plain: anything a message needs has to come from the
+       message's own CSS or from SHADOW_STYLE, never from the harness. */
+    html, body { margin: 0; padding: 0; background: #14161a; color: #e0e0e0;
+      font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 15px; }
+    #chat-container { padding: 16px; }
+  </style>
+</head>
+<body>
+  <div id="chat-container"></div>
+  <script type="module" src="./harness.js"></script>
+</body>
+</html>
