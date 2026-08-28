@@ -208,7 +208,7 @@ class ImageStorageService implements SyncImageStore {
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
-    final thumbnail = _resizeImage(imageBytes, kThumbnailShortSide);
+    final thumbnail = await _resizeImage(imageBytes, kThumbnailShortSide);
     if (thumbnail == null) return null;
     final path = p.join(dir.path, '$characterId.jpg');
     await File(path).writeAsBytes(thumbnail);
@@ -222,7 +222,7 @@ class ImageStorageService implements SyncImageStore {
     if (!await avatarFile.exists()) return null;
 
     final bytes = await avatarFile.readAsBytes();
-    final thumbnail = _resizeImage(bytes, kThumbnailShortSide);
+    final thumbnail = await _resizeImage(bytes, kThumbnailShortSide);
     if (thumbnail == null) return null;
 
     final dir = Directory(p.join(baseDir, 'thumbnails'));
@@ -298,8 +298,16 @@ class ImageStorageService implements SyncImageStore {
     return File(absPath).existsSync() ? absPath : null;
   }
 
-  Uint8List? _resizeImage(Uint8List imageBytes, int maxDimension) =>
-      resizeAvatarBytes(imageBytes, maxDimension);
+  /// Resizes off the UI isolate.
+  ///
+  /// Decoding a full-size card PNG and re-encoding it as a JPEG costs hundreds
+  /// of milliseconds and a decode buffer many times the file size. Doing that
+  /// inline meant one dropped frame — and one large allocation — per imported
+  /// card; a mass import piled up hundreds of them. `Isolate.run` hands those
+  /// buffers back the moment the worker exits (the thumbnail backfill above
+  /// already worked this way).
+  Future<Uint8List?> _resizeImage(Uint8List imageBytes, int maxDimension) =>
+      Isolate.run(() => resizeAvatarBytes(imageBytes, maxDimension));
 
   Uint8List _stripPngTextChunks(Uint8List pngBytes) {
     if (pngBytes.length < 8) return pngBytes;

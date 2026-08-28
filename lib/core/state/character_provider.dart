@@ -326,6 +326,20 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
     ref.invalidateSelf();
   }
 
+  /// Inserts a whole chunk of imported characters in one batch and refreshes
+  /// the list **once**.
+  ///
+  /// [add] is fine for a single card, but a mass import called it per file:
+  /// each call re-read the entire characters table (`invalidateSelf` → `build`
+  /// → `getAll`) and woke every watcher, so importing a few hundred cards did
+  /// quadratic work on the UI isolate and ran the app out of memory.
+  Future<void> addAll(List<Character> characters) async {
+    if (characters.isEmpty) return;
+    final repo = ref.read(characterRepoProvider);
+    await repo.putAll(characters);
+    ref.invalidateSelf();
+  }
+
   Future<void> save(Character character) async {
     final repo = ref.read(characterRepoProvider);
     await repo.put(character);

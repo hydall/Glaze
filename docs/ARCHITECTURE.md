@@ -196,6 +196,8 @@ lib/
 │   │   └── wallpaper.dart            # Device wallpaper fetch
 │   ├── services/                     # Business logic services (no UI, no Riverpod ref)
 │   │   ├── character_importer.dart   # Parses PNG/JSON/YAML V1/V2 character cards
+│   │   ├── character_bulk_import_service.dart # Mass import: one card at a time (read → parse → persist → release), yields between cards
+│   │   ├── character_import_write_buffer.dart # Buffers imported rows into chunked transactions (one list refresh per chunk)
 │   │   ├── character_exporter.dart   # Exports character to PNG (tEXt chunk) or JSON
 │   │   ├── character_book_converter.dart # character_book JSON ↔ Lorebook model
 │   │   ├── image_storage_service.dart    # Avatars + thumbnails on disk

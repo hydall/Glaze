@@ -195,39 +195,68 @@ class LorebookListScreen extends ConsumerWidget {
       allowedExtensions: ['json'],
       dialogTitle: 'lorebook_import_st_dialog_title'.tr(),
       allowMultiple: true,
-      withData: true,
+      // Not `withData: true`: that loads every picked file into memory before
+      // the picker returns, which a large multi-select does not survive. Each
+      // book is read from disk when its turn comes instead.
+      withData: false,
     );
     if (result == null || result.files.isEmpty) return;
 
     final notifier = ref.read(lorebooksProvider.notifier);
-    final imported = <STLorebookImportResult>[];
+    // Books are written in chunks (one transaction and one list refresh per
+    // chunk) instead of one `addLorebook` — and therefore one full reload of
+    // the lorebook list — per file.
+    const chunkSize = 20;
+    final pending = <Lorebook>[];
+    STLorebookImportResult? firstImported;
+    var importedCount = 0;
     Object? lastError;
+
+    Future<void> flush() async {
+      if (pending.isEmpty) return;
+      await notifier.putAll(List<Lorebook>.of(pending));
+      pending.clear();
+    }
 
     for (final file in result.files) {
       try {
         final STLorebookImportResult importResult;
-        final bytes = file.bytes;
         final filePath = file.path;
-        if (bytes != null && bytes.isNotEmpty) {
+        final bytes = file.bytes;
+        if (filePath != null && filePath.isNotEmpty) {
+          importResult = await importSTLorebookFromFile(
+            filePath,
+            nameOverride: file.name,
+          );
+        } else if (bytes != null && bytes.isNotEmpty) {
           importResult = importSTLorebook(
             jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>,
             nameOverride: file.name,
           );
-        } else if (filePath != null && filePath.isNotEmpty) {
-          importResult = await importSTLorebookFromFile(filePath);
         } else {
           continue;
         }
-        await notifier.addLorebook(importResult.lorebook);
-        imported.add(importResult);
+        pending.add(importResult.lorebook);
+        firstImported ??= importResult;
+        importedCount++;
+        if (pending.length >= chunkSize) await flush();
       } catch (e) {
         lastError = e;
       }
+      // Hand the frame back between files so the list keeps painting.
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    try {
+      await flush();
+    } catch (e) {
+      lastError = e;
+      importedCount -= pending.length;
     }
 
     if (!context.mounted) return;
 
-    if (imported.isEmpty) {
+    if (importedCount <= 0 || firstImported == null) {
       if (lastError != null) {
         GlazeErrorDialog.show(context, lastError, prefix: 'Import failed: ');
       }
@@ -236,7 +265,7 @@ class LorebookListScreen extends ConsumerWidget {
 
     // A single picked file keeps the original flow: toast + open the editor.
     if (result.files.length == 1) {
-      final single = imported.single;
+      final single = firstImported;
       GlazeToast.show(
         context,
         'lorebook_imported'.tr(
@@ -251,10 +280,10 @@ class LorebookListScreen extends ConsumerWidget {
       return;
     }
 
-    final failed = result.files.length - imported.length;
+    final failed = result.files.length - importedCount;
     final summary = StringBuffer(
-      '${'import_success'.tr()}: ${imported.length} '
-      '${'count_lorebooks'.plural(imported.length)}',
+      '${'import_success'.tr()}: $importedCount '
+      '${'count_lorebooks'.plural(importedCount)}',
     );
     if (failed > 0) {
       summary.write(

@@ -117,6 +117,17 @@ class LorebooksNotifier extends AsyncNotifier<List<Lorebook>> {
     ref.invalidateSelf();
   }
 
+  /// Writes a chunk of lorebooks in one batch and refreshes the list once —
+  /// the mass-import counterpart of [put] (every imported card can bring its
+  /// own embedded character book).
+  Future<void> putAll(List<Lorebook> lorebooks) async {
+    if (lorebooks.isEmpty) return;
+    final repo = ref.read(lorebookRepoProvider);
+    await repo.putAll(lorebooks);
+    await _syncActivationsToPrefs(lorebooks);
+    ref.invalidateSelf();
+  }
+
   Future<void> updateLorebook(Lorebook lorebook) async {
     final repo = ref.read(lorebookRepoProvider);
     await repo.put(lorebook);
@@ -124,34 +135,44 @@ class LorebooksNotifier extends AsyncNotifier<List<Lorebook>> {
     ref.invalidateSelf();
   }
 
-  Future<void> _syncActivationToPrefs(Lorebook lorebook) async {
-    if (lorebook.activationTargetId == null) return;
-    if (lorebook.activationScope != 'character' &&
-        lorebook.activationScope != 'chat') {
-      return;
-    }
-    final scope = lorebook.activationScope;
-    final targetId = lorebook.activationTargetId!;
+  Future<void> _syncActivationToPrefs(Lorebook lorebook) =>
+      _syncActivationsToPrefs([lorebook]);
 
+  /// Activates every character/chat-scoped book in [lorebooks] and persists the
+  /// activation map **once**. Doing it per book re-serialized the whole map for
+  /// every imported card, which is what made a mass import crawl.
+  Future<void> _syncActivationsToPrefs(Iterable<Lorebook> lorebooks) async {
     final current = ref.read(lorebookActivationsProvider);
-    final map = scope == 'character'
-        ? Map<String, List<String>>.from(current.character)
-        : Map<String, List<String>>.from(current.chat);
-    final list = List<String>.from(map[targetId] ?? []);
-    if (!list.contains(lorebook.id)) {
+    final charMap = <String, List<String>>{
+      for (final e in current.character.entries) e.key: List<String>.from(e.value),
+    };
+    final chatMap = <String, List<String>>{
+      for (final e in current.chat.entries) e.key: List<String>.from(e.value),
+    };
+
+    var changed = false;
+    for (final lorebook in lorebooks) {
+      final targetId = lorebook.activationTargetId;
+      if (targetId == null) continue;
+      final scope = lorebook.activationScope;
+      if (scope != 'character' && scope != 'chat') continue;
+
+      final map = scope == 'character' ? charMap : chatMap;
+      final list = map.putIfAbsent(targetId, () => <String>[]);
+      if (list.contains(lorebook.id)) continue;
       list.add(lorebook.id);
-      map[targetId] = list;
-      final updated = scope == 'character'
-          ? current.copyWith(character: map)
-          : current.copyWith(chat: map);
-      ref.read(lorebookActivationsProvider.notifier).state = updated;
-      final prefs = ref.read(sharedPreferencesProvider).value;
-      await saveLorebookActivations(updated, prefs);
+      changed = true;
       debugPrint(
         '[lorebook_provider] activation_synced lorebook=${lorebook.id} '
-        'scope=$scope target=$targetId ids=${map[targetId]}',
+        'scope=$scope target=$targetId ids=$list',
       );
     }
+    if (!changed) return;
+
+    final updated = current.copyWith(character: charMap, chat: chatMap);
+    ref.read(lorebookActivationsProvider.notifier).state = updated;
+    final prefs = ref.read(sharedPreferencesProvider).value;
+    await saveLorebookActivations(updated, prefs);
   }
 
   Future<void> deleteLorebook(String id) async {

@@ -219,6 +219,29 @@ class CharacterRepo implements SyncCharacterStore {
     await _db.into(_db.characters).insertOnConflictUpdate(_toCompanion(withTokens));
   }
 
+  /// Writes [characters] in a single batch, so the reactive watchers emit
+  /// **one** update instead of one per row.
+  ///
+  /// This is the mass-import path: writing a few hundred cards through [put]
+  /// woke `watchAll` (and every list provider behind it) once per card, which
+  /// re-read and re-decoded the whole — growing — table for every single file.
+  Future<void> putAll(List<Character> characters) async {
+    if (characters.isEmpty) return;
+    final companions = <CharactersCompanion>[];
+    for (final character in characters) {
+      companions.add(
+        _toCompanion(
+          character.copyWith(tokenCount: estimateCharacterTokens(character)),
+        ),
+      );
+      // Yield between encodes so a large chunk never blocks a frame.
+      await Future<void>.delayed(Duration.zero);
+    }
+    await _db.batch((b) {
+      b.insertAllOnConflictUpdate(_db.characters, companions);
+    });
+  }
+
   /// Computes and stores `tokenCount` for rows that still have the default 0
   /// (existing characters from before the column was added). Runs in one batch
   /// → a single reactive emission; safe to call unawaited at startup.

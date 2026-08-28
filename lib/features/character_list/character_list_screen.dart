@@ -12,11 +12,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/db/repositories/character_repo.dart';
 import '../../core/services/character_export_helper.dart';
-import '../../core/services/character_importer.dart';
-import '../../core/services/character_import_persistence_coordinator.dart';
+import '../../core/services/character_bulk_import_service.dart';
 import '../../core/state/character_folder_provider.dart';
 import '../../core/state/character_provider.dart';
-import '../../core/state/db_provider.dart';
 import '../../shared/shell/header_scroll_hider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
@@ -40,6 +38,7 @@ import 'character_import_persistence_provider.dart';
 import 'character_detail_screen.dart';
 import 'character_selection_provider.dart';
 import 'filtered_characters_provider.dart';
+import 'widgets/import_progress_dialog.dart';
 import 'widgets/widgets.dart';
 
 class CharacterListScreen extends ConsumerStatefulWidget {
@@ -1242,41 +1241,30 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     if (!context.mounted) return;
     if (assets == null || assets.isEmpty) return;
 
-    final importer = await ref.read(characterImporterProvider.future);
-    final persistence = ref.read(characterImportPersistenceCoordinatorProvider);
-    int imported = 0;
-    String? lastError;
-
+    // Names are resolved up front (a cheap metadata read); the pixels of each
+    // asset are only fetched when its turn comes, one asset at a time.
+    final sources = <CharacterImportSource>[];
     for (final asset in assets) {
       var name = await asset.titleAsync;
       if (name.isEmpty) name = '${asset.id}.png';
-      try {
-        final bytes = await _loadOriginalBytes(asset);
-        if (bytes == null) {
-          lastError =
-              'Failed to import $name: could not load the original (not downloaded from iCloud?)';
-          continue;
-        }
-        final r = await importer.importFromBytes(bytes, name);
-        final persisted = await persistence.persist(r);
-        if (persisted case CharacterImportPersistenceFailure()) {
-          persisted.rethrowError();
-        }
-        imported++;
-      } catch (e) {
-        lastError = 'Failed to import $name: $e';
-      }
+      sources.add(
+        CharacterImportSource(
+          name: name,
+          openBytes: () async {
+            final bytes = await _loadOriginalBytes(asset);
+            if (bytes == null) {
+              throw StateError(
+                'could not load the original (not downloaded from iCloud?)',
+              );
+            }
+            return bytes;
+          },
+        ),
+      );
     }
 
     if (!context.mounted) return;
-    if (imported > 0) {
-      GlazeToast.show(
-        context,
-        '${'import_success'.tr()}: $imported ${'count_characters'.plural(imported)}',
-      );
-    } else if (lastError != null) {
-      GlazeToast.show(context, lastError);
-    }
+    await _runBulkImport(context, ref, sources);
   }
 
   /// Reads the untouched original bytes of a gallery [asset] so embedded PNG
@@ -1296,44 +1284,113 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           ? null
           : ['png', 'json', 'charx', 'zip'],
       allowMultiple: true,
-      withData: true,
+      // Deliberately NOT `withData: true`: the picker would load every selected
+      // file into memory before returning, and a few hundred cards blow the
+      // heap before a single one is parsed. The runner reads them one at a time
+      // from disk instead (bytes remain the fallback for a pathless pick).
+      withData: false,
     );
     if (!context.mounted) return;
     if (result == null || result.files.isEmpty) return;
 
-    final importer = await ref.read(characterImporterProvider.future);
-    final persistence = ref.read(characterImportPersistenceCoordinatorProvider);
-    int imported = 0;
-    String? lastError;
-
+    final sources = <CharacterImportSource>[];
     for (final file in result.files) {
-      try {
-        CharacterImportResult r;
-        if (file.bytes != null) {
-          r = await importer.importFromBytes(file.bytes!, file.name);
-        } else if (file.path != null) {
-          r = await importer.importFromFile(file.path!);
-        } else {
-          continue;
-        }
-        final persisted = await persistence.persist(r);
-        if (persisted case CharacterImportPersistenceFailure()) {
-          persisted.rethrowError();
-        }
-        imported++;
-      } catch (e) {
-        lastError = 'Failed to import ${file.name}: $e';
+      final path = file.path;
+      final bytes = file.bytes;
+      if (path != null && path.isNotEmpty) {
+        sources.add(CharacterImportSource(name: file.name, path: path));
+      } else if (bytes != null) {
+        sources.add(
+          CharacterImportSource(name: file.name, openBytes: () async => bytes),
+        );
       }
+    }
+    if (sources.isEmpty) return;
+
+    await _runBulkImport(context, ref, sources);
+  }
+
+  /// Runs a mass import serially behind a progress dialog.
+  ///
+  /// One card at a time: read, parse, persist, release — the runner yields to
+  /// the event loop between cards, so the dialog keeps repainting and Cancel
+  /// keeps responding no matter how many files were picked.
+  Future<void> _runBulkImport(
+    BuildContext context,
+    WidgetRef ref,
+    List<CharacterImportSource> sources,
+  ) async {
+    if (sources.isEmpty) return;
+
+    final service = await ref.read(
+      characterBulkImportServiceFactoryProvider,
+    )();
+    if (!context.mounted) return;
+
+    final progress = ValueNotifier<CharacterBulkImportProgress>(
+      CharacterBulkImportProgress(
+        completed: 0,
+        total: sources.length,
+        imported: 0,
+        failed: 0,
+        currentName: sources.first.name,
+      ),
+    );
+    var cancelled = false;
+    var dialogOpen = false;
+    var dialogClosed = false;
+    final navigator = Navigator.of(context, rootNavigator: true);
+
+    // A couple of cards import faster than a dialog can animate in; only put one
+    // up for runs long enough to be worth showing.
+    if (sources.length > 1) {
+      dialogOpen = true;
+      unawaited(
+        showImportProgressDialog(
+          context,
+          progress: progress,
+          onCancel: () => cancelled = true,
+        ).whenComplete(() => dialogClosed = true),
+      );
+    }
+
+    CharacterBulkImportReport report;
+    try {
+      report = await service.run(
+        sources,
+        onProgress: (value) => progress.value = value,
+        isCancelled: () => cancelled,
+      );
+    } finally {
+      // Guarded: popping a dialog that is already gone would take the screen
+      // underneath it with it.
+      if (dialogOpen && !dialogClosed) navigator.pop();
+      // The dialog is still animating out with a listener attached, so let it
+      // finish before the notifier goes away.
+      unawaited(
+        Future<void>.delayed(
+          const Duration(milliseconds: 400),
+          progress.dispose,
+        ),
+      );
     }
 
     if (!context.mounted) return;
-    if (imported > 0) {
-      GlazeToast.show(
-        context,
-        '${'import_success'.tr()}: $imported ${'count_characters'.plural(imported)}',
+    if (report.imported > 0) {
+      final summary = StringBuffer(
+        '${'import_success'.tr()}: ${report.imported} '
+        '${'count_characters'.plural(report.imported)}',
       );
-    } else if (lastError != null) {
-      GlazeToast.show(context, lastError);
+      if (report.failed > 0) {
+        final failed = 'import_failed_count'.tr(args: ['${report.failed}']);
+        summary.write(' — $failed');
+      }
+      if (report.cancelled) summary.write(' (${'import_cancelled'.tr()})');
+      GlazeToast.show(context, summary.toString());
+    } else if (report.cancelled) {
+      GlazeToast.show(context, 'import_cancelled'.tr());
+    } else if (report.lastError != null) {
+      GlazeToast.show(context, report.lastError!);
     }
   }
 }
