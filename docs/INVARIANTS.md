@@ -82,7 +82,23 @@ runs against that committed result. With Studio enabled it awaits
 processes image tags, so images bind to the selected final/cleaned/partial
 swipe. It never runs concurrently with text generation. `continueMessage()`
 uses the same pipeline and post-generation coordinator, bound to the merged
-message — see INV-CM2.
+message — see INV-CM2. An errored stream returns before post-gen, and an abort
+bumps `AbortHandler`'s gen id so every stage bails, so neither reaches the
+image stage at all.
+
+The WebView says the same thing. `ChatState.isGeneratingImage` is raised by
+`ImageGenProcessor` before it dispatches the first block of a message and
+dropped after the last — on the pipeline path and on every manual retry — and
+it reaches the page through `bridge.setImageGenerating()`. A pending block is
+rendered *queued* whenever that flag is down: no elapsed clock (nothing is
+elapsing), no Stop button (there is no `_imgGenCancelToken` to cancel yet), and
+a label that says so. That covers the whole reply stream and the post-gen work
+before the image stage, which with Studio on runs the cleaner first and can
+take seconds. The flip carries no re-render of its own — the reply's last chunk
+is already painted — so `refreshImgGenPlaceholderState()` restamps the blocks
+on screen, and restamps `data-start` with them: the clock was stamped when the
+block was *rendered*, so without that a block that waited out a long reply
+would jump straight to "48.2s" the moment it went live.
 
 ### INV-IG2: Image generation has independent abort infrastructure
 

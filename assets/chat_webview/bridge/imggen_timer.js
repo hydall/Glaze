@@ -59,6 +59,9 @@ export class ImgGenTimer {
       el.textContent = ((now - start) / 1000).toFixed(1) + 's';
     });
     root.querySelectorAll('.imggen-loading').forEach((block) => {
+      // A queued block is waiting for the reply to finish, not generating, so
+      // its clock is hidden and must not hold the interval open (INV-IG1).
+      if (block.classList.contains('imggen-queued')) return;
       if (block.shadowRoot) found += this._updateIn(block.shadowRoot, now);
     });
     return found;

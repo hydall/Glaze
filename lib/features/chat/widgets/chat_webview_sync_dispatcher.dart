@@ -442,7 +442,7 @@ class ChatWebViewSyncDispatcher {
       'if (window.bridge) { '
       'window.bridge.setGenerating(${current.isGenerating}); '
       'window.bridge.setPostGenRunning(${current.isPostGenRunning}); '
-      'window.bridge.isGeneratingImage = ${current.isGeneratingImage}; '
+      'window.bridge.setImageGenerating(${current.isGeneratingImage}); '
       '}',
     );
 

@@ -758,7 +758,11 @@ export class Formatter {
         // The children are moved into a shadow root of the placeholder's own by
         // `isolateImgGenPlaceholders` right after insertion, which is what keeps
         // message CSS from restyling them (see renderer/imggen_placeholder.js).
-        return `<div class="imggen-loading" data-start="${start}" data-img-index="${at}"><span class="imggen-loading-hint">Generating image…</span><span class="imggen-loading-timer" data-start="${start}">0.0s</span><button class="imggen-stop-btn" type="button" data-action="img-stop" title="Stop image generation" aria-label="Stop image generation">${STOP_SVG}</button>${promptEl}</div>`;
+        // Two labels, one of which is hidden: the block is "queued" until the
+        // reply has finished streaming and post-gen actually reaches the image
+        // stage (INV-IG1), and only then does anything start elapsing or
+        // become stoppable. `refreshImgGenPlaceholderState` flips the class.
+        return `<div class="imggen-loading" data-start="${start}" data-img-index="${at}"><span class="imggen-loading-hint">Generating image…</span><span class="imggen-queued-hint">Image queued…</span><span class="imggen-loading-timer" data-start="${start}">0.0s</span><button class="imggen-stop-btn" type="button" data-action="img-stop" title="Stop image generation" aria-label="Stop image generation">${STOP_SVG}</button>${promptEl}</div>`;
       }
       if (block.type === 'error') {
         let errorMsg = 'Unknown error';

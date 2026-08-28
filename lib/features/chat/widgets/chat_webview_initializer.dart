@@ -224,7 +224,7 @@ class ChatWebViewInitializer {
         'if (window.bridge) { '
         'window.bridge.setGenerating(${input.isGenerating}); '
         'window.bridge.setPostGenRunning(${input.isPostGenRunning}); '
-        'window.bridge.isGeneratingImage = ${input.isGeneratingImage}; '
+        'window.bridge.setImageGenerating(${input.isGeneratingImage}); '
         '}',
       ),
     );

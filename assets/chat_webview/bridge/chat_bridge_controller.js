@@ -2,6 +2,7 @@
 
 import { GenTimer } from './gen_timer.js';
 import { ImgGenTimer } from './imggen_timer.js';
+import { refreshImgGenPlaceholderState } from '../renderer/imggen_placeholder.js';
 import { MessageUpdateBatcher } from './message_update_batcher.js';
 import { SelectionManager } from './selection_manager.js';
 import { EditController } from './edit_controller.js';
@@ -141,6 +142,17 @@ export class Bridge {
 
   setPostGenRunning(value) {
     this.isPostGenRunning = !!value;
+  }
+
+  // The image stage is the only thing that generates from an `[IMG:GEN…]` tag,
+  // so this flag is what tells a pending block apart from a running one
+  // (INV-IG1). The transition carries no re-render of its own — the reply's
+  // last chunk is already painted — so the placeholders are restamped here,
+  // and the ticker is woken for the clocks that just started.
+  setImageGenerating(value) {
+    this.isGeneratingImage = !!value;
+    refreshImgGenPlaceholderState();
+    this._imgGenTimer.ensureRunning();
   }
 
   _syncGenerationTimer() {

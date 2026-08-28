@@ -70,7 +70,8 @@ const PLACEHOLDER_CSS = `
     gap: 6px;
     padding: 12px 44px 0 12px;
   }
-  .imggen-loading-hint {
+  .imggen-loading-hint,
+  .imggen-queued-hint {
     font-size: 14px;
     font-weight: 600;
     opacity: 0.9;
@@ -81,6 +82,16 @@ const PLACEHOLDER_CSS = `
     opacity: 0.65;
     font-variant-numeric: tabular-nums;
   }
+  /* Queued: the reply is still streaming, or post-gen has not reached the
+     image stage yet, so nothing is generating (INV-IG1). Neither an elapsed
+     time nor a Stop button means anything here — the timer would count a wait
+     that is not the generation's, and the button would cancel a token that
+     does not exist yet. */
+  .imggen-queued-hint { display: none; }
+  :host(.imggen-queued) .imggen-loading-hint,
+  :host(.imggen-queued) .imggen-loading-timer,
+  :host(.imggen-queued) .imggen-stop-btn { display: none; }
+  :host(.imggen-queued) .imggen-queued-hint { display: inline; }
   .imggen-stop-btn {
     position: absolute;
     top: 8px;
@@ -174,7 +185,67 @@ const THEME_VARIABLE = '--text-color';
 const PINNED_FOREGROUND = '--imggen-fg';
 
 /** Children that belong on the placeholder's header row, in that order. */
-const HEAD_CLASSES = ['imggen-loading-hint', 'imggen-loading-timer'];
+const HEAD_CLASSES = [
+  'imggen-loading-hint',
+  'imggen-queued-hint',
+  'imggen-loading-timer',
+];
+
+/** Marks a block that is waiting its turn rather than generating. */
+const QUEUED_CLASS = 'imggen-queued';
+
+/**
+ * Whether a pending block is waiting rather than generating.
+ *
+ * `isGeneratingImage` is the image stage, and that stage is the only thing
+ * that ever generates from an `[IMG:GEN…]` tag: `ImageGenProcessor` raises the
+ * flag before it dispatches the first block of a message and drops it after
+ * the last, on the pipeline path and on every manual retry alike. So the block
+ * is live exactly while the flag is up — and queued for the whole reply
+ * stream, the post-gen work before the image stage (with Studio on the cleaner
+ * runs first and takes seconds), and any block simply left pending.
+ *
+ * Reading one flag rather than inferring from `isGenerating` also means there
+ * is no window between the stream ending and post-gen taking its hold where a
+ * block would flicker into a running state it is not in.
+ */
+function isQueued() {
+  const bridge = window.bridge;
+  if (!bridge) return false;
+  return !bridge.isGeneratingImage;
+}
+
+/**
+ * Re-reads the generation flags and restamps the placeholders on screen.
+ *
+ * Called by the bridge whenever a flag changes, because the transition can
+ * happen with no re-render at all: the reply's last chunk is already painted
+ * when the stream ends. The restamp matters as much as the class — `data-start`
+ * was written when the block was *rendered*, so a block that waited out a long
+ * reply would otherwise jump straight to "48.2s" the moment it goes live.
+ */
+export function refreshImgGenPlaceholderState() {
+  const queued = isQueued();
+  for (const host of document.querySelectorAll('.message-content')) {
+    const root = host.shadowRoot;
+    if (!root) continue;
+    for (const block of root.querySelectorAll('.imggen-loading')) {
+      const wasQueued = block.classList.contains(QUEUED_CLASS);
+      if (wasQueued === queued) continue;
+      block.classList.toggle(QUEUED_CLASS, queued);
+      if (!queued) restartTimer(block);
+    }
+  }
+}
+
+/** Starts the elapsed clock from now, so it measures the generation itself. */
+function restartTimer(block) {
+  const root = block.shadowRoot || block;
+  const timer = root.querySelector('.imggen-loading-timer');
+  if (!timer) return;
+  timer.dataset.start = String(Date.now());
+  timer.textContent = '0.0s';
+}
 
 /**
  * Moves every `.imggen-loading` placeholder under [root] into a shadow root of
@@ -228,6 +299,13 @@ function isolateOne(host) {
     host.style.setProperty(property, value, 'important');
   }
   pinForeground(host);
+  // A freshly rendered block starts in whichever state the flags describe; a
+  // render during streaming must not paint a running one for a frame.
+  if (isQueued()) {
+    host.classList.add(QUEUED_CLASS);
+  } else {
+    restartTimer(host);
+  }
 }
 
 function pinForeground(host) {

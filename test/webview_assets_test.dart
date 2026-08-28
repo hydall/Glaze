@@ -1150,6 +1150,45 @@ void main() {
       expect(imgGenPlaceholderJs, contains('fill: currentColor'));
     });
 
+    test('a pending block reads as queued until the image stage runs', () {
+      // INV-IG1: generation starts only after the reply has finished
+      // streaming and post-gen reaches the image stage. Until then there is
+      // nothing to time and nothing to stop — a running placeholder would be
+      // a lie, and its Stop button would cancel a token that does not exist.
+      expect(formatterFormatterJs, contains('class="imggen-queued-hint"'));
+      expect(
+        imgGenPlaceholderJs,
+        contains('return !bridge.isGeneratingImage;'),
+        reason: 'the image stage flag is what makes a block live',
+      );
+      expect(
+        imgGenPlaceholderJs,
+        contains(':host(.imggen-queued) .imggen-loading-timer,'),
+      );
+      expect(
+        imgGenPlaceholderJs,
+        contains(':host(.imggen-queued) .imggen-stop-btn { display: none; }'),
+      );
+      // The clock has to measure the generation, not the wait before it: the
+      // block was stamped when it rendered, possibly a whole reply ago.
+      expect(
+        imgGenPlaceholderJs,
+        contains('function restartTimer(block)'),
+      );
+      expect(imgGenPlaceholderJs, contains("timer.dataset.start = String(Date.now())"));
+      // The flip carries no re-render of its own, so the bridge drives it.
+      expect(
+        bridgeControllerJs,
+        contains('refreshImgGenPlaceholderState()'),
+      );
+      expect(bridgeControllerJs, contains('setImageGenerating(value)'));
+      // A hidden clock must not hold the ticker's interval open.
+      expect(
+        imgGenTimerJs,
+        contains("block.classList.contains('imggen-queued')"),
+      );
+    });
+
     test('the loading placeholder is sealed off from message CSS', () {
       // A card ships its own <style>, and its rules — !important included —
       // land in the same shadow root as the placeholder. A boundary is the

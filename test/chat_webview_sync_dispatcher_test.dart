@@ -372,6 +372,13 @@ void main() {
         expect(bridge.lastMessageIds, ['a1']);
         expect(bridge.evalCalls.single, contains('setGenerating(false)'));
         expect(bridge.evalCalls.single, contains('setPostGenRunning(true)'));
+        // The image stage flag goes through a setter, not a bare assignment:
+        // it is what tells a pending block apart from a running one, and the
+        // WebView has to restamp its placeholders when it flips (INV-IG1).
+        expect(
+          bridge.evalCalls.single,
+          contains('setImageGenerating(false)'),
+        );
       },
     );
 
