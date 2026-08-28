@@ -148,7 +148,7 @@ void main() {
     expect(state.committedTrackers, isEmpty);
   });
 
-  test('committed snapshot supersedes the live game-time seed', () async {
+  test('complete live clock repairs a partial committed snapshot', () async {
     await trackers.seedInitialGameTime(
       sessionId: 'session',
       time: '14:12',
@@ -172,7 +172,12 @@ void main() {
 
     final state = await db.transaction(() => reader.read('session'));
 
-    expect(state.committedTrackers, hasLength(1));
-    expect(state.committedTrackers.single.value, '14:15');
+    expect(
+      {
+        for (final tracker in state.committedTrackers)
+          tracker.name: tracker.value,
+      },
+      {'world:time': '14:15', 'world:date': '26.08.2026', 'world:day': '0'},
+    );
   });
 }

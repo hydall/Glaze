@@ -797,6 +797,41 @@ void main() {
       hasLength(1),
     );
   });
+
+  test(
+    'synced invalidation still imports unaffected completed collectors',
+    () async {
+      final runs = await _appendChain(sourceDb, 4);
+      final firstCollector = await _completeCollector(
+        sourceDb,
+        runs.sublist(0, 2),
+      );
+      await _completeCollector(sourceDb, runs.sublist(2, 4));
+      final payload = (await sourceStore.getBySessionId('session'))!
+        ..['invalidations'] = [
+          {
+            'id': 0,
+            'sessionId': 'session',
+            'runId': runs.last.id,
+            'causeMessageId': 'assistant-3',
+            'reason': 'message_evidence_changed',
+            'createdAt': 30,
+          },
+        ];
+
+      await targetStore.mergeBySessionId('session', payload);
+
+      final collectors = await targetDb
+          .select(targetDb.cardEvolutionCollectorRuns)
+          .get();
+      expect(collectors, hasLength(1));
+      expect(
+        collectors.single.reconciliationRunId,
+        firstCollector.reconciliationRunId,
+      );
+      expect(collectors.single.ownerId, 'cloud-sync');
+    },
+  );
 }
 
 Future<void> _seedSession(AppDatabase db) => db.customStatement(

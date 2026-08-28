@@ -62,12 +62,27 @@ class TrackerRepo {
   /// session has no snapshot yet, so this narrowly scoped bootstrap is the
   /// only live model-owned state allowed into that initial committed base.
   Future<List<Tracker>> getInitialGameTimeSeed(String sessionId) async {
+    return _getCompleteGameTime(
+      sessionId,
+      (tracker) => tracker.provenance == 'game_time_seed',
+    );
+  }
+
+  /// Returns the complete live game clock, but never exposes a partial tuple.
+  Future<List<Tracker>> getCompleteGameTime(String sessionId) {
+    return _getCompleteGameTime(sessionId, (_) => true);
+  }
+
+  Future<List<Tracker>> _getCompleteGameTime(
+    String sessionId,
+    bool Function(Tracker tracker) include,
+  ) async {
     const names = {'world:time', 'world:date', 'world:day'};
     final trackers = await getBySessionAndScope(sessionId, 'ledger');
     final seed = trackers
         .where(
           (tracker) =>
-              tracker.provenance == 'game_time_seed' &&
+              include(tracker) &&
               names.contains(tracker.name) &&
               tracker.value.trim().isNotEmpty,
         )

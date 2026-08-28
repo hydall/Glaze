@@ -957,10 +957,16 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
         sessionId,
         collectors,
       );
-      if (importedComplete && !resetDerivedLane) {
-        final collectorsValid = await _mergeCollectors(sessionId, collectors);
+      if (importedComplete) {
+        final mergeableCollectors = resetDerivedLane
+            ? await _withoutInvalidatedCollectors(sessionId, collectors)
+            : collectors;
+        final collectorsValid = await _mergeCollectors(
+          sessionId,
+          mergeableCollectors,
+        );
         if (collectorsValid) {
-          if (!normalized.identitiesChanged) {
+          if (!resetDerivedLane && !normalized.identitiesChanged) {
             await _mergeObservations(sessionId, _maps(data['observations']));
             await _mergeCompletedClaims(
               sessionId,
@@ -1381,6 +1387,21 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
       _db.cardEvolutionObservations,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     return true;
+  }
+
+  Future<List<Map<String, dynamic>>> _withoutInvalidatedCollectors(
+    String sessionId,
+    List<Map<String, dynamic>> incoming,
+  ) async {
+    final invalidatedRunIds =
+        (await (_db.select(
+              _db.ledgerReconciliationRunInvalidations,
+            )..where((row) => row.sessionId.equals(sessionId))).get())
+            .map((row) => row.runId)
+            .toSet();
+    return incoming
+        .where((row) => !invalidatedRunIds.contains(row['reconciliationRunId']))
+        .toList(growable: false);
   }
 
   Future<bool> _mergeCollectors(
