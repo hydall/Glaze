@@ -192,6 +192,7 @@ void main() {
       expect(prompt, contains('delete npc:Name.location'));
       expect(prompt, contains('never use it as a backlog'));
       expect(prompt, contains('accepted assistant prose as evidence'));
+      expect(prompt, contains('3–10 minutes'));
     });
 
     test('rejects append histories and legacy knowledge tracker keys', () {
@@ -434,6 +435,7 @@ void main() {
         expect(prompt, contains('DB PROMPT'));
         expect(prompt, contains('npc:Unidentified Netrunner.location'));
         expect(prompt, contains('npc:Rebecca.location'));
+        expect(prompt, contains('advance time by 3–10 minutes'));
         final state = RegExp(
           r'<committed_state>([\s\S]*?)</committed_state>',
         ).firstMatch(prompt)!.group(1)!;

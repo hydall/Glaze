@@ -271,8 +271,9 @@ through the review range according to how much in-game time the narrated events
 take, crossing midnight into the next world:day (day 0 = first story day) and
 world:date. Keep the complete DD.MM.YYYY / RP day / HH:MM tuple and never guess
 a missing date or day. The clock only moves FORWARD — never rewind it; treat
-flashbacks and memories as prose, not clock changes. When the range continues a
-scene immediately, advance time by only a few minutes.''';
+flashbacks and memories as prose, not clock changes. For each ordinary continuous
+turn with no explicit duration, advance time by 3–10 minutes and accumulate those
+steps across the review range. Use explicitly narrated durations when available.''';
   }
 
   List<CharacterKnowledgeFact> relevantKnowledgeFacts(
