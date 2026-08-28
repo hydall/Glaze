@@ -3,6 +3,7 @@ import { formatMessageBody } from './macros_in_message.js';
 import { reportCssErrors } from './css_diagnostics.js';
 import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
+import { rewriteTargetSelectors } from './target_toggle.js';
 
 /** Cheap pre-sanitize probe for an embedded `<script>` in formatted HTML. */
 const SCRIPT_TAG = /<script\b/i;
@@ -60,6 +61,10 @@ export function writeShadowContent({
     root.innerHTML = sanitizeMessageHtml(formatted, {
       allowScripts: allowMessageScripts,
     });
+    // A fragment link cannot make an id inside a shadow root the document's
+    // target element, so the card's `:target` rules are re-keyed on the
+    // attribute the click dispatcher stamps instead.
+    rewriteTargetSelectors(root);
     // Before anything else touches the tree: the placeholder's content moves
     // behind a shadow boundary, out of reach of the message's own CSS.
     isolateImgGenPlaceholders(root);

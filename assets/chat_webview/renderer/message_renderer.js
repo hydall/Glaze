@@ -4,6 +4,7 @@ import { createImageAttachment, setImageAttachmentHidden } from './image_embed.j
 import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
 import { writeShadowContent } from './markdown.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
+import { rewriteTargetSelectors } from './target_toggle.js';
 import {
   defaultName,
   formatDate,
@@ -1094,6 +1095,10 @@ if (messageData.isEditing) classes.push('editing');
               allowScripts: this.allowMessageScripts,
             });
             root.querySelectorAll('script').forEach(script => script.remove());
+            // The rewrite dropped the re-keyed `:target` rules with the rest
+            // of the body; put them back so a search pass cannot leave a
+            // card's toggles dead (see renderer/target_toggle.js).
+            rewriteTargetSelectors(root);
             // The rewrite dropped the placeholders' shadow roots with the rest
             // of the body; re-isolate so a search pass cannot expose them to
             // the message stylesheet.

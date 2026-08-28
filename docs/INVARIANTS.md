@@ -1241,7 +1241,9 @@ the light DOM, and is never applied to a message.
 
 `renderer/css_diagnostics.js` is the one other pass that looks at message CSS,
 and it only reads: it appends a `CSS ERROR` report next to a broken `<style>`
-without changing a byte of it.
+without changing a byte of it. `renderer/target_toggle.js` is the single pass
+that *writes* message CSS — the `:target` re-key of INV-JS8 — and it runs
+identically in both modes, so it never makes the toggle visible either.
 
 So an HTML/CSS card renders the same before and after the user enables message
 scripts — `position: fixed`, `url()` backgrounds, `@font-face`, `<form>` and
@@ -1250,6 +1252,37 @@ the frame elements that host it) follows the toggle.
 `test/webview_assets_test.dart` pins both halves (`message HTML is filtered for
 code only, never for markup`, `a message may not run code while execution is
 off`).
+
+### INV-JS8: A fragment link inside a message toggles that message's own card ✅ ENFORCED
+
+Message bodies live in a per-message shadow root (`.message-content`), and a
+URL fragment is only ever resolved against the document tree. An id written by
+a message therefore never becomes the document's target element, so an
+ST-style card that opens a panel with `<a href="#panel">` plus
+`#panel:target { … }` renders a button that does nothing — and the WebView's
+navigation policy (`chatWebViewNavigationPolicy`) cancels the navigation
+anyway.
+
+Two halves close that gap, and both are required:
+
+* `renderer/target_toggle.js` re-keys `:target` in the message's own `<style>`
+  on `[data-glaze-target]`. It runs on **every** path that writes a message
+  body — `writeShadowContent` (`renderer/markdown.js`) and the search
+  re-render (`message_renderer.js`) — because either one replaces the tree.
+  A message without a `:target` rule keeps its stylesheet byte-identical.
+* `InteractionDispatch.handleClick` resolves the clicked link through
+  `composedPath()` (`e.target` is retargeted to the shadow host, so
+  `e.target.closest('a')` never sees a link the message wrote) and, for a
+  `#…` href, stamps that attribute on the matching element **inside the link's
+  own root** instead of navigating. Document semantics are kept: at most one
+  target per root, and an empty fragment (`href="#"`, what a card's close
+  button uses) clears it.
+
+Every other href still goes to Flutter as `onLinkClick` — which is also what
+finally makes an ordinary markdown link inside a message open.
+
+`test/webview_assets_test.dart` pins both halves in the group named
+"`:target` cards in message HTML".
 
 ---
 
@@ -1283,6 +1316,8 @@ Before merging any structural PR:
   - [ ] `glaze.playAudio` does not leak the audio session (INV-JS4)
   - [ ] `executeCommand` wired registry routes to the same services (INV-JS5)
   - [ ] Periodic scheduler pauses on app background; no catch-up tick (INV-JS6)
+  - [ ] A message's `:target` card still opens, closes and survives a search
+        re-render (INV-JS8)
 - [ ] Context limit exceeded shows an error to the user
 - [ ] API not configured shows an error to the user
 - [ ] Abort closes the TCP connection (not just UI state)

@@ -1,5 +1,7 @@
 ﻿/* Extracted from ../bridge.legacy.js. Keep public behavior stable. */
 
+import { TARGET_ATTRIBUTE } from '../renderer/target_toggle.js';
+
 export class InteractionDispatch {
   constructor(bridge) {
     this.bridge = bridge;
@@ -42,9 +44,18 @@ export class InteractionDispatch {
       return;
     }
 
-    const link = e.target.closest('a');
+    // composedPath() again: a link written by the message (a markdown link, or
+    // the anchor an ST-style card toggles its panels with) lives in the
+    // message shadow root, where e.target is retargeted to the host and
+    // e.target.closest('a') never sees it.
+    const link = this._closestLinkInPath(e);
     if (link) {
       e.preventDefault();
+      const href = link.getAttribute('href') || '';
+      if (href.startsWith('#')) {
+        this._toggleFragmentTarget(link, href.slice(1));
+        return;
+      }
       bridge._sendToFlutter('onLinkClick', [link.href]);
       return;
     }
@@ -125,6 +136,40 @@ export class InteractionDispatch {
     return e.target && e.target.closest
         ? e.target.closest('[data-action]')
         : null;
+  }
+
+  // Returns the first <a href> along the event's composed path (pierces Shadow
+  // DOM boundaries), or null.
+  _closestLinkInPath(e) {
+    const path = (e.composedPath && e.composedPath()) || [];
+    for (const node of path) {
+      if (node && node.nodeType === 1 && node.localName === 'a' &&
+          node.hasAttribute('href')) {
+        return node;
+      }
+    }
+    return e.target && e.target.closest ? e.target.closest('a[href]') : null;
+  }
+
+  // Stands in for fragment navigation inside the root the link lives in (a
+  // message shadow root, normally). The browser cannot do it there — a URL
+  // fragment only resolves against the document tree — so the element the link
+  // points at is marked instead, and the card's own `:target` rules, re-keyed
+  // on that attribute at render time (renderer/target_toggle.js), light up.
+  // Document semantics are kept: at most one target per root, and an empty
+  // fragment (the `href="#"` a card closes its panel with) clears it.
+  _toggleFragmentTarget(link, rawId) {
+    const root = link.getRootNode ? link.getRootNode() : document;
+    if (!root || !root.querySelectorAll) return;
+    for (const marked of root.querySelectorAll(`[${TARGET_ATTRIBUTE}]`)) {
+      marked.removeAttribute(TARGET_ATTRIBUTE);
+    }
+    let id = rawId;
+    try { id = decodeURIComponent(rawId); } catch (_) { /* keep it raw */ }
+    if (!id || id === 'top') return;
+    let target = null;
+    try { target = root.querySelector(`#${CSS.escape(id)}`); } catch (_) { target = null; }
+    if (target) target.setAttribute(TARGET_ATTRIBUTE, '');
   }
 
   // Returns the first element along the event's composed path (pierces

@@ -39,6 +39,8 @@ void main() {
   late String panelHostJs;
   late String htmlSanitizerJs;
   late String cssDiagnosticsJs;
+  late String targetToggleJs;
+  late String markdownJs;
   late String cssSanitizerJs;
   late String imgGenPlaceholderJs;
   late String imgGenTimerJs;
@@ -73,6 +75,8 @@ void main() {
     imgGenPlaceholderJs = _rendererAsset('imggen_placeholder.js');
     imgGenTimerJs = _bridgeAsset('imggen_timer.js');
     cssDiagnosticsJs = _rendererAsset('css_diagnostics.js');
+    targetToggleJs = _rendererAsset('target_toggle.js');
+    markdownJs = _rendererAsset('markdown.js');
     cssSanitizerJs = _bridgeAsset('css_sanitizer.js');
     selectionManagerJs = _bridgeAsset('selection_manager.js');
     swipeHandlerJs = _bridgeAsset('swipe_gesture_handler.js');
@@ -1880,6 +1884,70 @@ void main() {
 
     test('click listener delegates to InteractionDispatch.handleClick', () {
       expect(bridgeControllerJs, contains('this._interaction.handleClick(e)'));
+    });
+  });
+
+  // ─── Fragment links inside a message ───────────────────────────────────────
+  group('`:target` cards in message HTML', () {
+    test('target_toggle.js re-keys `:target` on an attribute', () {
+      expect(
+        targetToggleJs,
+        contains("export const TARGET_ATTRIBUTE = 'data-glaze-target'"),
+      );
+      expect(
+        targetToggleJs,
+        contains('export function rewriteTargetSelectors(root)'),
+      );
+      expect(
+        targetToggleJs,
+        contains(r'/:target(?![\w-])/g'),
+        reason:
+            '`:target` must be re-keyed as a whole selector token, so '
+            '`::target-text` keeps its own meaning',
+      );
+    });
+
+    test('both message-HTML insertion points re-key `:target`', () {
+      for (final source in [markdownJs, rendererMessageJs]) {
+        expect(
+          source,
+          contains("import { rewriteTargetSelectors } from './target_toggle.js';"),
+        );
+        expect(
+          source,
+          contains('rewriteTargetSelectors(root);'),
+          reason:
+              'A URL fragment never resolves inside a shadow root, so a card '
+              'that toggles a panel with `:target` needs the re-key on every '
+              'path that writes a message body',
+        );
+      }
+    });
+
+    test('links are resolved through composedPath, not e.target', () {
+      expect(interactionDispatchJs, contains('_closestLinkInPath(e)'));
+      expect(interactionDispatchJs, contains("node.localName === 'a'"));
+      expect(
+        interactionDispatchJs,
+        isNot(contains("const link = e.target.closest('a');")),
+        reason:
+            'e.target is retargeted to the shadow host, so a link written by '
+            'the message is invisible to e.target.closest()',
+      );
+    });
+
+    test('a fragment link toggles in its own root; other links reach Flutter',
+        () {
+      expect(interactionDispatchJs, contains("href.startsWith('#')"));
+      expect(
+        interactionDispatchJs,
+        contains('_toggleFragmentTarget(link, href.slice(1))'),
+      );
+      expect(interactionDispatchJs, contains('link.getRootNode()'));
+      expect(
+        interactionDispatchJs,
+        contains("_sendToFlutter('onLinkClick', [link.href])"),
+      );
     });
   });
 
