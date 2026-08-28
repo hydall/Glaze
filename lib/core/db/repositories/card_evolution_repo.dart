@@ -678,19 +678,29 @@ class CardEvolutionRepo {
       return const CardEvolutionFinalizeOutcome('activeJob');
     }
     final cardOperations = operations.whereType<CardRewriteOperationSnapshot>();
-    final lorebookOperations = operations
+    final rawLorebookOperations = operations
         .whereType<LorebookRewriteOperationSnapshot>()
         .toList(growable: false);
     final allowedLoreTargets = _loreTargetsFromInput(selected);
-    if (allowedLoreTargets == null ||
-        lorebookOperations.any((operation) {
-          final target =
-              allowedLoreTargets['${operation.lorebookId}\u0000${operation.entryId}'];
-          return target == null ||
-              target.$1 != operation.baseContent ||
-              target.$2 != operation.expectedContentHash;
-        })) {
+    if (allowedLoreTargets == null) {
       return const CardEvolutionFinalizeOutcome('invalidLorebookOperation');
+    }
+    final lorebookOperations = <LorebookRewriteOperationSnapshot>[];
+    for (final operation in rawLorebookOperations) {
+      final target =
+          allowedLoreTargets['${operation.lorebookId}\u0000${operation.entryId}'];
+      if (target == null) {
+        return const CardEvolutionFinalizeOutcome('invalidLorebookOperation');
+      }
+      lorebookOperations.add(
+        LorebookRewriteOperationSnapshot(
+          lorebookId: operation.lorebookId,
+          entryId: operation.entryId,
+          baseContent: target.$1,
+          expectedContentHash: target.$2,
+          patches: operation.patches,
+        ),
+      );
     }
     final loreOnlyObservationKeys = _loreOnlyObservationKeys(selected);
     if (cardOperations.any(
@@ -749,8 +759,12 @@ class CardEvolutionRepo {
       return const CardEvolutionFinalizeOutcome('manualControl');
     }
 
+    final normalizedOperations = <RewriteOperationSnapshot>[
+      ...cardOperations,
+      ...lorebookOperations,
+    ];
     final snapshots = [
-      for (final operation in operations)
+      for (final operation in normalizedOperations)
         RewriteOperationSnapshotCodec.encode(operation),
     ];
     final jobId = 'rewrite-job-${generateId()}';
@@ -1819,8 +1833,8 @@ Map<String, (String, String)>? _loreTargetsFromInput(String selectedInputJson) {
     if (entries is! List) return null;
     final result = <String, (String, String)>{};
     for (final raw in entries) {
-      // Entries without session evolution carry no separate base; their
-      // current content is the CAS base the model must echo.
+      // Existing overlays retain their original base for rollback provenance;
+      // entries without an overlay use current content as that initial base.
       final base = raw is Map ? raw['baseContent'] ?? raw['content'] : null;
       if (raw is! Map ||
           raw['lorebookId'] is! String ||

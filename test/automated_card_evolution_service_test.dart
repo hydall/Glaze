@@ -534,7 +534,9 @@ void main() {
                   {
                     'lorebookId': 'book-a1',
                     'entryId': 'entry-a1-0',
-                    'baseContent': 'entry one',
+                    // Service-owned target metadata is normalized from the
+                    // immutable snapshot rather than trusted from model echo.
+                    'baseContent': 'entry one evolved',
                     'expectedContentHash': CardCanonicalizer.scalarSha256(
                       'entry one evolved',
                     ),
@@ -559,6 +561,15 @@ void main() {
     expect(result.kind, 'persisted', reason: result.detail);
     expect(lorebookPrompt, contains('"baseContent":"entry one"'));
     expect(lorebookPrompt, contains('"content":"entry one evolved"'));
+    final loreOperation =
+        (await fixture.db.select(fixture.db.rewriteOperations).get())
+            .map((row) => jsonDecode(row.operationJson))
+            .singleWhere((operation) => operation['target'] == 'lorebook');
+    expect(loreOperation['baseContent'], 'entry one');
+    expect(
+      loreOperation['expectedContentHash'],
+      CardCanonicalizer.scalarSha256('entry one evolved'),
+    );
   });
 
   test('oversized shared context reports the context gate limit', () async {

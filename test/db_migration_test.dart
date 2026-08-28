@@ -2316,10 +2316,8 @@ void main() {
             'SELECT id,retrieval_keys_json,target_kind FROM card_evolution_observations ORDER BY id',
           )
           .get();
-      expect(rows.first.read<String>('retrieval_keys_json'), '["book:entry"]');
-      expect(rows.first.read<String>('target_kind'), 'injected_lorebook_entry');
-      expect(rows.last.read<String>('retrieval_keys_json'), '[]');
-      expect(rows.last.readNullable<String>('target_kind'), isNull);
+      // v132 intentionally resets cadence-specific Collector observations.
+      expect(rows, isEmpty);
     });
 
     test(
@@ -3185,9 +3183,9 @@ INSERT INTO card_evolution_collector_runs VALUES
         final columns = await upgraded
             .customSelect("PRAGMA table_info('card_evolution_collector_runs')")
             .get();
-        final row = await upgraded
+        final rows = await upgraded
             .select(upgraded.cardEvolutionCollectorRuns)
-            .getSingle();
+            .get();
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .getSingle();
@@ -3201,9 +3199,8 @@ INSERT INTO card_evolution_collector_runs VALUES
             'failed_at',
           ]),
         );
-        expect(row.id, 'collector');
-        expect(row.status, 'claimed');
-        expect(row.failureCode, isNull);
+        // v132 intentionally resets pair-based Collector journals.
+        expect(rows, isEmpty);
         expect(version.read<int>('user_version'), 132);
       },
     );
@@ -3272,9 +3269,7 @@ INSERT INTO card_evolution_claims VALUES
       final writerIndexes = await upgraded
           .customSelect("PRAGMA index_list('card_evolution_writer_calls')")
           .get();
-      final claim = await upgraded
-          .select(upgraded.cardEvolutionClaims)
-          .getSingle();
+      final claims = await upgraded.select(upgraded.cardEvolutionClaims).get();
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
@@ -3289,9 +3284,8 @@ INSERT INTO card_evolution_claims VALUES
           'failed_at',
         ]),
       );
-      expect(claim.id, 'claim');
-      expect(claim.selectedInputJson, isNull);
-      expect(claim.writerOptionsJson, '{}');
+      // v132 removes unfinished claims from the old Collector cadence.
+      expect(claims, isEmpty);
       expect(
         writerIndexes.map((row) => row.read<String>('name')),
         contains('idx_card_evolution_writer_call_session_updated'),
@@ -3611,19 +3605,8 @@ INSERT INTO card_evolution_claims VALUES
             'FROM card_evolution_observations ORDER BY id',
           )
           .get();
-      final gilda = rows.singleWhere(
-        (row) => row.read<String>('id') == 'gilda',
-      );
-      expect(gilda.read<String>('evidence_message_ids'), '["m1","m2"]');
-      expect(gilda.read<String>('evidence_clusters_json'), '[["m1","m2"]]');
-      expect(gilda.read<int>('repeat_count'), 1);
-      expect(gilda.read<String>('status'), 'active');
-      expect(gilda.read<String>('retrieval_keys_json'), '[]');
-      expect(gilda.readNullable<String>('target_kind'), isNull);
-      final bad = rows.singleWhere((row) => row.read<String>('id') == 'bad');
-      expect(bad.read<String>('evidence_message_ids'), '[]');
-      expect(bad.read<String>('evidence_clusters_json'), '[]');
-      expect(bad.read<int>('repeat_count'), 1);
+      // v132 intentionally resets cadence-specific Collector observations.
+      expect(rows, isEmpty);
     });
 
     test('v114 allows a later revision to reuse an earlier hash', () async {
