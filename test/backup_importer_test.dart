@@ -1383,5 +1383,50 @@ void main() {
         } catch (_) {}
       }
     });
+
+    test('writes every lorebook when the selection spans several write '
+        'chunks', () async {
+      // Entries are written in chunks of 20, so a run that does not end on a
+      // chunk boundary only lands completely if the tail is flushed.
+      const bookCount = 25;
+      final archive = Archive();
+      for (var i = 0; i < bookCount; i++) {
+        archive.addFile(
+          ArchiveFile.bytes(
+            'worlds/book_$i.json',
+            utf8.encode(
+              jsonEncode({
+                'entries': {
+                  '0': {
+                    'uid': 0,
+                    'key': ['key_$i'],
+                    'content': 'content_$i',
+                  },
+                },
+              }),
+            ),
+          ),
+        );
+      }
+
+      final fixturePath =
+          '${Directory.systemTemp.path}/st_books_${DateTime.now().microsecondsSinceEpoch}.zip';
+      File(fixturePath).writeAsBytesSync(ZipEncoder().encode(archive));
+
+      try {
+        final result = await StBackupImporter(
+          db,
+          imageStorage,
+        ).importFromFile(fixturePath);
+
+        expect(result.errors, isEmpty);
+        expect(result.lorebooks, bookCount);
+        expect((await db.select(db.lorebooks).get()).length, bookCount);
+      } finally {
+        try {
+          File(fixturePath).deleteSync();
+        } catch (_) {}
+      }
+    });
   });
 }

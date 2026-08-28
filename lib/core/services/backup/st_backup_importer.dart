@@ -12,7 +12,9 @@ import '../../db/repositories/persona_repo.dart';
 import '../../db/repositories/preset_repo.dart';
 import '../../import/silly_tavern_preset_parser.dart';
 import '../../import/st_lorebook_importer.dart';
+import '../../models/character.dart';
 import '../../models/chat_message.dart';
+import '../../models/lorebook.dart';
 import '../../models/persona.dart';
 import '../../utils/id_generator.dart';
 import '../../utils/time_helpers.dart';
@@ -33,6 +35,13 @@ class StImportResult {
 }
 
 class StBackupImporter {
+  /// Rows written per transaction while importing a backup.
+  ///
+  /// A per-row `put` wakes every reactive query watching that table — the
+  /// character library subscribes at app start — so a backup with hundreds of
+  /// cards re-read and re-decoded the whole table once per card.
+  static const int _writeChunkSize = 20;
+
   final AppDatabase _db;
   final ImageStorageService _imageStorage;
   final ImportCancellationToken _cancel;
@@ -141,6 +150,20 @@ class StBackupImporter {
             !f.name.substring('characters/'.length).contains('/'))
         .toList();
 
+    final pendingChars = <Character>[];
+    final pendingBooks = <Lorebook>[];
+
+    Future<void> flush() async {
+      if (pendingChars.isNotEmpty) {
+        await _charRepo.putAll(pendingChars);
+        pendingChars.clear();
+      }
+      if (pendingBooks.isNotEmpty) {
+        await _lorebookRepo.putAll(pendingBooks);
+        pendingBooks.clear();
+      }
+    }
+
     for (final f in paths) {
       _cancel.check();
       try {
@@ -148,20 +171,32 @@ class StBackupImporter {
         if (bytes == null) continue;
         final fileName = f.name.split('/').last;
         final imported = await _charImporter.importFromBytes(bytes, fileName);
-        await _charRepo.put(imported.character);
+        pendingChars.add(imported.character);
 
         if (imported.characterBookData != null) {
-          final lb = convertCharacterBook(
-              imported.characterBookData!, imported.character.id);
-          await _lorebookRepo.put(lb);
+          pendingBooks.add(convertCharacterBook(
+              imported.characterBookData!, imported.character.id));
         }
 
         final baseName = fileName.replaceAll(RegExp(r'\.png$', caseSensitive: false), '');
         charNameToId[baseName] = imported.character.id;
         result.characters++;
+        if (pendingChars.length >= _writeChunkSize) await flush();
       } catch (e) {
         result.errors.add('Character ${f.name}: $e');
+      } finally {
+        // Release the decompressed entry: ArchiveFile caches what it
+        // decompressed, so without this every card read stays in memory until
+        // the whole import is over.
+        f.clear();
       }
+    }
+
+    try {
+      await flush();
+    } catch (e) {
+      result.characters -= pendingChars.length;
+      result.errors.add('Character batch: $e');
     }
   }
 
@@ -171,6 +206,8 @@ class StBackupImporter {
         f.name.startsWith('worlds/') &&
         f.name.toLowerCase().endsWith('.json'));
 
+    final pending = <Lorebook>[];
+
     for (final f in paths) {
       _cancel.check();
       try {
@@ -178,11 +215,24 @@ class StBackupImporter {
         final json = jsonDecode(text) as Map<String, dynamic>;
         final fileName = f.name.split('/').last;
         final r = importSTLorebook(json, nameOverride: fileName);
-        await _lorebookRepo.put(r.lorebook);
+        pending.add(r.lorebook);
         result.lorebooks++;
+        if (pending.length >= _writeChunkSize) {
+          await _lorebookRepo.putAll(pending);
+          pending.clear();
+        }
       } catch (e) {
         result.errors.add('Lorebook ${f.name}: $e');
+      } finally {
+        f.clear();
       }
+    }
+
+    try {
+      await _lorebookRepo.putAll(pending);
+    } catch (e) {
+      result.lorebooks -= pending.length;
+      result.errors.add('Lorebook batch: $e');
     }
   }
 
@@ -206,6 +256,8 @@ class StBackupImporter {
         result.presets++;
       } catch (e) {
         result.errors.add('Preset ${f.name}: $e');
+      } finally {
+        f.clear();
       }
     }
   }
@@ -258,6 +310,10 @@ class StBackupImporter {
         result.chats++;
       } catch (e) {
         result.errors.add('Chat ${f.name}: $e');
+      } finally {
+        // Chat entries are the biggest ones in a tavern backup; the cached
+        // decompressed copy has to go before the next file is read.
+        f.clear();
       }
     }
 
@@ -313,6 +369,8 @@ class StBackupImporter {
     } catch (e) {
       result.errors.add('Personas (settings.json): $e');
       return;
+    } finally {
+      settingsFile.clear();
     }
 
     final pu = settings['power_user'] is Map<String, dynamic>
@@ -348,6 +406,7 @@ class StBackupImporter {
           final n = f.name.toLowerCase();
           if (n.contains('user avatars') && n.endsWith(avatarLower)) {
             final avatarBytes = f.readBytes();
+            f.clear();
             if (avatarBytes == null) break;
             avatarPath = await _imageStorage.saveAvatar(id, avatarBytes);
             break;

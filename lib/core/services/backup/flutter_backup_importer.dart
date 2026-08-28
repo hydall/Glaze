@@ -79,6 +79,7 @@ class FlutterBackupImporter extends BackupHelpers {
     final manifestJson =
         jsonDecode(utf8.decode(manifestEntry.readBytes()!))
             as Map<String, dynamic>;
+    manifestEntry.clear();
     final schemaVersion = manifestJson['schemaVersion'] as int? ?? 0;
     // Minimum supported schemaVersion is 2 (initial ZIP format).
     // v3 added extension_presets and info_blocks — older backups simply won't
@@ -249,7 +250,9 @@ class FlutterBackupImporter extends BackupHelpers {
         .toList();
     if (matches.isEmpty) return;
 
-    final bytes = matches.first.readBytes();
+    final preferencesEntry = matches.first;
+    final bytes = preferencesEntry.readBytes();
+    preferencesEntry.clear();
     if (bytes == null || bytes.isEmpty) return;
 
     Map<String, dynamic> map;
@@ -301,6 +304,10 @@ class FlutterBackupImporter extends BackupHelpers {
         .split('\n')
         .where((l) => l.trim().isNotEmpty)
         .toList();
+    // ArchiveFile caches what it decompressed; the lines are decoded now, so
+    // the cached copy of a table that can run to hundreds of megabytes is pure
+    // ballast for the rest of the import.
+    file.clear();
     if (tableName == 'lorebook_use_acceptance_records') {
       int rank(String line) {
         try {
@@ -626,6 +633,7 @@ class FlutterBackupImporter extends BackupHelpers {
       if (base.isEmpty) continue;
       try {
         final bytes = f.readBytes();
+        f.clear();
         if (bytes == null) continue;
         final savedPath = await imageStorage.saveAvatar(base, bytes);
         if (f.name.startsWith('avatars/characters/') || !f.name.contains('/')) {
@@ -657,6 +665,7 @@ class FlutterBackupImporter extends BackupHelpers {
       final id = p.basenameWithoutExtension(filename);
       try {
         final bytes = f.readBytes();
+        f.clear();
         if (bytes == null) continue;
         final savedPath = await imageStorage.saveBytes(
           bytes,
