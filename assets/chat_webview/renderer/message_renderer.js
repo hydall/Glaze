@@ -1,6 +1,7 @@
 import { reportCssErrors } from './css_diagnostics.js';
 import { ICON } from './icon_library.js';
 import { createImageAttachment, setImageAttachmentHidden } from './image_embed.js';
+import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
 import { writeShadowContent } from './markdown.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
 import {
@@ -1090,6 +1091,10 @@ if (messageData.isEditing) classes.push('editing');
               allowScripts: this.allowMessageScripts,
             });
             root.querySelectorAll('script').forEach(script => script.remove());
+            // The rewrite dropped the placeholders' shadow roots with the rest
+            // of the body; re-isolate so a search pass cannot expose them to
+            // the message stylesheet.
+            isolateImgGenPlaceholders(root);
             // The rewrite dropped the CSS report with the rest of the body;
             // put it back so searching does not hide a broken stylesheet.
             if (!window.bridge?.isGenerating) reportCssErrors(root);

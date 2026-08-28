@@ -38,15 +38,29 @@ export class ImgGenTimer {
     hosts.forEach((host) => {
       const root = host.shadowRoot;
       if (!root) return;
-      const timers = root.querySelectorAll('.imggen-loading-timer[data-start]');
-      timers.forEach((el) => {
-        found++;
-        const start = parseInt(el.dataset.start, 10);
-        if (!start) return;
-        el.textContent = ((now - start) / 1000).toFixed(1) + 's';
-      });
+      found += this._updateIn(root, now);
     });
     if (found === 0) this.stop();
+    return found;
+  }
+
+  // Updates every timer in one shadow tree, then in the placeholders' own.
+  //
+  // A loading block carries its content in a nested shadow root of its own
+  // (renderer/imggen_placeholder.js), so the timer is one boundary deeper than
+  // the message body it belongs to and a flat query over the message root
+  // never sees it.
+  _updateIn(root, now) {
+    let found = 0;
+    root.querySelectorAll('.imggen-loading-timer[data-start]').forEach((el) => {
+      found++;
+      const start = parseInt(el.dataset.start, 10);
+      if (!start) return;
+      el.textContent = ((now - start) / 1000).toFixed(1) + 's';
+    });
+    root.querySelectorAll('.imggen-loading').forEach((block) => {
+      if (block.shadowRoot) found += this._updateIn(block.shadowRoot, now);
+    });
     return found;
   }
 }

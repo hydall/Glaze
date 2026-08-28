@@ -5,6 +5,11 @@ import { renderStyledSegment } from './text_format.js';
 const OPTIONS_SVG = '<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>';
 const VARIANT_PREV_SVG = '<svg viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>';
 const VARIANT_NEXT_SVG = '<svg viewBox="0 0 24 24"><path d="M8.6 7.4 10 6l6 6-6 6-1.4-1.4 4.6-4.6z"/></svg>';
+// Stop icon for the loading placeholder. An SVG rather than the ⏹ character:
+// the glyph is a font-dependent emoji that renders at a different size (and in
+// colour) on every platform, while a path is the same square everywhere and
+// takes `fill: currentColor` from the button.
+const STOP_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>';
 
 /** Separator between the images one block carries, mirroring the Dart codec. */
 const IMG_VARIANT_SEPARATOR = ';;';
@@ -37,12 +42,36 @@ export function parseImageResultPayload(payload) {
   return { paths, activeIndex, instruction };
 }
 
+/** Introduces the images a pending block carries, mirroring the Dart codec. */
+const IMG_PENDING_MARKER = '@';
+
+/**
+ * Splits an `[IMG:GEN:…]` payload into the images the block already holds and
+ * its instruction — the JS half of ImageBlockPayload.parsePending. Without the
+ * `@` marker the whole payload is the instruction, which is how every block
+ * written before regeneration carried its images is spelled.
+ */
+export function parseImagePendingPayload(payload) {
+  const raw = String(payload == null ? '' : payload);
+  if (!raw.startsWith(IMG_PENDING_MARKER)) {
+    return { paths: [], activeIndex: 0, instruction: raw };
+  }
+  return parseImageResultPayload(raw.substring(IMG_PENDING_MARKER.length));
+}
+
 /**
  * Matches one `<img …data-iig-instruction…>` element, the stored form of an
  * image block. Whether it is finished or still waiting is decided by its
  * `src` (see `parseImageResultElement`), not by the pattern.
  */
 const IIG_ELEMENT_REGEX = /<img\s[^>]*?data-iig-instruction\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/gi;
+
+/**
+ * Matches an `<img …src="[IMG:GEN…]">` element that carries no instruction
+ * attribute — the spelling a model writes by hand, where the payload lives in
+ * the `src`. Mirrors ImgGenPatterns.imgSrcGenRegex on the Dart side.
+ */
+const IMG_SRC_GEN_ELEMENT_REGEX = /<img\b[^>]*?\bsrc\s*=\s*["']\[IMG:GEN[^\]]*\]["'][^>]*>/gi;
 
 /** A paragraph holding only tag placeholders and whitespace (see step 11). */
 const ONLY_TAG_PLACEHOLDERS = /^(?:\x01T_(?:BLOCK_)?\d+\x01|\s)+$/;
@@ -105,6 +134,30 @@ export function parseImageResultElement(tag) {
   if (!(activeIndex >= 0)) activeIndex = 0;
   if (activeIndex > paths.length - 1) activeIndex = paths.length - 1;
   return { paths, activeIndex, instruction };
+}
+
+/**
+ * Reads the pending form of a stored image block: the same `<img data-iig-…>`
+ * element, but with no picture in its `src` yet (see `parseImageResultElement`,
+ * which is what decides between the two). Returns null for a finished block.
+ *
+ * Pulling this element out of the markup — instead of leaving it to render as
+ * an ordinary `<img>` — is what keeps a browser's broken-image icon off the
+ * screen while the picture is still being generated: the tag has no image to
+ * load, so the only thing it can paint is the failure glyph.
+ */
+export function parseImagePendingElement(tag) {
+  const attributes = imgAttributes(tag);
+  const src = unescapeAttribute(attributes.src || '').trim();
+  if (src && !src.startsWith('[IMG:GEN')) return null;
+  // The instruction attribute is the authoritative payload; a bare
+  // `<img src="[IMG:GEN:…]">` carries it inside the src instead.
+  let instruction = unescapeAttribute(attributes['data-iig-instruction'] || '');
+  if (!instruction && src) {
+    const inSrc = src.match(/^\[IMG:GEN(?::([\s\S]*))?\]$/);
+    if (inSrc) instruction = inSrc[1] || '';
+  }
+  return { instruction };
 }
 
 export class Formatter {
@@ -277,7 +330,17 @@ export class Formatter {
     const imgBlocks = [];
     html = html.replace(IIG_ELEMENT_REGEX, (match) => {
       const parsed = parseImageResultElement(match);
-      if (!parsed) return match;
+      if (!parsed) {
+        // Still waiting for its picture: render the loading placeholder in the
+        // element's place. Leaving the tag alone would put an <img> with no
+        // loadable source into the message, and the reader would watch a
+        // broken-image icon for the whole generation.
+        const pending = parseImagePendingElement(match);
+        if (!pending) return match;
+        const id = this._ph('IG_', imgBlocks.length, true);
+        imgBlocks.push({ type: 'gen', instruction: pending.instruction });
+        return '\n\n' + id + '\n\n';
+      }
       const id = this._ph('IG_', imgBlocks.length, true);
       imgBlocks.push({
         type: 'result',
@@ -286,6 +349,17 @@ export class Formatter {
         activeIndex: parsed.activeIndex,
         instruction: parsed.instruction,
       });
+      return '\n\n' + id + '\n\n';
+    });
+    // `<img src="[IMG:GEN…]">` with no instruction attribute: the whole element
+    // is the block, so it has to go before the bare-tag pass below — otherwise
+    // only the src payload is consumed and the empty <img> stays behind as a
+    // broken-image icon.
+    html = html.replace(IMG_SRC_GEN_ELEMENT_REGEX, (match) => {
+      const pending = parseImagePendingElement(match);
+      if (!pending) return match;
+      const id = this._ph('IG_', imgBlocks.length, true);
+      imgBlocks.push({ type: 'gen', instruction: pending.instruction });
       return '\n\n' + id + '\n\n';
     });
     html = html.replace(/\[IMG:GEN(?::(.*?))?\]/g, (match, instruction) => {
@@ -653,9 +727,16 @@ export class Formatter {
       }
       if (block.type === 'gen') {
         const start = Date.now();
-        const prompt = this._escapeHtml(this._imgPrompt(block.instruction));
+        // A pending block that carried images through a regeneration spells its
+        // payload `@paths|instruction`; reading it here keeps the prompt line
+        // showing the prompt instead of the path list in front of it.
+        const pending = parseImagePendingPayload(block.instruction);
+        const prompt = this._escapeHtml(this._imgPrompt(pending.instruction));
         const promptEl = prompt ? `<div class="imggen-loading-prompt">${prompt}</div>` : '';
-        return `<div class="imggen-loading" data-start="${start}" data-img-index="${at}"><span class="imggen-loading-hint">Generating image…</span><span class="imggen-loading-timer" data-start="${start}">0.0s</span><button class="imggen-stop-btn" type="button" data-action="img-stop" title="Stop image generation">⏹</button>${promptEl}</div>`;
+        // The children are moved into a shadow root of the placeholder's own by
+        // `isolateImgGenPlaceholders` right after insertion, which is what keeps
+        // message CSS from restyling them (see renderer/imggen_placeholder.js).
+        return `<div class="imggen-loading" data-start="${start}" data-img-index="${at}"><span class="imggen-loading-hint">Generating image…</span><span class="imggen-loading-timer" data-start="${start}">0.0s</span><button class="imggen-stop-btn" type="button" data-action="img-stop" title="Stop image generation" aria-label="Stop image generation">${STOP_SVG}</button>${promptEl}</div>`;
       }
       if (block.type === 'error') {
         let errorMsg = 'Unknown error';

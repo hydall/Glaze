@@ -161,7 +161,28 @@ A finished block is written by `ImageTagMarkup.encodeResultElement()` only:
   `scanPendingTags()` and `scanResultElements()` from ever claiming the same
   element (`ImgGenPatterns.isPendingIigElement`).
 * the WebView formatter parses the element with `parseImageResultElement()`,
-  the mirror of the Dart writer.
+  the mirror of the Dart writer, and a pending one with
+  `parseImagePendingElement()`. Both spellings of a pending element
+  (`<img data-iig-instruction… src="[IMG:GEN]">` and the bare
+  `<img src="[IMG:GEN:…]">`) are consumed **whole** and rendered as the loading
+  placeholder. Leaving the tag in the markup would put an `<img>` with no
+  loadable source into the message, and the reader would watch the browser's
+  broken-image icon for the length of the generation.
+
+### INV-IG10: The loading placeholder is sealed off from message CSS
+
+A message body is authored content — cards ship their own `<style>`, and those
+rules land in the same shadow root as everything the formatter renders. The
+`[IMG:GEN…]` placeholder is app chrome, so
+`renderer/imggen_placeholder.js` gives each `.imggen-loading` a shadow root of
+its own and moves its content inside, out of reach of message rules that a
+specificity war could never win (a card's `!important` beats any selector in
+`SHADOW_STYLE`). Two leaks are closed by hand: the host still lives in the
+message tree, so its geometry is pinned as inline `!important`; and inherited
+properties cross a shadow boundary, so the wrapper inside starts from
+`all: initial`. The nested root is **open** — `InteractionDispatch` finds the
+stop button through `composedPath()` and `ImgGenTimer` descends into it for the
+elapsed-time ticker, both of which a closed root would break.
 
 ### INV-IG7: Regenerating an image never adds a message swipe
 
