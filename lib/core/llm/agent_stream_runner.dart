@@ -230,9 +230,13 @@ class AgentStreamRunner {
     String? charName,
     String? userName,
   }) {
+    final hasInlineReasoningTags =
+        resolved.reasoningTagStart?.isNotEmpty == true &&
+        resolved.reasoningTagEnd?.isNotEmpty == true;
     final requestMessages =
         isFinalResponse &&
-            (!resolved.requestReasoning || resolved.omitReasoning)
+            (!resolved.requestReasoning || resolved.omitReasoning) &&
+            !hasInlineReasoningTags
         ? ReasoningStripper.stripMessageReasoning(messages)
         : messages;
     final spec = StudioControllerOntology.specForAgent(agent);

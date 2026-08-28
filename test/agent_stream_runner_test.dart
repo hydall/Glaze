@@ -126,6 +126,54 @@ void main() {
     },
   );
 
+  test('final request preserves configured inline reasoning tags', () {
+    const messages = [
+      {
+        'role': 'system',
+        'content': 'Use <think>reasoning</think> before the response.',
+      },
+    ];
+
+    final request = AgentStreamRunner.buildRequest(
+      agent: _agent,
+      messages: messages,
+      resolved: const ResolvedAgentConfig(
+        endpoint: 'https://example.com',
+        apiKey: 'key',
+        model: 'model',
+        protocol: 'custom_chat_completion',
+        requestReasoning: false,
+        omitReasoning: true,
+        reasoningTagStart: '<think>',
+        reasoningTagEnd: '</think>',
+      ),
+      sessionId: 'session',
+      isFinalResponse: true,
+    );
+
+    expect(request.messages, messages);
+    expect(request.messages.single['content'], contains('<think>'));
+    expect(request.messages.single['content'], isNot(contains('hidden reasoning')));
+  });
+
+  test('final request still neutralizes think tags without a configured pair', () {
+    final request = AgentStreamRunner.buildRequest(
+      agent: _agent,
+      messages: const [
+        {
+          'role': 'system',
+          'content': 'Use <think>reasoning</think> before the response.',
+        },
+      ],
+      resolved: _resolved,
+      sessionId: 'session',
+      isFinalResponse: true,
+    );
+
+    expect(request.messages.single['content'], contains('hidden reasoning'));
+    expect(request.messages.single['content'], isNot(contains('<think>')));
+  });
+
   test('timeout cancels the in-flight transport request', () async {
     final transport = _FakeTransport(waitForCancellation: true);
     final runner = AgentStreamRunner((_) => transport);
