@@ -79,13 +79,13 @@ class CardEvolutionCollectorRunRepo {
       if (existing.status == 'failed') {
         return CardEvolutionCollectorClaimOutcome('failed', existing);
       }
-      if (existing.inputHash != inputHash) {
-        return const CardEvolutionCollectorClaimOutcome('staleInput');
-      }
       if (existing.status == 'claimed' &&
           existing.leaseExpiresAt > now &&
           existing.ownerId != ownerId) {
         return const CardEvolutionCollectorClaimOutcome('busy');
+      }
+      if (existing.inputHash != inputHash && existing.leaseExpiresAt > now) {
+        return const CardEvolutionCollectorClaimOutcome('staleInput');
       }
       final changed =
           await (db.update(db.cardEvolutionCollectorRuns)..where(
@@ -97,6 +97,7 @@ class CardEvolutionCollectorRunRepo {
                   ownerId: Value(ownerId),
                   leaseExpiresAt: Value(now + leaseSeconds),
                   status: const Value('claimed'),
+                  inputHash: Value(inputHash),
                   failureCode: const Value(null),
                   failureDetail: const Value(null),
                   failedAt: const Value(null),

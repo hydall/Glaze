@@ -89,6 +89,54 @@ void main() {
     );
     expect((await repo.getById(claim.row!.id))?.status, 'claimed');
   });
+
+  test('expired claim can be reclaimed with refreshed input', () async {
+    final first = await repo.claim(
+      reconciliationRun: _run(),
+      characterId: 'character',
+      inputHash: 'old-input',
+      ownerId: 'owner-1',
+      now: 10,
+      leaseSeconds: 60,
+    );
+
+    final reclaimed = await repo.claim(
+      reconciliationRun: _run(),
+      characterId: 'character',
+      inputHash: 'new-input',
+      ownerId: 'owner-2',
+      now: 71,
+      leaseSeconds: 60,
+    );
+
+    expect(reclaimed.kind, 'existing');
+    expect(reclaimed.row?.id, first.row?.id);
+    expect(reclaimed.row?.ownerId, 'owner-2');
+    expect(reclaimed.row?.inputHash, 'new-input');
+    expect(reclaimed.row?.leaseExpiresAt, 131);
+  });
+
+  test('live claim rejects refreshed input', () async {
+    await repo.claim(
+      reconciliationRun: _run(),
+      characterId: 'character',
+      inputHash: 'old-input',
+      ownerId: 'owner-1',
+      now: 10,
+      leaseSeconds: 60,
+    );
+
+    final outcome = await repo.claim(
+      reconciliationRun: _run(),
+      characterId: 'character',
+      inputHash: 'new-input',
+      ownerId: 'owner-1',
+      now: 20,
+      leaseSeconds: 60,
+    );
+
+    expect(outcome.kind, 'staleInput');
+  });
 }
 
 LedgerReconciliationSuccessfulRunRow _run() {
