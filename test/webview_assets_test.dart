@@ -41,6 +41,7 @@ void main() {
   late String cssDiagnosticsJs;
   late String targetToggleJs;
   late String markdownJs;
+  late String shadowDocumentShimJs;
   late String cssSanitizerJs;
   late String imgGenPlaceholderJs;
   late String imgGenTimerJs;
@@ -77,6 +78,7 @@ void main() {
     cssDiagnosticsJs = _rendererAsset('css_diagnostics.js');
     targetToggleJs = _rendererAsset('target_toggle.js');
     markdownJs = _rendererAsset('markdown.js');
+    shadowDocumentShimJs = _rendererAsset('shadow_document_shim.js');
     cssSanitizerJs = _bridgeAsset('css_sanitizer.js');
     selectionManagerJs = _bridgeAsset('selection_manager.js');
     swipeHandlerJs = _bridgeAsset('swipe_gesture_handler.js');
@@ -246,8 +248,99 @@ void main() {
       expect(body, contains('script.remove()'));
       expect(
         body.indexOf('script.remove()'),
-        lessThan(body.indexOf('new Function(src)()')),
+        lessThan(body.indexOf('document.head.appendChild(runner)')),
       );
+      // The shim is only installed for a message that actually runs JS.
+      expect(
+        body.indexOf('if (!allowMessageScripts)'),
+        lessThan(body.indexOf('installShadowDocumentShim()')),
+      );
+    });
+
+    // INV-JS9. A card defines `function toggleCard(){…}` and calls it back from
+    // an `onclick=` handler, which looks the name up in global scope: a
+    // `new Function` wrapper keeps the declaration to itself, so the button
+    // stays dead. A script element evaluates the body the way the document
+    // script the card was written as does.
+    test('a message script evaluates in global scope', () {
+      final body = _extractBlockBody(
+        rendererJs,
+        rendererJs.indexOf('export function executeInlineScripts'),
+      );
+      expect(body, contains("document.createElement('script')"));
+      expect(body, contains('runner.textContent = src'));
+      expect(body, contains('document.head.appendChild(runner)'));
+      // Executed or not, the runner leaves nothing behind in the document.
+      expect(body, contains('runner.remove()'));
+      expect(body, isNot(contains('new Function(src)')));
+    });
+
+    test('a message script keeps its shadow-root currentScript', () {
+      final body = _extractBlockBody(
+        rendererJs,
+        rendererJs.indexOf('export function executeInlineScripts'),
+      );
+      expect(body, contains('previousElementSibling: prev'));
+      expect(
+        body,
+        contains(
+          "Object.defineProperty(document, 'currentScript', "
+          '{ value: shim, configurable: true })',
+        ),
+      );
+    });
+
+    test('document lookups reach the message root that owns them', () {
+      expect(
+        markdownJs,
+        contains("} from './shadow_document_shim.js'"),
+      );
+      expect(markdownJs, contains('runInMessageScope(root, ()'));
+      // Scope first, then the real document — an app lookup keeps its meaning —
+      // then the other message roots, which is all a deferred call has left.
+      final lookup = _extractBlockBody(
+        shadowDocumentShimJs,
+        shadowDocumentShimJs.indexOf('document.getElementById = function'),
+      );
+      expect(
+        lookup.indexOf('const inScope = queryIn(activeScope, selector)'),
+        lessThan(lookup.indexOf('const inDocument = native.getElementById(id)')),
+      );
+      expect(
+        lookup.indexOf('const inDocument = native.getElementById(id)'),
+        lessThan(lookup.indexOf('firstInMessageRoots(selector)')),
+      );
+      expect(shadowDocumentShimJs, contains('document.querySelector = function'));
+      expect(
+        shadowDocumentShimJs,
+        contains('document.querySelectorAll = function'),
+      );
+      // Message roots are enumerated through the native method, or the scan
+      // would call back into the shim it is serving.
+      expect(
+        shadowDocumentShimJs,
+        contains('native.querySelectorAll(MESSAGE_HOST_SELECTOR)'),
+      );
+    });
+
+    test('an inline handler is scoped to the card that was tapped', () {
+      // A capture-phase listener runs before the `onclick=` at the target, so
+      // the lookups inside it resolve against the clicked message's own root —
+      // the same card rendered twice must not answer for its other copy.
+      expect(
+        shadowDocumentShimJs,
+        contains('document.addEventListener(type, captureScope, true)'),
+      );
+      final capture = _extractBlockBody(
+        shadowDocumentShimJs,
+        shadowDocumentShimJs.indexOf('function captureScope(event)'),
+      );
+      expect(capture, contains('event.composedPath()'));
+      expect(capture, contains('target.getRootNode()'));
+      // The scope is released once the dispatch is over, even if a handler
+      // stopped propagation on the way.
+      expect(capture, contains('setTimeout('));
+      expect(capture, contains('activeScope = null'));
     });
 
     test('every render sanitizes active HTML before innerHTML insertion', () {

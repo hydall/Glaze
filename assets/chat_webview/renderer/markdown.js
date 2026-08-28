@@ -4,6 +4,10 @@ import { reportCssErrors } from './css_diagnostics.js';
 import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
 import { rewriteTargetSelectors } from './target_toggle.js';
+import {
+  installShadowDocumentShim,
+  runInMessageScope,
+} from './shadow_document_shim.js';
 
 /** Cheap pre-sanitize probe for an embedded `<script>` in formatted HTML. */
 const SCRIPT_TAG = /<script\b/i;
@@ -118,13 +122,21 @@ export function executeInlineScripts(root, allowMessageScripts = false) {
     scripts.forEach(script => script.remove());
     return;
   }
+  if (!scripts.length) return;
+  // Message JS reaches its own DOM through `document`; from here on the
+  // document's lookups know about the message shadow roots.
+  installShadowDocumentShim();
   for (const oldScript of scripts) {
-    // Inline scripts set via innerHTML are never executed by the browser.
-    // We run them manually with shimmed globals so ST-compatible regex
-    // scripts (BOOTS, HEADER, etc.) work inside shadow DOM:
+    // Inline scripts set via innerHTML are never executed by the browser. We
+    // re-run each one through a script element of our own, so it behaves like
+    // the document script an ST-compatible card is written as: the body
+    // evaluates in global scope, which is the only way a `function toggle(){…}`
+    // the markup calls back from an `onclick=` handler is still there when the
+    // button is pressed. Two shims cover what a shadow root breaks:
     //   - document.currentScript.previousElementSibling -> sibling in shadow root
-    //   - document.getElementById -> searches inside the shadow root first
-    //   - document.querySelector  -> searches inside the shadow root first
+    //   - document.getElementById / querySelector -> the message root first
+    //     (shadow_document_shim.js, which keeps answering for the card long
+    //     after this call returns — that is when its buttons are pressed)
     const prev = oldScript.previousElementSibling;
     const src = oldScript.textContent || '';
     try {
@@ -132,27 +144,20 @@ export function executeInlineScripts(root, allowMessageScripts = false) {
       const csDesc = Object.getOwnPropertyDescriptor(Document.prototype, 'currentScript');
       Object.defineProperty(document, 'currentScript', { value: shim, configurable: true });
 
-      const origGetById = document.getElementById.bind(document);
-      const origQS = document.querySelector.bind(document);
-      document.getElementById = function(id) {
-        const inShadow = root.querySelector('#' + CSS.escape(id));
-        return inShadow || origGetById(id);
-      };
-      document.querySelector = function(sel) {
-        const inShadow = root.querySelector(sel);
-        return inShadow || origQS(sel);
-      };
-
+      const runner = document.createElement('script');
+      runner.textContent = src;
       try {
-        new Function(src)();
+        // An inline script runs on insertion, so the whole body evaluates
+        // inside the scope below; an error in it reaches the console the way a
+        // page script's does.
+        runInMessageScope(root, () => document.head.appendChild(runner));
       } finally {
+        runner.remove();
         if (csDesc) {
           Object.defineProperty(document, 'currentScript', csDesc);
         } else {
           delete document.currentScript;
         }
-        document.getElementById = origGetById;
-        document.querySelector = origQS;
       }
     } catch (e) {
       console.error('Inline script error:', e);

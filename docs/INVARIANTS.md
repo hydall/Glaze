@@ -1284,6 +1284,36 @@ finally makes an ordinary markdown link inside a message open.
 `test/webview_assets_test.dart` pins both halves in the group named
 "`:target` cards in message HTML".
 
+### INV-JS9: A message's own script runs like a document script and reaches its own DOM ✅ ENFORCED
+
+An ST-style card is written as a page script: `<script>` defines
+`function toggleCard(id){ document.getElementById('body'+id)… }` and the markup
+calls it back from an `onclick=` handler. Both halves of that miss when the body
+is written into a per-message shadow root, so `executeInlineScripts`
+(`renderer/markdown.js`) closes both — only when the message-scripts toggle is
+on (INV-JS7), and only for a message that actually carries a `<script>`:
+
+* The body is evaluated by a script element appended to the document, not by a
+  `new Function` wrapper. A function declaration inside such a wrapper is local
+  to it, so the handler the markup names is never defined by the time the button
+  is pressed; through a script element the declaration lands in global scope,
+  which is where an inline `on…=` handler looks it up.
+* `renderer/shadow_document_shim.js` widens `document.getElementById`,
+  `querySelector` and `querySelectorAll`. Lookups resolve against the running
+  script's own message root first (`runInMessageScope`), then the real document
+  — so nothing the app looks up changes meaning — then every message shadow
+  root in document order. The shim outlives the script: a card's buttons are
+  pressed long after it returned, and a capture-phase listener scopes those
+  lookups to the root of the element being clicked, so a card that is on screen
+  twice answers for the copy that was tapped.
+
+`document.currentScript` still reports the shim whose `previousElementSibling`
+is the script's sibling **inside** the shadow root, and every script element the
+runner appends is removed again, executed or not.
+
+`test/webview_assets_test.dart` pins this in the group named "message script
+execution policy".
+
 ---
 
 ## Refactor PR Checklist
@@ -1318,6 +1348,8 @@ Before merging any structural PR:
   - [ ] Periodic scheduler pauses on app background; no catch-up tick (INV-JS6)
   - [ ] A message's `:target` card still opens, closes and survives a search
         re-render (INV-JS8)
+  - [ ] A message's own `<script>` defines its handlers globally and its
+        `document` lookups find the card (INV-JS9)
 - [ ] Context limit exceeded shows an error to the user
 - [ ] API not configured shows an error to the user
 - [ ] Abort closes the TCP connection (not just UI state)
