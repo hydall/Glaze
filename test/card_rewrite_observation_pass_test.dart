@@ -55,7 +55,7 @@ void main() {
     );
   });
 
-  test('odd reconciliation count skips observation pass', () async {
+  test('incomplete reconciliation batch skips observation pass', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
     var calls = 0;
     await fixture
@@ -90,10 +90,11 @@ void main() {
   });
 
   test(
-    'even reconciliation count runs observation pass before card writer',
+    'complete reconciliation batch runs observation pass before card writer',
     () async {
       await fixture.seedReconciliationRun(ordinal: 1);
       await fixture.seedReconciliationRun(ordinal: 2);
+      await fixture.seedReconciliationRun(ordinal: 3);
       final prompts = <String>[];
       await fixture
           .service((_, prompt) async {
@@ -266,6 +267,7 @@ void main() {
   test('promotion after threshold confirmations', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
     await fixture.seedReconciliationRun(ordinal: 2);
+    await fixture.seedReconciliationRun(ordinal: 3);
     await fixture.observationRepo.insertObservation(
       CardEvolutionObservation(
         id: 'obs-1',
@@ -341,6 +343,7 @@ void main() {
   test('observation pass failure does not block card writer', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
     await fixture.seedReconciliationRun(ordinal: 2);
+    await fixture.seedReconciliationRun(ordinal: 3);
     var calls = 0;
     final result = await fixture
         .service((_, prompt) async {
@@ -362,6 +365,7 @@ void main() {
   test('no evidence does not expire or otherwise mutate observation', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
     await fixture.seedReconciliationRun(ordinal: 2);
+    await fixture.seedReconciliationRun(ordinal: 3);
     await fixture.observationRepo.insertObservation(
       CardEvolutionObservation(
         id: 'obs-stale',
@@ -412,6 +416,7 @@ void main() {
     () async {
       await fixture.seedReconciliationRun(ordinal: 1);
       await fixture.seedReconciliationRun(ordinal: 2);
+      await fixture.seedReconciliationRun(ordinal: 3);
       await fixture.observationRepo.insertObservation(
         CardEvolutionObservation(
           id: 'obs-contradicted',
@@ -463,6 +468,7 @@ void main() {
   test('fabricated evidence IDs cannot create observations', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
     await fixture.seedReconciliationRun(ordinal: 2);
+    await fixture.seedReconciliationRun(ordinal: 3);
     await fixture
         .service((_, prompt) async {
           if (prompt.contains('observation journal keeper')) {
@@ -528,7 +534,7 @@ void main() {
   );
 
   test(
-    'automatic collector runs every second reconciliation and writer every second collector',
+    'automatic collector runs every third reconciliation and writer every second collector',
     () async {
       final prompts = <String>[];
       final contexts = <LlmCaptureContext>[];
@@ -538,12 +544,12 @@ void main() {
             ? _ok('{"observations":[]}')
             : _ok('{"operations":[]}');
       }, onCaptureContext: contexts.add);
-      for (var ordinal = 1; ordinal <= 4; ordinal++) {
+      for (var ordinal = 1; ordinal <= 6; ordinal++) {
         final run = await fixture.seedReconciliationRun(ordinal: ordinal);
         final result = await service.runAfterReconciliation(run);
         expect(
           result.kind,
-          ordinal < 4 ? 'collectorCompleted' : 'emptyModelProposal',
+          ordinal < 6 ? 'collectorCompleted' : 'emptyModelProposal',
         );
       }
       expect(
@@ -558,7 +564,7 @@ void main() {
           .select(fixture.db.cardEvolutionCollectorRuns)
           .get();
       expect(collectors, hasLength(2));
-      expect(collectors.map((run) => run.reconciliationRunOrdinal), [2, 4]);
+      expect(collectors.map((run) => run.reconciliationRunOrdinal), [3, 6]);
       expect(collectors.every((run) => run.status == 'completed'), isTrue);
       final claims = await fixture.db
           .select(fixture.db.cardEvolutionClaims)
@@ -577,9 +583,10 @@ void main() {
     },
   );
 
-  test('manual Collector recovery processes an unclaimed pair once', () async {
+  test('manual Collector recovery processes an unclaimed batch once', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
     await fixture.seedReconciliationRun(ordinal: 2);
+    await fixture.seedReconciliationRun(ordinal: 3);
     var collectorCalls = 0;
     final service = fixture.service((_, prompt) async {
       if (prompt.contains('observation journal keeper')) {
@@ -608,7 +615,7 @@ void main() {
       final service = fixture.service((_, prompt) async {
         return _ok('{"observations":[]}');
       });
-      for (var ordinal = 1; ordinal <= 3; ordinal++) {
+      for (var ordinal = 1; ordinal <= 5; ordinal++) {
         await service.runAfterReconciliation(
           await fixture.seedReconciliationRun(ordinal: ordinal),
         );
@@ -618,7 +625,7 @@ void main() {
       );
 
       final result = await service.runAfterReconciliation(
-        await fixture.seedReconciliationRun(ordinal: 4),
+        await fixture.seedReconciliationRun(ordinal: 6),
       );
 
       expect(result.kind, 'unexpectedFailure');
@@ -657,13 +664,13 @@ void main() {
         return _ok('{"operations":[]}');
       }, onCaptureContext: contexts.add);
       CardEvolutionFinalizeOutcome? outcome;
-      for (var ordinal = 1; ordinal <= 4; ordinal++) {
+      for (var ordinal = 1; ordinal <= 6; ordinal++) {
         outcome = await service.runAfterReconciliation(
           await fixture.seedReconciliationRun(
             ordinal: ordinal,
             messages: messages.sublist(
-              starts[ordinal - 1],
-              starts[ordinal - 1] + 20,
+              starts[(ordinal - 1) * 3 ~/ 5],
+              starts[(ordinal - 1) * 3 ~/ 5] + 20,
             ),
           ),
         );
@@ -723,7 +730,7 @@ void main() {
       return _ok('{"operations":[]}');
     });
     CardEvolutionFinalizeOutcome? outcome;
-    for (var ordinal = 1; ordinal <= 4; ordinal++) {
+    for (var ordinal = 1; ordinal <= 6; ordinal++) {
       outcome = await service.runAfterReconciliation(
         await fixture.seedReconciliationRun(
           ordinal: ordinal,
@@ -738,10 +745,11 @@ void main() {
   });
 
   test(
-    'first high logical reconciliation pair becomes collector one',
+    'first high logical reconciliation batch becomes collector one',
     () async {
       await fixture.seedReconciliationRun(ordinal: 39);
-      final run = await fixture.seedReconciliationRun(ordinal: 40);
+      await fixture.seedReconciliationRun(ordinal: 40);
+      final run = await fixture.seedReconciliationRun(ordinal: 41);
       final result = await fixture
           .service((_, prompt) async => _ok('{"observations":[]}'))
           .runAfterReconciliation(run);
@@ -750,7 +758,7 @@ void main() {
           .select(fixture.db.cardEvolutionCollectorRuns)
           .getSingle();
       expect(collector.collectorOrdinal, 1);
-      expect(collector.reconciliationRunOrdinal, 2);
+      expect(collector.reconciliationRunOrdinal, 3);
     },
   );
 
@@ -763,7 +771,7 @@ void main() {
       writerCalls++;
       return _ok(writerCalls == 1 ? 'invalid' : '{"operations":[]}');
     });
-    for (final ordinal in [10, 20, 30, 40, 50, 60, 70, 80]) {
+    for (final ordinal in [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]) {
       await service.runAfterReconciliation(
         await fixture.seedReconciliationRun(ordinal: ordinal),
       );
@@ -782,6 +790,7 @@ void main() {
   test('minimal no_evidence response is accepted', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
     await fixture.seedReconciliationRun(ordinal: 2);
+    await fixture.seedReconciliationRun(ordinal: 3);
     await fixture.observationRepo.insertObservation(
       CardEvolutionObservation(
         id: 'minimal-no-evidence',
@@ -821,8 +830,12 @@ void main() {
 
   test('tracker fields normalize to one stable NPC group target', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
-    final run = await fixture.seedReconciliationRun(
+    await fixture.seedReconciliationRun(
       ordinal: 2,
+      opKeys: const ['npc:Квинн.location', 'npc:Квинн.current_goal'],
+    );
+    final run = await fixture.seedReconciliationRun(
+      ordinal: 3,
       opKeys: const ['npc:Квинн.location', 'npc:Квинн.current_goal'],
     );
     String? collectorPrompt;
@@ -865,6 +878,11 @@ void main() {
           ),
         );
         await fixture.seedReconciliationRun(
+          ordinal: ordinal - 2,
+          messages: messages,
+          opKeys: const ['world:location'],
+        );
+        await fixture.seedReconciliationRun(
           ordinal: ordinal - 1,
           messages: messages,
           opKeys: const ['world:location'],
@@ -904,7 +922,7 @@ void main() {
         {'id': 'a2', 'role': 'assistant', 'content': 'assistant 2'},
         {'id': 'u2', 'role': 'user', 'content': 'user 2'},
       ];
-      final related = await promptFor(returned, 1002);
+      final related = await promptFor(returned, 1003);
       expect(related, contains('Квинн remembers the old promise'));
     },
   );
@@ -963,8 +981,13 @@ void main() {
         messages: messages,
         opKeys: const ['arc:Спонсорство.status'],
       );
-      final run = await fixture.seedReconciliationRun(
+      await fixture.seedReconciliationRun(
         ordinal: 2,
+        messages: messages,
+        opKeys: const ['arc:Спонсорство.status'],
+      );
+      final run = await fixture.seedReconciliationRun(
+        ordinal: 3,
         messages: messages,
         opKeys: const ['arc:Спонсорство.status'],
       );
@@ -1034,8 +1057,13 @@ void main() {
       messages: messages,
       opKeys: const ['world:location'],
     );
-    final run = await fixture.seedReconciliationRun(
+    await fixture.seedReconciliationRun(
       ordinal: 2,
+      messages: messages,
+      opKeys: const ['world:location'],
+    );
+    final run = await fixture.seedReconciliationRun(
+      ordinal: 3,
       messages: messages,
       opKeys: const ['world:location'],
     );
@@ -1049,28 +1077,32 @@ void main() {
     expect(prompt, contains('Old durable Quinn observation'));
   });
 
-  test('cadence waits for the next complete collector pair', () async {
+  test('cadence waits for the next complete collector batch', () async {
     final service = fixture.service(
       (_, prompt) async => prompt.contains('observation journal keeper')
           ? _ok('{"observations":[]}')
           : _ok('{"operations":[]}'),
     );
-    for (final ordinal in [1, 2, 3, 4]) {
+    for (final ordinal in [1, 2, 3, 4, 5, 6]) {
       final result = await service.runAfterReconciliation(
         await fixture.seedReconciliationRun(ordinal: ordinal),
       );
       expect(
         result.kind,
-        ordinal < 4 ? 'collectorCompleted' : 'emptyModelProposal',
+        ordinal < 6 ? 'collectorCompleted' : 'emptyModelProposal',
       );
     }
     await service.runAfterReconciliation(
-      await fixture.seedReconciliationRun(ordinal: 5),
+      await fixture.seedReconciliationRun(ordinal: 7),
     );
     final result = await service.runAfterReconciliation(
-      await fixture.seedReconciliationRun(ordinal: 6),
+      await fixture.seedReconciliationRun(ordinal: 8),
     );
     expect(result.kind, 'collectorCompleted');
+    final completed = await service.runAfterReconciliation(
+      await fixture.seedReconciliationRun(ordinal: 9),
+    );
+    expect(completed.kind, 'collectorCompleted');
     final claims = await fixture.db
         .select(fixture.db.cardEvolutionClaims)
         .get();
@@ -1080,8 +1112,9 @@ void main() {
 
   test('primary current groups survive retrieval target extras cap', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
+    await fixture.seedReconciliationRun(ordinal: 2);
     final run = await fixture.seedReconciliationRun(
-      ordinal: 2,
+      ordinal: 3,
       opKeys: [
         for (var index = 0; index < 85; index++) 'arc:Текущий$index.status',
       ],
@@ -1102,7 +1135,9 @@ void main() {
       'UPDATE tracker_rows SET value = ? WHERE session_id = ?',
       ['Ж' * 50000, 'session'],
     );
-    final run = await fixture.seedReconciliationRun(ordinal: 1);
+    await fixture.seedReconciliationRun(ordinal: 1);
+    await fixture.seedReconciliationRun(ordinal: 2);
+    final run = await fixture.seedReconciliationRun(ordinal: 3);
     var prompt = '';
     await fixture
         .service((_, value) async {
@@ -1116,9 +1151,11 @@ void main() {
 
   test('exact retry reuses captured prompt and completes failed row', () async {
     final first = await fixture.seedReconciliationRun(ordinal: 1);
-    final boundary = await fixture.seedReconciliationRun(ordinal: 2);
+    final middle = await fixture.seedReconciliationRun(ordinal: 2);
+    final boundary = await fixture.seedReconciliationRun(ordinal: 3);
     final failed = await fixture.seedFailedCollector(
       first: first,
+      middle: middle,
       boundary: boundary,
       prompt: 'captured collector prompt',
     );
@@ -1154,9 +1191,11 @@ void main() {
 
   test('retry rebuilds prompt when exact capture is unavailable', () async {
     final first = await fixture.seedReconciliationRun(ordinal: 1);
-    final boundary = await fixture.seedReconciliationRun(ordinal: 2);
+    final middle = await fixture.seedReconciliationRun(ordinal: 2);
+    final boundary = await fixture.seedReconciliationRun(ordinal: 3);
     final failed = await fixture.seedFailedCollector(
       first: first,
+      middle: middle,
       boundary: boundary,
       prompt: 'discarded collector prompt',
     );
@@ -1196,9 +1235,11 @@ void main() {
     'manual correction completes failed collector without model call',
     () async {
       final first = await fixture.seedReconciliationRun(ordinal: 1);
-      final boundary = await fixture.seedReconciliationRun(ordinal: 2);
+      final middle = await fixture.seedReconciliationRun(ordinal: 2);
+      final boundary = await fixture.seedReconciliationRun(ordinal: 3);
       final failed = await fixture.seedFailedCollector(
         first: first,
+        middle: middle,
         boundary: boundary,
         prompt: 'unused prompt',
       );
@@ -1228,9 +1269,11 @@ void main() {
 
   test('invalid manual correction keeps exact retry available', () async {
     final first = await fixture.seedReconciliationRun(ordinal: 1);
-    final boundary = await fixture.seedReconciliationRun(ordinal: 2);
+    final middle = await fixture.seedReconciliationRun(ordinal: 2);
+    final boundary = await fixture.seedReconciliationRun(ordinal: 3);
     final failed = await fixture.seedFailedCollector(
       first: first,
+      middle: middle,
       boundary: boundary,
       prompt: 'captured collector prompt',
     );
@@ -1343,14 +1386,16 @@ final class _Fixture {
 
   Future<CardEvolutionCollectorRunRow> seedFailedCollector({
     required LedgerReconciliationSuccessfulRunRow first,
+    required LedgerReconciliationSuccessfulRunRow middle,
     required LedgerReconciliationSuccessfulRunRow boundary,
     required String prompt,
   }) async {
     final snapshot = await repo.buildObservationSnapshotForRuns([
       first,
+      middle,
       boundary,
     ]);
-    final pair = CardEvolutionCollectorPair(first, boundary);
+    final batch = CardEvolutionCollectorBatch([first, middle, boundary]);
     final claim = await collectorRepo.claim(
       reconciliationRun: boundary,
       characterId: 'character',
@@ -1358,7 +1403,7 @@ final class _Fixture {
       ownerId: 'failed-owner',
       now: 10,
       leaseSeconds: 60,
-      rangeHash: pair.rangeHash,
+      rangeHash: batch.rangeHash,
     );
     final row = claim.row!;
     await captureRepo.record(

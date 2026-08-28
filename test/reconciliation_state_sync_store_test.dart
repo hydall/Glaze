@@ -450,8 +450,8 @@ void main() {
     );
   });
 
-  test('completed collector round-trip consumes its valid pair', () async {
-    final runs = await _appendChain(sourceDb, 2);
+  test('completed collector round-trip consumes its valid batch', () async {
+    final runs = await _appendChain(sourceDb, 3);
     final collectorRepo = CardEvolutionCollectorRunRepo(sourceDb);
     final claim = await collectorRepo.claim(
       reconciliationRun: await _storedRun(sourceDb, runs.last.id),
@@ -460,10 +460,9 @@ void main() {
       ownerId: 'owner',
       now: 10,
       leaseSeconds: 30,
-      rangeHash: CardEvolutionCollectorPair(
-        await _storedRun(sourceDb, runs.first.id),
-        await _storedRun(sourceDb, runs.last.id),
-      ).rangeHash,
+      rangeHash: CardEvolutionCollectorBatch([
+        for (final run in runs) await _storedRun(sourceDb, run.id),
+      ]).rangeHash,
     );
     expect(
       await collectorRepo.complete(
@@ -491,7 +490,7 @@ void main() {
   test(
     'stale collector provenance is discarded without failing sync',
     () async {
-      final runs = await _appendChain(sourceDb, 2);
+      final runs = await _appendChain(sourceDb, 3);
       await _completeCollector(sourceDb, runs);
       final payload = (await sourceStore.getBySessionId('session'))!;
       final collectors = (payload['collectors'] as List)
@@ -502,7 +501,7 @@ void main() {
 
       final merged = await targetStore.mergeBySessionId('session', payload);
 
-      expect(merged['runs'], hasLength(2));
+      expect(merged['runs'], hasLength(3));
       expect(merged['collectors'], isEmpty);
       expect(
         await CardEvolutionCollectorRunRepo(
@@ -514,8 +513,7 @@ void main() {
   );
 
   test('active collector claims and leases are omitted', () async {
-    final runs = await _appendChain(sourceDb, 2);
-    final first = await _storedRun(sourceDb, runs.first.id);
+    final runs = await _appendChain(sourceDb, 3);
     final boundary = await _storedRun(sourceDb, runs.last.id);
     await CardEvolutionCollectorRunRepo(sourceDb).claim(
       reconciliationRun: boundary,
@@ -524,7 +522,9 @@ void main() {
       ownerId: 'active-owner',
       now: 10,
       leaseSeconds: 30,
-      rangeHash: CardEvolutionCollectorPair(first, boundary).rangeHash,
+      rangeHash: CardEvolutionCollectorBatch([
+        for (final run in runs) await _storedRun(sourceDb, run.id),
+      ]).rangeHash,
     );
 
     final payload = (await sourceStore.getBySessionId('session'))!;
@@ -540,8 +540,8 @@ void main() {
   test(
     'incoming completed collector replaces local claim at boundary',
     () async {
-      final sourceRuns = await _appendChain(sourceDb, 2);
-      final targetRuns = await _appendChain(targetDb, 2);
+      final sourceRuns = await _appendChain(sourceDb, 3);
+      final targetRuns = await _appendChain(targetDb, 3);
       final completed = await _completeCollector(sourceDb, sourceRuns);
       final local = await _claimCollector(
         targetDb,
@@ -568,8 +568,8 @@ void main() {
   test(
     'incoming completed collector replaces failed boundary at another ordinal',
     () async {
-      final sourceRuns = await _appendChain(sourceDb, 2);
-      final targetRuns = await _appendChain(targetDb, 2);
+      final sourceRuns = await _appendChain(sourceDb, 3);
+      final targetRuns = await _appendChain(targetDb, 3);
       await _insertFailedCollectorPlaceholder(sourceDb);
       final completed = await _completeCollector(sourceDb, sourceRuns);
       final local = await _claimCollector(
@@ -632,8 +632,8 @@ void main() {
   });
 
   test('newer observation lifecycle wins and converges', () async {
-    await _appendChain(sourceDb, 2);
-    await _appendChain(targetDb, 2);
+    await _appendChain(sourceDb, 3);
+    await _appendChain(targetDb, 3);
     await _insertObservation(
       sourceDb,
       id: 'source-observation',
@@ -690,8 +690,8 @@ void main() {
   test(
     'incoming completed claim replaces failed claim with same input',
     () async {
-      final runs = await _appendChain(sourceDb, 2);
-      await _appendChain(targetDb, 2);
+      final runs = await _appendChain(sourceDb, 3);
+      await _appendChain(targetDb, 3);
       final collector = await _completeCollector(sourceDb, runs);
       await _insertCompletedClaim(sourceDb, collector);
       await targetDb
@@ -754,7 +754,7 @@ void main() {
 
   test('synced invalidation clears derived lane without deleting claims or '
       'resurrecting stale collectors', () async {
-    final runs = await _appendChain(sourceDb, 2);
+    final runs = await _appendChain(sourceDb, 3);
     final collector = await _completeCollector(sourceDb, runs);
     await _insertObservation(sourceDb);
     await _insertCompletedClaim(sourceDb, collector);
@@ -766,7 +766,7 @@ void main() {
         {
           'id': 0,
           'sessionId': 'session',
-          'runId': runs.last.id,
+          'runId': runs[1].id,
           'causeMessageId': 'opening-assistant',
           'reason': 'message deleted',
           'createdAt': 30,
@@ -801,12 +801,12 @@ void main() {
   test(
     'synced invalidation still imports unaffected completed collectors',
     () async {
-      final runs = await _appendChain(sourceDb, 4);
+      final runs = await _appendChain(sourceDb, 6);
       final firstCollector = await _completeCollector(
         sourceDb,
-        runs.sublist(0, 2),
+        runs.sublist(0, 3),
       );
-      await _completeCollector(sourceDb, runs.sublist(2, 4));
+      await _completeCollector(sourceDb, runs.sublist(3, 6));
       final payload = (await sourceStore.getBySessionId('session'))!
         ..['invalidations'] = [
           {
@@ -897,8 +897,8 @@ Future<CardEvolutionCollectorRunRow> _claimCollector(
   List<LedgerReconciliationRun> runs, {
   required String ownerId,
 }) async {
-  final first = await _storedRun(db, runs.first.id);
-  final boundary = await _storedRun(db, runs.last.id);
+  final storedRuns = [for (final run in runs) await _storedRun(db, run.id)];
+  final boundary = storedRuns.last;
   final claim = await CardEvolutionCollectorRunRepo(db).claim(
     reconciliationRun: boundary,
     characterId: 'character',
@@ -906,7 +906,7 @@ Future<CardEvolutionCollectorRunRow> _claimCollector(
     ownerId: ownerId,
     now: 10,
     leaseSeconds: 30,
-    rangeHash: CardEvolutionCollectorPair(first, boundary).rangeHash,
+    rangeHash: CardEvolutionCollectorBatch(storedRuns).rangeHash,
   );
   return claim.row!;
 }

@@ -17,7 +17,8 @@ import 'session_lorebook_evolution_repo.dart';
 
 const _maxChatHistoryMessages = 40;
 const _writerCollectorBatchSize = 2;
-const _writerReconciliationRunCount = _writerCollectorBatchSize * 2;
+const _writerReconciliationRunCount =
+    _writerCollectorBatchSize * collectorReconciliationBatchSize;
 const _maxCanonValueCharacters = 2000;
 const _maxLorebookEntryCharacters = 60000;
 const _maxLorebookTotalCharacters = 600000;
@@ -936,12 +937,15 @@ class CardEvolutionRepo {
     );
   });
 
-  /// Builds one collector snapshot from two consecutive valid logical
-  /// reconciliations. Both immutable histories remain available as evidence.
+  /// Builds one collector snapshot from a complete logical batch. Every
+  /// immutable reconciliation history remains available as evidence.
   Future<CardEvolutionObservationSnapshot?> buildObservationSnapshotForRuns(
     List<LedgerReconciliationSuccessfulRunRow> runs,
   ) => db.transaction(() async {
-    if (runs.length != 2 || runs[0].sessionId != runs[1].sessionId) return null;
+    if (runs.length != collectorReconciliationBatchSize ||
+        runs.any((run) => run.sessionId != runs.first.sessionId)) {
+      return null;
+    }
     final sessionId = runs.first.sessionId;
     final selected = (await _selectInput(
       sessionId,
@@ -960,8 +964,7 @@ class CardEvolutionRepo {
     );
   });
 
-  /// Counts successful Ledger reconciliations for the session. The observation
-  /// pass runs on every even count (every 2nd reconciliation cadence).
+  /// Counts successful Ledger reconciliations for the session.
   Future<int> countSuccessfulReconciliations(String sessionId) async {
     final result = await db
         .customSelect(

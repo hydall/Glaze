@@ -39,108 +39,135 @@ void main() {
 
   tearDown(() => db.close());
 
-  test('projects collector pair and every observation lifecycle state', () async {
-    await db.customStatement(
-      "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES ('session', 'character', 0, '[{\"id\":\"a1\",\"role\":\"assistant\",\"content\":\"one\"},{\"id\":\"u1\",\"role\":\"user\",\"content\":\"two\"}]')",
-    );
-    final first = _run(
-      id: 'run-1',
-      ordinal: 1,
-      messageId: 'a1',
-      role: 'assistant',
-      content: 'one',
-    );
-    expect(
-      await reconciliationRepo.append(first),
-      isA<ReconciliationRunAppended>(),
-    );
-    final second = _run(
-      id: 'run-2',
-      ordinal: 2,
-      predecessor: first.chainHash,
-      messageId: 'u1',
-      role: 'user',
-      content: 'two',
-    );
-    expect(
-      await reconciliationRepo.append(second),
-      isA<ReconciliationRunAppended>(),
-    );
-    await db
-        .into(db.cardEvolutionCollectorRuns)
-        .insert(
-          CardEvolutionCollectorRunsCompanion.insert(
-            id: 'collector-1',
-            sessionId: 'session',
-            characterId: 'character',
-            collectorOrdinal: 1,
-            reconciliationRunId: second.id,
-            reconciliationRunOrdinal: second.ordinal,
-            reconciliationChainHash: second.chainHash,
-            rangeHash: _pairHash(first, second),
-            inputHash: 'input',
-            ownerId: 'owner',
-            status: 'completed',
-            leaseExpiresAt: 100,
-            createdAt: 10,
-          ),
-        );
-    await observationRepo.insertObservation(_observation('active', 'active'));
-    await observationRepo.insertObservation(
-      _observation('expired', 'expired', updatedAt: 20),
-    );
-
-    final snapshot = await service.load('session');
-
-    expect(snapshot.runs, hasLength(1));
-    expect(snapshot.unclaimedPairCount, 0);
-    expect(snapshot.runs.single.firstReconciliationOrdinal, 1);
-    expect(snapshot.runs.single.boundaryReconciliationOrdinal, 2);
-    expect(snapshot.observations.map((item) => item.status), [
-      'expired',
-      'active',
-    ]);
-  });
-
-  test('reports a valid reconciliation pair without a Collector claim', () async {
-    await db.customStatement(
-      "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES ('session', 'character', 0, '[{\"id\":\"a1\",\"role\":\"assistant\",\"content\":\"one\"},{\"id\":\"u1\",\"role\":\"user\",\"content\":\"two\"}]')",
-    );
-    final first = _run(
-      id: 'run-1',
-      ordinal: 1,
-      messageId: 'a1',
-      role: 'assistant',
-      content: 'one',
-    );
-    await reconciliationRepo.append(first);
-    await reconciliationRepo.append(
-      _run(
+  test(
+    'projects collector batch and every observation lifecycle state',
+    () async {
+      await db.customStatement(
+        "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES ('session', 'character', 0, '[{\"id\":\"a1\",\"role\":\"assistant\",\"content\":\"one\"},{\"id\":\"u1\",\"role\":\"user\",\"content\":\"two\"},{\"id\":\"a2\",\"role\":\"assistant\",\"content\":\"three\"}]')",
+      );
+      final first = _run(
+        id: 'run-1',
+        ordinal: 1,
+        messageId: 'a2',
+        role: 'assistant',
+        content: 'three',
+      );
+      expect(
+        await reconciliationRepo.append(first),
+        isA<ReconciliationRunAppended>(),
+      );
+      final second = _run(
         id: 'run-2',
         ordinal: 2,
         predecessor: first.chainHash,
         messageId: 'u1',
         role: 'user',
         content: 'two',
-      ),
-    );
+      );
+      expect(
+        await reconciliationRepo.append(second),
+        isA<ReconciliationRunAppended>(),
+      );
+      final third = _run(
+        id: 'run-3',
+        ordinal: 3,
+        predecessor: second.chainHash,
+        messageId: 'a1',
+        role: 'assistant',
+        content: 'one',
+      );
+      expect(
+        await reconciliationRepo.append(third),
+        isA<ReconciliationRunAppended>(),
+      );
+      await db
+          .into(db.cardEvolutionCollectorRuns)
+          .insert(
+            CardEvolutionCollectorRunsCompanion.insert(
+              id: 'collector-1',
+              sessionId: 'session',
+              characterId: 'character',
+              collectorOrdinal: 1,
+              reconciliationRunId: third.id,
+              reconciliationRunOrdinal: third.ordinal,
+              reconciliationChainHash: third.chainHash,
+              rangeHash: _batchHash(first, second, third),
+              inputHash: 'input',
+              ownerId: 'owner',
+              status: 'completed',
+              leaseExpiresAt: 100,
+              createdAt: 10,
+            ),
+          );
+      await observationRepo.insertObservation(_observation('active', 'active'));
+      await observationRepo.insertObservation(
+        _observation('expired', 'expired', updatedAt: 20),
+      );
 
-    final snapshot = await service.load('session');
+      final snapshot = await service.load('session');
 
-    expect(snapshot.unclaimedPairCount, 1);
-    expect(snapshot.runs, isEmpty);
-  });
+      expect(snapshot.runs, hasLength(1));
+      expect(snapshot.unclaimedPairCount, 0);
+      expect(snapshot.runs.single.firstReconciliationOrdinal, 1);
+      expect(snapshot.runs.single.boundaryReconciliationOrdinal, 3);
+      expect(snapshot.observations.map((item) => item.status), [
+        'expired',
+        'active',
+      ]);
+    },
+  );
 
-  test('reports a valid pair when its Collector lease expired', () async {
+  test(
+    'reports a valid reconciliation batch without a Collector claim',
+    () async {
+      await db.customStatement(
+        "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES ('session', 'character', 0, '[{\"id\":\"a1\",\"role\":\"assistant\",\"content\":\"one\"},{\"id\":\"u1\",\"role\":\"user\",\"content\":\"two\"},{\"id\":\"a2\",\"role\":\"assistant\",\"content\":\"three\"}]')",
+      );
+      final first = _run(
+        id: 'run-1',
+        ordinal: 1,
+        messageId: 'a1',
+        role: 'assistant',
+        content: 'one',
+      );
+      await reconciliationRepo.append(first);
+      final second = _run(
+        id: 'run-2',
+        ordinal: 2,
+        predecessor: first.chainHash,
+        messageId: 'u1',
+        role: 'user',
+        content: 'two',
+      );
+      await reconciliationRepo.append(second);
+      await reconciliationRepo.append(
+        _run(
+          id: 'run-3',
+          ordinal: 3,
+          predecessor: second.chainHash,
+          messageId: 'a2',
+          role: 'assistant',
+          content: 'three',
+        ),
+      );
+
+      final snapshot = await service.load('session');
+
+      expect(snapshot.unclaimedPairCount, 1);
+      expect(snapshot.runs, isEmpty);
+    },
+  );
+
+  test('reports a valid batch when its Collector lease expired', () async {
     await db.customStatement(
-      "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES ('session', 'character', 0, '[{\"id\":\"a1\",\"role\":\"assistant\",\"content\":\"one\"},{\"id\":\"u1\",\"role\":\"user\",\"content\":\"two\"}]')",
+      "INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES ('session', 'character', 0, '[{\"id\":\"a1\",\"role\":\"assistant\",\"content\":\"one\"},{\"id\":\"u1\",\"role\":\"user\",\"content\":\"two\"},{\"id\":\"a2\",\"role\":\"assistant\",\"content\":\"three\"}]')",
     );
     final first = _run(
       id: 'run-1',
       ordinal: 1,
-      messageId: 'a1',
+      messageId: 'a2',
       role: 'assistant',
-      content: 'one',
+      content: 'three',
     );
     final second = _run(
       id: 'run-2',
@@ -152,6 +179,15 @@ void main() {
     );
     await reconciliationRepo.append(first);
     await reconciliationRepo.append(second);
+    final third = _run(
+      id: 'run-3',
+      ordinal: 3,
+      predecessor: second.chainHash,
+      messageId: 'a1',
+      role: 'assistant',
+      content: 'one',
+    );
+    await reconciliationRepo.append(third);
     await db
         .into(db.cardEvolutionCollectorRuns)
         .insert(
@@ -160,10 +196,10 @@ void main() {
             sessionId: 'session',
             characterId: 'character',
             collectorOrdinal: 1,
-            reconciliationRunId: second.id,
-            reconciliationRunOrdinal: second.ordinal,
-            reconciliationChainHash: second.chainHash,
-            rangeHash: _pairHash(first, second),
+            reconciliationRunId: third.id,
+            reconciliationRunOrdinal: third.ordinal,
+            reconciliationChainHash: third.chainHash,
+            rangeHash: _batchHash(first, second, third),
             inputHash: 'input',
             ownerId: 'interrupted-owner',
             status: 'claimed',
@@ -312,10 +348,12 @@ CardEvolutionObservation _observation(
   updatedAt: updatedAt,
 );
 
-String _pairHash(
+String _batchHash(
   LedgerReconciliationRun first,
   LedgerReconciliationRun second,
+  LedgerReconciliationRun third,
 ) => computeHash(
   '${first.id}\u001f${first.rangeHash}\u001e'
-  '${second.id}\u001f${second.rangeHash}',
+  '${second.id}\u001f${second.rangeHash}\u001e'
+  '${third.id}\u001f${third.rangeHash}',
 );

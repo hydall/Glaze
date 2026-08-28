@@ -17,7 +17,7 @@ import 'backup_helpers.dart';
 
 class FlutterBackupImporter extends BackupHelpers {
   static const int _batchSize = 500;
-  static const int _maxSchemaVersion = 12;
+  static const int _maxSchemaVersion = 13;
 
   @override
   final AppDatabase db;
@@ -186,6 +186,9 @@ class FlutterBackupImporter extends BackupHelpers {
         // Truncate WAL between tables to keep heap small.
         await db.customStatement('PRAGMA wal_checkpoint(TRUNCATE)');
       }
+      if (schemaVersion < 13) {
+        await _clearLegacyCollectorCadence();
+      }
       await db.applyLegacyStudioRuntimePayloads(_legacyStudioRuntimeRows);
       if (schemaVersion >= 11) await _rebuildSessionLorebookEmbeddingQueue();
     } finally {
@@ -224,6 +227,18 @@ class FlutterBackupImporter extends BackupHelpers {
           await db.customStatement('DELETE FROM $table');
         }
       });
+
+  Future<void> _clearLegacyCollectorCadence() => db.transaction(() async {
+    await db.customStatement(
+      'DELETE FROM card_evolution_writer_calls WHERE claim_id IN '
+      "(SELECT id FROM card_evolution_claims WHERE status <> 'completed')",
+    );
+    await db.customStatement(
+      "DELETE FROM card_evolution_claims WHERE status <> 'completed'",
+    );
+    await db.customStatement('DELETE FROM card_evolution_collector_runs');
+    await db.customStatement('DELETE FROM card_evolution_observations');
+  });
 
   /// Restores all SharedPreferences from [preferences.json] inside the ZIP.
   /// Keys are written as-is; missing file is silently ignored (v1 legacy or

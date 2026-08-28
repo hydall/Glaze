@@ -494,13 +494,14 @@ class LedgerReconciliationRunRepo {
     // promotions derived from invalid evidence. Reset the derived collector
     // lane and rebuild it from the valid reconciliation backlog.
     final affectedIds = affected.map((row) => row.id).toSet();
-    final hasAffectedCollector =
-        await (_db.select(_db.cardEvolutionCollectorRuns)
-              ..where((row) => row.sessionId.equals(sessionId))
-              ..where((row) => row.reconciliationRunId.isIn(affectedIds))
-              ..limit(1))
-            .getSingleOrNull();
-    if (hasAffectedCollector != null) {
+    final validRunIds = rows.take(firstAffected).map((row) => row.id).toSet();
+    final collectors = await (_db.select(
+      _db.cardEvolutionCollectorRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    final hasAffectedCollector = collectors.any(
+      (row) => !validRunIds.contains(row.reconciliationRunId),
+    );
+    if (hasAffectedCollector) {
       await (_db.delete(
         _db.cardEvolutionCollectorRuns,
       )..where((row) => row.sessionId.equals(sessionId))).go();

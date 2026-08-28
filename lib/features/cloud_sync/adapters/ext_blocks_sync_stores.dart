@@ -1363,23 +1363,22 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
     String sessionId,
     List<Map<String, dynamic>> incomingCollectors,
   ) async {
-    final invalidatedRunIds =
-        (await (_db.select(
-              _db.ledgerReconciliationRunInvalidations,
-            )..where((row) => row.sessionId.equals(sessionId))).get())
-            .map((row) => row.runId)
-            .toSet();
-    if (invalidatedRunIds.isEmpty) return false;
-    final affectedCollector =
-        await (_db.select(_db.cardEvolutionCollectorRuns)
-              ..where((row) => row.sessionId.equals(sessionId))
-              ..where((row) => row.reconciliationRunId.isIn(invalidatedRunIds))
-              ..limit(1))
-            .getSingleOrNull();
-    final incomingAffected = incomingCollectors.any(
-      (row) => invalidatedRunIds.contains(row['reconciliationRunId']),
+    final invalidations = await (_db.select(
+      _db.ledgerReconciliationRunInvalidations,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    if (invalidations.isEmpty) return false;
+    final batches = await _currentCollectorBatches(sessionId);
+    final localCollectors = await (_db.select(
+      _db.cardEvolutionCollectorRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    final affectedCollector = localCollectors.any(
+      (row) => batches[row.reconciliationRunId]?.rangeHash != row.rangeHash,
     );
-    if (affectedCollector == null && !incomingAffected) return false;
+    final incomingAffected = incomingCollectors.any(
+      (row) =>
+          batches[row['reconciliationRunId']]?.rangeHash != row['rangeHash'],
+    );
+    if (!affectedCollector && !incomingAffected) return false;
     await (_db.delete(
       _db.cardEvolutionCollectorRuns,
     )..where((row) => row.sessionId.equals(sessionId))).go();
@@ -1393,15 +1392,32 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
     String sessionId,
     List<Map<String, dynamic>> incoming,
   ) async {
-    final invalidatedRunIds =
-        (await (_db.select(
-              _db.ledgerReconciliationRunInvalidations,
-            )..where((row) => row.sessionId.equals(sessionId))).get())
-            .map((row) => row.runId)
-            .toSet();
+    final batches = await _currentCollectorBatches(sessionId);
     return incoming
-        .where((row) => !invalidatedRunIds.contains(row['reconciliationRunId']))
+        .where(
+          (row) =>
+              batches[row['reconciliationRunId']]?.rangeHash ==
+              row['rangeHash'],
+        )
         .toList(growable: false);
+  }
+
+  Future<Map<String, CardEvolutionCollectorBatch>> _currentCollectorBatches(
+    String sessionId,
+  ) async {
+    final runs = await LedgerReconciliationRunRepo(_db).readSession(sessionId);
+    final result = <String, CardEvolutionCollectorBatch>{};
+    for (
+      var index = 0;
+      index + collectorReconciliationBatchSize <= runs.length;
+      index += collectorReconciliationBatchSize
+    ) {
+      final batch = CardEvolutionCollectorBatch(
+        runs.sublist(index, index + collectorReconciliationBatchSize),
+      );
+      result[batch.boundary.id] = batch;
+    }
+    return result;
   }
 
   Future<bool> _mergeCollectors(
@@ -1410,20 +1426,26 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
   ) async {
     final runRepo = LedgerReconciliationRunRepo(_db);
     final runs = await runRepo.readSession(sessionId);
-    final pairs = <String, CardEvolutionCollectorPair>{};
-    for (var i = 0; i + 1 < runs.length; i += 2) {
-      final pair = CardEvolutionCollectorPair(runs[i], runs[i + 1]);
-      pairs[pair.boundary.id] = pair;
+    final batches = <String, CardEvolutionCollectorBatch>{};
+    for (
+      var i = 0;
+      i + collectorReconciliationBatchSize <= runs.length;
+      i += collectorReconciliationBatchSize
+    ) {
+      final batch = CardEvolutionCollectorBatch(
+        runs.sublist(i, i + collectorReconciliationBatchSize),
+      );
+      batches[batch.boundary.id] = batch;
     }
     final rows = incoming.map(CardEvolutionCollectorRunRow.fromJson).toList();
     for (final row in rows) {
       _requireSession(sessionId, row.sessionId);
-      final pair = pairs[row.reconciliationRunId];
+      final batch = batches[row.reconciliationRunId];
       if (row.status != 'completed' ||
-          pair == null ||
-          pair.boundary.ordinal != row.reconciliationRunOrdinal ||
-          pair.boundary.chainHash != row.reconciliationChainHash ||
-          pair.rangeHash != row.rangeHash) {
+          batch == null ||
+          batch.boundary.ordinal != row.reconciliationRunOrdinal ||
+          batch.boundary.chainHash != row.reconciliationChainHash ||
+          batch.rangeHash != row.rangeHash) {
         return false;
       }
     }

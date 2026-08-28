@@ -29,7 +29,8 @@ class BackupExporter {
   //  10 — added atomic character facts and immutable session baselines.
   //  11 — added complete Card Rewriter/session-canon provenance.
   //  12 — added complete Agent Ops reconciliation and recovery provenance.
-  static const int schemaVersion = 12;
+  //  13 — Collector journals use three-reconciliation batches.
+  static const int schemaVersion = 13;
 
   static const List<String> tableNames = [
     'characters',

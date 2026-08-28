@@ -59,15 +59,15 @@ class CardEvolutionCollectorCoordinator {
   final Map<String, CancelToken> _observationTokens = {};
 
   Future<bool> runCollector(
-    CardEvolutionCollectorPair pair, {
+    CardEvolutionCollectorBatch batch, {
     void Function()? onObservationStage,
   }) async {
-    final reconciliationRun = pair.boundary;
+    final reconciliationRun = batch.boundary;
     final sessionId = reconciliationRun.sessionId;
     String? claimId;
     String? ownerId;
     try {
-      final snapshot = await repo.buildObservationSnapshotForRuns(pair.runs);
+      final snapshot = await repo.buildObservationSnapshotForRuns(batch.runs);
       if (snapshot == null) return false;
       ownerId = 'collector-owner-${generateId()}';
       final now = currentTimestampSeconds();
@@ -78,7 +78,7 @@ class CardEvolutionCollectorCoordinator {
         ownerId: ownerId,
         now: now,
         leaseSeconds: leaseSeconds,
-        rangeHash: pair.rangeHash,
+        rangeHash: batch.rangeHash,
       );
       if (claim.kind == 'completed') return true;
       if (!claim.canRun || claim.row == null) return false;
@@ -110,9 +110,7 @@ class CardEvolutionCollectorCoordinator {
                   sessionId,
                   [claim.row!],
                 );
-                return logical.length == 2 &&
-                    logical[0].id == pair.first.id &&
-                    logical[1].id == pair.boundary.id;
+                return _sameRuns(logical, batch.runs);
               },
               applyEffects: applyEffects,
             ),
@@ -266,10 +264,10 @@ class CardEvolutionCollectorCoordinator {
     final runs = await collectorRunRepo.runsForCollectors(failed.sessionId, [
       failed,
     ]);
-    if (runs.length != 2) {
+    if (runs.length != collectorReconciliationBatchSize) {
       return const CardEvolutionFinalizeOutcome('collectorEvidenceStale');
     }
-    final pair = CardEvolutionCollectorPair(runs.first, runs.last);
+    final batch = CardEvolutionCollectorBatch(runs);
     final snapshot = await repo.buildObservationSnapshotForRuns(runs);
     if (snapshot == null ||
         computeHash(snapshot.selectedInputJson) != failed.inputHash) {
@@ -349,7 +347,7 @@ class CardEvolutionCollectorCoordinator {
         sessionId: failed.sessionId,
         snapshot: snapshot,
         runOrdinal: failed.collectorOrdinal,
-        pair: pair,
+        batch: batch,
         collectorId: failed.id,
         ownerId: ownerId,
         output: output!,
@@ -401,7 +399,7 @@ class CardEvolutionCollectorCoordinator {
     required String sessionId,
     required CardEvolutionObservationSnapshot snapshot,
     required int runOrdinal,
-    required CardEvolutionCollectorPair pair,
+    required CardEvolutionCollectorBatch batch,
     required String collectorId,
     required String ownerId,
     required String output,
@@ -450,9 +448,7 @@ class CardEvolutionCollectorCoordinator {
         final logical = await collectorRunRepo.runsForCollectors(sessionId, [
           collector,
         ]);
-        if (logical.length != 2 ||
-            logical[0].id != pair.first.id ||
-            logical[1].id != pair.boundary.id) {
+        if (!_sameRuns(logical, batch.runs)) {
           return false;
         }
         final currentSnapshot = await repo.buildObservationSnapshotForRuns(
@@ -479,6 +475,13 @@ class CardEvolutionCollectorCoordinator {
             'Collector lease or reconciliation evidence changed',
           );
   }
+
+  bool _sameRuns(
+    List<LedgerReconciliationSuccessfulRunRow> left,
+    List<LedgerReconciliationSuccessfulRunRow> right,
+  ) =>
+      left.length == right.length &&
+      left.indexed.every((entry) => entry.$2.id == right[entry.$1].id);
 
   Future<void> _applyCollectorActions({
     required String sessionId,

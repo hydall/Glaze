@@ -84,7 +84,7 @@ class CollectorViewService {
     final observations = values[1] as List<CardEvolutionObservation>;
     final reconciliations =
         values[2] as List<LedgerReconciliationSuccessfulRunRow>;
-    final unclaimedPairs = values[3] as List<CardEvolutionCollectorPair>;
+    final unclaimedBatches = values[3] as List<CardEvolutionCollectorBatch>;
     final positions = {
       for (final entry in reconciliations.indexed) entry.$2.id: entry.$1,
     };
@@ -93,7 +93,7 @@ class CollectorViewService {
     ]);
     return CollectorViewSnapshot(
       observations: observations,
-      unclaimedPairCount: unclaimedPairs.length,
+      unclaimedPairCount: unclaimedBatches.length,
       runs: [
         for (final entry in rows.indexed)
           CollectorRunView(
@@ -101,7 +101,9 @@ class CollectorViewService {
             firstReconciliationOrdinal: switch (positions[entry
                 .$2
                 .reconciliationRunId]) {
-              final index? when index > 0 => reconciliations[index - 1].ordinal,
+              final index? when index >= collectorReconciliationBatchSize - 1 =>
+                reconciliations[index - collectorReconciliationBatchSize + 1]
+                    .ordinal,
               _ => null,
             },
             boundaryReconciliationOrdinal: entry.$2.reconciliationRunOrdinal,

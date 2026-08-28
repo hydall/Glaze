@@ -1022,7 +1022,7 @@ void main() {
         ..addFile(
           ArchiveFile.bytes(
             'manifest.json',
-            utf8.encode(jsonEncode({'schemaVersion': 13})),
+            utf8.encode(jsonEncode({'schemaVersion': 14})),
           ),
         );
 
@@ -1070,12 +1070,12 @@ void main() {
       );
     });
 
-    test('accepts backup schema v12', () async {
+    test('accepts backup schema v13', () async {
       final archive = Archive()
         ..addFile(
           ArchiveFile.bytes(
             'manifest.json',
-            utf8.encode(jsonEncode({'schemaVersion': 12})),
+            utf8.encode(jsonEncode({'schemaVersion': 13})),
           ),
         )
         ..addFile(

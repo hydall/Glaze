@@ -131,19 +131,19 @@ class AutomatedCardEvolutionService {
     String sessionId, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
   }) async {
-    // Explicit "Run now" retains its historical convenience: when the current
-    // reconciliation count is even it also refreshes observations. Automatic
-    // cadence never uses this path.
+    // Explicit "Run now" retains its historical convenience: on each complete
+    // reconciliation batch it also refreshes observations. Automatic cadence
+    // never uses this path.
     try {
       final count = await repo.countSuccessfulReconciliations(sessionId);
-      if (count > 0 && count.isEven) {
+      if (count > 0 && count % collectorReconciliationBatchSize == 0) {
         onStage?.call(AutomatedCardEvolutionStage.observation);
         final snapshot = await repo.buildObservationSnapshot(sessionId);
         if (snapshot != null) {
           await _collectorCoordinator.runObservationPass(
             sessionId,
             snapshot,
-            count ~/ 2,
+            count ~/ collectorReconciliationBatchSize,
           );
           await _collectorCoordinator.checkPromotions(sessionId);
         }
@@ -154,7 +154,7 @@ class AutomatedCardEvolutionService {
     return _runWriter(sessionId, onStage: onStage);
   }
 
-  /// Automatic lane: collect each completed pair of valid reconciliations,
+  /// Automatic lane: collect each completed batch of valid reconciliations,
   /// then run at most one overdue writer cycle per two collectors.
   Future<CardEvolutionFinalizeOutcome> runAfterReconciliation(
     LedgerReconciliationSuccessfulRunRow reconciliationRun, {
@@ -183,7 +183,7 @@ class AutomatedCardEvolutionService {
     return future.whenComplete(() => _inFlight.remove(sessionId));
   }
 
-  /// Recovery lane for valid reconciliation pairs that automatic dispatch did
+  /// Recovery lane for valid reconciliation batches that automatic dispatch did
   /// not process. Existing failed or live claims remain on their explicit
   /// recovery paths and are never bypassed.
   Future<CardEvolutionFinalizeOutcome> runPendingCollectors(String sessionId) {
@@ -326,9 +326,9 @@ class AutomatedCardEvolutionService {
       if (pending.isEmpty && currentRun == null) {
         return const CardEvolutionFinalizeOutcome('collectorUpToDate');
       }
-      for (final pair in pending) {
+      for (final batch in pending) {
         final collected = await _collectorCoordinator.runCollector(
-          pair,
+          batch,
           onObservationStage: () =>
               onStage?.call(AutomatedCardEvolutionStage.observation),
         );
@@ -381,7 +381,8 @@ class AutomatedCardEvolutionService {
       sessionId,
       boundaryRuns,
     );
-    if (reconciliationRuns.length != _writerCollectorBatchSize * 2) {
+    if (reconciliationRuns.length !=
+        _writerCollectorBatchSize * collectorReconciliationBatchSize) {
       return const CardEvolutionFinalizeOutcome('collectorUnavailable');
     }
     return _runWriter(
