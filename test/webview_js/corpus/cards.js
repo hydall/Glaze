@@ -220,6 +220,64 @@ loomledger { display: block; font-family: 'Card', cursive; }
     origin: 'html_sanitizer keeps <form> for message HTML',
     text: `<form class="picker"><fieldset><legend>Выбор</legend><input type="radio" name="r" id="r1" checked><label for="r1">Раз</label></fieldset></form>`,
   },
+  {
+    id: 'doc-query-card',
+    title: 'Card script that looks its elements up through the document',
+    origin: 'INV-MR3/MR4 — a shadow root is not the document',
+    text: `<div class="dq"><span id="dq-out">-</span><b class="dq-tag">x</b><form name="dq-form"><input name="dq-field" value="v"></form></div>
+<script>
+(function () {
+  var out = document.getElementById('dq-out');
+  out.textContent = [
+    document.querySelector('.dq-tag') ? 'qs' : '',
+    document.getElementsByClassName('dq-tag').length,
+    document.getElementsByTagName('b').length,
+    document.getElementsByName('dq-field').length,
+    document.forms.length,
+  ].join('/');
+})();
+</script>`,
+  },
+  {
+    id: 'doc-body-card',
+    title: 'Card that puts its modal in document.body',
+    origin: 'INV-MR6 — the node used to leave the message and lose its CSS',
+    text: `<style>.db-modal { color: rgb(9, 90, 200); }</style>
+<div class="db"><button id="db-open" onclick="dbOpen()">Открыть</button></div>
+<script>
+function dbOpen() {
+  var modal = document.createElement('div');
+  modal.className = 'db-modal';
+  modal.id = 'db-modal';
+  modal.textContent = 'модалка';
+  document.body.appendChild(modal);
+}
+</script>`,
+  },
+  {
+    id: 'doc-ready-card',
+    title: 'Card that waits for DOMContentLoaded',
+    origin: 'INV-MR7 — the real event fired long before the message existed',
+    text: `<div class="dr"><span id="dr-out">ждём</span></div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  document.getElementById('dr-out').textContent = 'готово';
+});
+window.onload = function () {
+  document.getElementById('dr-out').textContent += '+load';
+};
+</script>`,
+  },
+  {
+    id: 'import-font-card',
+    title: 'Card whose CSS tries to @import a font',
+    origin: 'INV-MR5 — the policy drops it, and used to drop it silently',
+    text: `<style>
+@import url('https://fonts.example/css2?family=Card');
+.if-title { font-family: 'Card', cursive; }
+</style>
+<div class="if-title">Заголовок</div>`,
+  },
 ];
 
 /** Cards whose first chunks must already render as a card, not as raw tags. */

@@ -98,3 +98,13 @@ text mid-pipeline: whatever pass runs next will take it apart.
 which cannot produce a block element. A `<p>` inside a marker's `<span>` is
 markup the browser throws straight back out — the marker then shows as empty
 text. See `docs/markdown-markers.md` for the marker list itself.
+
+---
+
+## The message body renders into a shadow root
+
+`.message-content` gets an open shadow root (`message_renderer.js`), which is
+what keeps a card's CSS out of the app chrome. What a card may rely on inside
+that root is a fixed list, not a guess: `renderer/message_document.js` and
+`docs/INVARIANTS.md` § 11 (INV-MR1…INV-MR8). Add to that contract rather than
+shimming one more case where it happens to be needed.

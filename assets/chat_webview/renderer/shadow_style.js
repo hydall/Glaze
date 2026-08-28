@@ -64,6 +64,10 @@ export const SHADOW_STYLE = `
   .glaze-message .font-style-block,
   .glaze-message .font-color-block { display: inline-block; vertical-align: baseline; color: inherit; }
   .glaze-message .code-block-wrapper { position: relative; margin: 8px 0; }
+  /* Where a card's document.body.appendChild lands (INV-MR6). display:
+     contents so the node lays out where the card expected it to, while
+     staying under the message's own stylesheet. */
+  .glaze-message .glaze-message-overlay { display: contents; }
   .glaze-message .code-lang {
     position: absolute; top: 4px; right: 8px;
     font-size: 10px; opacity: 0.4;

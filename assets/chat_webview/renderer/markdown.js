@@ -1,9 +1,9 @@
 import { syncCodeBlockMetadata } from './code_highlight.js';
 import { formatMessageBody } from './macros_in_message.js';
-import { reportCssErrors } from './css_diagnostics.js';
+import { inspectBlockedAtRules, reportCssErrors } from './css_diagnostics.js';
 import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
-import { rewriteTargetSelectors } from './target_toggle.js';
+import { installMessageDocument } from './message_document.js';
 
 /** Cheap pre-sanitize probe for an embedded `<script>` in formatted HTML. */
 const SCRIPT_TAG = /<script\b/i;
@@ -28,6 +28,26 @@ function notifyMessageScriptBlocked() {
   } catch (_) {
     // Bridge not wired yet — a later render notifies instead.
   }
+}
+
+/** `<style>` bodies as the message wrote them, before the CSS policy ran. */
+const STYLE_BLOCK = /<style\b[^>]*>([\s\S]*?)(?:<\/style\s*>|$)/gi;
+
+/**
+ * At-rules the CSS policy dropped, read off the formatted HTML.
+ *
+ * The sanitizer removes them, so by the time the message is in the DOM there
+ * is nothing left to notice — which is how a card's `@import`ed font came to
+ * fall back to `cursive` with no explanation anywhere.
+ */
+function blockedAtRules(formatted) {
+  const problems = [];
+  STYLE_BLOCK.lastIndex = 0;
+  let match;
+  while ((match = STYLE_BLOCK.exec(formatted)) !== null) {
+    problems.push(...inspectBlockedAtRules(match[1]));
+  }
+  return problems;
 }
 
 export function writeShadowContent({
@@ -61,10 +81,6 @@ export function writeShadowContent({
     root.innerHTML = sanitizeMessageHtml(formatted, {
       allowScripts: allowMessageScripts,
     });
-    // A fragment link cannot make an id inside a shadow root the document's
-    // target element, so the card's `:target` rules are re-keyed on the
-    // attribute the click dispatcher stamps instead.
-    rewriteTargetSelectors(root);
     // Before anything else touches the tree: the placeholder's content moves
     // behind a shadow boundary, out of reach of the message's own CSS.
     isolateImgGenPlaceholders(root);
@@ -72,8 +88,13 @@ export function writeShadowContent({
     // A reply still arriving is half a stylesheet, and every unclosed brace in
     // it is on its way to being closed — report only what the message settled
     // on. `isGenerating` covers the whole reply, `isTyping` its first chunks.
-    if (!isTyping && !window.bridge?.isGenerating) reportCssErrors(root);
-    executeInlineScripts(root, allowMessageScripts);
+    if (!isTyping && !window.bridge?.isGenerating) {
+      reportCssErrors(root, blockedAtRules(formatted));
+    }
+    // The message's document: `:target` re-keyed, the scoped `document.*`
+    // lookups installed for later events, and the card's own scripts run.
+    // See renderer/message_document.js and INV-MR1…INV-MR8.
+    installMessageDocument(root, { allowMessageScripts });
     fixDetailsSummaryArrows(root);
     retryFailedLocalImages(root);
   } catch (e) {
@@ -109,55 +130,6 @@ export function retryFailedLocalImages(root) {
         img.src = `${source}${separator}__glaze_retry=${attempt}`;
       }, LOCAL_IMAGE_RETRY_DELAY_MS * attempt);
     });
-  }
-}
-
-export function executeInlineScripts(root, allowMessageScripts = false) {
-  const scripts = Array.from(root.querySelectorAll('script'));
-  if (!allowMessageScripts) {
-    scripts.forEach(script => script.remove());
-    return;
-  }
-  for (const oldScript of scripts) {
-    // Inline scripts set via innerHTML are never executed by the browser.
-    // We run them manually with shimmed globals so ST-compatible regex
-    // scripts (BOOTS, HEADER, etc.) work inside shadow DOM:
-    //   - document.currentScript.previousElementSibling -> sibling in shadow root
-    //   - document.getElementById -> searches inside the shadow root first
-    //   - document.querySelector  -> searches inside the shadow root first
-    const prev = oldScript.previousElementSibling;
-    const src = oldScript.textContent || '';
-    try {
-      const shim = { previousElementSibling: prev, parentNode: prev ? prev.parentNode : null };
-      const csDesc = Object.getOwnPropertyDescriptor(Document.prototype, 'currentScript');
-      Object.defineProperty(document, 'currentScript', { value: shim, configurable: true });
-
-      const origGetById = document.getElementById.bind(document);
-      const origQS = document.querySelector.bind(document);
-      document.getElementById = function(id) {
-        const inShadow = root.querySelector('#' + CSS.escape(id));
-        return inShadow || origGetById(id);
-      };
-      document.querySelector = function(sel) {
-        const inShadow = root.querySelector(sel);
-        return inShadow || origQS(sel);
-      };
-
-      try {
-        new Function(src)();
-      } finally {
-        if (csDesc) {
-          Object.defineProperty(document, 'currentScript', csDesc);
-        } else {
-          delete document.currentScript;
-        }
-        document.getElementById = origGetById;
-        document.querySelector = origQS;
-      }
-    } catch (e) {
-      console.error('Inline script error:', e);
-    }
-    oldScript.remove();
   }
 }
 

@@ -162,7 +162,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 | Drift reads/writes, repositories | `docs/rules/database.md` |
 | Architecture details, full flow | `docs/ARCHITECTURE.md` |
 | Formal invariants with code references | `docs/INVARIANTS.md` |
-| Message rendering — `assets/chat_webview/formatter/`, `renderer/` | `docs/rules/message-rendering.md` |
+| Message rendering — `assets/chat_webview/formatter/`, `renderer/` | `docs/rules/message-rendering.md` + `docs/INVARIANTS.md` (INV-MR1–8) |
 | Custom `==...==` markdown markers | `docs/markdown-markers.md` |
 | Windows/build failures, dependency overrides | `docs/BUILD_NOTES.md` |
 | Class/file organization, decomposition | `docs/CODE_STYLE.md` |

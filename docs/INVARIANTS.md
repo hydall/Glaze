@@ -1286,6 +1286,103 @@ finally makes an ordinary markdown link inside a message open.
 
 ---
 
+## 11. Message Document Contract
+
+A message body renders into a shadow root (`.message-content`), which is what
+keeps a card's CSS out of the app chrome. Cards, though, are written against a
+*document* — they look elements up with `document.getElementById`, declare
+functions their `onclick=` attributes call, wait for `DOMContentLoaded`, and
+put a modal in `document.body`.
+
+This section is the **whole list** of what a card may rely on inside that
+shadow root. It is finite and written down on purpose: for a while each case
+was found by a user and patched on its own, and the next card always found the
+next hole. Implementation: `assets/chat_webview/renderer/message_document.js`
+(plus `target_toggle.js` for `:target`). Every item has a case in
+`test/webview_js/specs/document_contract.spec.js`.
+
+**Add to this contract rather than shimming one more thing where it happens to
+be needed.**
+
+### INV-MR1: A message script runs in the page's global scope
+
+A card's `<script>` is executed by appending a real `<script>` element to the
+document's head, so `function toggle() {}` in the card becomes a global and the
+`onclick="toggle()"` in the same card resolves. `new Function(src)()` gave the
+script a function scope of its own, and the attribute pointed at nothing.
+
+`document.currentScript` is shimmed for the duration to the element the script
+was written next to, so ST-style cards that read
+`currentScript.previousElementSibling` still find what they decorate. The
+`<script>` is removed from the message afterwards, and so is the injected one.
+
+### INV-MR2: The app's own document is restored exactly
+
+Every shim is an **own property** on `document` / `window`, installed with
+`Object.defineProperty` and removed with `delete`. Nothing on a prototype is
+rewritten, and after a message's code has run, `document` is what it was.
+
+App chrome appended while a message's code may be running has to say so:
+`appBody()` (from `message_document.js`) returns the real body, and the
+selection bar uses it. Reading `document.body` there would put the app's own
+element inside somebody's card.
+
+### INV-MR3: Document lookups find the message's own elements first
+
+`getElementById`, `querySelector`, `querySelectorAll`, `getElementsByClassName`,
+`getElementsByTagName` and `getElementsByName` search the message root first and
+**fall back to the real document** when it has no answer. The fallback is what
+keeps app-level code called from a card working.
+
+### INV-MR4: The document's collections are the message's
+
+`document.forms`, `document.images`, `document.links` and `document.styleSheets`
+return the message's own, for the same reason.
+
+### INV-MR5: Message CSS never reaches the network — and says so
+
+`@import`, `@font-face`, `@page` and `@namespace` are dropped by the CSS policy
+(`bridge/css_sanitizer.js`), together with every `url()`. This is deliberate:
+inline CSS in an untrusted message must not fetch, and a background image is a
+working beacon. Hoisting `@import` into the document would undo that.
+
+What changed is that the drop is **reported**: `inspectBlockedAtRules` reads the
+pre-sanitize `<style>` source and the message shows a CSS-error line, so a card
+whose font silently fell back to `cursive` now says why.
+
+### INV-MR6: `document.body` is the message's overlay layer
+
+A node handed to `document.body` goes into `.glaze-message-overlay`, a
+`display: contents` child of the message root. It lays out where the card
+expected it to and stays under the card's own stylesheet, instead of rendering
+naked in the app chrome. `document.head` is the message root for the same
+reason: a `<style>` a card appends belongs to that message.
+
+### INV-MR7: The load events a card waits for still arrive
+
+The real `DOMContentLoaded` and `load` fired long before the message existed. A
+`DOMContentLoaded` / `load` / `readystatechange` listener registered by a
+message script — through `document.addEventListener`, `window.addEventListener`
+or `window.onload` — is **collected instead of registered**, and called once the
+message's scripts have all run. The app's own listeners are never touched.
+
+### INV-MR8: The scope lasts as long as the message's code can run
+
+A card's modal is appended from its click handler, not from its `<script>`. The
+document scope is therefore re-installed for the length of any dispatch of a
+common interaction event whose composed path passes through a message root, and
+removed on the microtask that follows it.
+
+Only for a message whose own code has actually run: a message with no
+`<script>` never needs the scope, so for all but a handful of messages the
+app's document is never touched at all.
+
+Message scripts are off by default. With the toggle off nothing here runs at
+all: `<script>` elements are dropped before insertion, and the message is still
+rendered exactly as written — markup and CSS are not a script policy.
+
+---
+
 ## Refactor PR Checklist
 
 Before merging any structural PR:

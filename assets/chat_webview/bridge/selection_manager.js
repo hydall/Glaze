@@ -1,5 +1,7 @@
 ﻿/* Extracted from ../bridge.legacy.js. Keep public behavior stable. */
 
+import { appBody } from '../renderer/message_document.js';
+
 export class SelectionManager {
   constructor(sendToFlutter, getOrderedIds) {
     this._sendToFlutter = sendToFlutter;
@@ -157,7 +159,9 @@ export class SelectionManager {
       content.appendChild(selection.getRangeAt(i).cloneContents());
     }
     shadow.appendChild(content);
-    document.body.appendChild(host);
+    // appBody(), not document.body: this runs from a click that may have come
+    // out of a message, where `document.body` is that message's overlay.
+    appBody().appendChild(host);
     const text = content.innerText.trim();
     host.remove();
     return text;
@@ -178,7 +182,7 @@ export class SelectionManager {
         this._hideSelectionBar();
         window.getSelection().removeAllRanges();
       });
-      document.body.appendChild(bar);
+      appBody().appendChild(bar);
       this._barCreated = true;
     }
     this._selectedText = text;

@@ -145,6 +145,33 @@ function droppedRules(css, blocks) {
   return dropped;
 }
 
+/**
+ * At-rules the CSS policy drops before the message is rendered.
+ *
+ * `@import` is rejected on purpose (css_sanitizer.js: message CSS never
+ * reaches the network), and `@font-face` with it. The card author saw only a
+ * font that silently fell back, so the drop is reported instead of hidden.
+ * Read from the *pre-sanitize* source — by the time the style element exists,
+ * the rule is already gone.
+ */
+const BLOCKED_AT_RULE = /@(import|font-face|page|namespace)\b/gi;
+
+export function inspectBlockedAtRules(css) {
+  const source = String(css == null ? '' : css);
+  const found = [];
+  BLOCKED_AT_RULE.lastIndex = 0;
+  let match;
+  while ((match = BLOCKED_AT_RULE.exec(source)) !== null) {
+    const line = countNewlines(source, 0, match.index) + 1;
+    found.push(
+      `line ${line}: @${match[1].toLowerCase()} is not applied ` +
+      '(message CSS cannot load anything over the network)',
+    );
+    if (found.length >= MAX_REPORTED) break;
+  }
+  return found;
+}
+
 /** Problems in one `<style>` block, as lines ready to show. */
 export function inspectCss(css) {
   const source = String(css == null ? '' : css);
@@ -197,12 +224,12 @@ function buildReport(problems) {
  * from scratch — so a stale report cannot survive and the pass is a no-op for
  * the overwhelming majority of messages, which carry no `<style>` at all.
  */
-export function reportCssErrors(root) {
+export function reportCssErrors(root, extraProblems = []) {
   if (!root) return;
   const styles = root.querySelectorAll('style');
-  if (!styles.length) return;
+  if (!styles.length && !extraProblems.length) return;
 
-  const problems = [];
+  const problems = [...extraProblems];
   for (const style of styles) {
     problems.push(...inspectCss(style.textContent));
   }

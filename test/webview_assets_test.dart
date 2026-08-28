@@ -47,6 +47,7 @@ void main() {
   late String cssDiagnosticsJs;
   late String targetToggleJs;
   late String markdownJs;
+  late String messageDocumentJs;
   late String cssSanitizerJs;
   late String imgGenPlaceholderJs;
   late String imgGenTimerJs;
@@ -72,6 +73,7 @@ void main() {
     rendererJs = [
       _rendererAsset('shadow_style.js'),
       _rendererAsset('markdown.js'),
+      _rendererAsset('message_document.js'),
       _rendererAsset('image_embed.js'),
       _rendererAsset('message_template.js'),
       rendererMessageJs,
@@ -89,6 +91,7 @@ void main() {
     cssDiagnosticsJs = _rendererAsset('css_diagnostics.js');
     targetToggleJs = _rendererAsset('target_toggle.js');
     markdownJs = _rendererAsset('markdown.js');
+    messageDocumentJs = _rendererAsset('message_document.js');
     cssSanitizerJs = _bridgeAsset('css_sanitizer.js');
     selectionManagerJs = _bridgeAsset('selection_manager.js');
     swipeHandlerJs = _bridgeAsset('swipe_gesture_handler.js');
@@ -252,13 +255,16 @@ void main() {
     });
 
     test('disabled path removes scripts before returning', () {
-      final marker = 'export function executeInlineScripts';
-      final body = _extractBlockBody(rendererJs, rendererJs.indexOf(marker));
+      final marker = 'export function runMessageScripts';
+      final body = _extractBlockBody(
+        messageDocumentJs,
+        messageDocumentJs.indexOf(marker),
+      );
       expect(body, contains('if (!allowMessageScripts)'));
       expect(body, contains('script.remove()'));
       expect(
         body.indexOf('script.remove()'),
-        lessThan(body.indexOf('new Function(src)()')),
+        lessThan(body.indexOf('runInGlobalScope(')),
       );
     });
 
@@ -1943,20 +1949,25 @@ void main() {
     });
 
     test('both message-HTML insertion points re-key `:target`', () {
-      for (final source in [markdownJs, rendererMessageJs]) {
-        expect(
-          source,
-          contains("import { rewriteTargetSelectors } from './target_toggle.js';"),
-        );
-        expect(
-          source,
-          contains('rewriteTargetSelectors(root);'),
-          reason:
-              'A URL fragment never resolves inside a shadow root, so a card '
-              'that toggles a panel with `:target` needs the re-key on every '
-              'path that writes a message body',
-        );
-      }
+      // A URL fragment never resolves inside a shadow root, so a card that
+      // toggles a panel with `:target` needs the re-key on every path that
+      // writes a message body. The render path goes through the document
+      // contract; the search re-render rewrites innerHTML on its own.
+      expect(
+        markdownJs,
+        contains("import { installMessageDocument } from './message_document.js';"),
+      );
+      expect(markdownJs, contains('installMessageDocument(root, { allowMessageScripts })'));
+      expect(
+        messageDocumentJs,
+        contains("import { rewriteTargetSelectors } from './target_toggle.js';"),
+      );
+      expect(messageDocumentJs, contains('rewriteTargetSelectors(root);'));
+      expect(
+        rendererMessageJs,
+        contains("import { rewriteTargetSelectors } from './target_toggle.js';"),
+      );
+      expect(rendererMessageJs, contains('rewriteTargetSelectors(root);'));
     });
 
     test('links are resolved through composedPath, not e.target', () {
@@ -1985,6 +1996,140 @@ void main() {
       );
     });
   });
+
+  // ─── What a card may rely on inside a message shadow root ─────────────────
+  group('message document contract (renderer/message_document.js)', () {
+    // Behaviour is covered case by case in test/webview_js —
+    // specs/document_contract.spec.js, one test per INV-MR item. These keep
+    // the contract in one module instead of a shim per complaint.
+    test('a card script runs in the page global scope', () {
+      // A function scope of its own is what left `onclick="jscToggle()"`
+      // pointing at nothing: the card declared the handler, and nobody could
+      // see it (INV-MR1).
+      final body = _extractBlockBody(
+        messageDocumentJs,
+        messageDocumentJs.indexOf('function runInGlobalScope('),
+      );
+      expect(body, contains("document.createElement('script')"));
+      expect(
+        body,
+        contains('REAL_HEAD.appendChild(element)'),
+        reason: 'document.head is the message root while the scope is on, and '
+            'a script appended to a shadow root never runs',
+      );
+    });
+
+    test('every shim is an own property, so restoring is a delete', () {
+      // INV-MR2: the app's own document must come back exactly as it was.
+      final body = _extractBlockBody(
+        messageDocumentJs,
+        messageDocumentJs.indexOf('function installDocumentScope('),
+      );
+      expect(
+        body,
+        contains('Object.defineProperty(target, name, { configurable: true'),
+      );
+      expect(
+        body,
+        contains('for (const { target, name } of defined) delete target[name];'),
+      );
+    });
+
+    test('the contract covers every document lookup a card makes', () {
+      for (final name in [
+        'getElementById',
+        'querySelector',
+        'querySelectorAll',
+        'getElementsByClassName',
+        'getElementsByTagName',
+        'getElementsByName',
+        'forms',
+        'images',
+        'links',
+        'styleSheets',
+        'body',
+        'head',
+      ]) {
+        expect(
+          messageDocumentJs,
+          contains("'$name'"),
+          reason: 'INV-MR3/MR4: $name must resolve inside the message',
+        );
+      }
+    });
+
+    test('a lookup the message cannot answer reaches the real document', () {
+      expect(
+        messageDocumentJs,
+        contains('documentQuery.getElementById.call(document, id)'),
+      );
+      expect(
+        messageDocumentJs,
+        contains('documentQuery.querySelector.call(document, selector)'),
+      );
+    });
+
+    test('document.body is the message overlay; app chrome opts out', () {
+      // INV-MR6. A node the card hands to the document stays under the
+      // message's stylesheet instead of rendering naked in the app chrome.
+      expect(
+        messageDocumentJs,
+        contains("define(document, 'body', { get: () => messageOverlay(root) })"),
+      );
+      expect(messageDocumentJs, contains('export function appBody()'));
+      expect(rendererJs, contains('.glaze-message-overlay { display: contents; }'));
+      // App chrome appended during a message event has to say so, or it lands
+      // inside somebody's card.
+      expect(selectionManagerJs, contains('appBody().appendChild'));
+      expect(selectionManagerJs, isNot(contains('document.body.appendChild')));
+    });
+
+    test('the load events a card waits for are collected and replayed', () {
+      // INV-MR7: the real DOMContentLoaded fired before the message existed,
+      // so a card that waits for it would wait forever.
+      expect(
+        messageDocumentJs,
+        contains(
+          "const READY_EVENTS = new Set(['DOMContentLoaded', 'load', "
+          "'readystatechange'])",
+        ),
+      );
+      expect(
+        messageDocumentJs,
+        contains("listener.call(document, new Event('DOMContentLoaded'))"),
+      );
+      expect(messageDocumentJs, contains("define(window, 'onload'"));
+    });
+
+    test('the scope outlives the script, for the length of an event', () {
+      // A card's modal is appended from its click handler, long after its
+      // <script> finished running.
+      expect(messageDocumentJs, contains('const SCOPED_EVENTS ='));
+      expect(messageDocumentJs, contains('queueMicrotask(restore)'));
+      expect(messageDocumentJs, contains('setTimeout(restore, 0)'));
+      // …and only for a message whose own code has actually run, so the app's
+      // document is untouched for every message that carries no script.
+      expect(messageDocumentJs, contains('scripted.has(root)'));
+    });
+
+    test('a dropped @import is reported instead of failing silently', () {
+      // INV-MR5: message CSS may not reach the network (css_sanitizer.js), so
+      // the rule is dropped — but the card author used to see only a font
+      // that fell back to cursive, with nothing on screen to say why.
+      expect(
+        cssDiagnosticsJs,
+        contains('export function inspectBlockedAtRules('),
+      );
+      expect(cssDiagnosticsJs, contains('@(import|font-face|page|namespace)'));
+      expect(
+        markdownJs,
+        contains('reportCssErrors(root, blockedAtRules(formatted))'),
+        reason: 'the at-rule is read off the pre-sanitize HTML; by insertion '
+            'time it is already gone',
+      );
+    });
+  });
+
 
   // ─── GenTimer extraction (Phase 3.5) ───────────────────────────────────────
   group('GenTimer (bridge.js)', () {
