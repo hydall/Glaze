@@ -60,12 +60,19 @@ Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use whatever is
 ## CI gate
 
 `.github/workflows/ci.yml` runs on every PR into `nightly`, `staging` or
-`stable` and does two things: `flutter analyze` and `flutter test`. A red check
-means the PR is not merged — no exceptions, no "it works on my machine".
+`stable`: `flutter analyze`, `flutter test`, and the WebView render suite
+(`test/webview_js` — Node + Playwright, no Flutter). A red check means the PR
+is not merged — no exceptions, no "it works on my machine".
 
 Only analyzer **errors** fail the run (`--no-fatal-infos --no-fatal-warnings`);
 infos and hints from the strict lint set are not build-breaking and must not be
 allowed to block every PR.
+
+The render suite loads the real `assets/chat_webview/` modules in a headless
+Chromium and asserts on the DOM, the resolved CSS and what a click does. Run it
+with `cd test/webview_js && npm ci && npx playwright install chromium && npm
+test`; the rule that goes with it — every rendering bug becomes a corpus entry
+before it is fixed — is in `docs/rules/message-rendering.md`.
 
 Running `flutter analyze` locally before opening the PR is still useful — it is
 faster feedback — but it is not the gate. The gate is CI, because it cannot be

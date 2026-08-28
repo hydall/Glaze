@@ -18,7 +18,7 @@ const LOCAL_IMAGE_RETRY_DELAY_MS = 350;
  * Tell Flutter that a message wanted to run JS while execution is off, so the
  * app can offer to turn it on. The check has to run on the *formatted* HTML:
  * with execution off `sanitizeMessageHtml` drops every `<script>` before
- * insertion, so by the time `executeInlineScripts` looks at the DOM there is
+ * insertion, so by the time the script runner looks at the DOM there is
  * nothing left to see. The bridge de-duplicates, so calling this on every
  * render is fine.
  */
