@@ -373,6 +373,13 @@ Long-running loops that produce those batches must also stay serial and yield
 materialise one item's bytes at a time — see
 `CharacterBulkImportService` / `CharacterImportWriteBuffer`.
 
+The same applies to a restore: never queue a whole table into one `db.batch`.
+`FlutterBackupImporter` streams `tables/*.jsonl` line by line (spilling an entry
+past 8 MB to a temp file first) and writes 500 rows per batch, so peak memory
+does not scale with table size. The trade-off is deliberate: a table is no
+longer written atomically, which is fine because the restore truncates it first
+and a cancelled restore is re-run from scratch.
+
 ---
 
 ## MemoryBook compatibility cleanup (v66)

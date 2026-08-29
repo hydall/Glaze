@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:drift/drift.dart';
@@ -12,11 +13,16 @@ import '../../llm/transport/endpoint_normalizer.dart';
 import '../../models/studio_agent_codec.dart';
 import '../../models/studio_preset_codec.dart';
 import '../image_storage_service.dart';
+import 'archive_stream.dart';
 import 'backup_cancel.dart';
 import 'backup_helpers.dart';
 
 class FlutterBackupImporter extends BackupHelpers {
   static const int _batchSize = 500;
+
+  /// Table entries larger than this are decompressed to a temp file and read
+  /// back from disk instead of being materialised in memory.
+  static const int _spillToDiskBytes = 8 * 1024 * 1024;
   static const int _maxSchemaVersion = 13;
 
   @override
@@ -287,6 +293,15 @@ class FlutterBackupImporter extends BackupHelpers {
     }
   }
 
+  /// Imports one `tables/<name>.jsonl` entry, row by row.
+  ///
+  /// The old path read the whole entry into memory, decoded it into one string,
+  /// split that into a list of every line, and then queued every INSERT into a
+  /// single batch (plus a second copy in a buffer that was never read) — four
+  /// simultaneous copies of a table that runs to hundreds of megabytes in a
+  /// chat-heavy library, which is where a restore ran out of memory. Lines are
+  /// now streamed and written [_batchSize] at a time, so peak memory is one
+  /// chunk plus one batch no matter how big the table is.
   Future<void> _importTableFromJsonl(
     ArchiveFile file,
     String tableName,
@@ -296,67 +311,163 @@ class FlutterBackupImporter extends BackupHelpers {
       await db.customStatement('DELETE FROM $tableName');
     } catch (_) {}
 
-    final bytes = file.readBytes();
-    if (bytes == null || bytes.isEmpty) return;
-
-    var lines = utf8
-        .decode(bytes, allowMalformed: true)
-        .split('\n')
-        .where((l) => l.trim().isNotEmpty)
-        .toList();
-    // ArchiveFile caches what it decompressed; the lines are decoded now, so
-    // the cached copy of a table that can run to hundreds of megabytes is pure
-    // ballast for the rest of the import.
-    file.clear();
+    // This table is inserted in a specific order (variation rows first), so its
+    // lines have to be buffered before anything can be written. It holds one
+    // row per acceptance — nothing like the tables the streaming path exists
+    // for.
     if (tableName == 'lorebook_use_acceptance_records') {
-      int rank(String line) {
-        try {
-          final row = jsonDecode(line) as Map<String, dynamic>;
-          return row['acceptance_kind'] == 'variation' ? 0 : 1;
-        } catch (_) {
-          return 2;
+      final lines = <String>[];
+      await for (final line in _tableLines(file)) {
+        lines.add(line);
+      }
+      lines.sort((a, b) => _acceptanceRank(a).compareTo(_acceptanceRank(b)));
+      var pending = <String>[];
+      for (final line in lines) {
+        pending.add(line);
+        if (pending.length >= _batchSize) {
+          _cancel.check();
+          await _insertJsonlRows(tableName, knownCols, pending);
+          pending = <String>[];
         }
       }
-
-      lines.sort((a, b) => rank(a).compareTo(rank(b)));
+      await _insertJsonlRows(tableName, knownCols, pending);
+      return;
     }
 
-    final buffer = <(String, List<dynamic>)>[];
-    var totalInserted = 0;
-    await db.transaction(() async {
-      await db.batch((batch) {
-        for (final line in lines) {
-          if ((++totalInserted % _batchSize) == 0) _cancel.check();
-          Map<String, dynamic> r;
-          try {
-            r = jsonDecode(line) as Map<String, dynamic>;
-            _stageLegacyStudioRuntimeRow(tableName, r);
-            r = _canonicalizeRow(tableName, r);
-          } catch (_) {
-            continue;
-          }
-          final columns = r.keys.where(knownCols.contains).toList();
-          if (columns.isEmpty) continue;
+    var pending = <String>[];
+    await for (final line in _tableLines(file)) {
+      pending.add(line);
+      if (pending.length >= _batchSize) {
+        _cancel.check();
+        await _insertJsonlRows(tableName, knownCols, pending);
+        pending = <String>[];
+      }
+    }
+    await _insertJsonlRows(tableName, knownCols, pending);
+  }
 
-          final placeholders = columns.map((_) => '?').join(', ');
-          final quotedColumns = columns.map((c) => '"$c"').join(', ');
-          final sql =
-              'INSERT OR REPLACE INTO $tableName ($quotedColumns) VALUES ($placeholders)';
-          final args = <dynamic>[];
-          for (final c in columns) {
-            final v = r[c];
-            if (v is List || v is Map) {
-              args.add(jsonEncode(v));
-            } else {
-              args.add(v);
-            }
-          }
-          buffer.add((sql, args));
-          batch.customStatement(sql, args);
+  /// Streams the non-empty lines of a `.jsonl` archive entry.
+  ///
+  /// Entries past [_spillToDiskBytes] are decompressed straight to a temp file
+  /// and read back from there: `ArchiveFile` can only hand out its content as
+  /// one decompressed buffer it then caches, which for the chat tables is the
+  /// allocation that kills the import. Smaller entries take the in-memory path
+  /// and are released right after.
+  Stream<String> _tableLines(ArchiveFile file) async* {
+    final spill = _spillToDisk(file);
+    if (spill != null) {
+      try {
+        yield* spill
+            .openRead()
+            .transform(const Utf8Decoder(allowMalformed: true))
+            .transform(const LineSplitter())
+            .where((line) => line.trim().isNotEmpty);
+      } finally {
+        try {
+          if (spill.existsSync()) spill.deleteSync();
+        } catch (_) {}
+      }
+      return;
+    }
+
+    try {
+      yield* readArchiveFileLines(file).where((l) => l.trim().isNotEmpty);
+    } finally {
+      // ArchiveFile caches what it decompressed; drop it before the next table.
+      file.clear();
+    }
+  }
+
+  /// Decompresses [file] straight to a temp file when it is too big to hold in
+  /// memory, and returns that file.
+  ///
+  /// Returns null when the entry is small enough to read in memory, or when the
+  /// spill could not be written (no temp space, read-only tmp) — the caller
+  /// then falls back to the in-memory read, because a hungrier import still
+  /// beats a failed restore.
+  File? _spillToDisk(ArchiveFile file) {
+    if (file.size <= _spillToDiskBytes) return null;
+
+    final spill = File(
+      p.join(
+        Directory.systemTemp.path,
+        'glaze_restore_${DateTime.now().microsecondsSinceEpoch}_'
+            '${p.basename(file.name)}',
+      ),
+    );
+    try {
+      final sink = OutputFileStream(spill.path);
+      try {
+        // Streams the inflate straight into the file: nothing but the codec's
+        // own window is held in memory.
+        file.decompress(sink);
+      } finally {
+        sink.closeSync();
+      }
+      file.clear();
+      return spill;
+    } catch (_) {
+      try {
+        if (spill.existsSync()) spill.deleteSync();
+      } catch (_) {}
+      return null;
+    }
+  }
+
+  static int _acceptanceRank(String line) {
+    try {
+      final row = jsonDecode(line) as Map<String, dynamic>;
+      return row['acceptance_kind'] == 'variation' ? 0 : 1;
+    } catch (_) {
+      return 2;
+    }
+  }
+
+  /// Writes one chunk of JSONL rows in a single batch.
+  Future<void> _insertJsonlRows(
+    String tableName,
+    Set<String> knownCols,
+    List<String> lines,
+  ) async {
+    if (lines.isEmpty) return;
+    await db.batch((batch) {
+      for (final line in lines) {
+        Map<String, dynamic> row;
+        try {
+          row = jsonDecode(line) as Map<String, dynamic>;
+          _stageLegacyStudioRuntimeRow(tableName, row);
+          row = _canonicalizeRow(tableName, row);
+        } catch (_) {
+          continue;
         }
-      });
+        final statement = _insertStatement(tableName, knownCols, row);
+        if (statement == null) continue;
+        batch.customStatement(statement.$1, statement.$2);
+      }
     });
-    buffer.clear();
+  }
+
+  /// Builds the INSERT for one decoded row, or null when the row carries no
+  /// column this build knows about.
+  (String, List<dynamic>)? _insertStatement(
+    String tableName,
+    Set<String> knownCols,
+    Map<String, dynamic> row,
+  ) {
+    final columns = row.keys.where(knownCols.contains).toList();
+    if (columns.isEmpty) return null;
+
+    final placeholders = columns.map((_) => '?').join(', ');
+    final quotedColumns = columns.map((c) => '"$c"').join(', ');
+    final args = <dynamic>[];
+    for (final c in columns) {
+      final v = row[c];
+      args.add(v is List || v is Map ? jsonEncode(v) : v);
+    }
+    return (
+      'INSERT OR REPLACE INTO $tableName ($quotedColumns) VALUES ($placeholders)',
+      args,
+    );
   }
 
   Future<void> _rebuildSessionLorebookEmbeddingQueue() async {
