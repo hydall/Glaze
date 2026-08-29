@@ -63,8 +63,17 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
     return null;
   }
 
-  Future<void> _runReconciliation() async {
+  Future<void> _runReconciliation({required bool hasMissingLedger}) async {
     if (_runningReconciliation) return;
+    if (hasMissingLedger) {
+      GlazeToast.show(
+        context,
+        'agent_ops_missing_ledger_blocks_reconciliation'.tr(),
+        isError: true,
+        position: ToastPosition.top,
+      );
+      return;
+    }
     setState(() => _runningReconciliation = true);
     try {
       final outcome = await ref
@@ -101,6 +110,14 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
 
   Future<void> _rerunLedger({required bool missingEndpoint}) async {
     if (_runningLedger) return;
+    if (missingEndpoint) {
+      GlazeToast.show(
+        context,
+        'agent_ops_missing_ledger_recovery_started'.tr(),
+        isError: true,
+        position: ToastPosition.top,
+      );
+    }
     setState(() => _runningLedger = true);
     try {
       final service = ref.read(manualStudioLedgerServiceProvider);
@@ -288,11 +305,13 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                         FilledButton.tonalIcon(
                           onPressed:
                               ledgerEnabled &&
-                                  data.missingLedgerTarget == null &&
                                   !_runningLedger &&
                                   !_runningReconciliation &&
                                   _regeneratingRunId == null
-                              ? _runReconciliation
+                              ? () => _runReconciliation(
+                                  hasMissingLedger:
+                                      data.missingLedgerTarget != null,
+                                )
                               : null,
                           icon: _runningReconciliation
                               ? const SizedBox.square(

@@ -2444,6 +2444,8 @@
   "agent_ops_run_reconciliation": "Запустить сверку",
   "agent_ops_rerun_ledger": "Повторить последний Ledger",
   "agent_ops_run_missing_ledger": "Запустить пропущенный Ledger",
+  "agent_ops_missing_ledger_blocks_reconciliation": "Сначала запусти пропущенный Ledger, затем reconciliation.",
+  "agent_ops_missing_ledger_recovery_started": "Найден пропущенный Ledger. Запускаю его вместо последнего хода.",
   "agent_ops_commits": "Коммиты",
   "agent_ops_no_commits": "Для этой сессии нет коммитов сверки.",
   "agent_ops_parsing_attempts": "Попытки разбора",

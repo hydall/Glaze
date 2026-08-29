@@ -2415,6 +2415,8 @@
   "agent_ops_run_reconciliation": "Run reconciliation",
   "agent_ops_rerun_ledger": "Rerun latest Ledger",
   "agent_ops_run_missing_ledger": "Run missing Ledger",
+  "agent_ops_missing_ledger_blocks_reconciliation": "Run the missing Ledger before starting reconciliation.",
+  "agent_ops_missing_ledger_recovery_started": "A missing Ledger was found. Running it instead of the latest turn.",
   "agent_ops_commits": "Commits",
   "agent_ops_no_commits": "No reconciliation commits recorded for this session.",
   "agent_ops_parsing_attempts": "Parsing attempts",
