@@ -92,10 +92,12 @@ class EffectiveCanonContextLoader {
   Future<EffectiveCanonContext> load({
     required String sessionId,
     required Character sourceCharacter,
+    String? excludeSnapshotMessageId,
   }) async => _load(
     sourceCharacter: sourceCharacter,
     sessionId: sessionId,
     reconcile: true,
+    excludeSnapshotMessageId: excludeSnapshotMessageId,
   );
 
   /// Builds the current effective canon without reconciling or persisting a
@@ -103,10 +105,12 @@ class EffectiveCanonContextLoader {
   Future<EffectiveCanonContext> loadReadOnly({
     required String sessionId,
     required Character sourceCharacter,
+    String? excludeSnapshotMessageId,
   }) async => _load(
     sourceCharacter: sourceCharacter,
     sessionId: sessionId,
     reconcile: false,
+    excludeSnapshotMessageId: excludeSnapshotMessageId,
   );
 
   /// Builds effective canon from an exact reconciliation state without
@@ -170,11 +174,13 @@ class EffectiveCanonContextLoader {
     required String sessionId,
     required Character sourceCharacter,
     required EffectiveCanonContextStamp stamp,
+    String? excludeSnapshotMessageId,
   }) async =>
       (await _load(
         sourceCharacter: sourceCharacter,
         sessionId: sessionId,
         reconcile: false,
+        excludeSnapshotMessageId: excludeSnapshotMessageId,
       )).stamp.identity ==
       stamp.identity;
 
@@ -182,6 +188,7 @@ class EffectiveCanonContextLoader {
     required String sessionId,
     required Character sourceCharacter,
     required bool reconcile,
+    String? excludeSnapshotMessageId,
   }) async {
     final source = reconcile
         ? await _reconcileSource(sourceCharacter)
@@ -189,6 +196,7 @@ class EffectiveCanonContextLoader {
     final input = await _readRepository.readFromSource(
       sessionId: sessionId,
       sourceCharacter: sourceCharacter,
+      excludeSnapshotMessageId: excludeSnapshotMessageId,
     );
     final assembly = _assemble(
       EffectiveCanonAssemblyInput(

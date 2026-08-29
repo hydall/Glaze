@@ -164,7 +164,8 @@ void main() {
     expect(ledger.lastTurnConfig?.pipelineSettings, isNot(same(pipeline)));
     expect(ledger.lastConfig?.endpoint, 'https://snapshot.example');
     expect(ledger.lastConfig?.model, 'snapshot-model');
-    expect(ledger.lastRecentHistory, contains('Assistant: Two'));
+    expect(ledger.lastRecentHistory, contains('User: Second'));
+    expect(ledger.lastRecentHistory, isNot(contains('Assistant: Two')));
     expect(ledger.lastMacroContext?.charName, 'Character');
     final diagnostic = await trackerRepo.get(
       'session',
@@ -251,6 +252,19 @@ void main() {
       ),
     );
     expect(ledger.reconcileCalls, 0);
+  });
+
+  test('missing Ledger recovery reruns the exact due endpoint', () async {
+    final messages = reconciliationMessages();
+    await putSession('session', messages: messages);
+
+    final outcome = await createService().rerunMissingForReconciliation(
+      'session',
+    );
+
+    expect(outcome.target.id, 'a6');
+    expect(ledger.runCalls, 1);
+    expect(ledger.lastTarget?.id, 'a6');
   });
 
   test('disabled Ledger preset blocks manual reconciliation', () async {
@@ -404,6 +418,7 @@ class _FakeLedgerExecutor implements StudioLedgerExecutor {
   MacroContext? lastMacroContext;
   LedgerReconciliationPlan? lastPlan;
   StudioLedgerEngine? lastEngine;
+  ChatMessage? lastTarget;
   String? lastExpectedRunId;
   Future<void> Function()? beforeRunComplete;
   Future<void> Function()? beforeReconcileComplete;
@@ -428,6 +443,7 @@ class _FakeLedgerExecutor implements StudioLedgerExecutor {
     lastRecentHistory = recentHistoryText;
     lastMacroContext = macroCtx;
     lastEngine = engine;
+    lastTarget = target;
     if (!runStarted.isCompleted) runStarted.complete();
     await beforeRunComplete?.call();
     if (!await isStillCurrent()) return LedgerRunResult.aborted;

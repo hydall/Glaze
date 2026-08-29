@@ -77,9 +77,13 @@ class EffectiveCanonReadRepository {
   Future<EffectiveCanonAssemblyInput> readFromSource({
     required String sessionId,
     required Character sourceCharacter,
+    String? excludeSnapshotMessageId,
   }) => db.transaction(
-    () =>
-        _readFromSource(sessionId: sessionId, sourceCharacter: sourceCharacter),
+    () => _readFromSource(
+      sessionId: sessionId,
+      sourceCharacter: sourceCharacter,
+      excludeSnapshotMessageId: excludeSnapshotMessageId,
+    ),
   );
 
   Future<EffectiveCanonAssemblyInput> _read({
@@ -101,13 +105,20 @@ class EffectiveCanonReadRepository {
   Future<EffectiveCanonAssemblyInput> _readFromSource({
     required String sessionId,
     required Character sourceCharacter,
+    String? excludeSnapshotMessageId,
   }) async {
     final lineage = await revisionRepo.getForCharacter(sourceCharacter.id);
     final baseline = await baselineRepo.getBySessionId(sessionId);
-    final facts = await factRepo.getReviewableForSession(sessionId);
-    final raw =
-        await (_runtimeRawTrackerStateLoader?.call(sessionId) ??
-            _rawTrackerStateReader.read(sessionId));
+    final facts = (await factRepo.getReviewableForSession(sessionId))
+        .where((fact) => fact.sourceMessageId != excludeSnapshotMessageId)
+        .toList(growable: false);
+    final raw = excludeSnapshotMessageId == null
+        ? await (_runtimeRawTrackerStateLoader?.call(sessionId) ??
+              _rawTrackerStateReader.read(sessionId))
+        : await _rawTrackerStateReader.read(
+            sessionId,
+            excludeSnapshotMessageId: excludeSnapshotMessageId,
+          );
     final transitions = await transitionRepo.getForContext(
       characterId: sourceCharacter.id,
       sessionId: sessionId,

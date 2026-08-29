@@ -17,13 +17,21 @@ final class LedgerRawTrackerStateReader {
   final TrackerRepo _trackers;
   final TrackerSnapshotRepo _snapshots;
 
-  Future<LedgerRawTrackerState> read(String sessionId) async {
-    final snapshot = await _snapshots.getLatestCommitted(sessionId);
+  Future<LedgerRawTrackerState> read(
+    String sessionId, {
+    String? excludeSnapshotMessageId,
+  }) async {
+    final snapshot = excludeSnapshotMessageId == null
+        ? await _snapshots.getLatestCommitted(sessionId)
+        : await _snapshots.getLatestCommittedExcludingMessage(
+            sessionId,
+            excludeSnapshotMessageId,
+          );
     final controls = await _trackers.getLiveCanonControls(sessionId);
     final committed = snapshot?.trackers
         .where((tracker) => tracker.scope == 'ledger')
         .toList(growable: true);
-    if (committed != null) {
+    if (committed != null && excludeSnapshotMessageId == null) {
       final names = committed.map((tracker) => tracker.name).toSet();
       final liveClock = await _trackers.getCompleteGameTime(sessionId);
       committed.addAll(

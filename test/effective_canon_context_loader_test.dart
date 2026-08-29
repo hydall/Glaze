@@ -9,11 +9,13 @@ import 'package:glaze_flutter/core/db/repositories/character_knowledge_fact_repo
 import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_revision_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/tracker_snapshot_repo.dart';
 import 'package:glaze_flutter/core/llm/prompt/ledger_tracker_loader.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/character_knowledge_fact.dart';
 import 'package:glaze_flutter/core/models/character_session_baseline.dart';
 import 'package:glaze_flutter/core/models/tracker.dart';
+import 'package:glaze_flutter/core/models/tracker_snapshot.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewriter_contracts.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/effective_canon_context_loader.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/effective_canon_assembler.dart';
@@ -118,6 +120,65 @@ void main() {
 
     expect(context.effectiveRevision.number, 1);
     expect(await revisions.getForCharacter('c'), isEmpty);
+  });
+
+  test('regen exclusion removes target snapshot and target facts', () async {
+    await TrackerSnapshotRepo(db).upsert(
+      const TrackerSnapshot(
+        sessionId: 's',
+        messageId: 'previous',
+        swipeId: 0,
+        agentSwipeId: 0,
+        trackers: [
+          Tracker(
+            sessionId: 's',
+            name: 'scene.location',
+            value: 'before',
+            scope: 'ledger',
+          ),
+        ],
+        committed: true,
+        createdAt: 1,
+      ),
+    );
+    await TrackerSnapshotRepo(db).upsert(
+      const TrackerSnapshot(
+        sessionId: 's',
+        messageId: 'target',
+        swipeId: 0,
+        agentSwipeId: 0,
+        trackers: [
+          Tracker(
+            sessionId: 's',
+            name: 'scene.location',
+            value: 'after',
+            scope: 'ledger',
+          ),
+        ],
+        committed: true,
+        createdAt: 2,
+      ),
+    );
+    await facts.insertTentative(_fact('kept', sourceMessageId: 'previous'));
+    await facts.insertTentative(_fact('excluded', sourceMessageId: 'target'));
+
+    final context = await loader.loadReadOnly(
+      sessionId: 's',
+      sourceCharacter: _character('one'),
+      excludeSnapshotMessageId: 'target',
+    );
+
+    expect(context.committedTrackers.single.value, 'before');
+    expect(context.resolution.activeFacts.map((fact) => fact.id), ['kept']);
+    expect(
+      await loader.isStillCurrentReadOnly(
+        sessionId: 's',
+        sourceCharacter: _character('one'),
+        stamp: context.stamp,
+        excludeSnapshotMessageId: 'target',
+      ),
+      isTrue,
+    );
   });
 
   test('read-only exact state overrides current Ledger and facts', () async {
@@ -504,16 +565,17 @@ void main() {
 Character _character(String description) =>
     Character(id: 'c', name: 'Character', description: description);
 
-CharacterKnowledgeFact _fact(String id) => CharacterKnowledgeFact(
-  id: id,
-  chatSessionId: 's',
-  knowerKey: 'alice',
-  subjectKey: 'bob',
-  factClass: CharacterKnowledgeFactClass.knowledge,
-  predicate: 'knows',
-  object: 'original',
-  epistemicState: CharacterKnowledgeEpistemicState.observed,
-  sourceMessageId: 'm',
-  sourceSwipeId: 0,
-  sourceAgentSwipeId: 0,
-);
+CharacterKnowledgeFact _fact(String id, {String sourceMessageId = 'm'}) =>
+    CharacterKnowledgeFact(
+      id: id,
+      chatSessionId: 's',
+      knowerKey: 'alice',
+      subjectKey: 'bob',
+      factClass: CharacterKnowledgeFactClass.knowledge,
+      predicate: 'knows',
+      object: 'original',
+      epistemicState: CharacterKnowledgeEpistemicState.observed,
+      sourceMessageId: sourceMessageId,
+      sourceSwipeId: 0,
+      sourceAgentSwipeId: 0,
+    );

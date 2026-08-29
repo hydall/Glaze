@@ -180,4 +180,77 @@ void main() {
       {'world:time': '14:15', 'world:date': '26.08.2026', 'world:day': '0'},
     );
   });
+
+  test(
+    'regen exclusion reads the previous snapshot without live leakage',
+    () async {
+      await snapshots.upsertTrackers(
+        sessionId: 'session',
+        messageId: 'previous',
+        swipeId: 0,
+        agentSwipeId: 0,
+        committed: true,
+        trackers: const [
+          Tracker(
+            sessionId: 'session',
+            name: 'world:time',
+            value: '12:00',
+            scope: 'ledger',
+          ),
+          Tracker(
+            sessionId: 'session',
+            name: 'scene.location',
+            value: 'before',
+            scope: 'ledger',
+          ),
+        ],
+      );
+      await snapshots.upsertTrackers(
+        sessionId: 'session',
+        messageId: 'target',
+        swipeId: 0,
+        agentSwipeId: 0,
+        committed: true,
+        trackers: const [
+          Tracker(
+            sessionId: 'session',
+            name: 'world:time',
+            value: '12:30',
+            scope: 'ledger',
+          ),
+          Tracker(
+            sessionId: 'session',
+            name: 'scene.location',
+            value: 'after',
+            scope: 'ledger',
+          ),
+        ],
+      );
+      await trackers.upsertValue(
+        'session',
+        'world:time',
+        '12:30',
+        scope: 'ledger',
+      );
+      await trackers.upsertValue(
+        'session',
+        'world:date',
+        '01.01.2027',
+        scope: 'ledger',
+      );
+      await trackers.upsertValue('session', 'world:day', '1', scope: 'ledger');
+
+      final state = await db.transaction(
+        () => reader.read('session', excludeSnapshotMessageId: 'target'),
+      );
+
+      expect(
+        {
+          for (final tracker in state.committedTrackers)
+            tracker.name: tracker.value,
+        },
+        {'world:time': '12:00', 'scene.location': 'before'},
+      );
+    },
+  );
 }

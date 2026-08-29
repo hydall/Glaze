@@ -2443,6 +2443,7 @@
   "agent_ops_checkpoint": "Контрольная точка: сообщений — {count}, последнее — сообщение {messageNumber}",
   "agent_ops_run_reconciliation": "Запустить сверку",
   "agent_ops_rerun_ledger": "Повторить последний Ledger",
+  "agent_ops_run_missing_ledger": "Запустить пропущенный Ledger",
   "agent_ops_commits": "Коммиты",
   "agent_ops_no_commits": "Для этой сессии нет коммитов сверки.",
   "agent_ops_parsing_attempts": "Попытки разбора",

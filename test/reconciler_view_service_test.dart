@@ -7,6 +7,8 @@ import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_debug_run_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/tracker_snapshot_repo.dart';
+import 'package:glaze_flutter/core/models/tracker_snapshot.dart';
 import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 import 'package:glaze_flutter/features/chat/services/reconciler_view_service.dart';
 
@@ -23,6 +25,7 @@ void main() {
       debugRepo: LedgerDebugRunRepo(db),
       checkpointRepo: LedgerReconciliationCheckpointRepo(db),
       chatRepo: ChatRepo(db),
+      snapshotRepo: TrackerSnapshotRepo(db),
     );
   });
 
@@ -65,6 +68,39 @@ void main() {
       expect(snapshot.runs.single.invalidation?.reason, 'manual replacement');
     },
   );
+
+  test('reports the exact missing Ledger endpoint for a due range', () async {
+    final messages = [
+      const {'id': 'a1', 'role': 'assistant', 'content': 'Opening'},
+      for (var i = 2; i <= 7; i++) ...[
+        {'id': 'u$i', 'role': 'user', 'content': 'User $i'},
+        {'id': 'a$i', 'role': 'assistant', 'content': 'Assistant $i'},
+      ],
+    ];
+    await db.customStatement(
+      'INSERT INTO chat_sessions '
+      '(session_id, character_id, session_index, messages_json) '
+      'VALUES (?, ?, ?, ?)',
+      ['due', 'character', 0, jsonEncode(messages)],
+    );
+
+    var snapshot = await service.load('due');
+    expect(snapshot.missingLedgerTarget?.id, 'a6');
+
+    await TrackerSnapshotRepo(db).upsert(
+      const TrackerSnapshot(
+        sessionId: 'due',
+        messageId: 'a6',
+        swipeId: 0,
+        agentSwipeId: 0,
+        trackers: [],
+        committed: true,
+        createdAt: 1,
+      ),
+    );
+    snapshot = await service.load('due');
+    expect(snapshot.missingLedgerTarget, isNull);
+  });
 
   test(
     'returns reconciliation debug rows without normal Ledger rows',

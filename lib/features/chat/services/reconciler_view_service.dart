@@ -7,6 +7,8 @@ import '../../../core/db/repositories/chat_repo.dart';
 import '../../../core/db/repositories/ledger_debug_run_repo.dart';
 import '../../../core/db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import '../../../core/db/repositories/ledger_reconciliation_run_repo.dart';
+import '../../../core/db/repositories/tracker_snapshot_repo.dart';
+import '../../../core/llm/studio_ledger_reconciliation.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/state/db_provider.dart';
 
@@ -52,6 +54,7 @@ final class ReconcilerViewSnapshot {
     required this.debugRuns,
     required this.checkpoint,
     required this.checkpointEndMessageOrdinal,
+    required this.missingLedgerTarget,
   });
 
   final ReconciliationRunIntegrity integrity;
@@ -59,6 +62,7 @@ final class ReconcilerViewSnapshot {
   final List<LedgerDebugRunRow> debugRuns;
   final LedgerReconciliationCheckpoint? checkpoint;
   final int? checkpointEndMessageOrdinal;
+  final ChatMessage? missingLedgerTarget;
 
   bool get chainIsValid => integrity is ReconciliationRunValid;
 }
@@ -69,19 +73,22 @@ class ReconcilerViewService {
     required LedgerDebugRunRepo debugRepo,
     required LedgerReconciliationCheckpointRepo checkpointRepo,
     required ChatRepo chatRepo,
-  }) : this._(runRepo, debugRepo, checkpointRepo, chatRepo);
+    required TrackerSnapshotRepo snapshotRepo,
+  }) : this._(runRepo, debugRepo, checkpointRepo, chatRepo, snapshotRepo);
 
   const ReconcilerViewService._(
     this._runRepo,
     this._debugRepo,
     this._checkpointRepo,
     this._chatRepo,
+    this._snapshotRepo,
   );
 
   final LedgerReconciliationRunRepo _runRepo;
   final LedgerDebugRunRepo _debugRepo;
   final LedgerReconciliationCheckpointRepo _checkpointRepo;
   final ChatRepo _chatRepo;
+  final TrackerSnapshotRepo _snapshotRepo;
 
   Future<ReconcilerViewSnapshot> load(String sessionId) async {
     final values = await Future.wait<Object?>([
@@ -114,6 +121,13 @@ class ReconcilerViewService {
     };
     final logicalIds = logical.map((row) => row.id).toSet();
     final invalidationByRun = {for (final row in invalidations) row.runId: row};
+    final missingLedgerTarget = session == null
+        ? null
+        : await _missingLedgerTarget(
+            session,
+            checkpoint: checkpoint,
+            previousEndMessageId: logical.lastOrNull?.endMessageId,
+          );
 
     return ReconcilerViewSnapshot(
       integrity: integrity,
@@ -121,6 +135,7 @@ class ReconcilerViewService {
       checkpointEndMessageOrdinal: checkpoint == null
           ? null
           : messageOrdinals[checkpoint.endMessageId],
+      missingLedgerTarget: missingLedgerTarget,
       debugRuns: debugRows,
       runs: [
         for (final row in physical)
@@ -134,6 +149,36 @@ class ReconcilerViewService {
           ),
       ],
     );
+  }
+
+  Future<ChatMessage?> _missingLedgerTarget(
+    ChatSession session, {
+    required LedgerReconciliationCheckpoint? checkpoint,
+    required String? previousEndMessageId,
+  }) async {
+    final trigger = session.messages.reversed.where((message) {
+      return message.role == 'assistant' &&
+          !message.isError &&
+          !message.isTyping &&
+          !message.isHidden &&
+          message.content.trim().isNotEmpty;
+    }).firstOrNull;
+    if (trigger == null) return null;
+    final plan = const LedgerReconciliationPlanner().plan(
+      messages: session.messages,
+      currentAssistantMessageId: trigger.id,
+      checkpoint: checkpoint,
+      previousEndMessageId: previousEndMessageId,
+    );
+    if (plan == null) return null;
+    final endpoint = plan.endMessage;
+    final snapshot = await _snapshotRepo.getByAnchor(
+      sessionId: session.id,
+      messageId: endpoint.id,
+      swipeId: endpoint.swipeId,
+      agentSwipeId: endpoint.agentSwipeId,
+    );
+    return snapshot?.committed == true ? null : endpoint;
   }
 
   ReconciliationRunView _toRunView(
@@ -190,6 +235,7 @@ final reconcilerViewServiceProvider = Provider<ReconcilerViewService>((ref) {
     debugRepo: ref.watch(ledgerDebugRunRepoProvider),
     checkpointRepo: ref.watch(ledgerReconciliationCheckpointRepoProvider),
     chatRepo: ref.watch(chatRepoProvider),
+    snapshotRepo: ref.watch(trackerSnapshotRepoProvider),
   );
 });
 

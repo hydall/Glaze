@@ -36,7 +36,6 @@ import '../../../core/models/pipeline_settings.dart';
 import '../../../core/services/model_usage_service.dart';
 import '../../../core/services/preset_defaults.dart';
 import '../../../core/state/active_selection_provider.dart';
-import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../chat_provider.dart';
 import '../chat_state.dart';
@@ -130,6 +129,7 @@ class StreamGenerationService {
             ? null
             : kContinueInstruction,
         includeEffectiveCanon: turnConfig.enabled,
+        excludeSnapshotMessageId: regenTargetId,
         shouldAbort: _isAborted,
         cancelToken: cancelToken,
         onPhase: _phase,
@@ -328,6 +328,7 @@ class StreamGenerationService {
           studioReportedPhase = next;
           _phase(next);
         }
+
         void scheduleStudioStreamingUpdate() {
           if (studioFrameScheduled) return;
           studioFrameScheduled = true;
@@ -468,15 +469,12 @@ class StreamGenerationService {
             studioFinalMessages,
           ),
         );
-        // Opening game clock: read the current ledger trackers before the
-        // message is written so the badge travels with the initial append
-        // (the post-turn Ledger stamp refines it afterwards). Null when no
-        // complete date/day/time tuple exists — never a partial clock.
-        final openingTrackers = await _ref
-            .read(trackerRepoProvider)
-            .getBySessionAndScope(session.id, 'ledger');
-        final openingClock = GameTimeState.fromTrackers(
-          openingTrackers,
+        // Use the same clock projection that built the prompt. During regen it
+        // excludes the target message's own snapshot.
+        final openingClock = GameTimeState(
+          time: inputs.gameTime,
+          date: inputs.gameDate,
+          day: int.tryParse(inputs.gameDay ?? ''),
         ).format();
         final finalState = _writer
             .writeAssistant(

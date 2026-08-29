@@ -2414,6 +2414,7 @@
   "agent_ops_checkpoint": "Checkpoint: {count} messages, ending at message {messageNumber}",
   "agent_ops_run_reconciliation": "Run reconciliation",
   "agent_ops_rerun_ledger": "Rerun latest Ledger",
+  "agent_ops_run_missing_ledger": "Run missing Ledger",
   "agent_ops_commits": "Commits",
   "agent_ops_no_commits": "No reconciliation commits recorded for this session.",
   "agent_ops_parsing_attempts": "Parsing attempts",

@@ -99,16 +99,19 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
     }
   }
 
-  Future<void> _rerunLedger() async {
+  Future<void> _rerunLedger({required bool missingEndpoint}) async {
     if (_runningLedger) return;
-    final target = await _latestAssistant();
-    if (target == null || !mounted) return;
     setState(() => _runningLedger = true);
     try {
-      final outcome = await ref
-          .read(manualStudioLedgerServiceProvider)
-          .rerun(sessionId: widget.sessionId, target: target);
-      if (!mounted) return;
+      final service = ref.read(manualStudioLedgerServiceProvider);
+      final outcome = missingEndpoint
+          ? await service.rerunMissingForReconciliation(widget.sessionId)
+          : await (() async {
+              final target = await _latestAssistant();
+              if (target == null) return null;
+              return service.rerun(sessionId: widget.sessionId, target: target);
+            })();
+      if (outcome == null || !mounted) return;
       final result = outcome.result;
       GlazeToast.show(
         context,
@@ -304,7 +307,10 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                                   !_runningLedger &&
                                   !_runningReconciliation &&
                                   _regeneratingRunId == null
-                              ? _rerunLedger
+                              ? () => _rerunLedger(
+                                  missingEndpoint:
+                                      data.missingLedgerTarget != null,
+                                )
                               : null,
                           icon: _runningLedger
                               ? const SizedBox.square(
@@ -312,7 +318,12 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                                   child: GlazeSpinner(),
                                 )
                               : const Icon(Icons.replay_outlined),
-                          label: Text('agent_ops_rerun_ledger'.tr()),
+                          label: Text(
+                            (data.missingLedgerTarget == null
+                                    ? 'agent_ops_rerun_ledger'
+                                    : 'agent_ops_run_missing_ledger')
+                                .tr(),
+                          ),
                         ),
                       ],
                     ),

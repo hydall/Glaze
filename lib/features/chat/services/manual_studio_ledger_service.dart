@@ -281,30 +281,35 @@ class ManualStudioLedgerService {
     );
   }
 
+  Future<ManualStudioLedgerResult> rerunMissingForReconciliation(
+    String sessionId,
+  ) async {
+    final session = await chatRepo.getById(sessionId);
+    if (session == null) throw StateError('Session not found');
+    final plan = await _reconciliationPlan(session);
+    if (plan == null) {
+      throw StateError('No batch of five committed Ledger ranges is due');
+    }
+    final endpoint = plan.endMessage;
+    final snapshot = await snapshotRepo.getByAnchor(
+      sessionId: sessionId,
+      messageId: endpoint.id,
+      swipeId: endpoint.swipeId,
+      agentSwipeId: endpoint.agentSwipeId,
+    );
+    if (snapshot?.committed == true) {
+      throw StateError('The reconciliation endpoint is already committed');
+    }
+    return rerun(sessionId: sessionId, target: endpoint);
+  }
+
   Future<ManualStudioLedgerResult> reconcile(String sessionId) async {
     final turnConfigFuture = _resolveTurnConfig(sessionId);
     final session = await chatRepo.getById(sessionId);
     if (session == null) throw StateError('Session not found');
     final turnConfig = await turnConfigFuture;
     _requireLedgerEnabled(turnConfig);
-    final trigger = session.messages.reversed.where((message) {
-      return message.role == 'assistant' &&
-          !message.isError &&
-          !message.isTyping &&
-          !message.isHidden &&
-          message.content.trim().isNotEmpty;
-    }).firstOrNull;
-    if (trigger == null) {
-      throw StateError('No assistant turn can trigger reconciliation');
-    }
-    final checkpoint = await reconciliationCheckpointRepo.get(sessionId);
-    final previousHead = await reconciliationRunRepo.getHead(sessionId);
-    final plan = const LedgerReconciliationPlanner().plan(
-      messages: session.messages,
-      currentAssistantMessageId: trigger.id,
-      checkpoint: checkpoint,
-      previousEndMessageId: previousHead?.endMessageId,
-    );
+    final plan = await _reconciliationPlan(session);
     if (plan == null) {
       throw StateError('No batch of five committed Ledger ranges is due');
     }
@@ -355,6 +360,29 @@ class ManualStudioLedgerService {
       target: endpoint,
       result: result,
       startedAtMs: startedAt,
+    );
+  }
+
+  Future<LedgerReconciliationPlan?> _reconciliationPlan(
+    ChatSession session,
+  ) async {
+    final trigger = session.messages.reversed.where((message) {
+      return message.role == 'assistant' &&
+          !message.isError &&
+          !message.isTyping &&
+          !message.isHidden &&
+          message.content.trim().isNotEmpty;
+    }).firstOrNull;
+    if (trigger == null) {
+      throw StateError('No assistant turn can trigger reconciliation');
+    }
+    final checkpoint = await reconciliationCheckpointRepo.get(session.id);
+    final previousHead = await reconciliationRunRepo.getHead(session.id);
+    return const LedgerReconciliationPlanner().plan(
+      messages: session.messages,
+      currentAssistantMessageId: trigger.id,
+      checkpoint: checkpoint,
+      previousEndMessageId: previousHead?.endMessageId,
     );
   }
 

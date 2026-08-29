@@ -153,6 +153,7 @@ class PromptPayloadBuilder {
     bool skipVectorSearch = false,
     bool includeEffectiveCanon = false,
     bool readOnlyEffectiveCanon = false,
+    String? excludeSnapshotMessageId,
     bool allowRemoteRetrieval = true,
     bool Function()? shouldAbort,
     CancelToken? cancelToken,
@@ -184,10 +185,15 @@ class PromptPayloadBuilder {
               .loadReadOnly(
                 sessionId: session.id,
                 sourceCharacter: sourceCharacter,
+                excludeSnapshotMessageId: excludeSnapshotMessageId,
               )
         : await _ref
               .read(effectiveCanonContextLoaderProvider)
-              .load(sessionId: session.id, sourceCharacter: sourceCharacter);
+              .load(
+                sessionId: session.id,
+                sourceCharacter: sourceCharacter,
+                excludeSnapshotMessageId: excludeSnapshotMessageId,
+              );
     final character = effectiveContext?.character ?? sourceCharacter;
     final effectiveProjection = effectiveContext == null
         ? null
@@ -502,6 +508,7 @@ class PromptPayloadBuilder {
       charId: effectiveCharId,
       session: session,
       context: effectiveContext,
+      excludeSnapshotMessageId: excludeSnapshotMessageId,
     );
     final gameTimeState = GameTimeState.fromTrackers(
       ledgerTrackers ?? const <Tracker>[],
@@ -757,6 +764,7 @@ class PromptPayloadBuilder {
     required String charId,
     required ChatSession? session,
     required EffectiveCanonContext? context,
+    String? excludeSnapshotMessageId,
   }) async {
     if (session == null || context == null) return;
     final current = await _ref.read(characterRepoProvider).getById(charId);
@@ -768,6 +776,7 @@ class PromptPayloadBuilder {
               sessionId: session.id,
               sourceCharacter: current,
               stamp: context.stamp,
+              excludeSnapshotMessageId: excludeSnapshotMessageId,
             );
     if (!isCurrent) {
       throw const PromptBuildStaleException(
