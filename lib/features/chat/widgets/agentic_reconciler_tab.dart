@@ -288,6 +288,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                         FilledButton.tonalIcon(
                           onPressed:
                               ledgerEnabled &&
+                                  data.missingLedgerTarget == null &&
                                   !_runningLedger &&
                                   !_runningReconciliation &&
                                   _regeneratingRunId == null
@@ -302,6 +303,12 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                           label: Text('agent_ops_run_reconciliation'.tr()),
                         ),
                         FilledButton.tonalIcon(
+                          style: data.missingLedgerTarget == null
+                              ? null
+                              : FilledButton.styleFrom(
+                                  backgroundColor: context.cs.errorContainer,
+                                  foregroundColor: context.cs.onErrorContainer,
+                                ),
                           onPressed:
                               ledgerEnabled &&
                                   !_runningLedger &&
@@ -317,7 +324,11 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                                   dimension: 16,
                                   child: GlazeSpinner(),
                                 )
-                              : const Icon(Icons.replay_outlined),
+                              : Icon(
+                                  data.missingLedgerTarget == null
+                                      ? Icons.replay_outlined
+                                      : Icons.warning_amber_rounded,
+                                ),
                           label: Text(
                             (data.missingLedgerTarget == null
                                     ? 'agent_ops_rerun_ledger'
