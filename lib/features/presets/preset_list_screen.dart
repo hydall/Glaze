@@ -41,6 +41,7 @@ import 'preset_editor_screen.dart';
 import 'preset_entry.dart';
 import 'preset_export.dart';
 import 'preset_image.dart';
+import 'preset_initial_folder.dart';
 import 'preset_list_provider.dart';
 import 'preset_selection_provider.dart';
 import 'preset_sort.dart';
@@ -107,6 +108,16 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   /// The list scrolls to the active preset once per screen open, not on every
   /// rebuild — otherwise the user could never scroll away from it.
   bool _didAutoScroll = false;
+
+  /// Whether the "open the folder the active preset lives in" decision has
+  /// already been made. Like [_didAutoScroll] it runs once per screen open, so
+  /// activating another preset later never yanks the list somewhere else.
+  bool _didRevealActiveFolder = false;
+
+  /// Folder [_revealActiveFolder] stepped into, if any. The auto-scroll treats
+  /// it as the list it opened on, so the active row is revealed inside it just
+  /// as it would be at the top level.
+  String? _autoOpenedFolderId;
 
   /// Set until that scroll has been made. [_activeRowKey] is only attached
   /// while it holds, so the two lists that overlap during a folder cross-fade
@@ -200,12 +211,61 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     // The auto-scroll is done with once the user navigates, and its key must be
     // free before a second list is mounted alongside the current one.
     _revealPending = false;
+    _autoOpenedFolderId = null;
     setState(() => _currentFolderId = id);
   }
 
   void _leaveFolder() {
     _revealPending = false;
+    _autoOpenedFolderId = null;
     setState(() => _currentFolderId = null);
+  }
+
+  /// Opens the folder the active preset is filed into, once, while the first
+  /// frame is being built.
+  ///
+  /// A preset that lives in a folder is not listed at the top level, so without
+  /// this the screen opens on a list where nothing is highlighted and the user
+  /// has to remember which folder they put the preset in.
+  ///
+  /// Called from [build] before the folder is read, so the very first frame is
+  /// already the folder's — no `setState`, no cross-fade out of a list that was
+  /// never meant to be shown.
+  void _revealActiveFolder({
+    required String? activeId,
+    required AsyncValue<String> activeStudioId,
+    required bool studioEnabled,
+  }) {
+    if (_didRevealActiveFolder || _currentFolderId != null) return;
+    final memberships = ref.watch(presetFolderMembershipsProvider);
+    final folders = ref.watch(presetFoldersProvider);
+    // Both still loading on the first frames: deciding now would always read
+    // "in no folder", so wait for the real data instead of burning the one shot.
+    if (!memberships.hasValue || !folders.hasValue) return;
+
+    final String? id;
+    final PresetKind kind;
+    if (studioEnabled) {
+      if (!activeStudioId.hasValue) return;
+      id = activeStudioId.requireValue;
+      kind = PresetKind.agentic;
+    } else {
+      id = activeId;
+      kind = PresetKind.normal;
+    }
+    // Decided — whatever the answer is, so that activating a preset inside a
+    // folder later does not pull the list back into it.
+    _didRevealActiveFolder = true;
+
+    final folder = initialPresetFolderId(
+      activeId: id,
+      kind: kind,
+      memberships: memberships.requireValue,
+      folders: folders.requireValue,
+    );
+    if (folder == null) return;
+    _currentFolderId = folder;
+    _autoOpenedFolderId = folder;
   }
 
   String? _folderName(String id) {
@@ -218,14 +278,21 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     final presets = ref.watch(presetListProvider);
     final activeId = ref.watch(activePresetIdProvider);
     final studioPresets = ref.watch(studioPresetListProvider);
-    final activeStudioId =
-        ref.watch(activeStudioPresetProvider).value ?? 'default';
+    final activeStudio = ref.watch(activeStudioPresetProvider);
+    final activeStudioId = activeStudio.value ?? 'default';
     // The Studio master switch is the single "which kind is in effect" flag:
     // ON → an agentic preset is active, OFF → a plain preset is active. Using
     // it as the discriminator keeps the two lists mutually exclusive so exactly
     // one card is ever highlighted.
     final studioEnabled = ref.watch(studioFeatureEnabledProvider);
     final selection = ref.watch(presetSelectionProvider);
+    // Before the title, `canPop` and the body read it: they must all agree on
+    // which list this frame shows.
+    _revealActiveFolder(
+      activeId: activeId,
+      activeStudioId: activeStudio,
+      studioEnabled: studioEnabled,
+    );
     final folderId = _currentFolderId;
 
     final String title;
@@ -368,9 +435,13 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
     final activeIndex = items.indexWhere(isActive);
 
-    // Auto-reveal the active preset the first time the plain (unfiltered,
-    // top-level) list is shown.
-    if (folderId == null && !_filters.isActive && _typeFilter == null) {
+    // Auto-reveal the active preset the first time the plain (unfiltered) list
+    // is shown — the top level, or the folder [_revealActiveFolder] opened on
+    // its behalf.
+    final onOpeningList =
+        folderId == null ||
+        (_autoOpenedFolderId != null && folderId == _autoOpenedFolderId);
+    if (onOpeningList && !_filters.isActive && _typeFilter == null) {
       _scheduleAutoScroll(activeIndex);
     }
 
@@ -1438,6 +1509,10 @@ class _PsCard extends ConsumerWidget {
         enableRipple: true,
         tint: Color.lerp(baseTint, activeTint, t),
         borderRadius: BorderRadius.circular(12),
+        // The cover fills the card edge to edge, so a border painted behind it
+        // is invisible — including the accent frame that marks the preset in
+        // effect. Over artwork the frame is drawn on top instead.
+        borderOnTop: cover != null,
         border: Border.all(
           color: Color.lerp(idleBorder, activeBorder, t)!,
           width: idleWidth + (_accentBorderWidth - idleWidth) * t,

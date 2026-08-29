@@ -39,6 +39,14 @@ class GlassSurface extends ConsumerWidget {
   /// recompute that made the keyboard animation janky.
   final bool blurViaWebView;
 
+  /// Paints [border] *over* the child instead of behind it.
+  ///
+  /// The surface's decoration is a background one, so a child that fills the
+  /// surface edge to edge — a cover image, a full-bleed gradient — simply
+  /// paints the frame away. Set this on those surfaces so their border (and,
+  /// with it, any selected/active highlight riding on it) stays visible.
+  final bool borderOnTop;
+
   const GlassSurface({
     super.key,
     required this.child,
@@ -53,6 +61,7 @@ class GlassSurface extends ConsumerWidget {
     this.rippleRadiusFactor = 1.0,
     this.rippleIntensity = 0.15,
     this.blurViaWebView = false,
+    this.borderOnTop = false,
   });
 
   @override
@@ -82,11 +91,12 @@ class GlassSurface extends ConsumerWidget {
             alpha: (effectiveTint.a * alpha).clamp(0.0, 1.0),
           );
 
+    final backgroundBorder = borderOnTop ? null : border;
     final filled = DecoratedBox(
       decoration: BoxDecoration(
         color: fillColor,
         borderRadius: borderRadius,
-        border: border,
+        border: backgroundBorder,
         boxShadow: boxShadow,
       ),
       // The foreground content is isolated in its own compositing layer so that
@@ -126,6 +136,20 @@ class GlassSurface extends ConsumerWidget {
           )
         : filled;
 
+    // Drawn last, on top of the child, when the caller asked for it. Borders
+    // paint inside their box, so this covers exactly the same pixels the
+    // background border would have.
+    final framed = (borderOnTop && border != null)
+        ? DecoratedBox(
+            position: DecorationPosition.foreground,
+            decoration: BoxDecoration(
+              borderRadius: borderRadius,
+              border: border,
+            ),
+            child: withNoise,
+          )
+        : withNoise;
+
     final surface = ClipRRect(
       borderRadius: borderRadius,
       // Deliberately NOT `BackdropFilter.grouped`: grouped filters blur the
@@ -137,10 +161,10 @@ class GlassSurface extends ConsumerWidget {
           ? RepaintBoundary(
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-                child: withNoise,
+                child: framed,
               ),
             )
-          : withNoise,
+          : framed,
     );
 
     final hasTapHandler = onTap != null || onLongPress != null;
