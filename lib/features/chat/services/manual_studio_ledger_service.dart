@@ -252,6 +252,7 @@ class ManualStudioLedgerService {
           session.messages,
           maxMessages: 10,
           upToMessageId: target.id,
+          excludeMessageId: target.id,
         ),
         target: target,
         macroCtx: macroCtx,
@@ -548,18 +549,25 @@ String _recentHistoryText(
   List<ChatMessage> messages, {
   int maxMessages = 10,
   String? upToMessageId,
+  String? excludeMessageId,
 }) {
   var source = messages;
   if (upToMessageId != null) {
     final idx = messages.indexWhere((m) => m.id == upToMessageId);
     if (idx >= 0) source = messages.sublist(0, idx + 1);
   }
-  final start = source.length > maxMessages ? source.length - maxMessages : 0;
+  final eligible = source.where((message) {
+    if (message.id == excludeMessageId) return false;
+    if (message.role != 'user' && message.role != 'assistant') return false;
+    if (message.isHidden || message.isError || message.isTyping) return false;
+    return message.content.trim().isNotEmpty;
+  }).toList();
+  final start = eligible.length > maxMessages
+      ? eligible.length - maxMessages
+      : 0;
   final lines = <String>[];
-  for (final msg in source.sublist(start)) {
-    if (msg.isError || msg.isTyping) continue;
+  for (final msg in eligible.sublist(start)) {
     final content = msg.content.trim();
-    if (content.isEmpty) continue;
     final role = msg.role == 'assistant' ? 'Assistant' : 'User';
     lines.add('$role: $content');
   }

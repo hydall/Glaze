@@ -394,7 +394,7 @@ Rules:
   FORWARD — never rewind it; flashbacks stay in prose. Past midnight, advance
   world:day (day 0 = first story day) and world:date.
   For an ordinary continuous turn with no explicit duration, advance the clock
-  by 3–10 minutes. Use an explicitly narrated duration instead when available.
+  by 1–5 minutes. Use an explicitly narrated duration instead when available.
   Do not invent time skips the narrative does not support.''';
 
   static const String _legacyTurnOnlySystemPrompt =

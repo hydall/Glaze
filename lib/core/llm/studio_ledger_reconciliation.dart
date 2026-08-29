@@ -267,13 +267,11 @@ Never create facts, rewrite fact content, or retract a fact merely because it is
 old or absent from the review range.
 
 Game clock (world:time, world:date, world:day): advance world:time (24h HH:MM)
-through the review range according to how much in-game time the narrated events
-take, crossing midnight into the next world:day (day 0 = first story day) and
-world:date. Keep the complete DD.MM.YYYY / RP day / HH:MM tuple and never guess
-a missing date or day. The clock only moves FORWARD — never rewind it; treat
-flashbacks and memories as prose, not clock changes. For each ordinary continuous
-turn with no explicit duration, advance time by 3–10 minutes and accumulate those
-steps across the review range. Use explicitly narrated durations when available.''';
+only to correct a demonstrable clock error in the committed endpoint state.
+The ordinary turns in the review range were already applied; never add their
+elapsed time again. Keep the complete DD.MM.YYYY / RP day / HH:MM tuple and never
+guess a missing date or day. The clock only moves FORWARD — never rewind it;
+treat flashbacks and memories as prose, not clock changes.''';
   }
 
   List<CharacterKnowledgeFact> relevantKnowledgeFacts(

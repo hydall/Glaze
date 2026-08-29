@@ -154,6 +154,10 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
 
   Future<void> _initializeStartup() async {
     try {
+      await _runStartupStep(
+        'orphaned reconciliation leases',
+        ref.read(ledgerReconciliationLeaseRepoProvider).clearProcessOrphans,
+      );
       await _runStartupStep('dotenv', () => dotenv.load(fileName: '.env'));
       await _runStartupStep('tokenizer', preloadO200kBase);
       await _runStartupStep('prompt worker', PromptWorker.ensureInitialized);

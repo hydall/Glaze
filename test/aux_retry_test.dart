@@ -130,6 +130,38 @@ void main() {
       expect(outcome.attempts.last.status, 'ok');
     });
 
+    for (final type in const [
+      DioExceptionType.connectionError,
+      DioExceptionType.connectionTimeout,
+      DioExceptionType.sendTimeout,
+      DioExceptionType.receiveTimeout,
+    ]) {
+      test('retries transient Dio $type', () async {
+        var calls = 0;
+        final outcome =
+            await const AuxRetryRunner(
+              policy: AuxRetryPolicy(
+                maxAttempts: 2,
+                backoffDelays: [Duration.zero],
+              ),
+            ).run(
+              attempt: (_) async {
+                calls++;
+                if (calls == 1) {
+                  throw DioException(
+                    requestOptions: RequestOptions(path: ''),
+                    type: type,
+                  );
+                }
+                return 'recovered';
+              },
+            );
+
+        expect(outcome.text, 'recovered');
+        expect(calls, 2);
+      });
+    }
+
     test(
       'does NOT retry on TimeoutException when retryOnTimeout=false',
       () async {

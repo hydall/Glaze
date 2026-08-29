@@ -118,4 +118,18 @@ void main() {
 
     expect(await db.select(db.ledgerReconciliationLeases).get(), isEmpty);
   });
+
+  test('new app scope clears process-orphaned leases', () async {
+    await repo.acquire(
+      sessionId: 'session',
+      ownerId: 'dead-process',
+      purpose: 'manual',
+      ttlSeconds: 3600,
+      now: 100,
+    );
+
+    await repo.clearProcessOrphans();
+
+    expect(await db.select(db.ledgerReconciliationLeases).get(), isEmpty);
+  });
 }

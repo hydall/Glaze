@@ -1518,18 +1518,8 @@ Future<({String url, Future<void> Function() close})> _serve(
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   unawaited(
     server.first.then((request) async {
-      await utf8.decoder.bind(request).join();
-      request.response.headers.contentType = ContentType.json;
-      request.response.write(
-        jsonEncode({
-          'choices': [
-            {
-              'message': {'content': content},
-            },
-          ],
-        }),
-      );
-      await request.response.close();
+      final body = await utf8.decoder.bind(request).join();
+      await _respondChat(request, body, content);
     }),
   );
   return (
@@ -1545,18 +1535,8 @@ Future<({String url, Future<void> Function() close})> _serveTwice(
 ) async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   server.listen((request) async {
-    await utf8.decoder.bind(request).join();
-    request.response.headers.contentType = ContentType.json;
-    request.response.write(
-      jsonEncode({
-        'choices': [
-          {
-            'message': {'content': content},
-          },
-        ],
-      }),
-    );
-    await request.response.close();
+    final body = await utf8.decoder.bind(request).join();
+    await _respondChat(request, body, content);
   });
   return (
     url: 'http://${server.address.host}:${server.port}',
@@ -1577,20 +1557,10 @@ _serveDelayed(String content) async {
   final requestReceived = Completer<void>();
   final release = Completer<void>();
   server.listen((request) async {
-    await utf8.decoder.bind(request).join();
+    final body = await utf8.decoder.bind(request).join();
     if (!requestReceived.isCompleted) requestReceived.complete();
     await release.future;
-    request.response.headers.contentType = ContentType.json;
-    request.response.write(
-      jsonEncode({
-        'choices': [
-          {
-            'message': {'content': content},
-          },
-        ],
-      }),
-    );
-    await request.response.close();
+    await _respondChat(request, body, content);
   });
   return (
     url: 'http://${server.address.host}:${server.port}',
@@ -1608,19 +1578,8 @@ _serveCounting(String content, {int statusCode = 200}) async {
   var count = 0;
   server.listen((request) async {
     count++;
-    await utf8.decoder.bind(request).join();
-    request.response.statusCode = statusCode;
-    request.response.headers.contentType = ContentType.json;
-    request.response.write(
-      jsonEncode({
-        'choices': [
-          {
-            'message': {'content': content},
-          },
-        ],
-      }),
-    );
-    await request.response.close();
+    final body = await utf8.decoder.bind(request).join();
+    await _respondChat(request, body, content, statusCode: statusCode);
   });
   return (
     url: 'http://${server.address.host}:${server.port}',
@@ -1711,9 +1670,54 @@ _serveSequence(List<String> contents) async {
   var requests = 0;
   final bodies = <String>[];
   server.listen((request) async {
-    bodies.add(await utf8.decoder.bind(request).join());
+    final body = await utf8.decoder.bind(request).join();
+    bodies.add(body);
     final index = requests++;
     final content = contents[index.clamp(0, contents.length - 1)];
+    await _respondChat(request, body, content);
+  });
+  return (
+    url: 'http://${server.address.host}:${server.port}',
+    close: () async {
+      await server.close(force: true);
+    },
+    requests: () => requests,
+    bodies: () => List<String>.unmodifiable(bodies),
+  );
+}
+
+Future<void> _respondChat(
+  HttpRequest request,
+  String requestBody,
+  String content, {
+  int statusCode = 200,
+}) async {
+  request.response.statusCode = statusCode;
+  if (statusCode != 200) {
+    request.response.headers.contentType = ContentType.json;
+    request.response.write('{}');
+    await request.response.close();
+    return;
+  }
+
+  final payload = jsonDecode(requestBody) as Map<String, dynamic>;
+  if (payload['stream'] == true) {
+    request.response.headers.contentType = ContentType(
+      'text',
+      'event-stream',
+      charset: 'utf-8',
+    );
+    request.response.write(
+      'data: ${jsonEncode({
+        'choices': [
+          {
+            'delta': {'content': content},
+          },
+        ],
+      })}\n\n',
+    );
+    request.response.write('data: [DONE]\n\n');
+  } else {
     request.response.headers.contentType = ContentType.json;
     request.response.write(
       jsonEncode({
@@ -1724,14 +1728,6 @@ _serveSequence(List<String> contents) async {
         ],
       }),
     );
-    await request.response.close();
-  });
-  return (
-    url: 'http://${server.address.host}:${server.port}',
-    close: () async {
-      await server.close(force: true);
-    },
-    requests: () => requests,
-    bodies: () => List<String>.unmodifiable(bodies),
-  );
+  }
+  await request.response.close();
 }

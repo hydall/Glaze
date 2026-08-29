@@ -32,6 +32,7 @@ import '../db/repositories/tracker_snapshot_repo.dart';
 import '../db/repositories/ledger_raw_tracker_state_reader.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import '../db/repositories/ledger_reconciliation_run_repo.dart';
+import '../db/repositories/ledger_reconciliation_lease_repo.dart';
 import '../db/repositories/ledger_debug_run_repo.dart';
 import '../db/repositories/llm_request_capture_repo.dart';
 import '../db/repositories/card_evolution_repo.dart';
@@ -136,6 +137,11 @@ final characterRepoProvider = Provider<CharacterRepo>((ref) {
 final chatRepoProvider = Provider<ChatRepo>((ref) {
   return ChatRepo(ref.watch(appDbProvider));
 });
+
+final ledgerReconciliationLeaseRepoProvider =
+    Provider<LedgerReconciliationLeaseRepo>((ref) {
+      return LedgerReconciliationLeaseRepo(ref.watch(appDbProvider));
+    });
 
 final chatSessionBranchRepoProvider = Provider<ChatSessionBranchRepo>((ref) {
   return ChatSessionBranchRepo(ref.watch(appDbProvider));

@@ -306,7 +306,7 @@ final class LedgerReconciliationRunner {
         return LedgerRunResult.aborted;
       }
       final timeoutMs = _llm.resolveLedgerTimeout(request.settings);
-      final outcome = await _llm.callOnceWithLog(
+      final outcome = await _llm.callStreamWithLog(
         config: request.config,
         prompt: prompt,
         maxTokens: request.settings.ledger.studioLedgerMaxTokens > 0
@@ -411,7 +411,7 @@ final class LedgerReconciliationRunner {
         if (!await _renewLease(request.sessionId, leaseOwnerId)) {
           return LedgerRunResult.aborted;
         }
-        final repair = await _llm.callOnceWithLog(
+        final repair = await _llm.callStreamWithLog(
           config: request.config,
           prompt: repairPrompt,
           maxTokens: request.settings.ledger.studioLedgerMaxTokens > 0

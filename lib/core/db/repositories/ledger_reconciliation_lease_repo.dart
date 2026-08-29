@@ -8,6 +8,12 @@ final class LedgerReconciliationLeaseRepo {
 
   final AppDatabase db;
 
+  /// Reconciliation leases coordinate work inside one running app process.
+  /// A new app scope has no surviving owner, so persisted rows are orphans.
+  Future<void> clearProcessOrphans() async {
+    await db.delete(db.ledgerReconciliationLeases).go();
+  }
+
   Future<bool> acquire({
     required String sessionId,
     required String ownerId,

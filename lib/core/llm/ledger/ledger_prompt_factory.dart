@@ -131,7 +131,7 @@ Game clock (world:time, world:date, world:day):
 - When the final response or chat implies elapsed time, advance world:time to the
   new in-game time based on how much time the narrated events would take.
 - For an ordinary continuous turn with no explicit duration, advance the clock
-  by 3–10 minutes. Use an explicitly narrated duration instead when available.
+  by 1–5 minutes. Use an explicitly narrated duration instead when available.
 - The game clock only moves FORWARD. Never rewind time; flashbacks and memories
   stay in prose without touching world:time. When time passes midnight, advance
   world:day (day 0 is the first day of the story) and world:date.

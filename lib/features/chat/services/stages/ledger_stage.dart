@@ -211,7 +211,11 @@ class LedgerStage {
         return;
       }
 
-      final recentHistory = extractRecentHistoryText(messages, maxMessages: 10);
+      final recentHistory = extractRecentHistoryText(
+        messages,
+        maxMessages: 10,
+        excludeMessageId: targetMessage.id,
+      );
 
       final service = ctx.ref.read(studioLedgerServiceProvider);
 

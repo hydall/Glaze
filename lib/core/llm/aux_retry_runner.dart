@@ -80,6 +80,16 @@ class AuxRetryPolicy {
     if (error is HttpException) return true; // connection closed mid-stream
     if (error is SocketException) return true; // TCP reset / refused
     if (error is DioException) {
+      if (error.type == DioExceptionType.connectionError ||
+          error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.sendTimeout ||
+          error.type == DioExceptionType.receiveTimeout) {
+        return true;
+      }
+      if (error.type == DioExceptionType.unknown &&
+          error.error is SocketException) {
+        return true;
+      }
       final code = error.response?.statusCode ?? 0;
       if (code >= 500 && code < 600) return true;
     }
