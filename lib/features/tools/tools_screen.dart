@@ -314,6 +314,10 @@ class _HeroCard extends StatelessWidget {
     final card = GlassSurface(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
+      // The artwork fills the card edge to edge, so a border painted behind it
+      // is invisible — and the accent frame is the whole point on those cards.
+      // Over art it is drawn on top instead.
+      borderOnTop: _hasArtwork,
       border: Border.all(
         color: _hasArtwork
             ? context.cs.primary.withValues(alpha: 0.5)
