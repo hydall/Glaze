@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/db/repositories/info_blocks_repository.dart';
@@ -7,6 +8,22 @@ import '../../models/block_run_status.dart';
 import '../../models/info_block.dart';
 import '../../providers/info_blocks_provider.dart';
 import 'block_context.dart';
+
+/// Renders the failure text for the block panel. [message] is already the
+/// user-facing string produced by the shared `formatError()` — the same
+/// wording the chat shows for a failed generation — so this only escapes it,
+/// localizes the label, and keeps the line break `formatError` puts before a
+/// provider message as a `<br>`.
+String formatBlockErrorContent(String message) {
+  final escaped = message
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('\r\n', '\n')
+      .replaceAll('\n', '<br>');
+  return '<p class="ext-block-error">'
+      '<strong>${'error_label'.tr()}:</strong> $escaped</p>';
+}
 
 typedef BlockPanelRefresh =
     void Function(
@@ -89,7 +106,7 @@ class BlockStatusTracker {
     required InfoBlock placeholder,
     required String errorMessage,
   }) async {
-    final content = _formatBlockErrorContent(errorMessage);
+    final content = formatBlockErrorContent(errorMessage);
     await repo.updateContent(placeholderId, content);
     await repo.updateStatus(placeholderId, BlockRunStatus.error);
     final errored = placeholder.copyWith(
@@ -228,13 +245,5 @@ class BlockStatusTracker {
       placeholderId: placeholderId,
       placeholder: placeholder,
     );
-  }
-
-  String _formatBlockErrorContent(String message) {
-    final escaped = message
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;');
-    return '<p class="ext-block-error"><strong>Ошибка:</strong> $escaped</p>';
   }
 }

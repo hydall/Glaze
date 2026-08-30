@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/game_time.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/studio_turn_config_resolver.dart';
+import '../../../core/utils/error_format.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/chat_state.dart';
 import '../../chat/editing_message_provider.dart';
@@ -116,7 +117,7 @@ class GenerationDispatcher {
           break;
       }
     } catch (e) {
-      return TriggerError(message: e.toString(), mode: resolved);
+      return TriggerError(message: formatError(e), mode: resolved);
     }
 
     return TriggerAccepted(mode: resolved, reason: reason);

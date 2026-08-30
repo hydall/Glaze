@@ -5,6 +5,7 @@ import '../../../../core/models/character.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/models/persona.dart';
 import '../../../../core/llm/prompt/main_model_context_snapshot.dart';
+import '../../../../core/utils/error_format.dart';
 import '../../models/block_config.dart';
 import '../../models/extension_preset.dart';
 import '../../models/info_block.dart';
@@ -104,7 +105,7 @@ class SingleBlockRunner {
           messageId: messageId,
           placeholderId: placeholderId,
           placeholder: placeholder,
-          errorMessage: e.toString(),
+          errorMessage: formatError(e),
         );
       }
       return statusTracker.markStoppedForPlaceholder(

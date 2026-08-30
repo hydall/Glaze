@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../../../core/models/character.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/services/image_storage_service.dart';
+import '../../../core/utils/error_format.dart';
 import '../image_gen_models.dart';
 import 'image_gen_dispatcher.dart';
 import 'image_prompt_builder.dart';
@@ -274,33 +275,12 @@ class ImageGenService {
     }).toList();
   }
 
-  String _formatError(DioException e) {
-    final data = e.response?.data;
-    String? responseMessage;
-    if (data is Map) {
-      final error = data['error'];
-      if (error is Map) {
-        responseMessage = error['message']?.toString();
-      } else if (error != null) {
-        responseMessage = error.toString();
-      }
-      responseMessage ??= data['message']?.toString();
-      responseMessage ??= data['detail']?.toString();
-    } else if (data != null) {
-      responseMessage = data.toString();
-    }
-    final status = e.response?.statusCode;
-    final msg = responseMessage?.trim().isNotEmpty == true
-        ? [if (status != null) 'HTTP $status', responseMessage!].join(': ')
-        : status != null
-        ? [
-            'HTTP $status',
-            if (e.response?.statusMessage?.trim().isNotEmpty == true)
-              e.response!.statusMessage!.trim(),
-          ].join(': ')
-        : e.message ?? e.toString();
-    return _formatErrorString(msg);
-  }
+  /// Delegates to the shared [formatError] — the same helper the chat and the
+  /// ext blocks use — so a failed image generation reads like every other
+  /// provider failure (localized status line, provider message on its own
+  /// line) instead of a Dio dump. The length cap stays: this string is
+  /// rendered inline in the message card.
+  String _formatError(DioException e) => _formatErrorString(formatError(e));
 
   String _formatErrorString(String msg) {
     if (msg.length > 200) msg = '${msg.substring(0, 197)}...';

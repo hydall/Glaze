@@ -77,7 +77,9 @@ class ModelField extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        GlazeToast.show(context, 'Ошибка загрузки моделей: $e');
+        // Same shared formatter the chat and API settings use: a provider
+        // failure reads as "HTTP 401 - Unauthorized", not a Dio dump.
+        GlazeToast.error(context, 'settings_err_failed'.tr(), e);
       }
     } finally {
       onFetchEnd();
