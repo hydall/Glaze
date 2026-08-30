@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../../../core/db/repositories/character_repo.dart';
 import '../../../../core/db/repositories/chat_repo.dart';
 import '../../../../core/db/repositories/global_variables_repo.dart';
+import '../../../../core/utils/error_format.dart';
 import 'handlers/audio_handler.dart';
 import 'handlers/command_handler.dart';
 import 'handlers/generation_handler.dart';
@@ -137,7 +138,7 @@ class JsBridgeService {
               : e is ArgumentError
               ? 'invalid_request'
               : 'bridge_error',
-          'message': e.toString(),
+          'message': formatError(e),
         },
       };
     }

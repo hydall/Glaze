@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/transport/chat_transport_request.dart';
+import '../../../core/llm/transport/llm_capture_context.dart';
 import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/models/api_config.dart';
@@ -13,6 +14,7 @@ import '../../../core/models/character.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/utils/error_format.dart';
 import '../../settings/api_list_provider.dart';
 import '../models/block_config.dart';
 import '../models/info_block.dart';
@@ -173,10 +175,21 @@ class InfoBlockService {
         userName: personaModel?.name ?? persona ?? 'User',
         cancelToken: cancelToken,
         onStreamUpdate: onStreamUpdate,
+        // Diagnostic identity only — never serialized into the provider body.
+        // Without it an ext block request lands in the capture log unlabeled,
+        // unlike every other stage (chat, cleaner, ledger, summary).
+        captureContext: LlmCaptureContext(
+          stage: 'extblock.${blockConfig.type.name}',
+          sessionId: sessionId,
+          messageId: messageId,
+          agentId: blockConfig.id,
+          logicalCallId: 'extblock:${blockConfig.id}:$messageId#$swipeId',
+          relatedArtifactId: messageId,
+        ),
       );
     } catch (e) {
       if (cancelToken?.isCancelled == true) return (content: null, error: null);
-      return (content: null, error: e.toString());
+      return (content: null, error: formatError(e));
     }
 
     if (cancelToken?.isCancelled == true) return (content: null, error: null);
@@ -484,6 +497,7 @@ class InfoBlockService {
     required String userName,
     CancelToken? cancelToken,
     void Function(String accumulated)? onStreamUpdate,
+    LlmCaptureContext? captureContext,
   }) async {
     final useStream = onStreamUpdate != null;
 
@@ -502,6 +516,7 @@ class InfoBlockService {
           stream: useStream,
           charName: charName,
           userName: userName,
+          captureContext: captureContext,
         ),
         cancelToken: cancelToken,
         onUpdate: useStream

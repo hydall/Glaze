@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/db/repositories/info_blocks_repository.dart';
 import '../../../../core/models/character.dart';
 import '../../../../core/models/chat_message.dart';
+import '../../../../core/utils/error_format.dart';
 import '../../../chat/bridge/chat_bridge_controller.dart';
 import '../../../chat/bridge/chat_bridge_registry.dart';
 import '../../models/block_run_status.dart';
@@ -127,7 +128,7 @@ class JsBlockExecutor {
         return stopped;
       }
       debugPrint('[ExtPostGen] jsRunner "${blockConfig.name}" failed: $e');
-      return markBlockError(context: context, errorMessage: e.toString());
+      return markBlockError(context: context, errorMessage: formatError(e));
     }
   }
 

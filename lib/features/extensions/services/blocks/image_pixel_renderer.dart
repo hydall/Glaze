@@ -9,6 +9,7 @@ import '../../../../core/models/character.dart';
 import '../../../../core/models/persona.dart';
 import '../../../../core/services/image_storage_service.dart';
 import '../../../../core/state/db_provider.dart';
+import '../../../../core/utils/error_format.dart';
 import '../../../image_gen/image_gen_provider.dart';
 import '../../../image_gen/services/image_tag_markup.dart';
 import '../../models/block_config.dart';
@@ -261,7 +262,7 @@ class ImagePixelRenderer {
           placeholder: placeholder,
           cancelToken: cancelToken,
         ),
-        errorMessage: e.toString(),
+        errorMessage: formatError(e),
       );
     } catch (e) {
       return markBlockError(
@@ -278,7 +279,7 @@ class ImagePixelRenderer {
           placeholder: placeholder,
           cancelToken: cancelToken,
         ),
-        errorMessage: e.toString(),
+        errorMessage: formatError(e),
       );
     }
   }
