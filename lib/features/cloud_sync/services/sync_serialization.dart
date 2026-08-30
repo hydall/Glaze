@@ -13,6 +13,8 @@ import '../sync_models.dart';
 class SyncSerialization {
   static const pipelineSettingsKey = 'pipelineSettings';
   static const activeStudioPresetKey = 'activeStudioPresetId';
+  static const globalRegexScriptsKey = 'gz_global_regex_scripts';
+  static const studioRegexScriptsKey = 'gz_studio_regex_scripts';
 
   /// Content fingerprint for manifest conflict detection (not full session JSON).
   static String computeChatMetadataHash(SessionMetadata metadata) {
@@ -169,11 +171,15 @@ class SyncSerialization {
   static Map<String, dynamic> localStoragePayload({
     String? pipelineSettings,
     String? activeStudioPresetId,
+    String? globalRegexScripts,
+    String? studioRegexScripts,
   }) {
     return {
       '__localStorage': true,
       pipelineSettingsKey: ?pipelineSettings,
       activeStudioPresetKey: ?activeStudioPresetId,
+      globalRegexScriptsKey: ?globalRegexScripts,
+      studioRegexScriptsKey: ?studioRegexScripts,
     };
   }
 

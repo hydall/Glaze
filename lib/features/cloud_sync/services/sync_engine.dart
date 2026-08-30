@@ -1449,10 +1449,23 @@ class SyncEngine {
     final activeStudioPresetId = prefs.getString(
       SyncSerialization.activeStudioPresetKey,
     );
-    if (pipelineSettings == null && activeStudioPresetId == null) return null;
+    final globalRegexScripts = prefs.getString(
+      SyncSerialization.globalRegexScriptsKey,
+    );
+    final studioRegexScripts = prefs.getString(
+      SyncSerialization.studioRegexScriptsKey,
+    );
+    if (pipelineSettings == null &&
+        activeStudioPresetId == null &&
+        globalRegexScripts == null &&
+        studioRegexScripts == null) {
+      return null;
+    }
     return SyncSerialization.localStoragePayload(
       pipelineSettings: pipelineSettings,
       activeStudioPresetId: activeStudioPresetId,
+      globalRegexScripts: globalRegexScripts,
+      studioRegexScripts: studioRegexScripts,
     );
   }
 
@@ -1480,11 +1493,37 @@ class SyncEngine {
         );
       }
     }
+    await _applyLocalStorageString(
+      prefs,
+      data,
+      SyncSerialization.globalRegexScriptsKey,
+    );
+    await _applyLocalStorageString(
+      prefs,
+      data,
+      SyncSerialization.studioRegexScriptsKey,
+    );
+  }
+
+  Future<void> _applyLocalStorageString(
+    SharedPreferences prefs,
+    Map<String, dynamic> data,
+    String key,
+  ) async {
+    final value = data[key];
+    if (value is! String) return;
+    if (value.isEmpty) {
+      await prefs.remove(key);
+    } else {
+      await prefs.setString(key, value);
+    }
   }
 
   Future<void> _deleteLocalStorage() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(SyncSerialization.pipelineSettingsKey);
     await prefs.remove(SyncSerialization.activeStudioPresetKey);
+    await prefs.remove(SyncSerialization.globalRegexScriptsKey);
+    await prefs.remove(SyncSerialization.studioRegexScriptsKey);
   }
 }
