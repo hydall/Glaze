@@ -43,6 +43,7 @@ class StudioBriefCache {
     required PromptPayload promptPayload,
     required String sceneKey,
     required int turnIndex,
+    String studioRegexIdentity = '',
   }) {
     final policy = effectiveRefreshPolicy(agent);
     final cacheKey = cacheKeyForAgent(
@@ -56,6 +57,7 @@ class StudioBriefCache {
       agent: agent,
       policy: policy,
       sceneKey: sceneKey,
+      studioRegexIdentity: studioRegexIdentity,
     );
     final cached = usableCachedBrief(
       cacheKey: cacheKey,
@@ -99,6 +101,7 @@ class StudioBriefCache {
     required StudioContext context,
     required String sceneKey,
     required int turnIndex,
+    String studioRegexIdentity = '',
   }) {
     final policy = effectiveRefreshPolicy(agent);
     final cacheKey = cacheKeyForAgent(
@@ -113,6 +116,7 @@ class StudioBriefCache {
       policy: policy,
       sceneKey: sceneKey,
       ledgerInjectionIdentity: context.diagnostics.ledgerInjectionIdentity,
+      studioRegexIdentity: studioRegexIdentity,
     );
     final cached = usableCachedBrief(
       cacheKey: cacheKey,
@@ -195,6 +199,7 @@ class StudioBriefCache {
     required String policy,
     required String sceneKey,
     String ledgerInjectionIdentity = '',
+    String studioRegexIdentity = '',
   }) {
     // Generation parameters live on the agent's spec, not on the agent (§4),
     // so the cache key must read them from there or it stops noticing changes.
@@ -283,6 +288,7 @@ class StudioBriefCache {
       },
       'refreshPolicy': policy,
       'ledgerInjectionIdentity': ledgerInjectionIdentity,
+      'studioRegexIdentity': studioRegexIdentity,
       if (policy == 'scene') 'sceneKey': sceneKey,
     };
     return computeHash(jsonEncode(base));

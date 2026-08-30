@@ -113,6 +113,13 @@ void main() {
     expect(first, isNot(second));
   });
 
+  test('Studio regex identity changes the cache key', () {
+    final first = _cacheKey(cache, studioRegexIdentity: 'regex-a');
+    final second = _cacheKey(cache, studioRegexIdentity: 'regex-b');
+
+    expect(first, isNot(second));
+  });
+
   test('refresh policy uses only the normalized explicit value', () {
     expect(
       cache.effectiveRefreshPolicy(
@@ -192,6 +199,7 @@ String _cacheKey(
   String sessionId = 'session-a',
   StudioPreset preset = _preset,
   String ledgerInjectionIdentity = '',
+  String studioRegexIdentity = '',
 }) {
   return cache.cacheKeyForAgent(
     config: _config,
@@ -205,6 +213,7 @@ String _cacheKey(
     policy: 'static',
     sceneKey: '',
     ledgerInjectionIdentity: ledgerInjectionIdentity,
+    studioRegexIdentity: studioRegexIdentity,
   );
 }
 

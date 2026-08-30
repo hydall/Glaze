@@ -1,10 +1,12 @@
 import '../models/studio_config.dart';
+import '../models/studio_regex.dart';
 import '../models/studio_preset_block_groups.dart';
 import 'history_assembler.dart';
 import 'studio_brief_deduper.dart';
 import 'studio_controller_ontology.dart';
 import 'studio_prompt_text.dart';
 import 'studio_stage_brief.dart';
+import 'studio_regex_applicator.dart';
 import 'studio/studio_brief_macro_renderer.dart';
 import 'studio/studio_history_limiter.dart';
 import 'studio/studio_runtime_block_expander.dart';
@@ -24,7 +26,15 @@ class StudioMessageBuilder {
   late final StudioRuntimeBlockExpander _blockExpander =
       StudioRuntimeBlockExpander(_briefMacroRenderer);
 
-  StudioMessageBuilder(this._promptText, this._briefDeduper);
+  final List<StudioRegex> Function() _readStudioRegexes;
+
+  StudioMessageBuilder(
+    this._promptText,
+    this._briefDeduper, {
+    List<StudioRegex> Function()? readStudioRegexes,
+  }) : _readStudioRegexes = readStudioRegexes ?? _emptyStudioRegexes;
+
+  static List<StudioRegex> _emptyStudioRegexes() => const [];
 
   List<Map<String, dynamic>> buildAgentMessages({
     required StudioAgent agent,
@@ -330,7 +340,14 @@ class StudioMessageBuilder {
             'fences). If no edit is needed, output the text verbatim.',
       });
     }
-    return messages;
+    final stages = <String>{point};
+    if (!isFinalResponse && !isPostProc) stages.add('specificAgent');
+    return applyStudioRegexes(
+      messages: messages,
+      stages: stages,
+      entries: _readStudioRegexes(),
+      macroContext: context.macroContext,
+    );
   }
 
   void _recordLorebookSlotClassifications(
@@ -624,5 +641,18 @@ class StudioMessageBuilder {
       if (content.isNotEmpty) buffer.writeln(content);
     }
     return buffer.toString().trim();
+  }
+
+  List<Map<String, dynamic>> applyRegexesForStages({
+    required List<Map<String, dynamic>> messages,
+    required Set<String> stages,
+    required StudioContext context,
+  }) {
+    return applyStudioRegexes(
+      messages: messages,
+      stages: stages,
+      entries: _readStudioRegexes(),
+      macroContext: context.macroContext,
+    );
   }
 }

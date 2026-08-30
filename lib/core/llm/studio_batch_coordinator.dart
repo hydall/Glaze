@@ -71,15 +71,19 @@ class StudioBatchCoordinator {
       perAgentTaskText: perAgentTask,
       roleText: roleText,
     );
-    final batchMessages = <Map<String, dynamic>>[
-      {'role': 'system', 'content': systemPrompt},
-      {
-        'role': 'user',
-        'content':
-            'Produce the required <result> blocks now, one per agent_task '
-            'listed above, in order.',
-      },
-    ];
+    final batchMessages = _messageBuilder.applyRegexesForStages(
+      messages: <Map<String, dynamic>>[
+        {'role': 'system', 'content': systemPrompt},
+        {
+          'role': 'user',
+          'content':
+              'Produce the required <result> blocks now, one per agent_task '
+              'listed above, in order.',
+        },
+      ],
+      stages: const {'pregen', 'specificAgent'},
+      context: context,
+    );
     // The batch runs under the first agent's identity (the API config is
     // resolved from the group's `resolved` config anyway), but with the
     // group's own budget: the summed token allowance and the lowest

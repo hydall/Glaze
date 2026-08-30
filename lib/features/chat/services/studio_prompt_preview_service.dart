@@ -24,6 +24,7 @@ import '../../../core/models/studio_config.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
+import '../../../core/state/studio_regex_provider.dart';
 import '../../../core/state/studio_turn_config_resolver.dart';
 import '../chat_provider.dart';
 import '../providers/prompt_build_providers.dart';
@@ -291,15 +292,19 @@ final class StudioPromptPreviewService {
         perAgentTaskText: perAgentTask,
         roleText: messageBuilder.batchRoleText(config, preset, trackerContext),
       );
-      final messages = <Map<String, dynamic>>[
-        {'role': 'system', 'content': systemPrompt},
-        {
-          'role': 'user',
-          'content':
-              'Produce the required <result> blocks now, one per agent_task '
-              'listed above, in order.',
-        },
-      ];
+      final messages = messageBuilder.applyRegexesForStages(
+        messages: [
+          {'role': 'system', 'content': systemPrompt},
+          {
+            'role': 'user',
+            'content':
+                'Produce the required <result> blocks now, one per agent_task '
+                'listed above, in order.',
+          },
+        ],
+        stages: const {'pregen', 'specificAgent'},
+        context: trackerContext,
+      );
       entries.add(
         _available(
           id: 'controller-batch:${group.key}:$index',
@@ -754,17 +759,23 @@ final studioPromptPreviewServiceProvider =
         messageBuilder: StudioMessageBuilder(
           const StudioPromptText(),
           StudioBriefDeduper(parser),
+          readStudioRegexes: () =>
+              ref.read(studioRegexProvider).value ?? const [],
         ),
       );
     });
 
 final studioPromptPreviewCatalogProvider =
-    FutureProvider.family<StudioPromptPreviewCatalog, String>((ref, charId) {
+    FutureProvider.family<StudioPromptPreviewCatalog, String>((
+      ref,
+      charId,
+    ) async {
       ref.watch(chatProvider(charId));
       ref.watch(pipelineSettingsProvider);
       ref.watch(studioFeatureEnabledProvider);
       ref.watch(activeStudioPresetProvider);
       ref.watch(apiListProvider);
       ref.watch(activeApiConfigProvider);
+      await ref.watch(studioRegexProvider.future);
       return ref.watch(studioPromptPreviewServiceProvider(charId)).load();
     });

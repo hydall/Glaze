@@ -14,6 +14,7 @@ class RegexApplyContext {
   final Map<String, String> globalVars;
   final int? depth;
   final int totalMessages;
+  final MacroContext? macroContext;
 
   const RegexApplyContext({
     this.char,
@@ -22,6 +23,7 @@ class RegexApplyContext {
     this.globalVars = const {},
     this.depth,
     this.totalMessages = 0,
+    this.macroContext,
   });
 }
 
@@ -42,13 +44,18 @@ String applyRegexes(
 
     final sPlacement = script.placement;
     if (sPlacement.isNotEmpty && !sPlacement.contains(placementFilter)) {
-      if (!(script.promptOnly && isPrompt)) continue;
+      if (!(script.promptOnly && isPrompt)) {
+        continue;
+      }
     }
     if (script.promptOnly && !isPrompt) continue;
     if (script.markdownOnly && !isMarkdown) continue;
 
     final sEphemerality = script.ephemerality;
-    if (sEphemerality.isNotEmpty && !sEphemerality.contains(ephemeralityFilter)) continue;
+    if (sEphemerality.isNotEmpty &&
+        !sEphemerality.contains(ephemeralityFilter)) {
+      continue;
+    }
 
     if (ctx.depth != null) {
       final minD = script.minDepth;
@@ -65,12 +72,14 @@ String applyRegexes(
     // message in the triggered-items sheet.
     if (triggered != null && result != before) {
       if (!triggered.any((t) => t.id == script.id)) {
-        triggered.add(TriggeredEntry(
-          id: script.id,
-          name: script.name,
-          source: 'regex',
-          pattern: script.regex,
-        ));
+        triggered.add(
+          TriggeredEntry(
+            id: script.id,
+            name: script.name,
+            source: 'regex',
+            pattern: script.regex,
+          ),
+        );
       }
     }
   }
@@ -78,7 +87,11 @@ String applyRegexes(
   return result;
 }
 
-String _applySingleScript(String text, PresetRegex script, RegexApplyContext ctx) {
+String _applySingleScript(
+  String text,
+  PresetRegex script,
+  RegexApplyContext ctx,
+) {
   var processed = text;
 
   if (script.trimOut.isNotEmpty) {
@@ -91,18 +104,22 @@ String _applySingleScript(String text, PresetRegex script, RegexApplyContext ctx
   var pattern = script.regex;
   var replacement = script.replacement;
 
-  if (script.substituteRegex != 0 && ctx.char != null) {
+  if (script.substituteRegex != 0 &&
+      (ctx.char != null || ctx.macroContext != null)) {
     pattern = _substituteFindRegex(pattern, script.substituteRegex, ctx);
   }
 
-  if (script.macroRules != '0' && ctx.char != null) {
-    final macroCtx = MacroContext(
-      charName: ctx.char!.name,
-      userName: ctx.persona?.name ?? 'User',
-      charId: ctx.char!.id,
-      sessionId: '',
-      macroName: ctx.char!.macroName,
-    );
+  if (script.macroRules != '0' &&
+      (ctx.char != null || ctx.macroContext != null)) {
+    final macroCtx =
+        ctx.macroContext ??
+        MacroContext(
+          charName: ctx.char!.name,
+          userName: ctx.persona?.name ?? 'User',
+          charId: ctx.char!.id,
+          sessionId: '',
+          macroName: ctx.char!.macroName,
+        );
 
     if (script.macroRules == '1') {
       if (script.substituteRegex == 0) {
@@ -112,8 +129,14 @@ String _applySingleScript(String text, PresetRegex script, RegexApplyContext ctx
     } else if (script.macroRules == '2') {
       if (script.substituteRegex == 0) {
         pattern = pattern
-            .replaceAllMapped(RegExp(r'{{user}}', caseSensitive: false), (_) => _escapeRegex(ctx.persona?.name ?? 'User'))
-            .replaceAllMapped(RegExp(r'{{char}}', caseSensitive: false), (_) => _escapeRegex(ctx.char!.name));
+            .replaceAllMapped(
+              RegExp(r'{{user}}', caseSensitive: false),
+              (_) => _escapeRegex(macroCtx.userName),
+            )
+            .replaceAllMapped(
+              RegExp(r'{{char}}', caseSensitive: false),
+              (_) => _escapeRegex(macroCtx.charName),
+            );
         pattern = replaceMacros(pattern, macroCtx).text;
       }
       replacement = replaceMacros(replacement, macroCtx).text;
@@ -124,13 +147,20 @@ String _applySingleScript(String text, PresetRegex script, RegexApplyContext ctx
 
   final safety = classifyRegexSafety(pattern);
   if (safety == RegexSafety.pathological) {
-    debugPrint('[regex] skipping pathological pattern "${script.name}": $pattern');
+    debugPrint(
+      '[regex] skipping pathological pattern "${script.name}": $pattern',
+    );
     return processed;
   }
 
   final parsed = _parseRegexPattern(pattern);
   try {
-    final regex = RegExp(parsed.pattern, multiLine: parsed.multiLine, dotAll: parsed.dotAll, caseSensitive: parsed.caseSensitive);
+    final regex = RegExp(
+      parsed.pattern,
+      multiLine: parsed.multiLine,
+      dotAll: parsed.dotAll,
+      caseSensitive: parsed.caseSensitive,
+    );
 
     // Always use replaceAllMapped so backreferences ($1, \1, {{match}},
     // $<name>) are resolved.  Dart's String.replaceAll does NOT interpret
@@ -147,21 +177,29 @@ String _applySingleScript(String text, PresetRegex script, RegexApplyContext ctx
 }
 
 String _substituteFindRegex(String pattern, int mode, RegexApplyContext ctx) {
-  if (ctx.char == null) return pattern;
-  final macroCtx = MacroContext(
-    charName: ctx.char!.name,
-    userName: ctx.persona?.name ?? 'User',
-    charId: ctx.char!.id,
-    sessionId: '',
-    macroName: ctx.char!.macroName,
-  );
+  if (ctx.char == null && ctx.macroContext == null) return pattern;
+  final macroCtx =
+      ctx.macroContext ??
+      MacroContext(
+        charName: ctx.char!.name,
+        userName: ctx.persona?.name ?? 'User',
+        charId: ctx.char!.id,
+        sessionId: '',
+        macroName: ctx.char!.macroName,
+      );
   if (mode == 1) {
     return replaceMacros(pattern, macroCtx).text;
   }
   if (mode == 2) {
     var out = pattern
-        .replaceAllMapped(RegExp(r'{{user}}', caseSensitive: false), (_) => _escapeRegex(ctx.persona?.name ?? 'User'))
-        .replaceAllMapped(RegExp(r'{{char}}', caseSensitive: false), (_) => _escapeRegex(ctx.char!.name));
+        .replaceAllMapped(
+          RegExp(r'{{user}}', caseSensitive: false),
+          (_) => _escapeRegex(macroCtx.userName),
+        )
+        .replaceAllMapped(
+          RegExp(r'{{char}}', caseSensitive: false),
+          (_) => _escapeRegex(macroCtx.charName),
+        );
     return replaceMacros(out, macroCtx).text;
   }
   return pattern;
@@ -190,7 +228,8 @@ String _resolveReplacement(String template, Match match) {
   return result;
 }
 
-({String pattern, bool multiLine, bool dotAll, bool caseSensitive}) _parseRegexPattern(String raw) {
+({String pattern, bool multiLine, bool dotAll, bool caseSensitive})
+_parseRegexPattern(String raw) {
   if (raw.startsWith('/') && raw.length > 1) {
     final lastSlash = raw.lastIndexOf('/');
     if (lastSlash > 0) {
@@ -208,5 +247,5 @@ String _resolveReplacement(String template, Match match) {
 }
 
 String _escapeRegex(String s) {
-  return s.replaceAll(RegExp(r'[/\-\\^$*+?.()|[\]{}]'), r'\$&');
+  return RegExp.escape(s);
 }

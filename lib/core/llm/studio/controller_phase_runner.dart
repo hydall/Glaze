@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
@@ -6,6 +7,7 @@ import '../../db/repositories/studio_preset_repo.dart';
 import '../../models/api_config.dart';
 import '../../models/pipeline_settings.dart';
 import '../../models/studio_config.dart';
+import '../../models/studio_regex.dart';
 import '../studio_activation_gate.dart';
 import '../studio_agent_executor.dart';
 import '../studio_batch_coordinator.dart';
@@ -58,6 +60,7 @@ class ControllerPhaseRunner {
   final StudioAgentExecutor _executor;
   final StudioTrackerResultMapper _resultMapper;
   final PipelineSettings Function() _readPipelineSettings;
+  final List<StudioRegex> Function() _readStudioRegexes;
   final void Function(String message) _log;
 
   ControllerPhaseRunner({
@@ -69,6 +72,7 @@ class ControllerPhaseRunner {
     required this._executor,
     required this._resultMapper,
     required this._readPipelineSettings,
+    required this._readStudioRegexes,
     required this._log,
   });
 
@@ -146,6 +150,9 @@ class ControllerPhaseRunner {
           (turnConfig?.pipelineSettings ?? _readPipelineSettings())
               .studioAgent
               .studioControllerContextSize;
+      final studioRegexIdentity = jsonEncode(
+        _readStudioRegexes().map((entry) => entry.toJson()).toList(),
+      );
       for (final agent in dueTrackers) {
         final resolvedConfig = await _executor.resolveTrackerConfig(
           agent: agent,
@@ -173,6 +180,7 @@ class ControllerPhaseRunner {
           context: context,
           sceneKey: sceneKey,
           turnIndex: turnIndex,
+          studioRegexIdentity: studioRegexIdentity,
         );
         cacheProbeByAgent[agent.id] = probe;
         if (probe.hit && probe.brief != null) {

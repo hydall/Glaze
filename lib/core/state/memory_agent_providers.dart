@@ -18,6 +18,7 @@ import '../llm/studio/agent_config_resolver.dart';
 import '../llm/controller_batcher.dart';
 import '../models/api_config.dart';
 import 'db_provider.dart';
+import 'studio_regex_provider.dart';
 
 /// Provider for the entity graph builder.
 final memoryGraphBuilderProvider = Provider<MemoryGraphBuilder>((ref) {
@@ -82,12 +83,14 @@ final memoryStudioServiceProvider = Provider<MemoryStudioService>((ref) {
 /// POST-cleaner service (Stage 4). Rewrites the final assistant message
 /// to remove clichés and repetition. Fire-and-forget after generation.
 final postCleanerServiceProvider = Provider<PostCleanerService>((ref) {
+  final studioRegexes = ref.watch(studioRegexProvider).value ?? const [];
   return PostCleanerService(
     llm: const AuxLlmClient(),
     chatRepo: ref.read(chatRepoProvider),
     snapshotRepo: ref.read(trackerSnapshotRepoProvider),
     onSessionUpdated: ChatSessionService.updateCache,
     invalidateChatHistory: () => ref.invalidate(chatHistoryProvider),
+    readStudioRegexes: () => studioRegexes,
   );
 });
 
@@ -100,6 +103,7 @@ final ledgerTrackerLoaderProvider = Provider<LedgerTrackerLoader>((ref) {
 });
 
 final studioLedgerServiceProvider = Provider<StudioLedgerService>((ref) {
+  final studioRegexes = ref.watch(studioRegexProvider).value ?? const [];
   return StudioLedgerService(
     llm: const AuxLlmClient(),
     trackerRepo: ref.read(trackerRepoProvider),
@@ -113,5 +117,6 @@ final studioLedgerServiceProvider = Provider<StudioLedgerService>((ref) {
     characterRepo: ref.read(characterRepoProvider),
     chatRepo: ref.read(chatRepoProvider),
     canonContextLoader: ref.read(effectiveCanonContextLoaderProvider),
+    readStudioRegexes: () => studioRegexes,
   );
 });
