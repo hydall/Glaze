@@ -2319,6 +2319,7 @@
   "studio_mode_direct": "Direct instruction",
   "studio_mode_pregen_brief": "Pregen Brief",
   "studio_mode_agent_response": "Agent response",
+  "studio_mode_function_prefill": "Function prefill (synthetic tool call)",
   "studio_field_source_agent": "← Take response from agent",
   "studio_field_injection_point": "Injection point",
   "studio_field_target_agent": "→ Send to agent",

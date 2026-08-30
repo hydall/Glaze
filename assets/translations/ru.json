@@ -2342,6 +2342,7 @@
   "studio_mode_direct": "Прямая инструкция",
   "studio_mode_pregen_brief": "Бриф преген-агента",
   "studio_mode_agent_response": "Ответ агента",
+  "studio_mode_function_prefill": "Префилл как синтетический tool-call",
   "studio_field_source_agent": "← Брать ответ у агента",
   "studio_field_injection_point": "Точка инжекта",
   "studio_field_target_agent": "→ Отправить агенту",

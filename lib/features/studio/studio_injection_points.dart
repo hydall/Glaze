@@ -59,5 +59,6 @@ List<StudioControllerSpec> _specsWithIds(List<String> ids) => [
 String studioBlockModeLabel(String mode) => switch (mode) {
   'pregenBrief' => 'studio_mode_pregen_brief'.tr(),
   'agentResponse' => 'studio_mode_agent_response'.tr(),
+  'functionPrefill' => 'studio_mode_function_prefill'.tr(),
   _ => 'studio_mode_direct'.tr(),
 };

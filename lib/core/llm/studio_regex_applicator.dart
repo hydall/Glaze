@@ -24,7 +24,9 @@ List<Map<String, dynamic>> applyStudioRegexes({
     final content = message['content'];
     if (content is! String) return Map<String, dynamic>.from(message);
     final role = message['role'];
-    final placement = role == 'user' ? 1 : (role == 'assistant' ? 2 : 4);
+    final placement = role == 'user'
+        ? 1
+        : ((role == 'assistant' || role == 'tool') ? 2 : 4);
     return <String, dynamic>{
       ...message,
       'content': applyRegexes(

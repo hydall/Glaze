@@ -24,7 +24,7 @@ abstract final class StudioPresetValidator {
     'brief_parser',
   };
 
-  static const supportedRoles = <String>{'system', 'user', 'assistant'};
+  static const supportedRoles = <String>{'system', 'user', 'assistant', 'tool'};
 
   static const supportedInsertionModes = <String>{'relative', 'depth'};
 
