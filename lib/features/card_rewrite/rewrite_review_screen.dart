@@ -549,9 +549,12 @@ class _ApplyFooter extends ConsumerWidget {
                 .read(rewriteReviewUiProvider(jobId).notifier)
                 .apply(snapshot);
             if (context.mounted) {
+              final result = outcome.reason == null
+                  ? outcome.kind
+                  : '${outcome.kind}: ${outcome.reason}';
               GlazeToast.show(
                 context,
-                'rewrite_apply_result'.tr(namedArgs: {'result': outcome.kind}),
+                'rewrite_apply_result'.tr(namedArgs: {'result': result}),
               );
               if (outcome.isApplied) {
                 final session = await ref

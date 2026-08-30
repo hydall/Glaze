@@ -176,6 +176,21 @@ void main() {
     );
   });
 
+  test('evolution batches reject repeated transition ids', () {
+    final first = validPayload();
+    final second = validPayload()
+      ..['field'] = 'personality';
+
+    expect(
+      CardRewriteOperationParser.explainEvolutionBatchFailure(
+        jsonEncode({
+          'operations': [first, second],
+        }),
+      ),
+      'transition id is repeated',
+    );
+  });
+
   test('rejects multiple concatenated JSON payloads', () {
     final result = CardRewriteOperationParser.parse(
       '${jsonEncode(validPayload())}\n${jsonEncode(validPayload())}',

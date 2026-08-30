@@ -215,6 +215,14 @@ class ManualRewriteApplyRepo {
         final lorebookOperations = parsed
             .where((item) => item.snapshot is LorebookRewriteOperationSnapshot)
             .toList(growable: false);
+        final transitionIds = <String>{};
+        for (final operation in cardOperations) {
+          if (!transitionIds.add(operation.transition.id)) {
+            return const ManualRewriteApplyOutcome.blocked(
+              'duplicateTransition',
+            );
+          }
+        }
         final patches = cardOperations
             .expand((item) => item.patches)
             .toList(growable: false);
