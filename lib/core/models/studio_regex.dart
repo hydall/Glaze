@@ -4,6 +4,7 @@ const studioRegexStages = <String>[
   'pregen',
   'specificAgent',
   'final',
+  'output',
   'cleaner',
   'ledger',
 ];

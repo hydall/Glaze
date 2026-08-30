@@ -57,3 +57,28 @@ String applyStudioRegexesToText({
       ).single['content']
       as String;
 }
+
+String applyStudioOutputRegexesToText({
+  required String text,
+  required List<StudioRegex> entries,
+  required MacroContext macroContext,
+}) {
+  if (text.isEmpty) return text;
+  final scripts = entries
+      .where((entry) => entry.stages.contains('output'))
+      .map((entry) => entry.script)
+      .toList();
+  if (scripts.isEmpty) return text;
+
+  return applyRegexes(
+    text,
+    2,
+    1,
+    scripts,
+    RegexApplyContext(
+      sessionVars: macroContext.sessionVars,
+      globalVars: macroContext.globalVars,
+      macroContext: macroContext,
+    ),
+  );
+}

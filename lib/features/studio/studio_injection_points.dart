@@ -21,6 +21,7 @@ String studioInjectionPointLabel(String point) => switch (point) {
   'pregen' => 'studio_point_pregen'.tr(),
   'specificAgent' => 'studio_point_specific_agent'.tr(),
   'final' => 'studio_point_final'.tr(),
+  'output' => 'studio_point_output'.tr(),
   'cleaner' => 'studio_point_cleaner'.tr(),
   'ledger' => 'studio_point_ledger'.tr(),
   _ => point,

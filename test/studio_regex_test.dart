@@ -24,13 +24,14 @@ void main() {
     String regex = 'cat',
     String replacement = 'fox',
     bool disabled = false,
+    List<int> ephemerality = const [2],
   }) => PresetRegex(
     id: id,
     name: id,
     regex: regex,
     replacement: replacement,
     placement: const [1, 2],
-    ephemerality: const [2],
+    ephemerality: ephemerality,
     disabled: disabled,
   );
 
@@ -164,6 +165,37 @@ void main() {
     );
 
     expect(result, 'matched');
+  });
+
+  test('output stage transforms the persisted assistant response only', () {
+    final result = applyStudioOutputRegexesToText(
+      text: 'cat',
+      entries: [
+        StudioRegex(
+          script: script(
+            id: 'output',
+            replacement: 'fox',
+            ephemerality: const [1],
+          ),
+          stages: const {'output'},
+        ),
+        StudioRegex(
+          script: script(id: 'prompt-only', replacement: 'owl'),
+          stages: const {'output'},
+        ),
+        StudioRegex(
+          script: script(
+            id: 'wrong-stage',
+            replacement: 'wolf',
+            ephemerality: const [1],
+          ),
+          stages: const {'final'},
+        ),
+      ],
+      macroContext: macroContext,
+    );
+
+    expect(result, 'fox');
   });
 
   test('provider persists separately with stage selections', () async {
