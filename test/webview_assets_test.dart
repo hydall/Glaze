@@ -815,11 +815,14 @@ void main() {
         './html_scan.js',
         './protect.js',
         './dom_format.js',
-        './inline_syntax.js',
         './image_blocks.js',
       ]) {
         expect(formatterFormatterJs, contains("'$module'"));
       }
+      // The inline pass is reached through phase B, which owns the run it
+      // formats. The entrypoint stopped wiring it directly when style markers
+      // moved out of the pre-parse stage and into formatRun.
+      expect(formatterDomFormatJs, contains("'./inline_syntax.js'"));
       expect(formatterInlineSyntaxJs, contains("'./text_format.js'"));
       expect(formatterInlineSyntaxJs, contains('renderStyledSegment('));
     });
