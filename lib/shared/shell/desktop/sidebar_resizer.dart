@@ -156,6 +156,12 @@ class RightSidebarController extends ChangeNotifier {
   static const collapsedDefaultWidth = 64.0;
   static const collapsedMin = 48.0;
 
+  /// Narrowest the sidebar may be while a tool panel is mounted: the 64px icon
+  /// rail plus room for a screen that was designed for a full column. Vue
+  /// expanded the sidebar whenever a sheet opened in it; without a floor the
+  /// panel is squeezed into ~200px and its rows overflow.
+  static const widthWithPanel = 384.0;
+
   double get width => _collapsed ? _collapsedWidth : _expandedWidth;
   bool get collapsed => _collapsed;
 

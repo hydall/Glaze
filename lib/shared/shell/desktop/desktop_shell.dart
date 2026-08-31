@@ -73,6 +73,10 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
   @override
   Widget build(BuildContext context) {
     final forceMobile = ref.watch(forceMobileLayoutProvider);
+    // Watched here, not inside the LayoutBuilder: that builder runs during
+    // layout rather than build, where `ref.watch` does not register a
+    // dependency and the layout would not react to the panel opening.
+    final hasPanel = ref.watch(rightSidebarPanelProvider) != null;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -94,7 +98,7 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
                 _rightController,
               ),
             ],
-            child: _buildDesktopLayout(context, width),
+            child: _buildDesktopLayout(context, width, hasPanel),
           ),
         );
       },
@@ -156,12 +160,19 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
   /// The breakpoint is 768px (as in the Vue app), but two 280/300px sidebars
   /// leave barely 200px of content there — the character grid's header row
   /// overflowed outright. The right sidebar yields first, then the left.
-  ({double left, double right}) _fitSidebars(double total) {
+  ({double left, double right}) _fitSidebars(double total, bool hasPanel) {
     double snap(double value) =>
         value < kSidebarCollapseThreshold ? kSidebarCollapsedWidth : value;
 
     var left = _leftController.width;
-    var right = _rightController.width;
+    // A mounted tool panel needs a floor, whatever width the sidebar was
+    // dragged to (Vue auto-expanded the sidebar when a sheet opened in it).
+    var right = hasPanel
+        ? math.max(
+            _rightController.width,
+            RightSidebarController.widthWithPanel,
+          )
+        : _rightController.width;
     if (total - left - right >= _middleMinWidth) {
       return (left: left, right: right);
     }
@@ -185,8 +196,12 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
     return (left: left, right: right);
   }
 
-  Widget _buildDesktopLayout(BuildContext context, double availableWidth) {
-    final widths = _fitSidebars(availableWidth);
+  Widget _buildDesktopLayout(
+    BuildContext context,
+    double availableWidth,
+    bool hasPanel,
+  ) {
+    final widths = _fitSidebars(availableWidth, hasPanel);
     return Focus(
       autofocus: true,
       canRequestFocus: false,
