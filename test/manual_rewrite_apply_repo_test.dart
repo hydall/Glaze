@@ -160,6 +160,7 @@ void main() {
     CardRewriteField field = CardRewriteField.description,
     String chatSessionId = 's',
     List<String> factIds = const [],
+    String? transitionId,
   }) async {
     final snapshot = jsonEncode({
       'field': field.wireName,
@@ -172,7 +173,7 @@ void main() {
         },
       ],
       'transition': {
-        'id': 'transition-$id',
+        'id': transitionId ?? 'transition-$id',
         'scopeKey': 'npc:alice',
         'canonicalClaim': value,
         'promotionDestination': 'card',
@@ -376,6 +377,37 @@ void main() {
       );
     },
   );
+
+  test('duplicate transition ids fail closed before apply writes', () async {
+    final stamp = await seed();
+    await addApprovedOperation(
+      id: 'op2',
+      field: CardRewriteField.personality,
+      anchor: 'untouched',
+      value: 'changed',
+      transitionId: 'transition',
+    );
+
+    final outcome = await ManualRewriteApplyRepo(db: db, canonReader: reader)
+        .applyApproved(
+          jobId: 'job',
+          expectedCanonStamp: stamp,
+          expectedJobVersion: 1,
+        );
+
+    expect(outcome.kind, 'blocked');
+    expect(outcome.reason, 'duplicateTransition');
+    final character = await characters.getById('c');
+    expect(character!.description, 'old text');
+    expect(character.personality, 'untouched');
+    expect(await revisions.getForCharacter('c'), hasLength(1));
+    expect(await db.select(db.appliedCanonTransitionRows).get(), isEmpty);
+    expect(
+      (await db.select(db.rewriteOperations).get()).map((row) => row.status),
+      everyElement('reviewable'),
+    );
+    expect((await db.select(db.rewriteJobs).getSingle()).status, 'pending');
+  });
 
   /// Automated evolution jobs are stamped with the stable canon identity
   /// (volatile Ledger state excluded). Restamps the seeded job accordingly.

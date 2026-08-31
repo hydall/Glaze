@@ -180,6 +180,7 @@ abstract final class CardRewriteOperationParser {
     final operations = decoded['operations'] as List;
     final result = <CardRewriteOperationSnapshot>[];
     final fields = <CardRewriteField>{};
+    final transitionIds = <String>{};
     for (final rawOperation in operations) {
       if (rawOperation is! Map || rawOperation['field'] is! String) {
         return const _EvolutionBatchParse.failure(
@@ -203,6 +204,11 @@ abstract final class CardRewriteOperationParser {
         final reason = parsed.rejection?.name ?? 'unknown rejection';
         return _EvolutionBatchParse.failure(
           '${field.wireName}: $reason${parsed.detail == null ? '' : ' (${parsed.detail})'}',
+        );
+      }
+      if (!transitionIds.add(parsed.snapshot!.transition.id)) {
+        return const _EvolutionBatchParse.failure(
+          'transition id is repeated',
         );
       }
       result.add(parsed.snapshot!);

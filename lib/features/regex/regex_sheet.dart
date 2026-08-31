@@ -11,11 +11,14 @@ import 'package:go_router/go_router.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 import '../../core/models/preset.dart';
+import '../../core/models/studio_regex.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/global_regex_provider.dart';
+import '../../core/state/studio_regex_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../presets/preset_list_provider.dart';
+import '../studio/studio_injection_points.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
@@ -42,6 +45,9 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   bool _isForward = true;
   PresetRegex? _activeScript;
   bool _isPresetScript = false;
+  bool _isStudioScript = false;
+  Set<String> _activeStudioStages = const {};
+  String _tab = 'standard';
   Timer? _saveTimer;
 
   @override
@@ -66,11 +72,18 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
 
   // ── Navigation ──────────────────────────────────────────────────────────────
 
-  void _selectScript(PresetRegex script, {required bool isPreset}) {
+  void _selectScript(
+    PresetRegex script, {
+    required bool isPreset,
+    bool isStudio = false,
+    Set<String> studioStages = const {},
+  }) {
     setState(() {
       _isForward = true;
       _activeScript = script;
       _isPresetScript = isPreset;
+      _isStudioScript = isStudio;
+      _activeStudioStages = studioStages;
       _view = 'edit';
     });
   }
@@ -85,6 +98,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         _view = 'list';
         _activeScript = null;
         _isPresetScript = false;
+        _isStudioScript = false;
+        _activeStudioStages = const {};
       });
     }
   }
@@ -111,7 +126,13 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   }
 
   Future<void> _saveActiveScript(PresetRegex script) async {
-    if (_isPresetScript) {
+    if (_isStudioScript) {
+      await ref
+          .read(studioRegexProvider.notifier)
+          .updateRegex(
+            StudioRegex(script: script, stages: _activeStudioStages),
+          );
+    } else if (_isPresetScript) {
       final pid = _effectivePresetId;
       if (pid == null) return;
       final presets = ref.read(presetListProvider).value ?? [];
@@ -128,13 +149,28 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     }
   }
 
+  Future<void> _setStudioStages(Set<String> stages) async {
+    final script = _activeScript;
+    if (script == null) return;
+    setState(() => _activeStudioStages = stages);
+    await ref
+        .read(studioRegexProvider.notifier)
+        .updateRegex(StudioRegex(script: script, stages: stages));
+  }
+
   Future<void> _toggleScript(
     PresetRegex script,
     bool enabled, {
     required bool isPreset,
+    bool isStudio = false,
+    Set<String> studioStages = const {},
   }) async {
     final updated = script.copyWith(disabled: !enabled);
-    if (isPreset) {
+    if (isStudio) {
+      await ref
+          .read(studioRegexProvider.notifier)
+          .updateRegex(StudioRegex(script: updated, stages: studioStages));
+    } else if (isPreset) {
       final pid = _effectivePresetId;
       if (pid == null) return;
       final presets = ref.read(presetListProvider).value ?? [];
@@ -151,8 +187,14 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     }
   }
 
-  Future<void> _deleteScript(PresetRegex script, bool isPreset) async {
-    if (isPreset) {
+  Future<void> _deleteScript(
+    PresetRegex script,
+    bool isPreset, {
+    bool isStudio = false,
+  }) async {
+    if (isStudio) {
+      await ref.read(studioRegexProvider.notifier).removeRegex(script.id);
+    } else if (isPreset) {
       final pid = _effectivePresetId;
       if (pid == null) return;
       final presets = ref.read(presetListProvider).value ?? [];
@@ -196,13 +238,28 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     return newScript;
   }
 
+  PresetRegex _addStudioRegex() {
+    final script = PresetRegex(
+      id: generateId(),
+      name: 'New Studio Script',
+      regex: '',
+      placement: const [1, 2],
+      ephemerality: const [2],
+    );
+    ref
+        .read(studioRegexProvider.notifier)
+        .addRegex(StudioRegex(script: script, stages: const {'final'}));
+    return script;
+  }
+
   // ── Menus ────────────────────────────────────────────────────────────────────
 
   void _showScriptMenu(
     BuildContext context,
     PresetRegex script,
-    bool isPreset,
-  ) {
+    bool isPreset, {
+    bool isStudio = false,
+  }) {
     GlazeBottomSheet.show<void>(
       context,
       title: script.name,
@@ -222,7 +279,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           isDestructive: true,
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _deleteScript(script, isPreset);
+            _deleteScript(script, isPreset, isStudio: isStudio);
           },
         ),
       ],
@@ -230,6 +287,16 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   }
 
   void _showAddMenu(BuildContext context) {
+    if (_tab == 'studio') {
+      final script = _addStudioRegex();
+      _selectScript(
+        script,
+        isPreset: false,
+        isStudio: true,
+        studioStages: const {'final'},
+      );
+      return;
+    }
     GlazeBottomSheet.show<void>(
       context,
       title: 'menu_regex'.tr(),
@@ -313,7 +380,11 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       if (context.mounted) GlazeToast.show(context, 'export_success'.tr());
     } catch (e) {
       if (context.mounted) {
-        GlazeErrorDialog.show(context, e, prefix: '${'settings_err_failed'.tr()} ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: '${'settings_err_failed'.tr()} ',
+        );
       }
     }
   }
@@ -396,7 +467,11 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       }
     } catch (e) {
       if (context.mounted) {
-        GlazeErrorDialog.show(context, e, prefix: '${'settings_err_failed'.tr()} ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: '${'settings_err_failed'.tr()} ',
+        );
       }
     }
   }
@@ -448,6 +523,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   Widget build(BuildContext context) {
     final presetsAsync = ref.watch(presetListProvider);
     final globalAsync = ref.watch(globalRegexProvider);
+    final studioAsync = ref.watch(studioRegexProvider);
     final activePresetId = ref.watch(activePresetIdProvider);
 
     final presets = presetsAsync.value ?? [];
@@ -457,6 +533,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         : presets.firstOrNull;
     final presetRegexes = activePreset?.regexes ?? <PresetRegex>[];
     final globalRegexes = globalAsync.value ?? <PresetRegex>[];
+    final studioRegexes = studioAsync.value ?? <StudioRegex>[];
 
     final isEdit = _view == 'edit';
 
@@ -466,6 +543,14 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       title: isEdit ? 'regex_editor'.tr() : 'menu_regex'.tr(),
       showBack: isEdit || widget.startExpanded,
       onBack: isEdit ? _goBack : _goBackFromList,
+      tabs: isEdit
+          ? const []
+          : [
+              SheetViewTab(id: 'standard', label: 'regex_standard_tab'.tr()),
+              SheetViewTab(id: 'studio', label: 'regex_studio_tab'.tr()),
+            ],
+      activeTabId: _tab,
+      onTabSelected: (tab) => setState(() => _tab = tab),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 280),
         transitionBuilder: _buildTransition,
@@ -474,7 +559,13 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
                 key: ValueKey(_activeScript!.id),
                 script: _activeScript!,
                 onChanged: _onScriptChanged,
+                studioStages: _isStudioScript ? _activeStudioStages : null,
+                onStudioStagesChanged: _isStudioScript
+                    ? _setStudioStages
+                    : null,
               )
+            : _tab == 'studio'
+            ? _buildStudioListView(context, studioRegexes)
             : _buildListView(
                 context,
                 activePreset,
@@ -490,6 +581,58 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
               foregroundColor: Colors.black,
               child: const Icon(Icons.add),
             ),
+    );
+  }
+
+  Widget _buildStudioListView(BuildContext context, List<StudioRegex> entries) {
+    return Builder(
+      key: const ValueKey('studio-regex-list'),
+      builder: (innerContext) => ListView(
+        padding: const EdgeInsets.fromLTRB(0, 20, 0, 96).add(
+          EdgeInsets.only(
+            top: MediaQuery.paddingOf(innerContext).top,
+            bottom: MediaQuery.paddingOf(innerContext).bottom,
+          ),
+        ),
+        children: [
+          MenuGroup(
+            header: 'regex_studio_scripts'.tr(),
+            description: 'regex_studio_description'.tr(),
+            items: [
+              if (entries.isEmpty)
+                const _EmptyState()
+              else
+                ...entries.map((entry) {
+                  final script = entry.script;
+                  return MenuScriptItem(
+                    name: script.name,
+                    subtitle: script.regex.isNotEmpty ? script.regex : null,
+                    enabled: !script.disabled,
+                    onToggle: (enabled) => _toggleScript(
+                      script,
+                      enabled,
+                      isPreset: false,
+                      isStudio: true,
+                      studioStages: entry.stages,
+                    ),
+                    onTap: () => _selectScript(
+                      script,
+                      isPreset: false,
+                      isStudio: true,
+                      studioStages: entry.stages,
+                    ),
+                    onMore: () => _showScriptMenu(
+                      innerContext,
+                      script,
+                      false,
+                      isStudio: true,
+                    ),
+                  );
+                }),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -641,11 +784,15 @@ class _EmptyState extends StatelessWidget {
 class _RegexEditView extends StatefulWidget {
   final PresetRegex script;
   final ValueChanged<PresetRegex> onChanged;
+  final Set<String>? studioStages;
+  final ValueChanged<Set<String>>? onStudioStagesChanged;
 
   const _RegexEditView({
     super.key,
     required this.script,
     required this.onChanged,
+    this.studioStages,
+    this.onStudioStagesChanged,
   });
 
   @override
@@ -719,6 +866,23 @@ class _RegexEditViewState extends State<_RegexEditView> {
         ),
       ),
       children: [
+        if (widget.studioStages != null)
+          MenuGroup(
+            header: 'regex_studio_stages'.tr(),
+            description: 'regex_studio_stages_description'.tr(),
+            items: studioRegexStages.map((stage) {
+              return _CheckboxOption(
+                key: ValueKey('studio-regex-stage-$stage'),
+                label: studioInjectionPointLabel(stage),
+                value: widget.studioStages!.contains(stage),
+                onChanged: (enabled) {
+                  final stages = Set<String>.from(widget.studioStages!);
+                  enabled ? stages.add(stage) : stages.remove(stage);
+                  widget.onStudioStagesChanged?.call(stages);
+                },
+              );
+            }).toList(),
+          ),
         MenuGroup(
           header: 'regex_script_settings'.tr(),
           items: [
@@ -877,6 +1041,7 @@ class _CheckboxOption extends StatelessWidget {
   final ValueChanged<bool> onChanged;
 
   const _CheckboxOption({
+    super.key,
     required this.label,
     required this.value,
     required this.onChanged,

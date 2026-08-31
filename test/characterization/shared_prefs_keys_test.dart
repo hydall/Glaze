@@ -231,6 +231,7 @@ void main() {
         'lorebookActivations',
         'lorebookSettings',
         'gz_global_regex_scripts',
+        'gz_studio_regex_scripts',
         'gz_imggen_settings',
         'gz_sync_provider',
         'gz_sync_auto',

@@ -6,16 +6,20 @@ import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/features/cloud_sync/services/sync_serialization.dart';
 
 void main() {
-  test('local storage carries pipeline settings and active Studio preset', () {
+  test('local storage carries settings and global regex collections', () {
     expect(
       SyncSerialization.localStoragePayload(
         pipelineSettings: '{"cleaner":true}',
         activeStudioPresetId: 'studio_loom_causal_direct_v1',
+        globalRegexScripts: '[{"id":"global"}]',
+        studioRegexScripts: '[{"script":{"id":"studio"}}]',
       ),
       {
         '__localStorage': true,
         'pipelineSettings': '{"cleaner":true}',
         'activeStudioPresetId': 'studio_loom_causal_direct_v1',
+        'gz_global_regex_scripts': '[{"id":"global"}]',
+        'gz_studio_regex_scripts': '[{"script":{"id":"studio"}}]',
       },
     );
   });

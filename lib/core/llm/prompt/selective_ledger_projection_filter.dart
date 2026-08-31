@@ -329,7 +329,7 @@ List<_Group> _buildGroups(
     }
   }
   for (final tracker in projection.trackers.where(
-    (item) => !_isManualControl(item),
+    (item) => !_isManualControl(item) && !_isGameClockTrackerKey(item.name),
   )) {
     // Tracker tier is item-level. In particular, an arc tombstone or lock must
     // not promote every volatile field in the same semantic group.
@@ -626,6 +626,17 @@ bool isSelectableLedgerFact(CharacterKnowledgeFact fact) {
     CharacterKnowledgeEpistemicState.forgotten,
     CharacterKnowledgeEpistemicState.retracted,
   }.contains(fact.epistemicState);
+}
+
+/// Game clock (`world:time` / `world:date` / `world:day`) is surfaced through
+/// the always-current `{{gametime}}` / `{{gamedate}}` / `{{gameday}}` macros,
+/// not through the ledger projection. Excluding the raw trackers here keeps the
+/// prompt from duplicating the clock and avoids re-injecting a stale value.
+bool _isGameClockTrackerKey(String key) {
+  final value = key.toLowerCase();
+  return value == 'world:time' ||
+      value == 'world:date' ||
+      value == 'world:day';
 }
 
 bool _isCriticalTrackerKey(String key) {

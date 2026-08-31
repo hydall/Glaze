@@ -8,6 +8,7 @@ import '../models/api_config.dart';
 import '../models/studio_config.dart';
 import '../state/active_studio_preset_provider.dart';
 import '../state/db_provider.dart';
+import '../state/studio_regex_provider.dart';
 import 'agent_runner.dart';
 import 'studio_activation_gate.dart';
 import 'studio_agent_executor.dart';
@@ -49,6 +50,7 @@ class MemoryStudioService {
   late final StudioMessageBuilder _messageBuilder = StudioMessageBuilder(
     _promptText,
     _briefDeduper,
+    readStudioRegexes: () => _ref.read(studioRegexProvider).value ?? const [],
   );
   late final StudioAgentExecutor _executor = StudioAgentExecutor(
     _runner,
@@ -73,6 +75,7 @@ class MemoryStudioService {
     executor: _executor,
     resultMapper: _resultMapper,
     readPipelineSettings: () => _ref.read(pipelineSettingsProvider),
+    readStudioRegexes: () => _ref.read(studioRegexProvider).value ?? const [],
     log: _log,
   );
 
@@ -97,6 +100,7 @@ class MemoryStudioService {
     void Function(Set<String> classifications)?
     onFinalLorebookClassificationsBuilt,
   }) async {
+    await _ref.read(studioRegexProvider.future);
     final token = cancelToken ?? CancelToken();
     if (token.isCancelled) {
       return const StudioPipelineResult(status: 'aborted', response: '');
@@ -208,6 +212,7 @@ class MemoryStudioService {
     StudioTurnConfigSnapshot? turnConfig,
     CancelToken? cancelToken,
   }) async {
+    await _ref.read(studioRegexProvider.future);
     final token = cancelToken ?? CancelToken();
     if (token.isCancelled) {
       return const StudioPipelineResult(status: 'aborted', response: '');

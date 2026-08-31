@@ -74,6 +74,7 @@ class StudioRuntimeBlockExpander {
     switch (role) {
       case 'user':
       case 'assistant':
+      case 'tool':
         return role;
       default:
         return 'system';

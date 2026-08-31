@@ -1689,6 +1689,96 @@ void main() {
     expect(prefs.getString('pipelineSettings'), settingsJson);
   });
 
+  test('Cloud round-trip restores both global regex collections', () async {
+    const globalRegex = '[{"id":"global-regex","regex":"foo"}]';
+    const studioRegex =
+        '[{"script":{"id":"studio-regex","regex":"bar"},"stages":["final"]}]';
+    final source = SyncWorld();
+    final sourcePrefs = await SharedPreferences.getInstance();
+    await sourcePrefs.setString(
+      SyncSerialization.globalRegexScriptsKey,
+      globalRegex,
+    );
+    await sourcePrefs.setString(
+      SyncSerialization.studioRegexScriptsKey,
+      studioRegex,
+    );
+
+    await source.engine.pushEntities(onProgress: (_) {});
+
+    final cloudPayload =
+        jsonDecode(
+              source.cloud.files[cloudPath('local_storage', 'local_storage')]!,
+            )
+            as Map<String, dynamic>;
+    expect(cloudPayload[SyncSerialization.globalRegexScriptsKey], globalRegex);
+    expect(cloudPayload[SyncSerialization.studioRegexScriptsKey], studioRegex);
+
+    SharedPreferences.setMockInitialValues({});
+    final target = SyncWorld();
+    target.cloud.files.addAll(source.cloud.files);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    final targetPrefs = await SharedPreferences.getInstance();
+    expect(
+      targetPrefs.getString(SyncSerialization.globalRegexScriptsKey),
+      globalRegex,
+    );
+    expect(
+      targetPrefs.getString(SyncSerialization.studioRegexScriptsKey),
+      studioRegex,
+    );
+  });
+
+  test(
+    'Legacy local_storage payload preserves local regex collections',
+    () async {
+      const globalRegex = '[{"id":"local-global"}]';
+      const studioRegex = '[{"script":{"id":"local-studio"}}]';
+      final world = SyncWorld();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        SyncSerialization.globalRegexScriptsKey,
+        globalRegex,
+      );
+      await prefs.setString(
+        SyncSerialization.studioRegexScriptsKey,
+        studioRegex,
+      );
+      const payload = {
+        '__localStorage': true,
+        'pipelineSettings': '{"legacy":true}',
+      };
+      final entry = SyncManifestEntry(
+        type: 'local_storage',
+        id: 'local_storage',
+        path: cloudPath('local_storage', 'local_storage'),
+        updatedAt: 1000,
+        hash: SyncSerialization.computeSyncHash(payload),
+      );
+      world.cloud.files[entry.path] = jsonEncode(payload);
+      world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+        SyncManifest(
+          deviceId: 'cloud',
+          createdAt: 1,
+          lastSync: 1000,
+          entries: {entry.key: entry},
+        ).toJson(),
+      );
+
+      await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+      expect(
+        prefs.getString(SyncSerialization.globalRegexScriptsKey),
+        globalRegex,
+      );
+      expect(
+        prefs.getString(SyncSerialization.studioRegexScriptsKey),
+        studioRegex,
+      );
+    },
+  );
+
   test(
     'Empty device with no API presets should not conflict with cloud',
     () async {
@@ -3354,10 +3444,7 @@ void main() {
     () async {
       SharedPreferences.setMockInitialValues({});
       final world = SyncWorld();
-      const preset = StudioPreset(
-        id: 'doomed',
-        name: 'Doomed Preset',
-      );
+      const preset = StudioPreset(id: 'doomed', name: 'Doomed Preset');
       await world.studioPresets.put(preset);
 
       var manifest = await world.manifestProvider.buildLocalManifest();
@@ -3383,9 +3470,7 @@ void main() {
       );
 
       final cloudManifest = SyncManifest.fromJson(
-        jsonDecode(
-              world.cloud.files[cloudPath('manifest', 'manifest')]!,
-            )
+        jsonDecode(world.cloud.files[cloudPath('manifest', 'manifest')]!)
             as Map<String, dynamic>,
       );
       expect(

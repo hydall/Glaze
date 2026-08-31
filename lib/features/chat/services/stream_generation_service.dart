@@ -21,6 +21,7 @@ import '../../../core/llm/prompt/prompt_payload.dart';
 import '../../../core/llm/prompt/prompt_result.dart';
 import '../../../core/llm/context_calculator.dart';
 import '../../../core/llm/stream_accumulator.dart';
+import '../../../core/llm/studio_regex_applicator.dart';
 import '../../../core/llm/beauty_state_parser.dart';
 import '../../../core/llm/idle_timeout_guard.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
@@ -30,6 +31,7 @@ import '../../../core/utils/cast_helpers.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../core/state/studio_turn_config_resolver.dart';
+import '../../../core/state/studio_regex_provider.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/pipeline_settings.dart';
@@ -344,6 +346,14 @@ class StreamGenerationService {
           });
         }
 
+        final studioOutputRegexes = await _ref.read(studioRegexProvider.future);
+        String transformStudioOutput(String text) =>
+            applyStudioOutputRegexesToText(
+              text: text,
+              entries: studioOutputRegexes,
+              macroContext: finalStudioContext!.macroContext,
+            );
+
         final studioResult = await studioService.runTrackerCycle(
           config: studioConfig,
           inputs: inputs,
@@ -372,9 +382,10 @@ class StreamGenerationService {
           },
           onFinalResponseUpdate: (text, reasoning) {
             if (_isAborted()) return;
-            latestStudioText = text;
+            final transformedText = transformStudioOutput(text);
+            latestStudioText = transformedText;
             latestStudioReasoning = reasoning;
-            reportStudioStreamPhase(text);
+            reportStudioStreamPhase(transformedText);
             // Phase transition is handled by onFinalStart above; here we only
             // push the streaming text to the UI. Guard against the rare case
             // where onFinalStart was not wired (e.g. older callers) so the
@@ -457,7 +468,7 @@ class StreamGenerationService {
           StudioCyclePhase.done,
         );
         final beautyApplied = applyBeautyState(
-          studioResult.response,
+          transformStudioOutput(studioResult.response),
           pendingSessionVars,
         );
         final wrappedStudioText = wrapLumiaOocColors(beautyApplied.text);

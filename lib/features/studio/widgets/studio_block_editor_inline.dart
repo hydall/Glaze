@@ -54,6 +54,7 @@ class StudioBlockEditorInline extends StatelessWidget {
           {'label': 'System', 'value': 'system'},
           {'label': 'User', 'value': 'user'},
           {'label': 'Assistant', 'value': 'assistant'},
+          {'label': 'Tool', 'value': 'tool'},
         ],
       ),
       GenericEditorField(
@@ -61,7 +62,7 @@ class StudioBlockEditorInline extends StatelessWidget {
         label: 'studio_field_mode'.tr(),
         type: 'select',
         options: [
-          for (final mode in const ['direct', 'pregenBrief', 'agentResponse'])
+          for (final mode in const ['direct', 'pregenBrief', 'agentResponse', 'functionPrefill'])
             {'label': studioBlockModeLabel(mode), 'value': mode},
         ],
       ),

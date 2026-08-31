@@ -21,6 +21,7 @@ String studioInjectionPointLabel(String point) => switch (point) {
   'pregen' => 'studio_point_pregen'.tr(),
   'specificAgent' => 'studio_point_specific_agent'.tr(),
   'final' => 'studio_point_final'.tr(),
+  'output' => 'studio_point_output'.tr(),
   'cleaner' => 'studio_point_cleaner'.tr(),
   'ledger' => 'studio_point_ledger'.tr(),
   _ => point,
@@ -58,5 +59,6 @@ List<StudioControllerSpec> _specsWithIds(List<String> ids) => [
 String studioBlockModeLabel(String mode) => switch (mode) {
   'pregenBrief' => 'studio_mode_pregen_brief'.tr(),
   'agentResponse' => 'studio_mode_agent_response'.tr(),
+  'functionPrefill' => 'studio_mode_function_prefill'.tr(),
   _ => 'studio_mode_direct'.tr(),
 };

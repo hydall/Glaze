@@ -1,10 +1,12 @@
 import '../models/studio_config.dart';
+import '../models/studio_regex.dart';
 import '../models/studio_preset_block_groups.dart';
 import 'history_assembler.dart';
 import 'studio_brief_deduper.dart';
 import 'studio_controller_ontology.dart';
 import 'studio_prompt_text.dart';
 import 'studio_stage_brief.dart';
+import 'studio_regex_applicator.dart';
 import 'studio/studio_brief_macro_renderer.dart';
 import 'studio/studio_history_limiter.dart';
 import 'studio/studio_runtime_block_expander.dart';
@@ -24,7 +26,15 @@ class StudioMessageBuilder {
   late final StudioRuntimeBlockExpander _blockExpander =
       StudioRuntimeBlockExpander(_briefMacroRenderer);
 
-  StudioMessageBuilder(this._promptText, this._briefDeduper);
+  final List<StudioRegex> Function() _readStudioRegexes;
+
+  StudioMessageBuilder(
+    this._promptText,
+    this._briefDeduper, {
+    List<StudioRegex> Function()? readStudioRegexes,
+  }) : _readStudioRegexes = readStudioRegexes ?? _emptyStudioRegexes;
+
+  static List<StudioRegex> _emptyStudioRegexes() => const [];
 
   List<Map<String, dynamic>> buildAgentMessages({
     required StudioAgent agent,
@@ -313,6 +323,23 @@ class StudioMessageBuilder {
                 ),
           );
           break;
+        case 'functionPrefill':
+          _recordLorebookMacroClassifications(
+            block.content,
+            emittedLorebookClassifications,
+          );
+          final prefill = _blockExpander
+              .expandStudioBlockContent(
+                block.content,
+                context: context,
+                priorBriefs: priorBriefs,
+                preset: studioPreset,
+              )
+              .trim();
+          if (prefill.isNotEmpty) {
+            _addFunctionPrefillTail(messages, block.id, prefill);
+          }
+          break;
         case 'agentResponse':
           break;
       }
@@ -330,7 +357,14 @@ class StudioMessageBuilder {
             'fences). If no edit is needed, output the text verbatim.',
       });
     }
-    return messages;
+    final stages = <String>{point};
+    if (!isFinalResponse && !isPostProc) stages.add('specificAgent');
+    return applyStudioRegexes(
+      messages: messages,
+      stages: stages,
+      entries: _readStudioRegexes(),
+      macroContext: context.macroContext,
+    );
   }
 
   void _recordLorebookSlotClassifications(
@@ -414,6 +448,41 @@ class StudioMessageBuilder {
     messages.add({
       'role': _blockExpander.normalizeInstructionRole(role),
       'content': resolved,
+    });
+  }
+
+  /// Emits a synthetic function-call tail: an `assistant` turn whose content is
+  /// empty and which carries a single `tool_call`, followed by a `tool` result
+  /// carrying [prefill]. This is the Glaze equivalent of wrapping an assistant
+  /// prefill in a function response (see the SillyTavern "Silly Prefill"
+  /// extension): the model continues writing from the already-emitted [prefill]
+  /// instead of treating it as an unanswered/refused prompt. The `tool_call`
+  /// id is derived from the block id so the pair is self-consistent within the
+  /// request; `name`/`arguments` are fixed — the model only reads the prefill.
+  void _addFunctionPrefillTail(
+    List<Map<String, dynamic>> messages,
+    String blockId,
+    String prefill,
+  ) {
+    final callId = 'call_$blockId';
+    messages.add({
+      'role': 'assistant',
+      'content': '',
+      'tool_calls': [
+        {
+          'id': callId,
+          'type': 'function',
+          'function': {
+            'name': 'glaze_prefill',
+            'arguments': '{"mode":"assistant_prefill"}',
+          },
+        },
+      ],
+    });
+    messages.add({
+      'role': 'tool',
+      'tool_call_id': callId,
+      'content': prefill,
     });
   }
 
@@ -624,5 +693,18 @@ class StudioMessageBuilder {
       if (content.isNotEmpty) buffer.writeln(content);
     }
     return buffer.toString().trim();
+  }
+
+  List<Map<String, dynamic>> applyRegexesForStages({
+    required List<Map<String, dynamic>> messages,
+    required Set<String> stages,
+    required StudioContext context,
+  }) {
+    return applyStudioRegexes(
+      messages: messages,
+      stages: stages,
+      entries: _readStudioRegexes(),
+      macroContext: context.macroContext,
+    );
   }
 }

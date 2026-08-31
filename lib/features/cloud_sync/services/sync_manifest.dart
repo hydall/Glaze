@@ -681,11 +681,22 @@ class SyncManifestBuilder implements SyncManifestProvider {
     final activeStudioPresetId = prefs.getString(
       SyncSerialization.activeStudioPresetKey,
     );
-    if (pipelineSettings != null || activeStudioPresetId != null) {
+    final globalRegexScripts = prefs.getString(
+      SyncSerialization.globalRegexScriptsKey,
+    );
+    final studioRegexScripts = prefs.getString(
+      SyncSerialization.studioRegexScriptsKey,
+    );
+    if (pipelineSettings != null ||
+        activeStudioPresetId != null ||
+        globalRegexScripts != null ||
+        studioRegexScripts != null) {
       const type = 'local_storage';
       final payload = SyncSerialization.localStoragePayload(
         pipelineSettings: pipelineSettings,
         activeStudioPresetId: activeStudioPresetId,
+        globalRegexScripts: globalRegexScripts,
+        studioRegexScripts: studioRegexScripts,
       );
       final hash = SyncSerialization.computeSyncHash(payload);
       final key = entryKey(type, type);
