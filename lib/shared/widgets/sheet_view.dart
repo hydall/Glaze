@@ -139,7 +139,34 @@ class _SheetViewState extends ConsumerState<SheetView>
   ShellHeaderRegistry? _headerRegistry;
 
   bool _keyboardOpen = false;
-  bool _wasExpandedBeforeKeyboard = false;
+
+  /// Height the on-screen keyboard adds on top of [_heightN], capped at
+  /// fullscreen.
+  ///
+  /// The sheet used to answer a keyboard by tweening its own height to
+  /// fullscreen (and back on hide) over 350 ms. That tween ran *alongside* the
+  /// keyboard's inset animation, which has its own duration and curve, so the
+  /// body was resized twice per toggle by two desynchronised motions: content
+  /// slid up with the inset, then again with the sheet, and any list that was
+  /// scrolled to its end re-clamped its offset on every frame in between. It
+  /// read as a flicker — most visibly in the Memory sheet's Summary tab, the
+  /// one place in that sheet with text fields.
+  ///
+  /// Tracking the inset instead keeps the two in lockstep: the sheet grows by
+  /// exactly what the keyboard covers, so the visible body neither shrinks nor
+  /// is animated a second time, and it returns to its previous height as the
+  /// keyboard retracts.
+  double _kbLift = 0;
+
+  /// Whether [_kbLift] is currently following the inset. Cleared by
+  /// [_commitKeyboardLift] once the user takes the height over by hand.
+  bool _kbAnchored = false;
+
+  /// Top padding the header was last built with, so [_measureHeader] can
+  /// subtract exactly what that frame added instead of re-deriving it from a
+  /// height that may already have ticked on — which made the padding-free base
+  /// oscillate by a few pixels per frame during any resize.
+  double _headerTopPad = 0;
 
   late AnimationController _ctrl;
   Animation<double>? _anim;
@@ -191,6 +218,30 @@ class _SheetViewState extends ConsumerState<SheetView>
   double _topPad(double height) =>
       MediaQueryData.fromView(View.of(context)).padding.top * _t(height);
 
+  /// [base] plus the keyboard lift, never past fullscreen.
+  double _lifted(double base) {
+    if (_kbLift <= 0) return base;
+    final full = _full(context);
+    final lifted = base + _kbLift;
+    return lifted > full ? full : lifted;
+  }
+
+  /// Folds the keyboard's share of the current height into [_heightN] and stops
+  /// tracking the inset, so a drag or a snap started while the keyboard is up
+  /// moves the sheet 1:1 instead of fighting the lift. The lift re-arms on the
+  /// next time the keyboard comes up.
+  void _commitKeyboardLift() {
+    if (!_kbAnchored) return;
+    final lifted = _lifted(_currentHeight);
+    _kbAnchored = false;
+    _kbLift = 0;
+    _currentHeight = lifted;
+    final expanded = lifted >= _full(context);
+    if (expanded != _expanded) {
+      setState(() => _expanded = expanded);
+    }
+  }
+
   double _estimateHeaderHeight() {
     if (!_hasHeader) {
       return 0;
@@ -226,7 +277,7 @@ class _SheetViewState extends ConsumerState<SheetView>
       final h = box.size.height;
       // The measured box includes the animated top padding; keep the raw
       // value for the blur strip and the padding-free base for the body inset.
-      final base = h - _topPad(_heightN.value);
+      final base = h - _headerTopPad;
       if (h != _headerH || base != _headerBaseH) {
         setState(() {
           _headerH = h;
@@ -308,11 +359,16 @@ class _SheetViewState extends ConsumerState<SheetView>
 
   void _toggle() {
     if (widget.fitContent) return;
+    // Commit first, so "expanded" means what the user sees when they tap the
+    // handle: a sheet the keyboard has lifted to fullscreen collapses on the
+    // first tap instead of swallowing it.
+    _commitKeyboardLift();
     final target = _expanded ? _collapsed(context) : _full(context);
     _animateTo(target, expanding: !_expanded);
   }
 
   void _animateTo(double target, {required bool expanding}) {
+    _commitKeyboardLift();
     final start = _currentHeight;
     _anim?.removeListener(_onTick);
     _anim = Tween(begin: start, end: target).animate(
@@ -327,6 +383,7 @@ class _SheetViewState extends ConsumerState<SheetView>
   void _onTick() => _currentHeight = _anim!.value;
 
   void _onDragStart(DragStartDetails d) {
+    _commitKeyboardLift();
     _ctrl.stop();
     _anim?.removeListener(_onTick);
     _dragStartY = d.globalPosition.dy;
@@ -394,27 +451,14 @@ class _SheetViewState extends ConsumerState<SheetView>
 
     if (isKeyboardOpen != _keyboardOpen) {
       _keyboardOpen = isKeyboardOpen;
-      if (isKeyboardOpen) {
-        if (!_expanded && !widget.fitContent) {
-          _wasExpandedBeforeKeyboard = false;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && !_expanded) {
-              _animateTo(_full(context), expanding: true);
-            }
-          });
-        } else {
-          _wasExpandedBeforeKeyboard = true;
-        }
-      } else {
-        if (!_wasExpandedBeforeKeyboard) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _expanded) {
-              _animateTo(_collapsed(context), expanding: false);
-            }
-          });
-        }
-      }
+      // A keyboard on its way up re-arms the lift; one that is gone drops it.
+      // A fitContent sheet is sized by its body, and a fullscreen route has no
+      // room to grow, so neither ever lifts.
+      _kbAnchored = isKeyboardOpen && _inModalSheet && !widget.fitContent;
     }
+    // Read every frame, not just on the open/close edge: the inset animates,
+    // and the sheet has to follow it the whole way up and back down.
+    _kbLift = _kbAnchored ? bottomInset : 0;
 
     if (!_inModalSheet) {
       if (_hasHeader) {
@@ -607,7 +651,7 @@ class _SheetViewState extends ConsumerState<SheetView>
           child: content,
           builder: (context, height, child) {
             return SizedBox(
-              height: widget.fitContent ? null : height,
+              height: widget.fitContent ? null : _lifted(height),
               child: ClipRRect(
                 // Constant, so the sheet keeps its rounded top edge when
                 // expanded to full height. It used to taper to 0 on the way up,
@@ -680,10 +724,15 @@ class _SheetViewState extends ConsumerState<SheetView>
                     onDragUpdate: widget.fitContent ? null : _onDragUpdate,
                     onDragEnd: widget.fitContent ? null : _onDragEnd,
                   ),
-                  builder: (context, height, header) => Padding(
-                    padding: EdgeInsets.only(top: _topPad(height)),
-                    child: header,
-                  ),
+                  builder: (context, height, header) {
+                    // Recorded so _measureHeader subtracts exactly what this
+                    // frame added.
+                    _headerTopPad = _topPad(_lifted(height));
+                    return Padding(
+                      padding: EdgeInsets.only(top: _headerTopPad),
+                      child: header,
+                    );
+                  },
                 ),
               ),
             ),
@@ -772,9 +821,8 @@ class _SheetViewState extends ConsumerState<SheetView>
             valueListenable: _heightN,
             child: scrollChild,
             builder: (context, height, child) {
-              final extraTop = _hasHeader
-                  ? _headerBaseH + _topPad(height)
-                  : _topPad(height);
+              final topPad = _topPad(_lifted(height));
+              final extraTop = _hasHeader ? _headerBaseH + topPad : topPad;
               return MediaQuery(
                 data: mediaQuery.copyWith(
                   padding: mediaQuery.padding.copyWith(
