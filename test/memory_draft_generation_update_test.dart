@@ -28,6 +28,9 @@ void main() {
       title: 'stale request title',
       content: 'new content',
       keys: ['new'],
+      keyParagraphs: {
+        'new': [0],
+      },
       status: 'pending_approval',
       generatedAt: 20,
       updatedAt: 21,
@@ -43,6 +46,9 @@ void main() {
     final draft = updated.pendingDrafts.last;
     expect(draft.content, 'new content');
     expect(draft.keys, ['new']);
+    expect(draft.keyParagraphs, {
+      'new': [0],
+    });
     expect(draft.title, 'Current title');
     expect(draft.status, 'pending_approval');
     expect(draft.error, isNull);

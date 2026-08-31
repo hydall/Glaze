@@ -17,6 +17,7 @@ MemoryBook? applyGeneratedMemoryDraft(
   drafts[index] = current.copyWith(
     content: generated.content,
     keys: generated.keys,
+    keyParagraphs: generated.keyParagraphs,
     status: 'pending_approval',
     generatedAt: generated.generatedAt,
     updatedAt: generated.updatedAt,

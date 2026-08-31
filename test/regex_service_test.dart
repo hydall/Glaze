@@ -5,6 +5,24 @@ import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 
 void main() {
+  test('Memory Book retrieval flag defaults false and round-trips aliases', () {
+    final legacy = PresetRegex.fromJson({
+      'id': 'legacy',
+      'scriptName': 'Legacy',
+      'findRegex': '/x/g',
+    });
+    final optedIn = PresetRegex.fromJson({
+      'id': 'opted-in',
+      'scriptName': 'Opted in',
+      'findRegex': '/x/g',
+      'memory_book_retrieval': 1,
+    });
+
+    expect(legacy.memoryBookRetrieval, isFalse);
+    expect(optedIn.memoryBookRetrieval, isTrue);
+    expect(PresetRegex.fromJson(optedIn.toJson()).memoryBookRetrieval, isTrue);
+  });
+
   group('RegexService — ST compatibility (backrefs, flags, substituteRegex)', () {
     RegexApplyContext ctx() => const RegexApplyContext();
 
@@ -19,7 +37,8 @@ void main() {
         'isEnabled': true,
       });
 
-      const input = 'See <div class="x">hello <b>world</b></div> and <br/> and <img src="a.png">';
+      const input =
+          'See <div class="x">hello <b>world</b></div> and <br/> and <img src="a.png">';
       final out = applyRegexes(input, 2, 2, [script], ctx());
 
       expect(out, equals('See  and  and '));
@@ -55,21 +74,24 @@ void main() {
       expect(out, equals('hello world'));
     });
 
-    test('ReplaceSpace with substituteRegex:1 — U+3164 (hangul filler) -> space', () {
-      final script = PresetRegex.fromJson({
-        'id': 'replace-space',
-        'scriptName': 'ReplaceSpace',
-        'findRegex': r'/ㅤ/g',
-        'replaceString': ' ',
-        'substituteRegex': 1,
-        'placement': [1, 2, 5],
-        'isEnabled': true,
-      });
+    test(
+      'ReplaceSpace with substituteRegex:1 — U+3164 (hangul filler) -> space',
+      () {
+        final script = PresetRegex.fromJson({
+          'id': 'replace-space',
+          'scriptName': 'ReplaceSpace',
+          'findRegex': r'/ㅤ/g',
+          'replaceString': ' ',
+          'substituteRegex': 1,
+          'placement': [1, 2, 5],
+          'isEnabled': true,
+        });
 
-      const input = 'helloㅤworld';
-      final out = applyRegexes(input, 2, 2, [script], ctx());
-      expect(out, equals('hello world'));
-    });
+        const input = 'helloㅤworld';
+        final out = applyRegexes(input, 2, 2, [script], ctx());
+        expect(out, equals('hello world'));
+      },
+    );
 
     test('markdownOnly applies only when isMarkdown is true', () {
       final script = PresetRegex.fromJson({
@@ -117,8 +139,14 @@ void main() {
       });
 
       const input = 'foo';
-      expect(applyRegexes(input, 4, 2, [script], ctx(), isPrompt: true), equals('foo'));
-      expect(applyRegexes(input, 5, 2, [script], ctx(), isPrompt: true), equals('bar'));
+      expect(
+        applyRegexes(input, 4, 2, [script], ctx(), isPrompt: true),
+        equals('foo'),
+      );
+      expect(
+        applyRegexes(input, 5, 2, [script], ctx(), isPrompt: true),
+        equals('bar'),
+      );
     });
 
     test('{{match}} in replacement', () {
@@ -146,7 +174,10 @@ void main() {
 
       expect(script.placement, contains(5));
       const input = 'x';
-      expect(applyRegexes(input, 5, 2, [script], ctx(), isPrompt: true), equals('Z'));
+      expect(
+        applyRegexes(input, 5, 2, [script], ctx(), isPrompt: true),
+        equals('Z'),
+      );
     });
 
     test('HEADER-style: multiline capture groups are resolved', () {
@@ -154,12 +185,14 @@ void main() {
       final script = PresetRegex.fromJson({
         'id': 'header-test',
         'name': 'HEADER',
-        'regex': r'/\[HEADER\]\s*name:\s*([^\n]+?)\s*status:\s*([^\n]+?)\s*\[\/HEADER\]/g',
+        'regex':
+            r'/\[HEADER\]\s*name:\s*([^\n]+?)\s*status:\s*([^\n]+?)\s*\[\/HEADER\]/g',
         'replacement': r'<div>Name=$1 Status=$2</div>',
         'placement': [2],
       });
 
-      const input = '[HEADER]\nname: Элай Марш\nstatus: idle\n[/HEADER]\nSome text.';
+      const input =
+          '[HEADER]\nname: Элай Марш\nstatus: idle\n[/HEADER]\nSome text.';
       final out = applyRegexes(input, 2, 2, [script], ctx());
       expect(out, equals('<div>Name=Элай Марш Status=idle</div>\nSome text.'));
     });
@@ -173,9 +206,15 @@ void main() {
         'placement': [2],
       });
 
-      const input = '[BOOTS]\ntitle: My Title\nreflection: deep thoughts\n[/BOOTS]';
+      const input =
+          '[BOOTS]\ntitle: My Title\nreflection: deep thoughts\n[/BOOTS]';
       final out = applyRegexes(input, 2, 2, [script], ctx());
-      expect(out, equals('<div class="boots">\ntitle: My Title\nreflection: deep thoughts\n</div>'));
+      expect(
+        out,
+        equals(
+          '<div class="boots">\ntitle: My Title\nreflection: deep thoughts\n</div>',
+        ),
+      );
     });
 
     test('backrefs work even with substituteRegex != 0', () {
@@ -232,12 +271,7 @@ void main() {
       Map<String, String> sessionVars = const {},
       Map<String, String> globalVars = const {},
     }) => RegexApplyContext(
-      char: Character(
-        id: 'char_1',
-        name: 'Alise',
-        createdAt: 0,
-        updatedAt: 0,
-      ),
+      char: Character(id: 'char_1', name: 'Alise', createdAt: 0, updatedAt: 0),
       persona: Persona(id: 'persona_1', name: 'Иван'),
       sessionVars: sessionVars,
       globalVars: globalVars,
@@ -252,37 +286,43 @@ void main() {
       'placement': [2],
     });
 
-    test('{{user}} / {{char}} in the replacement expand without macroRules',
-        () {
-      final out = applyRegexes(
-        '{TRK|jacket}',
-        2,
-        1,
-        [cardScript()],
-        charCtx(),
-        isMarkdown: true,
-      );
+    test(
+      '{{user}} / {{char}} in the replacement expand without macroRules',
+      () {
+        final out = applyRegexes(
+          '{TRK|jacket}',
+          2,
+          1,
+          [cardScript()],
+          charCtx(),
+          isMarkdown: true,
+        );
 
-      expect(
-        out,
-        equals('<div><b>Иван</b>: jacket</div><div><b>Alise</b>: jacket</div>'),
-      );
-    });
+        expect(
+          out,
+          equals(
+            '<div><b>Иван</b>: jacket</div><div><b>Alise</b>: jacket</div>',
+          ),
+        );
+      },
+    );
 
-    test('macros stay literal when no character/macro context is available',
-        () {
-      final out = applyRegexes(
-        '{TRK|jacket}',
-        2,
-        1,
-        [cardScript()],
-        const RegexApplyContext(),
-        isMarkdown: true,
-      );
+    test(
+      'macros stay literal when no character/macro context is available',
+      () {
+        final out = applyRegexes(
+          '{TRK|jacket}',
+          2,
+          1,
+          [cardScript()],
+          const RegexApplyContext(),
+          isMarkdown: true,
+        );
 
-      expect(out, contains('{{user}}'));
-      expect(out, contains('{{char}}'));
-    });
+        expect(out, contains('{{user}}'));
+        expect(out, contains('{{char}}'));
+      },
+    );
 
     test('macros are substituted after capture groups, like ST', () {
       // A macro carried in by a capture group is expanded too: ST runs
@@ -308,13 +348,9 @@ void main() {
         'placement': [2],
       });
 
-      final out = applyRegexes(
-        '{LOC}',
-        2,
-        1,
-        [script],
-        charCtx(sessionVars: {'location': 'Квартира бабы Нели'}),
-      );
+      final out = applyRegexes('{LOC}', 2, 1, [
+        script,
+      ], charCtx(sessionVars: {'location': 'Квартира бабы Нели'}));
       expect(out, equals('Квартира бабы Нели'));
     });
 
@@ -330,13 +366,9 @@ void main() {
         'placement': [2],
       });
 
-      final out = applyRegexes(
-        'noise {TRK|noise jacket} noise',
-        2,
-        1,
-        [script],
-        charCtx(),
-      );
+      final out = applyRegexes('noise {TRK|noise jacket} noise', 2, 1, [
+        script,
+      ], charCtx());
 
       expect(out, equals('noise <b> jacket</b> noise'));
     });

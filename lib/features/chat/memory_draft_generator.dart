@@ -5,13 +5,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 
 import '../../core/llm/transport/chat_transport_request.dart';
+import '../../core/llm/macro_engine.dart';
 import '../../core/llm/memory_book_api_config_resolver.dart';
+import '../../core/llm/memory_draft_response_parser.dart';
+import '../../core/llm/memory_draft_transcript_builder.dart';
+import '../../core/llm/regex_service.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/llm/transport/transport_factory.dart';
 import '../../core/models/memory_book.dart';
+import '../../core/models/chat_message.dart';
 import '../../core/models/pipeline_settings.dart';
 import '../../core/services/memory_prompt_presets.dart';
 import '../../core/state/memory_settings_provider.dart';
+import '../../core/state/active_selection_provider.dart';
+import '../../core/state/db_provider.dart';
+import '../../core/state/global_regex_provider.dart';
+import '../../core/state/studio_regex_provider.dart';
 import '../settings/api_list_provider.dart';
 
 class MemoryDraftGenerator {
@@ -25,9 +34,61 @@ class MemoryDraftGenerator {
     required MemoryDraft draft,
     required MemoryBookSettings settings,
     required PipelineSettings pipeline,
-    required String historyText,
+    required List<ChatMessage> messages,
+    required String charId,
+    required String sessionId,
+    required Map<String, String> sessionVars,
     CancelToken? cancelToken,
   }) async {
+    final character = await _read(characterRepoProvider).getById(charId);
+    if (character == null) throw StateError('Character not found: $charId');
+    final presets = await _read(presetRepoProvider).getAll();
+    final preset = getEffectivePreset(
+      presets,
+      charId,
+      sessionId,
+      _read(activePresetIdProvider),
+      _read(presetConnectionsProvider),
+    );
+    final personas = await _read(personaRepoProvider).getAll();
+    final persona = getEffectivePersona(
+      personas,
+      charId,
+      sessionId,
+      _read(activePersonaIdProvider),
+      _read(personaConnectionsProvider),
+    );
+    final globalRegexes = await _read(globalRegexProvider.future);
+    final studioRegexes = await _read(studioRegexProvider.future);
+    final globalVars = _read(globalVarsProvider);
+    final historyText = MemoryDraftTranscriptBuilder.build(
+      messages: messages,
+      scripts: [
+        ...?preset?.regexes,
+        ...globalRegexes,
+        ...studioRegexes.map((entry) => entry.script),
+      ],
+      context: RegexApplyContext(
+        char: character,
+        persona: persona,
+        sessionVars: sessionVars,
+        globalVars: globalVars,
+        macroContext: MacroContext(
+          charName: character.name,
+          charDescription: character.description,
+          charScenario: character.scenario,
+          charPersonality: character.personality,
+          charMesExample: character.mesExample,
+          userName: persona?.name ?? 'User',
+          personaPrompt: persona?.prompt,
+          sessionVars: sessionVars,
+          globalVars: globalVars,
+          charId: charId,
+          sessionId: sessionId,
+          macroName: character.macroName,
+        ),
+      ),
+    );
     final customPrompts = MemoryPromptPreset.fromJsonList(
       _read(memoryGlobalSettingsProvider).customPrompts,
     );
@@ -111,38 +172,6 @@ class MemoryDraftGenerator {
     );
 
     final result = await completer.future;
-    return _parseDraftResult(draft, result);
-  }
-
-  MemoryDraft _parseDraftResult(MemoryDraft draft, String raw) {
-    String content = raw;
-    List<String> keys = [];
-
-    final memoryMatch = RegExp(
-      r'Memory:\s*(.*?)(?=\nKeys:|$)',
-      dotAll: true,
-    ).firstMatch(raw);
-    final keysMatch = RegExp(r'Keys:\s*(.*?)$', dotAll: true).firstMatch(raw);
-
-    if (memoryMatch != null) {
-      content = memoryMatch.group(1)!.trim();
-    }
-    if (keysMatch != null) {
-      keys = keysMatch
-          .group(1)!
-          .split(',')
-          .map((k) => k.trim().toLowerCase())
-          .where((k) => k.isNotEmpty)
-          .toList();
-    }
-
-    return draft.copyWith(
-      content: content,
-      keys: keys,
-      status: 'pending_approval',
-      generatedAt: DateTime.now().millisecondsSinceEpoch,
-      updatedAt: DateTime.now().millisecondsSinceEpoch,
-      error: null,
-    );
+    return MemoryDraftResponseParser.parse(draft, result);
   }
 }

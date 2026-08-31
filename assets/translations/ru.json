@@ -91,6 +91,7 @@
   "regex_max_depth": "Макс. глубина",
   "regex_other_options": "Другие опции",
   "regex_run_on_edit": "Срабатывать при редактировании",
+  "regex_memory_book_retrieval": "Применять при генерации черновиков Memory Book",
   "regex_macros_find": "Макросы в поиске",
   "regex_ephemerality": "Эфемерность",
   "regex_user_input": "Ввод пользователя",

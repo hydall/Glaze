@@ -58,6 +58,7 @@ Future<String> savePresetJson(Preset preset) async {
             'markdownOnly': r.markdownOnly,
             'promptOnly': r.promptOnly,
             'runOnEdit': r.runOnEdit,
+            'memoryBookRetrieval': r.memoryBookRetrieval,
             'substituteRegex': r.substituteRegex,
             if (r.minDepth != null) 'minDepth': r.minDepth,
             if (r.maxDepth != null) 'maxDepth': r.maxDepth,

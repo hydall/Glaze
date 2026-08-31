@@ -217,6 +217,7 @@ class MemoryBookController {
       title: draft.title,
       content: draft.content,
       keys: draft.keys,
+      keyParagraphs: draft.keyParagraphs,
       vectorSearch: draft.vectorSearch,
       messageIds: draft.messageIds,
       messageRange: draft.messageRange,
@@ -374,6 +375,7 @@ class MemoryBookController {
         title: result.title,
         content: result.content,
         keys: result.keys,
+        keyParagraphs: result.keyParagraphs,
         updatedAt: DateTime.now().millisecondsSinceEpoch,
       );
     }

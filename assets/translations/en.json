@@ -91,6 +91,7 @@
   "regex_max_depth": "Max Depth",
   "regex_other_options": "Other Options",
   "regex_run_on_edit": "Run On Edit",
+  "regex_memory_book_retrieval": "Apply when generating Memory Book drafts",
   "regex_macros_find": "Macros in Find Regex",
   "regex_ephemerality": "Ephemerality",
   "regex_user_input": "User Input",

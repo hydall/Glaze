@@ -16,11 +16,20 @@ class JsMemoryImporter with TypeConverters {
       await _importMemoryBooksFromMap(charId, memoryBooksRaw);
     } else if (memoryBooksRaw is List) {
       final sessionId = '${charId}_1';
-      await _importMemoryBookEntries(charId, sessionId, memoryBooksRaw, {}, null);
+      await _importMemoryBookEntries(
+        charId,
+        sessionId,
+        memoryBooksRaw,
+        {},
+        null,
+      );
     }
   }
 
-  Future<void> importMemoryDrafts(String charId, dynamic pendingDraftsRaw) async {
+  Future<void> importMemoryDrafts(
+    String charId,
+    dynamic pendingDraftsRaw,
+  ) async {
     if (pendingDraftsRaw is! Map) return;
     for (final entry in pendingDraftsRaw.entries) {
       final sessionIdx = entry.key;
@@ -32,7 +41,9 @@ class JsMemoryImporter with TypeConverters {
   }
 
   Future<void> _importMemoryBooksFromMap(
-      String charId, Map<dynamic, dynamic> memoryBooksRaw) async {
+    String charId,
+    Map<dynamic, dynamic> memoryBooksRaw,
+  ) async {
     for (final mbEntry in memoryBooksRaw.entries) {
       final mbSessionIdx = mbEntry.key;
       final mbData = mbEntry.value;
@@ -40,28 +51,34 @@ class JsMemoryImporter with TypeConverters {
 
       final mbFullSessionId = '${charId}_$mbSessionIdx';
       final rawEntries = mbData['entries'];
-      final rawSettings =
-          mbData['settings'] is Map ? mbData['settings'] as Map : <String, dynamic>{};
+      final rawSettings = mbData['settings'] is Map
+          ? mbData['settings'] as Map
+          : <String, dynamic>{};
 
       if (rawEntries is List) {
         await _importMemoryBookEntries(
-            charId, mbFullSessionId, rawEntries, rawSettings, mbData);
+          charId,
+          mbFullSessionId,
+          rawEntries,
+          rawSettings,
+          mbData,
+        );
       }
 
       final rawDrafts = mbData['pendingDrafts'];
       if (rawDrafts is List) {
-        await _importMemoryDraftsForSession(
-            mbFullSessionId, rawDrafts);
+        await _importMemoryDraftsForSession(mbFullSessionId, rawDrafts);
       }
     }
   }
 
   Future<void> _importMemoryBookEntries(
-      String charId,
-      String sessionId,
-      List<dynamic> rawEntries,
-      Map<dynamic, dynamic> rawSettings,
-      Map<dynamic, dynamic>? mbData) async {
+    String charId,
+    String sessionId,
+    List<dynamic> rawEntries,
+    Map<dynamic, dynamic> rawSettings,
+    Map<dynamic, dynamic>? mbData,
+  ) async {
     final entries = <Map<String, dynamic>>[];
     for (final e in rawEntries) {
       if (e is! Map) continue;
@@ -73,28 +90,25 @@ class JsMemoryImporter with TypeConverters {
         'keys': e['keys'] is List
             ? List<String>.from((e['keys'] as List).whereType<String>())
             : <String>[],
+        'keyParagraphs': e['keyParagraphs'] is Map
+            ? Map<String, dynamic>.from(e['keyParagraphs'] as Map)
+            : <String, List<int>>{},
         'glazeKeys': e['glazeKeys'] is List
             ? List<String>.from((e['glazeKeys'] as List).whereType<String>())
             : <String>[],
-        'content':
-            e['content'] is String ? e['content'] as String : '',
+        'content': e['content'] is String ? e['content'] as String : '',
         'rawContent': e['rawContent'] is String
             ? e['rawContent'] as String
             : null,
-        'status': e['status'] is String
-            ? e['status'] as String
-            : 'active',
+        'status': e['status'] is String ? e['status'] as String : 'active',
         'vectorSearch': e['vectorSearch'] == true,
         'messageIds': e['messageIds'] is List
-            ? List<String>.from(
-                (e['messageIds'] as List).whereType<String>())
+            ? List<String>.from((e['messageIds'] as List).whereType<String>())
             : <String>[],
         'messageRange': e['messageRange'] is Map
             ? _convertMessageRange(e['messageRange'] as Map)
             : null,
-        'source': e['source'] is String
-            ? e['source'] as String
-            : 'manual',
+        'source': e['source'] is String ? e['source'] as String : 'manual',
         'createdAt': toInt(e['createdAt']),
         'updatedAt': toInt(e['updatedAt']) ?? 0,
         'generatedAt': toInt(e['generatedAt']),
@@ -103,19 +117,25 @@ class JsMemoryImporter with TypeConverters {
 
     final settings = _parseMemorySettings(rawSettings);
 
-    await db.into(db.memoryBookRows).insertOnConflictUpdate(
+    await db
+        .into(db.memoryBookRows)
+        .insertOnConflictUpdate(
           MemoryBookRowsCompanion.insert(
             sessionId: sessionId,
             entriesJson: Value(jsonEncode(entries)),
             settingsJson: Value(jsonEncode(settings)),
-            lastProcessedMessageCount: Value(toInt(mbData?['automation']
-                        is Map
-                    ? (mbData!['automation'] as Map)[
-                        'lastProcessedMessageCount']
-                    : null) ??
-                0),
-            updatedAt: Value(toInt(mbData?['updatedAt']) ??
-                currentTimestampSeconds()),
+            lastProcessedMessageCount: Value(
+              toInt(
+                    mbData?['automation'] is Map
+                        ? (mbData!['automation']
+                              as Map)['lastProcessedMessageCount']
+                        : null,
+                  ) ??
+                  0,
+            ),
+            updatedAt: Value(
+              toInt(mbData?['updatedAt']) ?? currentTimestampSeconds(),
+            ),
           ),
         );
   }
@@ -124,26 +144,20 @@ class JsMemoryImporter with TypeConverters {
     return <String, dynamic>{
       'enabled': rawSettings['enabled'] == true,
       'autoCreateEnabled': rawSettings['autoCreateEnabled'] == true,
-      'autoGenerateEnabled':
-          rawSettings['autoGenerateEnabled'] == true,
-      'maxInjectedEntries':
-          toInt(rawSettings['maxInjectedEntries']) ?? 7,
+      'autoGenerateEnabled': rawSettings['autoGenerateEnabled'] == true,
+      'maxInjectedEntries': toInt(rawSettings['maxInjectedEntries']) ?? 7,
       'memoryExcerptingEnabled':
           rawSettings['memoryExcerptingEnabled'] != false,
-      'autoCreateInterval':
-          toInt(rawSettings['autoCreateInterval']) ?? 15,
-      'autoCreateLagMessages':
-          toInt(rawSettings['autoCreateLagMessages']) ?? 4,
-      'useDelayedAutomation':
-          rawSettings['useDelayedAutomation'] == true,
+      'autoCreateInterval': toInt(rawSettings['autoCreateInterval']) ?? 15,
+      'autoCreateLagMessages': toInt(rawSettings['autoCreateLagMessages']) ?? 4,
+      'useDelayedAutomation': rawSettings['useDelayedAutomation'] == true,
       'injectionTarget': _migrateInjectionTarget(
         rawSettings['injectionTarget'] is String
             ? rawSettings['injectionTarget'] as String
             : null,
       ),
       'batchSize': toInt(rawSettings['batchSize']) ?? 3,
-      'vectorSearchEnabled':
-          rawSettings['vectorSearchEnabled'] == true,
+      'vectorSearchEnabled': rawSettings['vectorSearchEnabled'] == true,
       'keyMatchMode': rawSettings['keyMatchMode'] is String
           ? rawSettings['keyMatchMode'] as String
           : 'glaze',
@@ -153,10 +167,9 @@ class JsMemoryImporter with TypeConverters {
       'generationModel': rawSettings['generationModel'] is String
           ? rawSettings['generationModel'] as String
           : '',
-      'generationEndpoint':
-          rawSettings['generationEndpoint'] is String
-              ? rawSettings['generationEndpoint'] as String
-              : '',
+      'generationEndpoint': rawSettings['generationEndpoint'] is String
+          ? rawSettings['generationEndpoint'] as String
+          : '',
       'generationApiKey': rawSettings['generationApiKey'] is String
           ? rawSettings['generationApiKey'] as String
           : '',
@@ -164,7 +177,9 @@ class JsMemoryImporter with TypeConverters {
   }
 
   Future<void> _importMemoryDraftsForSession(
-      String sessionId, List<dynamic> rawDrafts) async {
+    String sessionId,
+    List<dynamic> rawDrafts,
+  ) async {
     final drafts = <Map<String, dynamic>>[];
     for (final d in rawDrafts) {
       if (d is! Map) continue;
@@ -175,6 +190,9 @@ class JsMemoryImporter with TypeConverters {
         'keys': d['keys'] is List
             ? List<String>.from((d['keys'] as List).whereType<String>())
             : <String>[],
+        'keyParagraphs': d['keyParagraphs'] is Map
+            ? Map<String, dynamic>.from(d['keyParagraphs'] as Map)
+            : <String, List<int>>{},
         'glazeKeys': d['glazeKeys'] is List
             ? List<String>.from((d['glazeKeys'] as List).whereType<String>())
             : <String>[],
@@ -185,7 +203,9 @@ class JsMemoryImporter with TypeConverters {
         'messageRange': d['messageRange'] is Map
             ? _convertMessageRange(d['messageRange'] as Map)
             : null,
-        'status': d['status'] is String ? d['status'] as String : 'pending_generation',
+        'status': d['status'] is String
+            ? d['status'] as String
+            : 'pending_generation',
         'source': d['source'] is String ? d['source'] as String : '',
         'createdAt': toInt(d['createdAt']) ?? 0,
         'updatedAt': toInt(d['updatedAt']) ?? 0,
@@ -194,17 +214,19 @@ class JsMemoryImporter with TypeConverters {
       });
     }
 
-    final existing = await (db.select(db.memoryBookRows)
-          ..where((t) => t.sessionId.equals(sessionId)))
-        .getSingleOrNull();
+    final existing = await (db.select(
+      db.memoryBookRows,
+    )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
     if (existing != null) {
-      await (db.update(db.memoryBookRows)
-            ..where((t) => t.sessionId.equals(sessionId)))
-          .write(MemoryBookRowsCompanion(
-        pendingDraftsJson: Value(jsonEncode(drafts)),
-      ));
+      await (db.update(
+        db.memoryBookRows,
+      )..where((t) => t.sessionId.equals(sessionId))).write(
+        MemoryBookRowsCompanion(pendingDraftsJson: Value(jsonEncode(drafts))),
+      );
     } else {
-      await db.into(db.memoryBookRows).insertOnConflictUpdate(
+      await db
+          .into(db.memoryBookRows)
+          .insertOnConflictUpdate(
             MemoryBookRowsCompanion.insert(
               sessionId: sessionId,
               pendingDraftsJson: Value(jsonEncode(drafts)),
@@ -215,10 +237,7 @@ class JsMemoryImporter with TypeConverters {
 
   Map<String, dynamic>? _convertMessageRange(Map<dynamic, dynamic> raw) {
     if (raw.containsKey('start') && raw.containsKey('end')) {
-      return {
-        'start': toInt(raw['start']) ?? 0,
-        'end': toInt(raw['end']) ?? 0,
-      };
+      return {'start': toInt(raw['start']) ?? 0, 'end': toInt(raw['end']) ?? 0};
     }
     return null;
   }

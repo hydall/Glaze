@@ -50,6 +50,7 @@ abstract class PresetRegex with _$PresetRegex {
     @Default(false) bool markdownOnly,
     @Default(false) bool promptOnly,
     @Default(false) bool runOnEdit,
+    @Default(false) bool memoryBookRetrieval,
     @Default(0) int substituteRegex,
   }) = _PresetRegex;
 
@@ -156,6 +157,10 @@ Map<String, dynamic> _normalizeRegex(Map<String, dynamic> json) {
   n['markdownOnly'] = _coerceBool(n['markdownOnly'], false);
   n['promptOnly'] = _coerceBool(n['promptOnly'], false);
   n['runOnEdit'] = _coerceBool(n['runOnEdit'], false);
+  n['memoryBookRetrieval'] = _coerceBool(
+    n['memoryBookRetrieval'] ?? n['memory_book_retrieval'],
+    false,
+  );
   n['substituteRegex'] = _coerceInt(n['substituteRegex']) ?? 0;
   if (n['placement'] is List) {
     n['placement'] = _migrateGlazePlacementIds(

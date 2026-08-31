@@ -98,11 +98,16 @@ class MemoryExcerptSelector {
       );
     }
 
+    final hasScopedEntries = selection.allScores.any(
+      (score) => _scopedParagraphs(score) != null,
+    );
     if (normalizedPackingMode == 'full' ||
-        budget == null ||
+        (budget == null && !hasScopedEntries) ||
         (normalizedPackingMode == 'hybrid' &&
+            budget != null &&
             selectedFullTokens <= budget &&
-            !selection.budgetTrimmed)) {
+            !selection.budgetTrimmed &&
+            !hasScopedEntries)) {
       return fullEntries(selection);
     }
 
@@ -110,6 +115,7 @@ class MemoryExcerptSelector {
         ? selection.entryCap
         : selection.entries.length;
     final items = <MemoryInjectionItem>[];
+    final packingBudget = budget ?? selectedFullTokens;
     var usedTokens = 0;
     var trimmed = selection.budgetTrimmed;
 
@@ -120,9 +126,11 @@ class MemoryExcerptSelector {
       final fullText = entry.content.trim();
       if (fullText.isEmpty) continue;
       final fullTokens = tokenFn(fullText);
+      final scopedParagraphs = _scopedParagraphs(score);
 
       if (normalizedPackingMode == 'hybrid' &&
-          usedTokens + fullTokens <= budget) {
+          scopedParagraphs == null &&
+          usedTokens + fullTokens <= packingBudget) {
         items.add(
           MemoryInjectionItem(
             entry: entry,
@@ -136,16 +144,16 @@ class MemoryExcerptSelector {
         continue;
       }
 
-      final remaining = budget - usedTokens;
+      final remaining = packingBudget - usedTokens;
       if (remaining <= 0 && items.isNotEmpty) {
         trimmed = true;
         continue;
       }
 
-      final perEntryBudget = budget <= 0
+      final perEntryBudget = packingBudget <= 0
           ? 0
           : items.isEmpty
-          ? maxExcerptTokensPerEntry.clamp(1, budget)
+          ? maxExcerptTokensPerEntry.clamp(1, packingBudget)
           : maxExcerptTokensPerEntry.clamp(1, remaining);
       final excerpt = _buildExcerpt(
         score,
@@ -173,7 +181,7 @@ class MemoryExcerptSelector {
         continue;
       }
 
-      if (usedTokens + excerpt.tokenCost <= budget || items.isEmpty) {
+      if (usedTokens + excerpt.tokenCost <= packingBudget || items.isEmpty) {
         items.add(excerpt);
         usedTokens += excerpt.tokenCost;
       } else {
@@ -208,9 +216,18 @@ class MemoryExcerptSelector {
       final fullText = score.entry.content.trim();
       if (fullText.isEmpty) continue;
 
-      final chunks = MemoryChunker.chunk(fullText, maxExcerptTokensPerChunk, tokenFn);
+      final chunks = MemoryChunker.chunk(
+        fullText,
+        maxExcerptTokensPerChunk,
+        tokenFn,
+      );
+      final scopedParagraphs = _scopedParagraphs(score);
       final terms = ExcerptScorer.termsFor(score);
       for (final chunk in chunks) {
+        if (scopedParagraphs != null &&
+            !scopedParagraphs.contains(chunk.paragraphIndex)) {
+          continue;
+        }
         ranked.add(
           GlobalChunkCandidate(
             entry: score.entry,
@@ -248,7 +265,10 @@ class MemoryExcerptSelector {
           .add(candidate);
     }
     final entryFloorCap = topEntries.clamp(0, 64);
-    final chunksPerGuaranteedEntry = topChunks.clamp(1, maxExcerptChunksPerEntry);
+    final chunksPerGuaranteedEntry = topChunks.clamp(
+      1,
+      maxExcerptChunksPerEntry,
+    );
     if (entryFloorCap > 0) {
       var floorEntriesProcessed = 0;
       for (final score in selection.allScores) {
@@ -370,7 +390,17 @@ class MemoryExcerptSelector {
     required int Function(String text) tokenCounter,
   }) {
     if (maxTokens <= 0 || maxChunks <= 0) return null;
-    final chunks = MemoryChunker.chunk(score.entry.content, maxTokens, tokenCounter);
+    var chunks = MemoryChunker.chunk(
+      score.entry.content,
+      maxTokens,
+      tokenCounter,
+    );
+    final scopedParagraphs = _scopedParagraphs(score);
+    if (scopedParagraphs != null) {
+      chunks = chunks
+          .where((chunk) => scopedParagraphs.contains(chunk.paragraphIndex))
+          .toList(growable: false);
+    }
     if (chunks.isEmpty) return null;
     final terms = ExcerptScorer.termsFor(score);
     final ranked =
@@ -438,5 +468,24 @@ class MemoryExcerptSelector {
     }
     chunksForEntry.add(candidate);
     return true;
+  }
+
+  static Set<int>? _scopedParagraphs(MemoryCandidateScore score) {
+    if (score.matchedKeys.isEmpty || score.entry.keyParagraphs.isEmpty) {
+      return null;
+    }
+    final normalized = {
+      for (final entry in score.entry.keyParagraphs.entries)
+        entry.key.trim().toLowerCase(): entry.value,
+    };
+    final resolved = <int>{};
+    for (final key in score.matchedKeys) {
+      final indexes = normalized[key.trim().toLowerCase()];
+      if (indexes == null || indexes.isEmpty) return null;
+      resolved.addAll(indexes);
+    }
+    final paragraphCount = MemoryChunker.paragraphs(score.entry.content).length;
+    resolved.removeWhere((index) => index < 0 || index >= paragraphCount);
+    return resolved.isEmpty ? null : resolved;
   }
 }

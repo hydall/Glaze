@@ -10,6 +10,7 @@ abstract class MemoryDraft with _$MemoryDraft {
     @Default('') String title,
     @Default('') String content,
     @Default([]) List<String> keys,
+    @Default({}) Map<String, List<int>> keyParagraphs,
     @Default([]) List<String> glazeKeys,
     @Default(false) bool vectorSearch,
     @Default([]) List<String> messageIds,
@@ -25,7 +26,7 @@ abstract class MemoryDraft with _$MemoryDraft {
   }) = _MemoryDraft;
 
   factory MemoryDraft.fromJson(Map<String, dynamic> json) =>
-      _$MemoryDraftFromJson(json);
+      _$MemoryDraftFromJson(_migrateKeyParagraphsInPlace(json));
 }
 
 @freezed
@@ -43,6 +44,7 @@ abstract class MemoryEntry with _$MemoryEntry {
     required String id,
     @Default('') String title,
     @Default([]) List<String> keys,
+    @Default({}) Map<String, List<int>> keyParagraphs,
     @Default('') String content,
     @Default('active') String status,
     @Default(false) bool vectorSearch,
@@ -161,7 +163,7 @@ Map<String, dynamic> _migrateInjectionTargetInPlace(Map<String, dynamic> json) {
 /// Coerces new optional fields into safe defaults when reading older JSON
 /// payloads written before the v2 selector schema.
 Map<String, dynamic> _migrateEntryInPlace(Map<String, dynamic> json) {
-  var out = json;
+  var out = _migrateKeyParagraphsInPlace(json);
   if (out['messageRange'] != null && out['messageRange'] is! Map) {
     out = {...out, 'messageRange': null};
   }
@@ -190,6 +192,28 @@ Map<String, dynamic> _migrateEntryInPlace(Map<String, dynamic> json) {
     out = {...out, 'source': ''};
   }
   return out;
+}
+
+Map<String, dynamic> _migrateKeyParagraphsInPlace(Map<String, dynamic> json) {
+  final raw = json['keyParagraphs'];
+  if (raw is! Map) return {...json, 'keyParagraphs': <String, List<int>>{}};
+  final normalized = <String, List<int>>{};
+  for (final entry in raw.entries) {
+    final key = entry.key.toString().trim();
+    if (key.isEmpty || entry.value is! List) continue;
+    final indexes =
+        (entry.value as List)
+            .map(
+              (value) => value is int ? value : int.tryParse(value.toString()),
+            )
+            .whereType<int>()
+            .where((value) => value >= 0)
+            .toSet()
+            .toList()
+          ..sort();
+    if (indexes.isNotEmpty) normalized[key] = indexes;
+  }
+  return {...json, 'keyParagraphs': normalized};
 }
 
 Map<String, int>? _parseLegacyTitleRange(Object? title) {
