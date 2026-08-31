@@ -700,7 +700,7 @@ ALLOWED CURRENT-STATE KEYS:
 
 GAME CLOCK:
 - Keep world:time as the current in-game time of day in 24h HH:MM and advance it when narrated events imply elapsed time.
-- Keep one complete tuple: world:date (DD.MM.YYYY), zero-based world:day, and world:time. Never guess a missing date or day.
+- Keep one complete tuple: world:date (DD.MM.YYYY), zero-based world:day, and world:time. Never invent a month or year. When the canonical timeline names only a month and year, derive day-of-month = 1 + world:day (Day 0 = the 1st of that month) and write world:date in DD.MM.YYYY.
 - The clock only moves FORWARD. Never rewind it; flashbacks and memories stay in prose. Past midnight, advance world:day (day 0 = the first story day) and world:date.
 - Do not invent time skips the narrative does not support; an immediately continuing scene moves time by only a few minutes.
 

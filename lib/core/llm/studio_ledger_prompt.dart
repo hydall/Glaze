@@ -389,7 +389,9 @@ Rules:
 - World/scene keys: world:location, world:time, world:date, world:day, world:active_threats, scene.present_entities, scene.absent_backstory_entities
 - Game clock: keep world:time in 24h HH:MM as the current in-game time of day and
   keep it paired with world:date (DD.MM.YYYY) and zero-based world:day. Never
-  guess a missing date or day. When all three are established,
+  invent a month or year; when the canonical timeline names only a month and year,
+  derive day-of-month = 1 + world:day (Day 0 = the 1st of that month) and write
+  world:date in DD.MM.YYYY. When all three are established,
   advance it when narrated events imply elapsed time. The clock only moves
   FORWARD — never rewind it; flashbacks stay in prose. Past midnight, advance
   world:day (day 0 = first story day) and world:date.
