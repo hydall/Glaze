@@ -448,6 +448,7 @@ class MagicDrawerStripIcon extends StatelessWidget {
       message: label,
       preferBelow: false,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: HoverGlow(
           child: Container(

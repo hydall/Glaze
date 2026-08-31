@@ -301,6 +301,10 @@ class _SidebarButton extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return GestureDetector(
+      // Opaque: HoverGlow's overlays are IgnorePointer and the row's own
+      // content only covers the icon and the label, so a deferToChild detector
+      // would swallow clicks landing on the empty space between them.
+      behavior: HitTestBehavior.opaque,
       onTap: item.onTap,
       child: HoverGlow(
         child: SizedBox(
@@ -344,6 +348,7 @@ class _CollapsedIcon extends StatelessWidget {
       message: item.label,
       preferBelow: false,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: item.onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),

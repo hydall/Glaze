@@ -27,6 +27,20 @@ class PointerPositionTracker extends StatelessWidget {
   }
 }
 
+/// A trailing affordance on a dropdown row — a selected check mark, or a
+/// secondary action such as "edit" beside the item it belongs to.
+class DesktopPopupAction {
+  final IconData icon;
+  final Color? color;
+  final VoidCallback onTap;
+
+  const DesktopPopupAction({
+    required this.icon,
+    this.color,
+    required this.onTap,
+  });
+}
+
 /// One row of a desktop dropdown.
 class DesktopPopupEntry {
   final String label;
@@ -35,6 +49,7 @@ class DesktopPopupEntry {
   final String? hint;
   final bool isDestructive;
   final VoidCallback onTap;
+  final List<DesktopPopupAction> actions;
 
   const DesktopPopupEntry({
     required this.label,
@@ -43,6 +58,7 @@ class DesktopPopupEntry {
     this.iconColor,
     this.hint,
     this.isDestructive = false,
+    this.actions = const [],
   });
 }
 
@@ -118,10 +134,8 @@ class _DesktopPopupRoute<T> extends PopupRoute<T> {
         title: title,
         entries: entries,
         width: width,
-        onPick: (entry) {
-          Navigator.of(context).pop();
-          entry.onTap();
-        },
+        onPick: (entry) => _dismissAfter(context, entry.onTap),
+        onAction: (action) => _dismissAfter(context, action.onTap),
       ),
     );
   }
@@ -146,6 +160,21 @@ class _DesktopPopupRoute<T> extends PopupRoute<T> {
       ),
     );
   }
+}
+
+/// Runs a menu item's callback, then closes the dropdown if it is still open.
+///
+/// Sheet items conventionally dismiss themselves —
+/// `Navigator.of(context, rootNavigator: true).pop(result)` — and the caller
+/// awaits that result. This route stands in for the sheet on the same
+/// navigator, so those callbacks pop *it* and its result reaches the caller
+/// unchanged. Popping first instead would leave the item's own pop to close
+/// whatever route sat underneath.
+void _dismissAfter(BuildContext context, VoidCallback action) {
+  final route = ModalRoute.of(context);
+  final navigator = Navigator.of(context);
+  action();
+  if (route != null && route.isActive) navigator.removeRoute(route);
 }
 
 class _PopupLayout extends SingleChildLayoutDelegate {
@@ -201,12 +230,14 @@ class _PopupPanel extends StatelessWidget {
   final List<DesktopPopupEntry> entries;
   final double width;
   final void Function(DesktopPopupEntry) onPick;
+  final void Function(DesktopPopupAction) onAction;
 
   const _PopupPanel({
     required this.title,
     required this.entries,
     required this.width,
     required this.onPick,
+    required this.onAction,
   });
 
   @override
@@ -246,7 +277,7 @@ class _PopupPanel extends StatelessWidget {
                 ],
                 const SizedBox(height: 4),
                 for (final entry in entries)
-                  _PopupRow(entry: entry, onPick: onPick),
+                  _PopupRow(entry: entry, onPick: onPick, onAction: onAction),
                 const SizedBox(height: 4),
               ],
             ),
@@ -260,13 +291,19 @@ class _PopupPanel extends StatelessWidget {
 class _PopupRow extends StatelessWidget {
   final DesktopPopupEntry entry;
   final void Function(DesktopPopupEntry) onPick;
+  final void Function(DesktopPopupAction) onAction;
 
-  const _PopupRow({required this.entry, required this.onPick});
+  const _PopupRow({
+    required this.entry,
+    required this.onPick,
+    required this.onAction,
+  });
 
   @override
   Widget build(BuildContext context) {
     final color = entry.isDestructive ? context.cs.error : context.cs.onSurface;
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => onPick(entry),
       child: HoverGlow(
         child: Padding(
@@ -297,6 +334,18 @@ class _PopupRow extends StatelessWidget {
                   ],
                 ),
               ),
+              for (final action in entry.actions) ...[
+                const SizedBox(width: 8),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onAction(action),
+                  child: Icon(
+                    action.icon,
+                    size: 18,
+                    color: action.color ?? context.cs.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ],
           ),
         ),

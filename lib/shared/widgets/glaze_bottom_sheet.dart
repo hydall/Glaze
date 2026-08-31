@@ -250,8 +250,7 @@ class GlazeBottomSheet {
         input == null &&
         child == null &&
         headerAction == null &&
-        !searchable &&
-        items.every((i) => i.actions.isEmpty);
+        !searchable;
     if (isPlainMenu && isDesktopLayout(context)) {
       return showDesktopPopup<T>(
         context,
@@ -265,6 +264,14 @@ class GlazeBottomSheet {
               hint: item.hint,
               isDestructive: item.isDestructive,
               onTap: item.onTap,
+              actions: [
+                for (final action in item.actions)
+                  DesktopPopupAction(
+                    icon: action.icon,
+                    color: action.color,
+                    onTap: action.onTap,
+                  ),
+              ],
             ),
         ],
       );
