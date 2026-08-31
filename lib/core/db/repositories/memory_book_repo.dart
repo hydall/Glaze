@@ -198,6 +198,27 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
     });
   }
 
+  /// Applies a narrow mutation to one draft using the latest durable book.
+  /// Returns false when the book or draft was removed while work was in flight.
+  Future<bool> mutateDraft({
+    required String sessionId,
+    required String draftId,
+    required MemoryDraft Function(MemoryDraft current) mutate,
+  }) async {
+    var updated = false;
+    await transaction(() async {
+      final existing = await getBySessionId(sessionId);
+      if (existing == null) return;
+      final index = existing.pendingDrafts.indexWhere((d) => d.id == draftId);
+      if (index < 0) return;
+      final drafts = [...existing.pendingDrafts];
+      drafts[index] = mutate(drafts[index]);
+      await put(existing.copyWith(pendingDrafts: drafts));
+      updated = true;
+    });
+    return updated;
+  }
+
   /// Atomically appends [entries] to the approved entries of the memory book
   /// for [sessionId]. Wraps the read-modify-write in a transaction so
   /// concurrent writes cannot interleave (database.md Rule 3).

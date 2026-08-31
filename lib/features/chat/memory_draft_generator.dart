@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart';
 
 import '../../core/llm/transport/chat_transport_request.dart';
 import '../../core/llm/memory_book_api_config_resolver.dart';
@@ -14,9 +15,11 @@ import '../../core/state/memory_settings_provider.dart';
 import '../settings/api_list_provider.dart';
 
 class MemoryDraftGenerator {
-  final WidgetRef _ref;
+  final T Function<T>(ProviderListenable<T> provider) _read;
 
-  MemoryDraftGenerator(this._ref);
+  MemoryDraftGenerator(Ref ref) : _read = ref.read;
+
+  MemoryDraftGenerator.widget(WidgetRef ref) : _read = ref.read;
 
   Future<MemoryDraft> generate({
     required MemoryDraft draft,
@@ -26,7 +29,7 @@ class MemoryDraftGenerator {
     CancelToken? cancelToken,
   }) async {
     final customPrompts = MemoryPromptPreset.fromJsonList(
-      _ref.read(memoryGlobalSettingsProvider).customPrompts,
+      _read(memoryGlobalSettingsProvider).customPrompts,
     );
     final template = MemoryPromptPresets.resolve(
       settings.promptPreset,
@@ -50,10 +53,10 @@ class MemoryDraftGenerator {
       model = pipeline.memoryBookApi.generationModel;
       protocol = LlmProtocol.customChatCompletion;
     } else {
-      await _ref.read(apiListProvider.future);
+      await _read(apiListProvider.future);
       final chatConfig = MemoryBookApiConfigResolver(
-        apiConfigs: _ref.read(apiListProvider).value ?? const [],
-        activeConfig: _ref.read(activeApiConfigProvider),
+        apiConfigs: _read(apiListProvider).value ?? const [],
+        activeConfig: _read(activeApiConfigProvider),
       ).resolve(pipeline.memoryBookApi);
       if (chatConfig == null) {
         throw Exception('No chat API config available');

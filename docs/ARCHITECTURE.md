@@ -950,16 +950,13 @@ compatibility backfill into `messageRange`.
 
 `MemoryDraftPlanner` scans stable user/assistant messages, leaves a configurable
 recent-message lag, and creates only complete fixed-size ranges. The post-turn
-`MemoryDraftStage` and manual **Scan Chat** action create empty drafts without an
-LLM call. Draft text is generated later through
-`MemoryDraftGenerationController` + `memory_draft_generator.dart`, then remains
-`pending_approval` until the user accepts it. Approval copies content, keys,
-message provenance, and range into an active `MemoryEntry`; vector indexing is
-best-effort when enabled.
-
-The `autoGenerateEnabled` setting exists in model/UI, but the current automatic
-post-turn stage does not invoke LLM draft generation. Automatic draft creation
-is not automatic memory population or approval.
+`MemoryDraftStage` and manual **Scan Chat** create drafts from complete ranges.
+When `autoGenerateEnabled` is enabled, the post-turn stage immediately fills
+newly created drafts through the configured Memory Book LLM. Generated drafts
+remain `pending_approval` until the user accepts them. Approval copies content,
+keys, message provenance, and range into an active `MemoryEntry`; vector indexing
+is best-effort when enabled. Manual **Scan Chat** keeps its explicit review and
+generation workflow.
 
 ### Retrieval and injection rule
 

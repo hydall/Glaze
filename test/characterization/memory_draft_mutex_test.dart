@@ -28,11 +28,11 @@ void main() {
       expect(container.read(memoryActiveDraftsProvider), isEmpty);
     });
 
-    test('markActive adds a sessionId; isActive reports true', () {
+    test('acquire adds a sessionId; isActive reports true', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
-      container.read(memoryActiveDraftsProvider.notifier).markActive('s1');
+      container.read(memoryActiveDraftsProvider.notifier).acquire('s1');
 
       expect(container.read(memoryActiveDraftsProvider), {'s1'});
       expect(
@@ -41,13 +41,13 @@ void main() {
       );
     });
 
-    test('markInactive removes a sessionId; isActive reports false', () {
+    test('release removes a sessionId; isActive reports false', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
       final notifier = container.read(memoryActiveDraftsProvider.notifier);
 
-      notifier.markActive('s1');
-      notifier.markInactive('s1');
+      final lease = notifier.acquire('s1');
+      lease.release();
 
       expect(container.read(memoryActiveDraftsProvider), isEmpty);
       expect(notifier.isActive('s1'), isFalse);
@@ -58,40 +58,44 @@ void main() {
       addTearDown(container.dispose);
       final notifier = container.read(memoryActiveDraftsProvider.notifier);
 
-      notifier.markActive('s1');
-      notifier.markActive('s2');
-      notifier.markActive('s3');
+      final first = notifier.acquire('s1');
+      final second = notifier.acquire('s2');
+      final third = notifier.acquire('s3');
 
       expect(container.read(memoryActiveDraftsProvider), {'s1', 's2', 's3'});
       expect(notifier.isActive('s2'), isTrue);
 
-      notifier.markInactive('s2');
+      second.release();
 
       expect(container.read(memoryActiveDraftsProvider), {'s1', 's3'});
       expect(notifier.isActive('s2'), isFalse);
+      first.release();
+      third.release();
     });
 
-    test('markActive is idempotent — no duplicate entries', () {
+    test('multiple owners keep a session active until all release', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
       final notifier = container.read(memoryActiveDraftsProvider.notifier);
 
-      notifier.markActive('s1');
-      notifier.markActive('s1');
-      notifier.markActive('s1');
+      final first = notifier.acquire('s1');
+      final second = notifier.acquire('s1');
 
       expect(container.read(memoryActiveDraftsProvider), {'s1'});
+      first.release();
+      expect(container.read(memoryActiveDraftsProvider), {'s1'});
+      second.release();
+      expect(container.read(memoryActiveDraftsProvider), isEmpty);
     });
 
-    test('markInactive on unknown sessionId is a no-op (no exception)', () {
+    test('lease release is idempotent', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
       final notifier = container.read(memoryActiveDraftsProvider.notifier);
 
-      notifier.markActive('s1');
-      notifier.markInactive('unknown');
-      notifier.markInactive('s1');
-      notifier.markInactive('s1');
+      final lease = notifier.acquire('s1');
+      lease.release();
+      lease.release();
 
       expect(container.read(memoryActiveDraftsProvider), isEmpty);
     });
@@ -102,11 +106,26 @@ void main() {
       final notifier = container.read(memoryActiveDraftsProvider.notifier);
 
       final before = container.read(memoryActiveDraftsProvider);
-      notifier.markActive('s1');
+      notifier.acquire('s1');
       final after = container.read(memoryActiveDraftsProvider);
 
-      expect(identical(before, after), isFalse,
-          reason: 'set must be reassigned so listeners rebuild');
+      expect(
+        identical(before, after),
+        isFalse,
+        reason: 'set must be reassigned so listeners rebuild',
+      );
+    });
+
+    test('exclusive acquisition fails while another owner is active', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final notifier = container.read(memoryActiveDraftsProvider.notifier);
+
+      final first = notifier.tryAcquireExclusive('s1');
+      expect(first, isNotNull);
+      expect(notifier.tryAcquireExclusive('s1'), isNull);
+      first!.release();
+      expect(notifier.tryAcquireExclusive('s1'), isNotNull);
     });
   });
 }

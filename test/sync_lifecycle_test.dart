@@ -1730,6 +1730,70 @@ void main() {
     );
   });
 
+  test('Cloud round-trip restores app settings', () async {
+    final source = SyncWorld();
+    final sourcePrefs = await SharedPreferences.getInstance();
+    await sourcePrefs.setBool('enterToSend', false);
+    await sourcePrefs.setBool('hideMessageId', true);
+    await sourcePrefs.setString('language', 'ru');
+
+    await source.engine.pushEntities(onProgress: (_) {});
+
+    final cloudPayload =
+        jsonDecode(
+              source.cloud.files[cloudPath('local_storage', 'local_storage')]!,
+            )
+            as Map<String, dynamic>;
+    expect(
+      (cloudPayload[SyncSerialization.appSettingsKey] as Map)['hideMessageId'],
+      isTrue,
+    );
+
+    SharedPreferences.setMockInitialValues({
+      'enterToSend': true,
+      'hideMessageId': false,
+      'language': 'en',
+    });
+    final target = SyncWorld();
+    target.cloud.files.addAll(source.cloud.files);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    final targetPrefs = await SharedPreferences.getInstance();
+    expect(targetPrefs.getBool('enterToSend'), isFalse);
+    expect(targetPrefs.getBool('hideMessageId'), isTrue);
+    expect(targetPrefs.getString('language'), 'ru');
+  });
+
+  test('Legacy local_storage payload preserves local app settings', () async {
+    final world = SyncWorld();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('hideMessageId', true);
+    const payload = {
+      '__localStorage': true,
+      'pipelineSettings': '{"legacy":true}',
+    };
+    final entry = SyncManifestEntry(
+      type: 'local_storage',
+      id: 'local_storage',
+      path: cloudPath('local_storage', 'local_storage'),
+      updatedAt: 1000,
+      hash: SyncSerialization.computeSyncHash(payload),
+    );
+    world.cloud.files[entry.path] = jsonEncode(payload);
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      SyncManifest(
+        deviceId: 'cloud',
+        createdAt: 1,
+        lastSync: 1000,
+        entries: {entry.key: entry},
+      ).toJson(),
+    );
+
+    await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    expect(prefs.getBool('hideMessageId'), isTrue);
+  });
+
   test(
     'Legacy local_storage payload preserves local regex collections',
     () async {

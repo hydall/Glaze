@@ -45,6 +45,8 @@ class ChatWebViewBuildListeners {
     required this.visibleStartIndex,
     required this.onRefreshExtBlocksPanel,
     required this.onSyncExtBlockPanels,
+    required this.onReconcileActiveGeneration,
+    required this.onDomReset,
     this.isCurrentBridge,
   });
 
@@ -65,6 +67,9 @@ class ChatWebViewBuildListeners {
   final Future<void> Function(String sessionId, String messageId)
   onRefreshExtBlocksPanel;
   final Future<void> Function() onSyncExtBlockPanels;
+  final Future<void> Function(ChatBridgeController bridge)
+  onReconcileActiveGeneration;
+  final void Function() onDomReset;
   final bool Function(ChatBridgeController bridge)? isCurrentBridge;
 
   /// Attach all `ref.listen` callbacks for the current build. Call
@@ -76,7 +81,8 @@ class ChatWebViewBuildListeners {
     _listenStreaming();
     _listenInfoBlocks();
     _listenExtSettingsAndPresets();
-}
+  }
+
   void _listenDisplayRegexes() {
     ref.listen<AsyncValue<List<PresetRegex>>>(displayRegexesProvider, (
       prev,
@@ -99,11 +105,16 @@ class ChatWebViewBuildListeners {
         // full re-render of every message. Preserve the current scroll position
         // so the chat stays put instead of jumping (see restoreAnchor in the
         // webview virtual list).
-        b.setMessages(
-          messages,
-          visibleStartIndex: visibleStartIndex,
-          preserveScroll: true,
-        );
+        unawaited(() async {
+          onDomReset();
+          await b.setMessages(
+            messages,
+            visibleStartIndex: visibleStartIndex,
+            preserveScroll: true,
+          );
+          if (isCurrentBridge?.call(b) == false || !ready()) return;
+          await onReconcileActiveGeneration(b);
+        }());
       }
     });
   }

@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/chat/bridge/chat_bridge_controller.dart';
 import 'package:glaze_flutter/features/chat/bridge/chat_overlay_blur_region.dart';
+import 'package:glaze_flutter/features/chat/chat_state.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_message_sync.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_streaming_bridge_sync.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_webview_sync_dispatcher.dart';
@@ -59,27 +60,30 @@ void main() {
       expect(completed, isTrue);
     });
 
-    test('withholds Regenerate while the send is still being persisted', () async {
-      // The optimistic user bubble is a tail append and the durable append can
-      // take a while on a long chat. Stamping the Regenerate button there put
-      // it under the message for that whole window, then took it away again
-      // the moment `isGenerating` went up — a visible flash on every send.
-      final bridge = _FakeBridge();
-      final greeting = _assistant('a1');
-      final user = _user('u1');
+    test(
+      'withholds Regenerate while the send is still being persisted',
+      () async {
+        // The optimistic user bubble is a tail append and the durable append can
+        // take a while on a long chat. Stamping the Regenerate button there put
+        // it under the message for that whole window, then took it away again
+        // the moment `isGenerating` went up — a visible flash on every send.
+        final bridge = _FakeBridge();
+        final greeting = _assistant('a1');
+        final user = _user('u1');
 
-      await const ChatMessageSync().sync(
-        bridge: bridge,
-        oldMsgs: [greeting],
-        newMsgs: [greeting, user],
-        visibleStartIndex: 0,
-        busy: true,
-        sessionSwitching: false,
-      );
+        await const ChatMessageSync().sync(
+          bridge: bridge,
+          oldMsgs: [greeting],
+          newMsgs: [greeting, user],
+          visibleStartIndex: 0,
+          busy: true,
+          sessionSwitching: false,
+        );
 
-      expect(bridge.appendedMessages, [user]);
-      expect(bridge.lastMessageIds, isEmpty);
-    });
+        expect(bridge.appendedMessages, [user]);
+        expect(bridge.lastMessageIds, isEmpty);
+      },
+    );
 
     test('stamps Regenerate on a trailing user message once idle', () async {
       final bridge = _FakeBridge();
@@ -182,6 +186,80 @@ void main() {
   });
 
   group('ChatWebViewSyncDispatcher', () {
+    test(
+      'restores an already-active normal generation after DOM reset',
+      () async {
+        final bridge = _FakeBridge();
+        final state = ChatWebViewSyncState()..wasGenerating = true;
+
+        await reconcileActiveGenerationBridge(
+          bridge: bridge,
+          syncState: state,
+          isGenerating: true,
+          isImpersonating: false,
+          regenTargetId: null,
+          continuationTargetId: null,
+          streaming: const StreamingState(text: 'partial reply'),
+          messages: [_user('u1')],
+          streamingId: '__streaming__',
+          isCurrent: () => true,
+        );
+
+        expect(bridge.appendedMessages, hasLength(1));
+        expect(bridge.appendedMessages.single.id, '__streaming__');
+        expect(bridge.appendedMessages.single.content, 'partial reply');
+        expect(bridge.appendedMessages.single.isTyping, isTrue);
+        expect(state.streamingSent, isTrue);
+      },
+    );
+
+    test('restores continuation in place without a virtual message', () async {
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState();
+      final original = _assistant('a1').copyWith(content: 'First');
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isGenerating: true,
+        isImpersonating: false,
+        regenTargetId: null,
+        continuationTargetId: 'a1',
+        streaming: const StreamingState(text: 'second'),
+        messages: [original],
+        streamingId: '__streaming__',
+        isCurrent: () => true,
+      );
+
+      expect(bridge.appendedMessages, isEmpty);
+      expect(bridge.updatedMessages, hasLength(1));
+      expect(bridge.updatedMessages.single.content, contains('second'));
+      expect(bridge.continuationTargetId, 'a1');
+      expect(state.regenStreamingSent, isTrue);
+    });
+
+    test('does not restore a chat bubble for impersonation', () async {
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState();
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isGenerating: true,
+        isImpersonating: true,
+        regenTargetId: null,
+        continuationTargetId: null,
+        streaming: const StreamingState(text: 'composer text'),
+        messages: const [],
+        streamingId: '__streaming__',
+        isCurrent: () => true,
+      );
+
+      expect(bridge.appendedMessages, isEmpty);
+      expect(bridge.updatedMessages, isEmpty);
+      expect(state.streamingSent, isFalse);
+    });
+
     test('serializes persisted and streaming message mutations', () async {
       final state = ChatWebViewSyncState();
       final firstMutation = Completer<void>();
@@ -414,10 +492,7 @@ void main() {
         // The image stage flag goes through a setter, not a bare assignment:
         // it is what tells a pending block apart from a running one, and the
         // WebView has to restamp its placeholders when it flips (INV-IG1).
-        expect(
-          bridge.evalCalls.single,
-          contains('setImageGenerating(false)'),
-        );
+        expect(bridge.evalCalls.single, contains('setImageGenerating(false)'));
       },
     );
 
@@ -746,6 +821,9 @@ class _FakeBridge implements ChatBridgeController {
 
   @override
   bool isPostGenRunning = false;
+
+  @override
+  String? continuationTargetId;
 
   final List<List<ChatOverlayBlurRegion>> overlayBlurCalls = [];
   final List<String> evalCalls = [];

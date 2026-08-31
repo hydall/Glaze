@@ -26,6 +26,7 @@ import '../sync_repo_interfaces.dart';
 import '../../../features/extensions/models/extension_preset.dart';
 import '../../../features/extensions/models/extensions_settings.dart';
 import '../../../features/extensions/models/info_block.dart';
+import '../../settings/app_settings_provider.dart';
 
 class SyncProgress {
   final int current;
@@ -1455,17 +1456,15 @@ class SyncEngine {
     final studioRegexScripts = prefs.getString(
       SyncSerialization.studioRegexScriptsKey,
     );
-    if (pipelineSettings == null &&
-        activeStudioPresetId == null &&
-        globalRegexScripts == null &&
-        studioRegexScripts == null) {
-      return null;
-    }
+    final appSettings = AppSettingsPreferences.encode(
+      AppSettingsPreferences.read(prefs),
+    );
     return SyncSerialization.localStoragePayload(
       pipelineSettings: pipelineSettings,
       activeStudioPresetId: activeStudioPresetId,
       globalRegexScripts: globalRegexScripts,
       studioRegexScripts: studioRegexScripts,
+      appSettings: appSettings,
     );
   }
 
@@ -1503,6 +1502,13 @@ class SyncEngine {
       data,
       SyncSerialization.studioRegexScriptsKey,
     );
+    final rawAppSettings = data[SyncSerialization.appSettingsKey];
+    if (rawAppSettings is Map) {
+      await AppSettingsPreferences.applyPartial(
+        prefs,
+        Map<String, dynamic>.from(rawAppSettings),
+      );
+    }
   }
 
   Future<void> _applyLocalStorageString(
@@ -1525,5 +1531,6 @@ class SyncEngine {
     await prefs.remove(SyncSerialization.activeStudioPresetKey);
     await prefs.remove(SyncSerialization.globalRegexScriptsKey);
     await prefs.remove(SyncSerialization.studioRegexScriptsKey);
+    await AppSettingsPreferences.removeAll(prefs);
   }
 }

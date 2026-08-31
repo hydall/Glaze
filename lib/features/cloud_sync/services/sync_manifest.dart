@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../settings/app_settings_provider.dart';
 import 'sync_serialization.dart';
 import '../sync_models.dart';
 import '../sync_repo_interfaces.dart';
@@ -687,16 +688,17 @@ class SyncManifestBuilder implements SyncManifestProvider {
     final studioRegexScripts = prefs.getString(
       SyncSerialization.studioRegexScriptsKey,
     );
-    if (pipelineSettings != null ||
-        activeStudioPresetId != null ||
-        globalRegexScripts != null ||
-        studioRegexScripts != null) {
+    final appSettings = AppSettingsPreferences.encode(
+      AppSettingsPreferences.read(prefs),
+    );
+    {
       const type = 'local_storage';
       final payload = SyncSerialization.localStoragePayload(
         pipelineSettings: pipelineSettings,
         activeStudioPresetId: activeStudioPresetId,
         globalRegexScripts: globalRegexScripts,
         studioRegexScripts: studioRegexScripts,
+        appSettings: appSettings,
       );
       final hash = SyncSerialization.computeSyncHash(payload);
       final key = entryKey(type, type);

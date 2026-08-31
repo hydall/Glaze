@@ -50,6 +50,7 @@ class MemoryDraftGenerationController {
   final Set<String> _activeDraftIds = {};
   final Map<String, DateTime> _genStartTimes = {};
   final Map<String, CancelToken> _cancelTokens = {};
+  final Map<String, MemoryDraftLease> _leases = {};
   Timer? _genElapsedTimer;
 
   MemoryDraftGenerationController({
@@ -138,11 +139,13 @@ class MemoryDraftGenerationController {
     _generatingDrafts[draftId] = true;
     _genStartTimes[draftId] = DateTime.now();
     _startGenElapsedTimer();
-    _ref.read(memoryActiveDraftsProvider.notifier).markActive(_sessionId);
+    _leases[draftId] = _ref
+        .read(memoryActiveDraftsProvider.notifier)
+        .acquire(_sessionId);
     onStart();
 
     try {
-      final generator = MemoryDraftGenerator(_ref);
+      final generator = MemoryDraftGenerator.widget(_ref);
       final result = await generator.generate(
         draft: draft,
         settings: _bookSettings,
@@ -186,11 +189,7 @@ class MemoryDraftGenerationController {
         _generatingDrafts.remove(draftId);
         _genStartTimes.remove(draftId);
         _stopGenElapsedTimer();
-        if (_generatingDrafts.isEmpty) {
-          _ref
-              .read(memoryActiveDraftsProvider.notifier)
-              .markInactive(_sessionId);
-        }
+        _leases.remove(draftId)?.release();
       }
     }
   }
@@ -207,10 +206,8 @@ class MemoryDraftGenerationController {
     _activeDraftIds.remove(draftId);
     _generatingDrafts.remove(draftId);
     _genStartTimes.remove(draftId);
+    _leases.remove(draftId)?.release();
     _stopGenElapsedTimer();
-    if (_generatingDrafts.isEmpty) {
-      _ref.read(memoryActiveDraftsProvider.notifier).markInactive(_sessionId);
-    }
   }
 
   Future<void> batchGenerate({

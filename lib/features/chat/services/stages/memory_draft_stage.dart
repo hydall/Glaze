@@ -1,25 +1,66 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../../core/llm/memory_draft_planner.dart';
+import '../../../../core/llm/auxiliary_timed_history.dart';
 import '../../../../core/models/chat_message.dart';
+import '../../../../core/models/memory_book.dart';
+import '../../../../core/models/pipeline_settings.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_settings_provider.dart';
+import '../../../memory/state/memory_active_drafts_provider.dart';
+import '../../memory_draft_generator.dart';
 import 'stage_context.dart';
 
-/// Stage 9 / 6: Auto-create memory drafts (parallel fire-and-forget,
-/// no LLM — just a planner over the MemoryBook).
+typedef GenerateMemoryDraft =
+    Future<MemoryDraft> Function({
+      required MemoryDraft draft,
+      required MemoryBookSettings settings,
+      required PipelineSettings pipeline,
+      required String historyText,
+    });
+
+/// Stage 9 / 6: Auto-create memory drafts and optionally fill them with the
+/// configured Memory Book LLM.
 class MemoryDraftStage {
   final StageContext ctx;
+  final GenerateMemoryDraft _generate;
 
-  MemoryDraftStage(this.ctx);
+  MemoryDraftStage(this.ctx, {GenerateMemoryDraft? generate})
+    : _generate =
+          generate ??
+          (({
+            required draft,
+            required settings,
+            required pipeline,
+            required historyText,
+          }) => MemoryDraftGenerator(ctx.ref).generate(
+            draft: draft,
+            settings: settings,
+            pipeline: pipeline,
+            historyText: historyText,
+          ));
 
-  Future<void> run(ChatSession? session) async {
-    if (!ctx.ref.mounted) return;
-    if (session == null) return;
+  MemoryDraftLease? reserveAutoGeneration(ChatSession? session) {
+    if (session == null || !ctx.ref.mounted) return null;
     final settings = ctx.ref.read(memoryGlobalSettingsProvider);
-    if (!settings.enabled || !settings.autoCreateEnabled) return;
+    if (!settings.enabled ||
+        !settings.autoCreateEnabled ||
+        !settings.autoGenerateEnabled) {
+      return null;
+    }
+    return ctx.ref
+        .read(memoryActiveDraftsProvider.notifier)
+        .tryAcquireExclusive(session.id);
+  }
 
+  Future<void> run(
+    ChatSession? session, {
+    MemoryDraftLease? generationLease,
+  }) async {
     try {
+      if (!ctx.ref.mounted || session == null) return;
+      final settings = ctx.ref.read(memoryGlobalSettingsProvider);
+      if (!settings.enabled || !settings.autoCreateEnabled) return;
       final repo = ctx.ref.read(memoryBookRepoProvider);
       final book = await repo.ensureForSession(session.id);
       if (!ctx.ref.mounted) return;
@@ -33,11 +74,58 @@ class MemoryDraftStage {
       );
       if (plan.drafts.isEmpty) return;
 
-      await repo.put(
-        book.copyWith(pendingDrafts: [...book.pendingDrafts, ...plan.drafts]),
-      );
+      await repo.appendDrafts(session.id, plan.drafts);
+      if (!settings.autoGenerateEnabled || generationLease == null) return;
+
+      final pipeline = ctx.ref.read(pipelineSettingsProvider);
+      for (final draft in plan.drafts.take(settings.batchSize)) {
+        if (!ctx.ref.mounted) return;
+        final draftMessages = session.messages
+            .where((message) => draft.messageIds.contains(message.id))
+            .toList();
+        if (draftMessages.isEmpty) continue;
+        final historyText = draftMessages
+            .map(
+              (message) => '${message.role}: ${auxiliaryTimedContent(message)}',
+            )
+            .join('\n\n');
+        try {
+          final generated = await _generate(
+            draft: draft,
+            settings: book.settings,
+            pipeline: pipeline,
+            historyText: historyText,
+          );
+          if (!ctx.ref.mounted) return;
+          await repo.mutateDraft(
+            sessionId: session.id,
+            draftId: draft.id,
+            mutate: (current) => current.copyWith(
+              content: generated.content,
+              keys: generated.keys,
+              status: 'pending_approval',
+              generatedAt: generated.generatedAt,
+              updatedAt: generated.updatedAt,
+              error: null,
+            ),
+          );
+        } catch (e) {
+          if (!ctx.ref.mounted) return;
+          await repo.mutateDraft(
+            sessionId: session.id,
+            draftId: draft.id,
+            mutate: (current) => current.copyWith(
+              status: 'needs_regeneration',
+              error: e.toString(),
+              updatedAt: DateTime.now().millisecondsSinceEpoch,
+            ),
+          );
+        }
+      }
     } catch (e) {
       debugPrint('[MemoryDraftStage] auto-create failed: $e');
+    } finally {
+      generationLease?.release();
     }
   }
 }
