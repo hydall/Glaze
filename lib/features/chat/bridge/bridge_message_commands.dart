@@ -37,6 +37,8 @@ class MessageBridgeCommands {
         displayRegexes: _host.displayRegexes,
         character: _host.regexCharacter,
         persona: _host.regexPersona,
+        sessionVars: _host.regexSessionVars,
+        globalVars: _host.regexGlobalVars,
       );
       _resolveMappedFileUrls(map);
       _host.cacheMappedTriggeredRegexes(map);
@@ -77,6 +79,8 @@ class MessageBridgeCommands {
       displayRegexes: _host.displayRegexes,
       character: _host.regexCharacter,
       persona: _host.regexPersona,
+      sessionVars: _host.regexSessionVars,
+      globalVars: _host.regexGlobalVars,
     );
     _resolveMappedFileUrls(map);
     _host.cacheMappedTriggeredRegexes(map);
@@ -99,6 +103,8 @@ class MessageBridgeCommands {
         displayRegexes: _host.displayRegexes,
         character: _host.regexCharacter,
         persona: _host.regexPersona,
+        sessionVars: _host.regexSessionVars,
+        globalVars: _host.regexGlobalVars,
       );
       _resolveMappedFileUrls(map);
       _host.cacheMappedTriggeredRegexes(map);
@@ -127,6 +133,8 @@ class MessageBridgeCommands {
         displayRegexes: _host.displayRegexes,
         character: _host.regexCharacter,
         persona: _host.regexPersona,
+        sessionVars: _host.regexSessionVars,
+        globalVars: _host.regexGlobalVars,
       );
       _resolveMappedFileUrls(map);
       _host.cacheMappedTriggeredRegexes(map);
@@ -155,6 +163,8 @@ class MessageBridgeCommands {
       displayRegexes: _host.displayRegexes,
       character: _host.regexCharacter,
       persona: _host.regexPersona,
+      sessionVars: _host.regexSessionVars,
+      globalVars: _host.regexGlobalVars,
     );
     _resolveMappedFileUrls(map);
     _host.cacheMappedTriggeredRegexes(map);

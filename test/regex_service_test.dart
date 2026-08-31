@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/regex_service.dart';
+import 'package:glaze_flutter/core/models/character.dart';
+import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 
 void main() {
@@ -219,6 +221,166 @@ void main() {
       final out = applyRegexes(input, 2, 2, [script], ctx());
       // $10 = 'j', $11 = 'k'
       expect(out, equals('j-k'));
+    });
+  });
+
+  group('RegexService — macros in the replacement (ST parity)', () {
+    // ST's runRegexScript ends with `return substituteParams(replaceWithGroups)`
+    // on every match, regardless of `substituteRegex` — that flag governs the
+    // *find* field only. These tests pin that behavior.
+    RegexApplyContext charCtx({
+      Map<String, String> sessionVars = const {},
+      Map<String, String> globalVars = const {},
+    }) => RegexApplyContext(
+      char: Character(
+        id: 'char_1',
+        name: 'Alise',
+        createdAt: 0,
+        updatedAt: 0,
+      ),
+      persona: Persona(id: 'persona_1', name: 'Иван'),
+      sessionVars: sessionVars,
+      globalVars: globalVars,
+    );
+
+    PresetRegex cardScript() => PresetRegex.fromJson({
+      'id': 'status-card',
+      'name': 'status card',
+      'regex': r'/\{TRK\|(.*?)\}/g',
+      'replacement':
+          '<div><b>{{user}}</b>: \$1</div><div><b>{{char}}</b>: \$1</div>',
+      'placement': [2],
+    });
+
+    test('{{user}} / {{char}} in the replacement expand without macroRules',
+        () {
+      final out = applyRegexes(
+        '{TRK|jacket}',
+        2,
+        1,
+        [cardScript()],
+        charCtx(),
+        isMarkdown: true,
+      );
+
+      expect(
+        out,
+        equals('<div><b>Иван</b>: jacket</div><div><b>Alise</b>: jacket</div>'),
+      );
+    });
+
+    test('macros stay literal when no character/macro context is available',
+        () {
+      final out = applyRegexes(
+        '{TRK|jacket}',
+        2,
+        1,
+        [cardScript()],
+        const RegexApplyContext(),
+        isMarkdown: true,
+      );
+
+      expect(out, contains('{{user}}'));
+      expect(out, contains('{{char}}'));
+    });
+
+    test('macros are substituted after capture groups, like ST', () {
+      // A macro carried in by a capture group is expanded too: ST runs
+      // substituteParams on the group-resolved string.
+      final script = PresetRegex.fromJson({
+        'id': 'match-macro',
+        'name': 'match macro',
+        'regex': r'/\[(.*?)\]/g',
+        'replacement': r'$1',
+        'placement': [2],
+      });
+
+      final out = applyRegexes('[{{char}} waves]', 2, 1, [script], charCtx());
+      expect(out, equals('Alise waves'));
+    });
+
+    test('variable macros in the replacement read the context vars', () {
+      final script = PresetRegex.fromJson({
+        'id': 'var-card',
+        'name': 'var card',
+        'regex': r'/\{LOC\}/g',
+        'replacement': '{{getvar::location}}',
+        'placement': [2],
+      });
+
+      final out = applyRegexes(
+        '{LOC}',
+        2,
+        1,
+        [script],
+        charCtx(sessionVars: {'location': 'Квартира бабы Нели'}),
+      );
+      expect(out, equals('Квартира бабы Нели'));
+    });
+
+    test('trim strings are stripped from the spliced-in match, ST-style', () {
+      // ST's filterString runs on the captured text that lands in the
+      // replacement — never on parts of the message the script did not match.
+      final script = PresetRegex.fromJson({
+        'id': 'trim-card',
+        'name': 'trim card',
+        'regex': r'/\{TRK\|(.*?)\}/g',
+        'replacement': r'<b>$1</b>',
+        'trimStrings': ['noise'],
+        'placement': [2],
+      });
+
+      final out = applyRegexes(
+        'noise {TRK|noise jacket} noise',
+        2,
+        1,
+        [script],
+        charCtx(),
+      );
+
+      expect(out, equals('noise <b> jacket</b> noise'));
+    });
+
+    test('trim strings themselves are macro-substituted', () {
+      final script = PresetRegex.fromJson({
+        'id': 'trim-macro',
+        'name': 'trim macro',
+        'regex': r'/\[(.*?)\]/g',
+        'replacement': r'$1',
+        'trimStrings': ['{{char}}: '],
+        'placement': [2],
+      });
+
+      final out = applyRegexes('[Alise: hello]', 2, 1, [script], charCtx());
+      expect(out, equals('hello'));
+    });
+
+    test('{{match}} is trimmed like ST\'s \$0', () {
+      final script = PresetRegex.fromJson({
+        'id': 'trim-match',
+        'name': 'trim match',
+        'regex': r'/<tag>.*?<\/tag>/g',
+        'replacement': '[{{match}}]',
+        'trimStrings': ['<tag>', '</tag>'],
+        'placement': [2],
+      });
+
+      final out = applyRegexes('<tag>body</tag>', 2, 1, [script], charCtx());
+      expect(out, equals('[body]'));
+    });
+
+    test('macroRules still drives macros in the find field', () {
+      final script = PresetRegex.fromJson({
+        'id': 'find-macro',
+        'name': 'find macro',
+        'regex': '/{{char}}/g',
+        'replacement': 'CHAR',
+        'macroRules': '1',
+        'placement': [2],
+      });
+
+      final out = applyRegexes('Alise waves', 2, 1, [script], charCtx());
+      expect(out, equals('CHAR waves'));
     });
   });
 }
