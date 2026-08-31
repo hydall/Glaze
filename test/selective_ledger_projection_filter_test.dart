@@ -403,6 +403,54 @@ void main() {
       );
     });
 
+    test('game clock trackers are excluded, other world state is retained', () {
+      final projection = _projection(
+        trackers: [
+          _tracker('world:time', '15:30', provenance: 'message=m0'),
+          _tracker('world:date', '01.01.2024', provenance: 'message=m0'),
+          _tracker('world:day', '3', provenance: 'message=m0'),
+          _tracker('world:weather', 'rain', provenance: 'message=m0'),
+        ],
+      );
+      final result = _select(
+        projection,
+        visible: [_message('m9', 'a later scene')],
+      );
+      expect(result.projection.trackers.map((t) => t.name), ['world:weather']);
+    });
+
+    test(
+      'here-and-now scene/relationship/npc state survives when source left window',
+      () {
+        final result = _select(
+          _projection(
+            trackers: [
+              _tracker('scene.location', 'the bath', provenance: 'message=mold'),
+              _tracker(
+                'relationship:a:b.trust',
+                'fragile',
+                provenance: 'message=mold',
+              ),
+              _tracker(
+                'npc:gilda.current_goal',
+                'talk',
+                provenance: 'message=mold',
+              ),
+            ],
+          ),
+          visible: [_message('mnew', 'recent exchange')],
+        );
+        expect(
+          result.projection.trackers.map((t) => t.name),
+          [
+            'scene.location',
+            'relationship:a:b.trust',
+            'npc:gilda.current_goal',
+          ],
+        );
+      },
+    );
+
     test('relationship requires evidence, not mention of one party', () {
       final projection = _projection(
         trackers: [
