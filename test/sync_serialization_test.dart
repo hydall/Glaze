@@ -13,6 +13,7 @@ void main() {
         activeStudioPresetId: 'studio_loom_causal_direct_v1',
         globalRegexScripts: '[{"id":"global"}]',
         studioRegexScripts: '[{"script":{"id":"studio"}}]',
+        appSettings: const {'enterToSend': false},
       ),
       {
         '__localStorage': true,
@@ -20,6 +21,7 @@ void main() {
         'activeStudioPresetId': 'studio_loom_causal_direct_v1',
         'gz_global_regex_scripts': '[{"id":"global"}]',
         'gz_studio_regex_scripts': '[{"script":{"id":"studio"}}]',
+        'appSettings': {'enterToSend': false},
       },
     );
   });

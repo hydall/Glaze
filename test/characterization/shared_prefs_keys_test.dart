@@ -24,6 +24,13 @@ void main() {
       'showOurPicks': bool,
       'gz_force_mobile_layout': bool,
       'addBlockAtTop': bool,
+      'openCardAfterImport': bool,
+      'hapticFeedback': bool,
+      'messageVibration': bool,
+      'extractJanitorLocally': bool,
+      'lorebookBuildPrompt': String,
+      'lorebookBuildPromptJs': String,
+      'useStandardRandomizer': bool,
     };
 
     test('AppSettings defaults match SharedPrefs fallbacks', () {
@@ -38,7 +45,10 @@ void main() {
             if (entry.key == 'enterToSend' ||
                 entry.key == 'showOurPicks' ||
                 entry.key == 'gz_force_mobile_layout' ||
-                entry.key == 'batterySaver') {
+                entry.key == 'batterySaver' ||
+                entry.key == 'openCardAfterImport' ||
+                entry.key == 'hapticFeedback' ||
+                entry.key == 'messageVibration') {
               expect(
                 _getBoolDefault(defaults, entry.key),
                 isTrue,
@@ -82,7 +92,7 @@ void main() {
     });
 
     test('all expected SharedPrefs keys are covered', () {
-      expect(expectedKeys.length, 16);
+      expect(expectedKeys.keys.toSet(), AppSettingsPreferences.keys);
     });
 
     test('legacy string values are accepted', () async {
@@ -294,6 +304,16 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.forceMobileLayout;
     case 'addBlockAtTop':
       return s.addBlockAtTop;
+    case 'openCardAfterImport':
+      return s.openCardAfterImport;
+    case 'hapticFeedback':
+      return s.hapticFeedback;
+    case 'messageVibration':
+      return s.messageVibration;
+    case 'extractJanitorLocally':
+      return s.extractJanitorLocally;
+    case 'useStandardRandomizer':
+      return s.useStandardRandomizer;
     default:
       return false;
   }

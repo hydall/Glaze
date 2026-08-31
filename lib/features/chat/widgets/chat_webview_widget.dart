@@ -19,7 +19,9 @@ import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../extensions/services/panel_host_service.dart';
 import '../bridge/chat_bridge_registry.dart';
 import '../chat_provider.dart';
+import '../state/generation_phase_provider.dart';
 import 'chat_message_sync.dart';
+import 'chat_streaming_bridge_sync.dart';
 import 'chat_webview_build_listeners.dart';
 import 'chat_webview_callbacks.dart';
 import 'chat_webview_ext_block_callbacks.dart';
@@ -413,6 +415,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final initSessionId = widget.sessionId;
     final initMessages = List<ChatMessage>.of(widget.messages);
     final initVisibleStartIndex = widget.visibleStartIndex;
+    _resetStreamingPresentationState();
     PerfDebug.chatWebViewInitAttempted();
     try {
       await _waitForJsBridgeReady();
@@ -487,6 +490,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     }
 
     if (!mounted) return;
+    await _reconcileActiveGenerationPresentation(bridge);
     // Init can take longer than the rebaseline window opened above, and the
     // list settles for a few more frames after it. Re-arm once everything is in
     // place so the chat is guaranteed to open with the header showing.
@@ -566,6 +570,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       // header tracker would otherwise read as the user scrolling down.
       await _showChatHeader(bridge);
       await _bridgeOp(bridge.clearAll(), label: 'clearAll');
+      _resetStreamingPresentationState();
       await _bridgeOp(
         bridge.setMessages(
           widget.messages,
@@ -573,6 +578,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         ),
         label: 'setMessages',
       );
+      await _reconcileActiveGenerationPresentation(bridge);
       unawaited(_syncExtBlockPanels());
       await _bridgeOp(bridge.scrollToBottom(), label: 'scrollToBottom');
     } finally {
@@ -602,9 +608,11 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         visibleStartIndex: widget.visibleStartIndex,
         busy: widget.isGenerating || widget.isSendPending,
         sessionSwitching: false,
+        onDomReset: _resetStreamingPresentationState,
       ),
       label: 'resyncMessagesAfterInit',
     );
+    await _reconcileActiveGenerationPresentation(bridge);
   }
 
   void _bindBridgeCallbacks() {
@@ -814,6 +822,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
       await _bridgeOp(bridge.clearAll(), label: 'clearAll');
       if (!ownsSwitch()) return;
+      _resetStreamingPresentationState();
       await _bridgeOp(
         bridge.setMessages(
           widget.messages,
@@ -822,12 +831,69 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         label: 'setMessages',
       );
       if (!ownsSwitch()) return;
+      await _reconcileActiveGenerationPresentation(bridge);
+      if (!ownsSwitch()) return;
       unawaited(_syncExtBlockPanels());
       await _bridgeOp(bridge.scrollToBottom(), label: 'scrollToBottom');
     } finally {
       if (ownsSwitch()) _setSessionSwitching(false);
     }
-    _syncState.wasGenerating = widget.isGenerating;
+  }
+
+  Future<void> _reconcileActiveGenerationPresentation(
+    ChatBridgeController bridge, {
+    bool enqueue = true,
+  }) async {
+    if (!mounted || !identical(_bridge, bridge) || !_ready) return;
+    final charId = widget.charId;
+    final sessionId = widget.sessionId;
+    final epoch = _syncState.streamEpoch;
+    final isGenerating = widget.isGenerating;
+    final regenTargetId = widget.regenTargetId;
+    final continuationTargetId = widget.continuationTargetId;
+    final messages = List<ChatMessage>.of(widget.messages);
+    final streaming = ref.read(streamingStateProvider(charId));
+    final isImpersonating = ref.read(impersonationStateProvider(charId)).active;
+
+    bool isCurrent() =>
+        mounted &&
+        identical(_bridge, bridge) &&
+        _ready &&
+        widget.charId == charId &&
+        widget.sessionId == sessionId &&
+        _syncState.streamEpoch == epoch &&
+        widget.isGenerating == isGenerating &&
+        widget.regenTargetId == regenTargetId &&
+        widget.continuationTargetId == continuationTargetId;
+
+    Future<void> reconcile() async {
+      if (!isCurrent()) return;
+      await bridge.setGenerationPhase(
+        generationPhaseLabel(ref.read(generationPhaseProvider(charId))),
+      );
+      if (!isCurrent()) return;
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: _syncState,
+        isGenerating: isGenerating,
+        isImpersonating: isImpersonating,
+        regenTargetId: regenTargetId,
+        continuationTargetId: continuationTargetId,
+        streaming: streaming,
+        messages: messages,
+        streamingId: _kStreamingId,
+        isCurrent: isCurrent,
+      );
+    }
+
+    if (enqueue) {
+      await _syncState.enqueueMessageMutation(reconcile);
+    } else {
+      await reconcile();
+    }
+  }
+
+  void _resetStreamingPresentationState() {
     _syncState.streamingSent = false;
     _syncState.regenStreamingSent = false;
   }
@@ -1027,6 +1093,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
                 sessionSwitching: sessionSwitching,
                 bridge: bridge,
               );
+              await _reconcileActiveGenerationPresentation(
+                bridge,
+                enqueue: false,
+              );
             }
             if (result.rehighlightSearch &&
                 mounted &&
@@ -1085,6 +1155,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       visibleStartIndex: visibleStartIndex,
       busy: busy,
       sessionSwitching: sessionSwitching,
+      onDomReset: _resetStreamingPresentationState,
     );
   }
 
@@ -1134,6 +1205,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       visibleStartIndex: widget.visibleStartIndex,
       onRefreshExtBlocksPanel: _refreshExtBlocksPanel,
       onSyncExtBlockPanels: _syncExtBlockPanels,
+      onReconcileActiveGeneration: _reconcileActiveGenerationPresentation,
+      onDomReset: _resetStreamingPresentationState,
       isCurrentBridge: (bridge) => identical(_bridge, bridge),
     ).attach();
 

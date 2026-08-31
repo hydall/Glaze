@@ -46,6 +46,7 @@ class ChatMessageSync {
     required int visibleStartIndex,
     required bool busy,
     required bool sessionSwitching,
+    void Function()? onDomReset,
   }) async {
     if (sessionSwitching) return;
     if (bridge == null) return;
@@ -55,6 +56,7 @@ class ChatMessageSync {
     final newLen = newIds.length;
 
     if (oldIds.isEmpty) {
+      onDomReset?.call();
       await bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
       if (!busy) {
         await bridge.setLastMessage(
@@ -65,6 +67,7 @@ class ChatMessageSync {
     }
 
     if (newIds.isEmpty) {
+      onDomReset?.call();
       await bridge.clearAll();
       return;
     }
@@ -114,6 +117,7 @@ class ChatMessageSync {
         }
         return;
       }
+      onDomReset?.call();
       await bridge.clearAll();
       await bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
       if (!busy) {
@@ -129,6 +133,7 @@ class ChatMessageSync {
     for (int i = 0; i < minLen; i++) {
       if (i >= newIds.length) break;
       if (newIds[i] != oldIds[i]) {
+        onDomReset?.call();
         await bridge.clearAll();
         await bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
         if (!busy) {

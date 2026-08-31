@@ -164,7 +164,7 @@ void main() {
       );
       final container = _container(charId: 'c1', initial: state);
       addTearDown(container.dispose);
-      container.read(memoryActiveDraftsProvider.notifier).markActive('s1');
+      container.read(memoryActiveDraftsProvider.notifier).acquire('s1');
 
       final dispatcher = container.read(generationDispatcherProvider);
       final result = await dispatcher.dispatch(charId: 'c1');

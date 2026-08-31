@@ -11,11 +11,13 @@ import '../../../core/state/chat_session_ops_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/global_regex_provider.dart';
+import '../../../core/state/pipeline_settings_provider.dart';
 import '../../../core/state/shared_prefs_provider.dart';
 import '../../../core/state/studio_regex_provider.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../personas/persona_list_provider.dart';
 import '../../settings/api_list_provider.dart';
+import '../../settings/app_settings_provider.dart';
 import '../../card_rewrite/card_rewriter_recovery_view_service.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/chat_session_service.dart';
@@ -218,7 +220,7 @@ class SyncController {
             'pulled': itemsCount,
             'conflictsCount': service.conflicts.length,
           };
-          invalidateDataProviders();
+          await refreshDataProvidersAfterPull();
           statusNotifier.state = service.status;
           conflictsNotifier.state = service.conflicts;
           if (service.conflicts.isNotEmpty) {
@@ -235,7 +237,7 @@ class SyncController {
             },
           );
           _syncResult = {'type': 'full'};
-          invalidateDataProviders();
+          await refreshDataProvidersAfterPull();
           statusNotifier.state = service.status;
           conflictsNotifier.state = service.conflicts;
           return 'sync_full_done'.tr();
@@ -334,7 +336,7 @@ class SyncController {
           setProgress(p);
         },
       );
-      if (isMounted()) invalidateDataProviders();
+      if (isMounted()) await refreshDataProvidersAfterPull();
       return 'Sync complete';
     } catch (e) {
       setError(e.toString());
@@ -345,7 +347,13 @@ class SyncController {
     }
   }
 
-  void invalidateDataProviders() {
+  Future<void> refreshDataProvidersAfterPull() async {
+    final prefs = await _ref.read(sharedPreferencesProvider.future);
+    await prefs.reload();
+    _ref.invalidate(appSettingsProvider);
+    await _ref.read(appSettingsProvider.future);
+    await _ref.read(pipelineSettingsProvider.notifier).load();
+
     // Evict all cached avatar images so that Image.file widgets re-read the
     // updated files from disk immediately (without a full app restart).
     _evictAvatarImageCache();
@@ -370,7 +378,7 @@ class SyncController {
     _ref.invalidate(globalRegexProvider);
     _ref.invalidate(studioRegexProvider);
     unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
-    _ref.read(themeProvider.notifier).reload();
+    await _ref.read(themeProvider.notifier).reload();
 
     // Bump the version counter so widgets that watch avatarVersionProvider
     // (chat_header, character_list) rebuild and pick up the new paths.

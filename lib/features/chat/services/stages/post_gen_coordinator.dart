@@ -70,11 +70,15 @@ class PostGenCoordinator {
   void _runInBackground(
     Future<void> Function() task,
     String label,
-    GenerationNotificationService notifService,
-  ) {
+    GenerationNotificationService notifService, {
+    void Function()? onTaskNotStarted,
+  }) {
     unawaited(() async {
-      final lease = await notifService.acquirePostGenerationLease();
+      var taskStarted = false;
+      PostGenerationForegroundLease? lease;
       try {
+        lease = await notifService.acquirePostGenerationLease();
+        taskStarted = true;
         await task();
       } catch (error, stackTrace) {
         debugPrint(
@@ -82,7 +86,8 @@ class PostGenCoordinator {
           '$error\n$stackTrace',
         );
       } finally {
-        await lease.release();
+        if (!taskStarted) onTaskNotStarted?.call();
+        await lease?.release();
       }
     }());
   }
@@ -147,17 +152,30 @@ class PostGenCoordinator {
     if (result.session == null) return;
 
     final sessionId = result.session!.id;
+    final studioEnabled = studioTurnConfig?.enabled == true;
+    // Normal chat has no foreground post-gen hold. Claim the memory session
+    // before the first await so a new send cannot enter while auto-generation
+    // is waiting to be scheduled.
+    final ordinaryMemoryLease = studioEnabled
+        ? null
+        : draftStage.reserveAutoGeneration(result.session);
 
     // Stage 3 / 2: Sync + notification (immediate, awaited).
-    await syncStage.run(
-      result: result,
-      genId: genId,
-      character: character,
-      notifService: notifService,
-    );
-    if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
-
-    final studioEnabled = studioTurnConfig?.enabled == true;
+    try {
+      await syncStage.run(
+        result: result,
+        genId: genId,
+        character: character,
+        notifService: notifService,
+      );
+    } catch (_) {
+      ordinaryMemoryLease?.release();
+      rethrow;
+    }
+    if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+      ordinaryMemoryLease?.release();
+      return;
+    }
 
     // Embedding is independent of the Studio Ledger clock and can start from
     // the committed response immediately.
@@ -172,9 +190,13 @@ class PostGenCoordinator {
     );
     if (!studioEnabled) {
       _runInBackground(
-        () => draftStage.run(result.session),
+        () => draftStage.run(
+          result.session,
+          generationLease: ordinaryMemoryLease,
+        ),
         'memory auto-draft',
         notifService,
+        onTaskNotStarted: ordinaryMemoryLease?.release,
       );
       _runInBackground(
         () => autoSummaryStage.run(result.session),
@@ -237,10 +259,12 @@ class PostGenCoordinator {
             refreshed == null) {
           return;
         }
+        final memoryLease = draftStage.reserveAutoGeneration(refreshed);
         _runInBackground(
-          () => draftStage.run(refreshed),
+          () => draftStage.run(refreshed, generationLease: memoryLease),
           'memory auto-draft',
           notifService,
+          onTaskNotStarted: memoryLease?.release,
         );
         _runInBackground(
           () => autoSummaryStage.run(refreshed),

@@ -9,31 +9,22 @@ part 'app_settings_provider.freezed.dart';
 
 const supportedAppLanguages = {'en', 'ru'};
 
-bool _readBoolPref(
-  SharedPreferences prefs,
-  String key, {
-  required bool defaultValue,
-}) {
-  final value = prefs.get(key);
+bool? _coerceBool(Object? value) {
   if (value is bool) return value;
   if (value is int) return value != 0;
   if (value is String) {
     final normalized = value.toLowerCase();
-    return normalized == '1' || normalized == 'true';
+    if (normalized == '1' || normalized == 'true') return true;
+    if (normalized == '0' || normalized == 'false') return false;
   }
-  return defaultValue;
+  return null;
 }
 
-double _readDoublePref(
-  SharedPreferences prefs,
-  String key, {
-  required double defaultValue,
-}) {
-  final value = prefs.get(key);
+double? _coerceDouble(Object? value) {
   if (value is int) return value.toDouble();
   if (value is double) return value;
-  if (value is String) return double.tryParse(value) ?? defaultValue;
-  return defaultValue;
+  if (value is String) return double.tryParse(value);
+  return null;
 }
 
 final appSettingsProvider =
@@ -83,96 +74,225 @@ abstract class AppSettings with _$AppSettings {
   }) = _AppSettings;
 }
 
+/// Canonical SharedPreferences schema for [AppSettings]. Cloud sync uses the
+/// same codec as the settings provider so newly added fields cannot silently
+/// be omitted from one of the two paths.
+abstract final class AppSettingsPreferences {
+  static const keys = <String>{
+    'enterToSend',
+    'hideMessageId',
+    'hideGenerationTime',
+    'hideTokenCount',
+    'dialogGrouping',
+    'batterySaver',
+    'hideTooltips',
+    'disableSwipeRegeneration',
+    'allowMessageScripts',
+    'language',
+    'virtualKeyboardSend',
+    'tokenizerHidePercent',
+    'tokenizerHistoryFillThreshold',
+    'showOurPicks',
+    'gz_force_mobile_layout',
+    'addBlockAtTop',
+    'openCardAfterImport',
+    'hapticFeedback',
+    'messageVibration',
+    'extractJanitorLocally',
+    'lorebookBuildPrompt',
+    'lorebookBuildPromptJs',
+    'useStandardRandomizer',
+  };
+
+  static AppSettings read(SharedPreferences prefs) {
+    const defaults = AppSettings();
+    final savedLanguage = prefs.getString('language');
+    return AppSettings(
+      enterToSend:
+          _coerceBool(prefs.get('enterToSend')) ?? defaults.enterToSend,
+      hideMessageId:
+          _coerceBool(prefs.get('hideMessageId')) ?? defaults.hideMessageId,
+      hideGenerationTime:
+          _coerceBool(prefs.get('hideGenerationTime')) ??
+          defaults.hideGenerationTime,
+      hideTokenCount:
+          _coerceBool(prefs.get('hideTokenCount')) ?? defaults.hideTokenCount,
+      groupDialogs:
+          _coerceBool(prefs.get('dialogGrouping')) ?? defaults.groupDialogs,
+      batterySaver:
+          _coerceBool(prefs.get('batterySaver')) ?? defaults.batterySaver,
+      hideTooltips:
+          _coerceBool(prefs.get('hideTooltips')) ?? defaults.hideTooltips,
+      disableSwipeRegeneration:
+          _coerceBool(prefs.get('disableSwipeRegeneration')) ??
+          defaults.disableSwipeRegeneration,
+      allowMessageScripts:
+          _coerceBool(prefs.get('allowMessageScripts')) ??
+          defaults.allowMessageScripts,
+      language: supportedAppLanguages.contains(savedLanguage)
+          ? savedLanguage!
+          : defaults.language,
+      virtualKeyboardSend:
+          _coerceBool(prefs.get('virtualKeyboardSend')) ??
+          defaults.virtualKeyboardSend,
+      tokenizerHidePercent:
+          _coerceDouble(prefs.get('tokenizerHidePercent')) ??
+          defaults.tokenizerHidePercent,
+      tokenizerHistoryFillThreshold:
+          _coerceDouble(prefs.get('tokenizerHistoryFillThreshold')) ??
+          defaults.tokenizerHistoryFillThreshold,
+      showOurPicks:
+          _coerceBool(prefs.get('showOurPicks')) ?? defaults.showOurPicks,
+      forceMobileLayout:
+          _coerceBool(prefs.get('gz_force_mobile_layout')) ??
+          defaults.forceMobileLayout,
+      addBlockAtTop:
+          _coerceBool(prefs.get('addBlockAtTop')) ?? defaults.addBlockAtTop,
+      openCardAfterImport:
+          _coerceBool(prefs.get('openCardAfterImport')) ??
+          defaults.openCardAfterImport,
+      hapticFeedback:
+          _coerceBool(prefs.get('hapticFeedback')) ?? defaults.hapticFeedback,
+      messageVibration:
+          _coerceBool(prefs.get('messageVibration')) ??
+          defaults.messageVibration,
+      extractJanitorLocally:
+          _coerceBool(prefs.get('extractJanitorLocally')) ??
+          defaults.extractJanitorLocally,
+      lorebookBuildPrompt:
+          prefs.getString('lorebookBuildPrompt') ??
+          defaults.lorebookBuildPrompt,
+      lorebookBuildPromptJs:
+          prefs.getString('lorebookBuildPromptJs') ??
+          defaults.lorebookBuildPromptJs,
+      useStandardRandomizer:
+          _coerceBool(prefs.get('useStandardRandomizer')) ??
+          defaults.useStandardRandomizer,
+    );
+  }
+
+  static Map<String, dynamic> encode(AppSettings settings) {
+    final normalized = _normalize(settings);
+    return {
+      'enterToSend': normalized.enterToSend,
+      'hideMessageId': normalized.hideMessageId,
+      'hideGenerationTime': normalized.hideGenerationTime,
+      'hideTokenCount': normalized.hideTokenCount,
+      'dialogGrouping': normalized.groupDialogs,
+      'batterySaver': normalized.batterySaver,
+      'hideTooltips': normalized.hideTooltips,
+      'disableSwipeRegeneration': normalized.disableSwipeRegeneration,
+      'allowMessageScripts': normalized.allowMessageScripts,
+      'language': normalized.language,
+      'virtualKeyboardSend': normalized.virtualKeyboardSend,
+      'tokenizerHidePercent': normalized.tokenizerHidePercent,
+      'tokenizerHistoryFillThreshold': normalized.tokenizerHistoryFillThreshold,
+      'showOurPicks': normalized.showOurPicks,
+      'gz_force_mobile_layout': normalized.forceMobileLayout,
+      'addBlockAtTop': normalized.addBlockAtTop,
+      'openCardAfterImport': normalized.openCardAfterImport,
+      'hapticFeedback': normalized.hapticFeedback,
+      'messageVibration': normalized.messageVibration,
+      'extractJanitorLocally': normalized.extractJanitorLocally,
+      'lorebookBuildPrompt': normalized.lorebookBuildPrompt,
+      'lorebookBuildPromptJs': normalized.lorebookBuildPromptJs,
+      'useStandardRandomizer': normalized.useStandardRandomizer,
+    };
+  }
+
+  static Future<void> write(
+    SharedPreferences prefs,
+    AppSettings settings,
+  ) async {
+    final values = encode(settings);
+    for (final entry in values.entries) {
+      final value = entry.value;
+      if (value is bool) {
+        await prefs.setBool(entry.key, value);
+      } else if (value is double) {
+        await prefs.setDouble(entry.key, value);
+      } else if (value is String) {
+        await prefs.setString(entry.key, value);
+      }
+    }
+  }
+
+  /// Applies only recognized, valid fields. Missing fields from older clients
+  /// preserve their local values instead of resetting newly introduced prefs.
+  static Future<void> applyPartial(
+    SharedPreferences prefs,
+    Map<String, dynamic> values,
+  ) async {
+    final merged = encode(read(prefs));
+    for (final key in keys) {
+      if (!values.containsKey(key)) continue;
+      final incoming = values[key];
+      final current = merged[key];
+      if (current is bool) {
+        final parsed = _coerceBool(incoming);
+        if (parsed != null) merged[key] = parsed;
+      } else if (current is double) {
+        final parsed = _coerceDouble(incoming);
+        if (parsed != null) merged[key] = parsed;
+      } else if (current is String && incoming is String) {
+        merged[key] =
+            key == 'language' && !supportedAppLanguages.contains(incoming)
+            ? 'en'
+            : incoming;
+      }
+    }
+    await write(prefs, _fromMap(merged));
+  }
+
+  static Future<void> removeAll(SharedPreferences prefs) async {
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
+  }
+
+  static AppSettings _normalize(AppSettings settings) =>
+      supportedAppLanguages.contains(settings.language)
+      ? settings
+      : settings.copyWith(language: 'en');
+
+  static AppSettings _fromMap(Map<String, dynamic> values) => AppSettings(
+    enterToSend: values['enterToSend'] as bool,
+    hideMessageId: values['hideMessageId'] as bool,
+    hideGenerationTime: values['hideGenerationTime'] as bool,
+    hideTokenCount: values['hideTokenCount'] as bool,
+    groupDialogs: values['dialogGrouping'] as bool,
+    batterySaver: values['batterySaver'] as bool,
+    hideTooltips: values['hideTooltips'] as bool,
+    disableSwipeRegeneration: values['disableSwipeRegeneration'] as bool,
+    allowMessageScripts: values['allowMessageScripts'] as bool,
+    language: values['language'] as String,
+    virtualKeyboardSend: values['virtualKeyboardSend'] as bool,
+    tokenizerHidePercent: values['tokenizerHidePercent'] as double,
+    tokenizerHistoryFillThreshold:
+        values['tokenizerHistoryFillThreshold'] as double,
+    showOurPicks: values['showOurPicks'] as bool,
+    forceMobileLayout: values['gz_force_mobile_layout'] as bool,
+    addBlockAtTop: values['addBlockAtTop'] as bool,
+    openCardAfterImport: values['openCardAfterImport'] as bool,
+    hapticFeedback: values['hapticFeedback'] as bool,
+    messageVibration: values['messageVibration'] as bool,
+    extractJanitorLocally: values['extractJanitorLocally'] as bool,
+    lorebookBuildPrompt: values['lorebookBuildPrompt'] as String,
+    lorebookBuildPromptJs: values['lorebookBuildPromptJs'] as String,
+    useStandardRandomizer: values['useStandardRandomizer'] as bool,
+  );
+}
+
 class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
   @override
   Future<AppSettings> build() async {
     final prefs = await ref.read(sharedPreferencesProvider.future);
-    final savedLanguage = prefs.getString('language');
-    final hapticFeedback = _readBoolPref(
-      prefs,
-      'hapticFeedback',
-      defaultValue: true,
-    );
-    final messageVibration = _readBoolPref(
-      prefs,
-      'messageVibration',
-      defaultValue: true,
-    );
+    final settings = AppSettingsPreferences.read(prefs);
     // Cache the toggles so the central [Haptics] gate can decide synchronously
     // in tap handlers and on message completion.
-    Haptics.configure(enabled: hapticFeedback);
-    Haptics.configureMessageVibration(enabled: messageVibration);
-    return AppSettings(
-      enterToSend: _readBoolPref(prefs, 'enterToSend', defaultValue: true),
-      hideMessageId: _readBoolPref(prefs, 'hideMessageId', defaultValue: false),
-      hideGenerationTime: _readBoolPref(
-        prefs,
-        'hideGenerationTime',
-        defaultValue: false,
-      ),
-      hideTokenCount: _readBoolPref(
-        prefs,
-        'hideTokenCount',
-        defaultValue: false,
-      ),
-      groupDialogs: _readBoolPref(prefs, 'dialogGrouping', defaultValue: false),
-      batterySaver: _readBoolPref(prefs, 'batterySaver', defaultValue: true),
-      hideTooltips: _readBoolPref(prefs, 'hideTooltips', defaultValue: false),
-      disableSwipeRegeneration: _readBoolPref(
-        prefs,
-        'disableSwipeRegeneration',
-        defaultValue: false,
-      ),
-      allowMessageScripts: _readBoolPref(
-        prefs,
-        'allowMessageScripts',
-        defaultValue: false,
-      ),
-      language: supportedAppLanguages.contains(savedLanguage)
-          ? savedLanguage!
-          : 'en',
-      virtualKeyboardSend: _readBoolPref(
-        prefs,
-        'virtualKeyboardSend',
-        defaultValue: false,
-      ),
-      tokenizerHidePercent: _readDoublePref(
-        prefs,
-        'tokenizerHidePercent',
-        defaultValue: 30,
-      ),
-      tokenizerHistoryFillThreshold: _readDoublePref(
-        prefs,
-        'tokenizerHistoryFillThreshold',
-        defaultValue: 85,
-      ),
-      showOurPicks: _readBoolPref(prefs, 'showOurPicks', defaultValue: true),
-      forceMobileLayout: _readBoolPref(
-        prefs,
-        'gz_force_mobile_layout',
-        defaultValue: true,
-      ),
-      addBlockAtTop: _readBoolPref(prefs, 'addBlockAtTop', defaultValue: false),
-      openCardAfterImport: _readBoolPref(
-        prefs,
-        'openCardAfterImport',
-        defaultValue: true,
-      ),
-      hapticFeedback: hapticFeedback,
-      messageVibration: messageVibration,
-      extractJanitorLocally: _readBoolPref(
-        prefs,
-        'extractJanitorLocally',
-        defaultValue: false,
-      ),
-      lorebookBuildPrompt: prefs.getString('lorebookBuildPrompt') ?? '',
-      lorebookBuildPromptJs: prefs.getString('lorebookBuildPromptJs') ?? '',
-      useStandardRandomizer: _readBoolPref(
-        prefs,
-        'useStandardRandomizer',
-        defaultValue: false,
-      ),
-    );
+    Haptics.configure(enabled: settings.hapticFeedback);
+    Haptics.configureMessageVibration(enabled: settings.messageVibration);
+    return settings;
   }
 
   Future<void> save(AppSettings settings) async {
@@ -180,50 +300,7 @@ class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
     final normalized = supportedAppLanguages.contains(settings.language)
         ? settings
         : settings.copyWith(language: 'en');
-    await prefs.setBool('enterToSend', settings.enterToSend);
-    await prefs.setBool('hideMessageId', settings.hideMessageId);
-    await prefs.setBool('hideGenerationTime', settings.hideGenerationTime);
-    await prefs.setBool('hideTokenCount', settings.hideTokenCount);
-    await prefs.setBool('dialogGrouping', settings.groupDialogs);
-    await prefs.setBool('batterySaver', settings.batterySaver);
-    await prefs.setBool('hideTooltips', settings.hideTooltips);
-    await prefs.setBool(
-      'disableSwipeRegeneration',
-      settings.disableSwipeRegeneration,
-    );
-    await prefs.setBool('allowMessageScripts', settings.allowMessageScripts);
-    await prefs.setString('language', normalized.language);
-    await prefs.setBool('virtualKeyboardSend', normalized.virtualKeyboardSend);
-    await prefs.setDouble(
-      'tokenizerHidePercent',
-      normalized.tokenizerHidePercent,
-    );
-    await prefs.setDouble(
-      'tokenizerHistoryFillThreshold',
-      normalized.tokenizerHistoryFillThreshold,
-    );
-    await prefs.setBool('showOurPicks', normalized.showOurPicks);
-    await prefs.setBool('gz_force_mobile_layout', normalized.forceMobileLayout);
-    await prefs.setBool('addBlockAtTop', normalized.addBlockAtTop);
-    await prefs.setBool('openCardAfterImport', normalized.openCardAfterImport);
-    await prefs.setBool('hapticFeedback', normalized.hapticFeedback);
-    await prefs.setBool('messageVibration', normalized.messageVibration);
-    await prefs.setBool(
-      'extractJanitorLocally',
-      normalized.extractJanitorLocally,
-    );
-    await prefs.setString(
-      'lorebookBuildPrompt',
-      normalized.lorebookBuildPrompt,
-    );
-    await prefs.setString(
-      'lorebookBuildPromptJs',
-      normalized.lorebookBuildPromptJs,
-    );
-    await prefs.setBool(
-      'useStandardRandomizer',
-      normalized.useStandardRandomizer,
-    );
+    await AppSettingsPreferences.write(prefs, normalized);
     Haptics.configure(enabled: normalized.hapticFeedback);
     Haptics.configureMessageVibration(enabled: normalized.messageVibration);
     state = AsyncData(normalized);

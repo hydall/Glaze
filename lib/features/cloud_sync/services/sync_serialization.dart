@@ -15,6 +15,7 @@ class SyncSerialization {
   static const activeStudioPresetKey = 'activeStudioPresetId';
   static const globalRegexScriptsKey = 'gz_global_regex_scripts';
   static const studioRegexScriptsKey = 'gz_studio_regex_scripts';
+  static const appSettingsKey = 'appSettings';
 
   /// Content fingerprint for manifest conflict detection (not full session JSON).
   static String computeChatMetadataHash(SessionMetadata metadata) {
@@ -173,6 +174,7 @@ class SyncSerialization {
     String? activeStudioPresetId,
     String? globalRegexScripts,
     String? studioRegexScripts,
+    Map<String, dynamic>? appSettings,
   }) {
     return {
       '__localStorage': true,
@@ -180,6 +182,7 @@ class SyncSerialization {
       activeStudioPresetKey: ?activeStudioPresetId,
       globalRegexScriptsKey: ?globalRegexScripts,
       studioRegexScriptsKey: ?studioRegexScripts,
+      appSettingsKey: ?appSettings,
     };
   }
 

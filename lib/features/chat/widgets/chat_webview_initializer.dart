@@ -201,6 +201,11 @@ class ChatWebViewInitializer {
           .toList(),
       patchMessages: false,
     );
+    // Seed the phase before rendering an active typing node. The renderer uses
+    // this value while constructing the node, not only on later transitions.
+    await bridge.setGenerationPhase(
+      generationPhaseLabel(ref.read(generationPhaseProvider(input.charId))),
+    );
     await bridge.setMessages(
       input.messages,
       visibleStartIndex: input.visibleStartIndex,
@@ -232,14 +237,6 @@ class ChatWebViewInitializer {
         'window.bridge.setPostGenRunning(${input.isPostGenRunning}); '
         'window.bridge.setImageGenerating(${input.isGeneratingImage}); '
         '}',
-      ),
-    );
-    // A fresh page starts with the default typing label, so re-push the phase
-    // of a run that is already in flight (session switch, WebView reload).
-    // `ref.listen` only fires on transitions and would leave it stale here.
-    unawaited(
-      bridge.setGenerationPhase(
-        generationPhaseLabel(ref.read(generationPhaseProvider(input.charId))),
       ),
     );
     onReady();
