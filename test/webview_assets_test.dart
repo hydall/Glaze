@@ -986,6 +986,7 @@ void main() {
       // A table needs its separator row — otherwise a line of prose that uses
       // pipes would become a table.
       expect(formatterBlockSyntaxJs, contains(r'\|[ \t:|-]+\|'));
+      expect(formatterBlockSyntaxJs, contains('const startAttr = start === 1'));
     });
 
     test('an indented list item nests inside the item above it', () {

@@ -18,7 +18,7 @@ const ONLY_REGIONS = new RegExp(`^(?:${SENTINEL}P_\\d+${SENTINEL}|\\s)+$`);
 const HEADING = /^(#{1,6})[ \t]+(.+?)[ \t]*#*$/;
 const RULE = /^(_{3,}|-{3,}|\*{3,})$/;
 const BULLET = /^([ \t]*)[-*] (.*)$/;
-const NUMBERED = /^\d+\. (.*)$/;
+const NUMBERED = /^(\d+)\. (.*)$/;
 const QUOTED = /^>[ \t]?(.*)$/;
 const TABLE_ROW = /^[ \t]*\|.*\|[ \t]*$/;
 const TABLE_SEPARATOR = /^[ \t]*\|[ \t:|-]+\|[ \t]*$/;
@@ -145,11 +145,14 @@ export function applyBlockSyntax(text, { inline, paragraphs }) {
       const items = [];
       let j = i;
       let match;
+      let start = 1;
       while (j < lines.length && (match = NUMBERED.exec(lines[j])) !== null) {
-        items.push(`<li>${inline(match[1])}</li>`);
+        if (!items.length) start = Number(match[1]);
+        items.push(`<li>${inline(match[2])}</li>`);
         j++;
       }
-      out.push(`<ol class="chat-list">${items.join('')}</ol>`);
+      const startAttr = start === 1 ? '' : ` start="${start}"`;
+      out.push(`<ol class="chat-list"${startAttr}>${items.join('')}</ol>`);
       i = j - 1;
       continue;
     }

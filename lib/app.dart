@@ -67,6 +67,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
   final List<ProviderSubscription> _warmSubs = [];
   late bool _startupReady;
   bool _startupHooksAttached = false;
+  AutomaticUpdateCheckController? _updateChecks;
 
   @override
   void initState() {
@@ -133,6 +134,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _navSub?.cancel();
+    _updateChecks?.dispose();
     for (final sub in _warmSubs) {
       sub.close();
     }
@@ -144,11 +146,14 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     if (!_startupReady) return;
     GenerationNotificationService.instance.updateLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
+      _updateChecks?.resume();
       unawaited(ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
       final service = ref.read(syncServiceProvider).value;
       if (service != null && service.status != SyncStatus.syncing) {
         ref.read(syncStatusProvider.notifier).state = service.status;
       }
+    } else {
+      _updateChecks?.pause();
     }
   }
 
@@ -215,7 +220,10 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     unawaited(
       ref.read(sessionLorebookEmbeddingWorkerProvider).recoverAndDrain(),
     );
-    unawaited(checkAndShowUpdateOnStartup());
+    _updateChecks = AutomaticUpdateCheckController(
+      check: (presentedUpdateIds) =>
+          checkAndShowUpdateOnStartup(presentedUpdateIds: presentedUpdateIds),
+    )..start();
   }
 
   void _listenNotificationNavigation() {
