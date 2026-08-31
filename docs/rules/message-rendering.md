@@ -99,6 +99,28 @@ which cannot produce a block element. A `<p>` inside a marker's `<span>` is
 markup the browser throws straight back out — the marker then shows as empty
 text. See `docs/markdown-markers.md` for the marker list itself.
 
+Which is why **a marker only holds markup it opened and closed itself**
+(`holdsOwnMarkup` in `protect.js`). Tags are one opaque run to the marker scan,
+so a `*` a model wrote before a card and a `*` that landed inside it — which is
+what a display regex does when its capture group swallows the closing marker —
+match as one emphasis run over the whole card. Holding that span hands the card
+to the inline pass: its `<style>` goes with it (a held segment is never
+unmasked, so the leak sweep deletes the stylesheet) and the browser throws the
+card's block elements back out of the `<em>` as siblings of the message.
+
+Two rules keep that from happening, both on the way *into* the marker store:
+
+* a candidate whose tags do not nest to zero is not a marker — the asterisks
+  stay literal text, and the card renders as the card it is;
+* a candidate carrying a masked `<style>` / `<script>` body is not a marker
+  either. A stylesheet is not emphasis.
+
+Balance is counted with `markupTagTest` — the same answer `escapeProseTags`
+gives — so `*он прошептал <вздох> тихо*` is still one italic run, and void
+elements (`<br>`, `<img>`) never leave anything open. A marker that spans
+*balanced* markup, which is how `html_to_markdown` writes rich colour
+(`==hc:#fff==<b>x</b>==`), matches exactly as before.
+
 ---
 
 ## The message body renders into a shadow root
