@@ -13,6 +13,7 @@ import 'animated_header_below.dart';
 import 'nav_bar_suppression_provider.dart';
 import 'nav_height_provider.dart';
 import 'shell_header_provider.dart';
+import 'shell_navigation_provider.dart';
 import 'desktop/desktop_layout_provider.dart';
 
 class ShellScreen extends ConsumerStatefulWidget {
@@ -47,9 +48,10 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
   }
 
   /// Screens pad their bodies by [navHeightProvider], which [GlassNavBar]
-  /// publishes once on mount and never clears. A suppressed bar would leave
-  /// that stale height behind as an empty strip under the editor, so zero it
-  /// while the claim is live — the bar re-measures when it comes back.
+  /// publishes once on mount and never clears. A suppressed bar — or the
+  /// desktop layout, where the bar does not exist at all — would leave that
+  /// stale height behind as an empty strip, so zero it while the bar is gone;
+  /// it re-measures when it comes back.
   void _clearNavHeight() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -58,9 +60,23 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     });
   }
 
+  /// Publishes the shell so widgets outside it (the desktop sidebars) can
+  /// drive branch navigation. Deferred: mutating a provider during build is
+  /// forbidden.
+  void _publishShell() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final notifier = ref.read(shellNavigationProvider.notifier);
+      if (!identical(notifier.state, widget.navigationShell)) {
+        notifier.state = widget.navigationShell;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentIndex = widget.navigationShell.currentIndex;
+    _publishShell();
     _revealHeaderOnBranchChange(currentIndex);
     final location = GoRouterState.of(context).uri.toString();
     final isDesktop = isDesktopLayout(context);
@@ -72,6 +88,13 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     // outer fade completes, flashing a frame of the previous screen at the end
     // of the transition (most visible on iOS).
     if (isDesktop) {
+      // [GlassNavBar] never mounts here, but it may have published its height
+      // before the layout switched (the desktop layout can be entered at
+      // runtime by turning "force mobile layout" off). That stale value is
+      // read by every screen's bottom padding and by [SheetView], so it would
+      // reserve an empty strip along the bottom of the desktop layout until
+      // the app restarts. Zero it for as long as the desktop layout is live.
+      _clearNavHeight();
       return widget.navigationShell;
     }
 
@@ -112,9 +135,7 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
           backgroundColor: Colors.transparent,
           body: Stack(
             children: [
-              Positioned.fill(
-                child: widget.navigationShell,
-              ),
+              Positioned.fill(child: widget.navigationShell),
               Positioned(
                 top: 0,
                 left: 0,
@@ -168,10 +189,7 @@ class _PersistentHeader extends ConsumerWidget {
       // throughout the cross-fade rather than snapping when one is disposed.
       layoutBuilder: (currentChild, previousChildren) => Stack(
         alignment: Alignment.topCenter,
-        children: [
-          ...previousChildren,
-          ?currentChild,
-        ],
+        children: [...previousChildren, ?currentChild],
       ),
       child: entry == null || entry.config.hidden
           ? const SizedBox.shrink(key: ValueKey('shell-header-empty'))

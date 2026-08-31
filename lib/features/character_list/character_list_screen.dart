@@ -34,6 +34,7 @@ import '../catalog/widgets/widgets.dart';
 import '../picks/widgets/picks_grid.dart';
 import '../settings/app_settings_provider.dart';
 import 'character_sort.dart';
+import 'dropped_files_provider.dart';
 import 'character_import_persistence_provider.dart';
 import 'character_detail_screen.dart';
 import 'character_selection_provider.dart';
@@ -173,9 +174,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     return ShellHeaderConfig(
       title: inSearch
           ? null
-          : (inPicks
-                ? _picksTitle
-                : (folderTitle ?? 'header_characters'.tr())),
+          : (inPicks ? _picksTitle : (folderTitle ?? 'header_characters'.tr())),
       titleWidget: inSearch ? _buildSearchField(context) : null,
       showBack: inFolder,
       onBack: inFolder ? _handleFolderBack : null,
@@ -376,6 +375,20 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       if (next.branchIndex == kCharactersBranchIndex) _onCharactersTabReTap();
     });
 
+    // Cards dropped onto the desktop window (see [DesktopFileDrop]) land here
+    // so they go through the same bulk importer as the file picker.
+    ref.listen(droppedCharacterFilesProvider, (_, paths) {
+      if (paths.isEmpty) return;
+      ref.read(droppedCharacterFilesProvider.notifier).state = const [];
+      _runBulkImport(context, ref, [
+        for (final path in paths)
+          CharacterImportSource(
+            name: path.split(Platform.pathSeparator).last,
+            path: path,
+          ),
+      ]);
+    });
+
     // The shell reveals the header when this branch is re-entered (see
     // [ShellScreen]). Re-baseline the hider so it agrees, instead of holding a
     // stale `hidden` that would swallow the next hide.
@@ -419,88 +432,88 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: Stack(
-        children: [
-          Positioned.fill(
-            child: NotificationListener<ScrollNotification>(
-              onNotification: _onScrollNotification,
-              child: PrimaryScrollController(
-                controller: _listScrollController,
-                child: SwipeTabSwitcher(
-                  // Only the top-level My/Catalog split is swipeable; inside a
-                  // folder the strip is hidden and horizontal drags belong to
-                  // the folder content.
-                  enabled: showTabBar,
-                  index: effectiveTab,
-                  length: 2,
-                  onChanged: _onTabSwipe,
-                  child: TabSlideSwitcher(
-                  index: effectiveTab,
-                  child: effectiveTab == 1
-                      ? CatalogGrid(
-                          key: const ValueKey('catalog_grid'),
-                          topPadding: contentTopPad,
-                          bottomPadding: navHeight + 20,
+          children: [
+            Positioned.fill(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
+                child: PrimaryScrollController(
+                  controller: _listScrollController,
+                  child: SwipeTabSwitcher(
+                    // Only the top-level My/Catalog split is swipeable; inside a
+                    // folder the strip is hidden and horizontal drags belong to
+                    // the folder content.
+                    enabled: showTabBar,
+                    index: effectiveTab,
+                    length: 2,
+                    onChanged: _onTabSwipe,
+                    child: TabSlideSwitcher(
+                      index: effectiveTab,
+                      child: effectiveTab == 1
+                          ? CatalogGrid(
+                              key: const ValueKey('catalog_grid'),
+                              topPadding: contentTopPad,
+                              bottomPadding: navHeight + 20,
+                            )
+                          : KeyedSubtree(
+                              key: const ValueKey('my_characters'),
+                              child: _buildMyCharacters(
+                                context,
+                                contentTopPad,
+                                navHeight,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // The selection bar and the add button share the same bottom slot and
+            // cross-fade/slide between each other so the panel glides in and out
+            // instead of popping.
+            if (effectiveTab == 0 && _currentFolderId != kPicksFolderId)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: navHeight + 16,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 280),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  transitionBuilder: (child, animation) {
+                    final slide =
+                        Tween<Offset>(
+                          begin: const Offset(0, 0.5),
+                          end: Offset.zero,
+                        ).animate(
+                          CurvedAnimation(
+                            parent: animation,
+                            curve: Curves.easeOutBack,
+                          ),
+                        );
+                    return FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(position: slide, child: child),
+                    );
+                  },
+                  child: selection.active
+                      ? _SelectionBar(
+                          key: const ValueKey('selection_bar'),
+                          count: selection.count,
+                          onCancel: () => ref
+                              .read(characterSelectionProvider.notifier)
+                              .clear(),
+                          onMore: () =>
+                              _showSelectionActions(context, selection),
                         )
-                      : KeyedSubtree(
-                          key: const ValueKey('my_characters'),
-                          child: _buildMyCharacters(
-                            context,
-                            contentTopPad,
-                            navHeight,
+                      : Align(
+                          key: const ValueKey('add_button'),
+                          alignment: Alignment.centerRight,
+                          child: _AddButton(
+                            onTap: () => _showAddSheet(context, ref),
                           ),
                         ),
                 ),
-                ),
               ),
-            ),
-          ),
-          // The selection bar and the add button share the same bottom slot and
-          // cross-fade/slide between each other so the panel glides in and out
-          // instead of popping.
-          if (effectiveTab == 0 && _currentFolderId != kPicksFolderId)
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: navHeight + 16,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 280),
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeIn,
-                transitionBuilder: (child, animation) {
-                  final slide =
-                      Tween<Offset>(
-                        begin: const Offset(0, 0.5),
-                        end: Offset.zero,
-                      ).animate(
-                        CurvedAnimation(
-                          parent: animation,
-                          curve: Curves.easeOutBack,
-                        ),
-                      );
-                  return FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(position: slide, child: child),
-                  );
-                },
-                child: selection.active
-                    ? _SelectionBar(
-                        key: const ValueKey('selection_bar'),
-                        count: selection.count,
-                        onCancel: () => ref
-                            .read(characterSelectionProvider.notifier)
-                            .clear(),
-                        onMore: () =>
-                            _showSelectionActions(context, selection),
-                      )
-                    : Align(
-                        key: const ValueKey('add_button'),
-                        alignment: Alignment.centerRight,
-                        child: _AddButton(
-                          onTap: () => _showAddSheet(context, ref),
-                        ),
-                      ),
-              ),
-            ),
           ],
         ),
       ),
@@ -568,8 +581,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final infinite = ref.watch(infiniteCharactersProvider(key));
 
     return infinite.when(
-      loading: () =>
-          Center(child: GlazeSpinner(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -677,8 +689,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   ) {
     final chars = ref.watch(charactersProvider);
     return chars.when(
-      loading: () =>
-          Center(child: GlazeSpinner(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -762,8 +773,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final isFavorites = folderId == kFavoritesFolderId;
     final chars = ref.watch(charactersProvider);
     return chars.when(
-      loading: () =>
-          Center(child: GlazeSpinner(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -1124,8 +1134,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       backgroundColor: Colors.transparent,
       builder: (_) => AddCharactersToFolderSheet(
         characterIds: ids,
-        onDone: () =>
-            ref.read(characterSelectionProvider.notifier).clear(),
+        onDone: () => ref.read(characterSelectionProvider.notifier).clear(),
       ),
     );
   }
@@ -1322,9 +1331,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   ) async {
     if (sources.isEmpty) return;
 
-    final service = await ref.read(
-      characterBulkImportServiceFactoryProvider,
-    )();
+    final service = await ref.read(characterBulkImportServiceFactoryProvider)();
     if (!context.mounted) return;
 
     final progress = ValueNotifier<CharacterBulkImportProgress>(
@@ -1510,9 +1517,7 @@ class _CircleIconBtn extends StatelessWidget {
         child: GlassSurface(
           borderRadius: BorderRadius.circular(20),
           tint: context.cs.surface,
-          border: Border.all(
-            color: context.cs.primary.withValues(alpha: 0.18),
-          ),
+          border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
           child: Center(
             child: Icon(
               icon,

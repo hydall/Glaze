@@ -23,6 +23,7 @@ void main() {
       'tokenizerHistoryFillThreshold': double,
       'showOurPicks': bool,
       'gz_force_mobile_layout': bool,
+      'gz_chat_max_width': double,
       'addBlockAtTop': bool,
       'openCardAfterImport': bool,
       'hapticFeedback': bool,
@@ -42,9 +43,10 @@ void main() {
         switch (entry.value) {
           // ignore: type_literal_in_constant_pattern
           case bool:
+            // gz_force_mobile_layout defaults to FALSE: wide windows get the
+            // desktop three-column layout unless the user opts back out.
             if (entry.key == 'enterToSend' ||
                 entry.key == 'showOurPicks' ||
-                entry.key == 'gz_force_mobile_layout' ||
                 entry.key == 'batterySaver' ||
                 entry.key == 'openCardAfterImport' ||
                 entry.key == 'hapticFeedback' ||
@@ -72,6 +74,8 @@ void main() {
               expect(defaults.tokenizerHidePercent, 30);
             } else if (entry.key == 'tokenizerHistoryFillThreshold') {
               expect(defaults.tokenizerHistoryFillThreshold, 85);
+            } else if (entry.key == 'gz_chat_max_width') {
+              expect(defaults.chatMaxWidth, 900);
             }
         }
       }

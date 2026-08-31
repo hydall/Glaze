@@ -54,6 +54,14 @@ class MagicDrawerPanel extends ConsumerStatefulWidget {
   final String charId;
   final bool disableEffects;
 
+  /// Renders the panel as a narrow vertical strip of icons instead of the
+  /// three-column card grid — the desktop right sidebar's collapsed state, and
+  /// the strip that sits beside an open panel there.
+  ///
+  /// Taps run through the very same handler as the cards, so the strip cannot
+  /// drift out of sync with the grid the way a hand-copied icon list would.
+  final bool iconOnly;
+
   /// Called when the drawer wants to dismiss itself: on a swipe-down of the
   /// drag handle, or before a picked item performs real navigation away from
   /// the chat (e.g. character edit -> go route). Sheets and dialogs open on
@@ -71,6 +79,7 @@ class MagicDrawerPanel extends ConsumerStatefulWidget {
     required this.charId,
     this.onClose,
     this.disableEffects = false,
+    this.iconOnly = false,
     this.onScrollToMessage,
   });
 
@@ -894,6 +903,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       ),
     );
 
+    if (widget.iconOnly) return _buildIconStrip(items);
+
     return DrawerPanelScaffold(
       disableEffects: batterySaver || widget.disableEffects,
       loading: _loading,
@@ -906,6 +917,38 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
             : null,
       ),
       content: scrollable,
+    );
+  }
+
+  /// Vue's `.tools-strip.magic-drawer-sidebar.icon-only`: a scrollable column
+  /// of 48px rows, each a tinted rounded icon with the card's label as its
+  /// tooltip.
+  Widget _buildIconStrip(List<MagicDrawerCardItem> items) {
+    if (_loading && items.isEmpty) {
+      return const Center(
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final item in items)
+              MagicDrawerStripIcon(
+                icon: item.def.icon,
+                label: item.def.label,
+                onTap: () => _handleTap(item.def),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

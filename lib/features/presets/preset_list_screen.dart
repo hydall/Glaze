@@ -6,8 +6,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/import/silly_tavern_preset_parser.dart';
 import '../../core/models/preset.dart';
 import '../../core/models/preset_folder.dart';
@@ -66,11 +66,7 @@ class PresetListScreen extends ConsumerStatefulWidget {
   /// Active chat, forwarded to the preset editor so the Author's Note block can
   /// edit the session-scoped note. Null when opened outside a chat.
   final String? charId;
-  const PresetListScreen({
-    super.key,
-    this.startExpanded = false,
-    this.charId,
-  });
+  const PresetListScreen({super.key, this.startExpanded = false, this.charId});
 
   @override
   ConsumerState<PresetListScreen> createState() => _PresetListScreenState();
@@ -189,7 +185,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       return;
     }
     if (widget.startExpanded) {
-      context.go('/tools');
+      closeExpandedToolScreen(context, ref);
     } else {
       Navigator.of(context).maybePop();
     }
@@ -509,10 +505,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           ?currentChild,
         ],
       ),
-      child: KeyedSubtree(
-        key: ValueKey(folderId ?? '#root'),
-        child: list,
-      ),
+      child: KeyedSubtree(key: ValueKey(folderId ?? '#root'), child: list),
     );
   }
 
@@ -594,9 +587,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     // approximation.
     final double estimate =
         headerExtent + index * _kRowExtent - viewport * 0.25;
-    controller.jumpTo(
-      estimate.clamp(0.0, controller.position.maxScrollExtent),
-    );
+    controller.jumpTo(estimate.clamp(0.0, controller.position.maxScrollExtent));
 
     // Correct the estimate now that the row itself is built (it is, after that
     // jump — the error stays inside the viewport's cache extent).
@@ -823,9 +814,8 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       ),
       onPickImage: () => unawaited(_changeCover(preset)),
       onRemoveImage: () => unawaited(_removeCover(preset)),
-      onAddToFolder: () => _showAddToFolder([
-        PresetFolderTarget(preset.id, PresetKind.normal),
-      ]),
+      onAddToFolder: () =>
+          _showAddToFolder([PresetFolderTarget(preset.id, PresetKind.normal)]),
       onClone: () => unawaited(_clonePreset(preset)),
       onExport: () => unawaited(exportPreset(context, preset)),
       onDelete: () => unawaited(_deleteItems([PresetItem(preset: preset)])),
@@ -891,9 +881,8 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         onRename: (name) => unawaited(_renameAgentic(preset, name)),
       ),
       onClone: () => unawaited(_cloneAgentic(preset)),
-      onAddToFolder: () => _showAddToFolder([
-        PresetFolderTarget(preset.id, PresetKind.agentic),
-      ]),
+      onAddToFolder: () =>
+          _showAddToFolder([PresetFolderTarget(preset.id, PresetKind.agentic)]),
       onExport: () => unawaited(exportStudioPreset(context, preset)),
       onDelete: () => unawaited(_deleteAgentic(preset)),
     );
@@ -1238,9 +1227,9 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   ) {
     // The built-in `default` agentic preset is re-seeded on demand, so deleting
     // it would only look like it worked.
-    final deletable = _selectedItems(selection)
-        .where((e) => !(e.isAgentic && e.id == 'default'))
-        .toList();
+    final deletable = _selectedItems(
+      selection,
+    ).where((e) => !(e.isAgentic && e.id == 'default')).toList();
     if (deletable.isEmpty) {
       GlazeToast.show(context, 'preset_delete_none_toast'.tr());
       return;
@@ -1850,9 +1839,7 @@ class _CircleIconBtn extends StatelessWidget {
         child: GlassSurface(
           borderRadius: BorderRadius.circular(20),
           tint: context.cs.surface,
-          border: Border.all(
-            color: context.cs.primary.withValues(alpha: 0.18),
-          ),
+          border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
           child: Center(
             child: Icon(
               icon,

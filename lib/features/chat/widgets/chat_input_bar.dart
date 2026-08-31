@@ -685,14 +685,19 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _CircleBtn(
-                      icon: Icons.auto_awesome,
-                      onTap: widget.onMagicDrawer,
-                      color: widget.isDrawerOpen ? Colors.amber : null,
-                      batterySaver: widget.batterySaver,
-                      blurRegionId: 'btn-magic',
-                    ),
-                    const SizedBox(width: 8),
+                    // Null on desktop, where the drawer lives in the right
+                    // sidebar instead — drop the button rather than leave a
+                    // dead one behind.
+                    if (widget.onMagicDrawer != null) ...[
+                      _CircleBtn(
+                        icon: Icons.auto_awesome,
+                        onTap: widget.onMagicDrawer,
+                        color: widget.isDrawerOpen ? Colors.amber : null,
+                        batterySaver: widget.batterySaver,
+                        blurRegionId: 'btn-magic',
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     _CircleBtn(
                       icon: Icons.attach_file,
                       onTap: _pickImage,

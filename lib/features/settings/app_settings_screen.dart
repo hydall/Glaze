@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -117,7 +118,12 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final settingsAsync = ref.watch(appSettingsProvider);
-    final topPad = MediaQuery.of(context).padding.top + 74.0;
+    // GlazeScaffold draws this screen's own header; inside the desktop
+    // floating window the frame supplies the title bar instead, so the space
+    // reserved for a header would be a gap.
+    final topPad = DetachedShellHost.of(context)
+        ? 0.0
+        : MediaQuery.of(context).padding.top + 74.0;
     final bottomPad = ref.watch(navHeightProvider) + 20;
     final searching = _searchQuery.trim().isNotEmpty;
 

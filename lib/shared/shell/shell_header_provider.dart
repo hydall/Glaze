@@ -154,6 +154,23 @@ ShellHeaderEntry? resolveShellHeader(
   return best;
 }
 
+/// Marks a subtree that is hosted *outside* the shell's branch navigators —
+/// the desktop right sidebar's tool panel and the desktop floating window.
+///
+/// Screens there are the same widgets the router mounts in the middle column,
+/// and a [SheetView] among them would otherwise suppress the header of
+/// whichever branch the middle column happens to be showing: opening API
+/// settings in the sidebar blanked the character list's header behind it.
+class DetachedShellHost extends InheritedWidget {
+  const DetachedShellHost({super.key, required super.child});
+
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<DetachedShellHost>() != null;
+
+  @override
+  bool updateShouldNotify(DetachedShellHost oldWidget) => false;
+}
+
 /// Mix into a shell screen's [ConsumerState] to publish a header into
 /// [shellHeaderProvider]. Implement [headerBranchIndex] and [buildShellHeader],
 /// and call [refreshShellHeader] whenever local state affecting the header
@@ -163,12 +180,18 @@ mixin ShellHeaderMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
 
   ShellHeaderConfig buildShellHeader();
 
+  /// Set false by a screen mounted somewhere that has no shell header to fill
+  /// — the desktop right sidebar hosts a second [ToolsScreen] instance, and a
+  /// duplicate claim on the same branch would fight the routed one.
+  bool get publishesShellHeader => true;
+
   // Cached so it can be used safely in [dispose], where reading `ref` is unsafe.
   ShellHeaderRegistry? _registry;
 
   @override
   void initState() {
     super.initState();
+    if (!publishesShellHeader) return;
     _registry = ref.read(shellHeaderProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

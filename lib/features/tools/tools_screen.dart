@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
+import '../../shared/shell/desktop/sidebar_tool_panels.dart';
 import '../../core/models/preset.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/utils/platform_paths.dart';
@@ -99,7 +101,13 @@ Widget _svgPath(
 );
 
 class ToolsScreen extends ConsumerStatefulWidget {
-  const ToolsScreen({super.key});
+  /// Rendered inside the desktop right sidebar rather than as the middle
+  /// column's route. The sidebar has no shell header, so the screen must not
+  /// reserve room for one nor publish a (never-rendered) header claim, and its
+  /// tiles open panels in the sidebar instead of navigating the whole app.
+  final bool inSidebar;
+
+  const ToolsScreen({super.key, this.inSidebar = false});
 
   @override
   ConsumerState<ToolsScreen> createState() => _ToolsScreenState();
@@ -111,6 +119,9 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
 
   @override
   int get headerBranchIndex => 2;
+
+  @override
+  bool get publishesShellHeader => !widget.inSidebar;
 
   @override
   ShellHeaderConfig buildShellHeader() =>
@@ -168,6 +179,16 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     );
   }
 
+  /// From the sidebar, a tool opens as a sidebar panel; from the route it
+  /// pushes `/tools/<id>` as before.
+  void _openTool(BuildContext context, WidgetRef ref, String id) {
+    if (widget.inSidebar) {
+      showPanelInRightSidebar(ref, sidebarToolPanel(id));
+      return;
+    }
+    context.push('/tools/$id');
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomPad = ref.watch(navHeightProvider) + 20;
@@ -179,13 +200,17 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     final extBlocksEnabled = ref.watch(
       extensionsSettingsProvider.select((s) => s.enabled),
     );
-    final topPad = MediaQuery.of(context).padding.top + 66.0;
+    final topPad = widget.inSidebar
+        ? 0.0
+        : MediaQuery.of(context).padding.top + 66.0;
 
     // Re-tap on the active Tools navbar tab → scroll to top (sub-routes are
     // already popped by the shell's goBranch(initialLocation: true)).
-    ref.listen(navReTapProvider, (_, next) {
-      if (next.branchIndex == kToolsBranchIndex) _scrollToTop();
-    });
+    if (!widget.inSidebar) {
+      ref.listen(navReTapProvider, (_, next) {
+        if (next.branchIndex == kToolsBranchIndex) _scrollToTop();
+      });
+    }
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -201,7 +226,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
                 subtitle: personaInfo?.name ?? 'user',
                 avatarPath: resolvedAvatar,
                 isAvatar: true,
-                onTap: () => context.push('/tools/personas'),
+                onTap: () => _openTool(context, ref, 'personas'),
               ),
               const SizedBox(height: 10),
               _HeroCard(
@@ -209,7 +234,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
                 title: 'tab_presets'.tr(),
                 subtitle: presetName,
                 backgroundImage: presetImage,
-                onTap: () => context.push('/tools/presets'),
+                onTap: () => _openTool(context, ref, 'presets'),
               ),
               const SizedBox(height: 10),
               ..._gridRows([
@@ -218,19 +243,19 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
                   title: 'tab_api'.tr(),
                   subtitle: 'tools_api_subtitle'.tr(),
                   showStatusDot: true,
-                  onTap: () => context.push('/tools/api'),
+                  onTap: () => _openTool(context, ref, 'api'),
                 ),
                 _GridTile(
                   iconPath: _kIconLorebook,
                   title: 'menu_lorebooks'.tr(),
                   subtitle: 'tools_lorebooks_subtitle'.tr(),
-                  onTap: () => context.push('/tools/lorebooks'),
+                  onTap: () => _openTool(context, ref, 'lorebooks'),
                 ),
                 _GridTile(
                   iconPath: _kIconRegex,
                   title: 'menu_regex'.tr(),
                   subtitle: 'tools_regex_subtitle'.tr(),
-                  onTap: () => context.push('/tools/regex'),
+                  onTap: () => _openTool(context, ref, 'regex'),
                 ),
                 _GridTile(
                   iconPath: _kIconStats,

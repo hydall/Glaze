@@ -1,7 +1,6 @@
-
-
 import 'package:flutter/material.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/hover_glow.dart';
 import 'magic_drawer_models.dart';
 
 class MagicDrawerHeader extends StatelessWidget {
@@ -84,7 +83,9 @@ class MagicDrawerHeader extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: editing ? context.cs.primary : context.cs.onSurface,
+                      color: editing
+                          ? context.cs.primary
+                          : context.cs.onSurface,
                     ),
                   ),
                 ],
@@ -152,100 +153,100 @@ class _MagicCardState extends State<MagicCard> {
               : null,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(
-                    alpha: _pressed || hovered ? 0.08 : 0.04,
-                  ),
-                  border: Border.all(
-                    color: editing
-                        ? context.cs.primary.withValues(alpha: 0.55)
-                        : Colors.white.withValues(alpha: 0.06),
-                  ),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(
+                  alpha: _pressed || hovered ? 0.08 : 0.04,
                 ),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  alignment: Alignment.centerLeft,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Icon(
-                          item.def.icon,
-                          size: 20,
-                          color: Colors.white.withValues(alpha: 0.85),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
+                border: Border.all(
+                  color: editing
+                      ? context.cs.primary.withValues(alpha: 0.55)
+                      : Colors.white.withValues(alpha: 0.06),
+                ),
+              ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.centerLeft,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(
+                        item.def.icon,
+                        size: 20,
+                        color: Colors.white.withValues(alpha: 0.85),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              item.def.label,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: context.cs.onSurface,
+                                height: 1,
+                              ),
+                            ),
+                            if (item.status != null) ...[
+                              const SizedBox(height: 1),
                               Text(
-                                item.def.label,
-                                maxLines: 2,
+                                item.status!,
+                                maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: context.cs.onSurface,
+                                  fontSize: 9,
+                                  color: context.cs.onSurfaceVariant.withValues(
+                                    alpha: 0.95,
+                                  ),
                                   height: 1,
                                 ),
                               ),
-                              if (item.status != null) ...[
-                                const SizedBox(height: 1),
-                                Text(
-                                  item.status!,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    color: context.cs.onSurfaceVariant.withValues(
-                                      alpha: 0.95,
-                                    ),
-                                    height: 1,
-                                  ),
-                                ),
-                              ],
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (editing)
+                    Positioned(
+                      top: -8,
+                      right: -8,
+                      child: GestureDetector(
+                        onTap: widget.onDelete,
+                        child: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFFF3B30),
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Color(0x4DFF3B30),
+                                blurRadius: 8,
+                                offset: Offset(0, 4),
+                              ),
                             ],
                           ),
-                        ),
-                      ],
-                    ),
-                    if (editing)
-                      Positioned(
-                        top: -8,
-                        right: -8,
-                        child: GestureDetector(
-                          onTap: widget.onDelete,
-                          child: Container(
-                            width: 24,
-                            height: 24,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFFFF3B30),
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Color(0x4DFF3B30),
-                                  blurRadius: 8,
-                                  offset: Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: const Icon(
-                              Icons.close,
-                              size: 14,
-                              color: Colors.white,
-                            ),
+                          child: const Icon(
+                            Icons.close,
+                            size: 14,
+                            color: Colors.white,
                           ),
                         ),
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
+          ),
         ),
       ),
     );
@@ -278,8 +279,9 @@ class MagicDrawerAddList extends StatelessWidget {
   Widget build(BuildContext context) {
     final children = <Widget>[];
     for (final category in MagicDrawerCategory.values) {
-      final sectionItems =
-          items.where((item) => item.category == category).toList();
+      final sectionItems = items
+          .where((item) => item.category == category)
+          .toList();
       if (sectionItems.isEmpty) continue;
       children.add(
         Padding(
@@ -300,10 +302,7 @@ class MagicDrawerAddList extends StatelessWidget {
           (item) => InkWell(
             onTap: () => onSelect(item),
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Row(
                 children: [
                   Icon(
@@ -373,10 +372,7 @@ class MagicCardGrid extends StatelessWidget {
         ),
       );
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: rows,
-    );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
   }
 }
 
@@ -391,35 +387,104 @@ class AddMagicCard extends StatelessWidget {
       onTap: onTap,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-              decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.04),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.add,
-                  size: 20,
-                  color: context.cs.onSurface.withValues(alpha: 0.6),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Add',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: context.cs.onSurface,
-                      height: 1,
-                    ),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.04),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.add,
+                size: 20,
+                color: context.cs.onSurface.withValues(alpha: 0.6),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Add',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: context.cs.onSurface,
+                    height: 1,
                   ),
                 ),
-              ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One row of the desktop right sidebar's icon strip.
+///
+/// Mirrors Vue's `.tools-strip .magic-item`: a 64x48 cell with a hairline
+/// bottom rule, a 28px tinted rounded square, and the item's label as a
+/// tooltip. Shared by the Magic Drawer strip and the Tools strip so the two
+/// cannot drift apart.
+class MagicDrawerStripIcon extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  const MagicDrawerStripIcon({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.active = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: label,
+      preferBelow: false,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: HoverGlow(
+          child: Container(
+            width: 64,
+            height: 48,
+            decoration: BoxDecoration(
+              color: active
+                  ? scheme.primary.withValues(alpha: 0.08)
+                  : Colors.transparent,
+              border: Border(
+                bottom: BorderSide(
+                  color: scheme.onSurface.withValues(alpha: 0.05),
+                ),
+              ),
+            ),
+            child: Center(
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: active
+                      ? scheme.primary.withValues(alpha: 0.15)
+                      : scheme.onSurface.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  icon,
+                  size: 18,
+                  color: active
+                      ? scheme.primary
+                      : scheme.onSurface.withValues(alpha: 0.8),
+                ),
+              ),
             ),
           ),
+        ),
       ),
     );
   }

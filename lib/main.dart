@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
 import 'core/debug/perf_debug.dart';
+import 'core/platform/desktop_window.dart';
 import 'core/services/dev_mode_flag_migration.dart';
 import 'core/services/windows_preferences_migration.dart';
 
@@ -40,6 +41,18 @@ Future<void> main() async {
     );
   }
   await EasyLocalization.ensureInitialized();
+  try {
+    await initDesktopWindow();
+  } catch (error, stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'startup',
+        context: ErrorDescription('desktop window setup failed'),
+      ),
+    );
+  }
   try {
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,

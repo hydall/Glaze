@@ -24,6 +24,7 @@ import 'core/services/preset_seeder.dart';
 import 'features/chat_history/chat_history_provider.dart';
 import 'features/settings/api_list_provider.dart';
 import 'features/settings/app_settings_provider.dart';
+import 'shared/widgets/desktop_popup.dart';
 import 'shared/theme/theme_font_provider.dart';
 import 'core/services/onboarding_service.dart';
 import 'core/services/update_check_coordinator.dart';
@@ -357,13 +358,18 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
                 ),
               )
             : const SizedBox.expand();
-        return AppLaunchSplash(
-          isReady: _startupReady,
-          child: Stack(
-            children: [
-              Positioned.fill(child: appChild),
-              const BuildWatermark(),
-            ],
+        // Records where the pointer last went down so desktop dropdowns can
+        // anchor themselves at the cursor without every call site passing an
+        // anchor (see [showDesktopPopup]).
+        return PointerPositionTracker(
+          child: AppLaunchSplash(
+            isReady: _startupReady,
+            child: Stack(
+              children: [
+                Positioned.fill(child: appChild),
+                const BuildWatermark(),
+              ],
+            ),
           ),
         );
       },

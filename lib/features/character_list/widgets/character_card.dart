@@ -171,9 +171,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
     final variationLabel = (widget.inVariationsGrid || variantCount > 1)
         ? variantLabel(character)
         : null;
-    final shadowAlpha = _hovered
-        ? (isFav ? 0.25 : 0.3)
-        : 0.1;
+    final shadowAlpha = _hovered ? (isFav ? 0.25 : 0.3) : 0.1;
     final shadowColor = isFav && _hovered
         ? const Color(0xFFFF6B6B).withValues(alpha: shadowAlpha)
         : Colors.black.withValues(alpha: shadowAlpha);
@@ -199,144 +197,152 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
       );
     }
 
+    // Shared by long-press (touch) and right-click (desktop): both enter or
+    // extend selection mode.
+    final VoidCallback? longPress = widget.inVariationsGrid
+        ? null
+        : () {
+            final notifier = ref.read(characterSelectionProvider.notifier);
+            if (selectionActive) {
+              notifier.toggle(character.id);
+            } else {
+              notifier.start(character.id);
+            }
+          };
+
     return FadeTransition(
       opacity: _fadeAnim,
       child: ScaleTransition(
         scale: _scaleAnim,
-      child: RepaintBoundary(
-        key: _boundaryKey,
-        child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: GestureDetector(
-          onTap: () {
-            if (selectionActive) {
-              ref.read(characterSelectionProvider.notifier).toggle(character.id);
-            } else {
-              _handleTap(context, variantCount);
-            }
-          },
-          onTapDown: (_) => setState(() => _pressed = true),
-          onTapUp: (_) => setState(() => _pressed = false),
-          onTapCancel: () => setState(() => _pressed = false),
-          onLongPress: widget.inVariationsGrid
-              ? null
-              : () {
-                  final notifier = ref.read(
-                    characterSelectionProvider.notifier,
-                  );
-                  if (selectionActive) {
-                    notifier.toggle(character.id);
-                  } else {
-                    notifier.start(character.id);
-                  }
-                },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutBack,
-            transform: Matrix4.identity()
-              ..translateByDouble(0.0, dy, 0.0, 1.0)
-              ..scaleByDouble(scale, scale, 1.0, 1.0),
-            transformAlignment: Alignment.center,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: shadowColor,
-                  blurRadius: _hovered ? 24 : 6,
-                  offset: Offset(0, _hovered ? 12 : 4),
+        child: RepaintBoundary(
+          key: _boundaryKey,
+          child: MouseRegion(
+            onEnter: (_) => setState(() => _hovered = true),
+            onExit: (_) => setState(() => _hovered = false),
+            child: GestureDetector(
+              onTap: () {
+                if (selectionActive) {
+                  ref
+                      .read(characterSelectionProvider.notifier)
+                      .toggle(character.id);
+                } else {
+                  _handleTap(context, variantCount);
+                }
+              },
+              onTapDown: (_) => setState(() => _pressed = true),
+              onTapUp: (_) => setState(() => _pressed = false),
+              onTapCancel: () => setState(() => _pressed = false),
+              onLongPress: longPress,
+              // Right-click is the desktop equivalent of a long press (Vue:
+              // `@contextmenu.prevent` on the card).
+              onSecondaryTap: longPress,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOutBack,
+                transform: Matrix4.identity()
+                  ..translateByDouble(0.0, dy, 0.0, 1.0)
+                  ..scaleByDouble(scale, scale, 1.0, 1.0),
+                transformAlignment: Alignment.center,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: shadowColor,
+                      blurRadius: _hovered ? 24 : 6,
+                      offset: Offset(0, _hovered ? 12 : 4),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  AnimatedScale(
-                    scale: _hovered ? 1.05 : 1.0,
-                    duration: const Duration(milliseconds: 500),
-                    curve: Curves.easeOut,
-                    child: _buildImage(),
-                  ),
-                  const Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    height: 150,
-                    child: _BottomGradient(),
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: _CardInfo(
-                      character: character,
-                      tokenCount: _tokenCount,
-                      isFav: isFav,
-                      variationLabel: variationLabel,
-                      // Inside the grid the chip is a label, not a door: every
-                      // card would otherwise reopen the sheet you are already in.
-                      onVariationTap: widget.inVariationsGrid
-                          ? null
-                          : () => _showVariations(context),
-                    ),
-                  ),
-                  if (character.hidden || _showsVariationsBadge(variantCount))
-                    Positioned(
-                      top: 8,
-                      left: 8,
-                      child: Row(
-                        children: [
-                          if (character.hidden) const _HiddenBadge(),
-                          if (character.hidden &&
-                              _showsVariationsBadge(variantCount))
-                            const SizedBox(width: 6),
-                          if (_showsVariationsBadge(variantCount))
-                            _VariationsBadge(count: variantCount),
-                        ],
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      AnimatedScale(
+                        scale: _hovered ? 1.05 : 1.0,
+                        duration: const Duration(milliseconds: 500),
+                        curve: Curves.easeOut,
+                        child: _buildImage(),
                       ),
-                    ),
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: selectionActive
-                        ? _SelectionCheck(selected: selected)
-                        : _CardMenuButton(
-                            character: character,
-                            onTap: () => _showActions(
-                              context,
-                              ref,
-                              isFav: isFav,
-                              variantCount: variantCount,
-                            ),
+                      const Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: 150,
+                        child: _BottomGradient(),
+                      ),
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: _CardInfo(
+                          character: character,
+                          tokenCount: _tokenCount,
+                          isFav: isFav,
+                          variationLabel: variationLabel,
+                          // Inside the grid the chip is a label, not a door: every
+                          // card would otherwise reopen the sheet you are already in.
+                          onVariationTap: widget.inVariationsGrid
+                              ? null
+                              : () => _showVariations(context),
+                        ),
+                      ),
+                      if (character.hidden ||
+                          _showsVariationsBadge(variantCount))
+                        Positioned(
+                          top: 8,
+                          left: 8,
+                          child: Row(
+                            children: [
+                              if (character.hidden) const _HiddenBadge(),
+                              if (character.hidden &&
+                                  _showsVariationsBadge(variantCount))
+                                const SizedBox(width: 6),
+                              if (_showsVariationsBadge(variantCount))
+                                _VariationsBadge(count: variantCount),
+                            ],
                           ),
-                  ),
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: selected
-                                ? context.cs.primary
-                                : isFav
+                        ),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: selectionActive
+                            ? _SelectionCheck(selected: selected)
+                            : _CardMenuButton(
+                                character: character,
+                                onTap: () => _showActions(
+                                  context,
+                                  ref,
+                                  isFav: isFav,
+                                  variantCount: variantCount,
+                                ),
+                              ),
+                      ),
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: selected
+                                    ? context.cs.primary
+                                    : isFav
                                     ? const Color(0xFFFF6B6B)
                                     : Colors.white.withValues(alpha: 0.15),
-                            width: selected ? 3 : 2,
+                                width: selected ? 3 : 2,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
         ),
-      ),
-      ),
       ),
     );
   }
@@ -460,9 +466,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
             hint: 'variation_duplicate_hint'.tr(),
             onTap: () {
               Navigator.of(context, rootNavigator: true).pop();
-              ref
-                  .read(charactersProvider.notifier)
-                  .addVariant(character, '');
+              ref.read(charactersProvider.notifier).addVariant(character, '');
             },
           ),
         ] else
@@ -632,7 +636,6 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
       }
     }
   }
-
 
   void _confirmDelete(BuildContext context, WidgetRef ref) {
     GlazeBottomSheet.show<void>(
@@ -822,8 +825,6 @@ class _CardInfo extends StatelessWidget {
   }
 }
 
-
-
 class _SelectionCheck extends StatelessWidget {
   final bool selected;
 
@@ -903,11 +904,7 @@ class _VariationsBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.dynamic_feed_rounded,
-            size: 15,
-            color: Colors.white,
-          ),
+          const Icon(Icons.dynamic_feed_rounded, size: 15, color: Colors.white),
           const SizedBox(width: 4),
           Text(
             '$count',

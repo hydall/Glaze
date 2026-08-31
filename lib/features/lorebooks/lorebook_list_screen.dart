@@ -5,8 +5,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/import/st_lorebook_importer.dart';
 import '../../core/models/lorebook.dart';
 import '../../core/services/file_export_service.dart';
@@ -63,7 +63,7 @@ class LorebookListScreen extends ConsumerWidget {
       showBack: true,
       onBack: () {
         if (startExpanded) {
-          context.go('/tools');
+          closeExpandedToolScreen(context, ref);
         } else {
           Navigator.of(context).maybePop();
         }
@@ -448,8 +448,13 @@ class _EmptyState extends StatelessWidget {
             style: TextStyle(fontSize: 14, color: context.cs.onSurfaceVariant),
           ),
           const SizedBox(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          // Wrap, not Row: the two labels are translated, and in a narrow
+          // column (the desktop right sidebar, or a small window) a Row
+          // overflowed instead of stacking them.
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 12,
+            runSpacing: 8,
             children: [
               FilledButton(
                 style: FilledButton.styleFrom(
@@ -459,7 +464,6 @@ class _EmptyState extends StatelessWidget {
                 onPressed: onCreate,
                 child: Text('btn_create'.tr()),
               ),
-              const SizedBox(width: 12),
               OutlinedButton(
                 onPressed: onImport,
                 child: Text('action_import'.tr()),
