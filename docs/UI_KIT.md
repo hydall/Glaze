@@ -104,6 +104,20 @@ ListView(
 The bottom padding is the nav-bar / keyboard inset, delivered the same way so
 list rows scroll *behind* the nav bar while the last row rests above it.
 
+### The keyboard
+
+A `SheetView` answers the on-screen keyboard by **tracking the inset**: it grows
+by exactly what the keyboard covers (never past fullscreen) and shrinks back as
+the keyboard retracts, so the visible body stays the same size and the sheet
+never runs a height animation of its own alongside the system's. Dragging the
+sheet, or tapping the handle, hands that lift over to the sheet's own height —
+from then on the gesture moves it 1:1 and the height survives the keyboard
+going away.
+
+Do not add a second keyboard response inside a body: `SheetView` already pads
+the whole body above the keyboard, so a body that insets itself by
+`MediaQuery.viewInsetsOf(context).bottom` double-counts it.
+
 ## Colours
 
 - Always through `context.cs` (`ColorScheme`) or `context.colors`
@@ -132,6 +146,15 @@ battery-saver is on, wraps its child in a `BackdropFilter`.
 
 Same reasoning applies to `NoiseOverlay` and `GlowRippleOverlay`: they are
 already inside `GlassSurface`, so do not stack another copy on top.
+
+`TopEdgeBlur` (the strip `SheetView` paints over the top of its body) replaces
+its child with a `toImageSync` raster of the whole child and blurs the top of
+it, so **every frame on which the body moves — a scroll, a sheet resize, the
+keyboard sliding in — rasterises the whole surface** to blur its top ~150 px.
+Its fingerprint cache only helps while the content is still. Keep sheet bodies
+off the effect's critical path where you can, and measure with
+`--dart-define=NO_EDGE_BLUR=true` before blaming anything else for dropped
+frames during an animation.
 
 ## Adding to the kit
 
