@@ -147,6 +147,12 @@ battery-saver is on, wraps its child in a `BackdropFilter`.
 Same reasoning applies to `NoiseOverlay` and `GlowRippleOverlay`: they are
 already inside `GlassSurface`, so do not stack another copy on top.
 
+`TopEdgeBlur` (the strip `SheetView` paints over the top of its body) re-samples
+the whole body through `toImageSync` whenever what shows under it moves, so it
+is switched off while the sheet itself is moving — a keyboard inset animating, a
+drag, a snap — and comes back once the motion settles. Its tint scrim keeps
+painting throughout, which is the same thing battery-saver mode shows.
+
 ## Adding to the kit
 
 Follow `docs/CODE_STYLE.md` § *UI Files*: a private helper widget belongs next

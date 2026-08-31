@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/shared/widgets/sheet_view.dart';
+import 'package:glaze_flutter/shared/widgets/top_edge_blur.dart';
 
 /// The sheet answers the keyboard by tracking its inset, not by running a
 /// second height animation of its own. The two used to overlap — the keyboard
@@ -83,6 +84,25 @@ void main() {
     showKeyboard(tester, 0);
     await tester.pump();
     expect(sheetHeight(tester), moreOrLessEquals(collapsed, epsilon: 0.01));
+  });
+
+  testWidgets('the edge blur stands down while the sheet is moving', (
+    tester,
+  ) async {
+    await pumpSheet(tester);
+    bool blurOn() =>
+        tester.widget<TopEdgeBlur>(find.byType(TopEdgeBlur)).enabled;
+    expect(blurOn(), isTrue);
+
+    // Re-sampling the whole body through toImageSync on a frame that is
+    // already resizing the sheet is what dropped frames; the tint scrim
+    // carries the header on its own until the keyboard stops.
+    showKeyboard(tester, 100);
+    await tester.pump();
+    expect(blurOn(), isFalse);
+
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(blurOn(), isTrue);
   });
 
   testWidgets('a sheet the user already expanded stays expanded', (
