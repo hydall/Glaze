@@ -94,9 +94,18 @@ class _WindowFrame extends ConsumerWidget {
   });
 
   /// Screens that publish into [shellHeaderProvider] instead of drawing their
-  /// own app bar; the window renders that claim in its own title bar. Anything
-  /// not listed brings its own `GlazeScaffold` header.
-  static const _shellHeaderBranch = <String, int>{'menu': 3};
+  /// own app bar (`useShellHeader: true`); the window renders that claim —
+  /// title plus actions such as the settings search — in its own title bar.
+  /// Anything not listed brings its own `GlazeScaffold` header.
+  ///
+  /// All of these live on the menu branch, and only one is mounted at a time,
+  /// so resolving that branch always yields the screen on screen.
+  static const _shellHeaderBranch = <String, int>{
+    'menu': 3,
+    'settings': 3,
+    'theme-settings': 3,
+    'about': 3,
+  };
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

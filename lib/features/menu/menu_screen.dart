@@ -155,7 +155,11 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
   @override
   Widget build(BuildContext context) {
     final navHeight = ref.watch(navHeightProvider);
-    final topPad = MediaQuery.of(context).padding.top + 66.0;
+    // No shell header above us inside the desktop floating window, so nothing
+    // to reserve room for.
+    final topPad = DetachedShellHost.of(context)
+        ? 0.0
+        : MediaQuery.of(context).padding.top + 66.0;
     final lang = ref.watch(appSettingsProvider).value?.language ?? 'en';
 
     // Re-tap on the active Menu navbar tab → drop out of search, then scroll to
