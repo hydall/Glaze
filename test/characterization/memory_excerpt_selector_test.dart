@@ -9,18 +9,108 @@ MemoryEntry _entry({
   required String title,
   required String content,
   List<String> keys = const [],
+  Map<String, List<int>> keyParagraphs = const {},
   int createdAt = 0,
 }) => MemoryEntry(
   id: id,
   title: title,
   content: content,
   keys: keys,
+  keyParagraphs: keyParagraphs,
   createdAt: createdAt,
   status: 'active',
 );
 
 void main() {
   group('MemoryExcerptSelector', () {
+    test('limits hybrid excerpts to paragraphs mapped by matched keys', () {
+      final entry = _entry(
+        id: 'scoped',
+        title: 'Two scenes',
+        content:
+            'The market sold bread and tea.\n\nRen hid the silver key in the chapel.',
+        keys: const ['market', 'silver key'],
+        keyParagraphs: const {
+          'market': [0],
+          'silver key': [1],
+        },
+      );
+      final selection = MemorySelector.select(
+        MemorySelectionInput(
+          entries: [entry],
+          keywordMatchedTerms: const {
+            'scoped': ['silver key'],
+          },
+          maxInjectionTokens: 100,
+          maxInjectedEntries: 1,
+          recencyBoost: false,
+          importanceBoost: false,
+          diversityAware: false,
+        ),
+      );
+
+      final result = MemoryExcerptSelector.select(
+        selection,
+        packingMode: 'hybrid',
+        tokenCounter: (text) => text.split(RegExp(r'\s+')).length,
+      );
+
+      expect(result.items.single.excerpt, isTrue);
+      expect(result.items.single.text, contains('silver key'));
+      expect(result.items.single.text, isNot(contains('market')));
+    });
+
+    test(
+      'limits chunk-first excerpts to paragraphs mapped by matched keys',
+      () {
+        final entry = _entry(
+          id: 'scoped',
+          title: 'Two scenes',
+          content: 'Market paragraph.\n\nThe chapel held the silver key.',
+          keys: const ['market', 'silver key'],
+          keyParagraphs: const {
+            'market': [0],
+            'silver key': [1],
+          },
+        );
+        final selection = MemorySelection(
+          entries: [entry],
+          allScores: [
+            MemoryCandidateScore(
+              entry: entry,
+              score: 10,
+              matchedKeys: const ['silver key'],
+            ),
+          ],
+          budgetTokens: 100,
+          entryCap: 1,
+        );
+
+        final result = MemoryExcerptSelector.select(
+          selection,
+          packingMode: 'chunk_first',
+          maxExcerptTokensPerEntry: 20,
+          tokenCounter: (text) => text.split(RegExp(r'\s+')).length,
+        );
+
+        expect(result.items.single.text, contains('silver key'));
+        expect(result.items.single.text, isNot(contains('Market')));
+      },
+    );
+
+    test('hard-split chunks preserve every word and paragraph index', () {
+      const text = 'one two three four five six seven eight nine ten';
+      final chunks = MemoryChunker.chunk(
+        text,
+        3,
+        (value) => value.split(RegExp(r'\s+')).length,
+      );
+
+      expect(chunks.map((chunk) => chunk.text).join(' '), text);
+      expect(chunks.every((chunk) => chunk.paragraphIndex == 0), isTrue);
+      expect(chunks.every((chunk) => chunk.tokenCost <= 3), isTrue);
+    });
+
     test('keeps full entries when selected memories fit the token budget', () {
       final selection = MemorySelector.select(
         MemorySelectionInput(
@@ -268,61 +358,62 @@ void main() {
       },
     );
 
-    test('chunk-first global budgets by injected chunk tokens not full entry', () {
-      MemoryEntry bulky(String id, int start, String needle) => MemoryEntry(
-        id: id,
-        title: id,
-        content: List.generate(
-          6,
-          (i) => i == 2 ? '$needle clue chunk $id' : 'filler words $id line $i',
-        ).join('\n\n'),
-        keys: const ['needle'],
-        messageRange: MessageRange(start: start, end: start + 14),
-        status: 'active',
-      );
+    test(
+      'chunk-first global budgets by injected chunk tokens not full entry',
+      () {
+        MemoryEntry bulky(String id, int start, String needle) => MemoryEntry(
+          id: id,
+          title: id,
+          content: List.generate(
+            6,
+            (i) =>
+                i == 2 ? '$needle clue chunk $id' : 'filler words $id line $i',
+          ).join('\n\n'),
+          keys: const ['needle'],
+          messageRange: MessageRange(start: start, end: start + 14),
+          status: 'active',
+        );
 
-      final entries = [
-        bulky('e1', 10, 'alpha'),
-        bulky('e2', 30, 'beta'),
-        bulky('e3', 50, 'gamma'),
-        bulky('e4', 70, 'delta'),
-        bulky('e5', 90, 'epsilon'),
-        bulky('e6', 110, 'zeta'),
-      ];
+        final entries = [
+          bulky('e1', 10, 'alpha'),
+          bulky('e2', 30, 'beta'),
+          bulky('e3', 50, 'gamma'),
+          bulky('e4', 70, 'delta'),
+          bulky('e5', 90, 'epsilon'),
+          bulky('e6', 110, 'zeta'),
+        ];
 
-      final selection = MemorySelector.select(
-        MemorySelectionInput(
-          entries: entries,
-          keywordMatchedTerms: {
-            for (final entry in entries) entry.id: const ['needle'],
-          },
-          maxInjectionTokens: 20,
-          maxInjectedEntries: 3,
-          keywordWeight: 0,
-          vectorWeight: 0,
-          recencyBoost: false,
-          importanceBoost: false,
-          diversityAware: false,
-          chunkBudgeting: true,
-        ),
-        tokenCounter: (entry) => entry.content.split(RegExp(r'\s+')).length,
-      );
+        final selection = MemorySelector.select(
+          MemorySelectionInput(
+            entries: entries,
+            keywordMatchedTerms: {
+              for (final entry in entries) entry.id: const ['needle'],
+            },
+            maxInjectionTokens: 20,
+            maxInjectedEntries: 3,
+            keywordWeight: 0,
+            vectorWeight: 0,
+            recencyBoost: false,
+            importanceBoost: false,
+            diversityAware: false,
+            chunkBudgeting: true,
+          ),
+          tokenCounter: (entry) => entry.content.split(RegExp(r'\s+')).length,
+        );
 
-      final excerpted = MemoryExcerptSelector.selectChunkFirstGlobal(
-        selection,
-        maxExcerptTokensPerChunk: 6,
-        maxExcerptChunksPerEntry: 1,
-        tokenCounter: (text) => text.split(RegExp(r'\s+')).length,
-      );
+        final excerpted = MemoryExcerptSelector.selectChunkFirstGlobal(
+          selection,
+          maxExcerptTokensPerChunk: 6,
+          maxExcerptChunksPerEntry: 1,
+          tokenCounter: (text) => text.split(RegExp(r'\s+')).length,
+        );
 
-      expect(excerpted.items.length, greaterThan(3));
-      expect(excerpted.totalTokens, lessThanOrEqualTo(20));
-      expect(excerpted.items.every((item) => item.excerpt), isTrue);
-      expect(
-        excerpted.items.every((item) => item.tokenCost <= 6),
-        isTrue,
-      );
-    });
+        expect(excerpted.items.length, greaterThan(3));
+        expect(excerpted.totalTokens, lessThanOrEqualTo(20));
+        expect(excerpted.items.every((item) => item.excerpt), isTrue);
+        expect(excerpted.items.every((item) => item.tokenCost <= 6), isTrue);
+      },
+    );
 
     test(
       'chunk-first reserves a chunk for fresh implied entries without keywords',
@@ -381,7 +472,8 @@ void main() {
         expect(
           excerpted.items.map((item) => item.entry.id),
           contains('fresh'),
-          reason: 'fresh implied memory should not lose to keyword-only old arc',
+          reason:
+              'fresh implied memory should not lose to keyword-only old arc',
         );
       },
     );
@@ -402,7 +494,9 @@ void main() {
       final selection = MemorySelector.select(
         MemorySelectionInput(
           entries: [lone],
-          keywordMatchedTerms: {'solo': const ['needle']},
+          keywordMatchedTerms: {
+            'solo': const ['needle'],
+          },
           maxInjectionTokens: 500,
           maxInjectedEntries: 10,
           keywordWeight: 0,

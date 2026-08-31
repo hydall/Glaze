@@ -35,6 +35,7 @@ String applyRegexes(
   RegexApplyContext ctx, {
   bool isMarkdown = false,
   bool isPrompt = false,
+  bool ignoreEphemerality = false,
   List<TriggeredEntry>? triggered,
 }) {
   var result = text;
@@ -52,7 +53,8 @@ String applyRegexes(
     if (script.markdownOnly && !isMarkdown) continue;
 
     final sEphemerality = script.ephemerality;
-    if (sEphemerality.isNotEmpty &&
+    if (!ignoreEphemerality &&
+        sEphemerality.isNotEmpty &&
         !sEphemerality.contains(ephemeralityFilter)) {
       continue;
     }

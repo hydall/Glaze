@@ -74,15 +74,15 @@ class MemoryPromptPresets {
 
   static const _detailedBeats = '''
 Analyze the following roleplay segment and create a structured memory entry.
-Preserve the original language. Exclude casual [OOC] conversation, BUT if OOC messages contain story rules, formatting instructions, backstory clarifications, or scene-setting directives, reflect those instructions in the memory entry under the relevant sections.
+Write every memory paragraph and every keyword in the language used for the roleplay. Do not translate or transliterate names or keywords. Exclude casual [OOC] conversation, BUT if OOC messages contain story rules, formatting instructions, backstory clarifications, or scene-setting directives, reflect those instructions in the memory entry under the relevant sections.
 
-Use this markdown structure (skip sections if not applicable):
-Timeline: Always label as "Day N" (Day 1, Day 2, Day 3, etc.) — increment the day counter each time a new in-story day begins. Write clock times HH:MM;  If the scene spans multiple days, write "Day N–M HH:MM-HH:MM".
-Story Beats: Important plot events and developments
-Key Interactions: Significant character exchanges and relationship shifts
-Notable Details: Important objects, settings, revelations, quotes
-OOC Rules & Directives: Any player-established rules, formatting requirements, backstory additions, or scene-setting instructions given through OOC
-Outcome: Results, emotional states, consequences
+Cover the following information when applicable, using natural labels in the roleplay language rather than these English names:
+- Timeline: increment the in-story day counter when a new day begins and include clock times as HH:MM when known.
+- Story beats: important plot events and developments.
+- Key interactions: significant character exchanges and relationship shifts.
+- Notable details: important objects, settings, revelations, and quotes.
+- OOC rules and directives: player-established rules, formatting requirements, backstory additions, or scene-setting instructions given through OOC.
+- Outcome: results, emotional states, and consequences.
 
 Write in past tense, third person. Be comprehensive but avoid verbatim repetition.
 
@@ -90,9 +90,10 @@ For keywords: generate 15-25 concrete scene-specific tags:
 - Proper nouns, locations, specific objects, unique actions
 - NOT abstract concepts, emotions, or character names
 
-Return plain text in this exact format:
-Memory: <structured markdown summary following the template above>
-Keys: <15-25 comma-separated concrete keywords>
+Return JSON only, without a markdown fence, in this exact shape:
+{"paragraphs":[{"text":"one self-contained memory paragraph","keys":["keywords specific to this paragraph"]}]}
+
+Create a separate paragraph object for each meaningful beat or section. Give each paragraph only the keywords that should retrieve that paragraph. Across all paragraphs, generate 15-25 concrete scene-specific keywords. Keep the JSON property names exactly as shown; only the text and keyword values use the roleplay language.
 
 {{history}}''';
 

@@ -347,4 +347,34 @@ void main() {
 
     expect(entry.messageRange, const MessageRange(start: 91, end: 105));
   });
+
+  test('paragraph key maps default safely and survive JSON round-trip', () {
+    final legacy = MemoryEntry.fromJson({
+      'id': 'legacy',
+      'content': 'old entry',
+    });
+    final malformedDraft = MemoryDraft.fromJson({
+      'id': 'draft',
+      'keyParagraphs': {
+        'key': ['2', -1, 'bad', 2, 1],
+        'invalid': 'not a list',
+      },
+    });
+    const entry = MemoryEntry(
+      id: 'scoped',
+      content: 'First.\n\nSecond.',
+      keys: ['key'],
+      keyParagraphs: {
+        'key': [1],
+      },
+    );
+
+    expect(legacy.keyParagraphs, isEmpty);
+    expect(malformedDraft.keyParagraphs, {
+      'key': [1, 2],
+    });
+    expect(MemoryEntry.fromJson(entry.toJson()).keyParagraphs, {
+      'key': [1],
+    });
+  });
 }

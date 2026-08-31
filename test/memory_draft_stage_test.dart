@@ -123,11 +123,17 @@ Future<_Harness> _createHarness({
             required draft,
             required settings,
             required pipeline,
-            required historyText,
+            required messages,
+            required charId,
+            required sessionId,
+            required sessionVars,
           }) async {
             calls++;
             if (generationError != null) throw generationError;
-            expect(historyText, contains('User turn'));
+            expect(messages.map((message) => message.id), ['u1', 'a1']);
+            expect(charId, 'c1');
+            expect(sessionId, 's1');
+            expect(sessionVars, isEmpty);
             return draft.copyWith(
               content: 'Generated memory',
               keys: ['memory'],

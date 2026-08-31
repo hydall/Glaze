@@ -4,7 +4,6 @@ import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/auxiliary_timed_history.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/state/memory_settings_provider.dart';
@@ -125,13 +124,6 @@ class MemoryDraftGenerationController {
       return;
     }
 
-    final historyText = draftMessages
-        .map((m) {
-          // Ledger-stamped game clock travels with the transcript so memory
-          // entries stay time-anchored.
-          return '${m.role}: ${auxiliaryTimedContent(m)}';
-        })
-        .join('\n\n');
     final cancelToken = CancelToken();
     _cancelTokens[draftId] = cancelToken;
 
@@ -150,7 +142,10 @@ class MemoryDraftGenerationController {
         draft: draft,
         settings: _bookSettings,
         pipeline: _pipeline,
-        historyText: historyText,
+        messages: draftMessages,
+        charId: _charId,
+        sessionId: _sessionId,
+        sessionVars: session.sessionVars,
         cancelToken: cancelToken,
       );
 

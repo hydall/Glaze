@@ -38,13 +38,23 @@ class _MemoryEntryEditorSheetState extends State<MemoryEntryEditorSheet> {
     if (content.isEmpty) return;
     final keys = _keysController.text
         .split(',')
-        .map((k) => k.trim().toLowerCase())
+        .map((k) => k.trim())
         .where((k) => k.isNotEmpty)
         .toList();
+    final contentChanged = content != widget.entry.content.trim();
+    final keyLookup = keys.map((key) => key.toLowerCase()).toSet();
+    final keyParagraphs = contentChanged
+        ? const <String, List<int>>{}
+        : {
+            for (final entry in widget.entry.keyParagraphs.entries)
+              if (keyLookup.contains(entry.key.toLowerCase()))
+                entry.key: entry.value,
+          };
     final entry = widget.entry.copyWith(
       title: _titleController.text.trim(),
       content: content,
       keys: keys,
+      keyParagraphs: keyParagraphs,
     );
     Navigator.pop(context, entry);
   }
@@ -56,16 +66,35 @@ class _MemoryEntryEditorSheetState extends State<MemoryEntryEditorSheet> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _field('label_block_name'.tr(), _titleController, hint: 'placeholder_block_name'.tr()),
+          _field(
+            'label_block_name'.tr(),
+            _titleController,
+            hint: 'placeholder_block_name'.tr(),
+          ),
           const SizedBox(height: 12),
-          _field('search_type_keys'.tr(), _keysController, hint: 'hint_comma_separated'.tr()),
+          _field(
+            'search_type_keys'.tr(),
+            _keysController,
+            hint: 'hint_comma_separated'.tr(),
+          ),
           const SizedBox(height: 4),
           Padding(
             padding: const EdgeInsets.only(left: 4),
-            child: Text('search_type_keys'.tr(), style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant.withValues(alpha: 0.6))),
+            child: Text(
+              'search_type_keys'.tr(),
+              style: TextStyle(
+                fontSize: 11,
+                color: context.cs.onSurfaceVariant.withValues(alpha: 0.6),
+              ),
+            ),
           ),
           const SizedBox(height: 12),
-          _field('label_content'.tr(), _contentController, hint: 'placeholder_lore_content'.tr(), maxLines: 8),
+          _field(
+            'label_content'.tr(),
+            _contentController,
+            hint: 'placeholder_lore_content'.tr(),
+            maxLines: 8,
+          ),
           const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
@@ -76,7 +105,10 @@ class _MemoryEntryEditorSheetState extends State<MemoryEntryEditorSheet> {
               ),
               const SizedBox(width: 8),
               FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: context.cs.primary, foregroundColor: Colors.black),
+                style: FilledButton.styleFrom(
+                  backgroundColor: context.cs.primary,
+                  foregroundColor: Colors.black,
+                ),
                 onPressed: _save,
                 child: Text('btn_save'.tr()),
               ),
@@ -87,7 +119,12 @@ class _MemoryEntryEditorSheetState extends State<MemoryEntryEditorSheet> {
     );
   }
 
-  Widget _field(String label, TextEditingController controller, {String? hint, int maxLines = 1}) {
+  Widget _field(
+    String label,
+    TextEditingController controller, {
+    String? hint,
+    int maxLines = 1,
+  }) {
     final isMultiline = maxLines > 1;
     return TextField(
       controller: controller,
@@ -99,7 +136,9 @@ class _MemoryEntryEditorSheetState extends State<MemoryEntryEditorSheet> {
         labelText: label,
         labelStyle: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 12),
         hintText: hint,
-        hintStyle: TextStyle(color: context.cs.onSurfaceVariant.withValues(alpha: 0.4)),
+        hintStyle: TextStyle(
+          color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
+        ),
         filled: true,
         fillColor: Colors.white.withValues(alpha: 0.05),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),

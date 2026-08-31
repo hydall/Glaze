@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../../core/llm/memory_draft_planner.dart';
-import '../../../../core/llm/auxiliary_timed_history.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/models/memory_book.dart';
 import '../../../../core/models/pipeline_settings.dart';
@@ -16,7 +15,10 @@ typedef GenerateMemoryDraft =
       required MemoryDraft draft,
       required MemoryBookSettings settings,
       required PipelineSettings pipeline,
-      required String historyText,
+      required List<ChatMessage> messages,
+      required String charId,
+      required String sessionId,
+      required Map<String, String> sessionVars,
     });
 
 /// Stage 9 / 6: Auto-create memory drafts and optionally fill them with the
@@ -32,12 +34,18 @@ class MemoryDraftStage {
             required draft,
             required settings,
             required pipeline,
-            required historyText,
+            required messages,
+            required charId,
+            required sessionId,
+            required sessionVars,
           }) => MemoryDraftGenerator(ctx.ref).generate(
             draft: draft,
             settings: settings,
             pipeline: pipeline,
-            historyText: historyText,
+            messages: messages,
+            charId: charId,
+            sessionId: sessionId,
+            sessionVars: sessionVars,
           ));
 
   MemoryDraftLease? reserveAutoGeneration(ChatSession? session) {
@@ -84,17 +92,15 @@ class MemoryDraftStage {
             .where((message) => draft.messageIds.contains(message.id))
             .toList();
         if (draftMessages.isEmpty) continue;
-        final historyText = draftMessages
-            .map(
-              (message) => '${message.role}: ${auxiliaryTimedContent(message)}',
-            )
-            .join('\n\n');
         try {
           final generated = await _generate(
             draft: draft,
             settings: book.settings,
             pipeline: pipeline,
-            historyText: historyText,
+            messages: draftMessages,
+            charId: ctx.charId,
+            sessionId: session.id,
+            sessionVars: session.sessionVars,
           );
           if (!ctx.ref.mounted) return;
           await repo.mutateDraft(
@@ -103,6 +109,7 @@ class MemoryDraftStage {
             mutate: (current) => current.copyWith(
               content: generated.content,
               keys: generated.keys,
+              keyParagraphs: generated.keyParagraphs,
               status: 'pending_approval',
               generatedAt: generated.generatedAt,
               updatedAt: generated.updatedAt,

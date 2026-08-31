@@ -1002,6 +1002,12 @@ class _RegexEditViewState extends State<_RegexEditView> {
               value: s.runOnEdit,
               onChanged: (v) => _update(s.copyWith(runOnEdit: v)),
             ),
+            _CheckboxOption(
+              key: const Key('regex_memory_book_retrieval'),
+              label: 'regex_memory_book_retrieval'.tr(),
+              value: s.memoryBookRetrieval,
+              onChanged: (v) => _update(s.copyWith(memoryBookRetrieval: v)),
+            ),
           ],
         ),
         MenuGroup(
