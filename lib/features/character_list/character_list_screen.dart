@@ -25,6 +25,7 @@ import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
 import '../../shared/widgets/swipe_tab_switcher.dart';
+import '../../shared/widgets/tab_scroll_memory.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
@@ -80,11 +81,15 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   // padding + the bar itself) so content can reserve room.
   static const double _kTabBarBlock = 52.0;
 
-  // Owns the scroll position of whichever list view is currently shown (the
-  // grids attach via PrimaryScrollController), so tapping the active tab can
-  // animate it back to the top.
-  final ScrollController _listScrollController = ScrollController();
+  // Owns one scroll position per sub-tab (the grids attach via
+  // PrimaryScrollController), so tapping the active tab can animate it back to
+  // the top and switching tabs returns each one to where it was left.
+  final TabScrollMemory _tabScroll = TabScrollMemory(tabCount: 2);
   final HeaderScrollHider _headerScrollHider = HeaderScrollHider();
+
+  /// The controller of the sub-tab currently on screen.
+  ScrollController get _activeScrollController =>
+      _tabScroll.controllerFor(_tabIndex);
 
   @override
   void initState() {
@@ -122,7 +127,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     _catalogDebounce?.cancel();
     _searchCtrl.dispose();
     _searchFocus.dispose();
-    _listScrollController.dispose();
+    _tabScroll.dispose();
     super.dispose();
   }
 
@@ -152,9 +157,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   /// Animates the active list back to the top. Guarded so it never reads a
   /// position while two scroll views are briefly attached during a tab switch.
   void _scrollToTop() {
-    if (!_listScrollController.hasClients) return;
-    if (_listScrollController.positions.length != 1) return;
-    _listScrollController.animateTo(
+    final controller = _activeScrollController;
+    if (!controller.hasClients) return;
+    if (controller.positions.length != 1) return;
+    controller.animateTo(
       0,
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeOutCubic,
@@ -295,7 +301,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       if (_tabIndex != 0 || _searchExpanded) {
         _catalogDebounce?.cancel();
         setState(() {
-          _tabIndex = 0;
+          _switchTab(0);
           _searchExpanded = false;
         });
         refreshShellHeader();
@@ -341,10 +347,11 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       return;
     }
 
+    final controller = _activeScrollController;
     final atTop =
-        !_listScrollController.hasClients ||
-        _listScrollController.positions.length != 1 ||
-        _listScrollController.position.pixels <= 0.5;
+        !controller.hasClients ||
+        controller.positions.length != 1 ||
+        controller.position.pixels <= 0.5;
 
     if (!atTop) {
       _scrollToTop();
@@ -357,7 +364,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     if (_tabIndex == 1) {
       ref.read(characterSelectionProvider.notifier).clear();
       setState(() {
-        _tabIndex = 0;
+        _switchTab(0);
         if (_searchExpanded) _applySearchForActiveTab();
       });
       refreshShellHeader();
@@ -402,7 +409,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     ref.listen(catalogVisibleProvider, (_, visible) {
       if (!visible && _tabIndex != 0) {
         ref.read(characterSelectionProvider.notifier).clear();
-        setState(() => _tabIndex = 0);
+        setState(() => _switchTab(0));
       }
       refreshShellHeader();
     });
@@ -436,25 +443,32 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
             Positioned.fill(
               child: NotificationListener<ScrollNotification>(
                 onNotification: _onScrollNotification,
-                child: PrimaryScrollController(
-                  controller: _listScrollController,
-                  child: SwipeTabSwitcher(
-                    // Only the top-level My/Catalog split is swipeable; inside a
-                    // folder the strip is hidden and horizontal drags belong to
-                    // the folder content.
-                    enabled: showTabBar,
+                child: SwipeTabSwitcher(
+                  // Only the top-level My/Catalog split is swipeable; inside a
+                  // folder the strip is hidden and horizontal drags belong to
+                  // the folder content.
+                  enabled: showTabBar,
+                  index: effectiveTab,
+                  length: 2,
+                  onChanged: _onTabSwipe,
+                  child: TabSlideSwitcher(
                     index: effectiveTab,
-                    length: 2,
-                    onChanged: _onTabSwipe,
-                    child: TabSlideSwitcher(
-                      index: effectiveTab,
-                      child: effectiveTab == 1
-                          ? CatalogGrid(
+                    // Each body carries its own scroll controller instead of
+                    // sharing one above the switcher, so the tab sliding away
+                    // keeps scrolling with the controller it was built with and
+                    // every tab comes back at the offset it was left at.
+                    child: effectiveTab == 1
+                        ? _tabScrollScope(
+                            tab: 1,
+                            child: CatalogGrid(
                               key: const ValueKey('catalog_grid'),
                               topPadding: contentTopPad,
                               bottomPadding: navHeight + 20,
-                            )
-                          : KeyedSubtree(
+                            ),
+                          )
+                        : _tabScrollScope(
+                            tab: 0,
+                            child: KeyedSubtree(
                               key: const ValueKey('my_characters'),
                               child: _buildMyCharacters(
                                 context,
@@ -462,7 +476,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
                                 navHeight,
                               ),
                             ),
-                    ),
+                          ),
                   ),
                 ),
               ),
@@ -869,6 +883,29 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     );
   }
 
+  /// Hands [child] the scroll controller that belongs to [tab].
+  ///
+  /// The grids scroll with the inherited primary controller; the default
+  /// mobile-only inheritance is widened to every platform so the desktop builds
+  /// attach too (otherwise scroll-to-top and the remembered offsets would be
+  /// silent no-ops there).
+  Widget _tabScrollScope({required int tab, required Widget child}) {
+    return PrimaryScrollController(
+      controller: _tabScroll.controllerFor(tab),
+      automaticallyInheritForPlatforms: TargetPlatform.values.toSet(),
+      child: child,
+    );
+  }
+
+  /// Moves the active sub-tab, handing its scroll position over: the tab being
+  /// left remembers where it sits and the one being entered re-attaches at the
+  /// offset it was left at. Callers run it inside their own [setState].
+  void _switchTab(int index) {
+    if (index == _tabIndex) return;
+    _tabScroll.switchTab(from: _tabIndex, to: index);
+    _tabIndex = index;
+  }
+
   /// Switches the active tab in response to a body swipe. Mirrors the tab
   /// strip's `onChanged`, minus the "tap the active tab" branch (a swipe always
   /// resolves to a different tab).
@@ -877,7 +914,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     ref.read(characterSelectionProvider.notifier).clear();
     _showHeader();
     setState(() {
-      _tabIndex = i;
+      _switchTab(i);
       if (_searchExpanded) _applySearchForActiveTab();
     });
     refreshShellHeader();
@@ -907,7 +944,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           ref.read(characterSelectionProvider.notifier).clear();
           _showHeader();
           setState(() {
-            _tabIndex = i;
+            _switchTab(i);
             if (_searchExpanded) _applySearchForActiveTab();
           });
           refreshShellHeader();
