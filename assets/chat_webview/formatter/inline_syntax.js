@@ -8,7 +8,6 @@
 // and the markdown kept eating the markup.
 
 import { renderStyledSegment } from './text_format.js';
-import { maskTags } from './html_scan.js';
 import { SENTINEL, createStore, extractMarkers } from './protect.js';
 
 /**
@@ -107,22 +106,25 @@ export function applyInlineSyntax(text, { markers, inner, skipQuotes = false }) 
 }
 
 /**
- * Formats a raw fragment of message source as inline content: the inside of a
- * style marker, which may carry its own tags and its own nested markers.
+ * Formats the inside of one style marker, which may carry its own nested
+ * markers and the `E_n` placeholders of elements it wrapped.
+ *
+ * The string is already what `formatRun` built — escaped text and masked
+ * elements — so nothing here escapes or masks again: doing either would show
+ * the author's own `<b>` as `&lt;b&gt;` on screen. Its only job is the passes
+ * a marker's content still needs.
  *
  * Always inline — a marker is a `<span>`, and a `<p>` inside one is what the
  * browser throws straight back out, leaving the marker empty on screen.
  */
-export function formatInlineRaw(raw, { skipQuotes = false } = {}) {
-  if (!raw) return '';
+export function formatInlineMasked(text, { skipQuotes = false } = {}) {
+  if (!text) return '';
   const markers = createStore('S');
-  const held = extractMarkers(String(raw), markers);
-  const { masked, unmask } = maskTags(held, SENTINEL);
-  const formatted = applyInlineSyntax(escapeText(masked), {
+  const held = extractMarkers(String(text), markers);
+  return applyInlineSyntax(held, {
     markers,
     skipQuotes,
     inner: (nested, nestedSkipQuotes = true) =>
-      formatInlineRaw(nested, { skipQuotes: nestedSkipQuotes }),
+      formatInlineMasked(nested, { skipQuotes: nestedSkipQuotes }),
   });
-  return unmask(formatted);
 }

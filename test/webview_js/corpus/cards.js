@@ -286,6 +286,24 @@ document.getElementById('sc-out').textContent='ok'+o;
 </script>`,
   },
   {
+    id: 'pre-with-emphasis',
+    title: 'Code in a <pre> that uses * and _ as operators',
+    origin: 'the pre-parse marker scan reached inside a raw-text element the ' +
+      'block pass never formats, so the run it held was never restored and ' +
+      'the leak sweep deleted it: `<pre>if (*p) *p = 1;</pre>` rendered as ' +
+      '`if (p = 1;`',
+    text: `<pre>int *p = &n;
+if (*p) *p = 1;
+long _t_ = a * b * c;</pre>`,
+  },
+  {
+    id: 'emphasis-across-element-boundary',
+    title: 'Emphasis that opens inside an element and closes outside it',
+    origin: 'the boundary the marker pass is now bound by: the two asterisks ' +
+      'are in different containers, so they are not one run',
+    text: `<span>*начало</span> конец* и <b>жирно *курсив* внутри</b>`,
+  },
+  {
     id: 'regex-card-in-emphasis',
     title: 'Regex-built card with the model\'s asterisks around it',
     origin: 'a display regex turns `(out) Name | text` lines into this card, ' +
@@ -340,6 +358,7 @@ export const streamingCards = [
   'svg-icon',
   'br-in-card',
   'regex-card-in-emphasis',
+  'pre-with-emphasis',
 ];
 
 export function card(id) {

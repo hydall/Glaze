@@ -72,16 +72,6 @@ export const RAW_TEXT_ELEMENTS = new Set([
   'script', 'style', 'pre', 'code', 'textarea', 'title', 'xmp', 'plaintext',
 ]);
 
-/**
- * Elements that close themselves. Not a list of what is block or inline — the
- * parser still answers that — only of the names for which a lone `<x>` is a
- * complete element, so a balance count must not wait for a `</x>`.
- */
-export const VOID_ELEMENTS = new Set([
-  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
-  'param', 'source', 'track', 'wbr',
-]);
-
 /** Element names a `<style>` block in the message uses as a type selector. */
 export function styledElementNames(text) {
   const names = new Set();
@@ -115,24 +105,6 @@ export function styledElementNames(text) {
  * a tag to this scan, and escaping it corrupts the script.
  */
 export function escapeProseTags(text, styledNames) {
-  const isMarkup = markupTagTest(text, styledNames);
-  return text.replace(TAG_REGEX, (tag) => (
-    isMarkup(tag)
-      ? tag
-      : tag.replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  ));
-}
-
-/**
- * The same question `escapeProseTags` answers, as a predicate other passes can
- * ask before the parse: will this tag survive as an element, or is it a word
- * the author wrote in angle brackets?
- *
- * Keep the two together — a pass that guesses differently from the escape is a
- * pass that reasons about a tree the parser never builds. A tag with no name
- * (a comment, a doctype, a stray `<`) is not an element either way.
- */
-export function markupTagTest(text, styledNames) {
   const styled = styledNames || styledElementNames(text);
   const opened = new Set();
   const closed = new Set();
@@ -144,34 +116,12 @@ export function markupTagTest(text, styledNames) {
     (isClosingTag(match[0]) ? closed : opened).add(name);
   }
 
-  return (tag) => {
+  return text.replace(TAG_REGEX, (tag) => {
     const name = tagName(tag);
-    if (!name) return false;
-    if (isKnownElement(name)) return true;
-    if (styled.has(name)) return true;
-    return opened.has(name) && closed.has(name);
-  };
-}
-
-/**
- * Replaces every tag with an opaque placeholder and hands back the restore.
- *
- * Used where a string pass must not read inside a tag: markdown markers are
- * matched across a message that still contains raw HTML, and `*` inside
- * `<div style="a*b">` is not an italic marker. Markers that *span* tags
- * (`==hc:#fff==<b>x</b>==`, which is how html_to_markdown writes rich colour)
- * still match, because the tag is one opaque character run rather than a
- * boundary.
- */
-export function maskTags(text, sentinel) {
-  const tags = [];
-  const masked = text.replace(TAG_REGEX, (tag) => {
-    tags.push(tag);
-    return `${sentinel}TAG_${tags.length - 1}${sentinel}`;
+    if (!name) return tag;
+    if (isKnownElement(name)) return tag;
+    if (styled.has(name)) return tag;
+    if (opened.has(name) && closed.has(name)) return tag;
+    return tag.replace(/</g, '&lt;').replace(/>/g, '&gt;');
   });
-  const pattern = new RegExp(`${sentinel}TAG_(\\d+)${sentinel}`, 'g');
-  return {
-    masked,
-    unmask: (value) => String(value).replace(pattern, (_m, i) => tags[Number(i)]),
-  };
 }

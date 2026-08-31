@@ -14,14 +14,6 @@
 // which survives HTML parsing as ordinary text and cannot appear in a message.
 
 import { extractImageBlocks } from './image_blocks.js';
-import {
-  TAG_REGEX,
-  VOID_ELEMENTS,
-  isClosingTag,
-  markupTagTest,
-  maskTags,
-  tagName,
-} from './html_scan.js';
 
 /** Wraps every placeholder. U+0001 is not writable in a chat message. */
 export const SENTINEL = '\u0001';
@@ -168,77 +160,26 @@ export function maskCodeElements(text) {
 /** Glaze colour markers and the markdown emphasis run that follows them. */
 const MARKER_REGEX = /(==hc:#[0-9a-fA-F]{3,8}==.+?==|==glow:#[0-9a-fA-F]{3,8},\d+==.+?==|==cg:#[0-9a-fA-F]{3,8},#[0-9a-fA-F]{3,8},\d+==.+?==|==grad:#[0-9a-fA-F]{3,8}(?:,#[0-9a-fA-F]{3,8})+==.+?==|==bg:#[0-9a-fA-F]{3,8}==.+?==|==mark==.+?==|==active==.+?==|==accent==.+?==|\*\*[^*\n]+?\*\*|(?<!\*)\*(?=[^*\n]*[^ \t*\n])[^*\n]+?\*(?!\*)|__[^_\n]+?__|(?<!\w)_[^_\n]+?_(?!\w)|~~[^~\n]+?~~)/gs;
 
-/** A masked `<style>` / `<script>` body, as maskCodeElements leaves it. */
-const CODE_PLACEHOLDER = new RegExp(`${SENTINEL}RAW_\\d+${SENTINEL}`);
-
 /**
- * True when the markup a candidate marker covers is the marker's own.
+ * Pulls the style markers out of one *run* of message text.
  *
- * A marker is inline and always will be (`renderStyledSegment` renders its
- * content through `formatInlineRaw`), so the only content it can carry is
- * content it fully contains. A `*` written before a card and a `*` that lands
- * somewhere inside it are not an emphasis run — they are two asterisks with a
- * card between them, and holding that span hands the whole card to an inline
- * pass, which drops its `<style>` and lets the browser throw its block
- * elements back out of the `<em>` as siblings of the message.
+ * [text] is what `formatRun` built: the run's text nodes escaped, its inline
+ * elements replaced by opaque `E_n` placeholders. There is no markup left in
+ * it, which is the whole reason this scan is safe — a marker can only ever
+ * hold text and elements that were already siblings inside one container, so
+ * it cannot reach across a block element, into a card, or inside a `<pre>`.
  *
- * The count asks the same question `escapeProseTags` does — a `<вздох>` the
- * parse will escape into a word is not an open element here either — so an
- * italic run around prose that merely looks like a tag still matches.
+ * It still runs before the block pass rather than per line, because a colour
+ * marker may wrap several lines (`==hc:#fff==` matches with `s`), and the
+ * block pass splits the run into lines before it formats them.
  */
-function holdsOwnMarkup(segment, isMarkup) {
-  const open = [];
-  TAG_REGEX.lastIndex = 0;
-  let match;
-  while ((match = TAG_REGEX.exec(segment)) !== null) {
-    const tag = match[0];
-    if (!isMarkup(tag)) continue;
-    const name = tagName(tag);
-    if (VOID_ELEMENTS.has(name) || /\/\s*>$/.test(tag)) continue;
-    if (!isClosingTag(tag)) {
-      open.push(name);
-      continue;
-    }
-    const at = open.lastIndexOf(name);
-    // Closing what the marker never opened: the run reaches out of its own
-    // element, which is the half-span case above seen from the other side.
-    if (at < 0) return false;
-    open.length = at;
-  }
-  return open.length === 0;
-}
-
-/**
- * Pulls the style markers out of [text] before it is parsed.
- *
- * They have to come out here, not from the parsed tree: html_to_markdown puts
- * rich content inside a colour marker (`==hc:#fff==<b>x</b>==`), and once that
- * is parsed the marker's two halves live in two different text nodes with an
- * element between them. Tags are masked for the scan so a `*` inside an
- * attribute cannot open an emphasis run, while a marker that spans a tag still
- * matches.
- *
- * [styledNames] is the set of element names the message's CSS styles, as
- * `styledElementNames` reads them off the source — the same set the caller
- * hands `escapeProseTags`. Only the balance check below uses it.
- */
-export function extractMarkers(text, markers, styledNames) {
-  const { masked, unmask } = maskTags(text, SENTINEL);
-  const isMarkup = markupTagTest(text, styledNames);
-  const held = masked.replace(MARKER_REGEX, (segment) => {
-    const raw = unmask(segment);
-    // A stylesheet is not emphasis. Its body is masked for this scan, and a
-    // held segment never gets unmasked — the marker would take the card's CSS
-    // out of the message with it.
-    if (CODE_PLACEHOLDER.test(raw)) return segment;
-    if (!holdsOwnMarkup(raw, isMarkup)) return segment;
-    return markers.hold(raw);
-  });
+export function extractMarkers(text, markers) {
+  const held = text.replace(MARKER_REGEX, (segment) => markers.hold(segment));
   // Models occasionally emit `».* *action*`: the first `*` is an orphan
   // marker, not an empty italic segment. Drop it once the real action is
   // safely stashed, otherwise it steals that action's opening marker.
-  return unmask(held.replace(
+  return held.replace(
     new RegExp(`\\*([ \\t]+)(?=${SENTINEL}S_\\d+${SENTINEL})`, 'g'),
     '$1',
-  ));
+  );
 }
