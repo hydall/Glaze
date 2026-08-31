@@ -318,6 +318,57 @@ void main() {
       expect(out, equals('Квартира бабы Нели'));
     });
 
+    test('trim strings are stripped from the spliced-in match, ST-style', () {
+      // ST's filterString runs on the captured text that lands in the
+      // replacement — never on parts of the message the script did not match.
+      final script = PresetRegex.fromJson({
+        'id': 'trim-card',
+        'name': 'trim card',
+        'regex': r'/\{TRK\|(.*?)\}/g',
+        'replacement': r'<b>$1</b>',
+        'trimStrings': ['noise'],
+        'placement': [2],
+      });
+
+      final out = applyRegexes(
+        'noise {TRK|noise jacket} noise',
+        2,
+        1,
+        [script],
+        charCtx(),
+      );
+
+      expect(out, equals('noise <b> jacket</b> noise'));
+    });
+
+    test('trim strings themselves are macro-substituted', () {
+      final script = PresetRegex.fromJson({
+        'id': 'trim-macro',
+        'name': 'trim macro',
+        'regex': r'/\[(.*?)\]/g',
+        'replacement': r'$1',
+        'trimStrings': ['{{char}}: '],
+        'placement': [2],
+      });
+
+      final out = applyRegexes('[Alise: hello]', 2, 1, [script], charCtx());
+      expect(out, equals('hello'));
+    });
+
+    test('{{match}} is trimmed like ST\'s \$0', () {
+      final script = PresetRegex.fromJson({
+        'id': 'trim-match',
+        'name': 'trim match',
+        'regex': r'/<tag>.*?<\/tag>/g',
+        'replacement': '[{{match}}]',
+        'trimStrings': ['<tag>', '</tag>'],
+        'placement': [2],
+      });
+
+      final out = applyRegexes('<tag>body</tag>', 2, 1, [script], charCtx());
+      expect(out, equals('[body]'));
+    });
+
     test('macroRules still drives macros in the find field', () {
       final script = PresetRegex.fromJson({
         'id': 'find-macro',

@@ -94,16 +94,18 @@ String _applySingleScript(
 ) {
   var processed = text;
 
-  if (script.trimOut.isNotEmpty) {
-    final tokens = script.trimOut.split('\n').where((t) => t.trim().isNotEmpty);
-    for (final token in tokens) {
-      processed = processed.replaceAll(token, '');
-    }
-  }
-
   var pattern = script.regex;
   final replacement = script.replacement;
   final macroCtx = _macroContextFor(ctx);
+
+  // ST's `filterString`: every trim string is macro-substituted, and the
+  // trimming applies to the *matched* text that gets spliced into the
+  // replacement — never to parts of the message the script did not match.
+  final trimStrings = [
+    for (final token in script.trimOut.split('\n'))
+      if (token.trim().isNotEmpty)
+        macroCtx == null ? token : replaceMacros(token, macroCtx).text,
+  ];
 
   if (script.substituteRegex != 0 && macroCtx != null) {
     pattern = _substituteFindRegex(pattern, script.substituteRegex, ctx);
@@ -161,7 +163,7 @@ String _applySingleScript(
     // find field — so a card-rendering script whose "Replace With" contains
     // `{{user}}` / `{{char}}` resolves without any extra toggle.
     processed = processed.replaceAllMapped(regex, (match) {
-      final resolved = _resolveReplacement(replacement, match);
+      final resolved = _resolveReplacement(replacement, match, trimStrings);
       // Fast path: the macro engine runs dozens of regexes, and a script like
       // "replace every space" fires this callback thousands of times per
       // message. No brace, no macro — nothing for it to do.
@@ -212,27 +214,59 @@ String _substituteFindRegex(String pattern, int mode, RegexApplyContext ctx) {
   return pattern;
 }
 
-/// Resolves backreferences (`$1`, `\1`), `{{match}}`, and named groups (`$<name>`).
-String _resolveReplacement(String template, Match match) {
+/// Resolves backreferences (`$1`, `\1`), `{{match}}`, and named groups
+/// (`$<name>`), trimming [trimStrings] out of every spliced-in match.
+///
+/// Mirrors ST's `runRegexScript`: `{{match}}` is rewritten to `$0` up front and
+/// all references are then resolved in a single pass, so text pulled in from
+/// the message is never rescanned for further backreferences. Each inserted
+/// value goes through ST's `filterString` (the trim strings).
+String _resolveReplacement(
+  String template,
+  Match match,
+  List<String> trimStrings,
+) {
   final groupCount = match.groupCount;
-  var result = template;
 
-  result = result.replaceAll('{{match}}', match.group(0) ?? '');
-  if (match is RegExpMatch) {
-    final regMatch = match;
-    result = result.replaceAllMapped(
-      RegExp(r'\$<([^>]+)>'),
-      (m) => regMatch.namedGroup(m.group(1)!) ?? '',
-    );
+  String filtered(String? value) {
+    var out = value ?? '';
+    if (out.isEmpty) return out;
+    for (final trim in trimStrings) {
+      out = out.replaceAll(trim, '');
+    }
+    return out;
   }
 
-  for (int i = groupCount; i >= 0; i--) {
-    final captured = match.group(i) ?? '';
-    result = result.replaceAll('\$$i', captured);
-    result = result.replaceAll('\\$i', captured);
+  String? groupAt(int index) {
+    if (index < 0 || index > groupCount) return null;
+    return match.group(index);
   }
 
-  return result;
+  final withMatchMacro = template.replaceAll(
+    RegExp(r'\{\{match\}\}', caseSensitive: false),
+    r'$0',
+  );
+
+  return withMatchMacro.replaceAllMapped(
+    RegExp(r'\$(\d+)|\$<([^>]+)>|\\(\d+)'),
+    (m) {
+      final named = m.group(2);
+      if (named != null) {
+        final regMatch = match;
+        if (regMatch is! RegExpMatch) return '';
+        try {
+          return filtered(regMatch.namedGroup(named));
+        } on ArgumentError {
+          // The pattern has no group by that name — ST yields an empty
+          // string rather than failing the whole replacement.
+          return '';
+        }
+      }
+      final numbered = int.tryParse(m.group(1) ?? m.group(3) ?? '');
+      if (numbered == null) return '';
+      return filtered(groupAt(numbered));
+    },
+  );
 }
 
 ({String pattern, bool multiLine, bool dotAll, bool caseSensitive})
