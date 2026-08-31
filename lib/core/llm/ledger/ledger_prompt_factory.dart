@@ -127,7 +127,10 @@ Allowed eventState: planned, suggested, threatened, attempted, completed, failed
 Game clock (world:time, world:date, world:day):
 - Maintain world:time as the current in-game time of day in 24h HH:MM format.
 - Keep one complete tuple: world:date (DD.MM.YYYY), zero-based world:day, and
-  world:time. Never guess a missing date or day.
+  world:time. Never invent a month or year. When the canonical timeline names a
+  month and year but no day-of-month, derive world:date deterministically as
+  day-of-month = 1 + world:day (so Day 0 = the 1st of that month) and advance
+  the day-of-month together with world:day. Always write world:date in DD.MM.YYYY.
 - When the final response or chat implies elapsed time, advance world:time to the
   new in-game time based on how much time the narrated events would take.
 - For an ordinary continuous turn with no explicit duration, advance the clock
