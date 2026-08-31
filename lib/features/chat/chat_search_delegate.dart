@@ -29,8 +29,7 @@ class ChatSearchDelegate extends ChangeNotifier {
   /// WebView that its highlights are stale — this counter is.
   int get searchRevision => _searchRevision;
 
-  VoidCallback? get onSearchPrev =>
-      _searchCurrentIndex > 0 ? searchPrev : null;
+  VoidCallback? get onSearchPrev => _searchCurrentIndex > 0 ? searchPrev : null;
   VoidCallback? get onSearchNext =>
       _searchCurrentIndex < _searchMatches.length - 1 ? searchNext : null;
 
@@ -52,6 +51,24 @@ class ChatSearchDelegate extends ChangeNotifier {
     _searchCurrentIndex = 0;
     _countedMessagesSignature = null;
     notifyListeners();
+  }
+
+  /// Desktop keeps the search field mounted in the header, so "search mode"
+  /// follows the query instead of an explicit open/close. Unlike [openSearch]
+  /// this never touches [searchController] — the user is typing into it.
+  void syncInlineQuery(String query, List<ChatMessage> messages) {
+    if (query.isEmpty) {
+      if (!_showSearch) return;
+      _showSearch = false;
+      _searchQuery = '';
+      _searchMatches = [];
+      _searchCurrentIndex = 0;
+      _countedMessagesSignature = null;
+      notifyListeners();
+      return;
+    }
+    _showSearch = true;
+    search(query, messages);
   }
 
   void search(String query, List<ChatMessage> messages) {

@@ -255,7 +255,10 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// for the branch it lives in. A modal bottom sheet leaves the host screen's
   /// header visible behind it and must not suppress.
   void _syncHeaderSuppression() {
-    final branch = _inModalSheet
+    // A sheet hosted in the desktop sidebar or floating window belongs to no
+    // branch — suppressing "the current route's" branch there would hide the
+    // header of the unrelated screen in the middle column.
+    final branch = _inModalSheet || DetachedShellHost.of(context)
         ? null
         : widget.shellBranchIndex ?? _branchForCurrentRoute();
     if (branch == _suppressedBranch) return;
@@ -600,7 +603,9 @@ class _SheetViewState extends ConsumerState<SheetView>
       },
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxHeight: widget.fitContent ? _full(context) * 0.95 : double.infinity,
+          maxHeight: widget.fitContent
+              ? _full(context) * 0.95
+              : double.infinity,
         ),
         child: ValueListenableBuilder<double>(
           valueListenable: _heightN,

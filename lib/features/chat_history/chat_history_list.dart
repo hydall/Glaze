@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../shared/widgets/hover_glow.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/utils/time_formatter.dart';
 import '../../shared/utils/avatar_image.dart';
@@ -482,98 +483,103 @@ class _SessionTileState extends ConsumerState<_SessionTile>
       onTap: () =>
           context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
       onLongPress: () => _showSessionActions(context, ref),
-      child: Container(
-        height: 72,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: unread
-            ? BoxDecoration(
-                color: context.cs.primary.withValues(alpha: 0.06),
-                border: Border(
-                  left: BorderSide(color: context.cs.primary, width: 3),
-                ),
-              )
-            : null,
-        child: Row(
-          children: [
-            _buildAvatar(context, ref),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            if (unread) ...[
-                              _UnreadDot(color: context.cs.primary),
-                              const SizedBox(width: 6),
-                            ],
-                            Flexible(
-                              child: Text(
-                                info.characterName,
-                                style: TextStyle(
-                                  fontWeight: unread
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                  fontSize: 16,
-                                  height: 20 / 16,
-                                  color: context.cs.onSurface,
+      // Right-click opens the same actions a long-press does, matching the Vue
+      // list's `@contextmenu.prevent="openActions(chat)"`.
+      onSecondaryTap: () => _showSessionActions(context, ref),
+      child: HoverGlow(
+        child: Container(
+          height: 72,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: unread
+              ? BoxDecoration(
+                  color: context.cs.primary.withValues(alpha: 0.06),
+                  border: Border(
+                    left: BorderSide(color: context.cs.primary, width: 3),
+                  ),
+                )
+              : null,
+          child: Row(
+            children: [
+              _buildAvatar(context, ref),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (unread) ...[
+                                _UnreadDot(color: context.cs.primary),
+                                const SizedBox(width: 6),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  info.characterName,
+                                  style: TextStyle(
+                                    fontWeight: unread
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                    fontSize: 16,
+                                    height: 20 / 16,
+                                    color: context.cs.onSurface,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                            // Outside the Flexible on purpose: the character
-                            // name gives way to the ellipsis first, the chip
-                            // that identifies the variation always survives.
-                            if (info.variantName != null) ...[
-                              const SizedBox(width: 6),
-                              VariationChip(name: info.variantName!),
+                              // Outside the Flexible on purpose: the character
+                              // name gives way to the ellipsis first, the chip
+                              // that identifies the variation always survives.
+                              if (info.variantName != null) ...[
+                                const SizedBox(width: 6),
+                                VariationChip(name: info.variantName!),
+                              ],
                             ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _buildChip(context),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    info.sessionName?.isNotEmpty == true
-                        ? info.sessionName!
-                        : 'session_name'.tr(
-                            namedArgs: {
-                              'id': (info.sessionIndex + 1).toString(),
-                            },
                           ),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: context.cs.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildChip(context),
+                      ],
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  generating
-                      ? const _GeneratingPreview()
-                      : MessagePreviewText(
-                          raw: info.lastMessage,
-                          style: TextStyle(
-                            fontSize: 13,
-                            height: 16 / 13,
-                            color: unread
-                                ? context.cs.onSurface
-                                : context.cs.onSurfaceVariant,
+                    const SizedBox(height: 2),
+                    Text(
+                      info.sessionName?.isNotEmpty == true
+                          ? info.sessionName!
+                          : 'session_name'.tr(
+                              namedArgs: {
+                                'id': (info.sessionIndex + 1).toString(),
+                              },
+                            ),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.cs.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    generating
+                        ? const _GeneratingPreview()
+                        : MessagePreviewText(
+                            raw: info.lastMessage,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 16 / 13,
+                              color: unread
+                                  ? context.cs.onSurface
+                                  : context.cs.onSurfaceVariant,
+                            ),
                           ),
-                        ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -590,68 +596,71 @@ class _SessionTileState extends ConsumerState<_SessionTile>
       onTap: () =>
           context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
       onLongPress: () => _showSessionActions(context, ref),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      if (unread) ...[
-                        _UnreadDot(color: context.cs.primary),
-                        const SizedBox(width: 6),
-                      ],
-                      Flexible(
-                        child: Text(
-                          info.sessionName?.isNotEmpty == true
-                              ? info.sessionName!
-                              : 'session_name'.tr(
-                                  namedArgs: {
-                                    'id': (info.sessionIndex + 1).toString(),
-                                  },
-                                ),
-                          style: TextStyle(
-                            fontWeight: unread
-                                ? FontWeight.w700
-                                : FontWeight.w600,
-                            fontSize: 15,
-                            color: context.cs.onSurface,
+      onSecondaryTap: () => _showSessionActions(context, ref),
+      child: HoverGlow(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        if (unread) ...[
+                          _UnreadDot(color: context.cs.primary),
+                          const SizedBox(width: 6),
+                        ],
+                        Flexible(
+                          child: Text(
+                            info.sessionName?.isNotEmpty == true
+                                ? info.sessionName!
+                                : 'session_name'.tr(
+                                    namedArgs: {
+                                      'id': (info.sessionIndex + 1).toString(),
+                                    },
+                                  ),
+                            style: TextStyle(
+                              fontWeight: unread
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                              fontSize: 15,
+                              color: context.cs.onSurface,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      // Inside a group the rows are sessions of possibly
-                      // different variations, so each one names its own.
-                      if (info.variantName != null) ...[
-                        const SizedBox(width: 6),
-                        VariationChip(name: info.variantName!),
+                        // Inside a group the rows are sessions of possibly
+                        // different variations, so each one names its own.
+                        if (info.variantName != null) ...[
+                          const SizedBox(width: 6),
+                          VariationChip(name: info.variantName!),
+                        ],
                       ],
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _buildChip(context),
-              ],
-            ),
-            const SizedBox(height: 4),
-            generating
-                ? const _GeneratingPreview()
-                : MessagePreviewText(
-                    raw: info.lastMessage,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: unread
-                          ? context.cs.onSurface
-                          : context.cs.onSurfaceVariant,
                     ),
-                    maxLines: 2,
                   ),
-          ],
+                  const SizedBox(width: 8),
+                  _buildChip(context),
+                ],
+              ),
+              const SizedBox(height: 4),
+              generating
+                  ? const _GeneratingPreview()
+                  : MessagePreviewText(
+                      raw: info.lastMessage,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: unread
+                            ? context.cs.onSurface
+                            : context.cs.onSurfaceVariant,
+                      ),
+                      maxLines: 2,
+                    ),
+            ],
+          ),
         ),
       ),
     );
@@ -844,100 +853,103 @@ class _GroupHeader extends ConsumerWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       onLongPress: () => _showGroupActions(context, ref, latest),
-      child: Container(
-        height: 72,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: unread
-            ? BoxDecoration(
-                color: context.cs.primary.withValues(alpha: 0.06),
-                border: Border(
-                  left: BorderSide(color: context.cs.primary, width: 3),
-                ),
-              )
-            : null,
-        child: Row(
-          children: [
-            _buildAvatar(context, ref, latest),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            if (unread) ...[
-                              _UnreadDot(color: context.cs.primary),
-                              const SizedBox(width: 6),
-                            ],
-                            Flexible(
-                              child: Text(
-                                latest.characterName,
-                                style: TextStyle(
-                                  fontWeight: unread
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                  fontSize: 16,
-                                  height: 20 / 16,
-                                  color: context.cs.onSurface,
+      onSecondaryTap: () => _showGroupActions(context, ref, latest),
+      child: HoverGlow(
+        child: Container(
+          height: 72,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: unread
+              ? BoxDecoration(
+                  color: context.cs.primary.withValues(alpha: 0.06),
+                  border: Border(
+                    left: BorderSide(color: context.cs.primary, width: 3),
+                  ),
+                )
+              : null,
+          child: Row(
+            children: [
+              _buildAvatar(context, ref, latest),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (unread) ...[
+                                _UnreadDot(color: context.cs.primary),
+                                const SizedBox(width: 6),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  latest.characterName,
+                                  style: TextStyle(
+                                    fontWeight: unread
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                    fontSize: 16,
+                                    height: 20 / 16,
+                                    color: context.cs.onSurface,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _buildTime(context, latest),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        _subtitle(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.cs.onSurfaceVariant,
-                        ),
-                      ),
-                      AnimatedRotation(
-                        turns: isExpanded ? 0.5 : 0,
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeInOut,
-                        child: Icon(
-                          Icons.keyboard_arrow_down,
-                          color: context.cs.onSurfaceVariant,
-                          size: 20,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  generating
-                      ? const _GeneratingPreview()
-                      : MessagePreviewText(
-                          raw: latest.lastMessage,
-                          style: TextStyle(
-                            fontSize: 13,
-                            height: 16 / 13,
-                            color: unread
-                                ? context.cs.onSurface
-                                : context.cs.onSurfaceVariant,
+                            ],
                           ),
                         ),
-                ],
+                        const SizedBox(width: 8),
+                        _buildTime(context, latest),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _subtitle(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: context.cs.onSurfaceVariant,
+                          ),
+                        ),
+                        AnimatedRotation(
+                          turns: isExpanded ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeInOut,
+                          child: Icon(
+                            Icons.keyboard_arrow_down,
+                            color: context.cs.onSurfaceVariant,
+                            size: 20,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    generating
+                        ? const _GeneratingPreview()
+                        : MessagePreviewText(
+                            raw: latest.lastMessage,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 16 / 13,
+                              color: unread
+                                  ? context.cs.onSurface
+                                  : context.cs.onSurfaceVariant,
+                            ),
+                          ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

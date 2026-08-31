@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../../core/platform/system_settings.dart';
 import '../../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../../shared/theme/app_colors.dart';
@@ -66,7 +67,7 @@ class _AppearanceGroup extends SettingsGroup {
               shape: BoxShape.circle,
             ),
           ),
-          onTap: () => context.push('/menu/themes'),
+          onTap: () => goOrFloat(context, ref, 'theme-settings', push: true),
         ),
         highlightIf(
           'theme_mode',

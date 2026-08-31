@@ -5,8 +5,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 const _collapseThreshold = 120.0;
 const _collapsedWidth = 64.0;
 
-double? _readDoublePref(SharedPreferences prefs, String key) {
-  final value = prefs.get(key);
+/// Width a sidebar snaps to when collapsed, and the width below which it counts
+/// as collapsed. Public so the shell can shrink a sidebar to its icon strip
+/// when the window is too narrow to afford the stored width.
+const double kSidebarCollapsedWidth = _collapsedWidth;
+const double kSidebarCollapseThreshold = _collapseThreshold;
+
+double? _readDoublePref(SharedPreferences? prefs, String key) {
+  final value = prefs?.get(key);
   if (value is int) return value.toDouble();
   if (value is double) return value;
   if (value is String) return double.tryParse(value);
@@ -14,10 +20,11 @@ double? _readDoublePref(SharedPreferences prefs, String key) {
 }
 
 bool _readBoolPref(
-  SharedPreferences prefs,
+  SharedPreferences? prefs,
   String key, {
   required bool defaultValue,
 }) {
+  if (prefs == null) return defaultValue;
   final value = prefs.get(key);
   if (value is bool) return value;
   if (value is int) return value != 0;
@@ -33,10 +40,7 @@ bool _readBoolPref(
 // ---------------------------------------------------------------------------
 
 class LeftSidebarController extends ChangeNotifier {
-  LeftSidebarController({
-    required double initialWidth,
-    required bool initialCollapsed,
-  }) : _width = initialWidth;
+  LeftSidebarController({required double initialWidth}) : _width = initialWidth;
 
   double _width;
 
@@ -46,6 +50,24 @@ class LeftSidebarController extends ChangeNotifier {
 
   double get width => _width;
   bool get collapsed => _width < _collapseThreshold;
+
+  /// True while the grip is being dragged. The sidebar surface animates its
+  /// width on collapse/expand, but must follow the pointer 1:1 during a drag —
+  /// otherwise the edge lags behind the cursor by the animation duration.
+  bool _dragging = false;
+  bool get dragging => _dragging;
+
+  void beginDrag() {
+    if (_dragging) return;
+    _dragging = true;
+    notifyListeners();
+  }
+
+  void endDrag() {
+    if (!_dragging) return;
+    _dragging = false;
+    notifyListeners();
+  }
 
   set width(double value) {
     final clamped = value.clamp(_collapsedWidth, maxWidth);
@@ -69,25 +91,35 @@ class LeftSidebarController extends ChangeNotifier {
     prefs.setString('gz_left_sidebar_width_collapsed', collapsed ? '1' : '0');
   }
 
-  static LeftSidebarController fromPrefs(SharedPreferences prefs) {
+  static double _storedWidth(SharedPreferences? prefs) {
     final collapsedFlag = _readBoolPref(
       prefs,
       'gz_left_sidebar_width_collapsed',
       defaultValue: false,
     );
+    if (collapsedFlag) return _collapsedWidth;
     final saved = _readDoublePref(prefs, 'gz_left_sidebar_width');
-    double initial;
-    if (collapsedFlag) {
-      initial = _collapsedWidth;
-    } else if (saved != null) {
-      initial = saved.clamp(minWidth, maxWidth);
-    } else {
-      initial = defaultWidth;
-    }
-    return LeftSidebarController(
-      initialWidth: initial,
-      initialCollapsed: collapsedFlag,
-    );
+    if (saved == null) return defaultWidth;
+    return saved.clamp(minWidth, maxWidth);
+  }
+
+  /// [prefs] may be null when they have not resolved yet — the controller then
+  /// starts from the defaults and adopts the stored width via [applyPrefs].
+  static LeftSidebarController fromPrefs(SharedPreferences? prefs) =>
+      LeftSidebarController(initialWidth: _storedWidth(prefs));
+
+  void applyPrefs(SharedPreferences prefs) {
+    final stored = _storedWidth(prefs);
+    if ((stored - _width).abs() < 0.5) return;
+    _width = stored;
+    notifyListeners();
+  }
+
+  /// Collapse / expand without dragging (double-click on the drag handle).
+  void toggleCollapse(SharedPreferences prefs) {
+    _width = collapsed ? defaultWidth : _collapsedWidth;
+    _persist(prefs);
+    notifyListeners();
   }
 }
 
@@ -126,6 +158,24 @@ class RightSidebarController extends ChangeNotifier {
 
   double get width => _collapsed ? _collapsedWidth : _expandedWidth;
   bool get collapsed => _collapsed;
+
+  /// True while the grip is being dragged. The sidebar surface animates its
+  /// width on collapse/expand, but must follow the pointer 1:1 during a drag —
+  /// otherwise the edge lags behind the cursor by the animation duration.
+  bool _dragging = false;
+  bool get dragging => _dragging;
+
+  void beginDrag() {
+    if (_dragging) return;
+    _dragging = true;
+    notifyListeners();
+  }
+
+  void endDrag() {
+    if (!_dragging) return;
+    _dragging = false;
+    notifyListeners();
+  }
 
   // ── Port of Vue DesktopRightSidebar.vue startRightResize onMouseMove ──
   // Drag handle passes raw newWidth; this method handles mode switching at
@@ -167,11 +217,16 @@ class RightSidebarController extends ChangeNotifier {
     notifyListeners();
   }
 
-  static RightSidebarController fromPrefs(SharedPreferences prefs) {
+  /// [prefs] may be null when they have not resolved yet — see
+  /// [LeftSidebarController.fromPrefs].
+  static RightSidebarController fromPrefs(SharedPreferences? prefs) {
+    // Expanded by default, matching the Vue app: a collapsed right sidebar in
+    // chat shows only the icon strip, which is a poor first impression of the
+    // desktop layout.
     final collapsedFlag = _readBoolPref(
       prefs,
       'gz_right_sidebar_width_collapsed',
-      defaultValue: true,
+      defaultValue: false,
     );
     final savedExpanded = _readDoublePref(prefs, 'gz_right_sidebar_width');
     final savedCollapsed = _readDoublePref(
@@ -189,6 +244,14 @@ class RightSidebarController extends ChangeNotifier {
       ),
       initialCollapsed: collapsedFlag,
     );
+  }
+
+  void applyPrefs(SharedPreferences prefs) {
+    final fresh = fromPrefs(prefs);
+    _expandedWidth = fresh._expandedWidth;
+    _collapsedWidth = fresh._collapsedWidth;
+    _collapsed = fresh._collapsed;
+    notifyListeners();
   }
 
   // -----------------------------------------------------------------------
@@ -213,10 +276,10 @@ class RightSidebarController extends ChangeNotifier {
     }
   }
 
-  void toggleCollapse() {
+  void toggleCollapse(SharedPreferences prefs) {
     _wasAutoExpanded = false;
     _collapsed = !_collapsed;
-    notifyListeners();
+    finishResize(prefs);
   }
 }
 

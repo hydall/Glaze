@@ -6,6 +6,9 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
+import '../../shared/shell/desktop/desktop_glossary_popup.dart';
+import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../core/models/chat_message.dart';
 import '../chat/widgets/triggered_items_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
@@ -202,7 +205,8 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                     icon: Icons.settings_outlined,
                     label: 'menu_app_settings'.tr(),
                     subtitle: 'menu_app_settings_hint'.tr(),
-                    onTap: () => context.push('/menu/settings'),
+                    onTap: () =>
+                        goOrFloat(context, ref, 'settings', push: true),
                   ),
                   MenuItem(
                     icon: Icons.extension_outlined,
@@ -220,13 +224,17 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                     icon: Icons.backup_outlined,
                     label: 'menu_backups'.tr(),
                     subtitle: 'menu_backups_hint'.tr(),
-                    onTap: () => openBackupsSheet(context),
+                    onTap: () => isDesktopLayout(context)
+                        ? goOrFloat(context, ref, 'backup', push: true)
+                        : openBackupsSheet(context),
                   ),
                   MenuItem(
                     icon: Icons.sync_rounded,
                     label: 'menu_cloud_sync'.tr(),
                     subtitle: 'menu_cloud_sync_hint'.tr(),
-                    onTap: () => openCloudSyncSheet(context),
+                    onTap: () => isDesktopLayout(context)
+                        ? goOrFloat(context, ref, 'sync', push: true)
+                        : openCloudSyncSheet(context),
                   ),
                 ],
               ),
@@ -414,13 +422,17 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                     icon: Icons.info_outline_rounded,
                     label: 'menu_about'.tr(),
                     subtitle: 'menu_about_hint'.tr(),
-                    onTap: () => context.push('/menu/about'),
+                    onTap: () => goOrFloat(context, ref, 'about', push: true),
                   ),
                   MenuItem(
                     icon: Icons.menu_book_rounded,
                     label: 'menu_glossary'.tr(),
                     subtitle: 'menu_glossary_hint'.tr(),
-                    onTap: () => context.push('/menu/glossary'),
+                    onTap: () => isDesktopLayout(context)
+                        ? ref
+                              .read(glossaryPopupVisibleProvider.notifier)
+                              .update((v) => !v)
+                        : context.push('/menu/glossary'),
                   ),
                   if (lang == 'en')
                     MenuItem(

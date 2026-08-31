@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:easy_localization/easy_localization.dart';
 
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/models/preset.dart';
 import '../../core/models/studio_regex.dart';
 import '../../core/services/file_export_service.dart';
@@ -106,7 +107,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
 
   void _goBackFromList() {
     if (widget.startExpanded) {
-      context.go('/tools');
+      closeExpandedToolScreen(context, ref);
     } else {
       Navigator.of(context).maybePop();
     }

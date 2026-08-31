@@ -8,7 +8,8 @@ import 'theme_preset.dart';
 
 const String kInterFontFamily = 'Inter';
 
-TextTheme _applySafe(TextTheme theme, {
+TextTheme _applySafe(
+  TextTheme theme, {
   required Color bodyColor,
   required Color displayColor,
   required double fontSizeFactor,
@@ -55,9 +56,9 @@ const _vueUiBg = Color(0xFF1E1E1E); // --ui-bg-default-rgb: 30,30,30
 ColorScheme _buildColorScheme(ThemePreset preset, {required bool isDark}) {
   final accent = preset.accent;
   final uiColor =
-      preset.uiColorParsed ?? (isDark ? _vueUiBg : _deriveUiColor(accent, isDark));
-  final bgColor =
-      preset.bgColorParsed ?? (isDark ? _vueAppBg : uiColor);
+      preset.uiColorParsed ??
+      (isDark ? _vueUiBg : _deriveUiColor(accent, isDark));
+  final bgColor = preset.bgColorParsed ?? (isDark ? _vueAppBg : uiColor);
   final onBg = contrastFor(uiColor);
   final onBgVariant = contrastFor(uiColor, secondary: true);
   final surfaceHigh = uiColor;
@@ -108,8 +109,10 @@ const _materialYouFallbackSeed = Color(0xFF7996CE);
 /// On Android [dynamicScheme] is the system palette; everywhere else (or when
 /// unavailable) it falls back to a seeded tonal palette so the theme still
 /// renders consistently.
-ColorScheme _materialYouScheme(ColorScheme? dynamicScheme,
-    {required bool isDark}) {
+ColorScheme _materialYouScheme(
+  ColorScheme? dynamicScheme, {
+  required bool isDark,
+}) {
   if (dynamicScheme != null) {
     return dynamicScheme;
   }
@@ -138,13 +141,22 @@ Color _deriveUiColor(Color accent, bool isDark) {
   ).toColor();
 }
 
-Color _ensureButtonContrast(Color accent, Color surface, {required bool isDark}) {
+Color _ensureButtonContrast(
+  Color accent,
+  Color surface, {
+  required bool isDark,
+}) {
   if (contrastRatio(accent, surface) >= 4.5) return accent;
   final hsl = HSLColor.fromColor(accent);
   double lightness = hsl.lightness;
   for (int i = 0; i < 20; i++) {
     lightness = isDark ? lightness + 0.04 : lightness - 0.04;
-    final candidate = HSLColor.fromAHSL(1.0, hsl.hue, hsl.saturation, lightness.clamp(0.0, 1.0)).toColor();
+    final candidate = HSLColor.fromAHSL(
+      1.0,
+      hsl.hue,
+      hsl.saturation,
+      lightness.clamp(0.0, 1.0),
+    ).toColor();
     if (contrastRatio(candidate, surface) >= 4.5) return candidate;
   }
   return isDark
@@ -155,18 +167,24 @@ Color _ensureButtonContrast(Color accent, Color surface, {required bool isDark})
 Color _borderFor(Color bg, bool isDark) {
   final lum = bg.computeLuminance();
   if (isDark) {
-    return lum > 0.35
-        ? const Color(0xFF5C5D5E)
-        : const Color(0xFF2C2D2E);
+    return lum > 0.35 ? const Color(0xFF5C5D5E) : const Color(0xFF2C2D2E);
   }
-  return lum > 0.35
-      ? const Color(0xFFB8B9BA)
-      : const Color(0xFFD8D9DA);
+  return lum > 0.35 ? const Color(0xFFB8B9BA) : const Color(0xFFD8D9DA);
 }
 
+/// Widest a modal bottom sheet is allowed to get.
+///
+/// Phones are narrower than this, so the cap only takes effect on tablets and
+/// desktop, where a full-width sheet reads as a mobile app pretending to be a
+/// desktop one. Matches the desktop right sidebar's usable width band.
+const BoxConstraints kSheetMaxWidthConstraints = BoxConstraints(maxWidth: 640);
+
 class AppTheme {
-  static ThemeData dark(ThemePreset preset,
-      {String? fontFamily, ColorScheme? dynamicScheme}) {
+  static ThemeData dark(
+    ThemePreset preset, {
+    String? fontFamily,
+    ColorScheme? dynamicScheme,
+  }) {
     final isMaterialYou = preset.isMaterialYou;
     final colorScheme = isMaterialYou
         ? _materialYouScheme(dynamicScheme, isDark: true)
@@ -180,7 +198,10 @@ class AppTheme {
         ? GlazeColors.fromColorScheme(colorScheme)
         : GlazeColors.fromPreset(preset, isDark: true);
     final btnBg = _ensureButtonContrast(
-        colorScheme.primary, colorScheme.surface, isDark: true);
+      colorScheme.primary,
+      colorScheme.surface,
+      isDark: true,
+    );
     final btnFg = btnBg.computeLuminance() > 0.35
         ? const Color(0xFF1A1A1B)
         : const Color(0xFFE1E3E6);
@@ -215,6 +236,12 @@ class AppTheme {
         backgroundColor: colorScheme.surfaceContainerHighest,
         modalBackgroundColor: colorScheme.surfaceContainerHighest,
         surfaceTintColor: colorScheme.surface,
+        // `showModalBottomSheet` falls back to this when a call site passes no
+        // constraints of its own, so one line here caps every sheet in the app.
+        // Without it a sheet spans the whole window on desktop — a full-width
+        // band across a 1080p monitor to pick "Rename" — while on phones the
+        // cap never binds.
+        constraints: kSheetMaxWidthConstraints,
       ),
       popupMenuTheme: PopupMenuThemeData(
         color: colorScheme.surfaceContainerHighest,
@@ -260,9 +287,7 @@ class AppTheme {
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: colorScheme.onSurface,
-        ),
+        style: TextButton.styleFrom(foregroundColor: colorScheme.onSurface),
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.all(Colors.white),
@@ -289,19 +314,46 @@ class AppTheme {
           linkColor: colorScheme.primary,
           linkHoverColor: colorScheme.primary.withAlpha(180),
           hrLineColor: colorScheme.outline,
-          h1: TextStyle(color: colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.bold),
-          h2: TextStyle(color: colorScheme.onSurface, fontSize: 22, fontWeight: FontWeight.bold),
-          h3: TextStyle(color: colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.w600),
-          h4: TextStyle(color: colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.w600),
-          h5: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 16, fontWeight: FontWeight.w600),
-          h6: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 14, fontWeight: FontWeight.w600),
+          h1: TextStyle(
+            color: colorScheme.onSurface,
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
+          h2: TextStyle(
+            color: colorScheme.onSurface,
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+          ),
+          h3: TextStyle(
+            color: colorScheme.onSurface,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+          h4: TextStyle(
+            color: colorScheme.onSurface,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+          h5: TextStyle(
+            color: colorScheme.onSurfaceVariant,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+          h6: TextStyle(
+            color: colorScheme.onSurfaceVariant,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ],
     );
   }
 
-  static ThemeData light(ThemePreset preset,
-      {String? fontFamily, ColorScheme? dynamicScheme}) {
+  static ThemeData light(
+    ThemePreset preset, {
+    String? fontFamily,
+    ColorScheme? dynamicScheme,
+  }) {
     final isMaterialYou = preset.isMaterialYou;
     final colorScheme = isMaterialYou
         ? _materialYouScheme(dynamicScheme, isDark: false)
@@ -315,7 +367,10 @@ class AppTheme {
         ? GlazeColors.fromColorScheme(colorScheme)
         : GlazeColors.fromPreset(preset, isDark: false);
     final btnBg = _ensureButtonContrast(
-        colorScheme.primary, colorScheme.surface, isDark: false);
+      colorScheme.primary,
+      colorScheme.surface,
+      isDark: false,
+    );
     final btnFg = btnBg.computeLuminance() > 0.35
         ? const Color(0xFF1A1A1B)
         : const Color(0xFFE1E3E6);
@@ -350,6 +405,12 @@ class AppTheme {
         backgroundColor: colorScheme.surfaceContainerHighest,
         modalBackgroundColor: colorScheme.surfaceContainerHighest,
         surfaceTintColor: colorScheme.surface,
+        // `showModalBottomSheet` falls back to this when a call site passes no
+        // constraints of its own, so one line here caps every sheet in the app.
+        // Without it a sheet spans the whole window on desktop — a full-width
+        // band across a 1080p monitor to pick "Rename" — while on phones the
+        // cap never binds.
+        constraints: kSheetMaxWidthConstraints,
       ),
       popupMenuTheme: PopupMenuThemeData(
         color: colorScheme.surfaceContainerHighest,
@@ -395,9 +456,7 @@ class AppTheme {
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: colorScheme.onSurface,
-        ),
+        style: TextButton.styleFrom(foregroundColor: colorScheme.onSurface),
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.all(Colors.white),
@@ -424,12 +483,36 @@ class AppTheme {
           linkColor: colorScheme.primary,
           linkHoverColor: colorScheme.primary.withAlpha(180),
           hrLineColor: colorScheme.outline,
-          h1: TextStyle(color: colorScheme.onSurface, fontSize: 24, fontWeight: FontWeight.bold),
-          h2: TextStyle(color: colorScheme.onSurface, fontSize: 22, fontWeight: FontWeight.bold),
-          h3: TextStyle(color: colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.w600),
-          h4: TextStyle(color: colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.w600),
-          h5: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 16, fontWeight: FontWeight.w600),
-          h6: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 14, fontWeight: FontWeight.w600),
+          h1: TextStyle(
+            color: colorScheme.onSurface,
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
+          h2: TextStyle(
+            color: colorScheme.onSurface,
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+          ),
+          h3: TextStyle(
+            color: colorScheme.onSurface,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+          h4: TextStyle(
+            color: colorScheme.onSurface,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+          h5: TextStyle(
+            color: colorScheme.onSurfaceVariant,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+          h6: TextStyle(
+            color: colorScheme.onSurfaceVariant,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ],
     );

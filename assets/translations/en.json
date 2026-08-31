@@ -265,6 +265,7 @@
   "hint_create_new": "Create a new character from scratch",
   "action_add_script": "Add Script",
   "action_import": "Import from File",
+  "import_unsupported_file": "Unsupported file type",
   "hint_import_file": "Import from JSON or PNG (v2 card)",
   "action_import_by_link": "Import",
   "action_import_janitor": "Import by Link",

@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../shared/widgets/responsive_grid.dart';
 import '../../../core/models/character.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -107,8 +108,15 @@ class CharacterGrid extends StatelessWidget {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+            // Wrap, not Row: the sort pill carries a translated label, so in a
+            // narrow column (a small desktop window, where the middle column
+            // gives up width to the sidebars) a Row overflowed instead of
+            // moving the controls onto a second line.
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 10,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 if (characters.isNotEmpty) ...[
                   Consumer(
@@ -126,17 +134,13 @@ class CharacterGrid extends StatelessWidget {
                       );
                     },
                   ),
-                  const SizedBox(width: 10),
                 ],
-                if (onFilterTap != null) ...[
+                if (onFilterTap != null)
                   _FilterButton(count: filterCount, onTap: onFilterTap!),
-                  const SizedBox(width: 10),
-                ],
                 _SortDirButton(
                   isAsc: sortDir == SortDir.asc,
                   onTap: onSortDirToggle,
                 ),
-                const SizedBox(width: 10),
                 _SortTypePill(sortBy: sortBy, onChanged: onSortTypeChanged),
               ],
             ),
@@ -156,28 +160,31 @@ class CharacterGrid extends StatelessWidget {
         ),
         SliverPadding(
           padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
-              childAspectRatio: 2 / 3,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              // No explicit RepaintBoundary: SliverChildBuilderDelegate already
-              // wraps each child in one (addRepaintBoundaries: true by default).
-              //
-              // Keyed by character id so Flutter matches each card's State to its
-              // character across list changes. Without this, deleting a card mid-
-              // list left its slot's State (which still holds the finished dust
-              // cloud) attached to the character that shifted up into that slot —
-              // showing an empty slot instead of the next card.
-              (ctx, i) => CharacterCard(
-                key: ValueKey(characters[i].id),
-                character: characters[i],
-                folderId: folderId,
+          sliver: SliverLayoutBuilder(
+            builder: (context, constraints) => SliverGrid(
+              // Two fixed columns turned into two poster-sized cards on a
+              // desktop window; Vue used `minmax(220px, 1fr)` here.
+              gridDelegate: ResponsiveGridDelegate(
+                availableWidth: constraints.crossAxisExtent,
+                minCellExtent: 180,
+                childAspectRatio: 2 / 3,
               ),
-              childCount: characters.length,
+              delegate: SliverChildBuilderDelegate(
+                // No explicit RepaintBoundary: SliverChildBuilderDelegate already
+                // wraps each child in one (addRepaintBoundaries: true by default).
+                //
+                // Keyed by character id so Flutter matches each card's State to its
+                // character across list changes. Without this, deleting a card mid-
+                // list left its slot's State (which still holds the finished dust
+                // cloud) attached to the character that shifted up into that slot —
+                // showing an empty slot instead of the next card.
+                (ctx, i) => CharacterCard(
+                  key: ValueKey(characters[i].id),
+                  character: characters[i],
+                  folderId: folderId,
+                ),
+                childCount: characters.length,
+              ),
             ),
           ),
         ),

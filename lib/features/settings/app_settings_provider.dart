@@ -49,7 +49,16 @@ abstract class AppSettings with _$AppSettings {
     @Default(30) double tokenizerHidePercent,
     @Default(85) double tokenizerHistoryFillThreshold,
     @Default(true) bool showOurPicks,
-    @Default(true) bool forceMobileLayout,
+
+    /// Widest the chat column is allowed to get, in logical pixels. 0 means
+    /// "fill the column". Only ever binds on desktop — phones are narrower than
+    /// the default — and is dragged directly by the chat column's edge grips.
+    @Default(900) double chatMaxWidth,
+
+    /// Desktop (>=768px) three-column layout is the default on wide windows,
+    /// matching the legacy Vue app. This switch forces the phone layout back
+    /// on for users who prefer it.
+    @Default(false) bool forceMobileLayout,
     @Default(false) bool addBlockAtTop,
     @Default(true) bool openCardAfterImport,
     @Default(true) bool hapticFeedback,
@@ -94,6 +103,7 @@ abstract final class AppSettingsPreferences {
     'tokenizerHistoryFillThreshold',
     'showOurPicks',
     'gz_force_mobile_layout',
+    'gz_chat_max_width',
     'addBlockAtTop',
     'openCardAfterImport',
     'hapticFeedback',
@@ -146,6 +156,9 @@ abstract final class AppSettingsPreferences {
       forceMobileLayout:
           _coerceBool(prefs.get('gz_force_mobile_layout')) ??
           defaults.forceMobileLayout,
+      chatMaxWidth:
+          _coerceDouble(prefs.get('gz_chat_max_width')) ??
+          defaults.chatMaxWidth,
       addBlockAtTop:
           _coerceBool(prefs.get('addBlockAtTop')) ?? defaults.addBlockAtTop,
       openCardAfterImport:
@@ -189,6 +202,7 @@ abstract final class AppSettingsPreferences {
       'tokenizerHistoryFillThreshold': normalized.tokenizerHistoryFillThreshold,
       'showOurPicks': normalized.showOurPicks,
       'gz_force_mobile_layout': normalized.forceMobileLayout,
+      'gz_chat_max_width': normalized.chatMaxWidth,
       'addBlockAtTop': normalized.addBlockAtTop,
       'openCardAfterImport': normalized.openCardAfterImport,
       'hapticFeedback': normalized.hapticFeedback,
@@ -272,6 +286,7 @@ abstract final class AppSettingsPreferences {
         values['tokenizerHistoryFillThreshold'] as double,
     showOurPicks: values['showOurPicks'] as bool,
     forceMobileLayout: values['gz_force_mobile_layout'] as bool,
+    chatMaxWidth: values['gz_chat_max_width'] as double,
     addBlockAtTop: values['addBlockAtTop'] as bool,
     openCardAfterImport: values['openCardAfterImport'] as bool,
     hapticFeedback: values['hapticFeedback'] as bool,

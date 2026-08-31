@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:easy_localization/easy_localization.dart';
 
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/models/persona.dart';
 import '../../core/services/persona_character_converter.dart';
 import '../../core/utils/platform_paths.dart';
@@ -25,7 +25,6 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/help_tip.dart';
 import '../../shared/widgets/sheet_view.dart';
-
 
 class PersonaListScreen extends ConsumerWidget {
   final bool startExpanded;
@@ -54,7 +53,7 @@ class PersonaListScreen extends ConsumerWidget {
       ),
       showBack: true,
       onBack: startExpanded
-          ? () => context.go('/tools')
+          ? () => closeExpandedToolScreen(context, ref)
           : () => Navigator.of(context).maybePop(),
       actions: [
         SheetViewAction(
@@ -75,19 +74,27 @@ class PersonaListScreen extends ConsumerWidget {
                     const SizedBox(height: 8),
                     FilledButton.tonal(
                       onPressed: () => _showEditor(context, ref),
-                      child: Text("${'create_new'.tr()} ${'tab_personas'.tr()}"),
+                      child: Text(
+                        "${'create_new'.tr()} ${'tab_personas'.tr()}",
+                      ),
                     ),
                   ],
                 ),
               )
             : Builder(
                 builder: (context) => ListView.builder(
-                  padding: EdgeInsets.fromLTRB(16, startExpanded ? 16 : 0, 16, 16).add(
-                    EdgeInsets.only(
-                      top: MediaQuery.paddingOf(context).top,
-                      bottom: MediaQuery.paddingOf(context).bottom,
-                    ),
-                  ),
+                  padding:
+                      EdgeInsets.fromLTRB(
+                        16,
+                        startExpanded ? 16 : 0,
+                        16,
+                        16,
+                      ).add(
+                        EdgeInsets.only(
+                          top: MediaQuery.paddingOf(context).top,
+                          bottom: MediaQuery.paddingOf(context).bottom,
+                        ),
+                      ),
                   itemCount: list.length,
                   itemBuilder: (_, i) => _PersonaTile(
                     persona: list[i],
@@ -112,10 +119,7 @@ class _PersonaTile extends ConsumerWidget {
   final Persona persona;
   final void Function(Persona persona) openEditor;
 
-  const _PersonaTile({
-    required this.persona,
-    required this.openEditor,
-  });
+  const _PersonaTile({required this.persona, required this.openEditor});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -127,8 +131,8 @@ class _PersonaTile extends ConsumerWidget {
     final rawAvatarPath = persona.avatarPath?.trim();
     final resolvedAvatarPath =
         (rawAvatarPath != null && rawAvatarPath.isNotEmpty)
-            ? resolveGlazeFilePath(rawAvatarPath)
-            : null;
+        ? resolveGlazeFilePath(rawAvatarPath)
+        : null;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: GlassSurface(
@@ -146,15 +150,19 @@ class _PersonaTile extends ConsumerWidget {
               : context.cs.outline,
         ),
         child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          onTap: () =>
-              setActivePersona(ref, isActive ? null : persona.id),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 4,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          onTap: () => setActivePersona(ref, isActive ? null : persona.id),
           leading: CircleAvatar(
             radius: 24,
             backgroundColor: context.cs.primary.withValues(alpha: 0.18),
-            backgroundImage: resolvedAvatarPath != null &&
-                    resolvedAvatarPath.isNotEmpty
+            backgroundImage:
+                resolvedAvatarPath != null && resolvedAvatarPath.isNotEmpty
                 ? FileImage(File(resolvedAvatarPath))
                 : null,
             child: resolvedAvatarPath == null || resolvedAvatarPath.isEmpty
@@ -232,7 +240,9 @@ class _PersonaTile extends ConsumerWidget {
                         isDestructive: true,
                         onTap: () {
                           Navigator.of(context, rootNavigator: true).pop();
-                          ref.read(personaListProvider.notifier).remove(persona.id);
+                          ref
+                              .read(personaListProvider.notifier)
+                              .remove(persona.id);
                         },
                       ),
                     ],
@@ -271,29 +281,30 @@ class _PersonaEditorScreenState extends ConsumerState<_PersonaEditorScreen> {
   }
 
   List<GenericEditorSection> get _config => [
-        GenericEditorSection(
-          title: 'section_basic_info'.tr(),
-          fields: [
-            GenericEditorField(
-              key: 'name',
-              label: 'label_name'.tr(),
-              placeholder: 'placeholder_enter_name'.tr(),
-            ),
-            GenericEditorField(
-              key: 'display_name',
-              label: 'Display Name',
-              placeholder: 'Name shown in lists',
-            ),
-            GenericEditorField(
-              key: 'prompt',
-              label: "${'tab_personas'.tr()} ${'label_char_prompt'.tr().replaceAll(RegExp(r'Character |Персонажа ', caseSensitive: false), '')}",
-              type: 'textarea',
-              rows: 12,
-              placeholder: 'placeholder_prompt_text'.tr(),
-            ),
-          ],
+    GenericEditorSection(
+      title: 'section_basic_info'.tr(),
+      fields: [
+        GenericEditorField(
+          key: 'name',
+          label: 'label_name'.tr(),
+          placeholder: 'placeholder_enter_name'.tr(),
         ),
-      ];
+        GenericEditorField(
+          key: 'display_name',
+          label: 'Display Name',
+          placeholder: 'Name shown in lists',
+        ),
+        GenericEditorField(
+          key: 'prompt',
+          label:
+              "${'tab_personas'.tr()} ${'label_char_prompt'.tr().replaceAll(RegExp(r'Character |Персонажа ', caseSensitive: false), '')}",
+          type: 'textarea',
+          rows: 12,
+          placeholder: 'placeholder_prompt_text'.tr(),
+        ),
+      ],
+    ),
+  ];
 
   @override
   void initState() {
@@ -321,7 +332,10 @@ class _PersonaEditorScreenState extends ConsumerState<_PersonaEditorScreen> {
 
     final imageStorage = await ref.read(imageStorageProvider.future);
     final bytes = await File(filePath).readAsBytes();
-    final savedPath = await imageStorage.saveAvatar('persona_$_personaId', bytes);
+    final savedPath = await imageStorage.saveAvatar(
+      'persona_$_personaId',
+      bytes,
+    );
     await FileImage(File(savedPath)).evict();
     final thumbPath = imageStorage.thumbnailPath(savedPath);
     if (thumbPath != null) await FileImage(File(thumbPath)).evict();
@@ -359,7 +373,9 @@ class _PersonaEditorScreenState extends ConsumerState<_PersonaEditorScreen> {
   @override
   Widget build(BuildContext context) {
     return GlazeScaffold(
-      title: widget.existing != null ? "${'action_edit'.tr()} ${'tab_personas'.tr()}" : "${'create_new'.tr()} ${'tab_personas'.tr()}",
+      title: widget.existing != null
+          ? "${'action_edit'.tr()} ${'tab_personas'.tr()}"
+          : "${'create_new'.tr()} ${'tab_personas'.tr()}",
       onBack: () => Navigator.of(context).pop(),
       body: GenericEditor(
         item: _item,

@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/transport/endpoint_normalizer.dart';
@@ -189,7 +189,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     if (isModalSheet) {
       Navigator.of(context).maybePop();
     } else {
-      context.go('/tools');
+      closeExpandedToolScreen(context, ref);
     }
   }
 

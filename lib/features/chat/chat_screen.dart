@@ -30,6 +30,7 @@ import '../../core/state/studio_turn_config_resolver.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart'
     show isDesktopLayout;
+import 'widgets/chat_column_width.dart';
 import 'widgets/message_actions.dart';
 import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
@@ -374,7 +375,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         headerBlurViaWebView: true,
         hideHeader: _isHeaderHidden,
         title: title,
-        titleWidget: _search.showSearch
+        // Desktop never swaps the header for a search field — it has a
+        // permanent one beside the character (see [_InlineChatSearchField]).
+        titleWidget: _search.showSearch && !isDesktopLayout(context)
             ? TextField(
                 controller: _search.searchController,
                 autofocus: true,
@@ -404,16 +407,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 },
               )
             : (character != null
-                  ? ChatHeader(
-                      character: character,
-                      sessionName: sessionName,
-                      currentSessionIndex: sessionIndex,
-                      onTapInfo: () => _showCharacterCard(charId),
-                      onTapAvatar:
-                          (character.avatarPath != null &&
-                              character.avatarPath!.isNotEmpty)
-                          ? () => _showAvatarViewer(character.avatarPath!)
-                          : null,
+                  ? Row(
+                      children: [
+                        Expanded(
+                          child: ChatHeader(
+                            character: character,
+                            sessionName: sessionName,
+                            currentSessionIndex: sessionIndex,
+                            onTapInfo: () => _showCharacterCard(charId),
+                            onTapAvatar:
+                                (character.avatarPath != null &&
+                                    character.avatarPath!.isNotEmpty)
+                                ? () => _showAvatarViewer(character.avatarPath!)
+                                : null,
+                          ),
+                        ),
+                        // Desktop has room for the search field to live in the
+                        // header permanently, so it does (Vue's
+                        // `.chat-search-inline-desktop`); the toggle button is
+                        // dropped below to match.
+                        if (isDesktopLayout(context))
+                          _InlineChatSearchField(search: _search),
+                      ],
                     )
                   : null),
         onBack: () {
@@ -453,6 +468,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         },
         actions: _search.showSearch
             ? const []
+            : isDesktopLayout(context)
+            ? const []
             : [
                 IconButton(
                   icon: const Icon(Icons.search),
@@ -491,30 +508,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               return const Center(child: GlazeSpinner());
             }
             _everBuiltBody = true;
-            return Stack(
-              children: [
-                _ChatBody(
-                  charId: charId,
-                  state: state,
-                  drawerCtrl: _drawerCtrl,
-                  search: _search,
-                  keyboardHeight: keyboardHeight,
-                  onScrollDirection: _onScrollDirection,
-                  virtualKeyboardSend: virtualKeyboardSend,
-                  enterToSend: enterToSend,
-                  targetMessageId: widget.targetMessageId,
-                  isHeaderHidden: _isHeaderHidden,
-                ),
-                if (awaitingTargetSession)
-                  const Positioned.fill(
-                    child: AbsorbPointer(
-                      child: ColoredBox(
-                        color: Colors.transparent,
-                        child: Center(child: GlazeSpinner()),
+            return ChatColumnWidth(
+              child: Stack(
+                children: [
+                  _ChatBody(
+                    charId: charId,
+                    state: state,
+                    drawerCtrl: _drawerCtrl,
+                    search: _search,
+                    keyboardHeight: keyboardHeight,
+                    onScrollDirection: _onScrollDirection,
+                    virtualKeyboardSend: virtualKeyboardSend,
+                    enterToSend: enterToSend,
+                    targetMessageId: widget.targetMessageId,
+                    isHeaderHidden: _isHeaderHidden,
+                  ),
+                  if (awaitingTargetSession)
+                    const Positioned.fill(
+                      child: AbsorbPointer(
+                        child: ColoredBox(
+                          color: Colors.transparent,
+                          child: Center(child: GlazeSpinner()),
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             );
           },
         ),
@@ -546,6 +565,71 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     if (resolved == null || resolved.isEmpty) return;
     ImageViewer.show(context, imageProvider: FileImage(File(resolved)));
   }
+}
+
+/// The always-visible search field the desktop chat header carries, in place
+/// of the phone layout's search toggle (Vue: `.chat-search-inline-desktop`).
+///
+/// Search mode follows the query — typing turns highlighting on, clearing the
+/// field turns it back off — so there is no open/close button at all.
+class _InlineChatSearchField extends ConsumerWidget {
+  final ChatSearchDelegate search;
+
+  const _InlineChatSearchField({required this.search});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return SizedBox(
+      width: 220,
+      child: ListenableBuilder(
+        listenable: search,
+        builder: (context, _) => TextField(
+          controller: search.searchController,
+          style: TextStyle(color: context.cs.onSurface, fontSize: 14),
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: 'search_messages'.tr(),
+            hintStyle: TextStyle(
+              fontSize: 14,
+              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+            prefixIcon: Icon(
+              Icons.search_rounded,
+              size: 18,
+              color: context.cs.primary,
+            ),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 34,
+              minHeight: 0,
+            ),
+            suffixIcon: search.searchQuery.isEmpty
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    onPressed: () {
+                      search.searchController.clear();
+                      search.closeSearch();
+                    },
+                  ),
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+          ),
+          onChanged: (q) => search.syncInlineQuery(
+            q,
+            ref.read(chatProvider(_charIdOf(context))).value?.messages ??
+                const [],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The field lives inside the chat route, so the id is right there in the URL.
+  String _charIdOf(BuildContext context) =>
+      GoRouterState.of(context).pathParameters['charId'] ?? '';
 }
 
 class _ChatBody extends ConsumerStatefulWidget {
@@ -1906,29 +1990,31 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                       opacity: widget.isHeaderHidden ? 0.0 : 1.0,
                       duration: kGlazeHeaderHideDuration,
                       curve: kGlazeHeaderHideCurve,
-                      child: NotificationListener<SizeChangedLayoutNotification>(
-                        onNotification: (n) {
-                          WidgetsBinding.instance.addPostFrameCallback(
-                            (_) => _checkHeight(),
-                          );
-                          return true;
-                        },
-                        child: SizeChangedLayoutNotifier(
-                          child: Container(
-                            key: _memoryCardKey,
-                            child: MemoryActivityCard(
-                              activity: memoryActivity,
-                              expanded: _showMemoryActivity,
-                              sessionId: widget.state.session?.id,
-                              onToggle: () {
-                                setState(() {
-                                  _showMemoryActivity = !_showMemoryActivity;
-                                });
-                              },
+                      child:
+                          NotificationListener<SizeChangedLayoutNotification>(
+                            onNotification: (n) {
+                              WidgetsBinding.instance.addPostFrameCallback(
+                                (_) => _checkHeight(),
+                              );
+                              return true;
+                            },
+                            child: SizeChangedLayoutNotifier(
+                              child: Container(
+                                key: _memoryCardKey,
+                                child: MemoryActivityCard(
+                                  activity: memoryActivity,
+                                  expanded: _showMemoryActivity,
+                                  sessionId: widget.state.session?.id,
+                                  onToggle: () {
+                                    setState(() {
+                                      _showMemoryActivity =
+                                          !_showMemoryActivity;
+                                    });
+                                  },
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
                     ),
                   ),
                 ),
@@ -2192,8 +2278,16 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                               }
                                             }
                                           : null,
-                                      onMagicDrawer: () => widget.drawerCtrl
-                                          .toggleDrawer(context),
+                                      // On desktop the Magic Drawer lives in
+                                      // the right sidebar and the bottom
+                                      // drawer is never rendered — the button
+                                      // would only animate an empty gap open,
+                                      // so hide it (Vue: `.desktop-mode
+                                      // #btn-magic { display: none }`).
+                                      onMagicDrawer: isDesktopLayout(context)
+                                          ? null
+                                          : () => widget.drawerCtrl
+                                                .toggleDrawer(context),
                                       onQuickReplies: () =>
                                           widget.drawerCtrl.toggleDrawer(
                                             context,

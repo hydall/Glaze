@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/widgets/responsive_grid.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
@@ -41,9 +42,7 @@ class PicksGrid extends ConsumerWidget {
           if (topPadding > 0)
             SliverToBoxAdapter(child: SizedBox(height: topPadding)),
           if (tabBar != null) SliverToBoxAdapter(child: tabBar!),
-          const SliverFillRemaining(
-            child: Center(child: GlazeSpinner()),
-          ),
+          const SliverFillRemaining(child: Center(child: GlazeSpinner())),
         ],
       ),
       error: (e, _) => CustomScrollView(
@@ -288,22 +287,25 @@ class _PicksFolderViewState extends State<_PicksFolderView> {
           if (foldersToDisplay.isNotEmpty)
             SliverPadding(
               padding: EdgeInsets.fromLTRB(16, _path.isEmpty ? 12 : 8, 16, 0),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 2 / 3.2,
+              sliver: SliverLayoutBuilder(
+                builder: (context, constraints) => SliverGrid(
+                  gridDelegate: ResponsiveGridDelegate(
+                    availableWidth: constraints.crossAxisExtent,
+                    minCellExtent: 180,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 2 / 3.2,
+                  ),
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    final item = foldersToDisplay[index];
+                    return _FolderCard(
+                      folder: item.folder,
+                      path: item.path,
+                      onTap: item.onTap,
+                      curatorName: item.curatorName,
+                    );
+                  }, childCount: foldersToDisplay.length),
                 ),
-                delegate: SliverChildBuilderDelegate((context, index) {
-                  final item = foldersToDisplay[index];
-                  return _FolderCard(
-                    folder: item.folder,
-                    path: item.path,
-                    onTap: item.onTap,
-                    curatorName: item.curatorName,
-                  );
-                }, childCount: foldersToDisplay.length),
               ),
             ),
           if (charactersToDisplay.isNotEmpty)
@@ -314,20 +316,23 @@ class _PicksFolderViewState extends State<_PicksFolderView> {
                 16,
                 widget.bottomPadding,
               ),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 2 / 3.2,
+              sliver: SliverLayoutBuilder(
+                builder: (context, constraints) => SliverGrid(
+                  gridDelegate: ResponsiveGridDelegate(
+                    availableWidth: constraints.crossAxisExtent,
+                    minCellExtent: 180,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 2 / 3.2,
+                  ),
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    final item = charactersToDisplay[index];
+                    return _PicksCharacterCard(
+                      character: item.character,
+                      path: item.path,
+                    );
+                  }, childCount: charactersToDisplay.length),
                 ),
-                delegate: SliverChildBuilderDelegate((context, index) {
-                  final item = charactersToDisplay[index];
-                  return _PicksCharacterCard(
-                    character: item.character,
-                    path: item.path,
-                  );
-                }, childCount: charactersToDisplay.length),
               ),
             ),
           if (charactersToDisplay.isEmpty &&

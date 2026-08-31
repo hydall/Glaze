@@ -2,6 +2,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'desktop_popup.dart';
+import '../shell/desktop/desktop_layout_provider.dart';
 import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
 import '../../features/settings/app_settings_provider.dart';
@@ -233,6 +235,41 @@ class GlazeBottomSheet {
       'Search filters materialized lists only — a lazy builder has no labels '
       'to match against.',
     );
+    // Desktop: a plain list of actions is a menu, not a sheet. Vue routed
+    // exactly this shape through `DesktopPopup`; anything richer (cards,
+    // sessions, an input, a custom child, search) still gets the real sheet.
+    final isPlainMenu =
+        items != null &&
+        items.isNotEmpty &&
+        itemBuilder == null &&
+        itemsAsCards == null &&
+        sessionItems == null &&
+        cardItems == null &&
+        cardsBuilder == null &&
+        bigInfo == null &&
+        input == null &&
+        child == null &&
+        headerAction == null &&
+        !searchable &&
+        items.every((i) => i.actions.isEmpty);
+    if (isPlainMenu && isDesktopLayout(context)) {
+      return showDesktopPopup<T>(
+        context,
+        title: title,
+        entries: [
+          for (final item in items)
+            DesktopPopupEntry(
+              label: item.label,
+              icon: item.icon,
+              iconColor: item.iconColor,
+              hint: item.hint,
+              isDestructive: item.isDestructive,
+              onTap: item.onTap,
+            ),
+        ],
+      );
+    }
+
     return showModalBottomSheet<T>(
       context: context,
       useRootNavigator: true,

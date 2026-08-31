@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/widgets/responsive_grid.dart';
 import '../../../core/models/gallery_entry.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/utils/platform_paths.dart';
@@ -120,10 +121,13 @@ class CharacterGalleryView extends ConsumerWidget {
       padding: const EdgeInsets.all(8),
       shrinkWrap: shrinkWrap,
       physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
+      gridDelegate: ResponsiveGridDelegate(
+        availableWidth: MediaQuery.sizeOf(context).width,
+        minCellExtent: 140,
+        childAspectRatio: 1,
         crossAxisSpacing: 4,
         mainAxisSpacing: 4,
+        minColumns: 3,
       ),
       itemCount: entries.length,
       itemBuilder: (context, index) => GalleryTile(
@@ -135,7 +139,10 @@ class CharacterGalleryView extends ConsumerWidget {
 
     return Column(
       mainAxisSize: MainAxisSize.min,
-      children: [header, shrinkWrap ? grid : Expanded(child: grid)],
+      children: [
+        header,
+        shrinkWrap ? grid : Expanded(child: grid),
+      ],
     );
   }
 
@@ -156,7 +163,11 @@ class CharacterGalleryView extends ConsumerWidget {
       ref.invalidate(galleryProvider(charId));
     } catch (e) {
       if (context.mounted) {
-        GlazeErrorDialog.show(context, e, prefix: '${'settings_err_failed'.tr()} ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: '${'settings_err_failed'.tr()} ',
+        );
       }
     }
   }
@@ -301,7 +312,11 @@ Future<void> setGalleryEntryAsAvatar(
     if (context.mounted) GlazeToast.show(context, 'import_success'.tr());
   } catch (e) {
     if (context.mounted) {
-      GlazeErrorDialog.show(context, e, prefix: '${'settings_err_failed'.tr()} ');
+      GlazeErrorDialog.show(
+        context,
+        e,
+        prefix: '${'settings_err_failed'.tr()} ',
+      );
     }
   }
 }

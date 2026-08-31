@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,26 +7,39 @@ import '../../../core/platform/haptics.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../features/chat_history/chat_history_list.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/hover_glow.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../shell_navigation_provider.dart';
 import 'desktop_floating_provider.dart';
 import 'desktop_glossary_popup.dart';
 import 'desktop_layout_provider.dart';
+import 'desktop_sidebar_surface.dart';
 import 'sidebar_drag_handle.dart';
 import 'sidebar_resizer.dart';
 
+/// Branch indices of the shell's [StatefulShellRoute], mirrored here because
+/// the sidebar sits outside the shell (see [shellNavigationProvider]).
+const int _charactersBranch = 1;
+const int _menuBranch = 3;
+
 class DesktopLeftSidebar extends ConsumerStatefulWidget {
+  /// Which entry reads as active: `characters`, `chat`, `tools`, `menu`,
+  /// `dialogs`, or empty for none. Supplied by `DesktopShell` from the route.
   final String currentView;
-  final void Function(String)? onViewChanged;
+
+  /// Width to render at. Normally the controller's stored width, but the shell
+  /// shrinks it when the window cannot afford both sidebars plus a usable
+  /// middle column — otherwise an 800px window left ~200px for the content.
+  final double width;
 
   const DesktopLeftSidebar({
     super.key,
     this.currentView = '',
-    this.onViewChanged,
+    required this.width,
   });
 
   @override
-  ConsumerState<DesktopLeftSidebar> createState() =>
-      _DesktopLeftSidebarState();
+  ConsumerState<DesktopLeftSidebar> createState() => _DesktopLeftSidebarState();
 }
 
 class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
@@ -55,78 +66,111 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final controller = ref.watch(leftSidebarControllerProvider);
-
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) => _buildContent(context, controller),
+  void _openCharacters() {
+    _registerCharactersTabTap();
+    goShellBranch(
+      context,
+      ref,
+      _charactersBranch,
+      fallbackLocation: '/characters',
     );
   }
 
-  Widget _buildContent(BuildContext context, LeftSidebarController controller) {
-    final collapsed = controller.collapsed;
+  /// The Vue sidebar's "New Chat" opened a character picker; the closest
+  /// equivalent here is the characters branch reset to its list, from which a
+  /// tap starts a fresh session.
+  void _startNewChat() {
+    goShellBranch(
+      context,
+      ref,
+      _charactersBranch,
+      fallbackLocation: '/characters',
+    );
+  }
 
-    final sidebarItems = [
+  void _toggleGlossary() {
+    if (isDesktopLayout(context)) {
+      ref.read(glossaryPopupVisibleProvider.notifier).update((v) => !v);
+    } else {
+      context.go('/menu/glossary');
+    }
+  }
+
+  void _openMenu() {
+    if (isDesktopLayout(context)) {
+      ref.read(desktopFloatingProvider).open('menu');
+    } else {
+      goShellBranch(context, ref, _menuBranch, fallbackLocation: '/menu');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = ref.watch(leftSidebarControllerProvider);
+    final glossaryOpen = ref.watch(glossaryPopupVisibleProvider);
+
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => _buildContent(context, controller, glossaryOpen),
+    );
+  }
+
+  Widget _buildContent(
+    BuildContext context,
+    LeftSidebarController controller,
+    bool glossaryOpen,
+  ) {
+    final collapsed = widget.width < kSidebarCollapseThreshold;
+
+    // Order matches the Vue sidebar in BOTH modes: the two primary entries on
+    // top, the chat list in the middle, the two secondary entries at the
+    // bottom. Previously the expanded layout moved Characters to the bottom
+    // and dropped New Chat entirely.
+    final top = <_NavItem>[
       _NavItem(
-        id: 'characters',
         label: 'tab_characters'.tr(),
         icon: Icons.people_rounded,
         active: widget.currentView == 'characters',
-        onTap: () {
-          _registerCharactersTabTap();
-          widget.onViewChanged?.call('characters');
-          context.go('/characters');
-        },
+        prominent: true,
+        onTap: _openCharacters,
       ),
       _NavItem(
-        id: 'new-chat',
         label: 'btn_new_chat'.tr(),
         icon: Icons.add_comment_rounded,
-        onTap: () => context.go('/characters'),
+        accent: true,
+        onTap: _startNewChat,
       ),
+    ];
+    final bottom = <_NavItem>[
       _NavItem(
-        id: 'glossary',
         label: 'menu_glossary'.tr(),
         icon: Icons.info_outline_rounded,
-        onTap: () {
-          if (isDesktopLayout(context)) {
-            ref.read(glossaryPopupVisibleProvider.notifier).update((v) => !v);
-          } else {
-            context.go('/menu/glossary');
-          }
-        },
+        active: glossaryOpen,
+        onTap: _toggleGlossary,
       ),
       _NavItem(
-        id: 'more',
         label: 'tab_more'.tr(),
         icon: Icons.menu_rounded,
         active: widget.currentView == 'menu',
-        onTap: () {
-          if (isDesktopLayout(context)) {
-            ref.read(desktopFloatingProvider).open('menu');
-          } else {
-            widget.onViewChanged?.call('menu');
-            context.go('/menu');
-          }
-        },
+        onTap: _openMenu,
       ),
     ];
 
-    return Container(
-      width: controller.width,
-      color: Colors.black.withValues(alpha: 0.2),
+    return DesktopSidebarSurface(
+      width: widget.width,
+      edge: SidebarEdge.left,
+      animate: !controller.dragging,
       child: Stack(
         children: [
           if (collapsed)
-            _buildCollapsed(context, sidebarItems)
+            _buildCollapsed(context, top, bottom)
           else
-            _buildExpanded(context, sidebarItems),
+            _buildExpanded(context, top, bottom),
           Positioned(
             top: 0,
             bottom: 0,
-            right: 0,
+            // Straddles the divider instead of eating into the content.
+            right: -SidebarDragHandle.width / 2,
             child: SidebarDragHandle.left(leftController: controller),
           ),
         ],
@@ -134,106 +178,83 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
     );
   }
 
-  Widget _buildExpanded(BuildContext context, List<_NavItem> items) {
+  Widget _buildExpanded(
+    BuildContext context,
+    List<_NavItem> top,
+    List<_NavItem> bottom,
+  ) {
     return Material(
       type: MaterialType.transparency,
       child: Column(
         children: [
-          // Search bar — no outer padding, flush with sidebar edges
-          TextField(
-            controller: _searchCtrl,
-            onChanged: (v) => setState(() => _searchQuery = v),
-            textInputAction: TextInputAction.search,
-            cursorColor: context.cs.primary,
-            style: Theme.of(context).textTheme.bodyMedium,
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'search_dialogs'.tr(),
-              hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: context.cs.onSurfaceVariant,
-              ),
-              prefixIcon: Icon(
-                Icons.search_rounded,
-                size: 18,
-                color: context.cs.primary,
-              ),
-              prefixIconConstraints: const BoxConstraints(
-                minWidth: 40,
-                minHeight: 0,
-              ),
-              suffixIcon: _searchQuery.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.close_rounded, size: 16),
-                      onPressed: () {
-                        _searchCtrl.clear();
-                        setState(() => _searchQuery = '');
-                      },
-                    )
-                  : null,
-              filled: true,
-              fillColor: Colors.transparent,
-              border: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
-            ),
-          ),
+          for (final item in top) _SidebarButton(item: item),
+          Divider(height: 1, color: context.cs.outlineVariant),
+          _buildSearchField(context),
           Divider(height: 1, color: context.cs.outlineVariant),
           Expanded(child: ChatHistoryList(searchQuery: _searchQuery)),
           Divider(height: 1, color: context.cs.outlineVariant),
-          // Characters, Glossary, More — stacked vertically
-          _HoverGlowButton(
-            icon: items[0].icon,
-            label: items[0].label,
-            active: items[0].active,
-            onTap: items[0].onTap,
-            prominent: true,
-          ),
-          _HoverGlowButton(
-            icon: items[2].icon,
-            label: items[2].label,
-            active: items[2].active,
-            onTap: items[2].onTap,
-          ),
-          _HoverGlowButton(
-            icon: items[3].icon,
-            label: items[3].label,
-            active: items[3].active,
-            onTap: items[3].onTap,
-          ),
+          for (final item in bottom) _SidebarButton(item: item),
           const SizedBox(height: 4),
         ],
       ),
     );
   }
 
-  Widget _buildCollapsed(BuildContext context, List<_NavItem> items) {
+  Widget _buildSearchField(BuildContext context) {
+    return TextField(
+      controller: _searchCtrl,
+      onChanged: (v) => setState(() => _searchQuery = v),
+      textInputAction: TextInputAction.search,
+      cursorColor: context.cs.primary,
+      style: Theme.of(context).textTheme.bodyMedium,
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: 'search_dialogs'.tr(),
+        hintStyle: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: context.cs.onSurfaceVariant),
+        prefixIcon: Icon(
+          Icons.search_rounded,
+          size: 18,
+          color: context.cs.primary,
+        ),
+        prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 0),
+        suffixIcon: _searchQuery.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.close_rounded, size: 16),
+                onPressed: () {
+                  _searchCtrl.clear();
+                  setState(() => _searchQuery = '');
+                },
+              )
+            : null,
+        filled: true,
+        fillColor: Colors.transparent,
+        border: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCollapsed(
+    BuildContext context,
+    List<_NavItem> top,
+    List<_NavItem> bottom,
+  ) {
     return Column(
       children: [
         const SizedBox(height: 8),
-        ...items.sublist(0, 2).map(
-          (item) => _CollapsedIcon(
-            icon: item.icon,
-            label: item.label,
-            active: item.active,
-            onTap: item.onTap,
-          ),
-        ),
+        for (final item in top) _CollapsedIcon(item: item),
         const SizedBox(height: 4),
         Divider(height: 1, color: context.cs.outlineVariant),
-        Expanded(child: ChatHistoryList(collapsed: true)),
+        const Expanded(child: ChatHistoryList(collapsed: true)),
         Divider(height: 1, color: context.cs.outlineVariant),
-        ...items.sublist(2).map(
-          (item) => _CollapsedIcon(
-            icon: item.icon,
-            label: item.label,
-            active: item.active,
-            onTap: item.onTap,
-          ),
-        ),
+        for (final item in bottom) _CollapsedIcon(item: item),
         const SizedBox(height: 8),
       ],
     );
@@ -241,103 +262,64 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
 }
 
 class _NavItem {
-  final String id;
   final String label;
   final IconData icon;
   final bool active;
   final VoidCallback onTap;
 
-  const _NavItem({
-    required this.id,
-    required this.label,
-    required this.icon,
-    this.active = false,
-    required this.onTap,
-  });
-}
-
-/// Expanded sidebar button with mouse-tracking radial glow (ported from v-hover-glow).
-class _HoverGlowButton extends StatefulWidget {
-  final IconData icon;
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-  // prominent = true  → onSurface (white) when inactive, like desktop-chars-btn
-  // prominent = false → onSurfaceVariant (gray) when inactive, like desktop-more-btn
+  /// Rendered in full-strength text when idle (Vue's `.desktop-chars-btn`)
+  /// rather than the muted tone used by the secondary entries.
   final bool prominent;
 
-  const _HoverGlowButton({
-    required this.icon,
-    required this.label,
-    this.active = false,
-    required this.onTap,
-    this.prominent = false,
-  });
+  /// Rendered in the accent colour when idle (Vue's `.desktop-new-chat-btn`).
+  final bool accent;
 
-  @override
-  State<_HoverGlowButton> createState() => _HoverGlowButtonState();
+  const _NavItem({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.active = false,
+    this.prominent = false,
+    this.accent = false,
+  });
 }
 
-class _HoverGlowButtonState extends State<_HoverGlowButton> {
-  Offset? _glowPos;
-  bool _hovered = false;
+Color _itemColor(BuildContext context, _NavItem item) {
+  if (item.active || item.accent) return context.cs.primary;
+  return item.prominent ? context.cs.onSurface : context.cs.onSurfaceVariant;
+}
+
+/// Expanded sidebar row with the mouse-tracking glow (ported from v-hover-glow).
+class _SidebarButton extends StatelessWidget {
+  final _NavItem item;
+
+  const _SidebarButton({required this.item});
 
   @override
   Widget build(BuildContext context) {
-    final primary = context.cs.primary;
-    final inactive =
-        widget.prominent ? context.cs.onSurface : context.cs.onSurfaceVariant;
-    final color = widget.active ? primary : inactive;
+    final color = _itemColor(context, item);
+    final textTheme = Theme.of(context).textTheme;
 
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onHover: (e) => setState(() {
-        _glowPos = e.localPosition;
-        _hovered = true;
-      }),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: ClipRect(
-          child: SizedBox(
-            height: 40,
-            child: Stack(
-              fit: StackFit.expand,
+    return GestureDetector(
+      onTap: item.onTap,
+      child: HoverGlow(
+        child: SizedBox(
+          height: 40,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
               children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  color: _hovered
-                      ? context.cs.onSurface.withValues(alpha: 0.05)
-                      : Colors.transparent,
-                ),
-                AnimatedOpacity(
-                  opacity: _hovered && _glowPos != null ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 400),
-                  curve: Curves.ease,
-                  child: CustomPaint(
-                    painter: _glowPos != null
-                        ? _RadialGlowPainter(
-                            position: _glowPos!,
-                            color: primary,
-                          )
-                        : null,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Icon(widget.icon, size: 18, color: color),
-                      const SizedBox(width: 10),
-                      Text(
-                        widget.label,
-                        style: (widget.prominent
-                                ? Theme.of(context).textTheme.labelLarge
-                                : Theme.of(context).textTheme.labelMedium)
+                Icon(item.icon, size: 18, color: color),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    item.label,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        (item.prominent || item.accent
+                                ? textTheme.labelLarge
+                                : textTheme.labelMedium)
                             ?.copyWith(color: color),
-                      ),
-                    ],
                   ),
                 ),
               ],
@@ -349,114 +331,42 @@ class _HoverGlowButtonState extends State<_HoverGlowButton> {
   }
 }
 
-class _RadialGlowPainter extends CustomPainter {
-  final Offset position;
-  final Color color;
+class _CollapsedIcon extends StatelessWidget {
+  final _NavItem item;
 
-  const _RadialGlowPainter({required this.position, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final shader = ui.Gradient.radial(
-      position,
-      200.0,
-      [
-        color.withValues(alpha: 0.07),
-        color.withValues(alpha: 0.04),
-        color.withValues(alpha: 0.015),
-        color.withValues(alpha: 0.0),
-      ],
-      [0.0, 0.38, 0.68, 1.0],
-    );
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..shader = shader,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_RadialGlowPainter old) =>
-      old.position != position || old.color != color;
-}
-
-class _CollapsedIcon extends StatefulWidget {
-  final IconData icon;
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  const _CollapsedIcon({
-    required this.icon,
-    required this.label,
-    this.active = false,
-    required this.onTap,
-  });
-
-  @override
-  State<_CollapsedIcon> createState() => _CollapsedIconState();
-}
-
-class _CollapsedIconState extends State<_CollapsedIcon> {
-  Offset? _glowPos;
-  bool _hovered = false;
+  const _CollapsedIcon({required this.item});
 
   @override
   Widget build(BuildContext context) {
-    final primary = context.cs.primary;
+    final color = _itemColor(context, item);
 
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onHover: (e) => setState(() {
-        _glowPos = e.localPosition;
-        _hovered = true;
-      }),
-      onExit: (_) => setState(() => _hovered = false),
+    return Tooltip(
+      message: item.label,
+      preferBelow: false,
       child: GestureDetector(
-        onTap: widget.onTap,
-        child: Tooltip(
-          message: widget.label,
-          preferBelow: false,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 48,
-                height: 48,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (widget.active)
-                      ColoredBox(color: primary.withValues(alpha: 0.15)),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      color: _hovered
-                          ? context.cs.onSurface.withValues(alpha: 0.05)
-                          : Colors.transparent,
+        onTap: item.onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          // The active tint sits *under* the glow: putting it inside HoverGlow
+          // would make it the child that paints over the light pool.
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (item.active)
+                    ColoredBox(
+                      color: context.cs.primary.withValues(alpha: 0.15),
                     ),
-                    AnimatedOpacity(
-                      opacity: _hovered && _glowPos != null ? 1.0 : 0.0,
-                      duration: const Duration(milliseconds: 400),
-                      curve: Curves.ease,
-                      child: CustomPaint(
-                        painter: _glowPos != null
-                            ? _RadialGlowPainter(
-                                position: _glowPos!,
-                                color: primary,
-                              )
-                            : null,
-                      ),
+                  HoverGlow(
+                    child: Center(
+                      child: Icon(item.icon, size: 22, color: color),
                     ),
-                    Center(
-                      child: Icon(
-                        widget.icon,
-                        size: 22,
-                        color:
-                            widget.active ? primary : context.cs.onSurface,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

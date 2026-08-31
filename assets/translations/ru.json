@@ -264,6 +264,7 @@
   "hint_create_new": "Создать нового персонажа с нуля",
   "action_add_script": "Добавить скрипт",
   "action_import": "Импортировать из файла",
+  "import_unsupported_file": "Неподдерживаемый тип файла",
   "hint_import_file": "Загрузить существующего персонажа из файла json/png",
   "action_import_by_link": "Импортировать",
   "action_import_janitor": "Импорт по ссылке",

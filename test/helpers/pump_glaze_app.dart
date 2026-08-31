@@ -34,6 +34,12 @@ Future<void> pumpGlazeApp(
 }) async {
   SharedPreferences.setMockInitialValues({
     'onboarding_complete': true,
+    // The default 800x600 test surface is past the 768px desktop breakpoint, so
+    // without this the app would build its three-column desktop shell — which
+    // is not what route-level smoke tests are exercising, and which leaves the
+    // middle column too narrow for screens designed against a phone width.
+    // Desktop-specific behaviour is covered by desktop_layout_test.dart.
+    'gz_force_mobile_layout': true,
     ...prefsSeed,
   });
 

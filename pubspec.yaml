@@ -46,6 +46,8 @@ dependencies:
   palette_generator: ^0.3.3+7
   flutter_localizations:
     sdk: flutter
+  desktop_drop: ^0.8.3
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:

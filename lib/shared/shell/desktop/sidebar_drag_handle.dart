@@ -4,9 +4,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/state/shared_prefs_provider.dart';
 import 'sidebar_resizer.dart';
 
+/// The column-resize grip that lives on a sidebar's inner edge.
+///
+/// Ported from the Vue `.sidebar-drag-handle`: invisible until hovered or
+/// dragged, 8px wide, and straddling the divider rather than eating into the
+/// sidebar's content. Double-clicking it toggles collapse, which the Vue app
+/// could only do by dragging past the threshold.
 class SidebarDragHandle extends ConsumerStatefulWidget {
   final LeftSidebarController? leftController;
   final RightSidebarController? rightController;
+
+  static const double width = 8;
 
   const SidebarDragHandle.left({super.key, required this.leftController})
     : rightController = null;
@@ -23,6 +31,7 @@ class _SidebarDragHandleState extends ConsumerState<SidebarDragHandle> {
   bool _startCollapsed = false;
   double _accumulatedDx = 0;
   bool _dragging = false;
+  bool _hovered = false;
 
   void _onPointerDown(PointerDownEvent event) {
     if (widget.leftController != null) {
@@ -32,7 +41,9 @@ class _SidebarDragHandleState extends ConsumerState<SidebarDragHandle> {
       _startCollapsed = widget.rightController!.collapsed;
     }
     _accumulatedDx = 0;
-    _dragging = true;
+    widget.leftController?.beginDrag();
+    widget.rightController?.beginDrag();
+    setState(() => _dragging = true);
   }
 
   void _onPointerMove(PointerMoveEvent event) {
@@ -48,28 +59,50 @@ class _SidebarDragHandleState extends ConsumerState<SidebarDragHandle> {
 
   Future<void> _onPointerUp(PointerUpEvent event) async {
     if (!_dragging) return;
-    _dragging = false;
+    setState(() => _dragging = false);
+    widget.leftController?.endDrag();
+    widget.rightController?.endDrag();
     final prefs = await ref.read(sharedPreferencesProvider.future);
-    if (widget.leftController != null) {
-      widget.leftController!.finishResize(prefs);
-    } else if (widget.rightController != null) {
-      widget.rightController!.finishResize(prefs);
-    }
+    if (!mounted) return;
+    widget.leftController?.finishResize(prefs);
+    widget.rightController?.finishResize(prefs);
+  }
+
+  Future<void> _onDoubleTap() async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    if (!mounted) return;
+    widget.leftController?.toggleCollapse(prefs);
+    widget.rightController?.toggleCollapse(prefs);
   }
 
   @override
   Widget build(BuildContext context) {
+    final lit = _hovered || _dragging;
     return MouseRegion(
       cursor: SystemMouseCursors.resizeColumn,
-      child: Listener(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onPointerDown: _onPointerDown,
-        onPointerMove: _onPointerMove,
-        onPointerUp: _onPointerUp,
-        child: Container(
-          width: 6,
-          height: double.infinity,
-          color: Colors.white.withValues(alpha: 0.03),
+        onDoubleTap: _onDoubleTap,
+        child: Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: _onPointerDown,
+          onPointerMove: _onPointerMove,
+          onPointerUp: _onPointerUp,
+          onPointerCancel: (_) {
+            widget.leftController?.endDrag();
+            widget.rightController?.endDrag();
+            setState(() => _dragging = false);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: SidebarDragHandle.width,
+            height: double.infinity,
+            color: lit
+                ? Colors.white.withValues(alpha: 0.2)
+                : Colors.transparent,
+          ),
         ),
       ),
     );
