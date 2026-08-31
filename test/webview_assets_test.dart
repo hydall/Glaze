@@ -831,11 +831,11 @@ void main() {
     test('a style marker is rendered by an inline-only pass', () {
       // A marker is a <span>. A <p> inside one is markup the browser throws
       // straight back out, which used to leave a coloured marker showing as
-      // empty text. Its content goes through formatInlineRaw, which cannot
+      // empty text. Its content goes through formatInlineMasked, which cannot
       // emit a paragraph: it never reaches the block pass at all.
       expect(
         formatterInlineSyntaxJs,
-        contains('export function formatInlineRaw('),
+        contains('export function formatInlineMasked('),
       );
       expect(formatterInlineSyntaxJs, isNot(contains('block_syntax.js')));
       expect(formatterTextFormatJs, contains('processRichText'));
@@ -859,28 +859,32 @@ void main() {
       );
     });
 
-    test('a style marker only holds markup it opened and closed itself', () {
-      // `*` before a card and `*` somewhere inside it are two asterisks with
-      // a card between them, not an emphasis run. Holding that span hands the
-      // card to the inline pass, which drops its <style> and lets the browser
-      // throw its block elements back out of the <em> as siblings.
+    test('style markers are taken from a run, never from the message', () {
+      // The one pass that used to read markdown out of a string with live
+      // HTML in it. A `*` before a card and a `*` inside it matched as one
+      // emphasis run over the whole card; the same scan reached inside a
+      // <pre> the block pass never formats and lost what it held there.
+      // It now runs in formatRun, where the string is one container's text
+      // with its elements already masked — so a marker cannot leave the
+      // container it was written in, and the tree enforces that, not a count.
+      expect(formatterFormatterJs, isNot(contains('extractMarkers')));
       final body = _extractBlockBody(
-        formatterProtectJs,
-        formatterProtectJs.indexOf('function holdsOwnMarkup('),
+        formatterDomFormatJs,
+        formatterDomFormatJs.indexOf('function formatRun('),
       );
-      expect(body, contains('VOID_ELEMENTS.has(name)'));
-      expect(body, contains('open.lastIndexOf(name)'));
-      expect(body, contains('return open.length === 0;'));
-      expect(
-        formatterProtectJs,
-        contains('if (!holdsOwnMarkup(raw, isMarkup)) return segment;'),
-      );
-      // A stylesheet is not emphasis: its body is masked for this scan and a
-      // held segment is never unmasked, so a marker over one loses the CSS.
-      expect(
-        formatterProtectJs,
-        contains('if (CODE_PLACEHOLDER.test(raw)) return segment;'),
-      );
+      final masked = body.indexOf(r'`${SENTINEL}E_${kept.length - 1}${SENTINEL}`');
+      final markers = body.indexOf('extractMarkers(masked, markers)');
+      final block = body.indexOf('applyBlockSyntax(staged');
+      expect(masked, isNonNegative);
+      expect(markers, greaterThan(masked));
+      // Before the block pass, not per line: a colour marker may wrap more
+      // than one, and applyBlockSyntax formats a line at a time.
+      expect(block, greaterThan(markers));
+
+      // Nothing masks tags for a markdown pass any more, because no markdown
+      // pass ever sees one.
+      expect(formatterHtmlScanJs, isNot(contains('export function maskTags(')));
+      expect(formatterProtectJs, isNot(contains('holdsOwnMarkup')));
     });
 
     test('nested guillemets cannot consume styled-segment placeholders', () {
@@ -902,7 +906,7 @@ void main() {
     test('the message is parsed before anything formats its text', () {
       final protect = formatterFormatterJs.indexOf('protectRegions(source');
       final parse = formatterFormatterJs.indexOf(
-        'parseHtml(code.unmask(escapeProseTags(',
+        'parseHtml(code.unmask(escapeProseTags(code.masked, styled))',
       );
       final format = formatterFormatterJs.indexOf('formatContainer(tree');
       expect(protect, isNonNegative);
@@ -926,22 +930,12 @@ void main() {
       // closing tag — not how many times the name occurs.
       final body = _extractBlockBody(
         formatterHtmlScanJs,
-        formatterHtmlScanJs.indexOf('export function markupTagTest('),
+        formatterHtmlScanJs.indexOf('export function escapeProseTags('),
       );
       expect(body, contains('isKnownElement(name)'));
       expect(body, contains('styled.has(name)'));
       expect(body, contains('opened.has(name) && closed.has(name)'));
-
-      // One answer, two callers: the escape and the marker balance check both
-      // ask `markupTagTest`, so neither can reason about a tree the parser
-      // will not build.
-      final escape = _extractBlockBody(
-        formatterHtmlScanJs,
-        formatterHtmlScanJs.indexOf('export function escapeProseTags('),
-      );
-      expect(escape, contains('markupTagTest(text, styledNames)'));
-      expect(escape, contains(r"tag.replace(/</g, '&lt;')"));
-      expect(formatterProtectJs, contains('markupTagTest(text, styledNames)'));
+      expect(body, contains(r"tag.replace(/</g, '&lt;')"));
     });
 
     test('a void element needs no exemption from anything', () {
@@ -961,17 +955,17 @@ void main() {
     });
 
     test('a <style> or <script> body is never read as prose', () {
-      // Both string passes before the parse would misread code: a `*` in a
-      // selector is not an italic marker, and `i<n; i++) { if (i>` in a
-      // script is not a tag. They are masked for the length of both.
+      // The tag scan before the parse would misread code — `i<n; i++) { if (i>`
+      // inside a script is a tag to it, and escaping that corrupts the script.
+      // The body is masked for its length and put back for the parser. The
+      // markdown passes need no such guard: they run after the parse, and
+      // <style> / <script> are OPAQUE to them.
       final mask = formatterFormatterJs.indexOf('maskCodeElements(staged)');
-      final markers = formatterFormatterJs.indexOf('extractMarkers(code.masked');
       final escape = formatterFormatterJs.indexOf(
-        'code.unmask(escapeProseTags(staged, styled))',
+        'code.unmask(escapeProseTags(code.masked, styled))',
       );
       expect(mask, isNonNegative);
-      expect(markers, greaterThan(mask));
-      expect(escape, greaterThan(markers));
+      expect(escape, greaterThan(mask));
       expect(
         formatterProtectJs,
         contains(r'/<(style|script)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi'),
@@ -990,7 +984,6 @@ void main() {
         formatterDomFormatJs,
         contains(r'`${SENTINEL}E_${kept.length - 1}${SENTINEL}`'),
       );
-      expect(formatterHtmlScanJs, contains('export function maskTags('));
     });
 
     test('inline code is protected before the message is parsed', () {

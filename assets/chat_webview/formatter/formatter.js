@@ -22,7 +22,6 @@ import { escapeProseTags, styledElementNames } from './html_scan.js';
 import {
   ANY_PLACEHOLDER,
   createStore,
-  extractMarkers,
   maskCodeElements,
   protectRegions,
 } from './protect.js';
@@ -32,7 +31,6 @@ import {
   parseHtml,
   replacePlaceholders,
 } from './dom_format.js';
-import { formatInlineRaw } from './inline_syntax.js';
 import { renderImageBlock } from './image_blocks.js';
 
 export {
@@ -94,32 +92,21 @@ export class Formatter {
       .trim();
 
     const regions = createStore('P');
-    const markers = createStore('S');
 
-    let staged = protectRegions(source, { store: regions, inReasoning });
-    // `<style>` and `<script>` bodies are code, and both string passes below
-    // would read them as prose: a `*` in a selector is not an italic marker,
-    // and `i<n; i++) { if (i>` in a script is not a tag. They are masked for
-    // the length of both, and put back for the parser.
+    const staged = protectRegions(source, { store: regions, inReasoning });
+    // `<style>` and `<script>` bodies are code, and the tag scan below would
+    // read them as prose: `i<n; i++) { if (i>` in a script is a tag to it, and
+    // escaping that corrupts the script. They are masked for its length and
+    // put back for the parser.
     const styled = styledElementNames(staged);
     const code = maskCodeElements(staged);
-    // Style markers come out before the parse, because html_to_markdown writes
-    // rich content inside them and a parsed marker is two text nodes with an
-    // element between them. `styled` goes along so the balance check there
-    // reads the message's tags exactly as `escapeProseTags` will below — the
-    // `<style>` bodies that declare them are masked out of `code.masked`.
-    staged = extractMarkers(code.masked, markers, styled);
 
-    const tree = parseHtml(code.unmask(escapeProseTags(staged, styled)), document);
+    // Nothing has read this string as markdown. The parse comes first, and
+    // every markdown pass — style markers included — runs in phase B, on a run
+    // of one container's text with its elements already masked out.
+    const tree = parseHtml(code.unmask(escapeProseTags(code.masked, styled)), document);
 
-    formatContainer(tree, {
-      isRoot: true,
-      allowBlocks: true,
-      inlineContext: {
-        markers,
-        inner: (raw, skipQuotes = true) => formatInlineRaw(raw, { skipQuotes }),
-      },
-    });
+    formatContainer(tree, { isRoot: true, allowBlocks: true });
 
     let imageIndex = 0;
     replacePlaceholders(tree, 'P', (index) => {

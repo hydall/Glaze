@@ -15,9 +15,9 @@
 //     paragraph wrapped around someone's card is what breaks `~` and `+`.
 
 import { isKnownElement, RAW_TEXT_ELEMENTS } from './html_scan.js';
-import { SENTINEL } from './protect.js';
+import { SENTINEL, createStore, extractMarkers } from './protect.js';
 import { applyBlockSyntax } from './block_syntax.js';
-import { applyInlineSyntax, escapeText } from './inline_syntax.js';
+import { applyInlineSyntax, escapeText, formatInlineMasked } from './inline_syntax.js';
 
 /** Elements that flow with the text around them, so they join its run. */
 const PHRASING = new Set([
@@ -145,10 +145,19 @@ function formatRun(run, container, context) {
 
   if (!masked.trim()) return;
 
-  const inline = (line) => applyInlineSyntax(line, context.inlineContext);
+  // Style markers come out of the run before the block pass splits it into
+  // lines, because a colour marker may wrap more than one. This is the only
+  // place they are taken, and by the time the run exists there is no markup
+  // in the string to take by accident: text is escaped, elements are `E_n`.
+  // A marker therefore holds what the author already had inside one container
+  // — never a block element, never the inside of a `<pre>`.
+  const markers = createStore('S');
+  const staged = extractMarkers(masked, markers);
+
+  const inline = (line) => applyInlineSyntax(line, { markers, inner: formatInlineMasked });
   const html = context.allowBlocks
-    ? applyBlockSyntax(masked, { inline, paragraphs: context.paragraphs })
-    : inline(masked).replace(/\n/g, '<br>');
+    ? applyBlockSyntax(staged, { inline, paragraphs: context.paragraphs })
+    : inline(staged).replace(/\n/g, '<br>');
 
   // Detach the run before the formatted tree is built: the elements it kept
   // are moved into that tree, and removing "what the run used to be"
@@ -166,14 +175,13 @@ function formatRun(run, container, context) {
  * Formats the text inside one container: first its element children (each in
  * its own context), then the runs of text between them.
  */
-export function formatContainer(container, { isRoot, allowBlocks, inlineContext }) {
+export function formatContainer(container, { isRoot, allowBlocks }) {
   for (const child of Array.from(container.children)) {
     const name = child.localName;
     if (OPAQUE.has(name)) continue;
     formatContainer(child, {
       isRoot: false,
       allowBlocks: canHoldBlocks(name),
-      inlineContext,
     });
   }
 
@@ -194,7 +202,6 @@ export function formatContainer(container, { isRoot, allowBlocks, inlineContext 
     formatRun(current, container, {
       allowBlocks,
       paragraphs: isRoot && !touchesBlockSibling(current),
-      inlineContext,
     });
   }
 }

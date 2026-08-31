@@ -4,7 +4,7 @@ The app extends GptMarkdown with custom `==...==` inline markers. When adding a
 new marker, update all of the following in sync:
 
 1. **Converter:** `lib/core/utils/html_to_markdown.dart` — produces marker syntax from HTML
-2. **JS formatter extraction:** `assets/chat_webview/formatter/protect.js` — `MARKER_REGEX`, which pulls markers out before the message is parsed (a marker may span a tag). `assets/chat_webview/formatter/formatter.js` drives the passes.
+2. **JS formatter extraction:** `assets/chat_webview/formatter/protect.js` — `MARKER_REGEX`, matched by `extractMarkers`. It runs in phase B, from `formatRun` in `assets/chat_webview/formatter/dom_format.js`, over one container's run of text with its inline elements masked — so a marker may still span a `<b>`, but never a block element or the inside of a `<pre>`. `assets/chat_webview/formatter/formatter.js` drives the passes.
 3. **JS marker rendering:** `assets/chat_webview/formatter/text_format.js` — `renderStyledSegment()` HTML output
 4. **JS CSS:** `assets/chat_webview/renderer/shadow_style.js` — `SHADOW_STYLE` styling for marker classes
 5. **Dart renderer:** `lib/shared/widgets/colored_markdown.dart` — `InlineMd` subclass for Flutter-native rendering
@@ -32,9 +32,9 @@ into the stored text, so a marker written once follows theme changes.
 five styling markers above.
 
 `==mark==`, `==active==` and `==accent==` render their inner content raw. Every
-other marker renders its content through `formatInlineRaw()`, which is inline
-by construction: a marker is a `<span>`, and a `<p>` inside one is markup the
-browser throws straight back out, leaving the marker empty on screen.
+other marker renders its content through `formatInlineMasked()`, which is
+inline by construction: a marker is a `<span>`, and a `<p>` inside one is markup
+the browser throws straight back out, leaving the marker empty on screen.
 
 ## Additional Custom InlineMd/BlockMd Classes
 

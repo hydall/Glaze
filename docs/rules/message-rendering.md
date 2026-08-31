@@ -92,34 +92,39 @@ text mid-pipeline: whatever pass runs next will take it apart.
 
 ---
 
-## Markers are inline, always
+## Markers are inline, always — and they come from a run, not from the message
 
-`renderStyledSegment()` renders a marker's content through `formatInlineRaw()`,
-which cannot produce a block element. A `<p>` inside a marker's `<span>` is
-markup the browser throws straight back out — the marker then shows as empty
-text. See `docs/markdown-markers.md` for the marker list itself.
+`renderStyledSegment()` renders a marker's content through
+`formatInlineMasked()`, which cannot produce a block element. A `<p>` inside a
+marker's `<span>` is markup the browser throws straight back out — the marker
+then shows as empty text. See `docs/markdown-markers.md` for the marker list
+itself.
 
-Which is why **a marker only holds markup it opened and closed itself**
-(`holdsOwnMarkup` in `protect.js`). Tags are one opaque run to the marker scan,
-so a `*` a model wrote before a card and a `*` that landed inside it — which is
-what a display regex does when its capture group swallows the closing marker —
-match as one emphasis run over the whole card. Holding that span hands the card
-to the inline pass: its `<style>` goes with it (a held segment is never
-unmasked, so the leak sweep deletes the stylesheet) and the browser throws the
-card's block elements back out of the `<em>` as siblings of the message.
+Markers are taken in `formatRun` (`dom_format.js`), from the string that pass
+has already built: one container's text nodes escaped, its inline elements
+replaced by `E_n` placeholders. That string holds no markup at all, which is
+what makes the scan safe. Three properties follow from *where* it runs, not
+from anything the scan checks:
 
-Two rules keep that from happening, both on the way *into* the marker store:
+* a marker cannot reach across a block element, because a block element ends
+  the run;
+* a marker cannot open inside an element and close outside it, because those
+  are two different runs;
+* a marker cannot reach inside `<pre>`, `<script>` or `<style>`, because those
+  are `OPAQUE` and never get a run.
 
-* a candidate whose tags do not nest to zero is not a marker — the asterisks
-  stay literal text, and the card renders as the card it is;
-* a candidate carrying a masked `<style>` / `<script>` body is not a marker
-  either. A stylesheet is not emphasis.
+It still runs before `applyBlockSyntax`, not per line: `==hc:#fff==` matches
+with `s` and may wrap several lines, and the block pass formats a line at a
+time.
 
-Balance is counted with `markupTagTest` — the same answer `escapeProseTags`
-gives — so `*он прошептал <вздох> тихо*` is still one italic run, and void
-elements (`<br>`, `<img>`) never leave anything open. A marker that spans
-*balanced* markup, which is how `html_to_markdown` writes rich colour
-(`==hc:#fff==<b>x</b>==`), matches exactly as before.
+**This is the pass that used to be the exception.** It ran before the parse, on
+the raw message, with tags masked — and every property above was something it
+had to guess. A `*` a model wrote before a regex-built card and the `*` the
+script's capture pulled into the card matched as one emphasis run over the
+whole card, taking its `<style>` with it; the same scan reached inside a `<pre>`
+the block pass never formats, so the run it held was never restored and the
+leak sweep deleted it. Do not move it back in front of the parse: there is now
+no markdown pass anywhere that reads a string containing live HTML.
 
 ---
 

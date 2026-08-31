@@ -418,6 +418,42 @@ test('emphasis around a regex-built card leaves the card alone', async ({ page }
   expect(shape.arrowWidth).toBe('11px');
 });
 
+test('code in a <pre> is never read as markdown', async ({ page }) => {
+  await render(page, card('pre-with-emphasis').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const pre = root.querySelector('pre');
+    return {
+      text: pre ? pre.textContent : '',
+      // Nothing inside a raw-text element may have been turned into markup.
+      elements: pre ? pre.children.length : -1,
+    };
+  });
+  expect(shape.text).toBe('int *p = &n;\nif (*p) *p = 1;\nlong _t_ = a * b * c;');
+  expect(shape.elements).toBe(0);
+});
+
+test('a marker cannot open inside an element and close outside it', async ({ page }) => {
+  await render(page, card('emphasis-across-element-boundary').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const span = root.querySelector('span');
+    const bold = root.querySelector('b');
+    return {
+      // Two asterisks in two containers are two asterisks, not an italic run.
+      spanText: span ? span.textContent : '',
+      spanEms: span ? span.querySelectorAll('em').length : -1,
+      strayAfter: root.textContent.includes('конец*'),
+      // A run that opens and closes inside one element still works.
+      boldEm: bold ? bold.querySelector('em.chat-italic')?.textContent : '',
+    };
+  });
+  expect(shape.spanText).toBe('*начало');
+  expect(shape.spanEms).toBe(0);
+  expect(shape.strayAfter).toBe(true);
+  expect(shape.boldEm).toBe('курсив');
+});
+
 test('a marker that spans balanced inline markup still holds it', async ({ page }) => {
   await render(page, card('emphasis-over-inline-tag').text);
   const shape = await page.evaluate(() => {
