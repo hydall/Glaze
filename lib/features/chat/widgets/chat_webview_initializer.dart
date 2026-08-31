@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/state/active_regex_provider.dart';
+import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
 import '../bridge/chat_bridge_controller.dart';
@@ -143,7 +144,15 @@ class ChatWebViewInitializer {
       )),
     );
     final displayRegexes = ref.read(displayRegexesProvider).value ?? const [];
-    bridge.setRegexContext(displayRegexes, character, effectivePersona);
+    bridge.setRegexContext(
+      displayRegexes,
+      character,
+      effectivePersona,
+      sessionVars:
+          ref.read(chatProvider(input.charId)).value?.session?.sessionVars ??
+          const {},
+      globalVars: ref.read(globalVarsProvider),
+    );
 
     await _setIdentity();
     await applyTheme();

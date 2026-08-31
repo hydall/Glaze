@@ -78,6 +78,8 @@ class ChatBridgeController {
   List<PresetRegex> _displayRegexes = [];
   Character? _regexCharacter;
   Persona? _regexPersona;
+  Map<String, String> _regexSessionVars = const {};
+  Map<String, String> _regexGlobalVars = const {};
 
   /// Origin marker ("Created on" / "Branched on") for the current session,
   /// prepended by [MessageBridgeCommands.setMessages] as the first synthetic
@@ -107,6 +109,8 @@ class ChatBridgeController {
   List<PresetRegex> get displayRegexes => _displayRegexes;
   Character? get regexCharacter => _regexCharacter;
   Persona? get regexPersona => _regexPersona;
+  Map<String, String> get regexSessionVars => _regexSessionVars;
+  Map<String, String> get regexGlobalVars => _regexGlobalVars;
   JsBridgeService get extensionBridgeService => _jsBridgeService;
 
   List<TriggeredEntry> triggeredRegexesFor(String messageId) =>
@@ -171,11 +175,19 @@ class ChatBridgeController {
   void setRegexContext(
     List<PresetRegex> regexes,
     Character? char,
-    Persona? persona,
-  ) {
+    Persona? persona, {
+    Map<String, String> sessionVars = const {},
+    Map<String, String> globalVars = const {},
+  }) {
     _displayRegexes = regexes;
     _regexCharacter = char;
     _regexPersona = persona;
+    // Chat/global variables ride along so `{{getvar::…}}` resolves the same
+    // way in a rendered message (and in a display regex's replacement) as it
+    // does in the prompt. Without them the macro engine would silently expand
+    // every variable macro to an empty string.
+    _regexSessionVars = sessionVars;
+    _regexGlobalVars = globalVars;
   }
 
   void resolveRequest(String requestId, dynamic result) {

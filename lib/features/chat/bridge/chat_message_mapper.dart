@@ -55,6 +55,8 @@ class ChatMessageMapper {
     List<PresetRegex>? displayRegexes,
     Character? character,
     Persona? persona,
+    Map<String, String> sessionVars = const {},
+    Map<String, String> globalVars = const {},
   }) {
     final isAssistant = m.role == 'assistant' || m.role == 'character';
     final isUser = m.role == 'user';
@@ -75,6 +77,8 @@ class ChatMessageMapper {
           charMesExample: character.mesExample,
           userName: persona?.name ?? 'User',
           personaPrompt: persona?.prompt,
+          sessionVars: sessionVars,
+          globalVars: globalVars,
           charId: character.id,
           sessionId: '',
           macroName: character.macroName,
@@ -84,7 +88,12 @@ class ChatMessageMapper {
     final List<TriggeredEntry> triggeredRegexes = [];
     if (displayRegexes != null && displayRegexes.isNotEmpty) {
       final placement = isUser ? 1 : 2;
-      final regexCtx = RegexApplyContext(char: character, persona: persona);
+      final regexCtx = RegexApplyContext(
+        char: character,
+        persona: persona,
+        sessionVars: sessionVars,
+        globalVars: globalVars,
+      );
       content = applyRegexes(
         content,
         placement,

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/debug/perf_debug.dart';
 import '../../../core/state/active_regex_provider.dart';
+import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
 import '../../../../shared/theme/theme_font_provider.dart';
@@ -1182,13 +1183,18 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
     if (_bridge != null) {
       _bindBridgeCallbacks();
-      _bridge!.setRegexContext(displayRegexes, character, effectivePersona);
+      final session = ref.watch(chatProvider(widget.charId)).value?.session;
+      _bridge!.setRegexContext(
+        displayRegexes,
+        character,
+        effectivePersona,
+        sessionVars: session?.sessionVars ?? const {},
+        globalVars: ref.watch(globalVarsProvider),
+      );
       // Refresh the origin ("Created on" / "Branched on") marker before any
       // message sync dispatches, so a full setMessages picks up the current
       // session's creation/branch stamp.
-      _bridge!.chatOrigin = ChatBridgeController.originMarkerFor(
-        ref.watch(chatProvider(widget.charId)).value?.session,
-      );
+      _bridge!.chatOrigin = ChatBridgeController.originMarkerFor(session);
     }
 
     ChatWebViewBuildListeners(

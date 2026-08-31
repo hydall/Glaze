@@ -102,45 +102,31 @@ String _applySingleScript(
   }
 
   var pattern = script.regex;
-  var replacement = script.replacement;
+  final replacement = script.replacement;
+  final macroCtx = _macroContextFor(ctx);
 
-  if (script.substituteRegex != 0 &&
-      (ctx.char != null || ctx.macroContext != null)) {
+  if (script.substituteRegex != 0 && macroCtx != null) {
     pattern = _substituteFindRegex(pattern, script.substituteRegex, ctx);
   }
 
+  // `macroRules` is the Glaze-side twin of ST's `substituteRegex`: it only
+  // controls the *find* field. Macros in the replacement are handled below,
+  // per match, exactly like ST's `runRegexScript`.
   if (script.macroRules != '0' &&
-      (ctx.char != null || ctx.macroContext != null)) {
-    final macroCtx =
-        ctx.macroContext ??
-        MacroContext(
-          charName: ctx.char!.name,
-          userName: ctx.persona?.name ?? 'User',
-          charId: ctx.char!.id,
-          sessionId: '',
-          macroName: ctx.char!.macroName,
-        );
-
-    if (script.macroRules == '1') {
-      if (script.substituteRegex == 0) {
-        pattern = replaceMacros(pattern, macroCtx).text;
-      }
-      replacement = replaceMacros(replacement, macroCtx).text;
-    } else if (script.macroRules == '2') {
-      if (script.substituteRegex == 0) {
-        pattern = pattern
-            .replaceAllMapped(
-              RegExp(r'{{user}}', caseSensitive: false),
-              (_) => _escapeRegex(macroCtx.userName),
-            )
-            .replaceAllMapped(
-              RegExp(r'{{char}}', caseSensitive: false),
-              (_) => _escapeRegex(macroCtx.charName),
-            );
-        pattern = replaceMacros(pattern, macroCtx).text;
-      }
-      replacement = replaceMacros(replacement, macroCtx).text;
+      script.substituteRegex == 0 &&
+      macroCtx != null) {
+    if (script.macroRules == '2') {
+      pattern = pattern
+          .replaceAllMapped(
+            RegExp(r'{{user}}', caseSensitive: false),
+            (_) => _escapeRegex(macroCtx.userName),
+          )
+          .replaceAllMapped(
+            RegExp(r'{{char}}', caseSensitive: false),
+            (_) => _escapeRegex(macroCtx.charName),
+          );
     }
+    pattern = replaceMacros(pattern, macroCtx).text;
   }
 
   if (pattern.isEmpty) return processed;
@@ -167,26 +153,47 @@ String _applySingleScript(
     // $1/$2 in the replacement string — they stay as literal text.
     // Previous code skipped resolution when substituteRegex != 0, but
     // ST scripts routinely combine substituteRegex with capture groups.
-    processed = processed.replaceAllMapped(
-      regex,
-      (match) => _resolveReplacement(replacement, match),
-    );
+    //
+    // Macros in the replacement are expanded *after* the capture groups are
+    // filled in and on every match, mirroring ST's `runRegexScript`, which
+    // ends with `return substituteParams(replaceWithGroups)`. ST does this
+    // unconditionally — `substituteRegex` (our `macroRules`) only governs the
+    // find field — so a card-rendering script whose "Replace With" contains
+    // `{{user}}` / `{{char}}` resolves without any extra toggle.
+    processed = processed.replaceAllMapped(regex, (match) {
+      final resolved = _resolveReplacement(replacement, match);
+      // Fast path: the macro engine runs dozens of regexes, and a script like
+      // "replace every space" fires this callback thousands of times per
+      // message. No brace, no macro — nothing for it to do.
+      if (macroCtx == null || !resolved.contains('{')) return resolved;
+      return replaceMacros(resolved, macroCtx).text;
+    });
   } catch (_) {}
 
   return processed;
 }
 
+/// The macro context used for macro substitution inside a regex script, or
+/// null when the caller supplied neither an explicit context nor a character
+/// (macros are then left untouched).
+MacroContext? _macroContextFor(RegexApplyContext ctx) {
+  if (ctx.macroContext != null) return ctx.macroContext;
+  final char = ctx.char;
+  if (char == null) return null;
+  return MacroContext(
+    charName: char.name,
+    userName: ctx.persona?.name ?? 'User',
+    charId: char.id,
+    sessionId: '',
+    macroName: char.macroName,
+    sessionVars: ctx.sessionVars,
+    globalVars: ctx.globalVars,
+  );
+}
+
 String _substituteFindRegex(String pattern, int mode, RegexApplyContext ctx) {
-  if (ctx.char == null && ctx.macroContext == null) return pattern;
-  final macroCtx =
-      ctx.macroContext ??
-      MacroContext(
-        charName: ctx.char!.name,
-        userName: ctx.persona?.name ?? 'User',
-        charId: ctx.char!.id,
-        sessionId: '',
-        macroName: ctx.char!.macroName,
-      );
+  final macroCtx = _macroContextFor(ctx);
+  if (macroCtx == null) return pattern;
   if (mode == 1) {
     return replaceMacros(pattern, macroCtx).text;
   }
