@@ -67,10 +67,35 @@ class ChatMessageService {
         ? (List<String>.from(msg.swipes)..[swipeIdx] = text)
         : msg.swipes;
     final updatedSwipesMeta = List<Map<String, dynamic>>.from(msg.swipesMeta);
+    while (updatedSwipesMeta.length < msg.swipes.length) {
+      updatedSwipesMeta.add(<String, dynamic>{});
+    }
+    final updatedTokens = estimateTokens(text);
+    final updatedAgentSwipes = List<AgentSwipe>.from(msg.agentSwipes);
+    if (msg.agentSwipeId >= 0 && msg.agentSwipeId < updatedAgentSwipes.length) {
+      final active = updatedAgentSwipes[msg.agentSwipeId];
+      updatedAgentSwipes[msg.agentSwipeId] = AgentSwipe(
+        content: text,
+        kind: active.kind,
+        reasoning: newReasoning,
+        genTime: active.genTime,
+        tokens: updatedTokens,
+        time: active.time,
+        studioOutputs: active.studioOutputs,
+        parentSwipeId: active.parentSwipeId,
+      );
+    }
     if (swipeIdx >= 0 && swipeIdx < updatedSwipesMeta.length) {
       updatedSwipesMeta[swipeIdx] = {
         ...updatedSwipesMeta[swipeIdx],
         'reasoning': newReasoning,
+        'tokens': updatedTokens,
+        if (updatedAgentSwipes.isNotEmpty) ...{
+          'agentSwipes': updatedAgentSwipes
+              .map((swipe) => swipe.toJson())
+              .toList(),
+          'agentSwipeId': msg.agentSwipeId,
+        },
       };
     }
     newMessages[index] = msg.copyWith(
@@ -79,7 +104,8 @@ class ChatMessageService {
       isAllReasoning: isAllReasoning,
       swipes: updatedSwipes,
       swipesMeta: updatedSwipesMeta,
-      tokens: estimateTokens(text),
+      agentSwipes: updatedAgentSwipes,
+      tokens: updatedTokens,
     );
     return _persist(session, newMessages);
   }

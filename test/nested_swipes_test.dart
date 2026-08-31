@@ -1,8 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/chat/chat_message_service.dart';
 import 'package:glaze_flutter/features/chat/services/saved_message_writer.dart';
+
+final _messageServiceProvider = Provider(ChatMessageService.new);
 
 void main() {
   group('AgentSwipe', () {
@@ -108,6 +111,116 @@ void main() {
       final msg = ChatMessage.fromJson(json);
       expect(msg.agentSwipes, isEmpty);
       expect(msg.agentSwipeId, 0);
+    });
+  });
+
+  group('ChatMessageService nested swipe edits', () {
+    test('edited variation survives switching away and back', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final service = container.read(_messageServiceProvider);
+      final message = ChatMessage(
+        id: 'a1',
+        role: 'assistant',
+        content: 'four',
+        swipes: const ['one', 'two', 'three', 'four'],
+        swipeId: 3,
+        swipesMeta: [
+          <String, dynamic>{},
+          <String, dynamic>{},
+          <String, dynamic>{},
+          <String, dynamic>{
+            'agentSwipes': [const AgentSwipe(content: 'four').toJson()],
+            'agentSwipeId': 0,
+          },
+        ],
+        agentSwipes: const [AgentSwipe(content: 'four')],
+      );
+      final session = ChatSession(
+        id: 's1',
+        characterId: 'c1',
+        sessionIndex: 0,
+        messages: [message],
+      );
+
+      final edited = service.editMessage(session, 0, 'four edited');
+      final editedMessage = edited.messages.single;
+      expect(editedMessage.agentSwipes.single.content, 'four edited');
+      final stored = editedMessage.swipesMeta[3]['agentSwipes'] as List;
+      expect(
+        AgentSwipe.fromJson(
+          Map<String, dynamic>.from(stored.single as Map<dynamic, dynamic>),
+        ).content,
+        'four edited',
+      );
+
+      final second = service.setSwipe(edited, 0, 1);
+      final fourth = service.setSwipe(second, 0, 3);
+      expect(fourth.messages.single.content, 'four edited');
+      expect(fourth.messages.single.swipes[3], 'four edited');
+    });
+
+    test('editing active nested swipe clears its reasoning only', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final service = container.read(_messageServiceProvider);
+      final message = ChatMessage(
+        id: 'a1',
+        role: 'assistant',
+        content: 'cleaned',
+        reasoning: 'old thought',
+        swipes: const ['cleaned'],
+        swipesMeta: [
+          <String, dynamic>{
+            'agentSwipes': [
+              const AgentSwipe(
+                content: 'final',
+                kind: 'final',
+                reasoning: 'final thought',
+              ).toJson(),
+              const AgentSwipe(
+                content: 'cleaned',
+                kind: 'cleaned',
+                reasoning: 'old thought',
+              ).toJson(),
+            ],
+            'agentSwipeId': 1,
+          },
+        ],
+        agentSwipes: const [
+          AgentSwipe(
+            content: 'final',
+            kind: 'final',
+            reasoning: 'final thought',
+          ),
+          AgentSwipe(
+            content: 'cleaned',
+            kind: 'cleaned',
+            reasoning: 'old thought',
+          ),
+        ],
+        agentSwipeId: 1,
+      );
+      final session = ChatSession(
+        id: 's1',
+        characterId: 'c1',
+        sessionIndex: 0,
+        messages: [message],
+      );
+
+      final edited = service.editMessage(
+        session,
+        0,
+        'cleaned edit',
+        tagStart: '<think>',
+        tagEnd: '</think>',
+      );
+      final result = edited.messages.single;
+      expect(result.reasoning, isNull);
+      expect(result.agentSwipes[0].reasoning, 'final thought');
+      expect(result.agentSwipes[0].content, 'final');
+      expect(result.agentSwipes[1].reasoning, isNull);
+      expect(result.agentSwipes[1].content, 'cleaned edit');
     });
   });
 

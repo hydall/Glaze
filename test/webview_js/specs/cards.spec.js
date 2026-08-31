@@ -229,6 +229,7 @@ test('markdown structure renders headings, lists and a table', async ({ page }) 
         ?.querySelectorAll(':scope > li').length ?? -1,
       nested: root.querySelectorAll('ul.chat-list li ul li').length,
       ordered: root.querySelectorAll('ol.chat-list > li').length,
+      orderedStart: root.querySelector('ol.chat-list')?.start ?? -1,
       tableRows: root.querySelectorAll('table.chat-table tbody tr').length,
       headers: root.querySelectorAll('table.chat-table th').length,
     };
@@ -237,8 +238,25 @@ test('markdown structure renders headings, lists and a table', async ({ page }) 
   expect(shape.topLevelItems).toBe(2);
   expect(shape.nested).toBe(1);
   expect(shape.ordered).toBe(2);
+  expect(shape.orderedStart).toBe(1);
   expect(shape.tableRows).toBe(2);
   expect(shape.headers).toBe(2);
+});
+
+test('ordered markdown list preserves a zero start', async ({ page }) => {
+  await render(page, card('ordered-list-zero').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const list = root.querySelector('ol.chat-list');
+    return {
+      start: list?.start ?? -1,
+      items: list?.querySelectorAll(':scope > li').length ?? -1,
+      text: list?.querySelector('li')?.textContent.trim() || '',
+    };
+  });
+  expect(shape.start).toBe(0);
+  expect(shape.items).toBe(1);
+  expect(shape.text).toBe('test');
 });
 
 test('blockquote and horizontal rule render as elements', async ({ page }) => {

@@ -107,6 +107,12 @@ function jscToggle() {
 | MP | 3 |`,
   },
   {
+    id: 'ordered-list-zero',
+    title: 'Ordered Markdown list starting at zero',
+    origin: 'Discord #1543310048007295086 — `0. test` rendered as `1. test`',
+    text: `0. test`,
+  },
+  {
     id: 'prose-angle-brackets',
     title: 'Prose that contains angle brackets',
     origin: 'the orphan heuristic existed for this case',

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,7 +21,10 @@ const _dismissedShaKey = 'update_dismissed_sha';
 /// exists on this build's channel and the user hasn't muted that exact update.
 /// Any failure (offline, rate-limited, dev build) is swallowed — never blocks
 /// or interrupts launch. Skipped while onboarding is still pending.
-Future<void> checkAndShowUpdateOnStartup({UpdateCheckService? service}) async {
+Future<void> checkAndShowUpdateOnStartup({
+  UpdateCheckService? service,
+  Set<String>? presentedUpdateIds,
+}) async {
   if (!await isOnboardingComplete()) return;
 
   final result = await (service ?? UpdateCheckService()).check();
@@ -36,13 +41,83 @@ Future<void> checkAndShowUpdateOnStartup({UpdateCheckService? service}) async {
   if (info == null) return;
 
   if (prefs.getString(_dismissedShaKey) == info.dismissId) return;
+  if (presentedUpdateIds?.contains(info.dismissId) == true) return;
 
   // Show on the root navigator: the startup hook fires above MaterialApp,
   // so its own context has no Navigator/Overlay (same reason onboarding uses
   // rootNavigatorKey).
   final navContext = rootNavigatorKey.currentContext;
   if (navContext == null || !navContext.mounted) return;
+  presentedUpdateIds?.add(info.dismissId);
   await _present(navContext, info);
+}
+
+/// Runs silent update checks while the app is in the foreground.
+///
+/// The same build is presented at most once per app lifetime. Persistent
+/// suppression remains owned by [checkAndShowUpdateOnStartup].
+class AutomaticUpdateCheckController {
+  AutomaticUpdateCheckController({
+    required this.check,
+    this.interval = const Duration(hours: 1),
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now;
+
+  final Future<void> Function(Set<String> presentedUpdateIds) check;
+  final Duration interval;
+  final DateTime Function() _now;
+  final Set<String> _presentedUpdateIds = {};
+
+  Timer? _timer;
+  DateTime? _lastAttemptAt;
+  bool _inFlight = false;
+
+  void start() {
+    _startTimer();
+    _schedule(force: true);
+  }
+
+  void pause() => _timer?.cancel();
+
+  void resume() {
+    _startTimer();
+    _schedule();
+  }
+
+  Future<void> runNow({bool force = false}) async {
+    if (_inFlight) return;
+    final now = _now();
+    final lastAttemptAt = _lastAttemptAt;
+    if (!force &&
+        lastAttemptAt != null &&
+        now.difference(lastAttemptAt) < interval) {
+      return;
+    }
+
+    _lastAttemptAt = now;
+    _inFlight = true;
+    try {
+      await check(_presentedUpdateIds);
+    } finally {
+      _inFlight = false;
+    }
+  }
+
+  void dispose() => _timer?.cancel();
+
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(interval, (_) => _schedule());
+  }
+
+  void _schedule({bool force = false}) {
+    unawaited(
+      runNow(force: force).catchError((Object _) {
+        // Automatic checks are deliberately silent. Manual checks still report
+        // failures through [runManualUpdateCheck].
+      }),
+    );
+  }
 }
 
 /// Manual "Check for updates" entry point. Always reports the outcome:
