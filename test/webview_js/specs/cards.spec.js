@@ -384,6 +384,61 @@ test('inline tags in prose keep their paragraphs and their markdown', async ({ p
   expect(shape.markerHoldsTag).toBe(true);
 });
 
+test('emphasis around a regex-built card leaves the card alone', async ({ page }) => {
+  await render(page, card('regex-card-in-emphasis').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const wrap = root.querySelector('.imsg-wrap');
+    const details = root.querySelector('.imsg-details');
+    const footer = root.querySelector('.imsg-footer');
+    const bubble = root.querySelector('.imsg-bubble');
+    return {
+      // The card's stylesheet is what the marker used to take with it.
+      styles: root.querySelectorAll('style').length,
+      summaries: details ? details.querySelectorAll('summary').length : -1,
+      // Everything after the point the closing `*` landed used to end up
+      // outside <details>, and the footer outside the wrapper entirely.
+      footerInsideDetails: !!footer && !!footer.closest('.imsg-details'),
+      bodyInsideDetails: !!root.querySelector('.imsg-details .imsg-body'),
+      wrapHoldsCard: !!wrap && wrap.contains(details) && wrap.contains(footer),
+      // A marker never reparents markup: no <em> may hold a block element.
+      emAroundCard: root.querySelectorAll('em .imsg-wrap, em .imsg-details').length,
+      // The CSS still resolves, which is the whole reason it has to survive.
+      bubbleRadius: bubble ? getComputedStyle(bubble).borderRadius : '',
+      arrowWidth: getComputedStyle(root.querySelector('.imsg-send svg')).width,
+    };
+  });
+  expect(shape.styles).toBe(1);
+  expect(shape.summaries).toBe(1);
+  expect(shape.footerInsideDetails).toBe(true);
+  expect(shape.bodyInsideDetails).toBe(true);
+  expect(shape.wrapHoldsCard).toBe(true);
+  expect(shape.emAroundCard).toBe(0);
+  expect(shape.bubbleRadius).toBe('16px');
+  expect(shape.arrowWidth).toBe('11px');
+});
+
+test('a marker that spans balanced inline markup still holds it', async ({ page }) => {
+  await render(page, card('emphasis-over-inline-tag').text);
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    const em = root.querySelector('em.chat-italic');
+    const marker = root.querySelector('.glaze-hc');
+    return {
+      emHoldsTag: !!em && !!em.querySelector('b'),
+      emText: em ? em.textContent : '',
+      markerHoldsTag: !!marker && !!marker.querySelector('i'),
+      breaks: root.querySelectorAll('br').length,
+      strayAsterisks: (root.textContent.match(/\*/g) || []).length,
+    };
+  });
+  expect(shape.emHoldsTag, 'balanced markup inside a marker is still a marker').toBe(true);
+  expect(shape.emText).toBe('шёпот громче и снова тише');
+  expect(shape.markerHoldsTag).toBe(true);
+  expect(shape.breaks).toBe(1);
+  expect(shape.strayAsterisks).toBe(0);
+});
+
 test('a gradient <font> carries its fill down to the text', async ({ page }) => {
   await render(page, card('font-gradient').text);
   const shape = await page.evaluate(() => {

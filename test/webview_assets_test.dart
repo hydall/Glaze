@@ -859,6 +859,30 @@ void main() {
       );
     });
 
+    test('a style marker only holds markup it opened and closed itself', () {
+      // `*` before a card and `*` somewhere inside it are two asterisks with
+      // a card between them, not an emphasis run. Holding that span hands the
+      // card to the inline pass, which drops its <style> and lets the browser
+      // throw its block elements back out of the <em> as siblings.
+      final body = _extractBlockBody(
+        formatterProtectJs,
+        formatterProtectJs.indexOf('function holdsOwnMarkup('),
+      );
+      expect(body, contains('VOID_ELEMENTS.has(name)'));
+      expect(body, contains('open.lastIndexOf(name)'));
+      expect(body, contains('return open.length === 0;'));
+      expect(
+        formatterProtectJs,
+        contains('if (!holdsOwnMarkup(raw, isMarkup)) return segment;'),
+      );
+      // A stylesheet is not emphasis: its body is masked for this scan and a
+      // held segment is never unmasked, so a marker over one loses the CSS.
+      expect(
+        formatterProtectJs,
+        contains('if (CODE_PLACEHOLDER.test(raw)) return segment;'),
+      );
+    });
+
     test('nested guillemets cannot consume styled-segment placeholders', () {
       expect(
         formatterInlineSyntaxJs,
@@ -902,12 +926,22 @@ void main() {
       // closing tag — not how many times the name occurs.
       final body = _extractBlockBody(
         formatterHtmlScanJs,
-        formatterHtmlScanJs.indexOf('export function escapeProseTags('),
+        formatterHtmlScanJs.indexOf('export function markupTagTest('),
       );
       expect(body, contains('isKnownElement(name)'));
       expect(body, contains('styled.has(name)'));
       expect(body, contains('opened.has(name) && closed.has(name)'));
-      expect(body, contains(r"tag.replace(/</g, '&lt;')"));
+
+      // One answer, two callers: the escape and the marker balance check both
+      // ask `markupTagTest`, so neither can reason about a tree the parser
+      // will not build.
+      final escape = _extractBlockBody(
+        formatterHtmlScanJs,
+        formatterHtmlScanJs.indexOf('export function escapeProseTags('),
+      );
+      expect(escape, contains('markupTagTest(text, styledNames)'));
+      expect(escape, contains(r"tag.replace(/</g, '&lt;')"));
+      expect(formatterProtectJs, contains('markupTagTest(text, styledNames)'));
     });
 
     test('a void element needs no exemption from anything', () {

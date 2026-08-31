@@ -286,6 +286,28 @@ document.getElementById('sc-out').textContent='ok'+o;
 </script>`,
   },
   {
+    id: 'regex-card-in-emphasis',
+    title: 'Regex-built card with the model\'s asterisks around it',
+    origin: 'a display regex turns `(out) Name | text` lines into this card, ' +
+      'and the model wrote the block in italics. The opening `*` sat before ' +
+      'the card and the closing one was pulled into the last bubble, so the ' +
+      'marker held the whole card: its <style> was dropped and <details> ' +
+      'lost everything up to the footer, which the browser reparented as a ' +
+      'sibling.',
+    text: `Он набрал сообщение.
+
+*<div class="imsg-wrap"><style>@import url('https://fonts.example/css2?family=Card');.imsg-wrap{display:flex;justify-content:center}.imsg-details{width:fit-content;border-radius:20px}.imsg-msg{display:none;flex-direction:column}.imsg-msg[data-dir="(out)"]{display:flex;align-items:flex-start}.imsg-bubble{padding:6px 11px;border-radius:16px}.imsg-send svg{width:11px;height:11px;fill:none;stroke:#fff}</style><details class="imsg-details" open><summary class="imsg-summary"><span class="imsg-dot"></span><span class="imsg-label">New Notification</span></summary><div class="imsg-body"><div class="imsg-msg" data-dir="(out)"><span class="imsg-name">Влад</span><div class="imsg-bubble">спокойной кошка</div></div><div class="imsg-msg" data-dir="(out)"><span class="imsg-name">Влад</span><div class="imsg-bubble">🤍*</div></div></div><div class="imsg-footer"><div class="imsg-input">iMessage</div><div class="imsg-send"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></div></div></details></div>
+
+Он убрал телефон.`,
+  },
+  {
+    id: 'emphasis-over-inline-tag',
+    title: 'Emphasis and a colour marker that legitimately span a tag',
+    origin: 'the guard for regex-card-in-emphasis must not cost these: the ' +
+      'markup inside is balanced, so the marker still holds it',
+    text: `*шёпот <b>громче</b> и снова тише* — ==hc:#00ff00==<i>зелёный</i>== и <br> подряд.`,
+  },
+  {
     id: 'import-font-card',
     title: 'Card whose CSS imports a web font',
     origin: 'INV-MR5 — @import is ignored inside a shadow root',
@@ -317,6 +339,7 @@ export const streamingCards = [
   'details-block',
   'svg-icon',
   'br-in-card',
+  'regex-card-in-emphasis',
 ];
 
 export function card(id) {

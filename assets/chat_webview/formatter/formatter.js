@@ -105,8 +105,10 @@ export class Formatter {
     const code = maskCodeElements(staged);
     // Style markers come out before the parse, because html_to_markdown writes
     // rich content inside them and a parsed marker is two text nodes with an
-    // element between them.
-    staged = extractMarkers(code.masked, markers);
+    // element between them. `styled` goes along so the balance check there
+    // reads the message's tags exactly as `escapeProseTags` will below — the
+    // `<style>` bodies that declare them are masked out of `code.masked`.
+    staged = extractMarkers(code.masked, markers, styled);
 
     const tree = parseHtml(code.unmask(escapeProseTags(staged, styled)), document);
 
