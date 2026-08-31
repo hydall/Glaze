@@ -86,7 +86,7 @@ void main() {
     expect(sheetHeight(tester), moreOrLessEquals(collapsed, epsilon: 0.01));
   });
 
-  testWidgets('the edge blur stands down while the sheet is moving', (
+  testWidgets('the edge blur stays on while the keyboard moves', (
     tester,
   ) async {
     await pumpSheet(tester);
@@ -94,14 +94,14 @@ void main() {
         tester.widget<TopEdgeBlur>(find.byType(TopEdgeBlur)).enabled;
     expect(blurOn(), isTrue);
 
-    // Re-sampling the whole body through toImageSync on a frame that is
-    // already resizing the sheet is what dropped frames; the tint scrim
-    // carries the header on its own until the keyboard stops.
+    // The blur is not something the sheet trades away for frames: it samples
+    // its own strip, so a moving body does not make it expensive.
     showKeyboard(tester, 100);
     await tester.pump();
-    expect(blurOn(), isFalse);
+    expect(blurOn(), isTrue);
 
-    await tester.pump(const Duration(milliseconds: 200));
+    showKeyboard(tester, 0);
+    await tester.pump();
     expect(blurOn(), isTrue);
   });
 

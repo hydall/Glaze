@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -164,15 +162,6 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// [_commitKeyboardLift] once the user takes the height over by hand.
   bool _kbAnchored = false;
 
-  /// How long after the last movement the edge blur comes back.
-  static const Duration _kMotionSettle = Duration(milliseconds: 100);
-
-  /// Whether the sheet is moving right now — the keyboard inset is animating,
-  /// or a drag/snap is running. See [_markMotion].
-  bool _inMotion = false;
-  Timer? _motionTimer;
-  double _lastInset = 0;
-
   /// Top padding the header was last built with, so [_measureHeader] can
   /// subtract exactly what that frame added instead of re-deriving it from a
   /// height that may already have ticked on — which made the padding-free base
@@ -253,28 +242,6 @@ class _SheetViewState extends ConsumerState<SheetView>
     }
   }
 
-  /// Marks the sheet as moving for the next [_kMotionSettle].
-  ///
-  /// [TopEdgeBlur] re-samples the whole body through `toImageSync` whenever
-  /// what shows under the strip moves, so every frame that resizes the sheet
-  /// pays for a full-screen snapshot plus a 24-sigma blur on the raster
-  /// thread — which is what dropped frames when the keyboard opened over a big
-  /// form like the API sheet. While the sheet moves the blur is switched off
-  /// and only its tint scrim remains — exactly what battery-saver mode shows —
-  /// and it comes back once the motion settles.
-  void _markMotion({required bool duringBuild}) {
-    _motionTimer?.cancel();
-    _motionTimer = Timer(_kMotionSettle, () {
-      if (!mounted) return;
-      setState(() => _inMotion = false);
-    });
-    if (_inMotion) return;
-    _inMotion = true;
-    // In build the flag is read later in the same pass; outside it the sheet
-    // has to be rebuilt for the blur to actually switch off.
-    if (!duringBuild) setState(() {});
-  }
-
   double _estimateHeaderHeight() {
     if (!_hasHeader) {
       return 0;
@@ -311,11 +278,6 @@ class _SheetViewState extends ConsumerState<SheetView>
       // The measured box includes the animated top padding; keep the raw
       // value for the blur strip and the padding-free base for the body inset.
       final base = h - _headerTopPad;
-      // Mid-motion the measured height changes every frame purely because the
-      // status-bar pad above the header is animating. Rebuilding the whole
-      // sheet for that costs a frame and buys nothing: the blur it feeds is
-      // off until the motion settles, and this runs again when it does.
-      if (_inMotion && base == _headerBaseH) return;
       if (h != _headerH || base != _headerBaseH) {
         setState(() {
           _headerH = h;
@@ -388,7 +350,6 @@ class _SheetViewState extends ConsumerState<SheetView>
         (_) => registry.remove(this),
       );
     }
-    _motionTimer?.cancel();
     _anim?.removeListener(_onTick);
     _ctrl.dispose();
     _fallbackScrollController.dispose();
@@ -419,10 +380,7 @@ class _SheetViewState extends ConsumerState<SheetView>
 
   // Height ticks go through the ValueNotifier only — no setState, so the
   // sheet subtree is not rebuilt on every animation/drag frame.
-  void _onTick() {
-    _markMotion(duringBuild: false);
-    _currentHeight = _anim!.value;
-  }
+  void _onTick() => _currentHeight = _anim!.value;
 
   void _onDragStart(DragStartDetails d) {
     _commitKeyboardLift();
@@ -433,7 +391,6 @@ class _SheetViewState extends ConsumerState<SheetView>
   }
 
   void _onDragUpdate(DragUpdateDetails d) {
-    _markMotion(duringBuild: false);
     final dy = d.globalPosition.dy - _dragStartY;
     final minHeight = _collapsed(context) * 0.3;
     _currentHeight = (_dragStartH - dy).clamp(
@@ -502,10 +459,6 @@ class _SheetViewState extends ConsumerState<SheetView>
     // Read every frame, not just on the open/close edge: the inset animates,
     // and the sheet has to follow it the whole way up and back down.
     _kbLift = _kbAnchored ? bottomInset : 0;
-    if (bottomInset != _lastInset) {
-      _lastInset = bottomInset;
-      _markMotion(duringBuild: true);
-    }
 
     if (!_inModalSheet) {
       if (_hasHeader) {
@@ -555,7 +508,7 @@ class _SheetViewState extends ConsumerState<SheetView>
                   );
 
                   return TopEdgeBlur(
-                    enabled: _hasHeader && !batterySaver && !_inMotion,
+                    enabled: _hasHeader && !batterySaver,
                     height: extraTop + 8,
                     sigma: 24,
                     tintColor: context.cs.surface.withValues(alpha: 0.88),
@@ -806,8 +759,7 @@ class _SheetViewState extends ConsumerState<SheetView>
     // FocusNode) survives interaction/battery-saver transitions without
     // GlobalKey tricks.
     return TopEdgeBlur(
-      enabled:
-          widget.enableHeaderBlur && _hasHeader && !batterySaver && !_inMotion,
+      enabled: widget.enableHeaderBlur && _hasHeader && !batterySaver,
       height: _headerH + 8,
       sigma: 24,
       tintColor: context.cs.surface.withValues(alpha: 0.88),

@@ -147,11 +147,14 @@ battery-saver is on, wraps its child in a `BackdropFilter`.
 Same reasoning applies to `NoiseOverlay` and `GlowRippleOverlay`: they are
 already inside `GlassSurface`, so do not stack another copy on top.
 
-`TopEdgeBlur` (the strip `SheetView` paints over the top of its body) re-samples
-the whole body through `toImageSync` whenever what shows under it moves, so it
-is switched off while the sheet itself is moving — a keyboard inset animating, a
-drag, a snap — and comes back once the motion settles. Its tint scrim keeps
-painting throughout, which is the same thing battery-saver mode shows.
+`TopEdgeBlur` (the strip `SheetView` paints over the top of its body) replaces
+its child with a `toImageSync` raster of the whole child and blurs the top of
+it, so **every frame on which the body moves — a scroll, a sheet resize, the
+keyboard sliding in — rasterises the whole surface** to blur its top ~150 px.
+Its fingerprint cache only helps while the content is still. Keep sheet bodies
+off the effect's critical path where you can, and measure with
+`--dart-define=NO_EDGE_BLUR=true` before blaming anything else for dropped
+frames during an animation.
 
 ## Adding to the kit
 
