@@ -94,6 +94,9 @@ void main() {
   testWidgets('the edge blur stays on while the keyboard moves', (
     tester,
   ) async {
+    // Battery saver is on by default (AppSettings.batterySaver), and that is
+    // what switches the blur off — so turn it off to have a blur to watch.
+    SharedPreferences.setMockInitialValues({'batterySaver': false});
     await pumpSheet(tester);
     bool blurOn() =>
         tester.widget<TopEdgeBlur>(find.byType(TopEdgeBlur)).enabled;

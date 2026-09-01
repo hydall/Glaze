@@ -162,6 +162,12 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// [_commitKeyboardLift] once the user takes the height over by hand.
   bool _kbAnchored = false;
 
+  /// Sub-pixel slack for the measured header base. Subtracting the animated
+  /// top pad back out of a measured height cannot be exact in binary floating
+  /// point, and a base that wobbles in the last bits would republish the body's
+  /// inset — and rebuild every body that reads it — on every frame of a resize.
+  static const double _kHeaderBaseEpsilon = 0.01;
+
   /// Top padding the header was last built with, so [_measureHeader] can
   /// subtract exactly what that frame added instead of re-deriving it from a
   /// height that may already have ticked on — which made the padding-free base
@@ -278,12 +284,14 @@ class _SheetViewState extends ConsumerState<SheetView>
       // The measured box includes the animated top padding; keep the raw
       // value for the blur strip and the padding-free base for the body inset.
       final base = h - _headerTopPad;
-      if (h != _headerH || base != _headerBaseH) {
-        setState(() {
-          _headerH = h;
-          _headerBaseH = base;
-        });
-      }
+      final baseMoved = (base - _headerBaseH).abs() > _kHeaderBaseEpsilon;
+      if (h == _headerH && !baseMoved) return;
+      setState(() {
+        _headerH = h;
+        // Only when the header's own content actually changed height: this is
+        // the value the body's inset is published from.
+        if (baseMoved) _headerBaseH = base;
+      });
     });
   }
 
