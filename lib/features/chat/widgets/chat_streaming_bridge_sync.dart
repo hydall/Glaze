@@ -7,10 +7,15 @@ import 'chat_webview_sync_dispatcher.dart';
 /// Restores the transient generation presentation after [setMessages] replaces
 /// the WebView DOM. Unlike the regular dispatcher this is level-triggered: a
 /// generation may already be active when a fresh widget attaches.
+///
+/// [isBusy] is the whole "a reply is on its way" window — streaming, or the
+/// send that will produce it still being persisted (`ChatState.isSendPending`).
+/// Reconciling on `isGenerating` alone would drop the typing bubble of a
+/// session switched into during that window.
 Future<void> reconcileActiveGenerationBridge({
   required ChatBridgeController bridge,
   required ChatWebViewSyncState syncState,
-  required bool isGenerating,
+  required bool isBusy,
   required bool isImpersonating,
   required String? regenTargetId,
   required String? continuationTargetId,
@@ -19,10 +24,10 @@ Future<void> reconcileActiveGenerationBridge({
   required String streamingId,
   required bool Function() isCurrent,
 }) async {
-  syncState.wasGenerating = isGenerating;
+  syncState.wasBusy = isBusy;
   bridge.continuationTargetId = continuationTargetId;
 
-  if (!isGenerating || isImpersonating || !isCurrent()) {
+  if (!isBusy || isImpersonating || !isCurrent()) {
     syncState.streamingSent = false;
     syncState.regenStreamingSent = false;
     return;

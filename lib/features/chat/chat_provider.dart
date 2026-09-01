@@ -518,6 +518,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         draft: '',
         updatedAt: currentTimestampSeconds(),
       );
+      // The typing bubble goes up with this paint, so name the phase now —
+      // otherwise it shows the default "Generating…" for the whole durable
+      // write, which is the claim this label exists to stop making.
+      setGenerationPhase(ref, arg, GenerationPhase.preparing);
       state = AsyncData(
         current.copyWith(session: optimisticSession, isSendPending: true),
       );
@@ -635,6 +639,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       }
       _sendInFlight = false;
       _clearSendPending(sendPendingToken);
+      // A send that never reached the pipeline (session gone, ownership lost,
+      // a throw) owns the phase it set above and has to put it back. The
+      // pipeline already resets it on the paths that did reach it, so this is
+      // a no-op there; the guard keeps it from clobbering whichever run took
+      // ownership instead.
+      final settled = state.value;
+      if (settled != null &&
+          !settled.isGenerating &&
+          !settled.isPostGenRunning) {
+        setGenerationPhase(ref, arg, GenerationPhase.idle);
+      }
     }
   }
 

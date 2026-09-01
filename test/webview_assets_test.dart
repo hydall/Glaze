@@ -2522,6 +2522,57 @@ void main() {
     });
   });
 
+  // The typing placeholder is a virtual message with one constant id, and it
+  // now goes up while the user's own message is still being persisted — so a
+  // persisted message can land while it is on screen.
+  group('typing placeholder pinning (chat_bridge_controller.js)', () {
+    test('a batch append keeps the placeholder at the tail', () {
+      // virtualList.append lands after whatever is last, so an unpinned
+      // placeholder would end up above the message that just arrived.
+      final idx = bridgeControllerJs.indexOf('appendMessages(messagesJson) {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('_keepingPlaceholderLast('));
+    });
+
+    test('appending the placeholder itself does not pin behind itself', () {
+      final idx = bridgeControllerJs.indexOf('appendMessage(messageJson) {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('msg.id === STREAMING_ID'));
+      expect(body, contains('_keepingPlaceholderLast('));
+    });
+
+    test('a full re-render carries the placeholder across', () {
+      // clearAll + setMessages used to drop it while Flutter still believed
+      // it was on screen — every following delta then updated nothing and the
+      // reply streamed into a removed node.
+      final clearIdx = bridgeControllerJs.indexOf('clearAll() {');
+      expect(clearIdx, isNot(-1));
+      expect(
+        _extractBlockBody(bridgeControllerJs, clearIdx),
+        contains('_parkedPlaceholder = this._detachStreamingPlaceholder()'),
+      );
+
+      final setIdx = bridgeControllerJs.indexOf(
+        'setMessages(messagesJson, preserveScroll = false) {',
+      );
+      expect(setIdx, isNot(-1));
+      final setBody = _extractBlockBody(bridgeControllerJs, setIdx);
+      expect(setBody, contains('this._parkedPlaceholder'));
+      expect(setBody, contains('_reattachStreamingPlaceholder(carriedPlaceholder)'));
+    });
+
+    test('an update for a lost placeholder re-creates it', () {
+      final idx = bridgeControllerJs.indexOf('_executeUpdateMessage(msg) {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      final guard = body.substring(0, body.indexOf('const animate'));
+      expect(guard, contains('msg.id === STREAMING_ID'));
+      expect(guard, contains('_renderAndAppend(msg)'));
+    });
+  });
+
   group('Regenerate button (renderer/message_renderer.js)', () {
     test('the send window withholds Regenerate at render time', () {
       final idx = rendererMessageJs.indexOf('const showRegen =');

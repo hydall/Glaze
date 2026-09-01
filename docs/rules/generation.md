@@ -113,6 +113,18 @@ deliberate (the assistant placeholder must never precede the message it
 answers). `ChatState.isSendPending` marks that gap so the UI can tell "idle"
 from "the reply is already on its way".
 
+- **The typing bubble and the send-follow scroll key off the whole window,
+  not off `isGenerating`.** `ChatWebViewWidgetFields.isBusy` is that union;
+  the sync dispatcher tracks its edges as `wasBusy`. Both used to wait for
+  `isGenerating`, which lands only once the durable append finishes: the
+  bubble appeared seconds late, and the follow was armed *after* the append it
+  was meant for, so the user's own message landed wherever they were parked
+  and only snapped into place on the next append.
+- **A placeholder that outlives one append must survive every list edit.** It
+  is a virtual message with one constant id, so the page pins it to the tail
+  (`_keepingPlaceholderLast`) and carries it across a full re-render
+  (`clearAll` parks it, `setMessages` puts it back). An update for a
+  placeholder whose node is gone re-creates it rather than dropping the reply.
 - **Treat it as busy wherever `isGenerating` gates a UI affordance.** It is why
   `ChatMessageSync.sync` takes `busy` rather than `isGenerating`: the
   optimistic bubble is a tail append, and stamping the Regenerate button there

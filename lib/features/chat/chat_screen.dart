@@ -2227,10 +2227,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                               ).notifier,
                                             )
                                             .trySendMessage(text);
-                                        if (accepted) {
-                                          await _webViewStateKey.currentState
-                                              ?.requestScrollToBottomOnAppend();
-                                        }
+                                        // The follow is armed by the sync
+                                        // dispatcher on the rising edge of the
+                                        // send window, which is the dispatch
+                                        // that appends the bubble. Arming it
+                                        // here instead waited out the durable
+                                        // write and missed that append.
                                         return accepted;
                                       },
                                       onSendWithGuidance: (text, guidance) async {
@@ -2250,10 +2252,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                               text,
                                               guidanceText: guidance,
                                             );
-                                        if (accepted) {
-                                          await _webViewStateKey.currentState
-                                              ?.requestScrollToBottomOnAppend();
-                                        }
+                                        // The follow is armed by the sync
+                                        // dispatcher on the rising edge of the
+                                        // send window, which is the dispatch
+                                        // that appends the bubble. Arming it
+                                        // here instead waited out the durable
+                                        // write and missed that append.
                                         return accepted;
                                       },
                                       onSendWithImage:
@@ -2276,11 +2280,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                                   guidanceText: guidanceText,
                                                   imageDataUrl: imageDataUrl,
                                                 );
-                                            if (accepted) {
-                                              await _webViewStateKey
-                                                  .currentState
-                                                  ?.requestScrollToBottomOnAppend();
-                                            }
+                                            // Armed by the sync dispatcher —
+                                            // see onSend above.
                                             return accepted;
                                           },
                                       isGenerating: widget.state.isGenerating,

@@ -849,7 +849,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final charId = widget.charId;
     final sessionId = widget.sessionId;
     final epoch = _syncState.streamEpoch;
-    final isGenerating = widget.isGenerating;
+    final isBusy = widget.isGenerating || widget.isSendPending;
     final regenTargetId = widget.regenTargetId;
     final continuationTargetId = widget.continuationTargetId;
     final messages = List<ChatMessage>.of(widget.messages);
@@ -863,7 +863,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         widget.charId == charId &&
         widget.sessionId == sessionId &&
         _syncState.streamEpoch == epoch &&
-        widget.isGenerating == isGenerating &&
+        (widget.isGenerating || widget.isSendPending) == isBusy &&
         widget.regenTargetId == regenTargetId &&
         widget.continuationTargetId == continuationTargetId;
 
@@ -876,7 +876,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       await reconcileActiveGenerationBridge(
         bridge: bridge,
         syncState: _syncState,
-        isGenerating: isGenerating,
+        isBusy: isBusy,
         isImpersonating: isImpersonating,
         regenTargetId: regenTargetId,
         continuationTargetId: continuationTargetId,
@@ -895,6 +895,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   }
 
   void _resetStreamingPresentationState() {
+    _syncState.wasBusy = widget.isGenerating || widget.isSendPending;
     _syncState.streamingSent = false;
     _syncState.regenStreamingSent = false;
   }
@@ -1081,7 +1082,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
                 !_sessionSwitching &&
                 widget.charId == charId &&
                 widget.sessionId == sessionId &&
-                widget.isGenerating &&
+                (widget.isGenerating || widget.isSendPending) &&
                 widget.regenTargetId == null &&
                 widget.continuationTargetId == null &&
                 !_syncState.streamingSent;
@@ -1124,7 +1125,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
                 identical(_bridge, bridge) &&
                 widget.charId == charId &&
                 widget.sessionId == sessionId &&
-                !widget.isGenerating) {
+                !widget.isGenerating &&
+                !widget.isSendPending) {
               // Stop can land while appendMessage is crossing the platform
               // channel, after the falling edge already tried to remove it.
               await bridge.removeMessage(_kStreamingId);

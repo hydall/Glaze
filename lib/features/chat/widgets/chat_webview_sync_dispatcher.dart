@@ -14,7 +14,11 @@ import 'chat_message_sync.dart'
 /// and read by other lifecycle hooks (e.g. the streaming
 /// `ref.listen` in `build`).
 class ChatWebViewSyncState {
-  bool wasGenerating = false;
+  /// Last dispatched "a reply is on its way" state — `isGenerating` OR the
+  /// send window that precedes it (`ChatState.isSendPending`). The typing
+  /// placeholder is keyed off this rather than `isGenerating` alone so it
+  /// appears the moment the user sends, not once the durable append lands.
+  bool wasBusy = false;
   bool streamingSent = false;
   bool regenStreamingSent = false;
 
@@ -89,9 +93,9 @@ class ChatWebViewSyncDispatcher {
     bool isImpersonating = false,
   }) {
     if (!ready || bridge == null) {
-      // Still need to keep `wasGenerating` rolling for the next frame
-      // so the placeholder injection can detect the rising edge.
-      state.wasGenerating = current.isGenerating;
+      // Still need to keep `wasBusy` rolling for the next frame so the
+      // placeholder injection can detect the rising edge.
+      state.wasBusy = current.isBusy;
       return const ChatWebViewSyncResult(
         runMessageSync: false,
         appendPlaceholder: false,
@@ -109,9 +113,9 @@ class ChatWebViewSyncDispatcher {
 
     if (current.charId != old.charId || current.sessionId != old.sessionId) {
       // The actual session switch is performed by the caller; we just
-      // record the rising edge of `wasGenerating` so the post-switch
+      // record the rising edge of `wasBusy` so the post-switch
       // `didUpdateWidget` doesn't re-inject the placeholder.
-      state.wasGenerating = current.isGenerating;
+      state.wasBusy = current.isBusy;
       state.streamEpoch++;
       return const ChatWebViewSyncResult(
         runMessageSync: false,
@@ -154,13 +158,19 @@ class ChatWebViewSyncDispatcher {
     // send then looks like "messages + generating" and ChatMessageSync would
     // incorrectly skip the just-appended persisted user message as if it were
     // the virtual streaming placeholder.
-    if (!state.wasGenerating && current.isGenerating) {
+    if (!state.wasBusy && current.isBusy) {
       state.streamEpoch++;
       state.streamingSent = false;
       state.regenStreamingSent = false;
+      // The list is about to grow by the user's own message. Arm the follow
+      // here, in the same dispatch that enqueues that append: waiting for the
+      // send to be durably accepted armed it a whole DB write too late, so the
+      // bubble landed wherever the reader happened to be parked and only
+      // snapped into place when the next append consumed the flag.
+      if (current.isSendPending) bridge.requestScrollToBottomOnAppend();
     }
 
-    if (state.wasGenerating && !current.isGenerating) {
+    if (state.wasBusy && !current.isBusy) {
       state.streamEpoch++;
       if (!state.regenStreamingSent) {
         bridge.removeMessage(streamingId);
@@ -168,7 +178,7 @@ class ChatWebViewSyncDispatcher {
       state.streamingSent = false;
       state.regenStreamingSent = false;
       unawaited(onSyncExtBlockPanels());
-    } else if (!current.isGenerating) {
+    } else if (!current.isBusy) {
       state.streamingSent = false;
       state.regenStreamingSent = false;
     }
@@ -196,9 +206,7 @@ class ChatWebViewSyncDispatcher {
         if (settled != null) bridge.updateMessage(settled);
       }
     }
-    if (!state.wasGenerating &&
-        current.isGenerating &&
-        continuationId != null) {
+    if (!state.wasBusy && current.isBusy && continuationId != null) {
       final target = current.messages.firstWhereOrNull(
         (m) => m.id == continuationId,
       );
@@ -208,17 +216,19 @@ class ChatWebViewSyncDispatcher {
       }
     }
 
-    // Fresh generation started (no regen/continuation target) → inject typing
-    // placeholder. Impersonation reuses the generating flag but streams into
-    // the composer, not the chat, so it must never spawn a typing bubble.
+    // A reply is on its way (no regen/continuation target) → inject the typing
+    // placeholder. Keyed off `isBusy`, so a send puts the bubble up while its
+    // message is still being persisted instead of leaving a gap of seconds.
+    // Impersonation reuses the generating flag but streams into the composer,
+    // not the chat, so it must never spawn a typing bubble.
     final shouldInjectPlaceholder =
-        !state.wasGenerating &&
-        current.isGenerating &&
+        !state.wasBusy &&
+        current.isBusy &&
         current.regenTargetId == null &&
         continuationId == null &&
         !state.streamingSent &&
         !isImpersonating;
-    state.wasGenerating = current.isGenerating;
+    state.wasBusy = current.isBusy;
 
     return ChatWebViewSyncResult(
       runMessageSync: runMessageSync,
@@ -692,6 +702,11 @@ class ChatWebViewWidgetFields {
   /// Mirrors [ChatState.isSendPending]: the user's bubble is painted but the
   /// generation it starts has not been published yet.
   final bool isSendPending;
+
+  /// A reply is on its way: either it is streaming, or the send that will
+  /// produce it is still being persisted. The typing placeholder and the
+  /// send-follow scroll key off this, not off [isGenerating] alone.
+  bool get isBusy => isGenerating || isSendPending;
   final String? regenTargetId;
 
   /// Id of the assistant message a continuation run extends, or null.

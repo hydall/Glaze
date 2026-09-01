@@ -15,6 +15,11 @@ import { parseImageResultElement } from '../formatter/formatter.js';
 import { ICON } from '../renderer/icon_library.js';
 import { applyTypingPhase } from '../renderer/typing_phase.js';
 
+/* Id of the virtual typing placeholder. It is not a persisted message: Flutter
+ * owns one constant id for it and the page keeps it pinned to the tail, so a
+ * persisted message that lands while it is up never slots in underneath. */
+const STREAMING_ID = '__streaming__';
+
 export class Bridge {
   constructor(renderer, virtualList) {
     this.renderer = renderer;
@@ -27,6 +32,9 @@ export class Bridge {
     // Label under the typing pencil, naming the phase the generation is
     // actually in. Empty = the renderer's default. See setGenerationPhase().
     this.generationPhaseText = '';
+    // Placeholder element lifted out by clearAll, waiting for the setMessages
+    // that follows it. See _keepingPlaceholderLast().
+    this._parkedPlaceholder = null;
     // Scroll-hide header state. Lifted out of the _setupScrollListener closure
     // so the rest of the controller can reach it: _ensureHeaderReachable()
     // un-hides the header when the list shrinks out of scroll range, and
@@ -503,9 +511,49 @@ export class Bridge {
     loading.style.display = 'flex';
   }
 
+  /* ---------- Typing placeholder pinning ---------- */
+
+  /* Lifts the placeholder out of the list and hands back its element, or null
+   * when it is not the tail. The node survives detached, so putting it back
+   * keeps whatever has already streamed into it. */
+  _detachStreamingPlaceholder() {
+    const items = this.virtualList.items;
+    const last = items[items.length - 1];
+    if (!last || last.id !== STREAMING_ID) return null;
+    const el = last.el;
+    this.virtualList.remove(STREAMING_ID);
+    return el;
+  }
+
+  _reattachStreamingPlaceholder(el) {
+    if (!el) return;
+    this.virtualList.append(STREAMING_ID, el);
+  }
+
+  /* Runs [fn] with the placeholder lifted out, then puts it back at the tail.
+   * Every batch append goes through here: `virtualList.append` lands after
+   * whatever is currently last, so a persisted message arriving mid-generation
+   * would otherwise render *below* the bubble that is still typing. */
+  _keepingPlaceholderLast(fn) {
+    const el = this._detachStreamingPlaceholder();
+    try {
+      fn();
+    } finally {
+      this._reattachStreamingPlaceholder(el);
+    }
+  }
+
   /* ---------- Message list API ---------- */
   setMessages(messagesJson, preserveScroll = false) {
     this.flush();
+    // A full re-render drops the placeholder while Flutter still believes it
+    // is on screen — every following delta would then update a node that no
+    // longer exists and the reply would stream into nothing. Carry it across.
+    // `clearAll` runs as its own call right before this one on the re-render
+    // path, so it parks the element here for us to pick up.
+    const carriedPlaceholder =
+      this._detachStreamingPlaceholder() || this._parkedPlaceholder || null;
+    this._parkedPlaceholder = null;
     this._suppressLoadMore = true;
     // When re-rendering in place (e.g. a preset switch changes display regexes),
     // remember the current reading position so the batch replace below doesn't
@@ -532,19 +580,30 @@ export class Bridge {
     }
 
     this.virtualList.setMessagesBatch(ids, elements);
+    this._reattachStreamingPlaceholder(carriedPlaceholder);
     if (anchor) this.virtualList.restoreAnchor(anchor);
     this._hideLoadingScreen();
     this._imgGenTimer.ensureRunning();
     setTimeout(() => { this._suppressLoadMore = false; }, 1000);
   }
 
-  appendMessage(messageJson) {
-    this.flush();
-    const msg = JSON.parse(messageJson);
+  _renderAndAppend(msg) {
     const rendered = this.renderer.renderMessage(msg);
     for (const el of rendered) {
       const id = el.dataset.messageId || `__date_${el.dataset.dateSeparator || Date.now()}`;
       this.virtualList.append(id, el);
+    }
+  }
+
+  appendMessage(messageJson) {
+    this.flush();
+    const msg = JSON.parse(messageJson);
+    // The placeholder is itself appended through here — pinning it behind
+    // itself would evict and re-add the node for nothing.
+    if (msg.id === STREAMING_ID) {
+      this._renderAndAppend(msg);
+    } else {
+      this._keepingPlaceholderLast(() => this._renderAndAppend(msg));
     }
     this.virtualList.scrollToBottom();
     this._imgGenTimer.ensureRunning();
@@ -553,12 +612,8 @@ export class Bridge {
   appendMessages(messagesJson) {
     this.flush();
     const messages = JSON.parse(messagesJson);
-    messages.forEach(msg => {
-      const rendered = this.renderer.renderMessage(msg);
-      for (const el of rendered) {
-        const id = el.dataset.messageId || `__date_${el.dataset.dateSeparator || Date.now()}`;
-        this.virtualList.append(id, el);
-      }
+    this._keepingPlaceholderLast(() => {
+      messages.forEach(msg => this._renderAndAppend(msg));
     });
     this._imgGenTimer.ensureRunning();
   }
@@ -606,7 +661,17 @@ export class Bridge {
 
   _executeUpdateMessage(msg) {
     const section = document.querySelector(`[data-message-id="${msg.id}"]`);
-    if (!section) return;
+    if (!section) {
+      // Last line of defence for the virtual placeholder: Flutter only sends
+      // updates for it while it believes one is on screen, so if the node is
+      // gone the list lost it somewhere. Re-create it instead of dropping the
+      // reply on the floor.
+      if (msg.id === STREAMING_ID) {
+        this._renderAndAppend(msg);
+        this.virtualList.scrollToBottom();
+      }
+      return;
+    }
 
     const animate = !!msg.swipeDirection;
     if (msg.swipeDirection) section.dataset.swipeDirection = msg.swipeDirection;
@@ -856,6 +921,10 @@ export class Bridge {
     this.flush();
     this._showLoadingScreen();
     this._panelHost?.closeAll();
+    // Park the placeholder rather than dropping it: every clearAll on the
+    // message-sync path is immediately followed by setMessages, which puts it
+    // back at the tail. Without this the reply streams into a removed node.
+    this._parkedPlaceholder = this._detachStreamingPlaceholder();
     this.virtualList.clear();
   }
 
