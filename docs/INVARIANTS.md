@@ -147,6 +147,10 @@ the next generation (`extractImageResultPaths`), and `rewriteResultPaths`
 resolves every variant so the switcher can page through them without a round
 trip to Dart.
 
+What a block keeps is images it actually has: a regeneration drops the paths
+whose file is gone (`ImageRecoveryService.dropMissingImages`) before it carries
+the rest forward, so a switcher never pages onto a picture that cannot load.
+
 ### INV-IG9: An image block is stored as an `<img>` element with a relative src
 
 A finished block is written by `ImageTagMarkup.encodeResultElement()` only:
@@ -225,6 +229,37 @@ formatter either, so a tag after one still generates.
 Finished `<img data-iig-…>` blocks are deliberately *not* filtered: they are
 pictures that already exist, and `scanResultElements()` is what keeps their
 paths resolving and strips them from a sync payload.
+
+### INV-IG12: A model never reads or writes a finished image block
+
+Glaze is the only writer of a finished block: `encodeResultElement()` runs the
+moment the image file has been saved, so the `src` and `data-iig-variants` of a
+stored block always name files that exist on *this* device.
+
+Neither is any use to a model, and handing them over is actively harmful. The
+history used to carry the stored element verbatim, and a model that reads one
+writes one back: a block pointing at files nobody generated, which renders as
+the browser's broken-image icon under a variant switcher counting pictures that
+never existed — one more of them with every turn, until the count reads like
+the length of the chat.
+
+`ImageTagMarkup.reduceBlocksToInstructions()` is the single gate. Whatever
+state a block is in, it comes out as `[IMG:GEN:<instruction>]` — the tag that
+asked for the picture, and the only spelling a model may see or write:
+
+* chat text on its way **into** a prompt goes through it — `HistoryAssembler`
+  (main model and Studio), `ExtensionContextAssembler` and the
+  `InfoBlockService` prompt builders;
+* a reply on its way **into** storage goes through it in
+  `SavedMessageWriter.writeAssistant()`, so a finished block a model wrote by
+  hand lands as a pending one and the post-gen image stage generates a real
+  picture for it (INV-IG1);
+* the cloud-sync payload uses the same reduction
+  (`SyncSerialization.normalizeImageGenContent`), for the same reason — a path
+  into one device's data root means nothing on another.
+
+A tag inside a reasoning block is still left alone (INV-IG11): the reduction
+reads the message through `scanImageBlocks()` like everything else.
 
 ### INV-IG7: Regenerating an image never adds a message swipe
 

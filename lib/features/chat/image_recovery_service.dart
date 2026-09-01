@@ -210,6 +210,27 @@ class ImageRecoveryService {
   static String resetImgTagsToGen(String text) =>
       ImageTagMarkup.resetErrorTags(text);
 
+  /// A regeneration carries forward only the images that are still on disk.
+  ///
+  /// A path that names no file can do nothing but render as a broken picture
+  /// and pad the block's switcher, and a regeneration is the one moment the
+  /// block is rewritten anyway — so this is where such a path is dropped
+  /// instead of being carried through yet another attempt.
+  static String dropMissingImages(String text) =>
+      ImageTagMarkup.dropCarriedImages(text, imageFileExists);
+
+  /// Whether an image a block carries can still be shown. Only local files can
+  /// go missing; a data URL or a remote picture is taken at its word.
+  static bool imageFileExists(String path) {
+    if (path.isEmpty) return false;
+    if (path.startsWith('data:') ||
+        path.startsWith('http://') ||
+        path.startsWith('https://')) {
+      return true;
+    }
+    return File(resolveGlazeFilePath(path) ?? path).existsSync();
+  }
+
   /// Puts another image of one block on screen — the block-level counterpart
   /// of a message swipe.
   ///
@@ -284,7 +305,7 @@ class ImageRecoveryService {
         ImageTagMarkup.scanResultElements(lastMsg.content).isNotEmpty;
     if (!hasRetryableContent) return;
 
-    final resetContent = resetImgTagsToGen(lastMsg.content);
+    final resetContent = dropMissingImages(resetImgTagsToGen(lastMsg.content));
     if (resetContent == lastMsg.content &&
         !ImageTagMarkup.hasImageGenTags(resetContent)) {
       return;
@@ -298,7 +319,9 @@ class ImageRecoveryService {
           updatedAt: currentTimestampSeconds(),
           mutate: (message) {
             if (message.role != 'assistant') return null;
-            final content = resetImgTagsToGen(message.content);
+            final content = dropMissingImages(
+              resetImgTagsToGen(message.content),
+            );
             if (content == message.content &&
                 !ImageTagMarkup.hasImageGenTags(content)) {
               return null;
@@ -374,12 +397,15 @@ class ImageRecoveryService {
     int? blockIndex,
   }) async {
     String reset(String content) {
-      if (blockIndex != null) {
-        return ImageTagMarkup.resetImageBlockAt(content, blockIndex);
-      }
-      return failedOnly
+      final pending = blockIndex != null
+          ? ImageTagMarkup.resetImageBlockAt(content, blockIndex)
+          : failedOnly
           ? resetImgErrorTagsToGen(content)
           : resetImgTagsToGen(content);
+      // An unchanged text is the caller's "nothing to do" signal, so the
+      // pruning below must not be what makes this look like a change.
+      if (pending == content) return content;
+      return dropMissingImages(pending);
     }
 
     var current = _getState().value;

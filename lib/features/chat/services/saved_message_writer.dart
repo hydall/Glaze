@@ -1,6 +1,7 @@
 import '../../../core/models/chat_message.dart';
 import '../../../core/utils/id_generator.dart';
 import '../../../core/utils/time_helpers.dart';
+import '../../image_gen/services/image_tag_markup.dart';
 import '../chat_state.dart';
 
 /// Pure-function helpers for building the final [ChatState] after one
@@ -46,6 +47,14 @@ class SavedMessageWriter {
     int visibleStartIndex = 0,
     List<Map<String, dynamic>> studioOutputs = const [],
   }) {
+    // A reply can only *ask* for a picture. Glaze is the sole writer of a
+    // finished image block — it writes the `<img data-iig-…>` element the
+    // moment it has saved the file — so one arriving in model output names
+    // files that do not exist: the message would render a broken picture with
+    // a variant switcher counting images that were never generated. Reduced to
+    // the pending tag it should have been, the post-gen image stage picks it up
+    // and produces a real image (INV-IG12).
+    text = ImageTagMarkup.reduceBlocksToInstructions(text);
     final persistedMemoryCoverage = stripEphemeralMemoryCoverage(
       memoryCoverage,
     );

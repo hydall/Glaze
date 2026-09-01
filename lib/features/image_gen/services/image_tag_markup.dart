@@ -635,6 +635,83 @@ class ImageTagMarkup {
     return blocks;
   }
 
+  /// [text] with every image block reduced to the pending tag that asked for
+  /// it: the picture, the block's other images and the position of the visible
+  /// one are dropped, the instruction is kept.
+  ///
+  /// This is the only spelling of an image block a model may read or write.
+  /// Glaze is the sole writer of a finished block — it writes one the moment it
+  /// has saved the file — so an `<img data-iig-…>` element in model output
+  /// names files that do not exist: it renders as a broken picture, and the
+  /// variant list it carries counts images that were never generated. Left in
+  /// the history it also teaches the next reply to write another one, a little
+  /// longer each turn (INV-IG12).
+  ///
+  /// Applied to a reply as it is stored (`SavedMessageWriter`) and to chat
+  /// content on its way into any prompt (`HistoryAssembler` and the extension
+  /// context builders), so the internal form neither leaves nor enters Glaze.
+  static String reduceBlocksToInstructions(String text) {
+    // Every prompt build walks the whole history through here, and most
+    // messages carry no image at all.
+    if (!text.contains('[IMG:') && !text.contains(instructionAttribute)) {
+      return text;
+    }
+    final blocks = scanImageBlocks(text);
+    if (blocks.isEmpty) return text;
+    var result = text;
+    // Right to left: replacing one block must not move the spans of the ones
+    // still to be replaced.
+    for (final block in blocks.reversed) {
+      // A block that is already waiting for its picture and carries none is
+      // left exactly as written. There is nothing in it to strip, and both of
+      // its spellings survive a prompt round trip — where rewriting the
+      // element form into `[IMG:GEN:…]` would end the tag at the first `]` of
+      // an instruction that happens to contain one.
+      if (block.kind == ImageBlockKind.pending && block.paths.isEmpty) {
+        continue;
+      }
+      result = result.replaceRange(
+        block.start,
+        block.end,
+        _pendingTag(ImageBlockPayload(instruction: block.instruction)),
+      );
+    }
+    return result;
+  }
+
+  /// [text] with every image a pending block carries and [keep] rejects
+  /// dropped, the instruction and the surviving images left in place.
+  ///
+  /// A block keeps its earlier images through a regeneration so the reader can
+  /// page back through them, which only holds for images that are still on
+  /// disk. One that is not — a file the user deleted, or a path that never
+  /// named a file at all — can do nothing but render as a broken picture and
+  /// pad the block's switcher, so a regeneration is where it is dropped.
+  static String dropCarriedImages(String text, bool Function(String) keep) {
+    final tags = scanPendingTags(text);
+    if (tags.isEmpty) return text;
+    var result = text;
+    // Right to left: rewriting one tag must not move the spans of the rest.
+    for (final tag in tags.reversed) {
+      final payload = ImageBlockPayload.parsePending(tag.payload);
+      if (payload.paths.isEmpty) continue;
+      final kept = <String>[];
+      var active = 0;
+      for (var i = 0; i < payload.paths.length; i++) {
+        if (!keep(payload.paths[i])) continue;
+        if (i == payload.activeIndex) active = kept.length;
+        kept.add(payload.paths[i]);
+      }
+      if (kept.length == payload.paths.length) continue;
+      result = result.replaceRange(
+        tag.start,
+        tag.end,
+        _pendingTag(payload.withPaths(kept, activeIndex: active)),
+      );
+    }
+    return result;
+  }
+
   static ImageBlock _pendingBlock(PendingImageTag tag) {
     final payload = ImageBlockPayload.parsePending(tag.payload);
     return ImageBlock(
