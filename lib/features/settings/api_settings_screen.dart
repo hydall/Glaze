@@ -52,6 +52,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   ApiConnectionStatus _llmStatus = ApiConnectionStatus.idle;
   String _llmError = '';
   ApiConnectionStatus _embStatus = ApiConnectionStatus.idle;
+  String _embError = '';
   List<Map<String, dynamic>> _fetchedModels = [];
 
   bool _isLoadingEmbModels = false;
@@ -500,14 +501,26 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   Widget _buildTopControls(List<ApiConfig> list, String activeName) {
     // Preset selector pill (tab-specific — slides with the body content).
-    return _tab == 0
-        ? ConnectionStatus(
-            status: _llmStatus,
-            errorMessage: _llmError,
-            onRetry: _testLlmConnection,
-            child: _buildPresetPill(context, list, activeName),
-          )
-        : _buildPresetPill(context, list, activeName);
+    // LLM and Embeddings each check their own connection from the badge beside
+    // the pill; the agents tab has no connection of its own to probe.
+    final pill = _buildPresetPill(context, list, activeName);
+    return switch (_tab) {
+      0 => ConnectionStatus(
+        status: _llmStatus,
+        errorMessage: _llmError,
+        onRetry: _testLlmConnection,
+        child: pill,
+      ),
+      // Nothing to probe until the preset has embeddings switched on, so the
+      // badge appears with the rest of the embedding settings.
+      1 when _embeddingEnabled => ConnectionStatus(
+        status: _embStatus,
+        errorMessage: _embError,
+        onRetry: _testEmbConnection,
+        child: pill,
+      ),
+      _ => pill,
+    };
   }
 
   Widget _buildPresetPill(
@@ -1107,34 +1120,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               ],
             ],
           ),
-          if (_embeddingEnabled)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: context.cs.primary,
-                  side: BorderSide(
-                    color: context.cs.primary.withValues(alpha: 0.4),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                onPressed: _embStatus == ApiConnectionStatus.connecting
-                    ? null
-                    : _testEmbConnection,
-                icon: _embStatus == ApiConnectionStatus.connecting
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: GlazeSpinner(),
-                      )
-                    : const Icon(Icons.wifi_find_rounded),
-                label: Text(
-                  _embStatus == ApiConnectionStatus.connecting
-                      ? 'settings_testing'.tr()
-                      : 'settings_test_connection'.tr(),
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -1949,8 +1934,12 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       GlazeToast.show(context, 'settings_err_fill_endpoint'.tr());
       return;
     }
+    // The badge stays tappable while connecting, so ignore a second tap
+    // instead of racing two probes into the same status field.
+    if (_embStatus == ApiConnectionStatus.connecting) return;
     setState(() {
       _embStatus = ApiConnectionStatus.connecting;
+      _embError = '';
     });
     final result = await ApiConnectionTester().testEmbedding(
       endpoint: endpoint,
@@ -1963,7 +1952,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         setState(() => _embStatus = ApiConnectionStatus.connected);
         GlazeToast.show(context, message);
       case ApiTestFailure(:final error):
-        setState(() => _embStatus = ApiConnectionStatus.failed);
+        setState(() {
+          _embStatus = ApiConnectionStatus.failed;
+          _embError = error.toString();
+        });
         GlazeErrorDialog.show(
           context,
           error,
