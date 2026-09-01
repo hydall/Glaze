@@ -20,11 +20,16 @@ void main() {
   Future<void> pumpSheet(
     WidgetTester tester, {
     bool startExpanded = false,
+    Widget body = const Text('sheet body'),
   }) async {
     tester.view.physicalSize = const Size(700, full);
     tester.view.devicePixelRatio = 1;
+    // A status bar to pad against: the pad the sheet fades in as it reaches
+    // fullscreen is what used to rebuild the body on every frame.
+    tester.view.padding = const FakeViewPadding(top: 60);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
     addTearDown(tester.view.resetViewInsets);
 
     await tester.pumpWidget(
@@ -41,7 +46,7 @@ void main() {
                   builder: (_) => SheetView(
                     title: 'Memory',
                     startExpanded: startExpanded,
-                    body: const Text('sheet body'),
+                    body: body,
                   ),
                 ),
                 child: const Text('Open'),
@@ -89,13 +94,16 @@ void main() {
   testWidgets('the edge blur stays on while the keyboard moves', (
     tester,
   ) async {
+    // Battery saver is on by default (AppSettings.batterySaver), and that is
+    // what switches the blur off — so turn it off to have a blur to watch.
+    SharedPreferences.setMockInitialValues({'batterySaver': false});
     await pumpSheet(tester);
     bool blurOn() =>
         tester.widget<TopEdgeBlur>(find.byType(TopEdgeBlur)).enabled;
     expect(blurOn(), isTrue);
 
-    // The blur is not something the sheet trades away for frames: it samples
-    // its own strip, so a moving body does not make it expensive.
+    // The blur is not something the sheet trades away for frames — it stays
+    // on through the whole keyboard animation.
     showKeyboard(tester, 100);
     await tester.pump();
     expect(blurOn(), isTrue);
@@ -103,6 +111,36 @@ void main() {
     showKeyboard(tester, 0);
     await tester.pump();
     expect(blurOn(), isTrue);
+  });
+
+  testWidgets('the body is not rebuilt while the keyboard lifts the sheet', (
+    tester,
+  ) async {
+    var builds = 0;
+    await pumpSheet(
+      tester,
+      body: Builder(
+        builder: (context) {
+          builds++;
+          // What a real sheet body does with the inset it is handed.
+          final top = MediaQuery.paddingOf(context).top;
+          return Padding(
+            padding: EdgeInsets.only(top: top),
+            child: const Text('sheet body'),
+          );
+        },
+      ),
+    );
+    final settled = builds;
+
+    // The sheet resizes on every one of these frames. The header inset it
+    // hands the body must not move with it, or a big form rebuilds its whole
+    // tree per frame — which is what dropped frames in the API sheet.
+    for (final inset in [20.0, 60.0, 140.0, 300.0, 0.0]) {
+      showKeyboard(tester, inset);
+      await tester.pump();
+    }
+    expect(builds, settled);
   });
 
   testWidgets('a sheet the user already expanded stays expanded', (
