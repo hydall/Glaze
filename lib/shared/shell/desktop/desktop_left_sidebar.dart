@@ -90,7 +90,13 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
 
   void _toggleGlossary() {
     if (isDesktopLayout(context)) {
-      ref.read(glossaryPopupVisibleProvider.notifier).update((v) => !v);
+      // Opening from here starts at the category list, so clear whatever term
+      // a help tip left behind.
+      if (ref.read(glossaryPopupVisibleProvider)) {
+        ref.read(glossaryPopupVisibleProvider.notifier).state = false;
+      } else {
+        openGlossaryPopup(ref);
+      }
     } else {
       context.go('/menu/glossary');
     }

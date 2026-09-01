@@ -10,6 +10,16 @@ import '../../widgets/glass_surface.dart';
 
 final glossaryPopupVisibleProvider = StateProvider<bool>((ref) => false);
 
+/// Term the window should open on, set by a [HelpTip] tap. Null opens the
+/// glossary at its category list.
+final glossaryPopupTermProvider = StateProvider<String?>((ref) => null);
+
+/// Opens the floating glossary window, jumped straight to [term] when given.
+void openGlossaryPopup(WidgetRef ref, {String? term}) {
+  ref.read(glossaryPopupTermProvider.notifier).state = term;
+  ref.read(glossaryPopupVisibleProvider.notifier).state = true;
+}
+
 const _prefsKeyX = 'gz_glossary_popup_x';
 const _prefsKeyY = 'gz_glossary_popup_y';
 
@@ -65,6 +75,7 @@ class _DesktopGlossaryPopupState extends ConsumerState<DesktopGlossaryPopup> {
   @override
   Widget build(BuildContext context) {
     final visible = ref.watch(glossaryPopupVisibleProvider);
+    final term = ref.watch(glossaryPopupTermProvider);
     final viewport = MediaQuery.sizeOf(context);
     final size = Size(_width.clamp(0.0, viewport.width), _height(viewport));
 
@@ -113,7 +124,15 @@ class _DesktopGlossaryPopupState extends ConsumerState<DesktopGlossaryPopup> {
                       ref.read(glossaryPopupVisibleProvider.notifier).state =
                           false,
                 ),
-                const Expanded(child: GlossarySheet(startExpanded: true)),
+                Expanded(
+                  child: GlossarySheet(
+                    // Keyed by term so re-opening on a different one rebuilds
+                    // the sheet at that article instead of keeping the old.
+                    key: ValueKey(term),
+                    initialTerm: term,
+                    startExpanded: true,
+                  ),
+                ),
               ],
             ),
           ),

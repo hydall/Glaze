@@ -15,6 +15,7 @@ import '../../core/services/character_export_helper.dart';
 import '../../core/services/character_bulk_import_service.dart';
 import '../../core/state/character_folder_provider.dart';
 import '../../core/state/character_provider.dart';
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/header_scroll_hider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
@@ -80,6 +81,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   // step with the shell header. This constant is the block it occupies (its top
   // padding + the bar itself) so content can reserve room.
   static const double _kTabBarBlock = 52.0;
+
+  /// Width the desktop tab strip settles at, leaving the rest of the row to
+  /// the Add button (Vue's `.tabs-row`). Mobile keeps a full-width strip.
+  static const double _kTabStripWidth = 420.0;
 
   // Owns one scroll position per sub-tab (the grids attach via
   // PrimaryScrollController), so tapping the active tab can animate it back to
@@ -204,8 +209,12 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
             ],
       // The tabs ride inside the header (only at the top level) so they hide and
       // reveal as a single unit with it — one animation, not two. Dropped
-      // entirely when the catalog is disabled (only "My Characters" remains).
-      below: (catalogVisible && !inFolder) ? _buildTabBar() : null,
+      // entirely when the catalog is disabled (only "My Characters" remains) —
+      // except on desktop, where the same row also carries the Add button and
+      // so outlives a hidden catalog.
+      below: (!inFolder && (catalogVisible || isDesktopLayout(context)))
+          ? _buildTabBar()
+          : null,
     );
   }
 
@@ -424,7 +433,11 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     // extra room for the tabs row when it's present so content clears it.
     final inFolder = effectiveTab == 0 && _currentFolderId != null;
     final showTabBar = catalogVisible && !inFolder;
-    final contentTopPad = showTabBar ? topPad + _kTabBarBlock : topPad;
+    // The desktop row survives a hidden catalog because Add lives in it, so
+    // the content below still has to clear it.
+    final showHeaderRow =
+        !inFolder && (catalogVisible || isDesktopLayout(context));
+    final contentTopPad = showHeaderRow ? topPad + _kTabBarBlock : topPad;
 
     // While inside a folder, intercept the system/gesture back so it pops out to
     // the top-level grid instead of bubbling up to the shell (which would exit
@@ -518,6 +531,12 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
                               .clear(),
                           onMore: () =>
                               _showSelectionActions(context, selection),
+                        )
+                      // Desktop moves Add into the tabs row, so the slot
+                      // there holds nothing but the selection bar.
+                      : isDesktopLayout(context)
+                      ? const SizedBox.shrink(
+                          key: ValueKey('add_button_hidden'),
                         )
                       : Align(
                           key: const ValueKey('add_button'),
@@ -925,31 +944,67 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     // horizontal padding — only the gap under the app bar is needed here.
     return Padding(
       padding: const EdgeInsets.only(top: 10),
-      child: GlazeTabBar(
-        tabs: [
-          GlazeTabItem(
-            label: 'tab_my_characters'.tr(),
-            icon: Icons.person_rounded,
+      child: isDesktopLayout(context)
+          ? _buildDesktopTabsRow()
+          : _buildTabStrip(),
+    );
+  }
+
+  /// Vue's `.tabs-row`: the strip keeps its natural width on the left and the
+  /// Add button sits at the far right, instead of the strip spanning the whole
+  /// window with Add floating over the grid.
+  Widget _buildDesktopTabsRow() {
+    final catalogVisible = ref.watch(catalogVisibleProvider);
+    return Row(
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: catalogVisible
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: _kTabStripWidth,
+                    ),
+                    child: _buildTabStrip(),
+                  )
+                : const SizedBox.shrink(),
           ),
-          GlazeTabItem(label: 'tab_catalog'.tr(), icon: Icons.public_rounded),
+        ),
+        // Mirrors `v-if="activeTab === 'characters'"` — Discover holds nothing
+        // of the user's to add to.
+        if (_tabIndex == 0 || !catalogVisible) ...[
+          const SizedBox(width: 12),
+          _AddButton(height: 42, onTap: () => _showAddSheet(context, ref)),
         ],
-        activeIndex: _tabIndex,
-        onChanged: (i) {
-          // Tapping the already-active tab scrolls its list back to the top.
-          if (i == _tabIndex) {
-            _scrollToTop();
-            _showHeader();
-            return;
-          }
-          ref.read(characterSelectionProvider.notifier).clear();
+      ],
+    );
+  }
+
+  Widget _buildTabStrip() {
+    return GlazeTabBar(
+      tabs: [
+        GlazeTabItem(
+          label: 'tab_my_characters'.tr(),
+          icon: Icons.person_rounded,
+        ),
+        GlazeTabItem(label: 'tab_catalog'.tr(), icon: Icons.public_rounded),
+      ],
+      activeIndex: _tabIndex,
+      onChanged: (i) {
+        // Tapping the already-active tab scrolls its list back to the top.
+        if (i == _tabIndex) {
+          _scrollToTop();
           _showHeader();
-          setState(() {
-            _switchTab(i);
-            if (_searchExpanded) _applySearchForActiveTab();
-          });
-          refreshShellHeader();
-        },
-      ),
+          return;
+        }
+        ref.read(characterSelectionProvider.notifier).clear();
+        _showHeader();
+        setState(() {
+          _switchTab(i);
+          if (_searchExpanded) _applySearchForActiveTab();
+        });
+        refreshShellHeader();
+      },
     );
   }
 
@@ -1441,18 +1496,24 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
 
 class _AddButton extends StatelessWidget {
   final VoidCallback onTap;
-  const _AddButton({required this.onTap});
+
+  /// 48 as the button floating over the grid on mobile; 42 inline in the
+  /// desktop tabs row, where it lines up with the tab strip beside it.
+  final double height;
+
+  const _AddButton({required this.onTap, this.height = 48});
 
   @override
   Widget build(BuildContext context) {
+    final compact = height < 48;
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        height: height,
+        padding: EdgeInsets.symmetric(horizontal: compact ? 16 : 20),
         decoration: BoxDecoration(
           color: context.cs.primary,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(height / 2),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.3),
@@ -1464,13 +1525,17 @@ class _AddButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.add_rounded, color: Colors.white, size: 24),
-            const SizedBox(width: 8),
+            Icon(
+              Icons.add_rounded,
+              color: Colors.white,
+              size: compact ? 20 : 24,
+            ),
+            SizedBox(width: compact ? 6 : 8),
             Text(
               'btn_add'.tr(),
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 16,
+                fontSize: compact ? 14 : 16,
                 fontWeight: FontWeight.w500,
               ),
             ),

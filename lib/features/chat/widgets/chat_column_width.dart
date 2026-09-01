@@ -14,11 +14,16 @@ import '../../settings/app_settings_provider.dart';
 class ChatColumnWidth extends ConsumerStatefulWidget {
   final Widget child;
 
+  /// Painted across the full column, behind the capped child and its gutters,
+  /// so the chat's background carries edge to edge instead of stopping at the
+  /// column and leaving the app's background showing at the sides.
+  final Widget? background;
+
   static const double minWidth = 400;
   static const double maxWidth = 1600;
   static const double handleWidth = 8;
 
-  const ChatColumnWidth({super.key, required this.child});
+  const ChatColumnWidth({super.key, required this.child, this.background});
 
   @override
   ConsumerState<ChatColumnWidth> createState() => _ChatColumnWidthState();
@@ -74,6 +79,8 @@ class _ChatColumnWidthState extends ConsumerState<ChatColumnWidth> {
         final gutter = (constraints.maxWidth - width) / 2;
         return Stack(
           children: [
+            if (widget.background != null)
+              Positioned.fill(child: IgnorePointer(child: widget.background!)),
             Positioned(
               left: gutter,
               right: gutter,

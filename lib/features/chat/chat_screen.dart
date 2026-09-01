@@ -60,6 +60,7 @@ import 'state/memory_activity_provider.dart';
 import 'state/studio_history_rotation_provider.dart';
 import 'bridge/chat_overlay_blur_region.dart';
 import 'widgets/chat_blur_region_tracker.dart';
+import 'widgets/chat_background.dart';
 import 'widgets/chat_header.dart';
 import 'widgets/chat_input_bar.dart';
 import 'widgets/magic_drawer.dart';
@@ -277,6 +278,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
   }
 
+  /// The chat's background, painted full width behind [ChatColumnWidth]'s
+  /// side gutters. Mirrors what [ChatWebViewSurface] paints behind the
+  /// WebView, from the same inputs, through the shared [ChatBackground].
+  Widget _buildChatBackground() {
+    final preset = ref.watch(themeProvider).activePreset;
+    final character = ref.watch(characterByIdProvider(widget.charId));
+    final bytes = switch (preset.chatBgMode) {
+      'custom' => ref.watch(chatBgImageBytesProvider),
+      'inherit' => ref.watch(effectiveBgImageBytesProvider),
+      _ => null,
+    };
+    return ChatBackground(
+      mode: preset.chatBgMode,
+      color: preset.chatBgColorParsed,
+      avatarPath: character?.avatarPath,
+      imageBytes: bytes,
+      blur: preset.bgBlur,
+      dim: preset.bgDim,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     PerfDebug.chatScreenBuilt();
@@ -373,6 +395,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         // reproduced by an in-WebView CSS strip (mirrored via the 'header'
         // blur region in _measureBlurRegions), so drop the Flutter blur pass.
         headerBlurViaWebView: true,
+        // Desktop paints a tab's header edge to edge (see the shell's
+        // _DesktopHeader); chat matches it instead of floating a pill.
+        flushHeader: isDesktopLayout(context),
         hideHeader: _isHeaderHidden,
         title: title,
         // Desktop never swaps the header for a search field — it has a
@@ -509,6 +534,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             }
             _everBuiltBody = true;
             return ChatColumnWidth(
+              // The capped column would otherwise sit as a lighter strip
+              // between two bands of the app background; painting the chat's
+              // own background across the whole width keeps the two even.
+              background: _buildChatBackground(),
               child: Stack(
                 children: [
                   _ChatBody(
@@ -707,6 +736,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
 
   /// `MediaQuery.padding.top` captured in build for the analytic header rect.
   double _blurSafeTop = 0;
+
+  /// Desktop layout flag, captured in build alongside [_blurSafeTop]. The
+  /// header rect below is measured post-frame, where reading an inherited
+  /// widget would register a dependency outside the build phase.
+  bool _blurFlushHeader = false;
 
   /// Keyboard-inset settle tracking for the WebView-bound bottom inset.
   /// While the keyboard animates, the WebView receives the predicted end
@@ -1148,20 +1182,33 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     if (box is! RenderBox || !box.attached || !box.hasSize) return;
     final origin = box.localToGlobal(Offset.zero);
     final regions = <ChatOverlayBlurRegion>[
-      // The floating header is not a descendant (it lives in GlazeScaffold's
-      // stack), but its geometry is fixed: SafeArea + fromLTRB(16, 10, 16, 0)
-      // + 56px GlazeAppBar with radius 20 (glaze_scaffold.dart).
+      // The header is not a descendant (it lives in GlazeScaffold's stack),
+      // but its geometry is fixed: SafeArea + fromLTRB(16, 10, 16, 0) + 56px
+      // GlazeAppBar with radius 20 (glaze_scaffold.dart) — or, with
+      // `flushHeader` on desktop, edge to edge with square corners.
       if (!widget.isHeaderHidden)
-        ChatOverlayBlurRegion(
-          id: 'header',
-          rect: Rect.fromLTWH(
-            16 - origin.dx,
-            _blurSafeTop + 10 - origin.dy,
-            box.size.width - 32,
-            56,
+        if (_blurFlushHeader)
+          ChatOverlayBlurRegion(
+            id: 'header',
+            rect: Rect.fromLTWH(
+              -origin.dx,
+              _blurSafeTop - origin.dy,
+              box.size.width,
+              56,
+            ),
+            radius: 0,
+          )
+        else
+          ChatOverlayBlurRegion(
+            id: 'header',
+            rect: Rect.fromLTWH(
+              16 - origin.dx,
+              _blurSafeTop + 10 - origin.dy,
+              box.size.width - 32,
+              56,
+            ),
+            radius: 20,
           ),
-          radius: 20,
-        ),
       ..._blurRegistry.measure(box),
     ];
     regions.sort((a, b) => a.id.compareTo(b.id));
@@ -1293,6 +1340,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final messageListTop = MediaQuery.paddingOf(context).top + 10 + 56;
     _blurSafeTop = MediaQuery.paddingOf(context).top;
+    _blurFlushHeader = isDesktopLayout(context);
 
     final bgBlur = preset.bgBlur > 0 ? preset.bgBlur : 0.0;
     final fontStyle = batteryAware(
@@ -1870,43 +1918,47 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 ),
               ),
             ),
-            // Top gradient for fade effect under the header
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: MediaQuery.paddingOf(context).top + 20,
-              child: IgnorePointer(
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.black54, Colors.transparent],
+            // Fades under the header and the input area. Dropped on desktop:
+            // the flush header is opaque enough on its own, and against the
+            // now-even chat background the two bands only read as a darkened
+            // top and bottom edge.
+            if (!isDesktopLayout(context)) ...[
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: MediaQuery.paddingOf(context).top + 20,
+                child: IgnorePointer(
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.black54, Colors.transparent],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            // Bottom gradient for fade effect under the input area
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: messageListBottom + 40,
-              child: IgnorePointer(
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [Colors.black54, Colors.transparent],
-                      stops: [0.0, 1.0],
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: messageListBottom + 40,
+                child: IgnorePointer(
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [Colors.black54, Colors.transparent],
+                        stops: [0.0, 1.0],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
+            ],
             Positioned(
               right: 16,
               bottom: messageListBottom + 16,

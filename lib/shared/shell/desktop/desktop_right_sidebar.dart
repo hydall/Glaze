@@ -103,6 +103,11 @@ class DesktopRightSidebar extends ConsumerWidget {
     // panel takes the rest, so switching tools never needs a round trip
     // through the hub.
     return Row(
+      // Stretch, not the default centre: the strip shrink-wraps its icons, so
+      // a centred row floated the rail into the middle of the sidebar with a
+      // gap above it. Vue's `.left-icon-strip` is pinned top-to-bottom and its
+      // icons stack from the top.
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
           width: _stripWidth,
