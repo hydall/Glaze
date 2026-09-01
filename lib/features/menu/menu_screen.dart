@@ -432,11 +432,16 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                     icon: Icons.menu_book_rounded,
                     label: 'menu_glossary'.tr(),
                     subtitle: 'menu_glossary_hint'.tr(),
-                    onTap: () => isDesktopLayout(context)
-                        ? ref
-                              .read(glossaryPopupVisibleProvider.notifier)
-                              .update((v) => !v)
-                        : context.push('/menu/glossary'),
+                    onTap: () {
+                      if (!isDesktopLayout(context)) {
+                        context.push('/menu/glossary');
+                      } else if (ref.read(glossaryPopupVisibleProvider)) {
+                        ref.read(glossaryPopupVisibleProvider.notifier).state =
+                            false;
+                      } else {
+                        openGlossaryPopup(ref);
+                      }
+                    },
                   ),
                   if (lang == 'en')
                     MenuItem(

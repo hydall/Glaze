@@ -58,6 +58,13 @@ class GlazeScaffold extends StatelessWidget {
   /// strip reproduce it (see [GlassSurface.blurViaWebView]).
   final bool headerBlurViaWebView;
 
+  /// Draws the header edge to edge with square corners, the way the desktop
+  /// shell paints a tab's header, instead of as an inset floating pill.
+  ///
+  /// Chat sets it on desktop so its header matches the Characters tab beside
+  /// it; the pill treatment stays everywhere else.
+  final bool flushHeader;
+
   /// When true, this scaffold does not draw its own floating header. Instead it
   /// publishes its title/actions/back into the shell's persistent header (see
   /// [shellHeaderProvider]) and reserves the same vertical space. Only set this
@@ -84,6 +91,7 @@ class GlazeScaffold extends StatelessWidget {
     this.useShellHeader = false,
     this.headerBranchIndex,
     this.headerBlurViaWebView = false,
+    this.flushHeader = false,
   });
 
   @override
@@ -107,7 +115,9 @@ class GlazeScaffold extends StatelessWidget {
     final header = SafeArea(
       bottom: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        padding: flushHeader
+            ? EdgeInsets.zero
+            : const EdgeInsets.fromLTRB(16, 10, 16, 0),
         child: GlazeAppBar(
           title: title,
           titleWidget: titleWidget,
@@ -115,6 +125,9 @@ class GlazeScaffold extends StatelessWidget {
           showBack: showBack,
           onBack: backHandler,
           blurViaWebView: headerBlurViaWebView,
+          borderRadius: flushHeader
+              ? BorderRadius.zero
+              : const BorderRadius.all(Radius.circular(20)),
         ),
       ),
     );
@@ -178,9 +191,7 @@ class GlazeScaffold extends StatelessWidget {
     );
 
     final withBackground = showBackground
-        ? GlazeBackground(
-            child: scaffold,
-          )
+        ? GlazeBackground(child: scaffold)
         : scaffold;
 
     if (!useShellHeader) return withBackground;
@@ -330,10 +341,7 @@ class GlazeAppBar extends ConsumerWidget {
             if (actions != null)
               Padding(
                 padding: const EdgeInsets.only(right: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: actions!,
-                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: actions!),
               )
             else
               const SizedBox(width: 12),

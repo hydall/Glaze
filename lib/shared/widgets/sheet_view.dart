@@ -141,6 +141,12 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// handed to the window's title bar instead of being drawn here.
   bool _hostDrawsChrome = false;
 
+  /// Whether the header is drawn edge to edge with square corners, as the
+  /// desktop shell draws a tab's. True for a sheet hosted in the right
+  /// sidebar, where the inset pill of the phone layout left a floating bar
+  /// adrift in a fixed column.
+  bool _flushHeader = false;
+
   /// Whether the app-bar row belongs to this sheet's own header.
   bool get _ownsAppBar => !_hostDrawsChrome;
 
@@ -314,6 +320,12 @@ class _SheetViewState extends ConsumerState<SheetView>
     // A modal bottom sheet is mounted on the root navigator, above any host,
     // so it always keeps its own header.
     _hostDrawsChrome = !_inModalSheet && DetachedShellHost.drawsChrome(context);
+    // Hosted in the desktop right sidebar: a panel filling a fixed column, not
+    // a sheet floating over a phone screen. Its header runs edge to edge with
+    // square corners there, the way the desktop shell paints a tab's header —
+    // the inset pill was left over from the phone layout.
+    _flushHeader =
+        !_inModalSheet && DetachedShellHost.of(context) && !_hostDrawsChrome;
     _syncHeaderSuppression();
     _publishChromeHeader();
     if (!_heightInit) {
@@ -631,7 +643,9 @@ class _SheetViewState extends ConsumerState<SheetView>
                 child: SafeArea(
                   bottom: false,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    padding: _flushHeader
+                        ? EdgeInsets.zero
+                        : const EdgeInsets.fromLTRB(16, 10, 16, 0),
                     child: KeyedSubtree(
                       key: _headerKey,
                       child: Column(
@@ -643,6 +657,9 @@ class _SheetViewState extends ConsumerState<SheetView>
                               titleWidget: widget.titleWidget,
                               showBack: widget.showBack,
                               onBack: widget.onBack,
+                              borderRadius: _flushHeader
+                                  ? BorderRadius.zero
+                                  : const BorderRadius.all(Radius.circular(20)),
                               actions: widget.actions.map((action) {
                                 return _HeaderIconButton(
                                   onPressed: action.onPressed,
@@ -655,7 +672,13 @@ class _SheetViewState extends ConsumerState<SheetView>
                             ),
                           if (widget.tabs.isNotEmpty)
                             Padding(
-                              padding: const EdgeInsets.only(top: 12),
+                              // The outer gutter is dropped when flush, so the
+                              // rows below the app bar carry their own.
+                              padding: EdgeInsets.only(
+                                top: 12,
+                                left: _flushHeader ? 16 : 0,
+                                right: _flushHeader ? 16 : 0,
+                              ),
                               child: Row(
                                 children: widget.tabs
                                     .map(
@@ -682,7 +705,11 @@ class _SheetViewState extends ConsumerState<SheetView>
                             ),
                           if (widget.headerBottom != null)
                             Padding(
-                              padding: const EdgeInsets.only(top: 12),
+                              padding: EdgeInsets.only(
+                                top: 12,
+                                left: _flushHeader ? 16 : 0,
+                                right: _flushHeader ? 16 : 0,
+                              ),
                               child: widget.headerBottom!,
                             ),
                         ],

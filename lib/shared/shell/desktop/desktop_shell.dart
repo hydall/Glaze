@@ -237,8 +237,6 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
               ),
               // Floating window overlay
               const DesktopWindowView(),
-              // Glossary corner popup
-              const DesktopGlossaryPopup(),
             ],
           ),
         ),

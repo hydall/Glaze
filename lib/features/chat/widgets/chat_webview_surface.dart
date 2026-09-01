@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import 'chat_background.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -105,46 +106,13 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
   }
 
   Widget _background(BuildContext context) {
-    final base = widget.chatBgMode == 'color' && widget.chatBgColor != null
-        ? widget.chatBgColor!
-        : Theme.of(context).colorScheme.surface;
-    Widget? image;
-    if (widget.chatBgMode == 'avatar') {
-      final path = widget.chatBgAvatarPath;
-      if (path != null && path.isNotEmpty) {
-        image = Image.file(
-          File(path),
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-        );
-      }
-    } else if (widget.chatBgMode != 'color' && widget.bgImageBytes != null) {
-      image = Image.memory(
-        widget.bgImageBytes!,
-        fit: BoxFit.cover,
-        gaplessPlayback: true,
-      );
-    }
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        ColoredBox(color: base),
-        if (image != null) ...[
-          if (widget.bgBlur > 0)
-            ImageFiltered(
-              imageFilter: ui.ImageFilter.blur(
-                sigmaX: widget.bgBlur,
-                sigmaY: widget.bgBlur,
-                tileMode: TileMode.clamp,
-              ),
-              child: image,
-            )
-          else
-            image,
-          if (widget.bgDim > 0)
-            Container(color: Colors.black.withValues(alpha: widget.bgDim)),
-        ],
-      ],
+    return ChatBackground(
+      mode: widget.chatBgMode,
+      color: widget.chatBgColor,
+      avatarPath: widget.chatBgAvatarPath,
+      imageBytes: widget.bgImageBytes,
+      blur: widget.bgBlur,
+      dim: widget.bgDim,
     );
   }
 

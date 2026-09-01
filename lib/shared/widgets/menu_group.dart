@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/platform/haptics.dart';
 import '../theme/app_colors.dart';
+import '../shell/shell_header_provider.dart';
 import 'glass_surface.dart';
 import 'help_tip.dart';
 
@@ -36,17 +37,23 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
 
   @override
   Widget build(BuildContext context) {
+    final flat = DetachedShellHost.drawsChrome(context);
+    final radius = flat ? BorderRadius.zero : BorderRadius.circular(20);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: flat
+              ? EdgeInsets.zero
+              : const EdgeInsets.fromLTRB(16, 0, 16, 12),
           child: GlassSurface(
             enableRipple: true,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: context.cs.outlineVariant),
+            borderRadius: radius,
+            border: flat
+                ? Border(bottom: BorderSide(color: context.cs.outlineVariant))
+                : Border.all(color: context.cs.outlineVariant),
             child: InkWell(
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: radius,
               onTap: () {
                 Haptics.selectionClick();
                 setState(() => _expanded = !_expanded);
@@ -122,20 +129,35 @@ class MenuGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (header != null) _buildHeader(context),
+        ...items,
+        const SizedBox(height: 6),
+      ],
+    );
+
+    // Inside the floating window the host already draws a frame, so a group
+    // that keeps its own card reads as a card inside a card. There it runs
+    // edge to edge — no side gutters, no left/right edges, no rounding — and
+    // only the rule under it separates one group from the next.
+    if (DetachedShellHost.drawsChrome(context)) {
+      return GlassSurface(
+        enableRipple: true,
+        borderRadius: BorderRadius.zero,
+        border: Border(bottom: BorderSide(color: context.cs.outlineVariant)),
+        child: body,
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: GlassSurface(
         enableRipple: true,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: context.cs.outlineVariant),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (header != null) _buildHeader(context),
-            ...items,
-            const SizedBox(height: 6),
-          ],
-        ),
+        child: body,
       ),
     );
   }

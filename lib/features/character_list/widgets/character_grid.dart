@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../shared/widgets/responsive_grid.dart';
 import '../../../core/models/character.dart';
+import '../../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glass_surface.dart';
@@ -98,6 +99,64 @@ class CharacterGrid extends StatelessWidget {
     }
   }
 
+  /// The dice / filter / sort row.
+  ///
+  /// Desktop mirrors Vue's `.desktop-mode .sort-controls`: the row starts at
+  /// the left edge and the sort-type pill leads the direction toggle (CSS
+  /// `justify-content: flex-start` with `order: 1 / 2`). Elsewhere it stays
+  /// right-aligned with the toggle first, as the phone build has it.
+  ///
+  /// Wrap, not Row: the sort pill carries a translated label, so in a narrow
+  /// column (a small desktop window, where the middle column gives up width to
+  /// the sidebars) a Row overflowed instead of moving the controls onto a
+  /// second line.
+  Widget _buildControls(BuildContext context) {
+    final isDesktop = isDesktopLayout(context);
+
+    final sortDirButton = _SortDirButton(
+      isAsc: sortDir == SortDir.asc,
+      onTap: onSortDirToggle,
+    );
+    final sortTypePill = _SortTypePill(
+      sortBy: sortBy,
+      onChanged: onSortTypeChanged,
+    );
+
+    return Wrap(
+      alignment: isDesktop ? WrapAlignment.start : WrapAlignment.end,
+      spacing: 10,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (characters.isNotEmpty)
+          Consumer(
+            builder: (context, ref, _) {
+              final standard = ref.watch(
+                appSettingsProvider.select(
+                  (s) => s.value?.useStandardRandomizer ?? false,
+                ),
+              );
+              return _DiceButton(
+                standard: standard,
+                onTap: () => standard
+                    ? _openStandardRandom(context)
+                    : _openRandomizing(context),
+              );
+            },
+          ),
+        if (onFilterTap != null)
+          _FilterButton(count: filterCount, onTap: onFilterTap!),
+        if (isDesktop) ...[
+          sortTypePill,
+          sortDirButton,
+        ] else ...[
+          sortDirButton,
+          sortTypePill,
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return CustomScrollView(
@@ -108,42 +167,7 @@ class CharacterGrid extends StatelessWidget {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            // Wrap, not Row: the sort pill carries a translated label, so in a
-            // narrow column (a small desktop window, where the middle column
-            // gives up width to the sidebars) a Row overflowed instead of
-            // moving the controls onto a second line.
-            child: Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 10,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                if (characters.isNotEmpty) ...[
-                  Consumer(
-                    builder: (context, ref, _) {
-                      final standard = ref.watch(
-                        appSettingsProvider.select(
-                          (s) => s.value?.useStandardRandomizer ?? false,
-                        ),
-                      );
-                      return _DiceButton(
-                        standard: standard,
-                        onTap: () => standard
-                            ? _openStandardRandom(context)
-                            : _openRandomizing(context),
-                      );
-                    },
-                  ),
-                ],
-                if (onFilterTap != null)
-                  _FilterButton(count: filterCount, onTap: onFilterTap!),
-                _SortDirButton(
-                  isAsc: sortDir == SortDir.asc,
-                  onTap: onSortDirToggle,
-                ),
-                _SortTypePill(sortBy: sortBy, onChanged: onSortTypeChanged),
-              ],
-            ),
+            child: _buildControls(context),
           ),
         ),
         SliverToBoxAdapter(
