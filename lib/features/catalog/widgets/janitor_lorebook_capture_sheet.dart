@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/lorebook.dart';
+import '../../../core/services/character_book_converter.dart';
 import '../../../core/services/file_export_service.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../core/utils/error_format.dart';
@@ -22,6 +23,9 @@ import '../../../shared/widgets/sheet_view.dart';
 import '../../settings/app_settings_provider.dart';
 import '../janitor_account_provider.dart';
 import '../services/catalog_error_labels.dart';
+// `ExtractionResult` here is DataCat's own; the one this file uses is
+// JanitorExtractor's, so the DataCat name is hidden to keep it unambiguous.
+import '../services/datacat_provider.dart' hide ExtractionResult;
 import '../services/janitor_extractor.dart';
 import '../services/janitor_lorebook_rebuilder.dart';
 import '../services/janitor_provider.dart';
@@ -155,6 +159,12 @@ class _JanitorLorebookCaptureState
   LabeledError? _extractError;
   ExtractionResult? _extraction;
 
+  // The DataCat path: one request, no stages. Its own state so switching the
+  // setting mid-sheet never shows a phase from the other source.
+  bool _datacatFetching = false;
+  String? _datacatPhase;
+  String? _datacatError;
+
   /// What is stuffed into the message sent into the JanitorAI chat to make the
   /// closed lorebook fire (JAR's `exSources`).
   final _extractSources = _ContextSources();
@@ -196,13 +206,18 @@ class _JanitorLorebookCaptureState
   List<PublicLorebook> get _downloadableBooks =>
       downloadablePublicBooks(_public);
 
-  /// Whether closed-lorebook extraction is currently possible: the user opted in
-  /// and is logged into Janitor.AI, and no capture is already running.
+  /// Where closed lorebooks are recovered from ("Extract lorebooks with").
+  ExtractionSource get _lorebookSource =>
+      ref.watch(appSettingsProvider).value?.janitorLorebookSource ??
+      const AppSettings().janitorLorebookSource;
+
+  /// Whether local closed-lorebook extraction is currently possible: the
+  /// lorebook source is Local, an account is signed in, and no capture is
+  /// already running.
   bool get _canRebuild {
     final loggedIn = ref.watch(janitorAccountProvider).isLoggedIn;
-    final enabled =
-        ref.watch(appSettingsProvider).value?.extractJanitorLocally ?? false;
-    return loggedIn && enabled && !_proxyForbidden && !_extracting;
+    final local = _lorebookSource == ExtractionSource.local;
+    return loggedIn && local && !_proxyForbidden && !_extracting;
   }
 
   /// The creator locked this character to JanitorAI's own model, so the capture
@@ -709,8 +724,12 @@ class _JanitorLorebookCaptureState
   // ─── Build ──────────────────────────────────────────────────────────────────
 
   /// Whether this character has a closed-lorebook flow to run at all. Without
-  /// closed books the sheet is just the list of public ones.
-  bool get _hasFlow => !_loadingPublic && _closedBooks.isNotEmpty;
+  /// closed books the sheet is just the list of public ones, and the DataCat
+  /// path is a single request rather than a flow — neither has stages to name.
+  bool get _hasFlow =>
+      !_loadingPublic &&
+      _closedBooks.isNotEmpty &&
+      _lorebookSource == ExtractionSource.local;
 
   /// Which stage of the closed-lorebook flow is on screen, derived from what
   /// has been produced so far rather than tracked separately.
@@ -822,7 +841,11 @@ class _JanitorLorebookCaptureState
           savedAllDone: _savedAllDone,
           savedAllTotal: _savedAllTotal,
         ),
-        if (closed.isNotEmpty) ..._closedSection(cs, closed),
+        if (closed.isNotEmpty)
+          ...switch (_lorebookSource) {
+            ExtractionSource.local => _closedSection(cs, closed),
+            ExtractionSource.datacat => _datacatSection(cs, closed),
+          },
       ],
       _Phase.build => _buildBlock(cs, _extraction!),
       _Phase.save => _buildResult(_built!),
@@ -973,6 +996,106 @@ class _JanitorLorebookCaptureState
     ];
   }
 
+  /// Stage 1 as DataCat does it: one request for whatever book DataCat's copy of
+  /// the card carries. There is no capture and no LLM rebuild here — DataCat
+  /// only ever holds the character's *public* lorebook scripts — so this is a
+  /// single action with no stages after it, and a private book simply is not
+  /// there. The hint above it says so; switching the setting to Local is what
+  /// recovers those.
+  List<Widget> _datacatSection(ColorScheme cs, List<PublicLorebook> closed) {
+    return [
+      MenuCollapsibleSection(
+        label: '${'catalog_lorebooks_closed'.tr()} · ${closed.length}',
+        helpTerm: 'janitor-closed-lorebook',
+        children: [
+          MenuGroup(
+            items: [
+              _GroupNote('catalog_lorebooks_datacat_hint'.tr()),
+              for (final b in closed) _ClosedRow(book: b),
+            ],
+          ),
+        ],
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: ActionTile(
+          icon: Icons.pets_outlined,
+          expand: true,
+          primary: true,
+          busy: _datacatFetching,
+          label: _datacatFetching
+              ? (_datacatPhase ?? 'catalog_lorebooks_datacat_fetching'.tr())
+              : 'catalog_lorebooks_datacat_btn'.tr(),
+          onTap: _datacatFetching ? null : _fetchDatacatLorebook,
+        ),
+      ),
+      if (_datacatError != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: _Hint(_datacatError!, cs: cs),
+        ),
+    ];
+  }
+
+  /// Pulls DataCat's copy of the card and offers its embedded lorebook, if it
+  /// has one, through the same Save / Export sheet a rebuilt book uses.
+  Future<void> _fetchDatacatLorebook() async {
+    if (_datacatFetching) return;
+    setState(() {
+      _datacatFetching = true;
+      _datacatError = null;
+      _datacatPhase = null;
+    });
+    try {
+      final res = await datacatExtractAndPoll(
+        widget.args.sourceUrl,
+        onPhaseChange: (p) {
+          if (mounted && p.trim().isNotEmpty) setState(() => _datacatPhase = p);
+        },
+      );
+      if (!mounted) return;
+      final book = res.charData?.characterBook;
+      if (res.error != null) {
+        setState(() => _datacatError = res.error);
+        return;
+      }
+      if (book is! Map) {
+        // DataCat answered, with no book in the card: for a private lorebook
+        // that is the expected answer, not a failure.
+        setState(() => _datacatError = 'catalog_lorebooks_datacat_none'.tr());
+        return;
+      }
+      final converted = convertCharacterBook(
+        Map<String, dynamic>.from(book),
+        widget.characterId ?? '',
+      );
+      if (converted.entries.isEmpty) {
+        setState(() => _datacatError = 'catalog_lorebooks_datacat_none'.tr());
+        return;
+      }
+      _offerSaveExport(
+        // convertCharacterBook builds an embedded book — always character-scoped
+        // and off by default. Saved from here it is a book the user asked for,
+        // and with no character it is a standalone one, same as every other save
+        // this sheet offers.
+        converted.copyWith(
+          enabled: true,
+          activationScope: widget.characterId != null ? 'character' : 'global',
+          activationTargetId: widget.characterId,
+        ),
+      );
+    } catch (e) {
+      if (mounted) setState(() => _datacatError = formatError(e));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _datacatFetching = false;
+          _datacatPhase = null;
+        });
+      }
+    }
+  }
+
   /// Back to stage 1: drop the capture (and anything built from it) so the
   /// extraction context can be picked again. Deliberately does not re-run the
   /// capture — the whole point of coming back is to change what is sent.
@@ -1002,14 +1125,13 @@ class _JanitorLorebookCaptureState
   /// inside the button.
   Widget _buildExtractStatus(ColorScheme cs) {
     final loggedIn = ref.watch(janitorAccountProvider).isLoggedIn;
-    final enabled =
-        ref.watch(appSettingsProvider).value?.extractJanitorLocally ?? false;
-    // Proxies forbidden outranks the other two: enabling the opt-in or logging
+    final local = _lorebookSource == ExtractionSource.local;
+    // Proxies forbidden outranks the other two: switching the source or logging
     // in would not make the capture possible.
     final hint = _proxyForbidden
         ? '${const JanitorRefusedException.proxyForbidden().message}. '
               '${'catalog_janitor_refused_body'.tr()}'
-        : !enabled
+        : !local
         ? 'catalog_lorebooks_need_optin'.tr()
         : !loggedIn
         ? 'catalog_lorebooks_need_login'.tr()

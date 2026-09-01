@@ -28,7 +28,9 @@ void main() {
       'openCardAfterImport': bool,
       'hapticFeedback': bool,
       'messageVibration': bool,
-      'extractJanitorLocally': bool,
+      'janitorLorebookSource': String,
+      'janitorCardSource': String,
+      'janitorCharacterSource': String,
       'lorebookBuildPrompt': String,
       'lorebookBuildPromptJs': String,
       'useStandardRandomizer': bool,
@@ -67,6 +69,14 @@ void main() {
           case String:
             if (entry.key == 'language') {
               expect(defaults.language, 'en');
+            } else if (entry.key == 'janitorLorebookSource') {
+              expect(defaults.janitorLorebookSource, ExtractionSource.datacat);
+            } else if (entry.key == 'janitorCardSource') {
+              // The card itself is read locally by default: only the WebView
+              // proxy can see a card restricted to logged-in visitors.
+              expect(defaults.janitorCardSource, ExtractionSource.local);
+            } else if (entry.key == 'janitorCharacterSource') {
+              expect(defaults.janitorCharacterSource, ExtractionSource.datacat);
             }
           // ignore: type_literal_in_constant_pattern
           case double:
@@ -314,8 +324,6 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.hapticFeedback;
     case 'messageVibration':
       return s.messageVibration;
-    case 'extractJanitorLocally':
-      return s.extractJanitorLocally;
     case 'useStandardRandomizer':
       return s.useStandardRandomizer;
     default:

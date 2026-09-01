@@ -11,6 +11,7 @@ import '../janitor_account_provider.dart';
 import '../saucepan_account_provider.dart';
 import '../third_party_providers_provider.dart';
 import 'janitor_login_sheet.dart';
+import 'janitor_source_settings.dart';
 import 'saucepan_login_sheet.dart';
 
 /// Opens the Third-Party providers screen as a full-screen pushed route on the
@@ -110,14 +111,7 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
             onTap: () => openJanitorAccountSheet(context, ref),
           ),
           if (settings != null)
-            MenuSwitchItem(
-              label: 'menu_extract_janitor_locally'.tr(),
-              description: 'desc_extract_janitor_locally'.tr(),
-              value: settings.extractJanitorLocally,
-              onChanged: (v) => ref
-                  .read(appSettingsProvider.notifier)
-                  .save(settings.copyWith(extractJanitorLocally: v)),
-            ),
+            ...janitorSourceMenuItems(context, ref, settings),
         ];
       case ThirdPartyProvider.saucepan:
         final account = ref.watch(saucepanAccountProvider);
