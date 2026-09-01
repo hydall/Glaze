@@ -822,22 +822,35 @@ class _SheetViewState extends ConsumerState<SheetView>
             child: innerChild,
           );
 
+          // The header inset the body reads stays put; the status-bar pad
+          // that grows as the sheet approaches fullscreen is applied around it
+          // as an outer inset instead of being folded into it.
+          //
+          // Folded in, it changed the MediaQuery on every frame of a resize,
+          // and every body that reads the inset rebuilt with it — for a big
+          // form whose list is built eagerly (the API sheet) that is a full
+          // widget-tree rebuild per frame of the keyboard animation, which is
+          // what dropped frames there. As an outer inset it costs the relayout
+          // the body pays anyway, and nothing rebuilds. The body still starts
+          // at the same place: the header carries the same pad above its own
+          // content.
+          final insetBody = MediaQuery(
+            data: mediaQuery.copyWith(
+              padding: mediaQuery.padding.copyWith(
+                top: _hasHeader ? _headerBaseH : 0.0,
+                bottom: navInset,
+              ),
+            ),
+            child: scrollChild,
+          );
+
           return ValueListenableBuilder<double>(
             valueListenable: _heightN,
-            child: scrollChild,
-            builder: (context, height, child) {
-              final topPad = _topPad(_lifted(height));
-              final extraTop = _hasHeader ? _headerBaseH + topPad : topPad;
-              return MediaQuery(
-                data: mediaQuery.copyWith(
-                  padding: mediaQuery.padding.copyWith(
-                    top: extraTop,
-                    bottom: navInset,
-                  ),
-                ),
-                child: child!,
-              );
-            },
+            child: insetBody,
+            builder: (context, height, child) => Padding(
+              padding: EdgeInsets.only(top: _topPad(_lifted(height))),
+              child: child!,
+            ),
           );
         },
       ),

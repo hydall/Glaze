@@ -104,6 +104,13 @@ ListView(
 The bottom padding is the nav-bar / keyboard inset, delivered the same way so
 list rows scroll *behind* the nav bar while the last row rests above it.
 
+That inset is deliberately **stable**: the status-bar pad the sheet fades in as
+it approaches fullscreen is applied as an outer inset, not folded into the
+`MediaQuery`. A `MediaQuery` that moved with the sheet rebuilt every body that
+reads it, once per frame of a resize — for a big eagerly-built form that is a
+whole widget tree per frame. Keep it that way: nothing that animates belongs in
+the inset the body reads.
+
 ### The keyboard
 
 A `SheetView` answers the on-screen keyboard by **tracking the inset**: it grows
