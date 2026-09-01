@@ -128,9 +128,11 @@ class MemoryBookController {
         : 'memory_books_current_llm_model'.tr();
   }
 
+  /// Reads the global settings, which is what [cycleSearchType] writes — the
+  /// per-book snapshot is a projection of them and would otherwise pin the
+  /// label to whatever the book was last saved with.
   String get searchTypeLabel {
-    final s = _book?.settings;
-    if (s == null) return 'memory_books_search_vector'.tr();
+    final s = globalSettings;
     if (!s.vectorSearchEnabled) return 'memory_books_search_keys'.tr();
     if (s.keyMatchMode == 'both') return 'memory_books_vector_and_keys'.tr();
     return 'memory_books_search_vector'.tr();
@@ -405,6 +407,19 @@ class MemoryBookController {
         .save(
           s.copyWith(vectorSearchEnabled: nextVector, keyMatchMode: nextMode),
         );
+    // Retrieval reads the book's own snapshot (`book.settings.keyMatchMode`),
+    // so mirror the two fields there as well — saving only the global settings
+    // left the sheet showing a value the search never used.
+    final book = _book;
+    if (book == null) return;
+    final bookSettings = book.settings.copyWith(
+      vectorSearchEnabled: nextVector,
+      keyMatchMode: nextMode,
+    );
+    _book = book.copyWith(settings: bookSettings);
+    await _ref
+        .read(memoryBookOpsProvider)
+        .updateSettings(_sessionId, bookSettings);
   }
 
   void dispose() => _draftGen.dispose();

@@ -673,6 +673,23 @@ bubble keeps rendering the image either way — hiding affects the request only.
 2. Keyword lorebook scan runs synchronously in `PromptBuilder` (inside the Dart isolate).
 3. `mergeKeywordVector()` deduplicates: vector entries whose IDs appear in keyword results are dropped. Keyword results always win.
 
+### INV-PS2b: Vector / embedding / index UI hangs off the API toggle
+
+`vectorSearchAvailableProvider` (`lib/core/state/lorebook_embedding_provider.dart`)
+is the single source of truth for whether the app shows anything about vectors,
+embeddings or indexes. It mirrors the condition `resolveEmbeddingConfig` uses —
+an active API preset, not itself an `embedding`-mode preset, with
+`embeddingEnabled` on (the **Embeddings → Vector search** switch of the API
+screen).
+
+While it is `false`, these stay hidden rather than disabled: the lorebook
+search-type picker and vector params (list + global + per-book settings), the
+embedding-settings entry point, the editor's index / reindex / drop-indexes
+toolbar, the reindex banner, the per-entry vector section and its `vec` / `idx`
+badges, and the memory sheet's retrieval-mode row, reindex / drop-indexes
+actions and index badges. Stored values are never rewritten by the gate — the
+previous choices come back when the toggle is switched on again.
+
 ### INV-PS3: History cutoff is oldest-first
 
 When context overflows, history is trimmed from the **oldest** end.

@@ -18,6 +18,17 @@ final embeddingConfigProvider = Provider<EmbeddingConfig>((ref) {
   return resolveEmbeddingConfig(chatConfig);
 });
 
+/// True when the active API preset has vector (semantic) search switched on.
+///
+/// Every vector / embedding / index affordance in the UI hangs off this: with
+/// embeddings off there is no endpoint to index against, so the buttons and
+/// hints stay hidden instead of failing at tap time. Mirrors the condition
+/// [resolveEmbeddingConfig] uses to decide whether a usable config exists.
+final vectorSearchAvailableProvider = Provider<bool>((ref) {
+  final config = ref.watch(activeApiConfigProvider);
+  return config != null && config.mode != 'embedding' && config.embeddingEnabled;
+});
+
 EmbeddingConfig resolveEmbeddingConfig(ApiConfig? chatConfig) {
   if (chatConfig == null ||
       chatConfig.mode == 'embedding' ||

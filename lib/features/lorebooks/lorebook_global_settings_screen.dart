@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/models/lorebook.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
@@ -30,6 +31,9 @@ class _LorebookGlobalSettingsScreenState
   @override
   Widget build(BuildContext context) {
     final settings = _settings;
+    // Vector knobs only exist while the active API preset has semantic search
+    // switched on; otherwise the screen is keyword-only.
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
 
     return Scaffold(
       backgroundColor: context.cs.surface,
@@ -74,23 +78,31 @@ class _LorebookGlobalSettingsScreenState
                   onChanged: (v) =>
                       _update(settings.copyWith(keySearchMode: v)),
                 ),
-                const SizedBox(height: 12),
-                _DropdownField<String>(
-                  label: 'label_search_type'.tr(),
-                  value: settings.searchType,
-                  items: [
-                    DropdownMenuItem(value: 'keyword', child: Text('search_type_keys'.tr())),
-                    DropdownMenuItem(value: 'vector', child: Text('search_type_vector'.tr())),
-                    DropdownMenuItem(
-                      value: 'both',
-                      child: Text('search_type_both'.tr()),
-                    ),
-                  ],
-                  onChanged: (v) => _update(settings.copyWith(searchType: v)),
-                ),
+                if (vectorAvailable) ...[
+                  const SizedBox(height: 12),
+                  _DropdownField<String>(
+                    label: 'label_search_type'.tr(),
+                    value: settings.searchType,
+                    items: [
+                      DropdownMenuItem(
+                        value: 'keyword',
+                        child: Text('search_type_keys'.tr()),
+                      ),
+                      DropdownMenuItem(
+                        value: 'vector',
+                        child: Text('search_type_vector'.tr()),
+                      ),
+                      DropdownMenuItem(
+                        value: 'both',
+                        child: Text('search_type_both'.tr()),
+                      ),
+                    ],
+                    onChanged: (v) => _update(settings.copyWith(searchType: v)),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 _NumberField(
-                  label: settings.searchType == 'vector'
+                  label: vectorAvailable && settings.searchType == 'vector'
                       ? 'label_vector_scan_depth'.tr()
                       : 'label_scan_depth_lore'.tr(),
                   value: settings.scanDepth,
@@ -160,7 +172,7 @@ class _LorebookGlobalSettingsScreenState
                 ),
                 const SizedBox(height: 24),
 
-                if (settings.searchType != 'keyword') ...[
+                if (vectorAvailable && settings.searchType != 'keyword') ...[
                   _SectionHeader('section_vector_search'.tr()),
                   _SliderField(
                     label: 'label_similarity_threshold'.tr(),

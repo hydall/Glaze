@@ -17,6 +17,11 @@ class MemoryBooksOverview extends StatelessWidget {
   final String settingsSummary;
   final String searchTypeLabel;
   final VoidCallback onCycleSearchType;
+
+  /// False when the active API preset has vector search switched off — the
+  /// retrieval-mode row only cycles between vector modes, so it is dropped
+  /// rather than offering a switch that cannot take effect.
+  final bool showSearchType;
   final int activeCount;
   final int needsRebuildCount;
   final int draftCount;
@@ -28,6 +33,7 @@ class MemoryBooksOverview extends StatelessWidget {
     required this.settingsSummary,
     required this.searchTypeLabel,
     required this.onCycleSearchType,
+    required this.showSearchType,
     required this.activeCount,
     required this.needsRebuildCount,
     required this.draftCount,
@@ -42,15 +48,16 @@ class MemoryBooksOverview extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
           child: _buildHero(context),
         ),
-        MenuGroup(
-          items: [
-            MenuSelectorItem(
-              label: 'label_search_type'.tr(),
-              currentValue: searchTypeLabel,
-              onTap: onCycleSearchType,
-            ),
-          ],
-        ),
+        if (showSearchType)
+          MenuGroup(
+            items: [
+              MenuSelectorItem(
+                label: 'label_search_type'.tr(),
+                currentValue: searchTypeLabel,
+                onTap: onCycleSearchType,
+              ),
+            ],
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
           child: _buildCounters(context),

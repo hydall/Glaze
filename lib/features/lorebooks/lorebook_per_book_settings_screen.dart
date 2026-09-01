@@ -1,23 +1,25 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/lorebook.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_scaffold.dart';
 import '../../../shared/widgets/help_tip.dart';
 
-class LorebookPerBookSettingsScreen extends StatefulWidget {
+class LorebookPerBookSettingsScreen extends ConsumerStatefulWidget {
   final LorebookSettings? settings;
   final LorebookGlobalSettings? globalSettings;
 
   const LorebookPerBookSettingsScreen({super.key, this.settings, this.globalSettings});
 
   @override
-  State<LorebookPerBookSettingsScreen> createState() =>
+  ConsumerState<LorebookPerBookSettingsScreen> createState() =>
       _LorebookPerBookSettingsScreenState();
 }
 
 class _LorebookPerBookSettingsScreenState
-    extends State<LorebookPerBookSettingsScreen> {
+    extends ConsumerState<LorebookPerBookSettingsScreen> {
   late LorebookSettings _settings;
   bool _hasCustom = false;
 
@@ -156,45 +158,53 @@ class _LorebookPerBookSettingsScreenState
                 const SizedBox(height: 24),
 
                 // ── Vector Search ─────────────────────────────────────────
-                _SectionHeader('section_vector_search'.tr()),
-                _SwitchField(
-                  label: 'label_vector_search'.tr(),
-                  value: _settings.vectorSearchEnabled,
-                  onChanged: (v) =>
-                      _update(_settings.copyWith(vectorSearchEnabled: v)),
-                ),
-                if (_settings.vectorSearchEnabled) ...[
-                  const SizedBox(height: 8),
-                  _DropdownField<String>(
-                    label: 'label_embedding_target'.tr(),
-                    value: _settings.embeddingTarget,
-                    items: [
-                      DropdownMenuItem(value: 'content', child: Text('target_content'.tr())),
-                      DropdownMenuItem(value: 'comment', child: Text('target_comment'.tr())),
-                      DropdownMenuItem(value: 'both', child: Text('search_type_both'.tr())),
-                    ],
+                // Hidden while the active API preset has semantic search off:
+                // the per-book override could not take effect anyway.
+                if (ref.watch(vectorSearchAvailableProvider)) ...[
+                  _SectionHeader('section_vector_search'.tr()),
+                  _SwitchField(
+                    label: 'label_vector_search'.tr(),
+                    value: _settings.vectorSearchEnabled,
                     onChanged: (v) =>
-                        _update(_settings.copyWith(embeddingTarget: v)),
+                        _update(_settings.copyWith(vectorSearchEnabled: v)),
                   ),
-                  const SizedBox(height: 12),
-                  _SliderField(
-                    label: 'label_similarity_threshold'.tr(),
-                    value: _settings.vectorThreshold,
-                    min: 0.0,
-                    max: 1.0,
-                    divisions: 20,
-                    displayText: _settings.vectorThreshold.toStringAsFixed(2),
-                    onChanged: (v) =>
-                        _update(_settings.copyWith(vectorThreshold: v)),
-                  ),
-                  const SizedBox(height: 12),
-                  _NumberField(
-                    label: 'label_top_k'.tr(),
-                    value: _settings.vectorTopK,
-                    min: 1,
-                    max: 50,
-                    onChanged: (v) => _update(_settings.copyWith(vectorTopK: v)),
-                  ),
+                  if (_settings.vectorSearchEnabled) ...[
+                    const SizedBox(height: 8),
+                    _DropdownField<String>(
+                      label: 'label_embedding_target'.tr(),
+                      value: _settings.embeddingTarget,
+                      items: [
+                        DropdownMenuItem(
+                            value: 'content', child: Text('target_content'.tr())),
+                        DropdownMenuItem(
+                            value: 'comment', child: Text('target_comment'.tr())),
+                        DropdownMenuItem(
+                            value: 'both', child: Text('search_type_both'.tr())),
+                      ],
+                      onChanged: (v) =>
+                          _update(_settings.copyWith(embeddingTarget: v)),
+                    ),
+                    const SizedBox(height: 12),
+                    _SliderField(
+                      label: 'label_similarity_threshold'.tr(),
+                      value: _settings.vectorThreshold,
+                      min: 0.0,
+                      max: 1.0,
+                      divisions: 20,
+                      displayText: _settings.vectorThreshold.toStringAsFixed(2),
+                      onChanged: (v) =>
+                          _update(_settings.copyWith(vectorThreshold: v)),
+                    ),
+                    const SizedBox(height: 12),
+                    _NumberField(
+                      label: 'label_top_k'.tr(),
+                      value: _settings.vectorTopK,
+                      min: 1,
+                      max: 50,
+                      onChanged: (v) =>
+                          _update(_settings.copyWith(vectorTopK: v)),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 24),
               ],
