@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/converters/prompt_post_processing.dart';
+import '../../core/llm/model_fetcher.dart';
 import '../../core/llm/transport/endpoint_normalizer.dart';
 import '../../core/llm/transport/endpoint_preview.dart';
 import '../../core/llm/transport/endpoint_resolution_cache.dart';
@@ -51,7 +52,15 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   ApiConnectionStatus _llmStatus = ApiConnectionStatus.idle;
   String _llmError = '';
   ApiConnectionStatus _embStatus = ApiConnectionStatus.idle;
+  String _embError = '';
   List<Map<String, dynamic>> _fetchedModels = [];
+
+  bool _isLoadingEmbModels = false;
+
+  /// Model ids offered by the embedding connection, cached until the preset,
+  /// the protocol or the "use LLM API" toggle changes the connection they
+  /// came from.
+  List<String> _embFetchedModels = [];
 
   // Text controllers
   final _nameCtrl = TextEditingController();
@@ -265,6 +274,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _protocol = values.protocol;
       _extraRequestParameters = values.extraRequestParameters;
       _fetchedModels = [];
+      _embFetchedModels = [];
     });
 
     _loading = false;
@@ -491,14 +501,26 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   Widget _buildTopControls(List<ApiConfig> list, String activeName) {
     // Preset selector pill (tab-specific — slides with the body content).
-    return _tab == 0
-        ? ConnectionStatus(
-            status: _llmStatus,
-            errorMessage: _llmError,
-            onRetry: _testLlmConnection,
-            child: _buildPresetPill(context, list, activeName),
-          )
-        : _buildPresetPill(context, list, activeName);
+    // LLM and Embeddings each check their own connection from the badge beside
+    // the pill; the agents tab has no connection of its own to probe.
+    final pill = _buildPresetPill(context, list, activeName);
+    return switch (_tab) {
+      0 => ConnectionStatus(
+        status: _llmStatus,
+        errorMessage: _llmError,
+        onRetry: _testLlmConnection,
+        child: pill,
+      ),
+      // Nothing to probe until the preset has embeddings switched on, so the
+      // badge appears with the rest of the embedding settings.
+      1 when _embeddingEnabled => ConnectionStatus(
+        status: _embStatus,
+        errorMessage: _embError,
+        onRetry: _testEmbConnection,
+        child: pill,
+      ),
+      _ => pill,
+    };
   }
 
   Widget _buildPresetPill(
@@ -1050,7 +1072,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   description: 'settings_use_llm_api_desc'.tr(),
                   value: _embeddingUseSame,
                   onChanged: (v) {
-                    setState(() => _embeddingUseSame = v);
+                    // The list was fetched from the other connection.
+                    setState(() {
+                      _embeddingUseSame = v;
+                      _embFetchedModels = [];
+                    });
                     _scheduleSave();
                   },
                 ),
@@ -1070,11 +1096,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                       );
                     },
                   ),
-                  MenuFieldItem(
-                    label: 'settings_embedding_model'.tr(),
-                    controller: _embModelCtrl,
-                    placeholder: 'text-embedding-3-small',
-                  ),
+                  _buildEmbeddingModelField(),
                   MenuFieldItem(
                     label: 'onboarding_label_key'.tr(),
                     controller: _embApiKeyCtrl,
@@ -1082,12 +1104,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                     obscure: true,
                   ),
                 ],
-                if (_embeddingUseSame)
-                  MenuFieldItem(
-                    label: 'settings_embedding_model'.tr(),
-                    controller: _embModelCtrl,
-                    placeholder: 'text-embedding-3-small',
-                  ),
+                if (_embeddingUseSame) _buildEmbeddingModelField(),
                 MenuFieldItem(
                   label: 'settings_max_tokens_chunk'.tr(),
                   controller: _embChunkTokensCtrl,
@@ -1103,36 +1120,135 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               ],
             ],
           ),
-          if (_embeddingEnabled)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: context.cs.primary,
-                  side: BorderSide(
-                    color: context.cs.primary.withValues(alpha: 0.4),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                onPressed: _embStatus == ApiConnectionStatus.connecting
-                    ? null
-                    : _testEmbConnection,
-                icon: _embStatus == ApiConnectionStatus.connecting
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: GlazeSpinner(),
-                      )
-                    : const Icon(Icons.wifi_find_rounded),
-                label: Text(
-                  _embStatus == ApiConnectionStatus.connecting
-                      ? 'settings_testing'.tr()
-                      : 'settings_test_connection'.tr(),
-                ),
-              ),
-            ),
         ],
       ),
+    );
+  }
+
+  /// The embedding-model row, shared by both branches of "use LLM API".
+  ///
+  /// Mirrors the LLM tab's model field: free text plus a chevron that fetches
+  /// the model list from whichever connection the embedding request will
+  /// actually use, and opens the same searchable picker.
+  Widget _buildEmbeddingModelField() {
+    return MenuFieldItem(
+      label: 'settings_embedding_model'.tr(),
+      controller: _embModelCtrl,
+      placeholder: 'text-embedding-3-small',
+      suffix: _isLoadingEmbModels
+          ? const Padding(
+              padding: EdgeInsets.all(12),
+              child: SizedBox(width: 18, height: 18, child: GlazeSpinner()),
+            )
+          : IconButton(
+              icon: Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: context.cs.onSurfaceVariant,
+                size: 22,
+              ),
+              tooltip: _embFetchedModels.isEmpty
+                  ? 'settings_fetch_models'.tr()
+                  : 'settings_select_model'.tr(),
+              onPressed: _openEmbeddingModelSelector,
+            ),
+    );
+  }
+
+  /// The connection the embedding model list is fetched from, mirroring what
+  /// `resolveEmbeddingConfig` feeds the request: the LLM connection while
+  /// "use LLM API" is on, the dedicated embedding one otherwise.
+  ///
+  /// The endpoint goes through the same persistence normalization the repo
+  /// applies, so a protocol with a fixed URL (OpenRouter, whose endpoint field
+  /// is hidden) resolves here exactly as it does at request time. Returns null
+  /// when there is nothing to fetch from yet.
+  ApiConfig? _embeddingModelSource() {
+    if (_embeddingUseSame) {
+      final endpoint = EndpointNormalizer.persistedLlmEndpoint(
+        raw: _endpointCtrl.text.trim(),
+        protocol: _protocol,
+        model: _modelCtrl.text.trim(),
+        stream: _stream,
+        useResponsesApi: _useResponsesApi,
+      );
+      if (endpoint.isEmpty) return null;
+      return ApiConfig(
+        id: '',
+        endpoint: endpoint,
+        apiKey: _keyCtrl.text.trim(),
+        protocol: _protocol,
+      );
+    }
+    final raw = _embEndpointCtrl.text.trim();
+    if (raw.isEmpty) return null;
+    // A dedicated embedding endpoint speaks the OpenAI-compatible surface
+    // (`/embeddings`, `/models`) whatever protocol the chat side uses.
+    return ApiConfig(
+      id: '',
+      endpoint: EndpointNormalizer.persistedEmbeddingEndpoint(raw),
+      apiKey: _embApiKeyCtrl.text.trim(),
+      protocol: LlmProtocol.customChatCompletion,
+    );
+  }
+
+  Future<void> _fetchEmbeddingModels() async {
+    final source = _embeddingModelSource();
+    if (source == null || source.apiKey.isEmpty) {
+      GlazeToast.show(context, 'settings_err_endpoint_key'.tr());
+      return;
+    }
+    setState(() => _isLoadingEmbModels = true);
+    try {
+      final ids = await ModelFetcher.fetchModelIds(source);
+      if (!mounted) return;
+      setState(() {
+        _embFetchedModels = ids;
+        _isLoadingEmbModels = false;
+      });
+      if (ids.isEmpty) {
+        GlazeToast.show(context, 'settings_err_no_models'.tr());
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingEmbModels = false);
+        GlazeErrorDialog.show(context, e, prefix: 'settings_err_failed'.tr());
+      }
+    }
+  }
+
+  Future<void> _openEmbeddingModelSelector() async {
+    if (_embFetchedModels.isEmpty) {
+      await _fetchEmbeddingModels();
+      if (_embFetchedModels.isEmpty) return;
+    }
+    if (!mounted) return;
+    final models = List<String>.from(_embFetchedModels);
+    final current = _embModelCtrl.text.trim();
+    // A model typed by hand (or one the provider does not list) stays
+    // selectable instead of silently dropping out of the picker.
+    if (current.isNotEmpty && !models.contains(current)) {
+      models.insert(0, current);
+    }
+    final selectedIndex = models.indexOf(current);
+    await GlazeBottomSheet.show<void>(
+      context,
+      title: 'settings_embedding_model'.tr(),
+      scrollToIndex: selectedIndex >= 0 ? selectedIndex : null,
+      searchable: true,
+      searchHint: 'settings_search_models'.tr(),
+      items: models
+          .map(
+            (m) => BottomSheetItem(
+              label: m,
+              icon: m == current ? Icons.check : null,
+              iconColor: context.cs.primary,
+              onTap: () {
+                Navigator.of(context, rootNavigator: true).pop();
+                _embModelCtrl.text = m;
+              },
+            ),
+          )
+          .toList(),
     );
   }
 
@@ -1667,6 +1783,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               _protocol = p;
               _applyProtocolUiPolicy(_protocol);
               _fetchedModels = [];
+              _embFetchedModels = [];
             });
             _scheduleSave();
           },
@@ -1793,7 +1910,17 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   Future<void> _testEmbConnection() async {
     final String endpoint, apiKey, model;
     if (_embeddingUseSame) {
-      endpoint = _endpointCtrl.text.trim();
+      // Resolve the LLM endpoint the way the repo persists it, so the test
+      // hits the URL the embedding request will actually use. A protocol with
+      // a fixed URL (OpenRouter, whose endpoint field is hidden) leaves the
+      // controller empty and would otherwise fail the guard below.
+      endpoint = EndpointNormalizer.persistedLlmEndpoint(
+        raw: _endpointCtrl.text.trim(),
+        protocol: _protocol,
+        model: _modelCtrl.text.trim(),
+        stream: _stream,
+        useResponsesApi: _useResponsesApi,
+      );
       apiKey = _keyCtrl.text.trim();
       model = _embModelCtrl.text.trim().isNotEmpty
           ? _embModelCtrl.text.trim()
@@ -1807,8 +1934,12 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       GlazeToast.show(context, 'settings_err_fill_endpoint'.tr());
       return;
     }
+    // The badge stays tappable while connecting, so ignore a second tap
+    // instead of racing two probes into the same status field.
+    if (_embStatus == ApiConnectionStatus.connecting) return;
     setState(() {
       _embStatus = ApiConnectionStatus.connecting;
+      _embError = '';
     });
     final result = await ApiConnectionTester().testEmbedding(
       endpoint: endpoint,
@@ -1821,7 +1952,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         setState(() => _embStatus = ApiConnectionStatus.connected);
         GlazeToast.show(context, message);
       case ApiTestFailure(:final error):
-        setState(() => _embStatus = ApiConnectionStatus.failed);
+        setState(() {
+          _embStatus = ApiConnectionStatus.failed;
+          _embError = error.toString();
+        });
         GlazeErrorDialog.show(
           context,
           error,

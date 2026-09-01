@@ -1,7 +1,11 @@
+import 'dart:io';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/llm/embedding_request_gate.dart';
 import 'package:glaze_flutter/core/state/lorebook_embedding_provider.dart';
+import 'package:glaze_flutter/features/settings/api_list_provider.dart';
 
 void main() {
   group('resolveEmbeddingConfig', () {
@@ -40,6 +44,82 @@ void main() {
       expect(config.model, api.embeddingModel);
       expect(config.maxChunkTokens, 256);
       expect(config.requestsPerMinute, 40);
+    });
+  });
+
+  group('vectorSearchAvailableProvider', () {
+    bool available(ApiConfig? config) {
+      final container = ProviderContainer(
+        overrides: [activeApiConfigProvider.overrideWithValue(config)],
+      );
+      addTearDown(container.dispose);
+      return container.read(vectorSearchAvailableProvider);
+    }
+
+    test('is false without an active API preset', () {
+      expect(available(null), isFalse);
+    });
+
+    test('is false while embeddings are disabled on the preset', () {
+      expect(
+        available(
+          const ApiConfig(
+            id: 'api',
+            endpoint: 'https://api.example/v1',
+            model: 'chat-model',
+          ),
+        ),
+        isFalse,
+      );
+    });
+
+    test('is false for an embedding-only preset', () {
+      expect(
+        available(
+          const ApiConfig(
+            id: 'api',
+            endpoint: 'https://api.example/v1',
+            model: 'chat-model',
+            mode: 'embedding',
+            embeddingEnabled: true,
+          ),
+        ),
+        isFalse,
+      );
+    });
+
+    test('is true once embeddings are enabled on the chat preset', () {
+      expect(
+        available(
+          const ApiConfig(
+            id: 'api',
+            endpoint: 'https://api.example/v1',
+            model: 'chat-model',
+            embeddingEnabled: true,
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('gates every vector affordance in the UI', () {
+      // Each of these screens/sheets used to show its vector, embedding or
+      // index controls unconditionally.
+      const gated = [
+        'lib/features/lorebooks/lorebook_list_screen.dart',
+        'lib/features/lorebooks/lorebook_global_settings_screen.dart',
+        'lib/features/lorebooks/lorebook_per_book_settings_screen.dart',
+        'lib/features/lorebooks/lorebook_editor_screen.dart',
+        'lib/features/chat/widgets/memory_books_tab.dart',
+        'lib/features/chat/widgets/memory_generation_settings_sheet.dart',
+      ];
+      for (final path in gated) {
+        expect(
+          File(path).readAsStringSync(),
+          contains('vectorSearchAvailableProvider'),
+          reason: '$path must gate its vector UI on the API toggle',
+        );
+      }
     });
   });
 

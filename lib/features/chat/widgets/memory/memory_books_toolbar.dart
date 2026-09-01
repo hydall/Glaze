@@ -15,6 +15,10 @@ class MemoryBooksToolbar extends StatelessWidget {
   final VoidCallback onReindex;
   final VoidCallback onDeleteIndexes;
 
+  /// False when the active API preset has vector search switched off — the
+  /// reindex / drop-indexes row is hidden rather than shown as a dead end.
+  final bool showIndexActions;
+
   const MemoryBooksToolbar({
     super.key,
     required this.onOpenSettings,
@@ -23,6 +27,7 @@ class MemoryBooksToolbar extends StatelessWidget {
     required this.isReindexing,
     required this.onReindex,
     required this.onDeleteIndexes,
+    required this.showIndexActions,
   });
 
   @override
@@ -60,29 +65,31 @@ class MemoryBooksToolbar extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: MemoryActionTile(
-                  icon: Icons.storage_rounded,
-                  label: isReindexing
-                      ? 'btn_indexing'.tr()
-                      : 'memory_books_btn_reindex'.tr(),
-                  onTap: isReindexing ? null : onReindex,
+          if (showIndexActions) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: MemoryActionTile(
+                    icon: Icons.storage_rounded,
+                    label: isReindexing
+                        ? 'btn_indexing'.tr()
+                        : 'memory_books_btn_reindex'.tr(),
+                    onTap: isReindexing ? null : onReindex,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: MemoryActionTile(
-                  icon: Icons.delete_sweep_outlined,
-                  label: 'action_delete_indexes'.tr(),
-                  onTap: isReindexing ? null : onDeleteIndexes,
-                  accent: danger,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: MemoryActionTile(
+                    icon: Icons.delete_sweep_outlined,
+                    label: 'action_delete_indexes'.tr(),
+                    onTap: isReindexing ? null : onDeleteIndexes,
+                    accent: danger,
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
       ),
     );

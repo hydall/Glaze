@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -146,6 +147,9 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
 
     final draftsNeedingGen = _ctrl.draftsNeedingGeneration;
     final isGenerating = _ctrl.isGenerating;
+    // Vector affordances (retrieval mode, reindex, index badges) only make
+    // sense while the active API preset has semantic search switched on.
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
 
     return SwipeTabSwitcher(
       index: _tabIndex,
@@ -167,6 +171,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             settingsSummary: _ctrl.settingsSummary,
             searchTypeLabel: _ctrl.searchTypeLabel,
             onCycleSearchType: _cycleSearchType,
+            showSearchType: vectorAvailable,
             activeCount: book.entries.where((e) => e.status == 'active').length,
             needsRebuildCount: book.entries
                 .where((e) => e.status == 'needs_rebuild')
@@ -180,6 +185,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             isReindexing: _ctrl.isReindexing,
             onReindex: _reindexAll,
             onDeleteIndexes: _deleteAllMemoryIndexes,
+            showIndexActions: vectorAvailable,
           ),
           if (draftsNeedingGen.isNotEmpty || isGenerating)
             MemoryBatchPanel(
@@ -223,6 +229,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   }
 
   Widget _buildApprovedTab(List<MemoryEntry> entries) {
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -237,7 +244,11 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             (entry) => MemoryEntryCard(
               key: ValueKey(entry.id),
               entry: entry,
-              embeddingStatus: _embeddingStatuses[entry.id],
+              // No index badge while semantic search is off in the API —
+              // there is nothing to be indexed against.
+              embeddingStatus: vectorAvailable
+                  ? _embeddingStatuses[entry.id]
+                  : null,
               onEdit: () => _editEntry(entry),
               onDelete: () => _deleteEntry(entry.id),
             ),

@@ -319,7 +319,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
       items: [
         for (final entry in entries)
           BottomSheetItem(
-            icon: entry.vectorSearch
+            icon: entry.vectorSearch && ref.read(vectorSearchAvailableProvider)
                 ? Icons.hub_outlined
                 : Icons.article_outlined,
             label: _entryLabel(entry),
@@ -944,15 +944,16 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             _showTestDialog();
           },
         ),
-        BottomSheetItem(
-          label: 'action_delete_indexes'.tr(),
-          icon: Icons.delete_outline,
-          isDestructive: true,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _deleteAllIndexes();
-          },
-        ),
+        if (ref.read(vectorSearchAvailableProvider))
+          BottomSheetItem(
+            label: 'action_delete_indexes'.tr(),
+            icon: Icons.delete_outline,
+            isDestructive: true,
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _deleteAllIndexes();
+            },
+          ),
       ],
     );
   }
@@ -1203,6 +1204,9 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
 
   Widget _entriesBody() {
     final filtered = _filteredEntries;
+    // Indexing affordances only exist while the active API preset has semantic
+    // search switched on — without it there is no endpoint to index against.
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
     return Builder(
       builder: (context) => ListView(
         padding: const EdgeInsets.fromLTRB(0, 0, 0, 100).add(
@@ -1212,10 +1216,12 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
           ),
         ),
         children: [
-          if (_needsReindex) _reindexBanner(),
-          if (_entries.isNotEmpty) _toolbar(),
-          if (!_isIndexing && _indexResult != null) _indexResultBlock(),
-          if (_failedEntries.isNotEmpty) _failedEntriesBlock(),
+          if (vectorAvailable && _needsReindex) _reindexBanner(),
+          if (_entries.isNotEmpty) _toolbar(vectorAvailable),
+          if (vectorAvailable) ...[
+            if (!_isIndexing && _indexResult != null) _indexResultBlock(),
+            if (_failedEntries.isNotEmpty) _failedEntriesBlock(),
+          ],
           if (filtered.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
@@ -1246,6 +1252,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
                     _EntryRow(
                       entry: entry,
                       status: _embeddingStatuses[entry.id],
+                      showVectorBadges: vectorAvailable,
                       onTap: () => _openEntry(_entries.indexOf(entry)),
                       onToggle: () => _toggleEntry(_entries.indexOf(entry)),
                       onMore: () => _entryMenu(_entries.indexOf(entry)),
@@ -1304,59 +1311,67 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     );
   }
 
-  Widget _toolbar() {
+  /// [vectorAvailable] false → only the non-vector actions are laid out; the
+  /// enable-vector / index / retry / drop-indexes buttons are dropped.
+  Widget _toolbar(bool vectorAvailable) {
     final allVector = _entries.every((e) => e.vectorSearch || e.constant);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       child: Row(
         children: [
-          _ToolbarButton(
-            icon: Icons.check_circle_outline,
-            label: allVector
-                ? 'btn_disable_vector_all'.tr()
-                : 'btn_enable_vector_all'.tr(),
-            onTap: _entries.isEmpty ? null : _enableVectorForAll,
-          ),
-          const SizedBox(width: 8),
+          if (vectorAvailable) ...[
+            _ToolbarButton(
+              icon: Icons.check_circle_outline,
+              label: allVector
+                  ? 'btn_disable_vector_all'.tr()
+                  : 'btn_enable_vector_all'.tr(),
+              onTap: _entries.isEmpty ? null : _enableVectorForAll,
+            ),
+            const SizedBox(width: 8),
+          ],
           _ToolbarButton(
             icon: Icons.restore,
             label: 'match_global'.tr(),
             secondary: true,
             onTap: _resetEntriesToGlobal,
           ),
-          const SizedBox(width: 8),
-          _ToolbarButton(
-            icon: Icons.auto_fix_high,
-            label: _rateLimitCooldown > 0
-                ? 'btn_rate_limited'.tr(
-                    namedArgs: {'seconds': '$_rateLimitCooldown'},
-                  )
-                : _isIndexing
-                ? (_indexStatus.isNotEmpty ? _indexStatus : 'btn_indexing'.tr())
-                : 'btn_index_all'.tr(),
-            onTap: (_isIndexing || _rateLimitCooldown > 0)
-                ? null
-                : _indexEntries,
-          ),
-          if (_failedEntries.isNotEmpty) ...[
+          if (vectorAvailable) ...[
             const SizedBox(width: 8),
             _ToolbarButton(
-              icon: Icons.refresh,
-              label: 'btn_retry_failed'.tr(),
-              secondary: true,
+              icon: Icons.auto_fix_high,
+              label: _rateLimitCooldown > 0
+                  ? 'btn_rate_limited'.tr(
+                      namedArgs: {'seconds': '$_rateLimitCooldown'},
+                    )
+                  : _isIndexing
+                  ? (_indexStatus.isNotEmpty
+                        ? _indexStatus
+                        : 'btn_indexing'.tr())
+                  : 'btn_index_all'.tr(),
               onTap: (_isIndexing || _rateLimitCooldown > 0)
                   ? null
-                  : _retryFailed,
+                  : _indexEntries,
+            ),
+            if (_failedEntries.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              _ToolbarButton(
+                icon: Icons.refresh,
+                label: 'btn_retry_failed'.tr(),
+                secondary: true,
+                onTap: (_isIndexing || _rateLimitCooldown > 0)
+                    ? null
+                    : _retryFailed,
+              ),
+            ],
+            const SizedBox(width: 8),
+            _ToolbarButton(
+              icon: Icons.delete_sweep_outlined,
+              label: 'action_delete_indexes'.tr(),
+              secondary: true,
+              onTap: _isIndexing ? null : _clearAndReindex,
             ),
           ],
-          const SizedBox(width: 8),
-          _ToolbarButton(
-            icon: Icons.delete_sweep_outlined,
-            label: 'action_delete_indexes'.tr(),
-            secondary: true,
-            onTap: _isIndexing ? null : _clearAndReindex,
-          ),
         ],
       ),
     );
@@ -1445,6 +1460,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
   // ── Edit-entry body ────────────────────────────────────────────────────────
 
   Widget _editBody() {
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
     return Builder(
       builder: (context) => ListView(
         padding: EdgeInsets.only(
@@ -1457,7 +1473,16 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             header: 'section_activation_logic'.tr(),
             helpTerm: 'lorebook-keys',
             items: [
-              if (_eVectorSearch)
+              // With semantic search off in the API the entry has no vector
+              // section, so its activation-only switch is hosted here instead.
+              if (!vectorAvailable)
+                MenuSwitchItem(
+                  label: 'label_constant'.tr(),
+                  description: 'hint_always_active'.tr(),
+                  value: _eConstant,
+                  onChanged: _onConstantChanged,
+                ),
+              if (vectorAvailable && _eVectorSearch)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                   child: Text(
@@ -1624,87 +1649,89 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             ],
           ),
 
-          // Vector Search
-          MenuGroup(
-            header: 'section_vector_search'.tr(),
-            items: [
-              MenuSwitchItem(
-                label: 'label_constant'.tr(),
-                description: 'desc_constant_disables_vector'.tr(),
-                value: _eConstant,
-                onChanged: _onConstantChanged,
-              ),
-              MenuSwitchItem(
-                label: 'label_vector_search'.tr(),
-                description: _eConstant
-                    ? 'desc_vector_disabled_for_constant'.tr()
-                    : 'desc_vector_search_entry'.tr(),
-                value: _eVectorSearch,
-                onChanged: _eConstant
-                    ? (_) {}
-                    : (v) {
-                        setState(() => _eVectorSearch = v);
-                        _commitEdit(immediate: true);
-                      },
-              ),
-              if (_eVectorSearch && !_eConstant)
+          // Vector Search — dropped entirely when the API has semantic search
+          // off; `label_constant` then lives in Activation & Logic above.
+          if (vectorAvailable)
+            MenuGroup(
+              header: 'section_vector_search'.tr(),
+              items: [
                 MenuSwitchItem(
-                  label: 'label_use_keyword_search'.tr(),
-                  description: 'desc_use_keyword_search'.tr(),
-                  value: _eUseKeywordSearch,
-                  onChanged: (v) {
-                    setState(() => _eUseKeywordSearch = v);
-                    _commitEdit(immediate: true);
-                  },
+                  label: 'label_constant'.tr(),
+                  description: 'desc_constant_disables_vector'.tr(),
+                  value: _eConstant,
+                  onChanged: _onConstantChanged,
                 ),
-              if (_eVectorSearch && !_eConstant)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: context.cs.primary,
-                            foregroundColor: Colors.black,
-                          ),
-                          onPressed: _eIndexing ? null : _indexSingleEntry,
-                          child: Text(
-                            _eIndexing
-                                ? 'btn_indexing'.tr()
-                                : 'btn_index_entry'.tr(),
-                          ),
-                        ),
-                      ),
-                      if (_embeddingStatuses[_entries[_editIndex].id] != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            switch (_embeddingStatuses[_entries[_editIndex]
-                                .id]) {
-                              'indexed' => 'entry_indexed'.tr(),
-                              'error' => 'entry_index_error'.tr(),
-                              _ => 'entry_not_indexed'.tr(),
-                            },
-                            style: TextStyle(
-                              fontSize: 12,
-                              color:
-                                  switch (_embeddingStatuses[_entries[_editIndex]
-                                      .id]) {
-                                    'indexed' => Colors.green,
-                                    'error' => Colors.orange,
-                                    _ => context.cs.onSurfaceVariant,
-                                  },
+                MenuSwitchItem(
+                  label: 'label_vector_search'.tr(),
+                  description: _eConstant
+                      ? 'desc_vector_disabled_for_constant'.tr()
+                      : 'desc_vector_search_entry'.tr(),
+                  value: _eVectorSearch,
+                  onChanged: _eConstant
+                      ? (_) {}
+                      : (v) {
+                          setState(() => _eVectorSearch = v);
+                          _commitEdit(immediate: true);
+                        },
+                ),
+                if (_eVectorSearch && !_eConstant)
+                  MenuSwitchItem(
+                    label: 'label_use_keyword_search'.tr(),
+                    description: 'desc_use_keyword_search'.tr(),
+                    value: _eUseKeywordSearch,
+                    onChanged: (v) {
+                      setState(() => _eUseKeywordSearch = v);
+                      _commitEdit(immediate: true);
+                    },
+                  ),
+                if (_eVectorSearch && !_eConstant)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: context.cs.primary,
+                              foregroundColor: Colors.black,
+                            ),
+                            onPressed: _eIndexing ? null : _indexSingleEntry,
+                            child: Text(
+                              _eIndexing
+                                  ? 'btn_indexing'.tr()
+                                  : 'btn_index_entry'.tr(),
                             ),
                           ),
                         ),
-                    ],
+                        if (_embeddingStatuses[_entries[_editIndex].id] != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              switch (_embeddingStatuses[_entries[_editIndex]
+                                  .id]) {
+                                'indexed' => 'entry_indexed'.tr(),
+                                'error' => 'entry_index_error'.tr(),
+                                _ => 'entry_not_indexed'.tr(),
+                              },
+                              style: TextStyle(
+                                fontSize: 12,
+                                color:
+                                    switch (_embeddingStatuses[_entries[_editIndex]
+                                        .id]) {
+                                      'indexed' => Colors.green,
+                                      'error' => Colors.orange,
+                                      _ => context.cs.onSurfaceVariant,
+                                    },
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-            ],
-          ),
+              ],
+            ),
 
           // Temporal Logic
           MenuGroup(
@@ -1798,6 +1825,10 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
 class _EntryRow extends StatelessWidget {
   final LorebookEntry entry;
   final String? status;
+
+  /// False while the API has semantic search off — the `vec` / `idx` / `err`
+  /// badges describe an index that cannot exist, so they are left out.
+  final bool showVectorBadges;
   final VoidCallback onTap;
   final VoidCallback onToggle;
   final VoidCallback onMore;
@@ -1805,6 +1836,7 @@ class _EntryRow extends StatelessWidget {
   const _EntryRow({
     required this.entry,
     required this.status,
+    required this.showVectorBadges,
     required this.onTap,
     required this.onToggle,
     required this.onMore,
@@ -1847,7 +1879,7 @@ class _EntryRow extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (entry.vectorSearch) ...[
+                        if (showVectorBadges && entry.vectorSearch) ...[
                           const SizedBox(width: 6),
                           const LorebookEntryBadge(
                             label: 'vec',

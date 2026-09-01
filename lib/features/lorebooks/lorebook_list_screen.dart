@@ -12,6 +12,7 @@ import '../../core/models/lorebook.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
+import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/state/lorebook_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
@@ -77,15 +78,18 @@ class LorebookListScreen extends ConsumerWidget {
         onPressed: () => _openLorebookMenu(context, ref),
       ),
       actions: [
-        SheetViewAction(
-          icon: const Icon(Icons.search, size: 20),
-          tooltip: 'lorebook_embedding_settings_tooltip'.tr(),
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => const EmbeddingSettingsScreen(),
+        // Embedding settings are only reachable while the active API preset
+        // has vector search switched on.
+        if (ref.watch(vectorSearchAvailableProvider))
+          SheetViewAction(
+            icon: const Icon(Icons.search, size: 20),
+            tooltip: 'lorebook_embedding_settings_tooltip'.tr(),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const EmbeddingSettingsScreen(),
+              ),
             ),
           ),
-        ),
       ],
       body: lorebooksAsync.when(
         data: (lorebooks) => Builder(
@@ -758,27 +762,32 @@ class _GlobalSettingsSectionState
   }
 
   List<Widget> _buildItems(LorebookGlobalSettings s) {
-    final isVector = s.searchType != 'keyword';
+    // With semantic search off in the API there is nothing to search against,
+    // so the search-type picker and every vector-only knob below it are
+    // dropped and the screen behaves as keyword-only.
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
+    final isVector = vectorAvailable && s.searchType != 'keyword';
     return [
-      MenuSelectorItem(
-        label: 'label_search_type'.tr(),
-        currentValue: switch (s.searchType) {
-          'vector' => 'search_type_vector'.tr(),
-          'both' => 'search_type_both'.tr(),
-          _ => 'search_type_keys'.tr(),
-        },
-        onTap: () => showLorebookOptionSheet<String>(
-          context,
-          title: 'label_search_type'.tr(),
-          current: s.searchType,
-          options: [
-            LorebookOption('keyword', 'search_type_keys'.tr()),
-            LorebookOption('vector', 'search_type_vector'.tr()),
-            LorebookOption('both', 'search_type_both'.tr()),
-          ],
-          onSelect: (v) => _update(s.copyWith(searchType: v)),
+      if (vectorAvailable)
+        MenuSelectorItem(
+          label: 'label_search_type'.tr(),
+          currentValue: switch (s.searchType) {
+            'vector' => 'search_type_vector'.tr(),
+            'both' => 'search_type_both'.tr(),
+            _ => 'search_type_keys'.tr(),
+          },
+          onTap: () => showLorebookOptionSheet<String>(
+            context,
+            title: 'label_search_type'.tr(),
+            current: s.searchType,
+            options: [
+              LorebookOption('keyword', 'search_type_keys'.tr()),
+              LorebookOption('vector', 'search_type_vector'.tr()),
+              LorebookOption('both', 'search_type_both'.tr()),
+            ],
+            onSelect: (v) => _update(s.copyWith(searchType: v)),
+          ),
         ),
-      ),
       MenuSelectorItem(
         label: 'label_key_search_mode'.tr(),
         currentValue: s.keySearchMode == 'glaze'

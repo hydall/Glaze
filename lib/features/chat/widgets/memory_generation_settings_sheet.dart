@@ -8,6 +8,7 @@ import '../../../core/llm/model_fetcher.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/services/memory_prompt_presets.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/memory_settings_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -284,45 +285,51 @@ class _MemoryGenerationSettingsSheetState
             _buildConnectionSelector(),
             const SizedBox(height: 8),
             _buildModelSelector(),
-            const SizedBox(height: 12),
-            _sectionLabel('search'.tr()),
-            _switchTile(
-              'label_vector_search'.tr(),
-              _vectorSearchEnabled,
-              (v) => setState(() => _vectorSearchEnabled = v),
-            ),
-            if (_vectorSearchEnabled) ...[
-              const SizedBox(height: 8),
-              _sliderField(
-                label: 'label_similarity_threshold'.tr(),
-                value: _vectorThreshold,
-                min: 0.0,
-                max: 1.0,
-                divisions: 20,
-                display: _vectorThreshold.toStringAsFixed(2),
-                onChanged: (v) => setState(() => _vectorThreshold = v),
+            // The whole retrieval section is vector-only, so it stays hidden
+            // until semantic search is switched on for the active API preset.
+            // The stored values are left untouched — flipping the API toggle
+            // back on brings the previous choices back.
+            if (ref.watch(vectorSearchAvailableProvider)) ...[
+              const SizedBox(height: 12),
+              _sectionLabel('search'.tr()),
+              _switchTile(
+                'label_vector_search'.tr(),
+                _vectorSearchEnabled,
+                (v) => setState(() => _vectorSearchEnabled = v),
               ),
-              const SizedBox(height: 8),
-              SegmentedButton<String>(
-                segments: [
-                  ButtonSegment(
-                    value: 'plain',
-                    label: Text('memory_packing_plain'.tr()),
-                  ),
-                  ButtonSegment(
-                    value: 'glaze',
-                    label: Text('memory_packing_glaze'.tr()),
-                  ),
-                  ButtonSegment(
-                    value: 'both',
-                    label: Text('memory_packing_both'.tr()),
-                  ),
-                ],
-                selected: {_keyMatchMode},
-                onSelectionChanged: (s) =>
-                    setState(() => _keyMatchMode = s.first),
-                style: ButtonStyle(visualDensity: VisualDensity.compact),
-              ),
+              if (_vectorSearchEnabled) ...[
+                const SizedBox(height: 8),
+                _sliderField(
+                  label: 'label_similarity_threshold'.tr(),
+                  value: _vectorThreshold,
+                  min: 0.0,
+                  max: 1.0,
+                  divisions: 20,
+                  display: _vectorThreshold.toStringAsFixed(2),
+                  onChanged: (v) => setState(() => _vectorThreshold = v),
+                ),
+                const SizedBox(height: 8),
+                SegmentedButton<String>(
+                  segments: [
+                    ButtonSegment(
+                      value: 'plain',
+                      label: Text('memory_packing_plain'.tr()),
+                    ),
+                    ButtonSegment(
+                      value: 'glaze',
+                      label: Text('memory_packing_glaze'.tr()),
+                    ),
+                    ButtonSegment(
+                      value: 'both',
+                      label: Text('memory_packing_both'.tr()),
+                    ),
+                  ],
+                  selected: {_keyMatchMode},
+                  onSelectionChanged: (s) =>
+                      setState(() => _keyMatchMode = s.first),
+                  style: ButtonStyle(visualDensity: VisualDensity.compact),
+                ),
+              ],
             ],
             const SizedBox(height: 16),
             Row(
