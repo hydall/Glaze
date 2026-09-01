@@ -135,6 +135,21 @@ class _SheetViewState extends ConsumerState<SheetView>
   /// (only when presented as a fullscreen route, not a modal bottom sheet).
   int? _suppressedBranch;
 
+  /// Whether the host already draws a title bar around this sheet — the
+  /// desktop floating window. Then the sheet's own app-bar row (back button,
+  /// title, actions) would be a second header inside the frame, so it is
+  /// handed to the window's title bar instead of being drawn here.
+  bool _hostDrawsChrome = false;
+
+  /// Whether the app-bar row belongs to this sheet's own header.
+  bool get _ownsAppBar => !_hostDrawsChrome;
+
+  /// Signature of the header content last published to a chrome-drawing host,
+  /// so a rebuild only republishes when something visible actually changed —
+  /// republishing unconditionally would rebuild the host, which rebuilds this
+  /// sheet, which would republish again.
+  String? _publishedChromeSignature;
+
   /// Cached so it can be used safely in [dispose].
   ShellHeaderRegistry? _headerRegistry;
 
@@ -256,10 +271,7 @@ class _SheetViewState extends ConsumerState<SheetView>
     if (_effectiveShowHandle) {
       h += 24;
     }
-    if (widget.title != null ||
-        widget.titleWidget != null ||
-        widget.showBack ||
-        widget.actions.isNotEmpty) {
+    if (_hasAppBarRow) {
       h += _inModalSheet ? 52 : 56;
     }
     if (widget.tabs.isNotEmpty) {
@@ -299,7 +311,11 @@ class _SheetViewState extends ConsumerState<SheetView>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _inModalSheet = ModalRoute.of(context) is ModalBottomSheetRoute;
+    // A modal bottom sheet is mounted on the root navigator, above any host,
+    // so it always keeps its own header.
+    _hostDrawsChrome = !_inModalSheet && DetachedShellHost.drawsChrome(context);
     _syncHeaderSuppression();
+    _publishChromeHeader();
     if (!_heightInit) {
       _currentHeight = (widget.startExpanded || !_inModalSheet)
           ? _full(context)
@@ -335,6 +351,64 @@ class _SheetViewState extends ConsumerState<SheetView>
     });
   }
 
+  /// Hands the header to a host that draws its own title bar (the desktop
+  /// floating window), so the window shows this sheet's title and actions
+  /// while the sheet itself draws no app-bar row.
+  ///
+  /// The claim goes under [kDetachedChromeBranch] rather than a real shell
+  /// branch: the sheet is mounted outside the branch navigators, and the
+  /// window resolves that pseudo-branch for exactly this purpose.
+  void _publishChromeHeader() {
+    // Cached for [dispose], where reading `ref` is unsafe.
+    final ShellHeaderRegistry registry = ref.read(shellHeaderProvider.notifier);
+    _headerRegistry = registry;
+    if (!_hostDrawsChrome) {
+      if (_publishedChromeSignature == null) return;
+      _publishedChromeSignature = null;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => registry.remove(this),
+      );
+      return;
+    }
+    final signature = _chromeSignature();
+    if (signature == _publishedChromeSignature) return;
+    _publishedChromeSignature = signature;
+    // Deferred: this runs during the build phase, where modifying a provider
+    // is forbidden — and the host rebuilds on the claim, so it must not be
+    // touched while it is building.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _publishedChromeSignature != signature) return;
+      registry.publish(
+        this,
+        kDetachedChromeBranch,
+        ShellHeaderConfig(
+          title: widget.title,
+          titleWidget: widget.titleWidget,
+          actions: [
+            for (var i = 0; i < widget.actions.length; i++)
+              _ChromeHeaderAction(owner: this, index: i),
+          ],
+        ),
+      );
+    });
+  }
+
+  /// What the host's title bar shows, flattened. Only a change here is worth a
+  /// republish; the callbacks themselves are read live by
+  /// [_ChromeHeaderAction], so they never go stale between publishes.
+  String _chromeSignature() {
+    final buffer = StringBuffer(widget.title ?? '')
+      ..write('|${widget.titleWidget?.runtimeType}');
+    for (final action in widget.actions) {
+      final icon = action.icon;
+      buffer.write(
+        '|${action.tooltip}|${action.color?.toARGB32()}'
+        '|${icon is Icon ? icon.icon?.codePoint : icon.runtimeType}',
+      );
+    }
+    return buffer.toString();
+  }
+
   /// Branch index of the shell this sheet currently lives in, or null when the
   /// sheet is hosted outside GoRouter.
   ///
@@ -354,9 +428,16 @@ class _SheetViewState extends ConsumerState<SheetView>
   }
 
   @override
+  void didUpdateWidget(covariant SheetView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _publishChromeHeader();
+  }
+
+  @override
   void dispose() {
     final registry = _headerRegistry;
-    if (registry != null && _suppressedBranch != null) {
+    if (registry != null &&
+        (_suppressedBranch != null || _publishedChromeSignature != null)) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => registry.remove(this),
       );
@@ -443,11 +524,17 @@ class _SheetViewState extends ConsumerState<SheetView>
     }
   }
 
+  /// Whether this sheet draws the title/back/actions row itself. False when a
+  /// chrome-drawing host renders it in its own title bar instead.
+  bool get _hasAppBarRow =>
+      _ownsAppBar &&
+      (widget.title != null ||
+          widget.titleWidget != null ||
+          widget.showBack ||
+          widget.actions.isNotEmpty);
+
   bool get _hasHeader =>
-      widget.title != null ||
-      widget.titleWidget != null ||
-      widget.showBack ||
-      widget.actions.isNotEmpty ||
+      _hasAppBarRow ||
       widget.tabs.isNotEmpty ||
       widget.headerBottom != null ||
       _effectiveShowHandle;
@@ -550,21 +637,22 @@ class _SheetViewState extends ConsumerState<SheetView>
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          GlazeAppBar(
-                            title: widget.title,
-                            titleWidget: widget.titleWidget,
-                            showBack: widget.showBack,
-                            onBack: widget.onBack,
-                            actions: widget.actions.map((action) {
-                              return _HeaderIconButton(
-                                onPressed: action.onPressed,
-                                tooltip: action.tooltip,
-                                foregroundColor:
-                                    action.color ?? context.cs.primary,
-                                child: action.icon,
-                              );
-                            }).toList(),
-                          ),
+                          if (_hasAppBarRow)
+                            GlazeAppBar(
+                              title: widget.title,
+                              titleWidget: widget.titleWidget,
+                              showBack: widget.showBack,
+                              onBack: widget.onBack,
+                              actions: widget.actions.map((action) {
+                                return _HeaderIconButton(
+                                  onPressed: action.onPressed,
+                                  tooltip: action.tooltip,
+                                  foregroundColor:
+                                      action.color ?? context.cs.primary,
+                                  child: action.icon,
+                                );
+                              }).toList(),
+                            ),
                           if (widget.tabs.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(top: 12),
@@ -721,6 +809,7 @@ class _SheetViewState extends ConsumerState<SheetView>
                 child: ValueListenableBuilder<double>(
                   valueListenable: _heightN,
                   child: _SheetViewHeader(
+                    showAppBar: _hasAppBarRow,
                     title: widget.title,
                     titleWidget: widget.titleWidget,
                     showBack: widget.showBack,
@@ -867,6 +956,9 @@ class _SheetViewState extends ConsumerState<SheetView>
 }
 
 class _SheetViewHeader extends StatelessWidget {
+  /// False when the host draws the title/back/actions row itself, leaving this
+  /// header with only the handle, tabs and [headerBottom].
+  final bool showAppBar;
   final String? title;
   final Widget? titleWidget;
   final bool showBack;
@@ -884,6 +976,7 @@ class _SheetViewHeader extends StatelessWidget {
   final GestureDragEndCallback? onDragEnd;
 
   const _SheetViewHeader({
+    required this.showAppBar,
     this.title,
     this.titleWidget,
     required this.showBack,
@@ -934,10 +1027,7 @@ class _SheetViewHeader extends StatelessWidget {
               ),
             ),
           ),
-        if (title != null ||
-            titleWidget != null ||
-            showBack ||
-            actions.isNotEmpty)
+        if (showAppBar)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Row(
@@ -1020,6 +1110,35 @@ class _SheetViewHeader extends StatelessWidget {
             child: headerBottom!,
           ),
       ],
+    );
+  }
+}
+
+/// One of the sheet's actions, rendered in a chrome-drawing host's title bar.
+///
+/// It keeps the owning state rather than the action itself, and reads the
+/// action back on every build: the published claim is only refreshed when the
+/// header's visible signature changes, so a captured callback could otherwise
+/// outlive the build that created it.
+class _ChromeHeaderAction extends StatelessWidget {
+  final _SheetViewState owner;
+  final int index;
+
+  const _ChromeHeaderAction({required this.owner, required this.index});
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = owner.widget.actions;
+    if (index >= actions.length) return const SizedBox.shrink();
+    final action = actions[index];
+    return _HeaderIconButton(
+      tooltip: action.tooltip,
+      onPressed: () {
+        final current = owner.widget.actions;
+        if (index < current.length) current[index].onPressed();
+      },
+      foregroundColor: action.color ?? context.cs.primary,
+      child: action.icon,
     );
   }
 }

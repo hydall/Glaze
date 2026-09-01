@@ -162,14 +162,40 @@ ShellHeaderEntry? resolveShellHeader(
 /// whichever branch the middle column happens to be showing: opening API
 /// settings in the sidebar blanked the character list's header behind it.
 class DetachedShellHost extends InheritedWidget {
-  const DetachedShellHost({super.key, required super.child});
+  /// Whether the host draws header chrome of its own — the desktop floating
+  /// window's title bar, with the window's back/close buttons in it.
+  ///
+  /// A screen that would otherwise draw its own header (a [SheetView] mounted
+  /// as a page, say) hands its title and actions to that title bar via
+  /// [kDetachedChromeBranch] instead of drawing a second header inside the
+  /// frame. The right sidebar has no title bar, so it leaves this false and its
+  /// panels keep their own headers.
+  final bool hasChrome;
 
-  static bool of(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<DetachedShellHost>() != null;
+  const DetachedShellHost({
+    super.key,
+    this.hasChrome = false,
+    required super.child,
+  });
+
+  static DetachedShellHost? _of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<DetachedShellHost>();
+
+  static bool of(BuildContext context) => _of(context) != null;
+
+  /// True when the nearest detached host draws its own header chrome.
+  static bool drawsChrome(BuildContext context) =>
+      _of(context)?.hasChrome ?? false;
 
   @override
-  bool updateShouldNotify(DetachedShellHost oldWidget) => false;
+  bool updateShouldNotify(DetachedShellHost oldWidget) =>
+      oldWidget.hasChrome != hasChrome;
 }
+
+/// Pseudo-branch under which a screen hosted by a chrome-drawing
+/// [DetachedShellHost] publishes its header, so the host's title bar can render
+/// it. Negative so it can never collide with a real shell branch index.
+const int kDetachedChromeBranch = -1;
 
 /// Mix into a shell screen's [ConsumerState] to publish a header into
 /// [shellHeaderProvider]. Implement [headerBranchIndex] and [buildShellHeader],
