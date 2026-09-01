@@ -12,6 +12,7 @@ import '../../settings/app_settings_provider.dart';
 import '../janitor_account_provider.dart';
 import '../services/janitor_lorebook_rebuilder.dart';
 import 'janitor_login_sheet.dart';
+import 'janitor_source_settings.dart';
 
 /// Settings for the JanitorAI extraction flow, opened from the gear in the
 /// lorebook capture sheet's header.
@@ -167,14 +168,7 @@ class _JanitorExtractionSettingsSheetState
                   onTap: () => openJanitorAccountSheet(context, ref),
                 ),
                 if (settings != null)
-                  MenuSwitchItem(
-                    label: 'menu_extract_janitor_locally'.tr(),
-                    description: 'desc_extract_janitor_locally'.tr(),
-                    value: settings.extractJanitorLocally,
-                    onChanged: (v) => ref
-                        .read(appSettingsProvider.notifier)
-                        .save(settings.copyWith(extractJanitorLocally: v)),
-                  ),
+                  ...janitorSourceMenuItems(context, ref, settings),
               ],
             ),
             MenuGroup(

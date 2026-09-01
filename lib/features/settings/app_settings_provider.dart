@@ -9,6 +9,32 @@ part 'app_settings_provider.freezed.dart';
 
 const supportedAppLanguages = {'en', 'ru'};
 
+/// Where a JanitorAI card, its hidden definition or its lorebooks are read
+/// from.
+///
+/// * [local] — Glaze's own offscreen WebView session on janitorai.com
+///   (`JanitorWebViewProxy`). Reads what the logged-in account can see and, for
+///   the closed card/lorebook, captures the assembled prompt.
+/// * [datacat] — datacat.run's scraped copy. No Janitor.AI account needed, but
+///   it only carries what DataCat has already extracted, and its lorebooks come
+///   from the character's *public* scripts only (private books are metadata
+///   stubs there — see `extractCharacterBookFromScripts` in the
+///   SillyTavern-CharacterLibrary reference).
+enum ExtractionSource {
+  local,
+  datacat;
+
+  static ExtractionSource? parse(Object? value) {
+    if (value is ExtractionSource) return value;
+    if (value is! String) return null;
+    final normalized = value.trim().toLowerCase();
+    for (final s in ExtractionSource.values) {
+      if (s.name == normalized) return s;
+    }
+    return null;
+  }
+}
+
 bool? _coerceBool(Object? value) {
   if (value is bool) return value;
   if (value is int) return value != 0;
@@ -25,6 +51,16 @@ double? _coerceDouble(Object? value) {
   if (value is double) return value;
   if (value is String) return double.tryParse(value);
   return null;
+}
+
+/// The pre-split `extractJanitorLocally` opt-in, read as a source so an
+/// upgrading install keeps the behaviour it had: the one toggle governed both
+/// the closed card and the closed lorebook, so both settings inherit it. Null
+/// when the old key was never written, leaving the new defaults in charge.
+ExtractionSource? _legacyExtractionSource(SharedPreferences prefs) {
+  final legacy = _coerceBool(prefs.get('extractJanitorLocally'));
+  if (legacy == null) return null;
+  return legacy ? ExtractionSource.local : ExtractionSource.datacat;
 }
 
 final appSettingsProvider =
@@ -63,7 +99,21 @@ abstract class AppSettings with _$AppSettings {
     @Default(true) bool openCardAfterImport,
     @Default(true) bool hapticFeedback,
     @Default(true) bool messageVibration,
-    @Default(false) bool extractJanitorLocally,
+    /// Where a JanitorAI **closed lorebook** is recovered from. [local] runs the
+    /// capture + LLM rebuild through the logged-in session; [datacat] takes
+    /// whatever book DataCat's copy of the card carries (public scripts only).
+    @Default(ExtractionSource.datacat) ExtractionSource janitorLorebookSource,
+
+    /// Where the catalog sheet reads a JanitorAI **character card** from.
+    /// [local] goes through the WebView proxy — which is the only way to see a
+    /// card the creator restricted to logged-in visitors — and falls back to
+    /// [datacat] when the card is hidden from us and no account is signed in.
+    @Default(ExtractionSource.local) ExtractionSource janitorCardSource,
+
+    /// Where a JanitorAI **closed character definition** is recovered from.
+    /// [local] captures the assembled prompt through the signed-in session;
+    /// [datacat] reads DataCat's scraped copy instead.
+    @Default(ExtractionSource.datacat) ExtractionSource janitorCharacterSource,
 
     /// User-edited system prompt for the closed-lorebook build (the JanitorAI
     /// extraction flow). Empty means the built-in default
@@ -108,7 +158,9 @@ abstract final class AppSettingsPreferences {
     'openCardAfterImport',
     'hapticFeedback',
     'messageVibration',
-    'extractJanitorLocally',
+    'janitorLorebookSource',
+    'janitorCardSource',
+    'janitorCharacterSource',
     'lorebookBuildPrompt',
     'lorebookBuildPromptJs',
     'useStandardRandomizer',
@@ -169,9 +221,17 @@ abstract final class AppSettingsPreferences {
       messageVibration:
           _coerceBool(prefs.get('messageVibration')) ??
           defaults.messageVibration,
-      extractJanitorLocally:
-          _coerceBool(prefs.get('extractJanitorLocally')) ??
-          defaults.extractJanitorLocally,
+      janitorLorebookSource:
+          ExtractionSource.parse(prefs.get('janitorLorebookSource')) ??
+          _legacyExtractionSource(prefs) ??
+          defaults.janitorLorebookSource,
+      janitorCardSource:
+          ExtractionSource.parse(prefs.get('janitorCardSource')) ??
+          defaults.janitorCardSource,
+      janitorCharacterSource:
+          ExtractionSource.parse(prefs.get('janitorCharacterSource')) ??
+          _legacyExtractionSource(prefs) ??
+          defaults.janitorCharacterSource,
       lorebookBuildPrompt:
           prefs.getString('lorebookBuildPrompt') ??
           defaults.lorebookBuildPrompt,
@@ -207,7 +267,9 @@ abstract final class AppSettingsPreferences {
       'openCardAfterImport': normalized.openCardAfterImport,
       'hapticFeedback': normalized.hapticFeedback,
       'messageVibration': normalized.messageVibration,
-      'extractJanitorLocally': normalized.extractJanitorLocally,
+      'janitorLorebookSource': normalized.janitorLorebookSource.name,
+      'janitorCardSource': normalized.janitorCardSource.name,
+      'janitorCharacterSource': normalized.janitorCharacterSource.name,
       'lorebookBuildPrompt': normalized.lorebookBuildPrompt,
       'lorebookBuildPromptJs': normalized.lorebookBuildPromptJs,
       'useStandardRandomizer': normalized.useStandardRandomizer,
@@ -249,17 +311,35 @@ abstract final class AppSettingsPreferences {
         final parsed = _coerceDouble(incoming);
         if (parsed != null) merged[key] = parsed;
       } else if (current is String && incoming is String) {
-        merged[key] =
-            key == 'language' && !supportedAppLanguages.contains(incoming)
-            ? 'en'
-            : incoming;
+        if (_extractionSourceKeys.contains(key)) {
+          // An unknown source name from a newer (or corrupted) client keeps the
+          // local value rather than silently resetting it to the default.
+          final parsed = ExtractionSource.parse(incoming);
+          if (parsed != null) merged[key] = parsed.name;
+        } else {
+          merged[key] =
+              key == 'language' && !supportedAppLanguages.contains(incoming)
+              ? 'en'
+              : incoming;
+        }
       }
     }
     await write(prefs, _fromMap(merged));
   }
 
+  /// Keys whose value is an [ExtractionSource] name rather than free text.
+  static const _extractionSourceKeys = <String>{
+    'janitorLorebookSource',
+    'janitorCardSource',
+    'janitorCharacterSource',
+  };
+
+  /// Keys no longer written but still read once, to carry an upgrading install's
+  /// choice over. Cleared alongside the live ones so a reset really resets.
+  static const legacyKeys = <String>{'extractJanitorLocally'};
+
   static Future<void> removeAll(SharedPreferences prefs) async {
-    for (final key in keys) {
+    for (final key in {...keys, ...legacyKeys}) {
       await prefs.remove(key);
     }
   }
@@ -291,7 +371,15 @@ abstract final class AppSettingsPreferences {
     openCardAfterImport: values['openCardAfterImport'] as bool,
     hapticFeedback: values['hapticFeedback'] as bool,
     messageVibration: values['messageVibration'] as bool,
-    extractJanitorLocally: values['extractJanitorLocally'] as bool,
+    janitorLorebookSource:
+        ExtractionSource.parse(values['janitorLorebookSource']) ??
+        const AppSettings().janitorLorebookSource,
+    janitorCardSource:
+        ExtractionSource.parse(values['janitorCardSource']) ??
+        const AppSettings().janitorCardSource,
+    janitorCharacterSource:
+        ExtractionSource.parse(values['janitorCharacterSource']) ??
+        const AppSettings().janitorCharacterSource,
     lorebookBuildPrompt: values['lorebookBuildPrompt'] as String,
     lorebookBuildPromptJs: values['lorebookBuildPromptJs'] as String,
     useStandardRandomizer: values['useStandardRandomizer'] as bool,
