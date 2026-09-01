@@ -34,6 +34,11 @@ class MemoryEntryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final title = entry.title.isNotEmpty
+        ? entry.title
+        : 'memory_books_untitled_memory'.tr();
+    final ledgerRange = entry.ledgerRange.trim();
+    final displayTitle = ledgerRange.isEmpty ? title : '$title · $ledgerRange';
     return MemoryCard(
       accent: entry.status == 'needs_rebuild' ? _kOrange : null,
       child: Column(
@@ -47,9 +52,9 @@ class MemoryEntryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      entry.title.isNotEmpty
-                          ? entry.title
-                          : 'memory_books_untitled_memory'.tr(),
+                      displayTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -115,9 +120,7 @@ class MemoryEntryCard extends StatelessWidget {
     final keys = entry.keys.take(3).join(', ');
     final messages =
         '${entry.messageIds.length} ${'memory_books_entry_messages'.tr()}';
-    return keys.isEmpty
-        ? '$status • $messages'
-        : '$status • $messages • $keys';
+    return keys.isEmpty ? '$status • $messages' : '$status • $messages • $keys';
   }
 
   Widget _buildBadges() {

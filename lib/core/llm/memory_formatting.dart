@@ -26,7 +26,7 @@ String formatMemoryItems(
         ? item.entry.title
         : formatMemoryRange(item.entry) ?? 'Memory';
     final range = formatMemoryRange(item.entry);
-    final heading = range == null
+    final heading = range == null || range == title
         ? 'Memory: $title'
         : 'Memory: $title ($range)';
     final ledger = item.entry.ledgerRange.trim();

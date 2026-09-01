@@ -105,6 +105,20 @@ void main() {
       expect(out, contains('Memory: Arc (1-4)'));
     });
 
+    test('heading does not repeat a title that already equals the range', () {
+      final out = formatMemoryItems([
+        _item(
+          id: 'e1',
+          title: '1-4',
+          text: 'hello',
+          rangeStart: 1,
+          rangeEnd: 4,
+        ),
+      ], includeContextHeader: false);
+      expect(out, startsWith('Memory: 1-4\n'));
+      expect(out, isNot(contains('Memory: 1-4 (1-4)')));
+    });
+
     test('excerpt item appends excerpt suffix', () {
       final out = formatMemoryItems([
         _item(id: 'e1', title: 'T1', text: 'hello', excerpt: true),
