@@ -50,7 +50,7 @@ import '../settings/api_list_provider.dart';
 import '../settings/api_settings_screen.dart';
 import '../settings/app_settings_provider.dart';
 import 'chat_drawer_controller.dart'
-    show ChatDrawerController, DrawerPanel, kKeyboardHeightPref;
+    show ChatDrawerController, kKeyboardHeightPref;
 import 'chat_provider.dart';
 import 'controllers/chat_message_selection_controller.dart';
 import 'chat_search_delegate.dart';
@@ -63,14 +63,13 @@ import 'widgets/chat_blur_region_tracker.dart';
 import 'widgets/chat_background.dart';
 import 'widgets/chat_header.dart';
 import 'widgets/chat_input_bar.dart';
-import 'widgets/magic_drawer.dart';
+import 'widgets/chat_drawer_panel.dart';
 import 'widgets/memory_activity_card.dart';
 import 'widgets/memory_sheet.dart';
 import 'widgets/studio_history_rotation_sheet.dart';
 import 'widgets/post_cleaner_status_card.dart';
 import 'widgets/post_gen_status_card.dart';
 import 'widgets/studio_status_card.dart';
-import 'widgets/quick_replies_panel.dart';
 import 'widgets/chat_webview_widget.dart';
 import 'widgets/triggered_items_sheet.dart';
 import 'widgets/webview_callbacks.dart';
@@ -2107,26 +2106,15 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                           -widget.drawerCtrl.activeDrawerHeight *
                           (1 - progress),
                       height: widget.drawerCtrl.activeDrawerHeight,
-                      child:
-                          widget.drawerCtrl.activePanel ==
-                              DrawerPanel.quickReplies
-                          ? QuickRepliesPanel(
-                              charId: widget.charId,
-                              beforeGeneration: _maybeSeedGameTime,
-                              onClose: () => widget.drawerCtrl.closeDrawer(),
-                              disableEffects:
-                                  batterySaver &&
-                                  widget.drawerCtrl.isDrawerAnimating,
-                            )
-                          : MagicDrawerPanel(
-                              charId: widget.charId,
-                              onClose: () => widget.drawerCtrl.closeDrawer(),
-                              disableEffects:
-                                  batterySaver &&
-                                  widget.drawerCtrl.isDrawerAnimating,
-                              onScrollToMessage: (id) =>
-                                  _scrollToTargetMessage(id),
-                            ),
+                      child: ChatDrawerPanel(
+                        charId: widget.charId,
+                        beforeGeneration: _maybeSeedGameTime,
+                        onClose: () => widget.drawerCtrl.closeDrawer(),
+                        disableEffects:
+                            batterySaver &&
+                            widget.drawerCtrl.isDrawerAnimating,
+                        onScrollToMessage: (id) => _scrollToTargetMessage(id),
+                      ),
                     ),
                   Positioned(
                     left: 0,
@@ -2215,19 +2203,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                         if (mounted) setState(() {});
                                       },
                                       isDrawerOpen:
-                                          (widget.drawerCtrl.drawerOpen ||
-                                              widget
-                                                  .drawerCtrl
-                                                  .switchingToDrawer) &&
-                                          widget.drawerCtrl.activePanel ==
-                                              DrawerPanel.magic,
-                                      isQuickRepliesOpen:
-                                          (widget.drawerCtrl.drawerOpen ||
-                                              widget
-                                                  .drawerCtrl
-                                                  .switchingToDrawer) &&
-                                          widget.drawerCtrl.activePanel ==
-                                              DrawerPanel.quickReplies,
+                                          widget.drawerCtrl.drawerOpen ||
+                                          widget
+                                              .drawerCtrl
+                                              .switchingToDrawer,
                                       virtualKeyboardSend:
                                           widget.virtualKeyboardSend,
                                       enterToSend: widget.enterToSend,
@@ -2340,11 +2319,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                           ? null
                                           : () => widget.drawerCtrl
                                                 .toggleDrawer(context),
-                                      onQuickReplies: () =>
-                                          widget.drawerCtrl.toggleDrawer(
-                                            context,
-                                            panel: DrawerPanel.quickReplies,
-                                          ),
                                       onImpersonate: (guidance) => ref
                                           .read(
                                             chatProvider(

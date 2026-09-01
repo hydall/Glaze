@@ -52,7 +52,14 @@ import '../../extensions/widgets/ext_blocks_settings_sheet.dart';
 
 class MagicDrawerPanel extends ConsumerStatefulWidget {
   final String charId;
-  final bool disableEffects;
+
+  /// Edit mode, owned by the hosting [ChatDrawerPanel] so one pencil toggles
+  /// both tabs at once. Ignored in [iconOnly] mode, which has nothing to edit.
+  final bool editing;
+
+  /// Asks the host to turn edit mode on — a long-press drag starts a reorder,
+  /// which only makes sense in edit mode, so the gesture switches into it.
+  final VoidCallback? onEditingRequested;
 
   /// Renders the panel as a narrow vertical strip of icons instead of the
   /// three-column card grid — the desktop right sidebar's collapsed state, and
@@ -78,7 +85,8 @@ class MagicDrawerPanel extends ConsumerStatefulWidget {
     super.key,
     required this.charId,
     this.onClose,
-    this.disableEffects = false,
+    this.editing = false,
+    this.onEditingRequested,
     this.iconOnly = false,
     this.onScrollToMessage,
   });
@@ -183,7 +191,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
   final List<String> _itemIds = [];
   final Set<String> _deletedIds = {};
-  bool _editing = false;
   bool _loading = true;
   bool _loadingTokens = false;
   int? _draggingIndex;
@@ -375,8 +382,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     return list;
   }
 
-  /// Feature-gated cards are hidden from Quick Access and the "Add Action"
-  /// (Tools) list unless their Experimental Features master switch is on.
+  /// Feature-gated cards are hidden from the Tools tab and the "Add Tool"
+  /// list unless their Experimental Features master switch is on.
   /// Ungated items are always visible.
   bool _featureVisible(
     String id,
@@ -452,10 +459,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     };
   }
 
-  void _toggleEditing() {
-    setState(() => _editing = !_editing);
-  }
-
   Future<void> _removeItem(String id) async {
     setState(() {
       _itemIds.remove(id);
@@ -493,7 +496,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
     await GlazeBottomSheet.show<MagicDrawerItemDef>(
       context,
-      title: 'Add Action',
+      title: 'sheet_title_add_tool'.tr(),
       child: MagicDrawerAddList(
         items: available,
         onSelect: (item) =>
@@ -510,7 +513,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   Future<void> _handleTap(MagicDrawerItemDef item) async {
-    if (_editing) return;
+    if (widget.editing) return;
 
     try {
       switch (item.id) {
@@ -813,8 +816,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     final extPresets = ref.watch(extensionPresetsProvider);
     final studioFeatureEnabled = ref.watch(studioFeatureEnabledProvider);
     final items = _displayItems(extSettings, extPresets, studioFeatureEnabled);
-    final batterySaver =
-        ref.watch(appSettingsProvider).value?.batterySaver ?? false;
+    final canAdd = _canAddMore(extSettings, studioFeatureEnabled);
 
     final scrollable = RawScrollbar(
       controller: _scrollController,
@@ -837,65 +839,77 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
               ),
               child: MagicCardGrid(
                 columns: 3,
-                cells: List.generate(items.length, (index) {
-                  final item = items[index];
-                  final card = MagicCard(
-                    item: item,
-                    editing: _editing,
-                    hovered: _hoverIndex == index && _draggingIndex != index,
-                    onTap: () => _handleTap(item.def),
-                    onDelete: () => _removeItem(item.def.id),
-                  );
+                cells: [
+                  ...List.generate(items.length, (index) {
+                    final item = items[index];
+                    final card = MagicCard(
+                      item: item,
+                      editing: widget.editing,
+                      hovered: _hoverIndex == index && _draggingIndex != index,
+                      onTap: () => _handleTap(item.def),
+                      onDelete: () => _removeItem(item.def.id),
+                    );
 
-                  return SizedBox(
-                    width: itemWidth,
-                    child: DragTarget<int>(
-                      onWillAcceptWithDetails: (details) {
-                        setState(() => _hoverIndex = index);
-                        return details.data != index;
-                      },
-                      onLeave: (_) {
-                        if (_hoverIndex == index) {
-                          setState(() => _hoverIndex = null);
-                        }
-                      },
-                      onAcceptWithDetails: (details) {
-                        _moveItem(details.data, index);
-                      },
-                      builder: (context, _, _) {
-                        return LongPressDraggable<int>(
-                          data: index,
-                          delay: const Duration(milliseconds: 300),
-                          onDragStarted: () {
-                            Haptics.mediumImpact();
-                            setState(() {
-                              if (!_editing) _editing = true;
-                              _draggingIndex = index;
-                            });
-                          },
-                          onDragEnd: (_) {
-                            setState(() {
-                              _draggingIndex = null;
-                              _hoverIndex = null;
-                            });
-                          },
-                          feedback: SizedBox(
-                            width: itemWidth,
-                            child: Material(
-                              color: Colors.transparent,
-                              child: Opacity(opacity: 0.92, child: card),
+                    return SizedBox(
+                      width: itemWidth,
+                      child: DragTarget<int>(
+                        onWillAcceptWithDetails: (details) {
+                          setState(() => _hoverIndex = index);
+                          return details.data != index;
+                        },
+                        onLeave: (_) {
+                          if (_hoverIndex == index) {
+                            setState(() => _hoverIndex = null);
+                          }
+                        },
+                        onAcceptWithDetails: (details) {
+                          _moveItem(details.data, index);
+                        },
+                        builder: (context, _, _) {
+                          return LongPressDraggable<int>(
+                            data: index,
+                            delay: const Duration(milliseconds: 300),
+                            onDragStarted: () {
+                              Haptics.mediumImpact();
+                              if (!widget.editing) {
+                                widget.onEditingRequested?.call();
+                              }
+                              setState(() => _draggingIndex = index);
+                            },
+                            onDragEnd: (_) {
+                              setState(() {
+                                _draggingIndex = null;
+                                _hoverIndex = null;
+                              });
+                            },
+                            feedback: SizedBox(
+                              width: itemWidth,
+                              child: Material(
+                                color: Colors.transparent,
+                                child: Opacity(opacity: 0.92, child: card),
+                              ),
                             ),
-                          ),
-                          childWhenDragging: Opacity(
-                            opacity: 0.25,
+                            childWhenDragging: Opacity(
+                              opacity: 0.25,
+                              child: card,
+                            ),
                             child: card,
-                          ),
-                          child: card,
-                        );
-                      },
+                          );
+                        },
+                      ),
+                    );
+                  }),
+                  // The add tile is always the last cell rather than a header
+                  // button revealed by edit mode: a "+" sitting in the grid is
+                  // how a new user finds out the row is theirs to change.
+                  // It is outside the drag/drop wiring above — it has no index
+                  // to reorder and must never be a drop target.
+                  if (canAdd)
+                    SizedBox(
+                      width: itemWidth,
+                      child: AddMagicCard(onTap: _showAddItemSheet),
                     ),
-                  );
-                }),
+                ],
               ),
             );
           },
@@ -905,19 +919,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
     if (widget.iconOnly) return _buildIconStrip(items);
 
-    return DrawerPanelScaffold(
-      disableEffects: batterySaver || widget.disableEffects,
-      loading: _loading,
-      onDismiss: widget.onClose,
-      header: MagicDrawerHeader(
-        editing: _editing,
-        onToggleEditing: _toggleEditing,
-        onAdd: _canAddMore(extSettings, studioFeatureEnabled)
-            ? _showAddItemSheet
-            : null,
-      ),
-      content: scrollable,
-    );
+    // The chrome (background, drag handle, header) belongs to the hosting
+    // [ChatDrawerPanel] — this is only the tab body.
+    return PanelLoadingOverlay(loading: _loading, child: scrollable);
   }
 
   /// Vue's `.tools-strip.magic-drawer-sidebar.icon-only`: a scrollable column

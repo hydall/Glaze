@@ -4,9 +4,10 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/top_edge_blur.dart';
 
-/// Shared shell for bottom slide-up panels (Magic Drawer, Quick Replies).
-/// Provides background, drag handle, top soft-edge blur, header slot,
-/// and an optional loading overlay.
+/// Shared shell for the chat drawer. Provides background, drag handle, top
+/// soft-edge blur and the header slot; the tab bodies hosted inside supply
+/// their own content and, while they are still loading, their own
+/// [PanelLoadingOverlay].
 ///
 /// Background is intentionally hardcoded to [Color(0xFF1E1E1E)] so the panel
 /// is always dark regardless of the active theme. [GlazeColors.charBubble]
@@ -16,7 +17,6 @@ import '../../../shared/widgets/top_edge_blur.dart';
 class DrawerPanelScaffold extends StatelessWidget {
   final Widget content;
   final Widget? header;
-  final bool loading;
   final bool disableEffects;
 
   /// Called when the user swipes down on the drag handle. When null the
@@ -27,7 +27,6 @@ class DrawerPanelScaffold extends StatelessWidget {
     super.key,
     required this.content,
     this.header,
-    this.loading = false,
     this.disableEffects = false,
     this.onDismiss,
   });
@@ -50,21 +49,23 @@ class DrawerPanelScaffold extends StatelessWidget {
               child: content,
             ),
           ),
+          if (header != null)
+            Positioned(top: 0, left: 0, right: 0, child: header!),
+          // Above the header in the stack, so it is hit-tested first. The
+          // header's tab strip is opaque and spans the full width, and a
+          // Stack stops at the first child that reports a hit — leaving the
+          // handle below it would have made the swipe-down dead everywhere
+          // the strip covers, which is exactly where the visible handle sits.
+          // The handle is translucent, so the strip still receives the taps
+          // and horizontal swipes it wants; only the vertical drag is the
+          // handle's. The two do not overlap visually (bar 10-14px, strip
+          // from 14px), so paint order is unaffected.
           Positioned(
             top: 0,
             left: 0,
             right: 0,
             child: _DismissHandle(onDismiss: onDismiss),
           ),
-          if (header != null)
-            Positioned(top: 0, left: 0, right: 0, child: header!),
-          if (loading)
-            const Positioned.fill(
-              child: ColoredBox(
-                color: Color(0x22000000),
-                child: Center(child: GlazeSpinner()),
-              ),
-            ),
         ],
       ),
     );
@@ -121,6 +122,38 @@ class _DismissHandleState extends State<_DismissHandle> {
         }
       },
       child: SizedBox(height: 34, width: double.infinity, child: bar),
+    );
+  }
+}
+
+/// Dimming spinner laid over a drawer tab that is still loading.
+///
+/// Lived in [DrawerPanelScaffold] while each panel built its own scaffold.
+/// Now that the tabs share one scaffold, each tab shows it for itself —
+/// switching to a loaded tab must not be dimmed by a sibling still working.
+class PanelLoadingOverlay extends StatelessWidget {
+  final bool loading;
+  final Widget child;
+
+  const PanelLoadingOverlay({
+    super.key,
+    required this.loading,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!loading) return child;
+    return Stack(
+      children: [
+        Positioned.fill(child: child),
+        const Positioned.fill(
+          child: ColoredBox(
+            color: Color(0x22000000),
+            child: Center(child: GlazeSpinner()),
+          ),
+        ),
+      ],
     );
   }
 }

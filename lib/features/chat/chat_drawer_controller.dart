@@ -8,9 +8,6 @@ import '../../core/platform/haptics.dart';
 const String kKeyboardHeightPref = 'chat_last_keyboard_height';
 const double _kDefaultKeyboardHeight = 320;
 
-/// Identifies which content the drawer is currently showing.
-enum DrawerPanel { magic, quickReplies }
-
 class ChatDrawerController extends ChangeNotifier {
   final FocusNode _inputFocus = FocusNode();
   final AnimationController _drawerAnimController;
@@ -18,7 +15,6 @@ class ChatDrawerController extends ChangeNotifier {
 
   bool _drawerOpen = false;
   bool _switchingToDrawer = false;
-  DrawerPanel _activePanel = DrawerPanel.magic;
   double _lastKeyboardHeight = _kDefaultKeyboardHeight;
   double _activeDrawerHeight = _kDefaultKeyboardHeight;
 
@@ -48,7 +44,6 @@ class ChatDrawerController extends ChangeNotifier {
   FocusNode get inputFocus => _inputFocus;
   bool get drawerOpen => _drawerOpen;
   bool get switchingToDrawer => _switchingToDrawer;
-  DrawerPanel get activePanel => _activePanel;
   double get lastKeyboardHeight => _lastKeyboardHeight;
   double get activeDrawerHeight => _activeDrawerHeight;
   bool get isDrawerAnimating => _drawerAnimController.isAnimating;
@@ -67,22 +62,17 @@ class ChatDrawerController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  void toggleDrawer(
-    BuildContext context, {
-    DrawerPanel panel = DrawerPanel.magic,
-  }) {
+  /// Opens or closes the drawer. Which tab it shows is the drawer's own
+  /// business (`chatDrawerTabProvider`) — this used to take a panel argument
+  /// because two input-bar buttons opened two different panels; there is one
+  /// button now, so this is a plain toggle.
+  void toggleDrawer(BuildContext context) {
     if (_drawerOpen) {
-      if (_activePanel == panel) {
-        _drawerOpen = false;
-        _drawerAnimController.reverse();
-      } else {
-        _activePanel = panel;
-        Haptics.selectionClick();
-      }
+      _drawerOpen = false;
+      _drawerAnimController.reverse();
       notifyListeners();
       return;
     }
-    _activePanel = panel;
     Haptics.selectionClick();
     _activeDrawerHeight = _lastKeyboardHeight;
 

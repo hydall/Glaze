@@ -7,7 +7,7 @@ import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
 
 /// Logical grouping of drawer items. Used only for sectioning the
-/// "Add Action" sheet - the grid itself stays freely orderable.
+/// "Add Tool" sheet - the grid itself stays freely orderable.
 enum MagicDrawerCategory { session, library, config, tools }
 
 class MagicDrawerItemDef {

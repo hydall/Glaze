@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/haptics.dart';
-import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
 import '../quick_replies_provider.dart';
@@ -13,16 +12,24 @@ import 'magic_drawer_widgets.dart';
 
 class QuickRepliesPanel extends ConsumerStatefulWidget {
   final String charId;
-  final bool disableEffects;
   final VoidCallback? onClose;
   final Future<bool> Function()? beforeGeneration;
+
+  /// Edit mode, owned by the hosting [ChatDrawerPanel] so one pencil toggles
+  /// both tabs at once.
+  final bool editing;
+
+  /// Asks the host to turn edit mode on when a long-press drag starts a
+  /// reorder.
+  final VoidCallback? onEditingRequested;
 
   const QuickRepliesPanel({
     super.key,
     required this.charId,
     this.onClose,
     this.beforeGeneration,
-    this.disableEffects = false,
+    this.editing = false,
+    this.onEditingRequested,
   });
 
   @override
@@ -30,7 +37,6 @@ class QuickRepliesPanel extends ConsumerStatefulWidget {
 }
 
 class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
-  bool _editing = false;
   int? _draggingIndex;
   int? _hoverIndex;
   final _scrollController = ScrollController();
@@ -41,12 +47,8 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     super.dispose();
   }
 
-  void _toggleEditing() {
-    setState(() => _editing = !_editing);
-  }
-
   Future<void> _handleTap(QuickReply reply) async {
-    if (_editing) {
+    if (widget.editing) {
       await _showEditSheet(existing: reply);
       return;
     }
@@ -119,16 +121,17 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
           ),
           status: _previewText(r),
         ),
-      if (_editing)
-        MagicDrawerCardItem(
-          def: MagicDrawerItemDef(
-            id: '__add__',
-            label: 'action_add'.tr(),
-            icon: Icons.add,
-            category: MagicDrawerCategory.session,
-          ),
-          isAddButton: true,
+      // Always last, never gated on edit mode: the "+" in the grid is how a
+      // new user learns this tab is theirs to fill.
+      MagicDrawerCardItem(
+        def: MagicDrawerItemDef(
+          id: '__add__',
+          label: 'action_add'.tr(),
+          icon: Icons.add,
+          category: MagicDrawerCategory.session,
         ),
+        isAddButton: true,
+      ),
     ];
 
     final content = RawScrollbar(
@@ -163,7 +166,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                   final reply = replies.firstWhere((r) => r.id == item.def.id);
                   final card = MagicCard(
                     item: item,
-                    editing: _editing,
+                    editing: widget.editing,
                     hovered: _hoverIndex == index && _draggingIndex != index,
                     onTap: () => _handleTap(reply),
                     onDelete: () => _remove(reply.id),
@@ -190,10 +193,10 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                           delay: const Duration(milliseconds: 300),
                           onDragStarted: () {
                             Haptics.mediumImpact();
-                            setState(() {
-                              if (!_editing) _editing = true;
-                              _draggingIndex = index;
-                            });
+                            if (!widget.editing) {
+                              widget.onEditingRequested?.call();
+                            }
+                            setState(() => _draggingIndex = index);
                           },
                           onDragEnd: (_) {
                             setState(() {
@@ -225,15 +228,11 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
       ),
     );
 
-    return DrawerPanelScaffold(
-      disableEffects: widget.disableEffects,
+    // The chrome (background, drag handle, header) belongs to the hosting
+    // [ChatDrawerPanel] — this is only the tab body.
+    return PanelLoadingOverlay(
       loading: repliesAsync.isLoading && replies.isEmpty,
-      onDismiss: widget.onClose,
-      header: QuickRepliesHeader(
-        editing: _editing,
-        onToggleEditing: _toggleEditing,
-      ),
-      content: content,
+      child: content,
     );
   }
 }
@@ -351,81 +350,6 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
                 child: Text(widget.isNew ? 'action_add'.tr() : 'btn_save'.tr()),
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Header for the Quick Replies panel. Mirrors [MagicDrawerHeader]
-/// visually but with its own title.
-class QuickRepliesHeader extends StatelessWidget {
-  final bool editing;
-  final VoidCallback onToggleEditing;
-
-  const QuickRepliesHeader({
-    super.key,
-    required this.editing,
-    required this.onToggleEditing,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Text(
-            'sheet_title_quick_replies'.tr(),
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: context.cs.onSurface,
-              letterSpacing: -0.2,
-            ),
-          ),
-          const Spacer(),
-          GestureDetector(
-            onTap: onToggleEditing,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              height: 34,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: editing
-                    ? context.cs.primary.withValues(alpha: 0.22)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(17),
-                border: Border.all(
-                  color: editing
-                      ? context.cs.primary.withValues(alpha: 0.38)
-                      : Colors.white.withValues(alpha: 0.18),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    editing ? Icons.check : Icons.edit,
-                    size: 16,
-                    color: editing ? context.cs.primary : context.cs.onSurface,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    editing ? 'btn_ok'.tr() : 'action_edit'.tr(),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: editing
-                          ? context.cs.primary
-                          : context.cs.onSurface,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ),
         ],
       ),
