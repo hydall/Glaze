@@ -47,6 +47,11 @@ class MemoryDraftCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasContent = draft.content.isNotEmpty;
+    final title = draft.title.isNotEmpty
+        ? draft.title
+        : 'memory_books_untitled_draft'.tr();
+    final ledgerRange = draft.ledgerRange.trim();
+    final displayTitle = ledgerRange.isEmpty ? title : '$title · $ledgerRange';
     return MemoryCard(
       accent: isGenerating
           ? _kAmber
@@ -64,9 +69,9 @@ class MemoryDraftCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      draft.title.isNotEmpty
-                          ? draft.title
-                          : 'memory_books_untitled_draft'.tr(),
+                      displayTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,

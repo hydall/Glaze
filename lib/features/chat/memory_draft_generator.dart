@@ -96,6 +96,7 @@ class MemoryDraftGenerator {
     final template = MemoryPromptPresets.resolve(
       settings.promptPreset,
       customPrompts,
+      ledgerRange != null,
     );
     var prompt = template.replaceAll('{{history}}', historyText);
     if (!template.contains('{{history}}')) {

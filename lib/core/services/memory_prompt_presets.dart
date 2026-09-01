@@ -24,10 +24,19 @@ class MemoryPromptPresets {
     ),
   ];
 
-  static String resolve(String? presetKey, [List<MemoryPromptPreset>? custom]) {
+  static String resolve(
+    String? presetKey, [
+    List<MemoryPromptPreset>? custom,
+    bool studioTimeContract = false,
+  ]) {
     final all = [...builtIn, ...?custom];
     final match = all.where((p) => p.key == presetKey).firstOrNull;
-    return match?.prompt ?? _detailedBeats;
+    final resolved = match ?? builtIn.first;
+    if (resolved.key != fallbackKey) return resolved.prompt;
+    return resolved.prompt.replaceAll(
+      '{{time_contract}}',
+      studioTimeContract ? _studioTimeContract : _ordinaryTimeContract,
+    );
   }
 
   static String label(String? presetKey, [List<MemoryPromptPreset>? custom]) {
@@ -80,7 +89,7 @@ LANGUAGE:
 - Write every memory paragraph and every keyword in that same roleplay language.
 - Preserve proper names and established terms exactly. Do not translate or transliterate them.
 
-The transcript may begin with AUTHORITATIVE_LEDGER_RANGE. It is source metadata, not dialogue. When present, do not calculate or normalize time yourself and do not create a separate inferred timeline. The application will attach that exact date/day/time range to the saved entry.
+{{time_contract}}
 
 CONTENT:
 - Produce 3-8 self-contained paragraphs, each covering one distinct meaningful beat.
@@ -104,6 +113,16 @@ Return JSON only, without a markdown fence, in this exact shape:
 Keep the JSON property names exactly as shown. Do not add any other properties.
 
 {{history}}''';
+
+  static const _ordinaryTimeContract = '''TIME:
+- This is an ordinary chat transcript without a Studio-computed clock.
+- Do not infer, calculate, or invent a date, day counter, clock time, duration, or timeline range.
+- Do not put time metadata in paragraph text or JSON. The application owns the entry header.''';
+
+  static const _studioTimeContract = '''TIME — STUDIO LEDGER:
+- The transcript begins with AUTHORITATIVE_LEDGER_RANGE computed by Studio Ledger. It is source metadata, not dialogue.
+- Preserve that range exactly as supplied. Do not shorten, translate, normalize, recalculate, or replace any part of it.
+- Do not put the range in paragraph text or JSON. The application attaches it to the saved entry header.''';
 
   static const _conciseNarrative = '''
 Analyze the following roleplay segment and create a concise memory entry.
