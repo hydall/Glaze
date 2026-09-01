@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/models/character.dart';
+import '../../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glass_surface.dart';
@@ -97,6 +98,69 @@ class CharacterGrid extends StatelessWidget {
     }
   }
 
+  /// The dice / filter / sort row.
+  ///
+  /// Desktop mirrors Vue's `.desktop-mode .sort-controls`: the row starts at
+  /// the left edge and the sort-type pill leads the direction toggle (CSS
+  /// `justify-content: flex-start` plus `order: 1 / 2`). Everywhere else it
+  /// stays right-aligned with the toggle first, as the mobile build has it.
+  Widget _buildControlsRow(BuildContext context) {
+    final isDesktop = isDesktopLayout(context);
+
+    final leading = <Widget>[
+      if (characters.isNotEmpty)
+        Consumer(
+          builder: (context, ref, _) {
+            final standard = ref.watch(
+              appSettingsProvider.select(
+                (s) => s.value?.useStandardRandomizer ?? false,
+              ),
+            );
+            return _DiceButton(
+              standard: standard,
+              onTap: () => standard
+                  ? _openStandardRandom(context)
+                  : _openRandomizing(context),
+            );
+          },
+        ),
+      if (onFilterTap != null)
+        _FilterButton(count: filterCount, onTap: onFilterTap!),
+    ];
+
+    final sortDirButton = _SortDirButton(
+      isAsc: sortDir == SortDir.asc,
+      onTap: onSortDirToggle,
+    );
+    final sortTypePill = _SortTypePill(
+      sortBy: sortBy,
+      onChanged: onSortTypeChanged,
+    );
+
+    final children = <Widget>[
+      ...leading,
+      if (isDesktop) ...[
+        sortTypePill,
+        sortDirButton,
+      ] else ...[
+        sortDirButton,
+        sortTypePill,
+      ],
+    ];
+
+    return Row(
+      mainAxisAlignment: isDesktop
+          ? MainAxisAlignment.start
+          : MainAxisAlignment.end,
+      children: [
+        for (var i = 0; i < children.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          children[i],
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return CustomScrollView(
@@ -107,39 +171,7 @@ class CharacterGrid extends StatelessWidget {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (characters.isNotEmpty) ...[
-                  Consumer(
-                    builder: (context, ref, _) {
-                      final standard = ref.watch(
-                        appSettingsProvider.select(
-                          (s) => s.value?.useStandardRandomizer ?? false,
-                        ),
-                      );
-                      return _DiceButton(
-                        standard: standard,
-                        onTap: () => standard
-                            ? _openStandardRandom(context)
-                            : _openRandomizing(context),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 10),
-                ],
-                if (onFilterTap != null) ...[
-                  _FilterButton(count: filterCount, onTap: onFilterTap!),
-                  const SizedBox(width: 10),
-                ],
-                _SortDirButton(
-                  isAsc: sortDir == SortDir.asc,
-                  onTap: onSortDirToggle,
-                ),
-                const SizedBox(width: 10),
-                _SortTypePill(sortBy: sortBy, onChanged: onSortTypeChanged),
-              ],
-            ),
+            child: _buildControlsRow(context),
           ),
         ),
         SliverToBoxAdapter(

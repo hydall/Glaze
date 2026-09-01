@@ -5,6 +5,23 @@ import '../theme/app_colors.dart';
 import 'glass_surface.dart';
 import 'help_tip.dart';
 
+/// Marks a subtree as living inside the desktop floating window, where
+/// [MenuGroup] drops its side gutters and left/right edges.
+///
+/// A window is already a framed, fixed-width panel; the groups' own rounded
+/// cards repeated that frame one level in, so the content read as a card of
+/// cards. Inside one, groups run edge to edge and separate with plain rules
+/// instead — see [MenuGroup.build].
+class MenuGroupFlatScope extends InheritedWidget {
+  const MenuGroupFlatScope({super.key, required super.child});
+
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<MenuGroupFlatScope>() != null;
+
+  @override
+  bool updateShouldNotify(MenuGroupFlatScope oldWidget) => false;
+}
+
 enum MenuGroupHeaderVariant { standard, accentCaps }
 
 // ── Collapsible section ────────────────────────────────────────────────────────
@@ -36,17 +53,23 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
 
   @override
   Widget build(BuildContext context) {
+    final flat = MenuGroupFlatScope.of(context);
+    final radius = flat ? BorderRadius.zero : BorderRadius.circular(20);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: flat
+              ? EdgeInsets.zero
+              : const EdgeInsets.fromLTRB(16, 0, 16, 12),
           child: GlassSurface(
             enableRipple: true,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: context.cs.outlineVariant),
+            borderRadius: radius,
+            border: flat
+                ? Border(bottom: BorderSide(color: context.cs.outlineVariant))
+                : Border.all(color: context.cs.outlineVariant),
             child: InkWell(
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: radius,
               onTap: () {
                 Haptics.selectionClick();
                 setState(() => _expanded = !_expanded);
@@ -122,20 +145,39 @@ class MenuGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final flat = MenuGroupFlatScope.of(context);
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (header != null) _buildHeader(context),
+        ...items,
+        const SizedBox(height: 6),
+      ],
+    );
+
+    // Inside a desktop window the group runs edge to edge: no side gutters, no
+    // left/right edges, and no corner rounding — only the rules above and
+    // below still separate one group from the next.
+    if (flat) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: context.cs.outlineVariant)),
+        ),
+        child: GlassSurface(
+          enableRipple: true,
+          borderRadius: BorderRadius.zero,
+          child: body,
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: GlassSurface(
         enableRipple: true,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: context.cs.outlineVariant),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (header != null) _buildHeader(context),
-            ...items,
-            const SizedBox(height: 6),
-          ],
-        ),
+        child: body,
       ),
     );
   }

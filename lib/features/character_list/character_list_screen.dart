@@ -17,6 +17,7 @@ import '../../core/services/character_import_persistence_coordinator.dart';
 import '../../core/state/character_folder_provider.dart';
 import '../../core/state/character_provider.dart';
 import '../../core/state/db_provider.dart';
+import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/header_scroll_hider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
@@ -79,6 +80,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   // step with the shell header. This constant is the block it occupies (its top
   // padding + the bar itself) so content can reserve room.
   static const double _kTabBarBlock = 52.0;
+
+  /// Width the desktop tab strip settles at, leaving the rest of the row to
+  /// the Add button. Full-width on mobile, where the strip is the whole row.
+  static const double _kTabStripWidth = 420.0;
 
   // Owns the scroll position of whichever list view is currently shown (the
   // grids attach via PrimaryScrollController), so tapping the active tab can
@@ -174,9 +179,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     return ShellHeaderConfig(
       title: inSearch
           ? null
-          : (inPicks
-                ? _picksTitle
-                : (folderTitle ?? 'header_characters'.tr())),
+          : (inPicks ? _picksTitle : (folderTitle ?? 'header_characters'.tr())),
       titleWidget: inSearch ? _buildSearchField(context) : null,
       showBack: inFolder,
       onBack: inFolder ? _handleFolderBack : null,
@@ -200,8 +203,12 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
             ],
       // The tabs ride inside the header (only at the top level) so they hide and
       // reveal as a single unit with it — one animation, not two. Dropped
-      // entirely when the catalog is disabled (only "My Characters" remains).
-      below: (catalogVisible && !inFolder) ? _buildTabBar() : null,
+      // entirely when the catalog is disabled (only "My Characters" remains) —
+      // except on desktop, where the same row also carries the Add button and
+      // so survives a hidden catalog.
+      below: (!inFolder && (catalogVisible || isDesktopLayout(context)))
+          ? _buildTabBar()
+          : null,
     );
   }
 
@@ -405,7 +412,11 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     // extra room for the tabs row when it's present so content clears it.
     final inFolder = effectiveTab == 0 && _currentFolderId != null;
     final showTabBar = catalogVisible && !inFolder;
-    final contentTopPad = showTabBar ? topPad + _kTabBarBlock : topPad;
+    // The desktop row is present at the top level even without the catalog,
+    // because the Add button lives in it.
+    final showHeaderRow =
+        !inFolder && (catalogVisible || isDesktopLayout(context));
+    final contentTopPad = showHeaderRow ? topPad + _kTabBarBlock : topPad;
 
     // While inside a folder, intercept the system/gesture back so it pops out to
     // the top-level grid instead of bubbling up to the shell (which would exit
@@ -420,88 +431,94 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: Stack(
-        children: [
-          Positioned.fill(
-            child: NotificationListener<ScrollNotification>(
-              onNotification: _onScrollNotification,
-              child: PrimaryScrollController(
-                controller: _listScrollController,
-                child: SwipeTabSwitcher(
-                  // Only the top-level My/Catalog split is swipeable; inside a
-                  // folder the strip is hidden and horizontal drags belong to
-                  // the folder content.
-                  enabled: showTabBar,
-                  index: effectiveTab,
-                  length: 2,
-                  onChanged: _onTabSwipe,
-                  child: TabSlideSwitcher(
-                  index: effectiveTab,
-                  child: effectiveTab == 1
-                      ? CatalogGrid(
-                          key: const ValueKey('catalog_grid'),
-                          topPadding: contentTopPad,
-                          bottomPadding: navHeight + 20,
+          children: [
+            Positioned.fill(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
+                child: PrimaryScrollController(
+                  controller: _listScrollController,
+                  child: SwipeTabSwitcher(
+                    // Only the top-level My/Catalog split is swipeable; inside a
+                    // folder the strip is hidden and horizontal drags belong to
+                    // the folder content.
+                    enabled: showTabBar,
+                    index: effectiveTab,
+                    length: 2,
+                    onChanged: _onTabSwipe,
+                    child: TabSlideSwitcher(
+                      index: effectiveTab,
+                      child: effectiveTab == 1
+                          ? CatalogGrid(
+                              key: const ValueKey('catalog_grid'),
+                              topPadding: contentTopPad,
+                              bottomPadding: navHeight + 20,
+                            )
+                          : KeyedSubtree(
+                              key: const ValueKey('my_characters'),
+                              child: _buildMyCharacters(
+                                context,
+                                contentTopPad,
+                                navHeight,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // The selection bar and the add button share the same bottom slot and
+            // cross-fade/slide between each other so the panel glides in and out
+            // instead of popping.
+            if (effectiveTab == 0 && _currentFolderId != kPicksFolderId)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: navHeight + 16,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 280),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  transitionBuilder: (child, animation) {
+                    final slide =
+                        Tween<Offset>(
+                          begin: const Offset(0, 0.5),
+                          end: Offset.zero,
+                        ).animate(
+                          CurvedAnimation(
+                            parent: animation,
+                            curve: Curves.easeOutBack,
+                          ),
+                        );
+                    return FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(position: slide, child: child),
+                    );
+                  },
+                  child: selection.active
+                      ? _SelectionBar(
+                          key: const ValueKey('selection_bar'),
+                          count: selection.count,
+                          onCancel: () => ref
+                              .read(characterSelectionProvider.notifier)
+                              .clear(),
+                          onMore: () =>
+                              _showSelectionActions(context, selection),
                         )
-                      : KeyedSubtree(
-                          key: const ValueKey('my_characters'),
-                          child: _buildMyCharacters(
-                            context,
-                            contentTopPad,
-                            navHeight,
+                      // On desktop the Add button sits in the tabs row instead,
+                      // so the slot holds only the selection bar there.
+                      : isDesktopLayout(context)
+                      ? const SizedBox.shrink(
+                          key: ValueKey('add_button_hidden'),
+                        )
+                      : Align(
+                          key: const ValueKey('add_button'),
+                          alignment: Alignment.centerRight,
+                          child: _AddButton(
+                            onTap: () => _showAddSheet(context, ref),
                           ),
                         ),
                 ),
-                ),
               ),
-            ),
-          ),
-          // The selection bar and the add button share the same bottom slot and
-          // cross-fade/slide between each other so the panel glides in and out
-          // instead of popping.
-          if (effectiveTab == 0 && _currentFolderId != kPicksFolderId)
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: navHeight + 16,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 280),
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeIn,
-                transitionBuilder: (child, animation) {
-                  final slide =
-                      Tween<Offset>(
-                        begin: const Offset(0, 0.5),
-                        end: Offset.zero,
-                      ).animate(
-                        CurvedAnimation(
-                          parent: animation,
-                          curve: Curves.easeOutBack,
-                        ),
-                      );
-                  return FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(position: slide, child: child),
-                  );
-                },
-                child: selection.active
-                    ? _SelectionBar(
-                        key: const ValueKey('selection_bar'),
-                        count: selection.count,
-                        onCancel: () => ref
-                            .read(characterSelectionProvider.notifier)
-                            .clear(),
-                        onMore: () =>
-                            _showSelectionActions(context, selection),
-                      )
-                    : Align(
-                        key: const ValueKey('add_button'),
-                        alignment: Alignment.centerRight,
-                        child: _AddButton(
-                          onTap: () => _showAddSheet(context, ref),
-                        ),
-                      ),
-              ),
-            ),
           ],
         ),
       ),
@@ -569,8 +586,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final infinite = ref.watch(infiniteCharactersProvider(key));
 
     return infinite.when(
-      loading: () =>
-          Center(child: GlazeSpinner(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -678,8 +694,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   ) {
     final chars = ref.watch(charactersProvider);
     return chars.when(
-      loading: () =>
-          Center(child: GlazeSpinner(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -763,8 +778,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final isFavorites = folderId == kFavoritesFolderId;
     final chars = ref.watch(charactersProvider);
     return chars.when(
-      loading: () =>
-          Center(child: GlazeSpinner(color: context.cs.primary)),
+      loading: () => Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -875,35 +889,70 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   }
 
   Widget _buildTabBar() {
+    final isDesktop = isDesktopLayout(context);
     // Rendered in the shell header's `below` slot, which already supplies the
     // horizontal padding — only the gap under the app bar is needed here.
     return Padding(
       padding: const EdgeInsets.only(top: 10),
-      child: GlazeTabBar(
-        tabs: [
-          GlazeTabItem(
-            label: 'tab_my_characters'.tr(),
-            icon: Icons.person_rounded,
+      child: isDesktop ? _buildDesktopTabsRow() : _buildTabStrip(),
+    );
+  }
+
+  /// Vue's `.tabs-row`: the tab strip keeps its natural width on the left and
+  /// the Add button sits at the far right, instead of the strip spanning the
+  /// window and the Add button floating over the grid.
+  Widget _buildDesktopTabsRow() {
+    final catalogVisible = ref.watch(catalogVisibleProvider);
+    return Row(
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: catalogVisible
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: _kTabStripWidth,
+                    ),
+                    child: _buildTabStrip(),
+                  )
+                : const SizedBox.shrink(),
           ),
-          GlazeTabItem(label: 'tab_catalog'.tr(), icon: Icons.public_rounded),
+        ),
+        // Mirrors `v-if="activeTab === 'characters'"` — Discover has nothing
+        // of the user's to add to.
+        if (_tabIndex == 0 || !catalogVisible) ...[
+          const SizedBox(width: 12),
+          _AddButton(height: 42, onTap: () => _showAddSheet(context, ref)),
         ],
-        activeIndex: _tabIndex,
-        onChanged: (i) {
-          // Tapping the already-active tab scrolls its list back to the top.
-          if (i == _tabIndex) {
-            _scrollToTop();
-            _showHeader();
-            return;
-          }
-          ref.read(characterSelectionProvider.notifier).clear();
+      ],
+    );
+  }
+
+  Widget _buildTabStrip() {
+    return GlazeTabBar(
+      tabs: [
+        GlazeTabItem(
+          label: 'tab_my_characters'.tr(),
+          icon: Icons.person_rounded,
+        ),
+        GlazeTabItem(label: 'tab_catalog'.tr(), icon: Icons.public_rounded),
+      ],
+      activeIndex: _tabIndex,
+      onChanged: (i) {
+        // Tapping the already-active tab scrolls its list back to the top.
+        if (i == _tabIndex) {
+          _scrollToTop();
           _showHeader();
-          setState(() {
-            _tabIndex = i;
-            if (_searchExpanded) _applySearchForActiveTab();
-          });
-          refreshShellHeader();
-        },
-      ),
+          return;
+        }
+        ref.read(characterSelectionProvider.notifier).clear();
+        _showHeader();
+        setState(() {
+          _tabIndex = i;
+          if (_searchExpanded) _applySearchForActiveTab();
+        });
+        refreshShellHeader();
+      },
     );
   }
 
@@ -1125,8 +1174,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       backgroundColor: Colors.transparent,
       builder: (_) => AddCharactersToFolderSheet(
         characterIds: ids,
-        onDone: () =>
-            ref.read(characterSelectionProvider.notifier).clear(),
+        onDone: () => ref.read(characterSelectionProvider.notifier).clear(),
       ),
     );
   }
@@ -1340,18 +1388,24 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
 
 class _AddButton extends StatelessWidget {
   final VoidCallback onTap;
-  const _AddButton({required this.onTap});
+
+  /// 48 as the button floating over the grid; 42 inline in the desktop tabs
+  /// row, where it lines up with the tab strip.
+  final double height;
+
+  const _AddButton({required this.onTap, this.height = 48});
 
   @override
   Widget build(BuildContext context) {
+    final compact = height < 48;
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        height: height,
+        padding: EdgeInsets.symmetric(horizontal: compact ? 16 : 20),
         decoration: BoxDecoration(
           color: context.cs.primary,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(height / 2),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.3),
@@ -1363,13 +1417,17 @@ class _AddButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.add_rounded, color: Colors.white, size: 24),
-            const SizedBox(width: 8),
+            Icon(
+              Icons.add_rounded,
+              color: Colors.white,
+              size: compact ? 20 : 24,
+            ),
+            SizedBox(width: compact ? 6 : 8),
             Text(
               'btn_add'.tr(),
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 16,
+                fontSize: compact ? 14 : 16,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -1453,9 +1511,7 @@ class _CircleIconBtn extends StatelessWidget {
         child: GlassSurface(
           borderRadius: BorderRadius.circular(20),
           tint: context.cs.surface,
-          border: Border.all(
-            color: context.cs.primary.withValues(alpha: 0.18),
-          ),
+          border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
           child: Center(
             child: Icon(
               icon,

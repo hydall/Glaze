@@ -20,23 +20,34 @@ void main() {
     });
 
     test('refreshes stats after every action route closes', () {
-      final source = File(
-        'lib/features/chat/widgets/magic_drawer.dart',
+      // The dispatch lives in MagicDrawerActions, shared with the desktop
+      // sidebar strip. Its half of the contract is that every action is
+      // awaited inside a try/finally that runs the caller's [onFinished].
+      final actions = File(
+        'lib/features/chat/services/magic_drawer_actions.dart',
       ).readAsStringSync();
 
-      final handlerStart = source.indexOf(
-        'Future<void> _handleTap(MagicDrawerItemDef item)',
-      );
-      final nextMethod = source.indexOf(
-        'Future<void> _showAgentOpsLog()',
+      final handlerStart = actions.indexOf('Future<void> handleTap(');
+      final nextMethod = actions.indexOf(
+        'Future<void> _showCardRewriter(',
         handlerStart,
       );
-      final handler = source.substring(handlerStart, nextMethod);
+      expect(handlerStart, isNonNegative);
+      expect(nextMethod, greaterThan(handlerStart));
+      final handler = actions.substring(handlerStart, nextMethod);
 
       expect(handler, contains('try {'));
       expect(handler, contains('finally {'));
-      expect(handler, contains('if (mounted) await _refreshStats();'));
+      expect(handler, contains('if (onFinished != null) await onFinished();'));
       expect(handler, contains('await showPromptInspectorSheet('));
+
+      // The panel's half: it hands in a refresh, so a closed route still
+      // brings the card subtitles back up to date.
+      final panel = File(
+        'lib/features/chat/widgets/magic_drawer.dart',
+      ).readAsStringSync();
+      expect(panel, contains('_actions.handleTap('));
+      expect(panel, contains('if (mounted) await _refreshStats();'));
     });
 
     test('rejects token results calculated from an older stats snapshot', () {

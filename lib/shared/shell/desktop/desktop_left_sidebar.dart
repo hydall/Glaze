@@ -27,8 +27,7 @@ class DesktopLeftSidebar extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<DesktopLeftSidebar> createState() =>
-      _DesktopLeftSidebarState();
+  ConsumerState<DesktopLeftSidebar> createState() => _DesktopLeftSidebarState();
 }
 
 class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
@@ -92,7 +91,13 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
         icon: Icons.info_outline_rounded,
         onTap: () {
           if (isDesktopLayout(context)) {
-            ref.read(glossaryPopupVisibleProvider.notifier).update((v) => !v);
+            // Toggle; opening from here starts at the category list, so clear
+            // any term a help tip left behind.
+            if (ref.read(glossaryPopupVisibleProvider)) {
+              ref.read(glossaryPopupVisibleProvider.notifier).state = false;
+            } else {
+              openGlossaryPopup(ref);
+            }
           } else {
             context.go('/menu/glossary');
           }
@@ -114,9 +119,15 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
       ),
     ];
 
+    // Same as the right sidebar: chat runs its background edge to edge, so the
+    // gutters must not tint it darker at the sides.
+    final inChat = GoRouterState.of(
+      context,
+    ).uri.toString().startsWith('/chat/');
+
     return Container(
       width: controller.width,
-      color: Colors.black.withValues(alpha: 0.2),
+      color: inChat ? null : Colors.black.withValues(alpha: 0.2),
       child: Stack(
         children: [
           if (collapsed)
@@ -214,26 +225,30 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
     return Column(
       children: [
         const SizedBox(height: 8),
-        ...items.sublist(0, 2).map(
-          (item) => _CollapsedIcon(
-            icon: item.icon,
-            label: item.label,
-            active: item.active,
-            onTap: item.onTap,
-          ),
-        ),
+        ...items
+            .sublist(0, 2)
+            .map(
+              (item) => _CollapsedIcon(
+                icon: item.icon,
+                label: item.label,
+                active: item.active,
+                onTap: item.onTap,
+              ),
+            ),
         const SizedBox(height: 4),
         Divider(height: 1, color: context.cs.outlineVariant),
         Expanded(child: ChatHistoryList(collapsed: true)),
         Divider(height: 1, color: context.cs.outlineVariant),
-        ...items.sublist(2).map(
-          (item) => _CollapsedIcon(
-            icon: item.icon,
-            label: item.label,
-            active: item.active,
-            onTap: item.onTap,
-          ),
-        ),
+        ...items
+            .sublist(2)
+            .map(
+              (item) => _CollapsedIcon(
+                icon: item.icon,
+                label: item.label,
+                active: item.active,
+                onTap: item.onTap,
+              ),
+            ),
         const SizedBox(height: 8),
       ],
     );
@@ -285,8 +300,9 @@ class _HoverGlowButtonState extends State<_HoverGlowButton> {
   @override
   Widget build(BuildContext context) {
     final primary = context.cs.primary;
-    final inactive =
-        widget.prominent ? context.cs.onSurface : context.cs.onSurfaceVariant;
+    final inactive = widget.prominent
+        ? context.cs.onSurface
+        : context.cs.onSurfaceVariant;
     final color = widget.active ? primary : inactive;
 
     return MouseRegion(
@@ -332,10 +348,11 @@ class _HoverGlowButtonState extends State<_HoverGlowButton> {
                       const SizedBox(width: 10),
                       Text(
                         widget.label,
-                        style: (widget.prominent
-                                ? Theme.of(context).textTheme.labelLarge
-                                : Theme.of(context).textTheme.labelMedium)
-                            ?.copyWith(color: color),
+                        style:
+                            (widget.prominent
+                                    ? Theme.of(context).textTheme.labelLarge
+                                    : Theme.of(context).textTheme.labelMedium)
+                                ?.copyWith(color: color),
                       ),
                     ],
                   ),
@@ -451,8 +468,7 @@ class _CollapsedIconState extends State<_CollapsedIcon> {
                       child: Icon(
                         widget.icon,
                         size: 22,
-                        color:
-                            widget.active ? primary : context.cs.onSurface,
+                        color: widget.active ? primary : context.cs.onSurface,
                       ),
                     ),
                   ],

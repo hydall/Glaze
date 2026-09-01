@@ -8,7 +8,6 @@ import '../../widgets/glaze_scaffold.dart' show GlazeAppBar;
 import '../animated_header_below.dart';
 import '../shell_header_provider.dart';
 import 'desktop_floating_provider.dart';
-import 'desktop_glossary_popup.dart';
 import 'desktop_layout_provider.dart';
 import 'desktop_left_sidebar.dart';
 import 'desktop_right_sidebar.dart';
@@ -60,11 +59,11 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
           isDesktop: true,
           child: ProviderScope(
             overrides: [
-              leftSidebarControllerProvider
-                  .overrideWithValue(_leftController!),
+              leftSidebarControllerProvider.overrideWithValue(_leftController!),
               if (_rightController != null)
-                rightSidebarControllerProvider
-                    .overrideWithValue(_rightController!),
+                rightSidebarControllerProvider.overrideWithValue(
+                  _rightController!,
+                ),
             ],
             child: _buildDesktopLayout(context),
           ),
@@ -106,8 +105,6 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
               ref.read(desktopFloatingProvider).close();
             },
           ),
-          // Glossary corner popup
-          const DesktopGlossaryPopup(),
         ],
       ),
     );
@@ -138,10 +135,7 @@ class _DesktopHeader extends ConsumerWidget {
       // rows stay flush with the header's top edge during the cross-fade.
       layoutBuilder: (currentChild, previousChildren) => Stack(
         alignment: Alignment.topCenter,
-        children: [
-          ...previousChildren,
-          ?currentChild,
-        ],
+        children: [...previousChildren, ?currentChild],
       ),
       child: entry == null || entry.config.hidden
           ? const SizedBox.shrink(key: ValueKey('desktop-header-empty'))

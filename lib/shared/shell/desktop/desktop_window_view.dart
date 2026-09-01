@@ -5,6 +5,7 @@ import '../../../features/cloud_sync/widgets/sync_sheet.dart';
 import '../../../features/menu/menu_screen.dart';
 import '../../../features/settings/app_settings_screen.dart';
 import '../../../features/settings/theme_preset_screen.dart';
+import '../../widgets/menu_group.dart';
 import 'desktop_floating_provider.dart';
 
 class DesktopWindowView extends ConsumerWidget {
@@ -45,7 +46,9 @@ class DesktopWindowView extends ConsumerWidget {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: _buildContent(viewId),
+              // The window is itself a framed panel, so the menu groups inside
+              // drop their own cards and run edge to edge.
+              child: MenuGroupFlatScope(child: _buildContent(viewId)),
             ),
           ),
         ),

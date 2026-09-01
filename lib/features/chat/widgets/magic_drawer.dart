@@ -1,54 +1,31 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/platform/haptics.dart';
-import '../../../core/services/chat_import_export.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../features/settings/app_settings_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/studio_feature_provider.dart';
 import '../../../core/state/summary_providers.dart';
-import '../../../shared/theme/app_colors.dart';
 
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../../shared/widgets/glaze_error_dialog.dart';
-import '../../../shared/widgets/glaze_toast.dart';
-import '../../image_gen/widgets/image_gen_sheet.dart';
-import '../chat_actions_service.dart';
 import '../chat_provider.dart';
-import '../../card_rewrite/card_rewriter_studio_sheet.dart';
-import '../../character_list/character_detail_screen.dart';
-import '../../lorebooks/lorebook_list_screen.dart';
-import '../../personas/persona_list_screen.dart';
-import '../../presets/preset_list_screen.dart';
-import '../../regex/regex_sheet.dart';
-import '../../settings/api_settings_screen.dart';
-import 'authors_note_sheet.dart';
-import 'agentic_operations_log_dialog.dart';
 import 'drawer_panel_scaffold.dart';
 import 'magic_drawer_models.dart';
+import '../services/magic_drawer_actions.dart';
 import '../services/magic_drawer_layout_service.dart';
 import '../services/magic_drawer_stats_service.dart';
 import 'magic_drawer_widgets.dart';
-import 'memory_sheet.dart';
-import 'prompt_inspector_sheet.dart';
-import 'session_picker_sheet.dart';
 import '../state/magic_drawer_stats_cache.dart';
 import '../state/token_breakdown_cache.dart';
-import '../../glossary/glossary_sheet.dart';
 import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/extensions_settings.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
-import '../../extensions/widgets/ext_blocks_settings_sheet.dart';
 
 class MagicDrawerPanel extends ConsumerStatefulWidget {
   final String charId;
@@ -79,98 +56,9 @@ class MagicDrawerPanel extends ConsumerStatefulWidget {
 }
 
 class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
-  static final _allItems = <MagicDrawerItemDef>[
-    MagicDrawerItemDef(
-      id: 'inspector',
-      label: 'prompt_inspector_title'.tr(),
-      icon: Icons.travel_explore,
-      category: MagicDrawerCategory.tools,
-    ),
-    MagicDrawerItemDef(
-      id: 'memory',
-      label: 'Memory',
-      icon: Icons.subject,
-      category: MagicDrawerCategory.session,
-    ),
-    MagicDrawerItemDef(
-      id: 'sessions',
-      label: 'history_title'.tr(),
-      icon: Icons.history,
-      category: MagicDrawerCategory.session,
-    ),
-    MagicDrawerItemDef(
-      id: 'char-card',
-      label: 'menu_characters'.tr(),
-      icon: Icons.account_box,
-      category: MagicDrawerCategory.library,
-    ),
-    MagicDrawerItemDef(
-      id: 'lorebooks',
-      label: 'label_lorebooks'.tr(),
-      icon: Icons.library_books,
-      category: MagicDrawerCategory.library,
-    ),
-    MagicDrawerItemDef(
-      id: 'regex',
-      label: 'menu_regex'.tr(),
-      icon: Icons.code,
-      category: MagicDrawerCategory.config,
-    ),
-    MagicDrawerItemDef(
-      id: 'api',
-      label: 'tab_api'.tr(),
-      icon: Icons.cloud,
-      category: MagicDrawerCategory.config,
-    ),
-    MagicDrawerItemDef(
-      id: 'presets',
-      label: 'tab_presets'.tr(),
-      icon: Icons.description,
-      category: MagicDrawerCategory.config,
-    ),
-    MagicDrawerItemDef(
-      id: 'personas',
-      label: 'menu_personas'.tr(),
-      icon: Icons.manage_accounts,
-      category: MagicDrawerCategory.library,
-    ),
-    MagicDrawerItemDef(
-      id: 'image-gen',
-      label: 'imggen_title'.tr(),
-      icon: Icons.image,
-      category: MagicDrawerCategory.tools,
-    ),
-    MagicDrawerItemDef(
-      id: 'authors-note',
-      label: 'magic_authors_notes'.tr(),
-      icon: Icons.edit_note,
-      category: MagicDrawerCategory.session,
-    ),
-    MagicDrawerItemDef(
-      id: 'glossary',
-      label: 'menu_glossary'.tr(),
-      icon: Icons.menu_book,
-      category: MagicDrawerCategory.library,
-    ),
-    MagicDrawerItemDef(
-      id: 'ext-blocks',
-      label: 'Ext Blocks',
-      icon: Icons.extension_outlined,
-      category: MagicDrawerCategory.config,
-    ),
-    MagicDrawerItemDef(
-      id: 'agent-ops',
-      label: 'agent_ops_title'.tr(),
-      icon: Icons.smart_toy_outlined,
-      category: MagicDrawerCategory.tools,
-    ),
-    MagicDrawerItemDef(
-      id: 'card-rewriter',
-      label: 'magic_card_rewriter'.tr(),
-      icon: Icons.auto_fix_high_outlined,
-      category: MagicDrawerCategory.tools,
-    ),
-  ];
+  /// Quick Access catalogue + dispatch, shared with the desktop sidebar
+  /// strip — see [MagicDrawerActions].
+  late final MagicDrawerActions _actions;
 
   final List<String> _itemIds = [];
   final Set<String> _deletedIds = {};
@@ -188,6 +76,11 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   @override
   void initState() {
     super.initState();
+    _actions = MagicDrawerActions(
+      charId: widget.charId,
+      onClose: widget.onClose,
+      onScrollToMessage: widget.onScrollToMessage,
+    );
     _statsService = MagicDrawerStatsService(ref);
     // Stale-while-revalidate. The panel is destroyed on every drawer close, so
     // without a cache each open would sit behind the spinner until a full
@@ -232,7 +125,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   Future<void> _loadLayout() async {
-    final layout = await MagicDrawerLayoutService(ref).loadLayout(_allItems);
+    final layout = await MagicDrawerLayoutService(
+      ref,
+    ).loadLayout(MagicDrawerActions.all);
     _deletedIds
       ..clear()
       ..addAll(layout.deletedIds);
@@ -325,7 +220,10 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     bool studioFeatureEnabled,
   ) {
     final list = _itemIds
-        .map((id) => _allItems.where((item) => item.id == id).firstOrNull)
+        .map(
+          (id) =>
+              MagicDrawerActions.all.where((item) => item.id == id).firstOrNull,
+        )
         .whereType<MagicDrawerItemDef>()
         .where(
           (def) => _featureVisible(def.id, extSettings, studioFeatureEnabled),
@@ -355,7 +253,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   bool _canAddMore(ExtensionsSettings extSettings, bool studioFeatureEnabled) =>
-      _allItems.any(
+      MagicDrawerActions.all.any(
         (item) =>
             !_itemIds.contains(item.id) &&
             _featureVisible(item.id, extSettings, studioFeatureEnabled),
@@ -448,7 +346,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   Future<void> _showAddItemSheet() async {
     final extSettings = ref.read(extensionsSettingsProvider);
     final studioFeatureEnabled = ref.read(studioFeatureEnabledProvider);
-    final available = _allItems
+    final available = MagicDrawerActions.all
         .where((item) => !_itemIds.contains(item.id))
         .where(
           (item) => _featureVisible(item.id, extSettings, studioFeatureEnabled),
@@ -472,236 +370,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       });
       await _saveLayout();
     });
-  }
-
-  Future<void> _handleTap(MagicDrawerItemDef item) async {
-    if (_editing) return;
-
-    try {
-      switch (item.id) {
-        case 'inspector':
-          await showPromptInspectorSheet(context, widget.charId);
-          break;
-        case 'memory':
-          await showMemorySheet(context, widget.charId);
-          break;
-        case 'sessions':
-          await _showSessionsSheet();
-          break;
-        case 'char-card':
-          final result = await showModalBottomSheet<String>(
-            context: context,
-            isScrollControlled: true,
-            useRootNavigator: true,
-            backgroundColor: Colors.transparent,
-            builder: (_) => CharacterDetailScreen(charId: widget.charId),
-          );
-          if (result != null && result.isNotEmpty && mounted) {
-            // Real navigation away from the chat - close the panel first.
-            widget.onClose?.call();
-            context.go(result);
-          }
-          break;
-        case 'lorebooks':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            backgroundColor: Colors.transparent,
-            barrierColor: Colors.black54,
-            isScrollControlled: true,
-            builder: (_) => const LorebookListScreen(),
-          );
-          break;
-        case 'regex':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            backgroundColor: Colors.transparent,
-            barrierColor: Colors.black54,
-            isScrollControlled: true,
-            builder: (_) => const RegexSheet(),
-          );
-          break;
-        case 'api':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            backgroundColor: Colors.transparent,
-            barrierColor: Colors.black54,
-            isScrollControlled: true,
-            builder: (_) => const ApiSettingsScreen(),
-          );
-          break;
-        case 'presets':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            backgroundColor: Colors.transparent,
-            barrierColor: Colors.black54,
-            isScrollControlled: true,
-            builder: (_) => PresetListScreen(charId: widget.charId),
-          );
-          break;
-        case 'personas':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
-            builder: (_) => const PersonaListScreen(),
-          );
-          break;
-        case 'image-gen':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
-            builder: (_) => ImageGenSheet(charId: widget.charId),
-          );
-          break;
-        case 'authors-note':
-          await showAuthorsNoteSheet(context, widget.charId);
-          break;
-        case 'glossary':
-          await GlossarySheet.show(context);
-          break;
-        case 'ext-blocks':
-          await _showExtBlocksSheet();
-          break;
-        case 'agent-ops':
-          await _showAgentOpsLog();
-          break;
-        case 'card-rewriter':
-          await _showCardRewriter();
-          break;
-      }
-    } finally {
-      if (mounted) await _refreshStats();
-    }
-  }
-
-  Future<void> _showCardRewriter() async {
-    final session = ref.read(chatProvider(widget.charId)).value?.session;
-    if (session == null) return;
-    final route = await CardRewriterStudioSheet.show(
-      context,
-      charId: widget.charId,
-      sessionId: session.id,
-    );
-    if (!mounted) return;
-    if (route != null && route.isNotEmpty) {
-      widget.onClose?.call();
-      context.go(route);
-    }
-  }
-
-  Future<void> _showAgentOpsLog() async {
-    final session = ref.read(chatProvider(widget.charId)).value?.session;
-    final route = await AgenticOperationsLogDialog.show(
-      context,
-      sessionId: session?.id,
-      characterId: widget.charId,
-    );
-    if (!mounted) return;
-    if (route != null && route.isNotEmpty) {
-      widget.onClose?.call();
-      context.go(route);
-    }
-  }
-
-  Future<void> _showExtBlocksSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      backgroundColor: context.cs.surfaceContainerHigh,
-      isScrollControlled: true,
-      builder: (_) => const ExtBlocksSettingsSheet(),
-    );
-  }
-
-  Future<void> _showSessionsSheet() async {
-    final currentSession = ref.read(chatProvider(widget.charId)).value?.session;
-    if (currentSession == null) return;
-
-    if (!mounted) return;
-    // The same picker the character catalog opens — see
-    // `showSessionPickerSheet`. Only what a pick does differs: here it switches
-    // the open chat in place instead of routing to it.
-    final result = await showSessionPickerSheet(context, charId: widget.charId);
-    if (result == null || !mounted) return;
-    switch (result.action) {
-      case SessionPickerAction.open:
-        final target = result.session!.sessionIndex;
-        final current = ref
-            .read(chatProvider(widget.charId))
-            .value
-            ?.session
-            ?.sessionIndex;
-        if (target == current) return;
-        try {
-          await ref
-              .read(chatProvider(widget.charId).notifier)
-              .switchSession(target)
-              .timeout(const Duration(seconds: 30));
-        } catch (error) {
-          if (mounted) {
-            GlazeErrorDialog.show(
-              context,
-              error,
-              prefix: 'Failed to switch chat session',
-            );
-          }
-        }
-      case SessionPickerAction.newSession:
-        await ref.read(chatProvider(widget.charId).notifier).newSession();
-      case SessionPickerAction.importChat:
-        await _importChat();
-    }
-  }
-
-  Future<void> _importChat() async {
-    final result = await FilePicker.pickFiles(
-      type: Platform.isIOS ? FileType.any : FileType.custom,
-      allowedExtensions: Platform.isIOS ? null : ['jsonl', 'json'],
-      allowMultiple: false,
-      withData: false,
-    );
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    final filePath = file.path;
-    try {
-      ChatImportSaveResult saveResult;
-      if (file.bytes != null) {
-        final importResult = importChatFromJsonlString(
-          utf8.decode(file.bytes!),
-        );
-        saveResult = await ref
-            .read(chatActionsServiceProvider)
-            .importChatFromResult(widget.charId, importResult);
-      } else if (filePath != null) {
-        saveResult = await ref
-            .read(chatActionsServiceProvider)
-            .importChat(widget.charId, filePath);
-      } else {
-        return;
-      }
-      if (!mounted) return;
-      final count = saveResult.count;
-      final sessionIndex = saveResult.sessionIndex;
-      if (count > 0 && sessionIndex != null) {
-        // The sessions sheet has already resolved and closed itself by the
-        // time this runs (`showSessionPickerSheet` pops with the picked
-        // action), so there is nothing left here to pop.
-        context.go('/chat/${widget.charId}?session=$sessionIndex');
-      }
-      GlazeToast.show(
-        context,
-        count == 0 ? 'No messages found in file' : 'Imported $count messages',
-      );
-    } catch (e) {
-      if (mounted) GlazeErrorDialog.show(context, e, prefix: 'Import failed: ');
-    }
   }
 
   @override
@@ -798,7 +466,16 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
                     item: item,
                     editing: _editing,
                     hovered: _hoverIndex == index && _draggingIndex != index,
-                    onTap: () => _handleTap(item.def),
+                    onTap: () => _editing
+                        ? null
+                        : _actions.handleTap(
+                            context,
+                            ref,
+                            item.def,
+                            onFinished: () async {
+                              if (mounted) await _refreshStats();
+                            },
+                          ),
                     onDelete: () => _removeItem(item.def.id),
                   );
 
