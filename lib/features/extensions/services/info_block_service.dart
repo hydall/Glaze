@@ -15,6 +15,7 @@ import '../../../core/models/persona.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/utils/error_format.dart';
+import '../../image_gen/services/image_tag_markup.dart';
 import '../../settings/api_list_provider.dart';
 import '../models/block_config.dart';
 import '../models/info_block.dart';
@@ -29,6 +30,15 @@ import 'runtime_prompt_injection_service.dart';
 final infoBlockServiceProvider = Provider<InfoBlockService>(
   (ref) => InfoBlockService(ref),
 );
+
+/// Chat text on its way into a block agent's prompt, with every image block
+/// reduced to the tag that asked for the picture.
+///
+/// The stored form of a finished block carries paths into this device's data
+/// root, which mean nothing to a model — and an agent that reads one writes one
+/// back, producing a block that points at files nobody generated (INV-IG12).
+String _withoutImagePaths(String content) =>
+    ImageTagMarkup.reduceBlocksToInstructions(content);
 
 class InfoBlockService {
   InfoBlockService(this._ref);
@@ -400,7 +410,7 @@ class InfoBlockService {
       );
       for (var i = 0; i < previousBlocks.length; i++) {
         buffer.writeln('--- #${i + 1} ---');
-        buffer.writeln(previousBlocks[i].content.trim());
+        buffer.writeln(_withoutImagePaths(previousBlocks[i].content).trim());
       }
       buffer.writeln();
     }
@@ -447,7 +457,7 @@ class InfoBlockService {
       for (var i = 0; i < previousBlocks.length; i++) {
         buffer
           ..writeln('--- #${i + 1} ---')
-          ..writeln(previousBlocks[i].content.trim());
+          ..writeln(_withoutImagePaths(previousBlocks[i].content).trim());
       }
       buffer.writeln();
     }
@@ -472,7 +482,7 @@ class InfoBlockService {
       buffer.writeln('Recent conversation:');
       for (final message in contextMessages) {
         final role = message.role == 'user' ? 'USER' : 'ASSISTANT';
-        buffer.writeln('$role: ${message.content}');
+        buffer.writeln('$role: ${_withoutImagePaths(message.content)}');
       }
       buffer.writeln();
     }

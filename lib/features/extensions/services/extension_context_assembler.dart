@@ -3,6 +3,7 @@ import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/character.dart';
 import '../../../core/models/persona.dart';
+import '../../image_gen/services/image_tag_markup.dart';
 import '../models/block_config.dart';
 import '../models/extension_context_policy.dart';
 import 'block_context_builder.dart';
@@ -197,7 +198,10 @@ class ExtensionContextAssembler {
         .map(
           (message) => PromptMessage(
             role: message.role,
-            content: message.content,
+            // Image blocks reach a block agent as the tag that asked for the
+            // picture: the stored element's file paths are this device's, and
+            // an agent that reads one writes one back (INV-IG12).
+            content: ImageTagMarkup.reduceBlocksToInstructions(message.content),
             isHistory: true,
             sourceMessageId: message.id,
           ),
@@ -233,7 +237,10 @@ class ExtensionContextAssembler {
       (message) => message['_sourceMessageId'] == anchorMessageId,
     );
     _stripInternalMetadata(messages);
-    messages.add({'role': 'assistant', 'content': anchor.content});
+    messages.add({
+      'role': 'assistant',
+      'content': ImageTagMarkup.reduceBlocksToInstructions(anchor.content),
+    });
   }
 
   void _appendBlockInstruction(

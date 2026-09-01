@@ -4,7 +4,6 @@ import 'package:crypto/crypto.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book.dart';
-import '../../../core/constants/image_gen_patterns.dart';
 import '../../../features/extensions/models/info_block.dart';
 import '../../../features/image_gen/services/image_tag_markup.dart';
 import '../cloud_adapter.dart';
@@ -134,29 +133,8 @@ class SyncSerialization {
   /// The stored `<img data-iig-…>` form of a finished block goes the same way:
   /// the image file itself never leaves the device, so what is uploaded is the
   /// instruction that can produce it again.
-  static String normalizeImageGenContent(String content) {
-    var result = content;
-    // Right to left, so replacing one element leaves the spans of the rest.
-    for (final element in ImageTagMarkup.scanResultElements(result).reversed) {
-      final instruction = element.payload.instruction;
-      result = result.replaceRange(
-        element.start,
-        element.end,
-        instruction.isEmpty ? '[IMG:GEN]' : '[IMG:GEN:$instruction]',
-      );
-    }
-    result = result.replaceAllMapped(ImgGenPatterns.imgResultRegex, (m) {
-      final payload = m.group(1) ?? '';
-      final pipeIdx = payload.indexOf('|');
-      if (pipeIdx >= 0) {
-        final instruction = payload.substring(pipeIdx + 1);
-        return '[IMG:GEN:$instruction]';
-      }
-      return '[IMG:GEN]';
-    });
-    result = result.replaceAll(ImgGenPatterns.imgErrorStripRegex, '[IMG:GEN]');
-    return result;
-  }
+  static String normalizeImageGenContent(String content) =>
+      ImageTagMarkup.reduceBlocksToInstructions(content);
 
   static String computeBinaryHash(List<int> bytes) {
     return sha256.convert(bytes).toString();

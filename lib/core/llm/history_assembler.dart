@@ -1,3 +1,4 @@
+import '../../features/image_gen/services/image_tag_markup.dart';
 import '../models/chat_message.dart';
 import 'macro_engine.dart';
 
@@ -14,7 +15,15 @@ class HistoryAssembler {
     for (int i = 0; i < history.length; i++) {
       final msg = history[i];
       if (msg.isHidden || msg.isTyping) continue;
-      final macroResult = replaceMacros(msg.content, macroCtx);
+      // A finished image block is stored as an `<img data-iig-…>` element
+      // carrying paths into this device's data root. The model has no use for
+      // them, and a model that reads one writes one back — a block pointing at
+      // files that were never generated (INV-IG12). It reads the tag that asked
+      // for the picture instead.
+      final withoutImagePaths = ImageTagMarkup.reduceBlocksToInstructions(
+        msg.content,
+      );
+      final macroResult = replaceMacros(withoutImagePaths, macroCtx);
       final normalized = _normalizeUnderscoreEmphasis(macroResult.text);
       messages.add(
         PromptMessage(
