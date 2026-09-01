@@ -353,6 +353,33 @@ void main() {
       );
     });
 
+    // With "use LLM API" on, `resolveEmbeddingConfig` hands the *persisted*
+    // chat URL to the embedding service, so the operation path has to be
+    // stripped back off before `/embeddings` is appended.
+    test('a persisted chat URL yields the provider embeddings URL', () {
+      expect(
+        EndpointNormalizer.embeddingsUrl(
+          'https://openrouter.ai/api/v1/chat/completions',
+        ),
+        'https://openrouter.ai/api/v1/embeddings',
+      );
+      expect(
+        EndpointNormalizer.embeddingsUrl(
+          'https://api.deepseek.com/v1/chat/completions',
+        ),
+        'https://api.deepseek.com/v1/embeddings',
+      );
+      // Gemini's native generation URL resolves onto its OpenAI-compatible
+      // surface, which is where the embeddings route lives.
+      expect(
+        EndpointNormalizer.embeddingsUrl(
+          'https://generativelanguage.googleapis.com'
+          '/v1beta/models/gemini-3-pro:generateContent',
+        ),
+        'https://generativelanguage.googleapis.com/v1beta/openai/embeddings',
+      );
+    });
+
     test('image generations and edits', () {
       expect(
         EndpointNormalizer.imagesUrl('api.openai.com', 'generations'),
