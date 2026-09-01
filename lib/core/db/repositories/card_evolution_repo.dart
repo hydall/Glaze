@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../models/character.dart';
+import '../../services/card_rewriter/card_rewrite_operation_parser.dart';
 import '../../services/card_rewriter/card_rewriter_contracts.dart';
 import '../../services/card_rewriter/effective_canon_assembler.dart';
 import '../../services/card_rewriter/effective_canon_read_repository.dart';
@@ -674,10 +675,24 @@ class CardEvolutionRepo {
     )) {
       return const CardEvolutionFinalizeOutcome('fieldMismatch');
     }
+    final cardOperations = operations
+        .whereType<CardRewriteOperationSnapshot>()
+        .toList(growable: false);
+    final evidenceFailure =
+        CardRewriteOperationParser.explainEvolutionEvidenceFailure(
+          cardOperations,
+          selected,
+        );
+    if (evidenceFailure != null) {
+      return CardEvolutionFinalizeOutcome(
+        'invalidOperation',
+        null,
+        evidenceFailure,
+      );
+    }
     if (await _activeJob(claim.sessionId, claim.characterId) != null) {
       return const CardEvolutionFinalizeOutcome('activeJob');
     }
-    final cardOperations = operations.whereType<CardRewriteOperationSnapshot>();
     final rawLorebookOperations = operations
         .whereType<LorebookRewriteOperationSnapshot>()
         .toList(growable: false);

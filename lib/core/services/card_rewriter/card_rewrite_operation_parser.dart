@@ -155,6 +155,82 @@ abstract final class CardRewriteOperationParser {
     Set<CardRewriteField> allowedFields = CardRewritePolicy.evolutionFields,
   }) => _parseEvolutionBatch(output, allowedFields: allowedFields).detail;
 
+  /// Validates card scopes against the exact retrieval metadata supplied to
+  /// the writer. Cited facts belong to their advertised `scopeKey`, not merely
+  /// to any related tracker that happened to be available in the same input.
+  static String? explainEvolutionEvidenceFailure(
+    Iterable<CardRewriteOperationSnapshot> operations,
+    String selectedInputJson,
+  ) {
+    Object? decoded;
+    try {
+      decoded = jsonDecode(selectedInputJson);
+    } catch (_) {
+      decoded = null;
+    }
+    final rawTargets = decoded is Map
+        ? decoded['availableObservationRetrievalTargets']
+        : null;
+    final allowedScopes = <String>{};
+    final factScopes = <String, Set<String>>{};
+    var malformedFactMetadata = false;
+    if (rawTargets is List) {
+      for (final rawTarget in rawTargets) {
+        if (rawTarget is! Map ||
+            rawTarget['key'] is! String ||
+            rawTarget['kind'] is! String) {
+          malformedFactMetadata = true;
+          continue;
+        }
+        final key = rawTarget['key'] as String;
+        if (!key.contains('/') && CardRewriteScope.tryParse(key) != null) {
+          allowedScopes.add(key);
+        }
+        if (rawTarget['kind'] != 'knowledge_fact') continue;
+        final factId = rawTarget['factId'];
+        final scopeKey = rawTarget['scopeKey'];
+        if (factId is! String ||
+            factId.isEmpty ||
+            scopeKey is! String ||
+            scopeKey.isEmpty) {
+          malformedFactMetadata = true;
+          continue;
+        }
+        factScopes.putIfAbsent(factId, () => <String>{}).add(scopeKey);
+      }
+    } else {
+      malformedFactMetadata = true;
+    }
+
+    for (final operation in operations) {
+      final transition = operation.transition;
+      if (allowedScopes.isNotEmpty &&
+          !allowedScopes.contains(transition.scopeKey)) {
+        return 'scopeKey "${transition.scopeKey}" is not an available '
+            'retrieval target';
+      }
+      for (final factId in transition.factIds) {
+        final scopes = factScopes[factId];
+        if (scopes == null) {
+          return malformedFactMetadata
+              ? 'factId "$factId" has unavailable or malformed knowledge '
+                    'fact metadata'
+              : 'factId "$factId" is not an available knowledge fact';
+        }
+        if (scopes.length != 1) {
+          return 'cited fact "$factId" has ambiguous scope metadata: '
+              '${scopes.join(', ')}';
+        }
+        final factScope = scopes.single;
+        if (factScope != transition.scopeKey) {
+          return 'transition scopeKey "${transition.scopeKey}" must equal '
+              'cited fact "$factId" scopeKey "$factScope"';
+        }
+      }
+    }
+    return null;
+  }
+
   static _EvolutionBatchParse _parseEvolutionBatch(
     String output, {
     required Set<CardRewriteField> allowedFields,
@@ -207,9 +283,7 @@ abstract final class CardRewriteOperationParser {
         );
       }
       if (!transitionIds.add(parsed.snapshot!.transition.id)) {
-        return const _EvolutionBatchParse.failure(
-          'transition id is repeated',
-        );
+        return const _EvolutionBatchParse.failure('transition id is repeated');
       }
       result.add(parsed.snapshot!);
     }
