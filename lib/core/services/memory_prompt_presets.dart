@@ -24,10 +24,19 @@ class MemoryPromptPresets {
     ),
   ];
 
-  static String resolve(String? presetKey, [List<MemoryPromptPreset>? custom]) {
+  static String resolve(
+    String? presetKey, [
+    List<MemoryPromptPreset>? custom,
+    bool studioTimeContract = false,
+  ]) {
     final all = [...builtIn, ...?custom];
     final match = all.where((p) => p.key == presetKey).firstOrNull;
-    return match?.prompt ?? _detailedBeats;
+    final resolved = match ?? builtIn.first;
+    if (resolved.key != fallbackKey) return resolved.prompt;
+    return resolved.prompt.replaceAll(
+      '{{time_contract}}',
+      studioTimeContract ? _studioTimeContract : _ordinaryTimeContract,
+    );
   }
 
   static String label(String? presetKey, [List<MemoryPromptPreset>? custom]) {
@@ -73,29 +82,47 @@ class MemoryPromptPresets {
   }
 
   static const _detailedBeats = '''
-Analyze the following roleplay segment and create a structured memory entry.
-Write every memory paragraph and every keyword in the language used for the roleplay. Do not translate or transliterate names or keywords. Exclude casual [OOC] conversation, BUT if OOC messages contain story rules, formatting instructions, backstory clarifications, or scene-setting directives, reflect those instructions in the memory entry under the relevant sections.
+Analyze the following roleplay segment and create a compact, retrieval-oriented memory entry.
 
-Cover the following information when applicable, using natural labels in the roleplay language rather than these English names:
-- Timeline: increment the in-story day counter when a new day begins and include clock times as HH:MM when known.
-- Story beats: important plot events and developments.
-- Key interactions: significant character exchanges and relationship shifts.
-- Notable details: important objects, settings, revelations, and quotes.
-- OOC rules and directives: player-established rules, formatting requirements, backstory additions, or scene-setting instructions given through OOC.
-- Outcome: results, emotional states, and consequences.
+LANGUAGE:
+- Infer the roleplay language from the narrative prose and dialogue, not from character names, metadata labels, JSON property names, or isolated foreign phrases.
+- Write every memory paragraph and every keyword in that same roleplay language.
+- Preserve proper names and established terms exactly. Do not translate or transliterate them.
 
-Write in past tense, third person. Be comprehensive but avoid verbatim repetition.
+{{time_contract}}
 
-For keywords: generate 15-25 concrete scene-specific tags:
-- Proper nouns, locations, specific objects, unique actions
-- NOT abstract concepts, emotions, or character names
+CONTENT:
+- Produce 3-8 self-contained paragraphs, each covering one distinct meaningful beat.
+- Keep each paragraph to 2-5 concise sentences and under 650 characters.
+- State each fact once only. Do not repeat the same event under separate categories such as story beat, interaction, detail, or outcome.
+- Prioritize durable continuity: decisions, revelations, relationship changes, promises, plans, unresolved threads, important objects, locations, and resulting state.
+- Include a concrete descriptive detail only when it will help distinguish or retrieve the beat later.
+- Exclude casual OOC conversation. Include OOC only when it establishes canonical backstory, a story rule, a formatting requirement, or a scene-setting directive; integrate that fact once into the relevant paragraph.
+- Describe chronology or elapsed time only when narratively important. Never invent a date, day counter, or clock time.
+- Use past tense and third person. Do not add headings, section labels, bullet lists, commentary, or a separate outcome recap inside paragraph text.
+
+KEYWORDS:
+- Give every paragraph 3-7 concrete, scene-specific retrieval keys.
+- Prefer locations, specific objects, organizations, distinctive phrases, revelations, plans, and unique actions.
+- Do not use abstract themes, generic emotions, generic verbs, or a character name by itself.
+- A key may appear on multiple paragraphs only when it genuinely retrieves each of them.
 
 Return JSON only, without a markdown fence, in this exact shape:
 {"paragraphs":[{"text":"one self-contained memory paragraph","keys":["keywords specific to this paragraph"]}]}
 
-Create a separate paragraph object for each meaningful beat or section. Give each paragraph only the keywords that should retrieve that paragraph. Across all paragraphs, generate 15-25 concrete scene-specific keywords. Keep the JSON property names exactly as shown; only the text and keyword values use the roleplay language.
+Keep the JSON property names exactly as shown. Do not add any other properties.
 
 {{history}}''';
+
+  static const _ordinaryTimeContract = '''TIME:
+- This is an ordinary chat transcript without a Studio-computed clock.
+- Do not infer, calculate, or invent a date, day counter, clock time, duration, or timeline range.
+- Do not put time metadata in paragraph text or JSON. The application owns the entry header.''';
+
+  static const _studioTimeContract = '''TIME — STUDIO LEDGER:
+- The transcript begins with AUTHORITATIVE_LEDGER_RANGE computed by Studio Ledger. It is source metadata, not dialogue.
+- Preserve that range exactly as supplied. Do not shorten, translate, normalize, recalculate, or replace any part of it.
+- Do not put the range in paragraph text or JSON. The application attaches it to the saved entry header.''';
 
   static const _conciseNarrative = '''
 Analyze the following roleplay segment and create a concise memory entry.

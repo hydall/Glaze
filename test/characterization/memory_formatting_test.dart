@@ -10,12 +10,14 @@ MemoryInjectionItem _item({
   bool excerpt = false,
   int? rangeStart,
   int? rangeEnd,
+  String ledgerRange = '',
 }) {
   return MemoryInjectionItem(
     entry: MemoryEntry(
       id: id,
       title: title,
       content: text,
+      ledgerRange: ledgerRange,
       messageRange: (rangeStart != null && rangeEnd != null)
           ? MessageRange(start: rangeStart, end: rangeEnd)
           : null,
@@ -49,95 +51,121 @@ void main() {
     });
 
     test('empty items list with header returns only the header', () {
-      expect(formatMemoryItems([], includeContextHeader: true), 'Memory context:');
+      expect(
+        formatMemoryItems([], includeContextHeader: true),
+        'Memory context:',
+      );
     });
 
     test('includeContextHeader prepends "Memory context:"', () {
-      final out = formatMemoryItems(
-        [_item(id: 'e1', title: 'T1', text: 'hello')],
-        includeContextHeader: true,
-      );
+      final out = formatMemoryItems([
+        _item(id: 'e1', title: 'T1', text: 'hello'),
+      ], includeContextHeader: true);
       expect(out, startsWith('Memory context:\n\n'));
     });
 
     test('no context header when includeContextHeader is false', () {
-      final out = formatMemoryItems(
-        [_item(id: 'e1', title: 'T1', text: 'hello')],
-        includeContextHeader: false,
-      );
+      final out = formatMemoryItems([
+        _item(id: 'e1', title: 'T1', text: 'hello'),
+      ], includeContextHeader: false);
       expect(out, isNot(contains('Memory context:')));
     });
 
     test('heading uses title when title is non-empty', () {
-      final out = formatMemoryItems(
-        [_item(id: 'e1', title: 'My Title', text: 'hello')],
-        includeContextHeader: false,
-      );
+      final out = formatMemoryItems([
+        _item(id: 'e1', title: 'My Title', text: 'hello'),
+      ], includeContextHeader: false);
       expect(out, contains('Memory: My Title'));
     });
 
     test('heading falls back to range when title is empty', () {
-      final out = formatMemoryItems(
-        [_item(id: 'e1', title: '', text: 'hello', rangeStart: 5, rangeEnd: 9)],
-        includeContextHeader: false,
-      );
+      final out = formatMemoryItems([
+        _item(id: 'e1', title: '', text: 'hello', rangeStart: 5, rangeEnd: 9),
+      ], includeContextHeader: false);
       expect(out, contains('Memory: 5-9'));
     });
 
     test('heading falls back to "Memory" when title and range are empty', () {
-      final out = formatMemoryItems(
-        [_item(id: 'e1', title: '', text: 'hello')],
-        includeContextHeader: false,
-      );
+      final out = formatMemoryItems([
+        _item(id: 'e1', title: '', text: 'hello'),
+      ], includeContextHeader: false);
       expect(out, contains('Memory: Memory'));
     });
 
     test('heading shows title plus range in parens when both present', () {
-      final out = formatMemoryItems(
-        [_item(
+      final out = formatMemoryItems([
+        _item(
           id: 'e1',
           title: 'Arc',
           text: 'hello',
           rangeStart: 1,
           rangeEnd: 4,
-        )],
-        includeContextHeader: false,
-      );
+        ),
+      ], includeContextHeader: false);
       expect(out, contains('Memory: Arc (1-4)'));
     });
 
+    test('heading does not repeat a title that already equals the range', () {
+      final out = formatMemoryItems([
+        _item(
+          id: 'e1',
+          title: '1-4',
+          text: 'hello',
+          rangeStart: 1,
+          rangeEnd: 4,
+        ),
+      ], includeContextHeader: false);
+      expect(out, startsWith('Memory: 1-4\n'));
+      expect(out, isNot(contains('Memory: 1-4 (1-4)')));
+    });
+
     test('excerpt item appends excerpt suffix', () {
-      final out = formatMemoryItems(
-        [_item(id: 'e1', title: 'T1', text: 'hello', excerpt: true)],
-        includeContextHeader: false,
-      );
+      final out = formatMemoryItems([
+        _item(id: 'e1', title: 'T1', text: 'hello', excerpt: true),
+      ], includeContextHeader: false);
       expect(out, contains('[Excerpted from a larger Memory Book entry]'));
     });
 
-    test('non-excerpt item has no excerpt suffix', () {
-      final out = formatMemoryItems(
-        [_item(id: 'e1', title: 'T1', text: 'hello', excerpt: false)],
-        includeContextHeader: false,
+    test('includes authoritative Ledger range for full and excerpt items', () {
+      final out = formatMemoryItems([
+        _item(
+          id: 'e1',
+          title: 'T1',
+          text: 'hello',
+          excerpt: true,
+          ledgerRange:
+              '15.09.2026 · RP_Day 0 · 21:00 -> '
+              '15.09.2026 · RP_Day 0 · 21:30',
+        ),
+      ], includeContextHeader: false);
+      expect(
+        out,
+        contains(
+          'Ledger range: 15.09.2026 · RP_Day 0 · 21:00 -> '
+          '15.09.2026 · RP_Day 0 · 21:30',
+        ),
       );
+    });
+
+    test('non-excerpt item has no excerpt suffix', () {
+      final out = formatMemoryItems([
+        _item(id: 'e1', title: 'T1', text: 'hello', excerpt: false),
+      ], includeContextHeader: false);
       expect(out, isNot(contains('Excerpted')));
     });
 
     test('multiple items are joined with blank line', () {
-      final out = formatMemoryItems(
-        [
-          _item(id: 'e1', title: 'A', text: 'aaa'),
-          _item(id: 'e2', title: 'B', text: 'bbb'),
-        ],
-        includeContextHeader: false,
-      );
+      final out = formatMemoryItems([
+        _item(id: 'e1', title: 'A', text: 'aaa'),
+        _item(id: 'e2', title: 'B', text: 'bbb'),
+      ], includeContextHeader: false);
       expect(out, contains('Memory: A\naaa\n\nMemory: B\nbbb'));
     });
 
     test('whitespace-only text body keeps heading with empty body line', () {
-      final out = formatMemoryItems(
-        [_item(id: 'e1', title: 'T1', text: '   ')],
-        includeContextHeader: false,
-      );
+      final out = formatMemoryItems([
+        _item(id: 'e1', title: 'T1', text: '   '),
+      ], includeContextHeader: false);
       expect(out, 'Memory: T1\n');
     });
   });

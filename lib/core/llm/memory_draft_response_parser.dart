@@ -6,13 +6,20 @@ import 'memory/memory_chunker.dart';
 class MemoryDraftResponseParser {
   const MemoryDraftResponseParser._();
 
-  static MemoryDraft parse(MemoryDraft draft, String raw, {int? nowMillis}) {
+  static MemoryDraft parse(
+    MemoryDraft draft,
+    String raw, {
+    int? nowMillis,
+    String? ledgerRange,
+  }) {
     final parsed = _parseStructured(raw) ?? _parseLegacy(raw);
     final now = nowMillis ?? DateTime.now().millisecondsSinceEpoch;
+    final range = ledgerRange?.trim();
     return draft.copyWith(
       content: parsed.content,
       keys: parsed.keys,
       keyParagraphs: parsed.keyParagraphs,
+      ledgerRange: range ?? '',
       status: 'pending_approval',
       generatedAt: now,
       updatedAt: now,

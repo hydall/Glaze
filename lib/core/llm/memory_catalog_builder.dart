@@ -31,6 +31,7 @@ class MemoryCatalogBuilder {
       'content': entry.content,
       'keys': entry.keys,
       'keyParagraphs': entry.keyParagraphs,
+      'ledgerRange': entry.ledgerRange,
       'status': entry.status,
       'sourceHash': sourceHash,
       'messageRange': entry.messageRange?.toJson(),

@@ -5,7 +5,11 @@ import 'package:glaze_flutter/core/models/memory_book_api_settings.dart';
 
 void main() {
   const active = ApiConfig(id: 'active', model: 'active-model');
-  const memory = ApiConfig(id: 'memory', model: 'memory-model');
+  const memory = ApiConfig(
+    id: 'memory',
+    model: 'memory-model',
+    firstChunkTimeoutMs: 240000,
+  );
 
   test('uses selected Memory Books connection without changing active', () {
     const resolver = MemoryBookApiConfigResolver(
@@ -18,6 +22,12 @@ void main() {
     );
 
     expect(resolved, memory);
+    expect(
+      resolver.resolveTimeoutMs(
+        const MemoryBookApiSettings(apiConfigId: 'memory'),
+      ),
+      240000,
+    );
     expect(resolver.activeConfig, active);
   });
 

@@ -26,15 +26,17 @@ String formatMemoryItems(
         ? item.entry.title
         : formatMemoryRange(item.entry) ?? 'Memory';
     final range = formatMemoryRange(item.entry);
-    final heading = range == null
+    final heading = range == null || range == title
         ? 'Memory: $title'
         : 'Memory: $title ($range)';
+    final ledger = item.entry.ledgerRange.trim();
+    final metadata = ledger.isEmpty ? '' : '\nLedger range: $ledger';
     if (item.excerpt) {
       parts.add(
-        '$heading\n${item.text.trim()}\n[Excerpted from a larger Memory Book entry]',
+        '$heading$metadata\n${item.text.trim()}\n[Excerpted from a larger Memory Book entry]',
       );
     } else {
-      parts.add('$heading\n${item.text.trim()}');
+      parts.add('$heading$metadata\n${item.text.trim()}');
     }
   }
   return parts.where((part) => part.trim().isNotEmpty).join('\n\n');

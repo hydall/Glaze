@@ -5,6 +5,37 @@ import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/features/chat/widgets/memory/memory_draft_card.dart';
 
 void main() {
+  testWidgets('shows the Ledger range in the draft header before approval', (
+    tester,
+  ) async {
+    const range =
+        '19.09.2026 · RP_Day 0 · 19:20 -> 19.09.2026 · RP_Day 0 · 19:35';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MemoryDraftCard(
+            draft: const MemoryDraft(
+              id: 'draft-1',
+              title: '1-15',
+              content: 'Generated memory',
+              ledgerRange: range,
+            ),
+            isGenerating: false,
+            generatingSince: null,
+            onGenerate: () {},
+            onRegenerate: () {},
+            onCancel: () {},
+            onApprove: () {},
+            onEdit: () {},
+            onDelete: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('1-15 · $range'), findsOneWidget);
+  });
+
   testWidgets('content-bearing pending draft offers explicit regeneration', (
     tester,
   ) async {

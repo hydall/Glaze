@@ -663,6 +663,61 @@ void main() {
     expect(await db.select(db.rewriteJobs).get(), isEmpty);
   });
 
+  test('finalize rejects a cited fact owned by another scope', () async {
+    Future<void> putFact(String id, String scope) => db
+        .into(db.characterKnowledgeFactRows)
+        .insert(
+          CharacterKnowledgeFactRowsCompanion.insert(
+            id: id,
+            chatSessionId: 'session',
+            knowerKey: 'alice',
+            subjectKey: 'alice',
+            factClass: 'relationship',
+            scopeKey: Value(scope),
+            predicate: 'status',
+            object: 'ended',
+            epistemicState: 'confirmed',
+            lifecycle: const Value('active'),
+            sourceMessageId: const Value('a1'),
+          ),
+        );
+    const relationshipScope = 'relationship:гильда:ричард';
+    const arcScope = 'arc:gilda_richard_engagement';
+    await putFact('fact-engagement', relationshipScope);
+    await putFact('fact-arc-target', arcScope);
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+
+    final result = await evolution.finalize(
+      claimId: claim.row.id,
+      ownerId: 'owner',
+      now: 11,
+      modelOutput: 'raw',
+      operations: [
+        _operation(
+          CardRewriteField.description,
+          'Alice is cautious.',
+          'Alice is cautious but decisive.',
+          scopeKey: arcScope,
+          factIds: const ['fact-engagement'],
+        ),
+      ],
+    );
+
+    expect(result.kind, 'invalidOperation');
+    expect(
+      result.detail,
+      allOf(contains(arcScope), contains(relationshipScope)),
+    );
+    expect(await db.select(db.rewriteJobs).get(), isEmpty);
+    expect(await db.select(db.rewriteOperations).get(), isEmpty);
+    expect(await db.select(db.cardEvolutionProposalRuns).get(), isEmpty);
+  });
+
   test('finalize rejects a tiny automated anchor', () async {
     final claim = (await evolution.claim(
       sessionId: 'session',
@@ -751,12 +806,14 @@ List<CardRewriteOperationSnapshot> _operations() => [
 CardRewriteOperationSnapshot _operation(
   CardRewriteField field,
   String anchor,
-  String value,
-) => CardRewriteOperationSnapshot(
+  String value, {
+  String scopeKey = 'npc:alice',
+  List<String> factIds = const [],
+}) => CardRewriteOperationSnapshot(
   field: field,
   patches: [
     AnchoredScalarPatch(
-      scopeKey: 'npc:alice',
+      scopeKey: scopeKey,
       field: field,
       anchor: anchor,
       anchorSha256: CardCanonicalizer.scalarSha256(anchor),
@@ -765,10 +822,10 @@ CardRewriteOperationSnapshot _operation(
   ],
   transition: CardRewriteTransitionSnapshot(
     id: 'transition-${field.wireName}',
-    scopeKey: 'npc:alice',
+    scopeKey: scopeKey,
     canonicalClaim: 'Alice is increasingly trusting.',
     promotionDestination: 'card',
     affectedTrackerKeys: const [],
-    factIds: const [],
+    factIds: factIds,
   ),
 );

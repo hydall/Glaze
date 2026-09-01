@@ -42,6 +42,31 @@ void main() {
     expect(MemoryPromptPresets.isBuiltIn(custom.key), isFalse);
   });
 
+  test('ordinary detailed beats never infers time', () {
+    final prompt = MemoryPromptPresets.resolve('detailed_beats');
+
+    expect(prompt, contains('ordinary chat transcript'));
+    expect(prompt, contains('Do not infer, calculate, or invent'));
+    expect(prompt, isNot(contains('TIME — STUDIO LEDGER')));
+    expect(prompt, contains('Never invent a date, day counter, or clock time'));
+    expect(prompt, isNot(contains('increment the in-story day counter')));
+    expect(prompt, contains('Produce 3-8 self-contained paragraphs'));
+    expect(prompt, contains('State each fact once only'));
+    expect(prompt, contains('Do not add headings, section labels'));
+    expect(prompt, contains('narrative prose and dialogue'));
+    expect(prompt, isNot(contains('Be comprehensive')));
+  });
+
+  test('Studio detailed beats trusts the computed Ledger range', () {
+    final prompt = MemoryPromptPresets.resolve('detailed_beats', null, true);
+
+    expect(prompt, contains('TIME — STUDIO LEDGER'));
+    expect(prompt, contains('AUTHORITATIVE_LEDGER_RANGE'));
+    expect(prompt, contains('computed by Studio Ledger'));
+    expect(prompt, contains('Preserve that range exactly as supplied'));
+    expect(prompt, isNot(contains('ordinary chat transcript')));
+  });
+
   test('serialized normalization repairs only a dangling selection', () {
     final original = <String, dynamic>{
       'promptPreset': 'custom_deleted',

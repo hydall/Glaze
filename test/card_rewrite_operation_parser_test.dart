@@ -178,8 +178,7 @@ void main() {
 
   test('evolution batches reject repeated transition ids', () {
     final first = validPayload();
-    final second = validPayload()
-      ..['field'] = 'personality';
+    final second = validPayload()..['field'] = 'personality';
 
     expect(
       CardRewriteOperationParser.explainEvolutionBatchFailure(
@@ -189,6 +188,101 @@ void main() {
       ),
       'transition id is repeated',
     );
+  });
+
+  group('evolution evidence scopes', () {
+    CardRewriteOperationSnapshot operation({
+      required String scopeKey,
+      List<String> factIds = const [],
+    }) => CardRewriteOperationSnapshot(
+      field: CardRewriteField.description,
+      patches: [
+        AnchoredScalarPatch(
+          scopeKey: scopeKey,
+          field: CardRewriteField.description,
+          anchor: anchor,
+          anchorSha256: CardCanonicalizer.scalarSha256(anchor),
+          value: value,
+        ),
+      ],
+      transition: CardRewriteTransitionSnapshot(
+        id: 'transition-evidence',
+        scopeKey: scopeKey,
+        canonicalClaim: 'claim',
+        promotionDestination: 'arc:gilda_richard_engagement.status',
+        affectedTrackerKeys: const ['arc:gilda_richard_engagement.status'],
+        factIds: factIds,
+      ),
+    );
+
+    String input(List<Map<String, Object?>> targets) =>
+        jsonEncode({'availableObservationRetrievalTargets': targets});
+
+    const relationshipScope = 'relationship:гильда:ричард';
+    const arcScope = 'arc:gilda_richard_engagement';
+    const factTarget = {
+      'kind': 'knowledge_fact',
+      'key': relationshipScope,
+      'factId': 'fact-engagement',
+      'scopeKey': relationshipScope,
+    };
+    const arcTarget = {'kind': 'ledger_tracker', 'key': arcScope};
+
+    test('accepts the exact fact-owning scope', () {
+      expect(
+        CardRewriteOperationParser.explainEvolutionEvidenceFailure([
+          operation(scopeKey: relationshipScope, factIds: ['fact-engagement']),
+        ], input([factTarget, arcTarget])),
+        isNull,
+      );
+    });
+
+    test('rejects an advertised arc scope that does not own the fact', () {
+      expect(
+        CardRewriteOperationParser.explainEvolutionEvidenceFailure([
+          operation(scopeKey: arcScope, factIds: ['fact-engagement']),
+        ], input([factTarget, arcTarget])),
+        allOf(contains(arcScope), contains(relationshipScope)),
+      );
+    });
+
+    test('rejects unknown and mixed-owner facts', () {
+      expect(
+        CardRewriteOperationParser.explainEvolutionEvidenceFailure([
+          operation(scopeKey: relationshipScope, factIds: ['missing']),
+        ], input([factTarget])),
+        contains('not an available knowledge fact'),
+      );
+      expect(
+        CardRewriteOperationParser.explainEvolutionEvidenceFailure(
+          [
+            operation(
+              scopeKey: relationshipScope,
+              factIds: ['fact-engagement', 'fact-arc'],
+            ),
+          ],
+          input([
+            factTarget,
+            {
+              'kind': 'knowledge_fact',
+              'key': arcScope,
+              'factId': 'fact-arc',
+              'scopeKey': arcScope,
+            },
+          ]),
+        ),
+        allOf(contains('fact-arc'), contains(arcScope)),
+      );
+    });
+
+    test('preserves allowlist behavior when no facts are cited', () {
+      expect(
+        CardRewriteOperationParser.explainEvolutionEvidenceFailure([
+          operation(scopeKey: arcScope),
+        ], input([arcTarget])),
+        isNull,
+      );
+    });
   });
 
   test('rejects multiple concatenated JSON payloads', () {

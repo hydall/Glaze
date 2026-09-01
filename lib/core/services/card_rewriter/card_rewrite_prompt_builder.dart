@@ -115,6 +115,14 @@ abstract final class CardRewriterPromptBuilder {
         'transliterate, case-fold, or invent an identity.',
       )
       ..writeln(
+        '- When transition.factIds is non-empty, copy each factId and its exact '
+        'owning scopeKey from a supplied knowledge_fact retrieval target. All '
+        'cited facts, every patch, and the transition must share that scopeKey '
+        'verbatim. Do not substitute a related arc, NPC, or relationship '
+        'tracker: put those keys in affectedTrackerKeys and keep the durable '
+        'destination in promotionDestination.',
+      )
+      ..writeln(
         '- Each anchor must occur exactly once in its current field. '
         'Empty anchors are forbidden. Use a meaningful literal phrase of at '
         'least 12 code units, never an isolated word, number, punctuation mark, '

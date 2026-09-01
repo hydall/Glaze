@@ -61,6 +61,7 @@ class MemoryDraftGenerator {
     final globalRegexes = await _read(globalRegexProvider.future);
     final studioRegexes = await _read(studioRegexProvider.future);
     final globalVars = _read(globalVarsProvider);
+    final ledgerRange = MemoryDraftTranscriptBuilder.ledgerRange(messages);
     final historyText = MemoryDraftTranscriptBuilder.build(
       messages: messages,
       scripts: [
@@ -95,6 +96,7 @@ class MemoryDraftGenerator {
     final template = MemoryPromptPresets.resolve(
       settings.promptPreset,
       customPrompts,
+      ledgerRange != null,
     );
     var prompt = template.replaceAll('{{history}}', historyText);
     if (!template.contains('{{history}}')) {
@@ -107,6 +109,7 @@ class MemoryDraftGenerator {
     String model;
     String protocol;
     var useResponsesApi = false;
+    int? receiveTimeoutMs;
 
     if (isCustom) {
       endpoint = pipeline.memoryBookApi.generationEndpoint;
@@ -115,10 +118,11 @@ class MemoryDraftGenerator {
       protocol = LlmProtocol.customChatCompletion;
     } else {
       await _read(apiListProvider.future);
-      final chatConfig = MemoryBookApiConfigResolver(
+      final apiResolver = MemoryBookApiConfigResolver(
         apiConfigs: _read(apiListProvider).value ?? const [],
         activeConfig: _read(activeApiConfigProvider),
-      ).resolve(pipeline.memoryBookApi);
+      );
+      final chatConfig = apiResolver.resolve(pipeline.memoryBookApi);
       if (chatConfig == null) {
         throw Exception('No chat API config available');
       }
@@ -129,6 +133,7 @@ class MemoryDraftGenerator {
           : chatConfig.model;
       protocol = chatConfig.protocol;
       useResponsesApi = chatConfig.useResponsesApi;
+      receiveTimeoutMs = apiResolver.resolveTimeoutMs(pipeline.memoryBookApi);
     }
 
     final endpointRequired = protocol != LlmProtocol.openrouter;
@@ -161,6 +166,7 @@ class MemoryDraftGenerator {
         omitTopP: true,
         stream: false,
         useResponsesApi: useResponsesApi,
+        receiveTimeoutMs: receiveTimeoutMs,
       ),
       cancelToken: cancelToken,
       onComplete: (text, _, {rawResponseJson}) {
@@ -172,6 +178,10 @@ class MemoryDraftGenerator {
     );
 
     final result = await completer.future;
-    return MemoryDraftResponseParser.parse(draft, result);
+    return MemoryDraftResponseParser.parse(
+      draft,
+      result,
+      ledgerRange: ledgerRange,
+    );
   }
 }

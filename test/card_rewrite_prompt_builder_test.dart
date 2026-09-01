@@ -229,6 +229,10 @@ void main() {
       );
       expect(prompt, contains('Empty fields are omitted and MUST NOT appear'));
       expect(prompt, contains('Empty anchors are forbidden.'));
+      expect(prompt, contains('exact owning scopeKey'));
+      expect(prompt, contains('knowledge_fact retrieval target'));
+      expect(prompt, contains('put those keys in affectedTrackerKeys'));
+      expect(prompt, contains('destination in promotionDestination'));
       expect(prompt, isNot(contains('"description":""')));
       expect(prompt, isNot(contains('"scenario":""')));
     },

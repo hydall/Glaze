@@ -151,8 +151,8 @@ final class DurableWriterCallRunner {
                     )
             : allowedCardFields == null
             ? null
-            : _scopeAllowlistFailure(
-                parsed.whereType<CardRewriteOperationSnapshot>().toList(),
+            : CardRewriteOperationParser.explainEvolutionEvidenceFailure(
+                parsed.whereType<CardRewriteOperationSnapshot>(),
                 cardContext,
               );
         if (parsed == null || detail != null) {
@@ -425,49 +425,6 @@ final class DurableWriterCallRunner {
       return null;
     }
   }
-
-  static String? _scopeAllowlistFailure(
-    List<CardRewriteOperationSnapshot> operations,
-    String selectedInputJson,
-  ) {
-    final targets = _retrievalTargets(selectedInputJson);
-    if (targets == null || targets.isEmpty) return null;
-    final allowed = targets.keys.where(_isCardScopeTarget).toSet();
-    if (allowed.isEmpty) return null;
-    for (final operation in operations) {
-      final scope = operation.transition.scopeKey;
-      if (!allowed.contains(scope)) {
-        return 'scopeKey "$scope" is not an available retrieval target';
-      }
-    }
-    return null;
-  }
-
-  static Map<String, String>? _retrievalTargets(String selectedInputJson) {
-    try {
-      final decoded = jsonDecode(selectedInputJson);
-      if (decoded is! Map ||
-          decoded['availableObservationRetrievalTargets'] is! List) {
-        return null;
-      }
-      final result = <String, String>{};
-      for (final target
-          in decoded['availableObservationRetrievalTargets'] as List) {
-        if (target is! Map ||
-            target['key'] is! String ||
-            target['kind'] is! String) {
-          return null;
-        }
-        result[target['key'] as String] = target['kind'] as String;
-      }
-      return result;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static bool _isCardScopeTarget(String key) =>
-      !key.contains('/') && CardRewriteScope.tryParse(key) != null;
 
   static String _modelFailureDetail(AuxCallOutcome outcome) {
     final attempts = outcome.attempts;
