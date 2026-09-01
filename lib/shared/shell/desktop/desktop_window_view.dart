@@ -109,12 +109,13 @@ class _WindowFrame extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final branch = _shellHeaderBranch[viewId];
-    final entry = branch == null
-        ? null
-        : ref.watch(
-            shellHeaderProvider.select((e) => resolveShellHeader(e, branch)),
-          );
+    // Screens off the menu branch claim their header by branch; everything
+    // else hosted here — the sheets — publishes under the detached-chrome
+    // pseudo-branch so this title bar is the only header the window shows.
+    final branch = _shellHeaderBranch[viewId] ?? kDetachedChromeBranch;
+    final entry = ref.watch(
+      shellHeaderProvider.select((e) => resolveShellHeader(e, branch)),
+    );
 
     return GlassSurface(
       borderRadius: BorderRadius.circular(16),
@@ -139,7 +140,9 @@ class _WindowFrame extends ConsumerWidget {
               onClose: onClose,
             ),
             Divider(height: 1, color: context.cs.outlineVariant),
-            Expanded(child: DetachedShellHost(child: _content())),
+            Expanded(
+              child: DetachedShellHost(hasChrome: true, child: _content()),
+            ),
           ],
         ),
       ),
