@@ -1,102 +1,9 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/hover_glow.dart';
 import 'magic_drawer_models.dart';
-
-class MagicDrawerHeader extends StatelessWidget {
-  final bool editing;
-  final VoidCallback onToggleEditing;
-
-  /// Opens the "Add Action" sheet. Null when every item is already placed,
-  /// in which case the button is hidden.
-  final VoidCallback? onAdd;
-
-  const MagicDrawerHeader({
-    super.key,
-    required this.editing,
-    required this.onToggleEditing,
-    this.onAdd,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Text(
-            'Quick Access',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: context.cs.onSurface,
-              letterSpacing: -0.2,
-            ),
-          ),
-          const Spacer(),
-          if (onAdd != null) ...[
-            GestureDetector(
-              onTap: onAdd,
-              child: Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.18),
-                  ),
-                ),
-                child: Icon(Icons.add, size: 18, color: context.cs.onSurface),
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
-          GestureDetector(
-            onTap: onToggleEditing,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              height: 34,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: editing
-                    ? context.cs.primary.withValues(alpha: 0.22)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(17),
-                border: Border.all(
-                  color: editing
-                      ? context.cs.primary.withValues(alpha: 0.38)
-                      : Colors.white.withValues(alpha: 0.18),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    editing ? Icons.check : Icons.edit,
-                    size: 16,
-                    color: editing ? context.cs.primary : context.cs.onSurface,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    editing ? 'Done' : 'Edit',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: editing
-                          ? context.cs.primary
-                          : context.cs.onSurface,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class MagicCard extends StatefulWidget {
   final MagicDrawerCardItem item;
@@ -404,7 +311,7 @@ class AddMagicCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Add',
+                  'action_add'.tr(),
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,

@@ -99,6 +99,14 @@ const onboardingIntroContent = <OnboardingInfoBlock>[
 ];
 
 const onboardingFeaturesContent = <OnboardingInfoBlock>[
+  // First on the slide on purpose: the chat drawer is the one feature a new
+  // user cannot stumble into from the menu, and the Actions tab in particular
+  // is invisible until someone says it is there.
+  OnboardingInfoBlock(
+    icon: Icons.bolt_outlined,
+    title: 'onboarding_feature_drawer_title',
+    desc: 'onboarding_feature_drawer_desc',
+  ),
   OnboardingInfoBlock(
     icon: Icons.image_outlined,
     title: 'onboarding_feature_imggen_title',

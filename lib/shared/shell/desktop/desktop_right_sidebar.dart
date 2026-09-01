@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../features/chat/bridge/chat_bridge_registry.dart';
+import '../../../features/chat/widgets/chat_drawer_panel.dart';
 import '../../../features/chat/widgets/magic_drawer.dart';
 import '../../../features/chat/widgets/magic_drawer_widgets.dart';
 import '../../../features/tools/tools_screen.dart';
@@ -82,7 +83,7 @@ class DesktopRightSidebar extends ConsumerWidget {
     }
 
     final background = isChat
-        ? MagicDrawerPanel(
+        ? ChatDrawerPanel(
             key: ValueKey('magic-$charId'),
             charId: charId,
             // The Ledger diagnostics' "jump to source message" needs the chat

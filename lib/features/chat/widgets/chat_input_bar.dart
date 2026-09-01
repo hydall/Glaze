@@ -53,7 +53,6 @@ class ChatInputBar extends ConsumerStatefulWidget {
   )?
   onSendWithImage;
   final VoidCallback? onFullScreen;
-  final VoidCallback? onQuickReplies;
 
   /// Triggered by the account-circle button when the composer is empty.
   /// [guidance] carries the active guidance instruction when guidance mode is
@@ -63,12 +62,9 @@ class ChatInputBar extends ConsumerStatefulWidget {
   final bool enterToSend;
   final bool batterySaver;
 
-  /// When true, the magic-drawer button shows the active state. The host
-  /// also uses this to interpret onMagicDrawer as a toggle.
+  /// When true, the drawer button shows the active state. The host also uses
+  /// this to interpret onMagicDrawer as a toggle.
   final bool isDrawerOpen;
-
-  /// When true, the quick-replies (Continue) button shows the active state.
-  final bool isQuickRepliesOpen;
 
   /// Optional focus node from the host so it can mediate keyboard ↔ drawer
   /// transitions (Telegram-style: keyboard and drawer replace each other).
@@ -108,13 +104,11 @@ class ChatInputBar extends ConsumerStatefulWidget {
     this.onMagicDrawer,
     this.onSendWithImage,
     this.onFullScreen,
-    this.onQuickReplies,
     this.onImpersonate,
     this.virtualKeyboardSend = false,
     this.enterToSend = true,
     this.batterySaver = false,
     this.isDrawerOpen = false,
-    this.isQuickRepliesOpen = false,
     this.focusNode,
     this.initialDraft = '',
     this.onDraftChanged,
@@ -721,14 +715,6 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                       color: _guidanceMode ? Colors.orange : null,
                       batterySaver: widget.batterySaver,
                       blurRegionId: 'btn-guidance',
-                    ),
-                    const SizedBox(width: 8),
-                    _CircleBtn(
-                      icon: Icons.keyboard_double_arrow_right,
-                      onTap: widget.onQuickReplies,
-                      color: widget.isQuickRepliesOpen ? Colors.amber : null,
-                      batterySaver: widget.batterySaver,
-                      blurRegionId: 'btn-quick-replies',
                     ),
                   ],
                 ),
