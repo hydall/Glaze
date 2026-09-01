@@ -367,6 +367,7 @@ void main() {
       keyParagraphs: {
         'key': [1],
       },
+      ledgerRange: '15.09.2026 · RP_Day 0 · 21:00',
     );
 
     expect(legacy.keyParagraphs, isEmpty);
@@ -376,5 +377,7 @@ void main() {
     expect(MemoryEntry.fromJson(entry.toJson()).keyParagraphs, {
       'key': [1],
     });
+    expect(MemoryEntry.fromJson(entry.toJson()).ledgerRange, entry.ledgerRange);
+    expect(legacy.ledgerRange, isEmpty);
   });
 }

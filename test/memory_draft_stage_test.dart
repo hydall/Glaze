@@ -35,6 +35,7 @@ void main() {
       expect(book.pendingDrafts.single.content, 'Generated memory');
       expect(book.pendingDrafts.single.status, 'pending_approval');
       expect(book.pendingDrafts.single.messageIds, ['u1', 'a1']);
+      expect(book.pendingDrafts.single.ledgerRange, 'range');
       expect(harness.container.read(memoryActiveDraftsProvider), isEmpty);
     },
   );
@@ -137,6 +138,7 @@ Future<_Harness> _createHarness({
             return draft.copyWith(
               content: 'Generated memory',
               keys: ['memory'],
+              ledgerRange: 'range',
               status: 'pending_approval',
               generatedAt: 100,
               updatedAt: 100,

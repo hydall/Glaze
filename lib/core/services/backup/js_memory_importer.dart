@@ -93,6 +93,9 @@ class JsMemoryImporter with TypeConverters {
         'keyParagraphs': e['keyParagraphs'] is Map
             ? Map<String, dynamic>.from(e['keyParagraphs'] as Map)
             : <String, List<int>>{},
+        'ledgerRange': e['ledgerRange'] is String
+            ? e['ledgerRange'] as String
+            : '',
         'glazeKeys': e['glazeKeys'] is List
             ? List<String>.from((e['glazeKeys'] as List).whereType<String>())
             : <String>[],
@@ -193,6 +196,9 @@ class JsMemoryImporter with TypeConverters {
         'keyParagraphs': d['keyParagraphs'] is Map
             ? Map<String, dynamic>.from(d['keyParagraphs'] as Map)
             : <String, List<int>>{},
+        'ledgerRange': d['ledgerRange'] is String
+            ? d['ledgerRange'] as String
+            : '',
         'glazeKeys': d['glazeKeys'] is List
             ? List<String>.from((d['glazeKeys'] as List).whereType<String>())
             : <String>[],

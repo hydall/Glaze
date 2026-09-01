@@ -6,6 +6,24 @@ import 'regex_service.dart';
 class MemoryDraftTranscriptBuilder {
   const MemoryDraftTranscriptBuilder._();
 
+  static String? ledgerRange(List<ChatMessage> messages) {
+    final stamps = messages
+        .where(
+          (message) =>
+              !message.isHidden &&
+              !message.isTyping &&
+              message.content.trim().isNotEmpty &&
+              (message.role == 'user' || message.role == 'assistant'),
+        )
+        .map((message) => message.time?.trim())
+        .whereType<String>()
+        .where((stamp) => stamp.isNotEmpty)
+        .toList(growable: false);
+    if (stamps.isEmpty) return null;
+    if (stamps.length == 1 || stamps.first == stamps.last) return stamps.first;
+    return '${stamps.first} -> ${stamps.last}';
+  }
+
   static String build({
     required List<ChatMessage> messages,
     required List<PresetRegex> scripts,
@@ -24,7 +42,7 @@ class MemoryDraftTranscriptBuilder {
         )
         .toList(growable: false);
 
-    return [
+    final transcript = [
       for (var index = 0; index < eligible.length; index++)
         _formatMessage(
           eligible[index],
@@ -34,6 +52,12 @@ class MemoryDraftTranscriptBuilder {
           totalMessages: eligible.length,
         ),
     ].join('\n\n');
+    final range = ledgerRange(eligible);
+    if (range == null) return transcript;
+    return 'AUTHORITATIVE_LEDGER_RANGE: $range\n'
+        'Treat this exact value as source metadata. Do not infer, shorten, '
+        'translate, or recalculate it.\n\n'
+        '$transcript';
   }
 
   static String _formatMessage(

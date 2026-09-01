@@ -21,4 +21,9 @@ class MemoryBookApiConfigResolver {
     }
     return activeConfig;
   }
+
+  /// Uses the same saved connection as draft generation itself. This avoids
+  /// silently falling back to the transport's generic 120-second timeout.
+  int? resolveTimeoutMs(MemoryBookApiSettings settings) =>
+      resolve(settings)?.firstChunkTimeoutMs;
 }

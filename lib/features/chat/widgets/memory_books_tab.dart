@@ -504,6 +504,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
       content: draft.content,
       keys: draft.keys,
       keyParagraphs: draft.keyParagraphs,
+      ledgerRange: draft.ledgerRange,
       messageIds: draft.messageIds,
       status: 'active',
       createdAt: draft.createdAt,

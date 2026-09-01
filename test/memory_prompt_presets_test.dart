@@ -42,6 +42,20 @@ void main() {
     expect(MemoryPromptPresets.isBuiltIn(custom.key), isFalse);
   });
 
+  test('detailed beats treats the Ledger range as authoritative', () {
+    final prompt = MemoryPromptPresets.resolve('detailed_beats');
+
+    expect(prompt, contains('AUTHORITATIVE_LEDGER_RANGE'));
+    expect(prompt, contains('do not calculate or normalize time yourself'));
+    expect(prompt, contains('Never invent a date, day counter, or clock time'));
+    expect(prompt, isNot(contains('increment the in-story day counter')));
+    expect(prompt, contains('Produce 3-8 self-contained paragraphs'));
+    expect(prompt, contains('State each fact once only'));
+    expect(prompt, contains('Do not add headings, section labels'));
+    expect(prompt, contains('narrative prose and dialogue'));
+    expect(prompt, isNot(contains('Be comprehensive')));
+  });
+
   test('serialized normalization repairs only a dangling selection', () {
     final original = <String, dynamic>{
       'promptPreset': 'custom_deleted',

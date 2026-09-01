@@ -18,6 +18,7 @@ MemoryBook? applyGeneratedMemoryDraft(
     content: generated.content,
     keys: generated.keys,
     keyParagraphs: generated.keyParagraphs,
+    ledgerRange: generated.ledgerRange,
     status: 'pending_approval',
     generatedAt: generated.generatedAt,
     updatedAt: generated.updatedAt,

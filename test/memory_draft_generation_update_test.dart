@@ -31,6 +31,9 @@ void main() {
       keyParagraphs: {
         'new': [0],
       },
+      ledgerRange:
+          '15.09.2026 · RP_Day 0 · 21:00 -> '
+          '15.09.2026 · RP_Day 0 · 21:30',
       status: 'pending_approval',
       generatedAt: 20,
       updatedAt: 21,
@@ -49,6 +52,7 @@ void main() {
     expect(draft.keyParagraphs, {
       'new': [0],
     });
+    expect(draft.ledgerRange, generated.ledgerRange);
     expect(draft.title, 'Current title');
     expect(draft.status, 'pending_approval');
     expect(draft.error, isNull);

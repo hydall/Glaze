@@ -52,4 +52,25 @@ void main() {
       'third': [2],
     });
   });
+
+  test('stores the authoritative Ledger range without shifting key scopes', () {
+    final result = MemoryDraftResponseParser.parse(
+      draft,
+      '{"paragraphs":[{"text":"Scene beat.","keys":["place"]}]}',
+      ledgerRange:
+          '15.09.2026 · RP_Day 0 · 21:00 -> '
+          '15.09.2026 · RP_Day 0 · 21:30',
+      nowMillis: 1,
+    );
+
+    expect(result.content, 'Scene beat.');
+    expect(
+      result.ledgerRange,
+      '15.09.2026 · RP_Day 0 · 21:00 -> '
+      '15.09.2026 · RP_Day 0 · 21:30',
+    );
+    expect(result.keyParagraphs, {
+      'place': [0],
+    });
+  });
 }

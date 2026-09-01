@@ -75,4 +75,47 @@ void main() {
 
     expect(transcript, 'user: original');
   });
+
+  test('exposes the exact first-to-last Ledger range as metadata', () {
+    const messages = [
+      ChatMessage(id: 'u1', role: 'user', content: 'Start'),
+      ChatMessage(
+        id: 'empty',
+        role: 'assistant',
+        content: ' ',
+        time: '15.09.2026 · RP_Day 0 · 20:55',
+      ),
+      ChatMessage(
+        id: 'a1',
+        role: 'assistant',
+        content: 'Middle',
+        time: '15.09.2026 · RP_Day 0 · 21:00',
+      ),
+      ChatMessage(
+        id: 'a2',
+        role: 'assistant',
+        content: 'End',
+        time: '15.09.2026 · RP_Day 0 · 21:30',
+      ),
+    ];
+
+    expect(
+      MemoryDraftTranscriptBuilder.ledgerRange(messages),
+      '15.09.2026 · RP_Day 0 · 21:00 -> '
+      '15.09.2026 · RP_Day 0 · 21:30',
+    );
+    final transcript = MemoryDraftTranscriptBuilder.build(
+      messages: messages,
+      scripts: const [],
+      context: const RegexApplyContext(),
+    );
+    expect(
+      transcript,
+      startsWith(
+        'AUTHORITATIVE_LEDGER_RANGE: '
+        '15.09.2026 · RP_Day 0 · 21:00 -> '
+        '15.09.2026 · RP_Day 0 · 21:30',
+      ),
+    );
+  });
 }
