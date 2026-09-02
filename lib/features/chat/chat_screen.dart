@@ -2260,6 +2260,29 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                         // write and missed that append.
                                         return accepted;
                                       },
+                                      onSendWithoutReply:
+                                          (text, imageDataUrl) async {
+                                            if (text.trim().isEmpty &&
+                                                imageDataUrl == null) {
+                                              return false;
+                                            }
+                                            if (!await _maybeSeedGameTime()) {
+                                              return false;
+                                            }
+                                            // Appends only — a reply is asked
+                                            // for later, with Regenerate or
+                                            // the next ordinary send.
+                                            return ref
+                                                .read(
+                                                  chatProvider(
+                                                    widget.charId,
+                                                  ).notifier,
+                                                )
+                                                .tryAppendMessage(
+                                                  text,
+                                                  imageDataUrl: imageDataUrl,
+                                                );
+                                          },
                                       onSendWithImage:
                                           (
                                             text,

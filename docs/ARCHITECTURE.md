@@ -481,6 +481,15 @@ toast. See `docs/INVARIANTS.md` INV-CM1–INV-CM6.
 **Talkativeness:** `sendMessage()` may skip generation when
 `character.extensions['talkativeness']` rolls above the configured threshold.
 
+**Send without a reply:** `ChatNotifier.tryAppendMessage()` runs the send path
+with `generateReply: false` — the composer's "no reply" toggle, used to write
+several user turns in a row. A run in flight is aborted first, the message is
+appended through the same durable write, and no pipeline starts. Consecutive
+`user` messages are left untouched in the history and in the assembled prompt;
+the connection's prompt post-processing mode decides whether they go out as
+separate turns or squashed into one (`PromptPostProcessing`). See
+`docs/rules/generation.md` § Entry paths.
+
 ### Prompt composition boundary
 
 `PromptInputsCollector` and `PromptPayloadBuilder` do not import feature modules
