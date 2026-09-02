@@ -670,6 +670,7 @@ class SyncWorld {
   SyncWorld({
     FakeReconciliationStateStore? reconciliationStateStore,
     FakeSessionLorebookOverlayStore? sessionLorebookOverlayStore,
+    Future<void> Function(Set<String>)? reconcilePulledSessions,
   }) {
     characters = FakeCharacterStore();
     chats = FakeChatStore();
@@ -688,6 +689,7 @@ class SyncWorld {
     characterDeletions = FakeCharacterDeletionStore(characters);
     reconciliationStates = reconciliationStateStore;
     sessionLorebookOverlays = sessionLorebookOverlayStore;
+    _reconcilePulledSessions = reconcilePulledSessions;
     manifestProvider = InMemoryManifestProvider(
       characterRepo: characters,
       chatRepo: chats,
@@ -703,6 +705,8 @@ class SyncWorld {
       reconciliationStateStore: reconciliationStates,
     );
   }
+
+  Future<void> Function(Set<String>)? _reconcilePulledSessions;
 
   SyncEngine get engine => SyncEngine(
     cloud,
@@ -733,6 +737,7 @@ class SyncWorld {
     (_) async {},
     reconciliationStates,
     sessionLorebookOverlays,
+    _reconcilePulledSessions,
   );
 }
 
@@ -791,6 +796,7 @@ SyncEngine _realStoreEngine({
     FakeCharacterDeletionStore(characters),
     (_) async {},
     reconciliationStore,
+    null,
   );
 }
 
@@ -915,6 +921,57 @@ void main() {
 
     expect(world.chats.data[sessionId], cloudChat);
     expect(reconciliationStates.data[sessionId], statePayload);
+  });
+
+  test('pull reconciles touched sessions after primary entities', () async {
+    final seen = <Set<String>>[];
+    late final SyncWorld world;
+    world = SyncWorld(
+      reconcilePulledSessions: (ids) async {
+        seen.add(Set.of(ids));
+        if (!world.chats.data.containsKey('session')) {
+          throw StateError('Reconciliation ran before chat apply');
+        }
+      },
+    );
+    const chat = ChatSession(
+      id: 'session',
+      characterId: 'character',
+      sessionIndex: 0,
+      updatedAt: 2000,
+    );
+    final entry = SyncManifestEntry(
+      type: 'chat',
+      id: chat.id,
+      path: cloudPath('chat', chat.id),
+      updatedAt: chat.updatedAt,
+      hash: SyncSerialization.computeChatMetadataHash(
+        const SessionMetadata(
+          sessionId: 'session',
+          characterId: 'character',
+          sessionIndex: 0,
+          updatedAt: 2000,
+          messageCount: 0,
+          lastMessageContent: '',
+          lastMessageTimestamp: 0,
+        ),
+      ),
+    );
+    final manifest = SyncManifest(
+      deviceId: 'cloud',
+      createdAt: 1,
+      entries: {entry.key: entry},
+    );
+    world.cloud.files[entry.path] = jsonEncode(chat.toJson());
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      manifest.toJson(),
+    );
+
+    await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    expect(seen, [
+      {'session'},
+    ]);
   });
 
   test('pull applies chat before session lorebook overlays', () async {

@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../../../core/state/db_provider.dart';
+import '../../../core/db/repositories/sync_session_consistency_repo.dart';
 import '../../../core/state/character_folder_provider.dart'
     show characterFolderRepoProvider;
 import '../../../core/state/lorebook_provider.dart'
@@ -59,6 +60,9 @@ final syncServiceProvider = FutureProvider<SyncService>((ref) async {
     sessionDeletionStore: ref.watch(sessionDeletionRepoProvider),
     characterDeletionStore: ref.watch(characterDeletionRepoProvider),
     saveLorebookActivations: saveLorebookActivations,
+    reconcilePulledSessions: SyncSessionConsistencyRepo(
+      ref.watch(appDbProvider),
+    ).reconcile,
   );
   await service.init();
 

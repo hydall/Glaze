@@ -227,11 +227,13 @@ class SyncManifestBuilder implements SyncManifestProvider {
       );
     }
 
-    final trackerSnapshotSessionIds = await _trackerSnapshotStore
-        .getAllSessionIds();
+    final chatSessionIds = sessions.map((session) => session.sessionId).toSet();
+    final trackerSnapshotSessionIds = {
+      ...chatSessionIds,
+      ...await _trackerSnapshotStore.getAllSessionIds(),
+    };
     for (final sessionId in trackerSnapshotSessionIds) {
       final snapshots = await _trackerSnapshotStore.getBySessionId(sessionId);
-      if (snapshots.isEmpty) continue;
       final payload = {'__trackerSnapshots': true, 'items': snapshots};
       final hash = SyncSerialization.computeSyncHash(payload);
       final key = entryKey('tracker_snapshot', sessionId);
@@ -253,10 +255,12 @@ class SyncManifestBuilder implements SyncManifestProvider {
       );
     }
 
-    final trackerValueSessionIds = await _trackerValueStore.getAllSessionIds();
+    final trackerValueSessionIds = {
+      ...chatSessionIds,
+      ...await _trackerValueStore.getAllSessionIds(),
+    };
     for (final sessionId in trackerValueSessionIds) {
       final trackers = await _trackerValueStore.getBySessionId(sessionId);
-      if (trackers.isEmpty) continue;
       final payload = {'__trackerValues': true, 'items': trackers};
       final hash = SyncSerialization.computeSyncHash(payload);
       final key = entryKey('tracker_value', sessionId);
