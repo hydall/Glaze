@@ -559,7 +559,11 @@ void main() {
     test('_executeUpdateMessage contains update logic', () {
       expect(bridgeJs, contains('_executeUpdateMessage(msg)'));
       final idx = bridgeJs.indexOf('_executeUpdateMessage(msg) {');
-      final methodBody = bridgeJs.substring(idx, idx + 1200);
+      expect(idx, isNot(-1));
+      // Walk the method rather than slicing a fixed window: the guard at the
+      // top of it grows (the typing placeholder is re-created there when its
+      // node is gone), and a byte budget turns that into a false failure.
+      final methodBody = _extractBlockBody(bridgeJs, idx);
       expect(methodBody, contains('updateMessageContent'));
     });
 
