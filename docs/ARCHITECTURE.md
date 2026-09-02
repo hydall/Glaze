@@ -882,7 +882,7 @@ INV-C5.
 ### Files
 - `lorebook_scanner.dart` — keyword scan: sticky/cooldown/probability/character-filter/recursion
 - `lorebook_merger.dart` — merges keyword + vector results, deduplicates by entry ID
-- `core/state/lorebook_embedding_provider.dart` — Riverpod composition for vector search and embedding. `embeddingConfigProvider` reads the preset selected on the API screen's **Embeddings** tab (`activeEmbeddingConfigProvider`), independent of the chat preset; only the preset's "Use LLM API" toggle borrows the active LLM endpoint (INV-PS2c)
+- `core/state/lorebook_embedding_provider.dart` — Riverpod composition for vector search and embedding. `embeddingConfigProvider` reads the preset selected on the API screen's **Embeddings** tab (`activeEmbeddingConfigProvider`, over the tab's own `embeddingPresetListProvider` list), independent of the chat presets; only the preset's "Use LLM API" toggle borrows an LLM endpoint, from the preset its *Endpoint from* row names (INV-PS2c)
 - `lorebook_coverage.dart` — diagnostic full coverage report
 - `lorebook_vector_search.dart` — cosine similarity, hybrid boost (name/key/hint overlap)
 - `lorebook_embedding_service.dart` — indexes lorebook entries (hash-based dirty check)

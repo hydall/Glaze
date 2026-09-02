@@ -247,6 +247,7 @@ void main() {
         'addBlockAtTop',
         'activeApiConfigId',
         'activeEmbeddingConfigId',
+        'embeddingPresetsSeeded',
         'activePresetId',
         'activePersonaId',
         'globalVars',

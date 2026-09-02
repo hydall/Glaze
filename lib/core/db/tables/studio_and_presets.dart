@@ -153,6 +153,8 @@ class ApiConfigs extends Table {
       integer().withDefault(const Constant(512))();
   IntColumn get embeddingRequestsPerMinute =>
       integer().withDefault(const Constant(50))();
+  TextColumn get embeddingLlmPresetId =>
+      text().withDefault(const Constant(''))();
   TextColumn get cacheControlTtl => text().withDefault(const Constant('off'))();
   TextColumn get cacheBreakpointMode =>
       text().withDefault(const Constant('depth'))();

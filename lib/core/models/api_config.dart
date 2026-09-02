@@ -47,6 +47,11 @@ abstract class ApiConfig with _$ApiConfig {
     @Default('') String embeddingModel,
     @Default(512) int embeddingMaxChunkTokens,
     @Default(50) int embeddingRequestsPerMinute,
+
+    /// Which LLM preset an embedding preset borrows its endpoint and key from
+    /// while [embeddingUseSame] is on. Empty means "whichever connection the
+    /// LLM tab is currently on", the behaviour before the row existed.
+    @Default('') String embeddingLlmPresetId,
     @Default('off') String cacheControlTtl,
     @Default('depth') String cacheBreakpointMode,
     @Default('openrouter') String sessionIdMode,

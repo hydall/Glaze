@@ -189,9 +189,10 @@ class ApiConfigDraft {
     );
   }
 
-  /// The embedding half of the editor, written onto whichever preset the
-  /// Embeddings tab is pointed at — which is not necessarily the preset the
-  /// chat side runs on.
+  /// The embedding half of the editor, written onto the preset the Embeddings
+  /// tab is pointed at — a preset of its own, from a list the chat side never
+  /// shows. The preset's name is set by the caller, which is the only field
+  /// the two halves of the editor spell the same way.
   ApiConfig applyEmbeddingTo(ApiConfig base) {
     final normalized = normalizeValues(values);
     final parsedEmbeddingRequestsPerMinute = int.tryParse(
@@ -200,6 +201,7 @@ class ApiConfigDraft {
     return base.copyWith(
       embeddingEnabled: normalized.embeddingEnabled,
       embeddingUseSame: normalized.embeddingUseSame,
+      embeddingLlmPresetId: normalized.embeddingLlmPresetId,
       embeddingEndpoint: embeddingEndpoint.trim(),
       embeddingApiKey: embeddingApiKey.trim(),
       embeddingModel: embeddingModel.trim(),

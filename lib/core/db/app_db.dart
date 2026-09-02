@@ -25,6 +25,7 @@ part 'migrations/upgrade_v2_v50.dart';
 part 'migrations/upgrade_v51_v100.dart';
 part 'migrations/upgrade_v101_v131.dart';
 part 'migrations/upgrade_v132.dart';
+part 'migrations/upgrade_v133.dart';
 
 @DriftDatabase(
   tables: [
@@ -92,7 +93,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 132;
+  int get schemaVersion => 133;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -129,6 +130,7 @@ class AppDatabase extends _$AppDatabase {
       await _upgradeV51ToV100(m, from);
       await _upgradeV101ToV131(m, from);
       await _upgradeV132(from);
+      await _upgradeV133(m, from);
     },
   );
 
