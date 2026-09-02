@@ -29,8 +29,20 @@ Full formal invariants with code references: `docs/INVARIANTS.md`
 | User action | Orchestrator | Post-SSE (`GenerationPipeline`) |
 |-------------|--------------|----------------------------------|
 | Send message | `_runGeneration` → `GenerationPipeline.run()` | Yes — image tags, extensions, sync |
+| Send without a reply | `_sendMessage(generateReply: false)` — durable append only | **No run at all** |
 | Regenerate | `_runGeneration` → `GenerationPipeline.run()` | Yes |
 | Continue | `ChatGenerationService.generate()` directly | **No** — see INV-CM2 |
+
+`ChatNotifier.tryAppendMessage` is the no-reply half of a send: the composer's
+"no reply" toggle uses it to write several user turns in a row. It aborts a run
+in flight first (the send *is* the Stop press), appends the message through the
+same durable path as an ordinary send, commits the accepted variation and
+dispatches `afterUser` blocks — then stops, leaving the chat idle with a
+trailing user message. The queued turns stay separate `user` messages in the
+history; how they reach the provider is the connection's prompt
+post-processing mode's call (`none` sends them as-is, the merge family squashes
+them into one turn). The reply is asked for later by Regenerate on the trailing
+user message, by Continue, or by the next ordinary send.
 
 ---
 

@@ -37,6 +37,12 @@ class ChatInputBar extends ConsumerStatefulWidget {
   final bool Function()? canSend;
   final Future<bool> Function(String text, String? guidance)?
   onSendWithGuidance;
+
+  /// Appends the message without asking for a reply, so several turns can be
+  /// written in a row. Same contract as [onSend]: true only when the host took
+  /// ownership. When null the "no reply" toggle is not offered at all.
+  final Future<bool> Function(String text, String? imageDataUrl)?
+  onSendWithoutReply;
   final bool isGenerating;
   final bool isGeneratingImage;
 
@@ -97,6 +103,7 @@ class ChatInputBar extends ConsumerStatefulWidget {
     required this.onSend,
     this.canSend,
     this.onSendWithGuidance,
+    this.onSendWithoutReply,
     required this.isGenerating,
     this.isGeneratingImage = false,
     this.isPostGenRunning = false,
@@ -138,6 +145,11 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   late final TextEditingController _controller;
   final _guidanceController = TextEditingController();
   bool _guidanceMode = false;
+
+  /// "Write several turns in a row" mode: a send appends the message and asks
+  /// for no reply. Sticky until toggled back off — queuing messages is a
+  /// stretch of writing, not a single tap.
+  bool _noReplyMode = false;
   Timer? _debounce;
   final _internalFocusNode = FocusNode();
   Uint8List? _attachedImageBytes;
@@ -310,7 +322,11 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     _isDispatchingSend = true;
     bool accepted;
     try {
-      if (imageDataUrl != null) {
+      if (_noReplyMode && widget.onSendWithoutReply != null) {
+        // Queue the turn: no guidance (there is no generation to steer) and no
+        // reply — the host appends it and stays idle.
+        accepted = await widget.onSendWithoutReply!(text, imageDataUrl);
+      } else if (imageDataUrl != null) {
         final guidance =
             _guidanceMode && _guidanceController.text.trim().isNotEmpty
             ? _guidanceController.text.trim()
@@ -535,6 +551,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
         widget.isGenerating ||
         widget.isGeneratingImage ||
         widget.isPostGenRunning;
+    final canQueue = widget.onSendWithoutReply != null;
+    final queueing = canQueue && _noReplyMode;
+    // The button is Stop while a reply is in flight — except when the user is
+    // queuing turns and has something written: there the send *is* the stop
+    // (the host cancels the run, then appends), which is what "several
+    // messages in a row, no reply" means mid-stream.
+    final showStop = isGenerating && !(queueing && hasContent);
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -625,6 +648,11 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                           color: Colors.orange.withValues(alpha: 0.3),
                           width: preset.borderWidth.clamp(1.0, double.infinity),
                         )
+                      : queueing
+                      ? Border.all(
+                          color: Colors.lightBlueAccent.withValues(alpha: 0.3),
+                          width: preset.borderWidth.clamp(1.0, double.infinity),
+                        )
                       : uiBorder,
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(minHeight: 56),
@@ -652,6 +680,8 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                       decoration: InputDecoration(
                         hintText: _guidanceMode
                             ? 'chat_guidance_message_hint'.tr()
+                            : queueing
+                            ? 'chat_no_reply_hint'.tr()
                             : 'chat_placeholder'.tr(),
                         hintStyle: TextStyle(
                           color: secondaryColor,
@@ -711,24 +741,45 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                       onTap: () => setState(() {
                         _guidanceMode = !_guidanceMode;
                         if (!_guidanceMode) _guidanceController.clear();
+                        // Guidance steers a generation; the no-reply mode asks
+                        // for none. Only one of the two can be armed.
+                        if (_guidanceMode) _noReplyMode = false;
                       }),
                       color: _guidanceMode ? Colors.orange : null,
                       batterySaver: widget.batterySaver,
                       blurRegionId: 'btn-guidance',
                     ),
+                    if (canQueue) ...[
+                      const SizedBox(width: 8),
+                      _CircleBtn(
+                        icon: Icons.speaker_notes_off_outlined,
+                        onTap: () => setState(() {
+                          _noReplyMode = !_noReplyMode;
+                          if (_noReplyMode) {
+                            _guidanceMode = false;
+                            _guidanceController.clear();
+                          }
+                        }),
+                        color: _noReplyMode ? Colors.lightBlueAccent : null,
+                        batterySaver: widget.batterySaver,
+                        blurRegionId: 'btn-no-reply',
+                      ),
+                    ],
                   ],
                 ),
                 _SendBtn(
-                  icon: isGenerating
+                  icon: showStop
                       ? Icons.stop_rounded
                       : hasContent
-                      ? (_guidanceMode && _controller.text.trim().isEmpty
+                      ? (queueing
+                            ? Icons.playlist_add_rounded
+                            : _guidanceMode && _controller.text.trim().isEmpty
                             ? Icons.check_rounded
                             : Icons.send_rounded)
                       : Icons.account_circle_rounded,
                   batterySaver: widget.batterySaver,
                   onTap: () {
-                    if (isGenerating) {
+                    if (showStop) {
                       widget.onStop?.call();
                     } else if (widget.isEditingMessage) {
                       return;
