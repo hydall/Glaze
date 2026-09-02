@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/haptics.dart';
+import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
 import '../quick_replies_provider.dart';
@@ -84,6 +85,9 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
         initialLabel: reply?.label ?? '',
         initialText: reply?.text ?? '',
         isNew: isNew,
+        // Continue runs the app's continue-generation call; it has no prompt
+        // body to edit and no delete button, so the form drops both.
+        builtIn: reply?.isBuiltIn ?? false,
         onSubmit: (label, text) async {
           final notifier = ref.read(quickRepliesProvider.notifier);
           if (isNew) {
@@ -92,7 +96,9 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
             await notifier.edit(reply.id, label: label, text: text);
           }
         },
-        onDelete: isNew ? null : () => _remove(reply.id),
+        onDelete: (isNew || reply.isBuiltIn)
+            ? null
+            : () => _remove(reply.id),
       ),
     );
   }
@@ -136,7 +142,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
 
     final content = RawScrollbar(
       controller: _scrollController,
-      padding: const EdgeInsets.only(top: 60),
+      padding: const EdgeInsets.only(top: kDrawerContentTopInset),
       thickness: 3,
       radius: const Radius.circular(3),
       thumbColor: Colors.white24,
@@ -149,7 +155,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
               controller: _scrollController,
               padding: EdgeInsets.fromLTRB(
                 12,
-                60,
+                kDrawerContentTopInset,
                 12,
                 16 + MediaQuery.of(context).padding.bottom,
               ),
@@ -170,6 +176,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                     hovered: _hoverIndex == index && _draggingIndex != index,
                     onTap: () => _handleTap(reply),
                     onDelete: () => _remove(reply.id),
+                    deletable: !reply.isBuiltIn,
                   );
 
                   return SizedBox(
@@ -244,6 +251,10 @@ class _QuickReplyEditForm extends StatefulWidget {
   final String initialLabel;
   final String initialText;
   final bool isNew;
+
+  /// True for a built-in action: the prompt field is replaced by a note
+  /// explaining what the card does, since its text is never sent.
+  final bool builtIn;
   final Future<void> Function(String label, String text) onSubmit;
   final Future<void> Function()? onDelete;
 
@@ -252,6 +263,7 @@ class _QuickReplyEditForm extends StatefulWidget {
     required this.initialText,
     required this.isNew,
     required this.onSubmit,
+    this.builtIn = false,
     this.onDelete,
   });
 
@@ -314,16 +326,19 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _textCtrl,
-            maxLines: 4,
-            minLines: 2,
-            decoration: InputDecoration(
-              labelText: 'label_content'.tr(),
-              hintText: 'placeholder_prompt_text'.tr(),
-              border: const OutlineInputBorder(),
+          if (widget.builtIn)
+            _BuiltInNote(text: 'quick_reply_builtin_note'.tr())
+          else
+            TextField(
+              controller: _textCtrl,
+              maxLines: 4,
+              minLines: 2,
+              decoration: InputDecoration(
+                labelText: 'label_content'.tr(),
+                hintText: 'placeholder_prompt_text'.tr(),
+                border: const OutlineInputBorder(),
+              ),
             ),
-          ),
           const SizedBox(height: 20),
           Row(
             children: [
@@ -350,6 +365,43 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
                 child: Text(widget.isNew ? 'action_add'.tr() : 'btn_save'.tr()),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Explains why a built-in action has no prompt body and no delete button,
+/// standing in for the text field the other cards get.
+class _BuiltInNote extends StatelessWidget {
+  final String text;
+
+  const _BuiltInNote({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        color: context.cs.primary.withValues(alpha: 0.08),
+        border: Border.all(color: context.cs.primary.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.lock_outline, size: 16, color: context.cs.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                color: context.cs.onSurfaceVariant,
+              ),
+            ),
           ),
         ],
       ),
