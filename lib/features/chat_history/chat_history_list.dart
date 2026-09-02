@@ -18,16 +18,17 @@ import '../../core/state/character_provider.dart'
         characterSessionCountsProvider,
         charactersProvider,
         revealHiddenCharactersProvider;
+import '../../core/platform/haptics.dart';
 import '../../core/state/chat_session_ops_provider.dart';
 import '../../shared/utils/variant_label.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/variation_chip.dart';
-import '../chat/chat_actions_service.dart';
-import '../chat/chat_provider.dart';
 import '../chat/generating_sessions_provider.dart';
 import '../chat/unread_sessions_provider.dart';
 import '../settings/app_settings_provider.dart';
+import 'chat_history_actions.dart';
 import 'chat_history_provider.dart';
+import 'chat_history_selection_provider.dart';
 import 'widgets/message_preview_text.dart';
 import 'widgets/typing_dots.dart';
 
@@ -46,6 +47,12 @@ class ChatHistoryList extends ConsumerStatefulWidget {
   /// Owned by the parent so a navbar re-tap can animate the list back to the top.
   final ScrollController? controller;
 
+  /// Whether a long press may start a multi-selection. Only the full-screen
+  /// dialogs list sets it: the selection bar lives in the shell header, and
+  /// the desktop sidebar's embedded copies publish no header to put it in —
+  /// there a long press keeps opening the row's own action menu.
+  final bool selectable;
+
   const ChatHistoryList({
     super.key,
     this.collapsed = false,
@@ -53,6 +60,7 @@ class ChatHistoryList extends ConsumerStatefulWidget {
     this.topPadding = 0,
     this.bottomPadding = 20,
     this.controller,
+    this.selectable = false,
   });
 
   @override
@@ -127,6 +135,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
             return _SessionTile(
               info: filtered[i - 1],
               collapsed: widget.collapsed,
+              selectable: widget.selectable,
               index: i - 1,
             );
           },
@@ -200,6 +209,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
         return _ChatHistoryGroupSection(
           sessions: group,
           isExpanded: isExpanded,
+          selectable: widget.selectable,
           onTap: () {
             setState(() {
               if (isExpanded) {
@@ -229,12 +239,14 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
 class _ChatHistoryGroupSection extends StatefulWidget {
   final List<ChatSessionInfo> sessions;
   final bool isExpanded;
+  final bool selectable;
   final VoidCallback onTap;
 
   const _ChatHistoryGroupSection({
     required this.sessions,
     required this.isExpanded,
     required this.onTap,
+    this.selectable = false,
   });
 
   @override
@@ -336,6 +348,7 @@ class _ChatHistoryGroupSectionState extends State<_ChatHistoryGroupSection>
                           _SessionTile(
                             info: widget.sessions[i],
                             isGrouped: true,
+                            selectable: widget.selectable,
                             index: i,
                           ),
                         ],
@@ -357,6 +370,9 @@ class _SessionTile extends ConsumerStatefulWidget {
   final bool isGrouped;
   final bool collapsed;
 
+  /// See [ChatHistoryList.selectable].
+  final bool selectable;
+
   /// Row position within its list — staggers the fade-in so rows cascade in
   /// on load instead of popping in all at once. Capped below so long lists
   /// don't take forever to finish appearing.
@@ -366,6 +382,7 @@ class _SessionTile extends ConsumerStatefulWidget {
     required this.info,
     this.isGrouped = false,
     this.collapsed = false,
+    this.selectable = false,
     this.index = 0,
   });
 
@@ -424,11 +441,37 @@ class _SessionTileState extends ConsumerState<_SessionTile>
         ref.watch(
           unreadSessionsProvider.select((s) => s.contains(info.sessionId)),
         );
+    // Both reads are gated on a flag that is constant for the life of the row,
+    // so the watched set never changes shape between builds.
+    final selectionActive =
+        widget.selectable &&
+        ref.watch(chatHistorySelectionProvider.select((s) => s.active));
+    final selected =
+        widget.selectable &&
+        ref.watch(
+          chatHistorySelectionProvider.select(
+            (s) => s.contains(info.sessionId),
+          ),
+        );
     final Widget tile = widget.collapsed
         ? _buildCollapsedTile(context, ref, generating, unread)
         : widget.isGrouped
-        ? _buildGroupedTile(context, ref, generating, unread)
-        : _buildFullTile(context, ref, generating, unread);
+        ? _buildGroupedTile(
+            context,
+            ref,
+            generating,
+            unread,
+            selectionActive: selectionActive,
+            selected: selected,
+          )
+        : _buildFullTile(
+            context,
+            ref,
+            generating,
+            unread,
+            selectionActive: selectionActive,
+            selected: selected,
+          );
 
     return FadeTransition(
       opacity: _fadeAnim,
@@ -476,30 +519,32 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     BuildContext context,
     WidgetRef ref,
     bool generating,
-    bool unread,
-  ) {
+    bool unread, {
+    required bool selectionActive,
+    required bool selected,
+  }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () =>
-          context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
-      onLongPress: () => _showSessionActions(context, ref),
-      // Right-click opens the same actions a long-press does, matching the Vue
+      onTap: () => _handleTap(selectionActive),
+      onLongPress: _handleContextGesture,
+      // Right-click is the desktop equivalent of a long press, matching the Vue
       // list's `@contextmenu.prevent="openActions(chat)"`.
-      onSecondaryTap: () => _showSessionActions(context, ref),
+      onSecondaryTap: _handleContextGesture,
       child: HoverGlow(
         child: Container(
           height: 72,
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: unread
-              ? BoxDecoration(
-                  color: context.cs.primary.withValues(alpha: 0.06),
-                  border: Border(
-                    left: BorderSide(color: context.cs.primary, width: 3),
-                  ),
-                )
-              : null,
+          decoration: _rowDecoration(
+            context,
+            unread: unread,
+            selected: selected,
+          ),
           child: Row(
             children: [
+              if (selectionActive) ...[
+                _SelectionCheck(selected: selected),
+                const SizedBox(width: 12),
+              ],
               _buildAvatar(context, ref),
               const SizedBox(width: 12),
               Expanded(
@@ -589,76 +634,90 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     BuildContext context,
     WidgetRef ref,
     bool generating,
-    bool unread,
-  ) {
+    bool unread, {
+    required bool selectionActive,
+    required bool selected,
+  }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () =>
-          context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
-      onLongPress: () => _showSessionActions(context, ref),
-      onSecondaryTap: () => _showSessionActions(context, ref),
+      onTap: () => _handleTap(selectionActive),
+      onLongPress: _handleContextGesture,
+      onSecondaryTap: _handleContextGesture,
       child: HoverGlow(
-        child: Padding(
+        child: Container(
           padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          color: selected ? context.cs.primary.withValues(alpha: 0.12) : null,
+          child: Row(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Row(
+              if (selectionActive) ...[
+                _SelectionCheck(selected: selected),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        if (unread) ...[
-                          _UnreadDot(color: context.cs.primary),
-                          const SizedBox(width: 6),
-                        ],
-                        Flexible(
-                          child: Text(
-                            info.sessionName?.isNotEmpty == true
-                                ? info.sessionName!
-                                : 'session_name'.tr(
-                                    namedArgs: {
-                                      'id': (info.sessionIndex + 1).toString(),
-                                    },
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (unread) ...[
+                                _UnreadDot(color: context.cs.primary),
+                                const SizedBox(width: 6),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  info.sessionName?.isNotEmpty == true
+                                      ? info.sessionName!
+                                      : 'session_name'.tr(
+                                          namedArgs: {
+                                            'id': (info.sessionIndex + 1)
+                                                .toString(),
+                                          },
+                                        ),
+                                  style: TextStyle(
+                                    fontWeight: unread
+                                        ? FontWeight.w700
+                                        : FontWeight.w600,
+                                    fontSize: 15,
+                                    color: context.cs.onSurface,
                                   ),
-                            style: TextStyle(
-                              fontWeight: unread
-                                  ? FontWeight.w700
-                                  : FontWeight.w600,
-                              fontSize: 15,
-                              color: context.cs.onSurface,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              // Inside a group the rows are sessions of
+                              // possibly different variations, so each one
+                              // names its own.
+                              if (info.variantName != null) ...[
+                                const SizedBox(width: 6),
+                                VariationChip(name: info.variantName!),
+                              ],
+                            ],
                           ),
                         ),
-                        // Inside a group the rows are sessions of possibly
-                        // different variations, so each one names its own.
-                        if (info.variantName != null) ...[
-                          const SizedBox(width: 6),
-                          VariationChip(name: info.variantName!),
-                        ],
+                        const SizedBox(width: 8),
+                        _buildChip(context),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  _buildChip(context),
-                ],
+                    const SizedBox(height: 4),
+                    generating
+                        ? const _GeneratingPreview()
+                        : MessagePreviewText(
+                            raw: info.lastMessage,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: unread
+                                  ? context.cs.onSurface
+                                  : context.cs.onSurfaceVariant,
+                            ),
+                            maxLines: 2,
+                          ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 4),
-              generating
-                  ? const _GeneratingPreview()
-                  : MessagePreviewText(
-                      raw: info.lastMessage,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: unread
-                            ? context.cs.onSurface
-                            : context.cs.onSurfaceVariant,
-                      ),
-                      maxLines: 2,
-                    ),
             ],
           ),
         ),
@@ -666,106 +725,58 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     );
   }
 
+  /// Opens a chat, or toggles the row while a multi-selection is running.
+  void _handleTap(bool selectionActive) {
+    if (selectionActive) {
+      ref.read(chatHistorySelectionProvider.notifier).toggle(info.sessionId);
+      return;
+    }
+    context.go('/chat/${info.characterId}?session=${info.sessionIndex}');
+  }
+
+  /// Long press — and right-click, its desktop equivalent. On the full-screen
+  /// list it starts or extends the multi-selection, whose actions then live in
+  /// the shell header; where selection is unavailable it opens this row's own
+  /// action menu, as it always did.
+  void _handleContextGesture() {
+    if (!widget.selectable) {
+      unawaited(showChatSessionActions(context, ref, [info]));
+      return;
+    }
+    unawaited(Haptics.selectionClick());
+    final notifier = ref.read(chatHistorySelectionProvider.notifier);
+    if (ref.read(chatHistorySelectionProvider).active) {
+      notifier.toggle(info.sessionId);
+    } else {
+      notifier.start(info.sessionId);
+    }
+  }
+
+  /// Row background: the selection tint wins over the unread accent, so a
+  /// selected row still reads as selected while it is also unread.
+  BoxDecoration? _rowDecoration(
+    BuildContext context, {
+    required bool unread,
+    required bool selected,
+  }) {
+    if (selected) {
+      return BoxDecoration(
+        color: context.cs.primary.withValues(alpha: 0.12),
+        border: Border(
+          left: BorderSide(color: context.cs.primary, width: 3),
+        ),
+      );
+    }
+    if (!unread) return null;
+    return BoxDecoration(
+      color: context.cs.primary.withValues(alpha: 0.06),
+      border: Border(left: BorderSide(color: context.cs.primary, width: 3)),
+    );
+  }
+
   String _formatTime() {
     if (info.lastMessageTime == 0) return '';
     return formatSessionTimeAgo(info.lastMessageTime);
-  }
-
-  void _showRenameDialog(BuildContext context, WidgetRef ref) {
-    final currentName = info.sessionName?.isNotEmpty == true
-        ? info.sessionName!
-        : 'session_name'.tr(
-            namedArgs: {'id': (info.sessionIndex + 1).toString()},
-          );
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'Rename Session',
-      input: BottomSheetInput(
-        placeholder: 'Session name',
-        value: currentName,
-        confirmLabel: 'action_rename'.tr(),
-        onConfirm: (val) {
-          Navigator.of(context, rootNavigator: true).pop();
-          if (val.trim().isNotEmpty) {
-            ref
-                .read(chatHistoryProvider.notifier)
-                .renameSession(info.sessionId, val.trim());
-            ref.invalidate(chatProvider(info.characterId));
-          }
-        },
-      ),
-    );
-  }
-
-  void _confirmDelete(BuildContext context, WidgetRef ref) {
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'action_delete_session'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.delete_outline,
-        description:
-            '${'action_delete_session'.tr()} \u2014 ${info.fullCharacterName}? ${'chat_clear_confirm'.tr()}',
-      ),
-      items: [
-        BottomSheetItem(
-          label: 'btn_delete'.tr(),
-          isDestructive: true,
-          centered: true,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            ref
-                .read(chatHistoryProvider.notifier)
-                .deleteSession(info.sessionId);
-          },
-        ),
-        BottomSheetItem(
-          label: 'btn_cancel'.tr(),
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(),
-        ),
-      ],
-    );
-  }
-
-  void _showSessionActions(BuildContext context, WidgetRef ref) {
-    GlazeBottomSheet.show<String>(
-      context,
-      title: 'Session',
-      items: [
-        BottomSheetItem(
-          icon: Icons.upload_file,
-          label: 'action_export_chat'.tr(),
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('export'),
-        ),
-        BottomSheetItem(
-          icon: Icons.drive_file_rename_outline,
-          label: 'action_rename'.tr(),
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('rename'),
-        ),
-        BottomSheetItem(
-          icon: Icons.delete_outline,
-          label: 'action_delete'.tr(),
-          isDestructive: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('delete'),
-        ),
-      ],
-    ).then((result) {
-      if (!context.mounted) return;
-      switch (result) {
-        case 'export':
-          ref
-              .read(chatActionsServiceProvider)
-              .exportSessionUI(
-                context,
-                charId: info.characterId,
-                sessionId: info.sessionId,
-              );
-        case 'rename':
-          _showRenameDialog(context, ref);
-        case 'delete':
-          _confirmDelete(context, ref);
-      }
-    });
   }
 
   Widget _buildAvatar(BuildContext context, WidgetRef ref, {double size = 48}) {
@@ -1131,6 +1142,35 @@ class _GroupHeader extends ConsumerWidget {
         )
         .toList()
       ..sort((a, b) => a.variantOrder.compareTo(b.variantOrder));
+  }
+}
+
+/// The circular checkbox each row grows on its leading edge while a
+/// multi-selection is running. Mirrors the character grid's selection mark.
+class _SelectionCheck extends StatelessWidget {
+  final bool selected;
+
+  const _SelectionCheck({required this.selected});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: selected ? context.cs.primary : Colors.transparent,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: selected
+              ? context.cs.primary
+              : context.cs.onSurfaceVariant.withValues(alpha: 0.6),
+          width: 2,
+        ),
+      ),
+      child: selected
+          ? Icon(Icons.check_rounded, size: 14, color: context.cs.onPrimary)
+          : null,
+    );
   }
 }
 
