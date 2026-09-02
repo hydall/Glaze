@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
@@ -15,7 +16,9 @@ import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../chat_provider.dart'
     show ImpersonationState, impersonationStateProvider;
+import '../composer_actions_provider.dart';
 import 'chat_blur_region_tracker.dart';
+import 'composer_actions_sheet.dart';
 
 Border _uiBorder(BuildContext context, ThemePreset preset) {
   final base = preset.borderParsed ?? context.cs.onSurface;
@@ -369,6 +372,80 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     );
   }
 
+  /// The configurable button row under the composer.
+  ///
+  /// Which buttons appear, and in what order, comes from
+  /// [composerActionsProvider]; this only maps each enabled action onto its
+  /// callback. An action whose callback is unavailable in the current layout
+  /// (the drawer button on desktop) is skipped whatever the setting says —
+  /// hiding a dead button beats honouring a preference nobody can act on.
+  ///
+  /// Long-pressing anywhere in the row opens the picker, so the setting is
+  /// reachable from the row it configures and not only from Settings.
+  Widget _buildActionRow() {
+    final actions =
+        ref.watch(composerActionsProvider).value ?? kDefaultComposerActions;
+
+    final buttons = <Widget>[];
+    for (final action in actions) {
+      final button = _buildActionButton(action);
+      if (button == null) continue;
+      if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 8));
+      buttons.add(button);
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPress: () {
+        Haptics.mediumImpact();
+        ComposerActionsSheet.show(context);
+      },
+      child: Row(mainAxisSize: MainAxisSize.min, children: buttons),
+    );
+  }
+
+  /// Null when [action] has nothing to do in the current layout.
+  Widget? _buildActionButton(ComposerAction action) {
+    switch (action) {
+      case ComposerAction.drawer:
+        // Null on desktop, where the drawer lives in the right sidebar
+        // instead — drop the button rather than leave a dead one behind.
+        if (widget.onMagicDrawer == null) return null;
+        return _CircleBtn(
+          icon: action.icon,
+          onTap: widget.onMagicDrawer,
+          color: widget.isDrawerOpen ? Colors.amber : null,
+          batterySaver: widget.batterySaver,
+          blurRegionId: 'btn-magic',
+        );
+      case ComposerAction.attach:
+        return _CircleBtn(
+          icon: action.icon,
+          onTap: _pickImage,
+          batterySaver: widget.batterySaver,
+          blurRegionId: 'btn-attach',
+        );
+      case ComposerAction.fullscreen:
+        return _CircleBtn(
+          icon: action.icon,
+          onTap: _openFullscreenEditor,
+          batterySaver: widget.batterySaver,
+          blurRegionId: 'btn-fullscreen',
+        );
+      case ComposerAction.guidance:
+        return _CircleBtn(
+          icon: action.icon,
+          onTap: () => setState(() {
+            _guidanceMode = !_guidanceMode;
+            if (!_guidanceMode) _guidanceController.clear();
+          }),
+          color: _guidanceMode ? Colors.orange : null,
+          batterySaver: widget.batterySaver,
+          blurRegionId: 'btn-guidance',
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final preset = ref.watch(themeProvider.select((s) => s.activePreset));
@@ -676,48 +753,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Null on desktop, where the drawer lives in the right
-                    // sidebar instead — drop the button rather than leave a
-                    // dead one behind.
-                    if (widget.onMagicDrawer != null) ...[
-                      _CircleBtn(
-                        icon: Icons.auto_awesome,
-                        onTap: widget.onMagicDrawer,
-                        color: widget.isDrawerOpen ? Colors.amber : null,
-                        batterySaver: widget.batterySaver,
-                        blurRegionId: 'btn-magic',
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    _CircleBtn(
-                      icon: Icons.attach_file,
-                      onTap: _pickImage,
-                      batterySaver: widget.batterySaver,
-                      blurRegionId: 'btn-attach',
-                    ),
-                    const SizedBox(width: 8),
-                    _CircleBtn(
-                      icon: Icons.fullscreen,
-                      onTap: _openFullscreenEditor,
-                      batterySaver: widget.batterySaver,
-                      blurRegionId: 'btn-fullscreen',
-                    ),
-                    const SizedBox(width: 8),
-                    _CircleBtn(
-                      icon: Icons.north_east,
-                      onTap: () => setState(() {
-                        _guidanceMode = !_guidanceMode;
-                        if (!_guidanceMode) _guidanceController.clear();
-                      }),
-                      color: _guidanceMode ? Colors.orange : null,
-                      batterySaver: widget.batterySaver,
-                      blurRegionId: 'btn-guidance',
-                    ),
-                  ],
-                ),
+                _buildActionRow(),
                 _SendBtn(
                   icon: isGenerating
                       ? Icons.stop_rounded

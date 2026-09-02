@@ -13,6 +13,11 @@ class MagicCard extends StatefulWidget {
   final VoidCallback onDelete;
   final VoidCallback? onLongPress;
 
+  /// False for cards that back a built-in feature rather than user content:
+  /// edit mode still reorders and renames them, but the delete badge is not
+  /// drawn, because removing one would take the feature away for good.
+  final bool deletable;
+
   const MagicCard({
     super.key,
     required this.item,
@@ -21,6 +26,7 @@ class MagicCard extends StatefulWidget {
     required this.onTap,
     required this.onDelete,
     this.onLongPress,
+    this.deletable = true,
   });
 
   @override
@@ -122,7 +128,7 @@ class _MagicCardState extends State<MagicCard> {
                       ),
                     ],
                   ),
-                  if (editing)
+                  if (editing && widget.deletable)
                     Positioned(
                       top: -8,
                       right: -8,
