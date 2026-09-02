@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 
 import '../../models/tracker.dart';
@@ -6,6 +8,8 @@ import '../app_db.dart';
 import 'reconciliation_state_codec.dart';
 
 class TrackerRepo {
+  static const initialGameTimeSeedName = '__game_time_initial_seed_v1';
+
   final AppDatabase db;
 
   const TrackerRepo(this.db);
@@ -62,6 +66,41 @@ class TrackerRepo {
   /// session has no snapshot yet, so this narrowly scoped bootstrap is the
   /// only live model-owned state allowed into that initial committed base.
   Future<List<Tracker>> getInitialGameTimeSeed(String sessionId) async {
+    final stored = await get(sessionId, initialGameTimeSeedName);
+    if (stored != null &&
+        stored.scope == 'system' &&
+        stored.provenance == 'game_time_seed') {
+      try {
+        final value = jsonDecode(stored.value);
+        if (value is Map<String, dynamic>) {
+          final time = value['time'];
+          final date = value['date'];
+          final day = value['day'];
+          if (time is String &&
+              time.trim().isNotEmpty &&
+              date is String &&
+              date.trim().isNotEmpty &&
+              day is String &&
+              day.trim().isNotEmpty) {
+            return {'world:time': time, 'world:date': date, 'world:day': day}
+                .entries
+                .map(
+                  (entry) => Tracker(
+                    sessionId: sessionId,
+                    name: entry.key,
+                    value: entry.value,
+                    scope: 'ledger',
+                    provenance: 'game_time_seed',
+                    updatedAt: stored.updatedAt,
+                  ),
+                )
+                .toList(growable: false);
+          }
+        }
+      } on FormatException {
+        // Fall through to the legacy provenance-only representation.
+      }
+    }
     return _getCompleteGameTime(
       sessionId,
       (tracker) => tracker.provenance == 'game_time_seed',
@@ -107,6 +146,15 @@ class TrackerRepo {
           final current = await get(sessionId, name);
           if (current?.value != expectedValues[name]) return false;
         }
+      }
+      if (await get(sessionId, initialGameTimeSeedName) == null) {
+        await upsertValue(
+          sessionId,
+          initialGameTimeSeedName,
+          jsonEncode({'time': time, 'date': date, 'day': day}),
+          scope: 'system',
+          provenance: 'game_time_seed',
+        );
       }
       for (final entry in {
         'world:time': time,

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/tracker_repo.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/character_knowledge_fact.dart';
 import 'package:glaze_flutter/core/models/knowledge_cleanup.dart';
@@ -15,7 +16,7 @@ final _messageServiceProvider = Provider(ChatMessageService.new);
 
 void main() {
   test(
-    'deleting the last assistant message preserves the game clock as a seed',
+    'deleting generated messages restores the original game-time seed',
     () async {
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       final container = ProviderContainer(
@@ -31,39 +32,49 @@ void main() {
         characterId: 'c1',
         sessionIndex: 0,
         messages: const [
-          ChatMessage(id: 'u1', role: 'user', content: 'hi', timestamp: 1),
+          ChatMessage(
+            id: 'g1',
+            role: 'assistant',
+            content: 'hello',
+            timestamp: 1,
+          ),
+          ChatMessage(id: 'u1', role: 'user', content: 'hi', timestamp: 2),
           ChatMessage(
             id: 'a1',
             role: 'assistant',
             content: 'reply',
-            timestamp: 2,
+            timestamp: 3,
+          ),
+          ChatMessage(id: 'u2', role: 'user', content: 'next', timestamp: 4),
+          ChatMessage(
+            id: 'a2',
+            role: 'assistant',
+            content: 'later',
+            timestamp: 5,
           ),
         ],
       );
       await container.read(chatRepoProvider).put(session);
-      // A complete clock tuple from a previous Ledger run — no committed
-      // tracker snapshot exists yet.
       final trackerRepo = container.read(trackerRepoProvider);
-      for (final entry in {
-        'world:time': '14:15',
-        'world:date': '01.01.2027',
-        'world:day': '2',
-      }.entries) {
-        await trackerRepo.upsertValue(
-          's1',
-          entry.key,
-          entry.value,
-          scope: 'ledger',
-          provenance: 'studio_ledger',
-        );
-      }
+      await trackerRepo.seedInitialGameTime(
+        sessionId: 's1',
+        time: '08:00',
+        date: '21.04.2026',
+      );
+      await trackerRepo.upsertValue(
+        's1',
+        'world:time',
+        '08:27',
+        scope: 'ledger',
+        provenance: 'studio_ledger',
+      );
 
       await container.read(_messageServiceProvider).deleteMessages(session, {
-        1,
+        2,
+        3,
+        4,
       });
 
-      // The rollback-to-empty path must keep a complete bootstrap tuple so a
-      // following regeneration still stamps the opening clock.
       final seed = await trackerRepo.getInitialGameTimeSeed('s1');
       expect(seed.map((t) => t.name).toSet(), {
         'world:time',
@@ -71,11 +82,62 @@ void main() {
         'world:day',
       });
       final byName = {for (final t in seed) t.name: t.value};
-      expect(byName['world:time'], '14:15');
-      expect(byName['world:date'], '01.01.2027');
-      expect(byName['world:day'], '2');
+      expect(byName['world:time'], '08:00');
+      expect(byName['world:date'], '21.04.2026');
+      expect(byName['world:day'], '0');
+      expect((await trackerRepo.get('s1', 'world:time'))?.value, '08:00');
+      expect(
+        (await container.read(chatRepoProvider).getById('s1'))?.messages.map(
+          (message) => message.id,
+        ),
+        ['g1', 'u1'],
+      );
     },
   );
+
+  test('legacy rollback keeps live clock without inventing a seed', () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [appDbProvider.overrideWithValue(db)],
+    );
+    addTearDown(() async {
+      container.dispose();
+      await db.close();
+    });
+    final session = ChatSession(
+      id: 's1',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: const [
+        ChatMessage(id: 'u1', role: 'user', content: 'hi'),
+        ChatMessage(id: 'a1', role: 'assistant', content: 'reply'),
+      ],
+    );
+    await container.read(chatRepoProvider).put(session);
+    final trackerRepo = container.read(trackerRepoProvider);
+    for (final entry in {
+      'world:time': '08:27',
+      'world:date': '21.04.2026',
+      'world:day': '0',
+    }.entries) {
+      await trackerRepo.upsertValue(
+        's1',
+        entry.key,
+        entry.value,
+        scope: 'ledger',
+        provenance: 'studio_ledger',
+      );
+    }
+
+    await container.read(_messageServiceProvider).deleteMessages(session, {1});
+
+    expect((await trackerRepo.get('s1', 'world:time'))?.value, '08:27');
+    expect(await trackerRepo.getInitialGameTimeSeed('s1'), isEmpty);
+    expect(
+      await trackerRepo.get('s1', TrackerRepo.initialGameTimeSeedName),
+      isNull,
+    );
+  });
 
   test(
     'bulk delete persists final state and clears raw-message index',

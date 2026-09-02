@@ -87,50 +87,76 @@ class SessionCanonRollbackRepo {
       throw StateError('Rollback session character does not exist.');
     }
     final targetCharacter = await _loadCharacterSnapshot(target);
-    final restored = targetCharacter.copyWith(
-      id: current.id,
-      name: current.name,
-      displayName: current.displayName,
-      avatarPath: current.avatarPath,
-      color: current.color,
-      updatedAt: current.updatedAt,
-      createdAt: current.createdAt,
-      gallery: current.gallery,
-      currentSessionIndex: current.currentSessionIndex,
-      fav: current.fav,
-      characterVersion: current.characterVersion,
-      picksHash: current.picksHash,
-      tokenCount: current.tokenCount,
-      variantGroupId: current.variantGroupId,
-      variantName: current.variantName,
-      variantOrder: current.variantOrder,
-      hidden: current.hidden,
-    );
+    var rollbackCharacterId = current.id;
+    var rollbackRevision = 0;
+    var rollbackHash = '';
+    final targetLive = target.characterId == current.id
+        ? null
+        : await CharacterRepo(db).getById(target.characterId);
+    final canRebindToTarget =
+        targetLive != null &&
+        CardCanonicalizer.sha256(targetLive) == target.characterRevisionHash;
 
-    final latestRevision =
-        await (db.select(db.characterRevisionRows)
-              ..where((row) => row.characterId.equals(current.id))
-              ..orderBy([(row) => OrderingTerm.desc(row.revision)])
-              ..limit(1))
-            .getSingleOrNull();
-    if (latestRevision == null) {
-      throw StateError('Rollback character lineage does not exist.');
+    if (canRebindToTarget) {
+      final changed =
+          await (db.update(db.chatSessions)..where(
+                (row) =>
+                    row.sessionId.equals(sessionId) &
+                    row.characterId.equals(current.id),
+              ))
+              .write(
+                ChatSessionsCompanion(characterId: Value(target.characterId)),
+              );
+      if (changed != 1) throw StateError('Rollback session owner is stale.');
+      rollbackCharacterId = target.characterId;
+      rollbackRevision = target.characterRevision;
+      rollbackHash = target.characterRevisionHash;
+    } else {
+      final restored = targetCharacter.copyWith(
+        id: current.id,
+        name: current.name,
+        displayName: current.displayName,
+        avatarPath: current.avatarPath,
+        color: current.color,
+        updatedAt: current.updatedAt,
+        createdAt: current.createdAt,
+        gallery: current.gallery,
+        currentSessionIndex: current.currentSessionIndex,
+        fav: current.fav,
+        characterVersion: current.characterVersion,
+        picksHash: current.picksHash,
+        tokenCount: current.tokenCount,
+        variantGroupId: current.variantGroupId,
+        variantName: current.variantName,
+        variantOrder: current.variantOrder,
+        hidden: current.hidden,
+      );
+
+      final latestRevision =
+          await (db.select(db.characterRevisionRows)
+                ..where((row) => row.characterId.equals(current.id))
+                ..orderBy([(row) => OrderingTerm.desc(row.revision)])
+                ..limit(1))
+              .getSingleOrNull();
+      if (latestRevision == null) {
+        throw StateError('Rollback character lineage does not exist.');
+      }
+      rollbackRevision = latestRevision.revision + 1;
+      rollbackHash = CardCanonicalizer.sha256(restored);
+      await _restoreCharacterCas(current, restored);
+      await db
+          .into(db.characterRevisionRows)
+          .insert(
+            CharacterRevisionRowsCompanion.insert(
+              characterId: current.id,
+              revision: rollbackRevision,
+              revisionHash: rollbackHash,
+              parentRevisionHash: Value(latestRevision.revisionHash),
+              snapshotJson: jsonEncode(restored.toJson()),
+              createdAt: Value(currentTimestampSeconds()),
+            ),
+          );
     }
-    final newRevision = latestRevision.revision + 1;
-    final newHash = CardCanonicalizer.sha256(restored);
-    await _restoreCharacterCas(current, restored);
-    await db
-        .into(db.characterRevisionRows)
-        .insert(
-          CharacterRevisionRowsCompanion.insert(
-            characterId: current.id,
-            revision: newRevision,
-            revisionHash: newHash,
-            parentRevisionHash: Value(latestRevision.revisionHash),
-            snapshotJson: jsonEncode(restored.toJson()),
-            createdAt: Value(currentTimestampSeconds()),
-          ),
-        );
 
     final rollbackAnchor = target.sequence == 0
         ? SessionCanonCheckpointAnchor(
@@ -147,9 +173,9 @@ class SessionCanonRollbackRepo {
     final rollback = await _checkpoints.appendInTransaction(
       sessionId: sessionId,
       expectedParentCheckpointId: latest.id,
-      characterId: current.id,
-      characterRevision: newRevision,
-      characterRevisionHash: newHash,
+      characterId: rollbackCharacterId,
+      characterRevision: rollbackRevision,
+      characterRevisionHash: rollbackHash,
       rewriteJobId: rollbackId,
       anchor: rollbackAnchor,
     );

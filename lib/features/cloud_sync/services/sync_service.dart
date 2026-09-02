@@ -46,6 +46,7 @@ class SyncService {
   final SessionDeletionStore _sessionDeletionStore;
   final CharacterDeletionStore _characterDeletionStore;
   final Future<void> Function(LorebookActivations) _saveLorebookActivations;
+  final Future<void> Function(Set<String>)? _reconcilePulledSessions;
 
   SyncProvider _provider = SyncProvider.dropbox;
   SyncStatus _status = SyncStatus.idle;
@@ -119,9 +120,11 @@ class SyncService {
     required SessionDeletionStore sessionDeletionStore,
     required CharacterDeletionStore characterDeletionStore,
     required Future<void> Function(LorebookActivations) saveLorebookActivations,
+    Future<void> Function(Set<String>)? reconcilePulledSessions,
   }) : _sessionDeletionStore = sessionDeletionStore,
        _characterDeletionStore = characterDeletionStore,
-       _saveLorebookActivations = saveLorebookActivations;
+       _saveLorebookActivations = saveLorebookActivations,
+       _reconcilePulledSessions = reconcilePulledSessions;
 
   CloudAdapter get _adapter {
     switch (_provider) {
@@ -186,6 +189,7 @@ class SyncService {
     _saveLorebookActivations,
     _reconciliationStateStore,
     _sessionLorebookOverlayStore,
+    _reconcilePulledSessions,
   );
 
   Future<void> init() async {

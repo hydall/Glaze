@@ -65,6 +65,7 @@ class SyncEngine {
   final SessionDeletionStore _sessionDeletionStore;
   final CharacterDeletionStore _characterDeletionStore;
   final Future<void> Function(LorebookActivations) _saveLorebookActivations;
+  final Future<void> Function(Set<String>)? _reconcilePulledSessions;
   final SyncQueue _queue = SyncQueue();
   late final SyncBinaryAssetSyncer _binarySyncer;
   bool _includeApiKeys = false;
@@ -98,6 +99,7 @@ class SyncEngine {
     this._saveLorebookActivations, [
     this._reconciliationStateStore,
     this._sessionLorebookOverlayStore,
+    this._reconcilePulledSessions,
   ]) {
     _binarySyncer = SyncBinaryAssetSyncer(
       _adapter,
@@ -577,8 +579,24 @@ class SyncEngine {
     // Both dependent aggregates validate against chats/base lorebooks. Apply
     // primary entities first, current lore projections second, and immutable
     // reconciliation provenance last.
+    final primaryErrors = await applyEntries(primaryEntries);
+    if (primaryErrors.isNotEmpty) {
+      throw SyncQueueAggregateError(primaryErrors);
+    }
+    final touchedSessionIds = primaryEntries
+        .where(
+          (entry) =>
+              entry.type == 'chat' ||
+              entry.type == 'tracker_snapshot' ||
+              entry.type == 'tracker_value',
+        )
+        .map((entry) => entry.id)
+        .toSet();
+    if (touchedSessionIds.isNotEmpty) {
+      await _reconcilePulledSessions?.call(touchedSessionIds);
+    }
+
     final taskErrors = <Object>[
-      ...await applyEntries(primaryEntries),
       ...await applyEntries(overlayEntries),
       ...await applyEntries(reconciliationEntries),
     ];
@@ -923,11 +941,9 @@ class SyncEngine {
           return SyncSerialization.infoBlocksPayload(blocks);
         case 'tracker_snapshot':
           final snaps = await _trackerSnapshotStore.getBySessionId(id);
-          if (snaps.isEmpty) return null;
           return {'__trackerSnapshots': true, 'items': snaps};
         case 'tracker_value':
           final trackers = await _trackerValueStore.getBySessionId(id);
-          if (trackers.isEmpty) return null;
           return {'__trackerValues': true, 'items': trackers};
         case 'studio_config':
           final config = await _studioConfigStore.getById(id);
@@ -1063,7 +1079,10 @@ class SyncEngine {
           break;
       }
     } catch (_) {
-      if (type == 'reconciliation_state' ||
+      if (type == 'chat' ||
+          type == 'tracker_snapshot' ||
+          type == 'tracker_value' ||
+          type == 'reconciliation_state' ||
           type == 'session_lorebook_overlays') {
         rethrow;
       }

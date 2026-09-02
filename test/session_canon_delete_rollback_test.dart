@@ -428,6 +428,85 @@ void main() {
       4,
     );
   });
+
+  test('deleting a rewrite anchor rebinds an automatic fork', () async {
+    final original = Character(
+      id: 'original',
+      name: 'Original',
+      description: 'before rewrite',
+    );
+    final fork = Character(
+      id: 'fork',
+      name: 'Original',
+      description: 'after rewrite',
+      variantGroupId: 'original',
+      variantOrder: 1,
+    );
+    await container.read(characterRepoProvider).put(original);
+    await container.read(characterRepoProvider).put(fork);
+    await revision(original, 12, '');
+    await revision(fork, 1, '');
+    await revision(fork, 2, CardCanonicalizer.sha256(fork));
+    final session = const ChatSession(
+      id: 's1',
+      characterId: 'fork',
+      sessionIndex: 0,
+      messages: [
+        ChatMessage(id: 'm0', role: 'user', content: 'before'),
+        ChatMessage(id: 'anchor', role: 'assistant', content: 'rewrite'),
+      ],
+    );
+    await container.read(chatRepoProvider).put(session);
+    final checkpoints = container.read(sessionCanonCheckpointRepoProvider);
+    final root = await checkpoints.appendRootInTransaction(
+      sessionId: session.id,
+      characterId: original.id,
+      characterRevision: 12,
+      characterRevisionHash: CardCanonicalizer.sha256(original),
+    );
+    await checkpoints.appendInTransaction(
+      sessionId: session.id,
+      expectedParentCheckpointId: root.id,
+      characterId: fork.id,
+      characterRevision: 2,
+      characterRevisionHash: CardCanonicalizer.sha256(fork),
+      rewriteJobId: 'job-fork',
+      anchor: const SessionCanonCheckpointAnchor(
+        messageId: 'anchor',
+        swipeId: 0,
+        agentSwipeId: 0,
+      ),
+    );
+
+    final result = await container.read(_serviceProvider).deleteMessages(
+      session,
+      {1},
+    );
+
+    expect(result.characterId, original.id);
+    expect(
+      (await container.read(chatRepoProvider).getById(session.id))?.characterId,
+      original.id,
+    );
+    final timeline = await checkpoints.getForSession(session.id);
+    expect(timeline.last.characterId, original.id);
+    expect(timeline.last.characterRevision, 12);
+    expect(
+      timeline.last.characterRevisionHash,
+      CardCanonicalizer.sha256(original),
+    );
+    expect(
+      await container
+          .read(characterRevisionRepoProvider)
+          .getForCharacter(original.id),
+      hasLength(1),
+    );
+    expect(
+      (await container.read(characterRepoProvider).getById(fork.id))
+          ?.description,
+      'after rewrite',
+    );
+  });
 }
 
 Character _card(String description) => Character(

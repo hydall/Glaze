@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/llm/game_time.dart';
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/tracker.dart';
@@ -265,29 +264,14 @@ class ChatMessageService {
         messageIds: invalidatedMessageIds,
       );
       await checkpointRepo.deleteForMessages(session.id, invalidatedMessageIds);
-      // Rolling back before the first committed snapshot wipes all
-      // model-owned Ledger rows — including the game clock. Preserve the
-      // current complete tuple as a bootstrap seed so the next generation
-      // (e.g. regenerating after deleting the assistant reply) still stamps
-      // the opening clock and the next Ledger run sees a valid baseline.
+      // Rolling back before the first committed snapshot restores the original
+      // clock seed. Legacy sessions without one retain a complete live clock as
+      // a best-effort baseline, but must not promote it to an initial seed.
       var committedBase = fallbackSnapshot?.trackers ?? const <Tracker>[];
       if (fallbackSnapshot == null) {
-        final liveLedger = await trackerRepo.getBySessionAndScope(
-          session.id,
-          'ledger',
-        );
-        final clock = GameTimeState.fromTrackers(liveLedger);
-        final time = clock.time;
-        final date = clock.date;
-        final day = clock.day;
-        if (time != null && date != null && day != null) {
-          await trackerRepo.seedInitialGameTime(
-            sessionId: session.id,
-            time: time,
-            date: date,
-            day: '$day',
-          );
-          committedBase = await trackerRepo.getInitialGameTimeSeed(session.id);
+        committedBase = await trackerRepo.getInitialGameTimeSeed(session.id);
+        if (committedBase.isEmpty) {
+          committedBase = await trackerRepo.getCompleteGameTime(session.id);
         }
       }
       await trackerRepo.replaceLedgerState(session.id, committedBase);
@@ -315,8 +299,9 @@ class ChatMessageService {
       debugPrint('[ChatMessageService] failed to clear message index: $e');
     }
 
-    ChatSessionService.updateCache(updated);
-    return updated;
+    final durable = await chatRepo.getById(session.id) ?? updated;
+    ChatSessionService.updateCache(durable);
+    return durable;
   }
 
   ChatSession toggleMessageHidden(ChatSession session, int index) {
