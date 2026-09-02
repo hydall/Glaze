@@ -678,9 +678,9 @@ bubble keeps rendering the image either way — hiding affects the request only.
 `vectorSearchAvailableProvider` (`lib/core/state/lorebook_embedding_provider.dart`)
 is the single source of truth for whether the app shows anything about vectors,
 embeddings or indexes. It mirrors the condition `resolveEmbeddingConfig` uses —
-an **embedding** preset (`activeEmbeddingConfigProvider`, see INV-PS2c), not
-itself an `embedding`-mode preset, with `embeddingEnabled` on (the
-**Embeddings → Vector search** switch of the API screen).
+a selected **embedding preset** (`activeEmbeddingConfigProvider`, see INV-PS2c)
+with `embeddingEnabled` on (the **Embeddings → Vector search** switch of the
+API screen). With no embedding preset at all it is `false`.
 
 While it is `false`, these stay hidden rather than disabled: the lorebook
 search-type picker and vector params (list + global + per-book settings), the
@@ -690,31 +690,43 @@ badges, and the memory sheet's retrieval-mode row, reindex / drop-indexes
 actions and index badges. Stored values are never rewritten by the gate — the
 previous choices come back when the toggle is switched on again.
 
-### INV-PS2c: The embedding preset is selected apart from the chat preset
+### INV-PS2c: Embedding presets are a list of their own
 
-The API screen's **LLM** and **Embeddings** tabs each carry their own preset
-pill. The chat side follows `activeApiPresetIdProvider` (SharedPreferences
+The API screen's **LLM** and **Embeddings** tabs each have their own presets,
+their own selection and their own pill. Both live in the `api_configs` table
+and are told apart by `ApiConfig.mode`: `apiListProvider` serves everything
+that is **not** `'embedding'` (the LLM tab, Studio slots, every model picker),
+`embeddingPresetListProvider` serves everything that is. A row saved through
+`EmbeddingPresetListNotifier.put` is forced into that mode, so the two lists
+can never share a row.
+
+The chat side follows `activeApiPresetIdProvider` (SharedPreferences
 `activeApiConfigId`), the embedding side `activeEmbeddingPresetIdProvider`
 (`activeEmbeddingConfigId`), and switching one never moves the other — a vector
 index is tied to the model that produced it, so it must not follow the chat
 connection around.
 
-`ApiListNotifier.build` seeds `activeEmbeddingConfigId` once, from the saved
-chat preset (or the first preset), so an upgrade keeps running embeddings on
-the preset they were already on. A stored id pointing at a deleted preset is
-re-seeded the same way.
+`EmbeddingPresetListNotifier.build` seeds the list once (guarded by
+`embeddingPresetsSeeded`) from the embedding settings that used to live on a
+chat preset, pinning the new preset to the chat preset it came from so the
+borrow below resolves exactly as it did before. Nothing is seeded when nothing
+was configured: the tab shows its own empty state instead of a blank preset. A
+JS backup import clears both keys so the imported settings are carried over the
+same way.
 
-The one remaining link is the preset's **Use LLM API** toggle
-(`embeddingUseSame`, and the same fallback when a dedicated embedding endpoint
-is blank): while it is on, `resolveEmbeddingConfig(embeddingConfig, llmConfig)`
-borrows the endpoint and key of the *active LLM preset* — the model, chunk size
-and rate limit still come from the embedding preset. With the toggle off,
-`embeddingConfigProvider` does not even watch the chat selection.
+The one link left between the two sides is the embedding preset's **Use LLM
+API** toggle (`embeddingUseSame`, and the same fallback when its dedicated
+endpoint is blank): the endpoint and key are borrowed from the LLM preset named
+by `ApiConfig.embeddingLlmPresetId` — the *Endpoint from* row under the toggle
+— falling back to the active LLM preset when it names none, or names one that
+is gone (`embeddingLlmSourceProvider`). The model, chunk size and rate limit
+always come from the embedding preset. With the toggle off,
+`embeddingConfigProvider` does not watch any chat state at all.
 
 Saving follows the same split: `ApiConfigDraft.applyLlmTo` writes the
-connection / sampling / reasoning half, `applyEmbeddingTo` the embedding half,
-and the API screen sends each to its own preset (one combined `toConfig` write
-while both tabs sit on the same preset).
+connection / sampling / reasoning half to the chat preset, `applyEmbeddingTo`
+the embedding half (plus its own name) to the embedding preset, and either half
+saves on its own when the other tab has no preset.
 
 ### INV-PS3: History cutoff is oldest-first
 

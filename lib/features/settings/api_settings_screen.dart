@@ -48,6 +48,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   int _tab = 0; // 0 = LLM, 1 = Embeddings, 2 = Studio agents
 
   bool _showApiKey = false;
+  bool _showEmbApiKey = false;
   bool _isLoadingModels = false;
   ApiConnectionStatus _llmStatus = ApiConnectionStatus.idle;
   String _llmError = '';
@@ -71,6 +72,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   final _contextSizeCtrl = TextEditingController();
   final _firstChunkTimeoutCtrl = TextEditingController();
   final _reasoningHistoryCountCtrl = TextEditingController();
+  final _embNameCtrl = TextEditingController();
   final _embEndpointCtrl = TextEditingController();
   final _embApiKeyCtrl = TextEditingController();
   final _embModelCtrl = TextEditingController();
@@ -99,6 +101,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   bool _omitReasoningEffort = false;
   bool _embeddingEnabled = false;
   bool _embeddingUseSame = true;
+
+  /// The LLM preset "Use LLM API" borrows its endpoint from. Empty means
+  /// "whichever connection the LLM tab is on".
+  String _embeddingLlmPresetId = '';
   String _cacheControlTtl = 'off';
   String _cacheBreakpointMode = 'depth';
   String _sessionIdMode = 'openrouter';
@@ -140,6 +146,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _contextSizeCtrl,
     _firstChunkTimeoutCtrl,
     _reasoningHistoryCountCtrl,
+    _embNameCtrl,
     _embEndpointCtrl,
     _embApiKeyCtrl,
     _embModelCtrl,
@@ -223,6 +230,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     }
   }
 
+  /// The list a tab writes its presets to.
+  ApiPresetWriter _presetNotifier(bool forEmbedding) => forEmbedding
+      ? ref.read(embeddingPresetListProvider.notifier)
+      : ref.read(apiListProvider.notifier);
+
   void _persistActiveEmbeddingId(String? id) async {
     final prefs = ref.read(sharedPreferencesProvider).value;
     if (prefs == null) return;
@@ -301,6 +313,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _loading = true;
     final draft = ApiConfigDraft.fromConfig(config);
 
+    _embNameCtrl.text = draft.name;
     _embEndpointCtrl.text = draft.embeddingEndpoint;
     _embApiKeyCtrl.text = draft.embeddingApiKey;
     _embModelCtrl.text = draft.embeddingModel;
@@ -310,6 +323,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     setState(() {
       _embeddingEnabled = draft.values.embeddingEnabled;
       _embeddingUseSame = draft.values.embeddingUseSame;
+      _embeddingLlmPresetId = draft.values.embeddingLlmPresetId;
       // Both the model list and the connection badge describe the preset that
       // was open a moment ago.
       _embFetchedModels = [];
@@ -322,9 +336,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   Future<void> _save() async {
     final config = _ref.read(activeApiConfigProvider);
-    if (config == null) return;
+    final embeddingConfig = _ref.read(activeEmbeddingConfigProvider);
+    if (config == null && embeddingConfig == null) return;
+    // Either tab can be the only one with a preset open — the editor still
+    // saves the half that has one. The base only supplies the fields the
+    // written half does not carry.
     final draft = ApiConfigDraft(
-      values: config.copyWith(
+      values: (config ?? embeddingConfig!).copyWith(
         temperature: _temperature,
         topP: _topP,
         topK: _topK,
@@ -346,6 +364,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         omitReasoningEffort: _omitReasoningEffort,
         embeddingEnabled: _embeddingEnabled,
         embeddingUseSame: _embeddingUseSame,
+        embeddingLlmPresetId: _embeddingLlmPresetId,
         cacheControlTtl: _cacheControlTtl,
         cacheBreakpointMode: _cacheBreakpointMode,
         sessionIdMode: _sessionIdMode,
@@ -367,19 +386,20 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       embeddingMaxChunkTokens: _embChunkTokensCtrl.text,
       embeddingRequestsPerMinute: _embRequestsPerMinuteCtrl.text,
     );
-    final notifier = _ref.read(apiListProvider.notifier);
-    final embeddingConfig = _ref.read(activeEmbeddingConfigProvider);
-    if (embeddingConfig == null || embeddingConfig.id == config.id) {
-      await notifier.put(draft.toConfig(config));
-      return;
-    }
-    // The two tabs are on two different presets, so each half is written to
-    // its own: saving from the LLM tab must never copy this editor's embedding
+    // Each tab owns a preset from its own list, so each half is written to its
+    // own row: a save from the LLM tab must never copy this editor's embedding
     // fields onto the LLM preset, nor the other way round.
-    await notifier.putAll([
-      draft.applyLlmTo(config),
-      draft.applyEmbeddingTo(embeddingConfig),
-    ]);
+    if (config != null) {
+      await _ref.read(apiListProvider.notifier).put(draft.applyLlmTo(config));
+    }
+    if (embeddingConfig == null) return;
+    await _ref
+        .read(embeddingPresetListProvider.notifier)
+        .put(
+          draft
+              .applyEmbeddingTo(embeddingConfig)
+              .copyWith(name: _embNameCtrl.text.trim()),
+        );
   }
 
   bool get _supportsTemperature => true;
@@ -477,6 +497,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final asyncList = ref.watch(apiListProvider);
+    final asyncEmbeddingList = ref.watch(embeddingPresetListProvider);
     final activeConfig = ref.watch(activeApiConfigProvider);
     final embeddingConfig = ref.watch(activeEmbeddingConfigProvider);
 
@@ -493,8 +514,9 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     }
 
     final list = asyncList.value ?? [];
+    final embeddingList = asyncEmbeddingList.value ?? const <ApiConfig>[];
     final activeName = _activeName(activeConfig, list);
-    final embeddingName = _activeName(embeddingConfig, list);
+    final embeddingName = _activeName(embeddingConfig, embeddingList);
 
     return SheetView(
       startExpanded: widget.startExpanded,
@@ -510,12 +532,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       // The LLM/Embeddings switcher stays fixed in the header so it never
       // slides with the tab bodies — a single segmented control that keeps its
       // own pill animation while the content swipes beneath it.
-      headerBottom: list.isEmpty ? null : _buildTabBar(),
+      // The tab bar goes away only while there is nothing at all to configure;
+      // an empty Embeddings list is the tab's own empty state, not the screen's.
+      headerBottom: list.isEmpty && embeddingList.isEmpty
+          ? null
+          : _buildTabBar(),
       body: asyncList.when(
         loading: () => const Center(child: GlazeSpinner()),
         error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
-        data: (list) => list.isEmpty
-            ? _buildEmptyState()
+        data: (list) => list.isEmpty && embeddingList.isEmpty
+            ? _buildEmptyState(forEmbedding: false)
             : SwipeTabSwitcher(
                 index: _tab,
                 length: 3,
@@ -523,8 +549,18 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                 child: TabSlideSwitcher(
                   index: _tab,
                   child: switch (_tab) {
-                    0 => _buildLlmTab(list, activeName),
-                    1 => _buildEmbeddingsTab(list, embeddingName),
+                    0 =>
+                      list.isEmpty
+                          ? _buildEmptyState(forEmbedding: false)
+                          : _buildLlmTab(list, activeName),
+                    1 =>
+                      embeddingList.isEmpty
+                          ? _buildEmptyState(forEmbedding: true)
+                          : _buildEmbeddingsTab(
+                              embeddingList,
+                              list,
+                              embeddingName,
+                            ),
                     _ => StudioSlotsTab(controller: _agentsScrollController),
                   },
                 ),
@@ -585,8 +621,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       );
     }
     // Nothing to probe until the preset has embeddings switched on, so the
-    // badge appears with the rest of the embedding settings.
-    if (!_embeddingEnabled) return pill;
+    // badge appears with the rest of the embedding settings. Without it the
+    // pill is alone under a full-width tight constraint, which would stretch
+    // it across the row — Align hands it loose ones so it keeps its own size,
+    // exactly as it has inside ConnectionStatus's Row.
+    if (!_embeddingEnabled) {
+      return Align(alignment: Alignment.centerLeft, child: pill);
+    }
     return ConnectionStatus(
       status: _embStatus,
       errorMessage: _embError,
@@ -641,21 +682,32 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState({required bool forEmbedding}) {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.cloud, size: 64, color: context.cs.onSurfaceVariant),
+          Icon(
+            forEmbedding ? Icons.layers_outlined : Icons.cloud,
+            size: 64,
+            color: context.cs.onSurfaceVariant,
+          ),
           const SizedBox(height: 16),
           Text(
-            'settings_no_api_configs'.tr(),
+            forEmbedding
+                ? 'settings_no_embedding_configs'.tr()
+                : 'settings_no_api_configs'.tr(),
             style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 15),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
           FilledButton.tonal(
-            onPressed: _createNewPreset,
-            child: Text('settings_add_api_config'.tr()),
+            onPressed: () => _createNewPreset(forEmbedding: forEmbedding),
+            child: Text(
+              forEmbedding
+                  ? 'settings_add_embedding_config'.tr()
+                  : 'settings_add_api_config'.tr(),
+            ),
           ),
         ],
       ),
@@ -1108,7 +1160,14 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   // ── Embeddings tab ────────────────────────────────────────────────────────────
 
-  Widget _buildEmbeddingsTab(List<ApiConfig> list, String embeddingName) {
+  /// [presets] is the Embeddings tab's own list — what the pill and its sheet
+  /// switch between. [chatPresets] is the LLM list, offered by the
+  /// "endpoint from" row under the *Use LLM API* toggle.
+  Widget _buildEmbeddingsTab(
+    List<ApiConfig> presets,
+    List<ApiConfig> chatPresets,
+    String embeddingName,
+  ) {
     return Builder(
       builder: (context) => ListView(
         controller: _embScrollController,
@@ -1119,13 +1178,22 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _buildTopControls(list, embeddingName, forEmbedding: true),
+            child: _buildTopControls(
+              presets,
+              embeddingName,
+              forEmbedding: true,
+            ),
           ),
           MenuGroup(
             compact: true,
             header: 'tab_embeddings'.tr(),
             helpTerm: 'embeddings',
             items: [
+              MenuFieldItem(
+                label: 'settings_config_name'.tr(),
+                controller: _embNameCtrl,
+                placeholder: 'My embeddings',
+              ),
               MenuSwitchItem(
                 label: 'search_type_vector'.tr(),
                 description: 'settings_enable_vector_desc'.tr(),
@@ -1135,7 +1203,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   final config = ref.read(activeEmbeddingConfigProvider);
                   if (config != null) {
                     ref
-                        .read(apiListProvider.notifier)
+                        .read(embeddingPresetListProvider.notifier)
                         .setEmbeddingEnabled(config.id, v);
                   }
                   _scheduleSave();
@@ -1151,10 +1219,23 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                     setState(() {
                       _embeddingUseSame = v;
                       _embFetchedModels = [];
+                      _embStatus = ApiConnectionStatus.idle;
+                      _embError = '';
                     });
                     _scheduleSave();
                   },
                 ),
+                // Which LLM preset the borrowed endpoint comes from. Without
+                // it the answer was implicit — whatever the LLM tab happened
+                // to be on — which is exactly what the two tabs no longer
+                // share.
+                if (_embeddingUseSame)
+                  MenuSelectorItem(
+                    label: 'settings_embedding_llm_preset'.tr(),
+                    description: 'settings_embedding_llm_preset_desc'.tr(),
+                    currentValue: _embeddingLlmPresetName(chatPresets),
+                    onTap: () => _openEmbeddingLlmPresetSelector(chatPresets),
+                  ),
                 if (!_embeddingUseSame) ...[
                   ValueListenableBuilder<TextEditingValue>(
                     valueListenable: _embEndpointCtrl,
@@ -1174,9 +1255,21 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   _buildEmbeddingModelField(),
                   MenuFieldItem(
                     label: 'onboarding_label_key'.tr(),
+                    helpTerm: 'apikey',
                     controller: _embApiKeyCtrl,
                     placeholder: 'sk-...',
-                    obscure: true,
+                    obscure: !_showEmbApiKey,
+                    suffix: IconButton(
+                      icon: Icon(
+                        _showEmbApiKey
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        color: context.cs.onSurfaceVariant,
+                        size: 20,
+                      ),
+                      onPressed: () =>
+                          setState(() => _showEmbApiKey = !_showEmbApiKey),
+                    ),
                   ),
                 ],
                 if (_embeddingUseSame) _buildEmbeddingModelField(),
@@ -1229,9 +1322,92 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     );
   }
 
+  /// The name shown by the "endpoint from" row: the LLM preset the embedding
+  /// preset names, or the connection the LLM tab is on when it names none.
+  String _embeddingLlmPresetName(List<ApiConfig> chatPresets) {
+    if (_embeddingLlmPresetId.isEmpty) return 'studio_slot_use_chat_api'.tr();
+    for (final config in chatPresets) {
+      if (config.id != _embeddingLlmPresetId) continue;
+      if (config.name.isNotEmpty) return config.name;
+      if (config.model.isNotEmpty) return config.model;
+      return 'unnamed_entry'.tr();
+    }
+    // The named preset was deleted; the request falls back to the active one.
+    return 'studio_slot_use_chat_api'.tr();
+  }
+
+  void _openEmbeddingLlmPresetSelector(List<ApiConfig> chatPresets) {
+    BottomSheetItem radio(String id, String label) => BottomSheetItem(
+      label: label,
+      icon: _embeddingLlmPresetId == id
+          ? Icons.radio_button_checked
+          : Icons.radio_button_off,
+      iconColor: _embeddingLlmPresetId == id
+          ? context.cs.primary
+          : context.cs.onSurfaceVariant,
+      onTap: () {
+        Navigator.of(context, rootNavigator: true).pop();
+        // The model list and the badge belong to the connection that was
+        // selected a moment ago.
+        setState(() {
+          _embeddingLlmPresetId = id;
+          _embFetchedModels = [];
+          _embStatus = ApiConnectionStatus.idle;
+          _embError = '';
+        });
+        _scheduleSave();
+      },
+    );
+
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'settings_embedding_llm_preset'.tr(),
+      items: [
+        radio('', 'studio_slot_use_chat_api'.tr()),
+        for (final config in chatPresets)
+          radio(
+            config.id,
+            config.name.isNotEmpty
+                ? config.name
+                : (config.model.isNotEmpty
+                      ? config.model
+                      : 'unnamed_entry'.tr()),
+          ),
+      ],
+    );
+  }
+
+  /// The LLM connection "use LLM API" borrows, as the request will see it: the
+  /// preset named by the row — already persisted, so its endpoint is stored
+  /// normalized — or the connection the LLM tab is on, whose fields are still
+  /// being edited and so are read from the controllers.
+  ApiConfig? _embeddingLlmSource() {
+    if (_embeddingLlmPresetId.isNotEmpty) {
+      final list = ref.read(apiListProvider).value ?? const <ApiConfig>[];
+      for (final config in list) {
+        if (config.id == _embeddingLlmPresetId) return config;
+      }
+    }
+    final endpoint = EndpointNormalizer.persistedLlmEndpoint(
+      raw: _endpointCtrl.text.trim(),
+      protocol: _protocol,
+      model: _modelCtrl.text.trim(),
+      stream: _stream,
+      useResponsesApi: _useResponsesApi,
+    );
+    if (endpoint.isEmpty) return null;
+    return ApiConfig(
+      id: '',
+      endpoint: endpoint,
+      apiKey: _keyCtrl.text.trim(),
+      model: _modelCtrl.text.trim(),
+      protocol: _protocol,
+    );
+  }
+
   /// The connection the embedding model list is fetched from, mirroring what
-  /// `resolveEmbeddingConfig` feeds the request: the LLM connection while
-  /// "use LLM API" is on, the dedicated embedding one otherwise.
+  /// `resolveEmbeddingConfig` feeds the request: the borrowed LLM connection
+  /// while "use LLM API" is on, the dedicated embedding one otherwise.
   ///
   /// The endpoint goes through the same persistence normalization the repo
   /// applies, so a protocol with a fixed URL (OpenRouter, whose endpoint field
@@ -1239,19 +1415,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   /// when there is nothing to fetch from yet.
   ApiConfig? _embeddingModelSource() {
     if (_embeddingUseSame) {
-      final endpoint = EndpointNormalizer.persistedLlmEndpoint(
-        raw: _endpointCtrl.text.trim(),
-        protocol: _protocol,
-        model: _modelCtrl.text.trim(),
-        stream: _stream,
-        useResponsesApi: _useResponsesApi,
-      );
-      if (endpoint.isEmpty) return null;
+      final source = _embeddingLlmSource();
+      if (source == null || source.endpoint.isEmpty) return null;
       return ApiConfig(
         id: '',
-        endpoint: endpoint,
-        apiKey: _keyCtrl.text.trim(),
-        protocol: _protocol,
+        endpoint: source.endpoint,
+        apiKey: source.apiKey,
+        protocol: source.protocol,
       );
     }
     final raw = _embEndpointCtrl.text.trim();
@@ -1334,8 +1504,9 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   /// preset or selecting several updates the open sheet in place — it is never
   /// closed and reopened to show the change.
   ///
-  /// It lists the same presets either way; [forEmbedding] only decides which
-  /// selection a tap moves — the chat connection or the embedding one.
+  /// [forEmbedding] picks the list it shows and the selection a tap moves: the
+  /// Embeddings tab has presets of its own, so the two sheets never share a
+  /// row.
   Future<void> _showPresetSheet({required bool forEmbedding}) async {
     _presetSheetOpen = true;
     await GlazeBottomSheet.show<void>(
@@ -1347,7 +1518,12 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       headerAction: Consumer(
         builder: (context, ref, _) {
           final selection = ref.watch(apiPresetSelectionProvider);
-          if (selection.active) return _buildSelectionActions(selection);
+          if (selection.active) {
+            return _buildSelectionActions(
+              selection,
+              forEmbedding: forEmbedding,
+            );
+          }
           final mode =
               ref.watch(apiPresetSortProvider).value?.mode ??
               ApiPresetSortMode.manual;
@@ -1385,7 +1561,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         },
       ),
       cardsBuilder: (context, ref) {
-        final list = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
+        final list =
+            ref
+                .watch(
+                  forEmbedding ? embeddingPresetListProvider : apiListProvider,
+                )
+                .value ??
+            const <ApiConfig>[];
         final sort =
             ref.watch(apiPresetSortProvider).value ??
             const ApiPresetSortState();
@@ -1411,7 +1593,9 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                 activeId,
                 selection: selection,
                 reordering: reordering,
-                canDelete: list.length > 1,
+                // The Embeddings tab has an empty state of its own, so its
+                // last preset may go; the chat side always keeps one.
+                canDelete: forEmbedding || list.length > 1,
                 forEmbedding: forEmbedding,
               ),
           ],
@@ -1432,7 +1616,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   /// What the sheet header shows while presets are selected: the count and the
   /// bulk actions, in place of the sort and add controls.
-  Widget _buildSelectionActions(ApiPresetSelectionState selection) {
+  Widget _buildSelectionActions(
+    ApiPresetSelectionState selection, {
+    required bool forEmbedding,
+  }) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1447,7 +1634,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         IconButton(
           icon: Icon(Icons.delete_outline_rounded, color: context.cs.error),
           tooltip: 'action_delete'.tr(),
-          onPressed: () => _confirmDeleteSelected(selection),
+          onPressed: () =>
+              _confirmDeleteSelected(selection, forEmbedding: forEmbedding),
         ),
         IconButton(
           icon: Icon(Icons.close_rounded, color: context.cs.onSurfaceVariant),
@@ -1522,7 +1710,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             icon: Icons.delete_outline_rounded,
             color: context.cs.onSurfaceVariant,
             onTap: () async {
-              await ref.read(apiListProvider.notifier).remove(config.id);
+              await _presetNotifier(forEmbedding).remove(config.id);
               _reloadAfterDelete(activeId, {config.id});
             },
           ),
@@ -1579,12 +1767,21 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   /// Deletes every selected preset, after a confirmation. The sheet stays open
   /// and the rows simply go — unless nothing is left to show, which is the one
   /// case it closes itself.
-  void _confirmDeleteSelected(ApiPresetSelectionState selection) {
+  void _confirmDeleteSelected(
+    ApiPresetSelectionState selection, {
+    required bool forEmbedding,
+  }) {
     final ids = selection.ids.toList();
     if (ids.isEmpty) return;
-    final list = ref.read(apiListProvider).value ?? const <ApiConfig>[];
+    final list =
+        ref
+            .read(forEmbedding ? embeddingPresetListProvider : apiListProvider)
+            .value ??
+        const <ApiConfig>[];
     final activeId =
-        ref.read(activeApiPresetIdProvider) ??
+        (forEmbedding
+            ? ref.read(activeEmbeddingPresetIdProvider)
+            : ref.read(activeApiPresetIdProvider)) ??
         (list.isNotEmpty ? list.first.id : null);
     GlazeBottomSheet.show<void>(
       context,
@@ -1605,11 +1802,15 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               // Each delete awaits a DB round-trip; bail out if the screen went
               // away in the meantime rather than reading a disposed ref.
               if (!mounted) return;
-              await ref.read(apiListProvider.notifier).remove(id);
+              await _presetNotifier(forEmbedding).remove(id);
             }
             if (!mounted) return;
             _reloadAfterDelete(activeId, ids.toSet());
-            final remaining = await ref.read(apiListProvider.future);
+            final remaining = await ref.read(
+              forEmbedding
+                  ? embeddingPresetListProvider.future
+                  : apiListProvider.future,
+            );
             // An empty sheet would be a header and nothing else.
             if (remaining.isEmpty && mounted && _presetSheetOpen) {
               Navigator.of(context, rootNavigator: true).pop();
@@ -1693,6 +1894,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           final newConfig = ApiConfig(
             id: DateTime.now().millisecondsSinceEpoch.toString(),
             name: trimmed,
+            mode: forEmbedding ? kEmbeddingPresetMode : 'chat',
           );
           if (forEmbedding) {
             ref.read(activeEmbeddingPresetIdProvider.notifier).state =
@@ -1706,7 +1908,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             _loadedPresetId = null;
             _loadFromConfig(newConfig);
           }
-          await ref.read(apiListProvider.notifier).put(newConfig);
+          await _presetNotifier(forEmbedding).put(newConfig);
         },
       ),
     );
@@ -1949,6 +2151,31 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     }
   }
 
+  /// After a successful embedding test, adopt the URL the request actually
+  /// reached — the mirror of [_adoptResolvedEndpoint] for the dedicated
+  /// endpoint field, so a rescued base path is not re-walked on every launch.
+  ///
+  /// With "use LLM API" on there is no field here to write to: the URL belongs
+  /// to the LLM preset, and the LLM tab's own test adopts it there.
+  void _adoptResolvedEmbeddingEndpoint() {
+    if (_embeddingUseSame) return;
+    final raw = _embEndpointCtrl.text.trim();
+    if (raw.isEmpty) return;
+    final resolvedBase = EndpointResolutionCache.resolvedBase(raw);
+    if (resolvedBase == null) return;
+    if (resolvedBase == EndpointNormalizer.parse(raw).base) return;
+
+    _embEndpointCtrl.text = '$resolvedBase/embeddings';
+    if (mounted) {
+      GlazeToast.show(
+        context,
+        'settings_endpoint_autofixed'.tr(
+          namedArgs: {'url': _embEndpointCtrl.text},
+        ),
+      );
+    }
+  }
+
   Future<void> _fetchModels() async {
     final endpoint = _endpointCtrl.text.trim();
     final apiKey = _keyCtrl.text.trim();
@@ -2029,21 +2256,17 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   Future<void> _testEmbConnection() async {
     final String endpoint, apiKey, model;
     if (_embeddingUseSame) {
-      // Resolve the LLM endpoint the way the repo persists it, so the test
-      // hits the URL the embedding request will actually use. A protocol with
-      // a fixed URL (OpenRouter, whose endpoint field is hidden) leaves the
+      // Probe the connection the request will actually borrow — the preset the
+      // "endpoint from" row names, or the one the LLM tab is on — with its
+      // endpoint resolved the way the repo persists it. A protocol with a
+      // fixed URL (OpenRouter, whose endpoint field is hidden) leaves the
       // controller empty and would otherwise fail the guard below.
-      endpoint = EndpointNormalizer.persistedLlmEndpoint(
-        raw: _endpointCtrl.text.trim(),
-        protocol: _protocol,
-        model: _modelCtrl.text.trim(),
-        stream: _stream,
-        useResponsesApi: _useResponsesApi,
-      );
-      apiKey = _keyCtrl.text.trim();
+      final source = _embeddingLlmSource();
+      endpoint = source?.endpoint ?? '';
+      apiKey = source?.apiKey ?? '';
       model = _embModelCtrl.text.trim().isNotEmpty
           ? _embModelCtrl.text.trim()
-          : _modelCtrl.text.trim();
+          : (source?.model ?? '');
     } else {
       endpoint = _embEndpointCtrl.text.trim();
       apiKey = _embApiKeyCtrl.text.trim();
@@ -2069,6 +2292,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     switch (result) {
       case ApiTestSuccess(:final message):
         setState(() => _embStatus = ApiConnectionStatus.connected);
+        _adoptResolvedEmbeddingEndpoint();
         GlazeToast.show(context, message);
       case ApiTestFailure(:final error):
         setState(() {

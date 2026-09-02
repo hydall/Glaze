@@ -191,9 +191,12 @@ class JsBackupImporter extends BackupHelpers {
     if (activeLlmId is String && activeLlmId.isNotEmpty) {
       await prefs.setString('activeApiConfigId', activeLlmId);
       // The legacy embedding profile is folded into this very preset by the
-      // API-config importer, so the embedding selection — which is its own
-      // thing here — starts out on it too.
-      await prefs.setString('activeEmbeddingConfigId', activeLlmId);
+      // API-config importer. Embedding presets are their own list here, so
+      // clearing the selection and the seeding flag lets
+      // `EmbeddingPresetListNotifier` carry those settings into a preset of
+      // their own, exactly as it does on an in-place upgrade.
+      await prefs.remove('activeEmbeddingConfigId');
+      await prefs.remove('embeddingPresetsSeeded');
     }
 
     final globalVars = ls['gz_global_vars'];

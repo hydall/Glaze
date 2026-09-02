@@ -130,18 +130,18 @@ void main() {
       );
     });
 
-    test('is false for an embedding-only preset', () {
+    test('is true for the tab\'s own embedding-mode preset', () {
       expect(
         available(
           const ApiConfig(
-            id: 'api',
-            endpoint: 'https://api.example/v1',
-            model: 'chat-model',
-            mode: 'embedding',
+            id: 'emb',
+            mode: kEmbeddingPresetMode,
             embeddingEnabled: true,
+            embeddingEndpoint: 'https://vectors.example/v1',
+            embeddingModel: 'embedding-model',
           ),
         ),
-        isFalse,
+        isTrue,
       );
     });
 
@@ -202,7 +202,7 @@ void main() {
     });
   });
 
-  group('the embedding preset selection', () {
+  group('the embedding preset list', () {
     Future<ProviderContainer> containerWith(
       List<ApiConfig> configs, {
       Map<String, Object> prefs = const {},
@@ -218,7 +218,9 @@ void main() {
         await container.read(apiConfigRepoProvider).put(config);
       }
       container.invalidate(apiListProvider);
+      container.invalidate(embeddingPresetListProvider);
       await container.read(apiListProvider.future);
+      await container.read(embeddingPresetListProvider.future);
       return container;
     }
 
@@ -239,24 +241,49 @@ void main() {
     const vectors = ApiConfig(
       id: 'vectors',
       name: 'Vectors',
+      mode: kEmbeddingPresetMode,
       embeddingEnabled: true,
       embeddingUseSame: false,
       embeddingEndpoint: 'https://vectors.example/v1',
       embeddingApiKey: 'vector-key',
       embeddingModel: 'embedding-model',
     );
+    const borrowing = ApiConfig(
+      id: 'borrowing',
+      name: 'Borrowed',
+      mode: kEmbeddingPresetMode,
+      embeddingEnabled: true,
+      embeddingUseSame: true,
+      embeddingModel: 'embedding-model',
+    );
+
+    test('the two lists never share a preset', () async {
+      final container = await containerWith([chat, otherChat, vectors]);
+
+      expect(container.read(apiListProvider).value?.map((c) => c.id), [
+        'chat',
+        'other-chat',
+      ]);
+      expect(
+        container.read(embeddingPresetListProvider).value?.map((c) => c.id),
+        ['vectors'],
+      );
+    });
 
     test(
       'switching the chat preset leaves the embedding one where it is',
       () async {
-        final container = await containerWith([chat, otherChat, vectors]);
-        container.read(activeEmbeddingPresetIdProvider.notifier).state =
-            vectors.id;
+        final container = await containerWith(
+          [chat, otherChat, vectors],
+          prefs: {kEmbeddingPresetsSeededKey: true},
+        );
         // The repo normalizes an endpoint on the way in, so the expectation is
         // taken from the stored preset rather than from the literal above.
         final stored = container.read(activeEmbeddingConfigProvider)!;
-        final before = container.read(embeddingConfigProvider);
-        expect(before.endpoint, stored.embeddingEndpoint);
+        expect(
+          container.read(embeddingConfigProvider).endpoint,
+          stored.embeddingEndpoint,
+        );
 
         container.read(activeApiPresetIdProvider.notifier).state = otherChat.id;
 
@@ -269,64 +296,143 @@ void main() {
       },
     );
 
+    test('"use LLM API" follows the chat preset while it names none', () async {
+      final container = await containerWith(
+        [chat, otherChat, borrowing],
+        prefs: {kEmbeddingPresetsSeededKey: true},
+      );
+      final storedChat = container.read(activeApiConfigProvider)!;
+      expect(
+        container.read(embeddingConfigProvider).endpoint,
+        storedChat.endpoint,
+      );
+
+      container.read(activeApiPresetIdProvider.notifier).state = otherChat.id;
+
+      final storedOther = container.read(activeApiConfigProvider)!;
+      final config = container.read(embeddingConfigProvider);
+      expect(config.endpoint, storedOther.endpoint);
+      expect(config.apiKey, otherChat.apiKey);
+      expect(config.model, 'embedding-model');
+    });
+
+    test('"endpoint from" pins the borrow to one LLM preset', () async {
+      final container = await containerWith(
+        [
+          chat,
+          otherChat,
+          borrowing.copyWith(embeddingLlmPresetId: otherChat.id),
+        ],
+        prefs: {kEmbeddingPresetsSeededKey: true},
+      );
+      final pinned = container
+          .read(apiListProvider)
+          .value!
+          .firstWhere((c) => c.id == otherChat.id);
+
+      // The chat tab is on `chat`, the named preset is `other-chat`.
+      expect(container.read(activeApiConfigProvider)?.id, chat.id);
+      final config = container.read(embeddingConfigProvider);
+      expect(config.endpoint, pinned.endpoint);
+      expect(config.apiKey, pinned.apiKey);
+    });
+
+    test('a named preset that is gone falls back to the active one', () async {
+      final container = await containerWith(
+        [chat, borrowing.copyWith(embeddingLlmPresetId: 'deleted')],
+        prefs: {kEmbeddingPresetsSeededKey: true},
+      );
+      final storedChat = container.read(activeApiConfigProvider)!;
+
+      expect(
+        container.read(embeddingConfigProvider).endpoint,
+        storedChat.endpoint,
+      );
+    });
+
     test(
-      '"use LLM API" follows the chat preset the user switches to',
-      () async {
-        const shared = ApiConfig(
-          id: 'shared',
-          name: 'Shared',
-          embeddingEnabled: true,
-          embeddingUseSame: true,
-          embeddingModel: 'embedding-model',
-        );
-        final container = await containerWith([chat, otherChat, shared]);
-        container.read(activeEmbeddingPresetIdProvider.notifier).state =
-            shared.id;
-        final storedChat = container.read(activeApiConfigProvider)!;
-        expect(
-          container.read(embeddingConfigProvider).endpoint,
-          storedChat.endpoint,
-        );
-
-        container.read(activeApiPresetIdProvider.notifier).state = otherChat.id;
-
-        final storedOther = container.read(activeApiConfigProvider)!;
-        final config = container.read(embeddingConfigProvider);
-        expect(config.endpoint, storedOther.endpoint);
-        expect(config.apiKey, otherChat.apiKey);
-        expect(config.model, 'embedding-model');
-      },
-    );
-
-    test(
-      'pins the embedding preset to the saved chat one on first run',
+      'seeds a preset from the settings that lived on a chat preset',
       () async {
         final container = await containerWith(
-          [chat, vectors],
-          prefs: {'activeApiConfigId': vectors.id},
+          [
+            chat.copyWith(
+              embeddingEnabled: true,
+              embeddingUseSame: true,
+              embeddingModel: 'embedding-model',
+              embeddingMaxChunkTokens: 256,
+            ),
+            otherChat,
+          ],
+          prefs: {'activeApiConfigId': chat.id},
         );
 
-        expect(container.read(activeEmbeddingPresetIdProvider), vectors.id);
+        final presets = container.read(embeddingPresetListProvider).value!;
+        expect(presets, hasLength(1));
+        final seeded = presets.single;
+        expect(seeded.mode, kEmbeddingPresetMode);
+        expect(seeded.name, 'Chat');
+        expect(seeded.embeddingEnabled, isTrue);
+        expect(seeded.embeddingModel, 'embedding-model');
+        expect(seeded.embeddingMaxChunkTokens, 256);
+        // Pointing at the preset it came from keeps "use LLM API" resolving to
+        // the endpoint it resolved to before the split.
+        expect(seeded.embeddingLlmPresetId, chat.id);
+        expect(container.read(activeEmbeddingConfigProvider)?.id, seeded.id);
+
         final prefs = await SharedPreferences.getInstance();
-        expect(prefs.getString(kActiveEmbeddingConfigIdKey), vectors.id);
+        expect(prefs.getString(kActiveEmbeddingConfigIdKey), seeded.id);
+        expect(prefs.getBool(kEmbeddingPresetsSeededKey), isTrue);
       },
     );
+
+    test('seeds nothing when embeddings were never configured', () async {
+      final container = await containerWith([chat, otherChat]);
+
+      expect(container.read(embeddingPresetListProvider).value, isEmpty);
+      expect(container.read(activeEmbeddingConfigProvider), isNull);
+      expect(container.read(vectorSearchAvailableProvider), isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool(kEmbeddingPresetsSeededKey), isTrue);
+    });
 
     test(
-      'restores a stored embedding preset that differs from the chat one',
+      'a preset saved from the Embeddings tab stays out of the chat list',
       () async {
         final container = await containerWith(
-          [chat, otherChat, vectors],
-          prefs: {
-            'activeApiConfigId': otherChat.id,
-            kActiveEmbeddingConfigIdKey: vectors.id,
-          },
+          [chat],
+          prefs: {kEmbeddingPresetsSeededKey: true},
         );
 
-        expect(container.read(activeApiConfigProvider)?.id, otherChat.id);
-        expect(container.read(activeEmbeddingConfigProvider)?.id, vectors.id);
+        // The tab creates presets with the mode set, but the list is what
+        // guarantees it: a row saved here can never surface as a chat preset.
+        await container
+            .read(embeddingPresetListProvider.notifier)
+            .put(const ApiConfig(id: 'new-emb', name: 'New'));
+        await container.read(embeddingPresetListProvider.future);
+        container.invalidate(apiListProvider);
+        await container.read(apiListProvider.future);
+
+        expect(
+          container.read(embeddingPresetListProvider).value?.single.id,
+          'new-emb',
+        );
+        expect(container.read(apiListProvider).value?.map((c) => c.id), [
+          'chat',
+        ]);
       },
     );
+
+    test('restores the stored embedding preset selection', () async {
+      final container = await containerWith(
+        [chat, vectors, borrowing],
+        prefs: {
+          kEmbeddingPresetsSeededKey: true,
+          kActiveEmbeddingConfigIdKey: borrowing.id,
+        },
+      );
+
+      expect(container.read(activeEmbeddingConfigProvider)?.id, borrowing.id);
+    });
   });
 
   group('EmbeddingRequestGate', () {

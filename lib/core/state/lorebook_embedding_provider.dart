@@ -15,11 +15,12 @@ import 'db_provider.dart';
 /// The embedding connection every vector request runs on.
 ///
 /// Reads its settings from [activeEmbeddingConfigProvider] — the preset picked
-/// on the API screen's *Embeddings* tab — so switching the chat connection
-/// leaves the vector index alone. The one place the two still meet is the
-/// preset's "Use LLM API" toggle: while it is on the endpoint and key are
-/// borrowed from the active LLM preset, so that (and only that) selection is
-/// watched here.
+/// on the API screen's *Embeddings* tab, which has a list of its own — so
+/// switching the chat connection leaves the vector index alone. The one place
+/// the two still meet is that preset's "Use LLM API" toggle: while it is on,
+/// the endpoint and key come from the LLM preset it names
+/// ([ApiConfig.embeddingLlmPresetId]), or from the active one when it names
+/// none. Only in that case is any chat state watched here.
 final embeddingConfigProvider = Provider<EmbeddingConfig>((ref) {
   final embConfig = ref.watch(activeEmbeddingConfigProvider);
   EmbeddingRequestGate.setEnabled(embConfig?.embeddingEnabled == true);
@@ -27,9 +28,25 @@ final embeddingConfigProvider = Provider<EmbeddingConfig>((ref) {
       embConfig != null &&
       (embConfig.embeddingUseSame || embConfig.embeddingEndpoint.isEmpty);
   final llmConfig = borrowsLlmEndpoint
-      ? ref.watch(activeApiConfigProvider)
+      ? ref.watch(embeddingLlmSourceProvider)
       : null;
   return resolveEmbeddingConfig(embConfig, llmConfig);
+});
+
+/// The LLM preset an embedding request borrows its endpoint and key from while
+/// "Use LLM API" is on: the one the embedding preset names, falling back to
+/// whichever connection the LLM tab is on (the behaviour when it names none,
+/// and when the named preset is gone).
+final embeddingLlmSourceProvider = Provider<ApiConfig?>((ref) {
+  final embConfig = ref.watch(activeEmbeddingConfigProvider);
+  final pinnedId = embConfig?.embeddingLlmPresetId ?? '';
+  if (pinnedId.isNotEmpty) {
+    final list = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
+    for (final config in list) {
+      if (config.id == pinnedId) return config;
+    }
+  }
+  return ref.watch(activeApiConfigProvider);
 });
 
 /// True when the preset the embedding side runs on has vector (semantic)
@@ -41,23 +58,19 @@ final embeddingConfigProvider = Provider<EmbeddingConfig>((ref) {
 /// [resolveEmbeddingConfig] uses to decide whether a usable config exists.
 final vectorSearchAvailableProvider = Provider<bool>((ref) {
   final config = ref.watch(activeEmbeddingConfigProvider);
-  return config != null &&
-      config.mode != 'embedding' &&
-      config.embeddingEnabled;
+  return config != null && config.embeddingEnabled;
 });
 
 /// Builds the embedding connection out of the embedding preset, borrowing the
 /// endpoint and key from [llmConfig] while "Use LLM API" is on (or while the
 /// dedicated endpoint is still blank). [llmConfig] defaults to the embedding
-/// preset itself, which is what the borrow meant before the two selections
-/// were split.
+/// preset itself, which is what the borrow meant while embeddings still shared
+/// the chat preset.
 EmbeddingConfig resolveEmbeddingConfig(
   ApiConfig? embeddingConfig, [
   ApiConfig? llmConfig,
 ]) {
-  if (embeddingConfig == null ||
-      embeddingConfig.mode == 'embedding' ||
-      !embeddingConfig.embeddingEnabled) {
+  if (embeddingConfig == null || !embeddingConfig.embeddingEnabled) {
     return const EmbeddingConfig(endpoint: '', model: '');
   }
   if (embeddingConfig.embeddingUseSame ||
