@@ -2355,8 +2355,40 @@ void main() {
       final body = _extractBlockBody(bridgeControllerJs, idx);
       expect(body, contains('this.isGenerating'));
       expect(body, isNot(contains('this.isPostGenRunning')));
-      expect(body, contains('this._genTimer.start()'));
+      expect(body, contains('this._genTimer.ensureRunning()'));
       expect(body, contains('this._genTimer.stop()'));
+    });
+
+    test('the elapsed clock runs for the whole send window', () {
+      // The bubble goes up on the send and the generation is published a
+      // durable append later. Keying the clock on `isGenerating` alone left
+      // the bubble sitting there without one for that whole write.
+      final marker = '_syncGenerationTimer() {';
+      final idx = bridgeControllerJs.indexOf(marker);
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('this.isSendPending'));
+
+      final sendPendingIdx = bridgeControllerJs.indexOf(
+        'setSendPending(value) {',
+      );
+      expect(sendPendingIdx, isNot(-1));
+      final sendPendingBody = _extractBlockBody(
+        bridgeControllerJs,
+        sendPendingIdx,
+      );
+      expect(sendPendingBody, contains('this.isSendPending = !!value'));
+      expect(sendPendingBody, contains('this._syncGenerationTimer()'));
+    });
+
+    test('the hand-off to the generation does not restart the clock', () {
+      // Both edges reconcile through _syncGenerationTimer, so `start()` on the
+      // second one would reset a timer the user has already watched count.
+      final idx = genTimerJs.indexOf('ensureRunning() {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(genTimerJs, idx);
+      expect(body, contains('if (this._interval) return'));
+      expect(body, contains('this.start()'));
     });
 
     test(

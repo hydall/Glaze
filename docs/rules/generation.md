@@ -138,6 +138,18 @@ from "the reply is already on its way".
   three DB round-trips; in front of the publish it delayed the typing bubble by
   their full cost on every send. It still runs before `_runGeneration`, which
   is the ordering prompt assembly actually depends on.
+- **The elapsed clock runs on the whole window too.** `setSendPending` is
+  pushed into the page next to `setGenerating`, and `GenTimer.ensureRunning`
+  makes the hand-off between them a no-op instead of a restart. On
+  `isGenerating` alone the bubble sat there without a clock for the entire
+  durable append.
+- **Anything the bubble is painted from must be reset before the window
+  opens, not inside the run.** `_sendMessage` clears the streaming state at
+  the optimistic paint. `GenerationPipeline.run` clears it as well, but that
+  is a whole durable append later: whatever the previous run left there is
+  what the new typing bubble shows until the first token replaces it — the
+  reply the user just read, appearing again under the message they just sent
+  (and still there after they deleted it).
 
 ---
 
@@ -172,6 +184,12 @@ Rules:
   never an O(n) trim per delta.
 - Nothing in the pipeline reads the phase — it is a UI signal only, so a
   missed transition costs a stale label, never a stuck generation.
+- **A deferred publish must be closed before the run settles.** The streaming
+  deltas are published from a frame callback; one that lands after
+  `GenerationPipeline` cleared the streaming state puts the finished reply
+  back into a state that is meant to be empty. `StreamGenerationService`
+  flushes the pending callback synchronously when the stream ends
+  (`closeStreamPublishing`) and drops anything scheduled behind it.
 
 The label crosses into the WebView through `bridge.setGenerationPhase(label)`
 and is swapped with a cross-fade by `renderer/typing_phase.js`; battery saver

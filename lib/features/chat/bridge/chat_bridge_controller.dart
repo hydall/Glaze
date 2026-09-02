@@ -64,6 +64,13 @@ class ChatBridgeController {
   /// renderer draws (or withholds) the Regenerate button from the map alone.
   bool isSendPending = false;
 
+  /// Last send-window value the *page* received, level-reconciled next to
+  /// `isGenerating` / `isPostGenRunning` / `isGeneratingImage`. Kept apart
+  /// from [isSendPending], which the dispatcher has already overwritten by the
+  /// time the flags are pushed — comparing against that one would always find
+  /// them equal and never push anything.
+  bool isSendPendingInPage = false;
+
   /// Last generation-phase label pushed to the page ('' = the page's own
   /// default). Kept here so the listener can skip a redundant eval, the same
   /// way the isGenerating flags are reconciled against the bridge.

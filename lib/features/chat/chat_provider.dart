@@ -527,6 +527,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // otherwise it shows the default "Generating…" for the whole durable
       // write, which is the claim this label exists to stop making.
       setGenerationPhase(ref, arg, GenerationPhase.preparing);
+      // The bubble is painted from the streaming state, so it must be empty
+      // before the bubble exists. `GenerationPipeline.run` clears it too, but
+      // that is a whole durable append later — anything the previous run left
+      // behind would be the reply the user just read, shown again under the
+      // message they just sent until the first token replaces it.
+      _abortHandler.clearStreaming();
       state = AsyncData(
         current.copyWith(session: optimisticSession, isSendPending: true),
       );

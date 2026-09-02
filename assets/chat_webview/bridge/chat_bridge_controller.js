@@ -29,6 +29,10 @@ export class Bridge {
     this.isGenerating = false;
     this.isGeneratingImage = false;
     this.isPostGenRunning = false;
+    // A send is painted but its generation has not been published yet. The
+    // typing bubble is already on screen for it, so the elapsed clock under
+    // the bubble runs on this too — see _syncGenerationTimer().
+    this.isSendPending = false;
     // Label under the typing pencil, naming the phase the generation is
     // actually in. Empty = the renderer's default. See setGenerationPhase().
     this.generationPhaseText = '';
@@ -175,6 +179,15 @@ export class Bridge {
     if (wasGenerating && !this.isGenerating) this._ensureHeaderReachable();
   }
 
+  /* The send window that precedes a generation: the user's message is painted
+   * and the durable append is still in flight. Nothing else in the page reads
+   * it — it only keeps the elapsed clock honest, so the bubble does not sit
+   * there without one for as long as that write takes. */
+  setSendPending(value) {
+    this.isSendPending = !!value;
+    this._syncGenerationTimer();
+  }
+
   setPostGenRunning(value) {
     this.isPostGenRunning = !!value;
   }
@@ -191,8 +204,12 @@ export class Bridge {
   }
 
   _syncGenerationTimer() {
-    if (this.isGenerating) {
-      this._genTimer.start();
+    // Post-generation work is deliberately absent here: the reply is written
+    // by then and its badge is final. The send window is not — the bubble it
+    // puts up is the same bubble the reply streams into, so the clock spans
+    // both and `ensureRunning` keeps the hand-off from restarting it.
+    if (this.isGenerating || this.isSendPending) {
+      this._genTimer.ensureRunning();
     } else {
       this._genTimer.stop();
     }

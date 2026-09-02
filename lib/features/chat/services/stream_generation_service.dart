@@ -331,12 +331,20 @@ class StreamGenerationService {
           _phase(next);
         }
 
+        // Publishing is deferred to the next frame, and the pipeline clears
+        // the streaming state as soon as this call returns. A callback that
+        // fires after that clear leaves the finished reply in a state that is
+        // meant to be empty, and the next send paints it into the typing
+        // bubble — the answer the user just read, shown again under the
+        // message they just sent. Closing the window flushes the text one
+        // last time, synchronously, and drops anything scheduled behind it.
+        var studioPublishClosed = false;
         void scheduleStudioStreamingUpdate() {
-          if (studioFrameScheduled) return;
+          if (studioFrameScheduled || studioPublishClosed) return;
           studioFrameScheduled = true;
           SchedulerBinding.instance.scheduleFrameCallback((_) {
             studioFrameScheduled = false;
-            if (_isAborted()) return;
+            if (studioPublishClosed || _isAborted()) return;
             _ref
                 .read(streamingStateProvider(_charId).notifier)
                 .state = StreamingState(
@@ -344,6 +352,19 @@ class StreamGenerationService {
               reasoning: latestStudioReasoning,
             );
           });
+        }
+
+        void closeStudioStreamPublishing() {
+          if (studioPublishClosed) return;
+          studioPublishClosed = true;
+          if (!studioFrameScheduled || _isAborted()) return;
+          studioFrameScheduled = false;
+          _ref
+              .read(streamingStateProvider(_charId).notifier)
+              .state = StreamingState(
+            text: latestStudioText,
+            reasoning: latestStudioReasoning,
+          );
         }
 
         final studioOutputRegexes = await _ref.read(studioRegexProvider.future);
@@ -411,6 +432,7 @@ class StreamGenerationService {
             studioLorebookClassifications = classifications;
           },
         );
+        closeStudioStreamPublishing();
         if (_isAborted() || studioResult.status == 'aborted') {
           _ref.read(studioCycleStateProvider.notifier).state =
               const StudioCycleState.idle();
@@ -587,6 +609,29 @@ class StreamGenerationService {
       ChatState? finalState;
 
       bool frameScheduled = false;
+      // See the Studio branch above for why the deferred publish has to be
+      // closed: a frame callback that lands after the pipeline cleared the
+      // streaming state resurrects the finished reply into the next send's
+      // typing bubble.
+      var streamPublishClosed = false;
+      void publishStreamedText() {
+        _ref.read(streamingStateProvider(_charId).notifier).state =
+            StreamingState(
+              text: accumulator.text.trimLeft(),
+              reasoning: accumulator.reasoning.isNotEmpty
+                  ? accumulator.reasoning
+                  : null,
+            );
+      }
+
+      void closeStreamPublishing() {
+        if (streamPublishClosed) return;
+        streamPublishClosed = true;
+        if (!frameScheduled || _isAborted()) return;
+        frameScheduled = false;
+        publishStreamedText();
+      }
+
       // See the Studio branch above: one report per transition, never a
       // per-chunk re-derivation over the accumulated text.
       var reportedPhase = GenerationPhase.waiting;
@@ -634,24 +679,18 @@ class StreamGenerationService {
           // Reasoning-only output keeps the typing bubble on screen (the
           // visible text is still empty), so name that phase for what it is.
           reportStreamPhase();
-          if (!frameScheduled) {
+          if (!frameScheduled && !streamPublishClosed) {
             frameScheduled = true;
             SchedulerBinding.instance.scheduleFrameCallback((_) {
               frameScheduled = false;
-              if (_isAborted()) return;
-              _ref
-                  .read(streamingStateProvider(_charId).notifier)
-                  .state = StreamingState(
-                text: accumulator.text.trimLeft(),
-                reasoning: accumulator.reasoning.isNotEmpty
-                    ? accumulator.reasoning
-                    : null,
-              );
+              if (streamPublishClosed || _isAborted()) return;
+              publishStreamedText();
             });
           }
         },
         onComplete: (text, reasoning, {rawResponseJson}) {
           if (_isAborted()) return;
+          closeStreamPublishing();
           idleGuard.dispose();
           if (!apiConfig.stream &&
               accumulator.text.isEmpty &&
@@ -759,6 +798,7 @@ class StreamGenerationService {
           }
         },
         onError: (error) {
+          closeStreamPublishing();
           idleGuard.dispose();
           if (idleTimedOut) {
             final msg = 'error_first_chunk_timeout'.tr(
@@ -811,6 +851,9 @@ class StreamGenerationService {
           }
         },
       );
+      // Neither callback is guaranteed on every transport path; the window
+      // must be shut before the pipeline clears the streaming state.
+      closeStreamPublishing();
 
       return finalState ??
           ChatState(
