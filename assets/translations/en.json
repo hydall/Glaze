@@ -1756,6 +1756,7 @@
   "conn_status_connected": "Connected",
   "conn_status_failed": "Failed",
   "settings_api_configs_title": "API Configs",
+  "settings_embedding_config_title": "Embedding connection",
   "settings_new_config_tooltip": "New config",
   "settings_new_config_title": "New API Config",
   "settings_err_endpoint_key": "Enter endpoint and API key first",

@@ -190,6 +190,10 @@ class JsBackupImporter extends BackupHelpers {
         ls['gz_active_llm_profile_id'] ?? kv['gz_active_llm_profile_id'];
     if (activeLlmId is String && activeLlmId.isNotEmpty) {
       await prefs.setString('activeApiConfigId', activeLlmId);
+      // The legacy embedding profile is folded into this very preset by the
+      // API-config importer, so the embedding selection — which is its own
+      // thing here — starts out on it too.
+      await prefs.setString('activeEmbeddingConfigId', activeLlmId);
     }
 
     final globalVars = ls['gz_global_vars'];

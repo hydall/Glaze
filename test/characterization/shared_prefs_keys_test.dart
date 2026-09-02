@@ -246,6 +246,7 @@ void main() {
         'gz_force_mobile_layout',
         'addBlockAtTop',
         'activeApiConfigId',
+        'activeEmbeddingConfigId',
         'activePresetId',
         'activePersonaId',
         'globalVars',

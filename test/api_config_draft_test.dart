@@ -58,6 +58,75 @@ void main() {
     expect(mapped, config);
   });
 
+  test('each half of the editor is written to its own preset', () {
+    // The API screen can sit on two presets at once — the LLM tab on one, the
+    // Embeddings tab on another — so neither half may leak onto the other's
+    // preset when the editor saves.
+    const llm = ApiConfig(
+      id: 'llm',
+      name: 'LLM',
+      endpoint: 'https://llm.test',
+      apiKey: 'llm-key',
+      model: 'chat-model',
+      embeddingEnabled: false,
+      embeddingUseSame: true,
+      embeddingEndpoint: 'https://old-embeddings.test',
+      embeddingModel: 'old-embedding-model',
+    );
+    const embedding = ApiConfig(
+      id: 'embedding',
+      name: 'Embeddings',
+      endpoint: 'https://embedding-preset.test',
+      apiKey: 'embedding-preset-key',
+      model: 'embedding-preset-chat-model',
+    );
+    final source = ApiConfigDraft.fromConfig(llm);
+    final draft = ApiConfigDraft(
+      values: source.values.copyWith(
+        embeddingEnabled: true,
+        embeddingUseSame: false,
+      ),
+      name: 'Edited LLM',
+      endpoint: 'https://edited-llm.test',
+      apiKey: 'edited-llm-key',
+      model: 'edited-chat-model',
+      maxTokens: source.maxTokens,
+      contextSize: source.contextSize,
+      firstChunkTimeoutSeconds: source.firstChunkTimeoutSeconds,
+      reasoningHistoryCount: source.reasoningHistoryCount,
+      embeddingEndpoint: 'https://edited-embeddings.test',
+      embeddingApiKey: 'edited-embedding-key',
+      embeddingModel: 'edited-embedding-model',
+      embeddingMaxChunkTokens: '256',
+      embeddingRequestsPerMinute: '40',
+    );
+
+    final savedLlm = draft.applyLlmTo(llm);
+    final savedEmbedding = draft.applyEmbeddingTo(embedding);
+
+    // The LLM preset takes the connection fields and keeps its own embedding
+    // settings untouched.
+    expect(savedLlm.name, 'Edited LLM');
+    expect(savedLlm.endpoint, 'https://edited-llm.test');
+    expect(savedLlm.embeddingEnabled, isFalse);
+    expect(savedLlm.embeddingUseSame, isTrue);
+    expect(savedLlm.embeddingEndpoint, 'https://old-embeddings.test');
+    expect(savedLlm.embeddingModel, 'old-embedding-model');
+    // The embedding preset takes the embedding fields and keeps its own name
+    // and chat connection.
+    expect(savedEmbedding.name, 'Embeddings');
+    expect(savedEmbedding.endpoint, 'https://embedding-preset.test');
+    expect(savedEmbedding.apiKey, 'embedding-preset-key');
+    expect(savedEmbedding.model, 'embedding-preset-chat-model');
+    expect(savedEmbedding.embeddingEnabled, isTrue);
+    expect(savedEmbedding.embeddingUseSame, isFalse);
+    expect(savedEmbedding.embeddingEndpoint, 'https://edited-embeddings.test');
+    expect(savedEmbedding.embeddingApiKey, 'edited-embedding-key');
+    expect(savedEmbedding.embeddingModel, 'edited-embedding-model');
+    expect(savedEmbedding.embeddingMaxChunkTokens, 256);
+    expect(savedEmbedding.embeddingRequestsPerMinute, 40);
+  });
+
   test('trims text and preserves current numeric values on invalid input', () {
     const config = ApiConfig(
       id: 'api',

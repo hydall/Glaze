@@ -1767,6 +1767,7 @@
   "conn_status_connected": "Подключено",
   "conn_status_failed": "Ошибка",
   "settings_api_configs_title": "Конфигурации API",
+  "settings_embedding_config_title": "Подключение для эмбеддингов",
   "settings_new_config_tooltip": "Новая конфигурация",
   "settings_new_config_title": "Новая конфигурация API",
   "settings_err_endpoint_key": "Сначала введите эндпоинт и API ключ",

@@ -137,13 +137,19 @@ class ApiConfigDraft {
     }
   }
 
-  ApiConfig toConfig(ApiConfig base) {
+  /// Everything the editor holds, written onto one preset.
+  ///
+  /// Used while the LLM and the embedding side run on the same preset; when
+  /// they are two different presets each half goes to its own through
+  /// [applyLlmTo] and [applyEmbeddingTo].
+  ApiConfig toConfig(ApiConfig base) => applyEmbeddingTo(applyLlmTo(base));
+
+  /// The LLM half of the editor — connection, sampling, reasoning, cache. The
+  /// preset's embedding fields are left exactly as they are.
+  ApiConfig applyLlmTo(ApiConfig base) {
     final normalized = normalizeValues(values);
     final parsedReasoningHistoryCount =
         int.tryParse(reasoningHistoryCount) ?? 0;
-    final parsedEmbeddingRequestsPerMinute = int.tryParse(
-      embeddingRequestsPerMinute,
-    );
     return base.copyWith(
       name: name.trim(),
       endpoint: endpoint.trim(),
@@ -174,13 +180,26 @@ class ApiConfigDraft {
       omitPresencePenalty: normalized.omitPresencePenalty,
       omitReasoning: normalized.omitReasoning,
       omitReasoningEffort: normalized.omitReasoningEffort,
-      embeddingEnabled: normalized.embeddingEnabled,
-      embeddingUseSame: normalized.embeddingUseSame,
       cacheControlTtl: normalized.cacheControlTtl,
       cacheBreakpointMode: normalized.cacheBreakpointMode,
       sessionIdMode: normalized.sessionIdMode,
       promptPostProcessing: normalized.promptPostProcessing,
       protocol: normalized.protocol,
+      extraRequestParameters: normalized.extraRequestParameters,
+    );
+  }
+
+  /// The embedding half of the editor, written onto whichever preset the
+  /// Embeddings tab is pointed at — which is not necessarily the preset the
+  /// chat side runs on.
+  ApiConfig applyEmbeddingTo(ApiConfig base) {
+    final normalized = normalizeValues(values);
+    final parsedEmbeddingRequestsPerMinute = int.tryParse(
+      embeddingRequestsPerMinute,
+    );
+    return base.copyWith(
+      embeddingEnabled: normalized.embeddingEnabled,
+      embeddingUseSame: normalized.embeddingUseSame,
       embeddingEndpoint: embeddingEndpoint.trim(),
       embeddingApiKey: embeddingApiKey.trim(),
       embeddingModel: embeddingModel.trim(),
@@ -191,7 +210,6 @@ class ApiConfigDraft {
               parsedEmbeddingRequestsPerMinute > 0
           ? parsedEmbeddingRequestsPerMinute
           : base.embeddingRequestsPerMinute,
-      extraRequestParameters: normalized.extraRequestParameters,
     );
   }
 }
