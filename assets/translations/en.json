@@ -1373,7 +1373,6 @@
   "chat_message_title": "Message",
   "chat_long_message_hint": "Write a long message here...",
   "chat_guidance_message_hint": "Message with guidance...",
-  "chat_no_reply_hint": "Message without a reply...",
   "authors_note_placeholder": "Enter author's note...",
   "authors_note_role_hint": "Role, depth and insertion mode are set per preset, in the preset editor.",
   "tokenizer_history_limit_warning": "History is near its limit",
