@@ -120,12 +120,19 @@ class _ChatDrawerHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+      // Top inset clears the drag handle (y=10..14) instead of starting on its
+      // edge, which is what made the handle read as a seam across the old
+      // full-width track.
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Expanded(
+          Flexible(
             child: GlazeTabBar(
+              // Underline, not the app-default pill: this strip heads the
+              // panel rather than sitting inside it, and a filled accent
+              // segment outweighed every card it was introducing.
+              style: GlazeTabBarStyle.underline,
               tabs: [
                 GlazeTabItem(
                   label: 'drawer_tab_tools'.tr(),
@@ -150,6 +157,11 @@ class _ChatDrawerHeader extends StatelessWidget {
 
 /// Icon-only edit toggle. The label it used to carry would have squeezed the
 /// tab strip; the tooltip keeps the affordance for anyone who long-presses.
+///
+/// At rest it is a bare glyph — a permanent ring next to a container-less tab
+/// strip would be the only outlined thing in the header. The ring appears only
+/// while editing, so the state change is what draws it rather than decorating
+/// both states equally.
 class _EditToggle extends StatelessWidget {
   final bool editing;
   final VoidCallback onTap;
@@ -181,13 +193,15 @@ class _EditToggle extends StatelessWidget {
               border: Border.all(
                 color: editing
                     ? context.cs.primary.withValues(alpha: 0.38)
-                    : Colors.white.withValues(alpha: 0.18),
+                    : Colors.transparent,
               ),
             ),
             child: Icon(
-              editing ? Icons.check : Icons.edit,
-              size: 17,
-              color: editing ? context.cs.primary : context.cs.onSurface,
+              editing ? Icons.check : Icons.edit_outlined,
+              size: 18,
+              color: editing
+                  ? context.cs.primary
+                  : context.cs.onSurface.withValues(alpha: 0.55),
             ),
           ),
         ),

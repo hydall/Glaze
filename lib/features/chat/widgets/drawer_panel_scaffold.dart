@@ -4,6 +4,15 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/top_edge_blur.dart';
 
+/// Top inset every drawer tab body must leave clear for the header.
+///
+/// The header floats over the content (see the [Stack] below), so each tab
+/// pads its own scroll view by this much instead of the scaffold reserving the
+/// space. One constant so the two tab bodies cannot drift apart from each other
+/// or from the header: 20px top padding + a ~34px tab strip, plus a gap wide
+/// enough that the active tab's underline does not sit on a card's edge.
+const double kDrawerContentTopInset = 66;
+
 /// Shared shell for the chat drawer. Provides background, drag handle, top
 /// soft-edge blur and the header slot; the tab bodies hosted inside supply
 /// their own content and, while they are still loading, their own

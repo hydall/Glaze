@@ -820,7 +820,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
     final scrollable = RawScrollbar(
       controller: _scrollController,
-      padding: const EdgeInsets.only(top: 60),
+      padding: const EdgeInsets.only(top: kDrawerContentTopInset),
       thickness: 3,
       radius: const Radius.circular(3),
       thumbColor: Colors.white24,
@@ -833,7 +833,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
               controller: _scrollController,
               padding: EdgeInsets.fromLTRB(
                 12,
-                60,
+                kDrawerContentTopInset,
                 12,
                 16 + MediaQuery.of(context).padding.bottom,
               ),
