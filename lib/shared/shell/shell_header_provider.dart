@@ -13,6 +13,12 @@ class ShellHeaderConfig {
   final bool showBack;
   final VoidCallback? onBack;
 
+  /// Replaces the header's leading slot — the Glaze logo by default. Screens
+  /// that temporarily stop being "a tab" set it (the dialogs list swaps in a
+  /// close button while a multi-selection is running); ignored when
+  /// [showBack] draws a back button there instead.
+  final Widget? leading;
+
   /// Optional extra row rendered directly under the app bar (e.g. the Chats
   /// "Filter: …" chip).
   final Widget? below;
@@ -28,6 +34,7 @@ class ShellHeaderConfig {
     this.actions,
     this.showBack = false,
     this.onBack,
+    this.leading,
     this.below,
     this.hidden = false,
   });

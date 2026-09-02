@@ -2188,6 +2188,10 @@
     "one": "chat",
     "other": "chats"
   },
+  "dialogs_delete_selected_confirm": {
+    "one": "Delete {} chat? This cannot be undone.",
+    "other": "Delete {} chats? This cannot be undone."
+  },
   "count_characters": {
     "one": "character",
     "other": "characters"

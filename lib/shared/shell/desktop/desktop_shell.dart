@@ -281,6 +281,7 @@ class _DesktopHeader extends ConsumerWidget {
                 actions: entry.config.actions,
                 showBack: entry.config.showBack,
                 onBack: entry.config.onBack,
+                leading: entry.config.leading,
                 borderRadius: BorderRadius.zero,
               ),
             ),
