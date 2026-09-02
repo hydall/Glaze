@@ -140,16 +140,20 @@ void main() {
       expect(textField.controller!.text, 'keep me');
     });
 
-    testWidgets('pending send does not clear text before durable acceptance', (
+    testWidgets('pending send clears the composer before the durable write', (
       tester,
     ) async {
+      // The append behind a send re-encodes the whole message list. Waiting
+      // for that to land before emptying the box left the message sitting in
+      // the composer next to its own bubble, reading as a send that never
+      // registered.
       final accepted = Completer<bool>();
       await tester.pumpWidget(
         ProviderScope(
           child: MaterialApp(
             home: Scaffold(
               body: ChatInputBar(
-                initialDraft: 'wait for db',
+                initialDraft: 'clear me now',
                 isGenerating: false,
                 onSend: (_) => accepted.future,
               ),
@@ -161,12 +165,74 @@ void main() {
       await tester.tap(find.byIcon(Icons.send_rounded));
       await tester.pump();
       var textField = tester.widget<TextField>(find.byType(TextField));
-      expect(textField.controller!.text, 'wait for db');
+      expect(textField.controller!.text, isEmpty);
 
       accepted.complete(true);
       await tester.pump();
       textField = tester.widget<TextField>(find.byType(TextField));
       expect(textField.controller!.text, isEmpty);
+    });
+
+    testWidgets('a rejected pending send puts the text back', (tester) async {
+      final accepted = Completer<bool>();
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: ChatInputBar(
+                initialDraft: 'give me back',
+                isGenerating: false,
+                onSend: (_) => accepted.future,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+
+      accepted.complete(false);
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'give me back',
+      );
+    });
+
+    testWidgets('a rejected send does not overwrite newer text', (
+      tester,
+    ) async {
+      final accepted = Completer<bool>();
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: ChatInputBar(
+                initialDraft: 'the old one',
+                isGenerating: false,
+                onSend: (_) => accepted.future,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'the new one');
+      await tester.pump();
+
+      accepted.complete(false);
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'the new one',
+      );
     });
 
     testWidgets('image generation stop button remains tappable', (

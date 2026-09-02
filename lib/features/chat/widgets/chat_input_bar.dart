@@ -310,42 +310,69 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // and image so nothing is lost while the host shows its modal.
     if (widget.canSend != null && !widget.canSend!()) return;
     final imageDataUrl = _attachedImageDataUrl;
+    final imageBytes = _attachedImageBytes;
+    final guidance = _guidanceMode && _guidanceController.text.trim().isNotEmpty
+        ? _guidanceController.text.trim()
+        : null;
     _isDispatchingSend = true;
+    // Empty the composer on the tap, not on durable acceptance. Behind a send
+    // is a whole re-encode of the message list, and on a long chat that is
+    // seconds of the message sitting in the box next to its own bubble,
+    // reading as a send that never registered. The payload is captured above,
+    // so the rare rejection puts it straight back.
+    _clearComposedPayload();
     bool accepted;
     try {
       if (imageDataUrl != null) {
-        final guidance =
-            _guidanceMode && _guidanceController.text.trim().isNotEmpty
-            ? _guidanceController.text.trim()
-            : null;
         accepted =
             await widget.onSendWithImage?.call(text, guidance, imageDataUrl) ??
             false;
-      } else if (_guidanceMode && _guidanceController.text.trim().isNotEmpty) {
+      } else if (guidance != null) {
         accepted =
-            await widget.onSendWithGuidance?.call(
-              text,
-              _guidanceController.text.trim(),
-            ) ??
-            false;
+            await widget.onSendWithGuidance?.call(text, guidance) ?? false;
       } else {
-        if (text.trim().isEmpty) return;
         accepted = await widget.onSend(text);
       }
     } finally {
       _isDispatchingSend = false;
     }
-    if (!mounted || !accepted) return;
-    // The user may edit the composer while the durable write is pending. Clear
-    // only the exact payload that was accepted, never newer text.
-    if (_controller.text != text || _attachedImageDataUrl != imageDataUrl) {
-      return;
-    }
+    if (!mounted || accepted) return;
+    _restoreComposedPayload(
+      text: text,
+      guidance: guidance,
+      imageBytes: imageBytes,
+      imageDataUrl: imageDataUrl,
+    );
+  }
+
+  void _clearComposedPayload() {
     _controller.clear();
     _guidanceController.clear();
     setState(() {
       _attachedImageBytes = null;
       _attachedImageDataUrl = null;
+    });
+  }
+
+  /// Puts a rejected send's payload back in the composer — unless the user has
+  /// already started composing something newer, which outranks it.
+  void _restoreComposedPayload({
+    required String text,
+    required String? guidance,
+    required Uint8List? imageBytes,
+    required String? imageDataUrl,
+  }) {
+    if (_controller.text.isNotEmpty || _attachedImageDataUrl != null) return;
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+    if (guidance != null && _guidanceController.text.isEmpty) {
+      _guidanceController.text = guidance;
+    }
+    setState(() {
+      _attachedImageBytes = imageBytes;
+      _attachedImageDataUrl = imageDataUrl;
     });
   }
 

@@ -13,6 +13,15 @@ export class GenTimer {
     return (battery ? elapsedSeconds.toFixed(0) : elapsedSeconds.toFixed(1)) + 's';
   }
 
+  /* Starts the clock only if it is not already ticking. The send window puts
+   * the typing bubble up before the generation is published, and both edges
+   * reconcile through _syncGenerationTimer — restarting on the second one
+   * would reset a timer the user has already been watching count. */
+  ensureRunning() {
+    if (this._interval) return;
+    this.start();
+  }
+
   start() {
     this.stop();
     this._start = Date.now();

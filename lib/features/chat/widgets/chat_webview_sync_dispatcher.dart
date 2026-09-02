@@ -474,28 +474,44 @@ class ChatWebViewSyncDispatcher {
     final streamChanged = current.isGenerating != bridge.isGenerating;
     final postGenChanged = current.isPostGenRunning != bridge.isPostGenRunning;
     final imageChanged = current.isGeneratingImage != bridge.isGeneratingImage;
-    if (!streamChanged && !postGenChanged && !imageChanged) {
+    // The send window is pushed with the rest so the elapsed clock under the
+    // typing bubble starts with the bubble, not a durable write later. The
+    // page keeps it apart from `isGenerating`: nothing but the timer reads it.
+    final sendPendingChanged =
+        current.isSendPending != bridge.isSendPendingInPage;
+    if (!streamChanged &&
+        !postGenChanged &&
+        !imageChanged &&
+        !sendPendingChanged) {
       return;
     }
 
     bridge.isGenerating = current.isGenerating;
     bridge.isPostGenRunning = current.isPostGenRunning;
     bridge.isGeneratingImage = current.isGeneratingImage;
+    bridge.isSendPendingInPage = current.isSendPending;
     bridge.evalJs(
       'if (window.bridge) { '
       'window.bridge.setGenerating(${current.isGenerating}); '
       'window.bridge.setPostGenRunning(${current.isPostGenRunning}); '
       'window.bridge.setImageGenerating(${current.isGeneratingImage}); '
+      // Guarded and last: a page from before this flag existed (a cached
+      // asset, the legacy bridge snapshot) would throw here and take the
+      // three calls after it down with the statement.
+      'if (window.bridge.setSendPending) '
+      'window.bridge.setSendPending(${current.isSendPending}); '
       '}',
     );
 
-    if (!current.isGenerating &&
-        !current.isGeneratingImage &&
-        current.messages.isNotEmpty) {
+    // `busy`, not `isGenerating`: a send whose message is still being
+    // persisted is answering already, and stamping Regenerate under it for
+    // that window is the flash this pass exists to keep off screen.
+    final busy = current.isGenerating || current.isSendPending;
+    if (!busy && !current.isGeneratingImage && current.messages.isNotEmpty) {
       bridge.setLastMessage(
         lastUserMessageId(current.messages) ?? current.messages.last.id,
       );
-    } else if (current.isGenerating) {
+    } else if (busy) {
       bridge.setLastMessage(null);
     }
 

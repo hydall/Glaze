@@ -597,6 +597,40 @@ void main() {
       expect(syncState.wasBusy, isTrue);
     });
 
+    test('the send window reaches the page so the clock can start', () {
+      // The elapsed clock under the typing bubble runs on this flag: without
+      // it the bubble sits there timerless for the whole durable append.
+      final bridge = _FakeBridge();
+      final greeting = _assistant('a1');
+      final user = _user('u1');
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+
+      dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(isGenerating: false, messages: [greeting]),
+        current: _fields(
+          isGenerating: false,
+          isSendPending: true,
+          messages: [greeting, user],
+        ),
+        oldMessages: [greeting],
+        newMessages: [greeting, user],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(bridge.isSendPendingInPage, isTrue);
+      expect(bridge.evalCalls.single, contains('setSendPending(true)'));
+      expect(bridge.evalCalls.single, contains('setGenerating(false)'));
+      // Still not idle: the Regenerate button belongs to a chat with no reply
+      // on its way, and this send already has one.
+      expect(bridge.lastMessageIds, [null]);
+    });
+
     test('the bubble is not re-injected when the send hands off to a run', () {
       final bridge = _FakeBridge();
       final greeting = _assistant('a1');
@@ -914,6 +948,12 @@ class _FakeBridge implements ChatBridgeController {
 
   @override
   bool isPostGenRunning = false;
+
+  @override
+  bool isSendPending = false;
+
+  @override
+  bool isSendPendingInPage = false;
 
   @override
   String? continuationTargetId;
