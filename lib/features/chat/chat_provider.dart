@@ -427,62 +427,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     return durableAcceptance.future;
   }
 
-  /// Appends a user message and asks for **no** reply, so the user can write
-  /// several turns in a row. A run already in flight is aborted first — "let
-  /// me keep writing" is exactly the Stop button plus a send.
-  ///
-  /// The queued turns stay separate `user` messages in the history: how they
-  /// reach the provider is the connection's prompt post-processing mode's
-  /// call (`PromptPostProcessing` — `none` sends them as-is, the merge family
-  /// squashes them into one turn). The trailing user message keeps its
-  /// Regenerate button, which is how the reply is finally asked for.
-  ///
-  /// Resolves true once the message is durably appended, same contract as
-  /// [trySendMessage]: UI callers keep the composer intact on false.
-  Future<bool> tryAppendMessage(String text, {String? imageDataUrl}) async {
-    if (!ref.mounted) return false;
-    final running = state.value;
-    if (running != null &&
-        (running.isGenerating ||
-            running.isGeneratingImage ||
-            running.isPostGenRunning)) {
-      // Awaited: the aborted run finalizes its own session write (partial
-      // text, restoration), and this message has to land on top of that row,
-      // never race it.
-      await abortGeneration();
-      if (!ref.mounted) return false;
-    }
-    if (_sendInFlight ||
-        _sessionChangesInFlight > 0 ||
-        ref.read(editingMessageIdProvider(arg)) != null) {
-      return false;
-    }
-    final current = state.value;
-    if (current == null ||
-        current.isGenerating ||
-        current.isGeneratingImage ||
-        current.isPostGenRunning ||
-        _isMemoryDraftActive(current)) {
-      return false;
-    }
-
-    final durableAcceptance = Completer<bool>();
-    unawaited(
-      _sendMessage(
-        text,
-        imageDataUrl: imageDataUrl,
-        generateReply: false,
-        durableAcceptance: durableAcceptance,
-      ).catchError((Object error, StackTrace stackTrace) {
-        debugPrint('[ChatNotifier] queued send failed: $error\n$stackTrace');
-        if (!durableAcceptance.isCompleted) {
-          durableAcceptance.complete(false);
-        }
-      }),
-    );
-    return durableAcceptance.future;
-  }
-
   Future<void> sendMessage(
     String text, {
     String? guidanceText,
@@ -497,7 +441,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     String text, {
     String? guidanceText,
     String? imageDataUrl,
-    bool generateReply = true,
     Completer<bool>? durableAcceptance,
   }) async {
     if (!ref.mounted) {
@@ -551,8 +494,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // Only the assistant *immediately* before the new message is accepted —
       // `ChatRepo.appendUserMessageAndAcceptCurrentVariation` enforces exactly
       // that and refuses the whole write otherwise. Scanning back past a
-      // trailing user message (an aborted send, or a queued turn) would name
-      // an older variation and the append would be silently dropped.
+      // trailing user message (a send aborted before anything streamed leaves
+      // one) named an older variation, so the append was silently dropped and
+      // the message the user just sent disappeared.
       final trailing = current.messages.isEmpty ? null : current.messages.last;
       final acceptedAssistant = trailing?.role == 'assistant' ? trailing : null;
       final expectedAcceptedVariation = acceptedAssistant == null
@@ -574,10 +518,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // button under a message it is about to answer. Cleared atomically with
       // the `isGenerating` publish below, and swept in this method's `finally`
       // for the paths that return before ever reaching it.
-      //
-      // A no-reply send ([generateReply] false) claims neither: nothing is on
-      // its way, so the chat stays idle and the trailing user message keeps
-      // the Regenerate button that asks for the reply later.
       final optimisticSession = current.session!.copyWith(
         messages: [...current.messages, userMsg],
         draft: '',
@@ -586,14 +526,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       // The typing bubble goes up with this paint, so name the phase now —
       // otherwise it shows the default "Generating…" for the whole durable
       // write, which is the claim this label exists to stop making.
-      if (generateReply) {
-        setGenerationPhase(ref, arg, GenerationPhase.preparing);
-      }
+      setGenerationPhase(ref, arg, GenerationPhase.preparing);
       state = AsyncData(
-        current.copyWith(
-          session: optimisticSession,
-          isSendPending: generateReply,
-        ),
+        current.copyWith(session: optimisticSession, isSendPending: true),
       );
       await _yieldToFrame();
       if (!ref.mounted) return;
@@ -638,19 +573,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         return;
       }
       state = AsyncData(
-        generateReply
-            ? afterWrite.copyWith(
-                session: updatedSession,
-                isGenerating: true,
-                isSendPending: false,
-                generationStartTime: DateTime.now(),
-              )
-            // No reply was asked for: publish the appended message and leave
-            // the chat idle, ready for the next one.
-            : afterWrite.copyWith(
-                session: updatedSession,
-                isSendPending: false,
-              ),
+        afterWrite.copyWith(
+          session: updatedSession,
+          isGenerating: true,
+          isSendPending: false,
+          generationStartTime: DateTime.now(),
+        ),
       );
 
       // Dispatch `afterUser` extension blocks. This is fire-and-forget — the
@@ -672,10 +600,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         // `isGenerating` stuck true.
         await _commitAcceptedVariation(current.session!.id, acceptedAssistant);
         if (!ref.mounted) return;
-        // The variation the user was looking at is committed either way — the
-        // message lands after it — but a no-reply send stops here: no
-        // talkativeness roll, no pipeline.
-        if (!generateReply) return;
 
         final charRepo = ref.read(characterRepoProvider);
         final character = await charRepo.getById(arg);

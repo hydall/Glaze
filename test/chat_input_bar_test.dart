@@ -14,23 +14,19 @@ void main() {
 
   group('ChatInputBar', () {
     late List<String> sentMessages;
-    late List<String> queuedMessages;
 
     Widget buildChatInputBar({
       FocusNode? focusNode,
       bool virtualKeyboardSend = false,
       bool enterToSend = true,
       bool isEditingMessage = false,
-      bool isGenerating = false,
       bool isGeneratingImage = false,
       String initialDraft = '',
       void Function(String? guidance)? onImpersonate,
       VoidCallback? onStop,
       bool acceptSend = true,
-      bool canQueue = false,
     }) {
       sentMessages = [];
-      queuedMessages = [];
       return ProviderScope(
         child: MaterialApp(
           home: Scaffold(
@@ -39,13 +35,7 @@ void main() {
                 sentMessages.add(text);
                 return acceptSend;
               },
-              onSendWithoutReply: canQueue
-                  ? (text, imageDataUrl) async {
-                      queuedMessages.add(text);
-                      return acceptSend;
-                    }
-                  : null,
-              isGenerating: isGenerating,
+              isGenerating: false,
               isGeneratingImage: isGeneratingImage,
               focusNode: focusNode,
               virtualKeyboardSend: virtualKeyboardSend,
@@ -177,67 +167,6 @@ void main() {
       await tester.pump();
       textField = tester.widget<TextField>(find.byType(TextField));
       expect(textField.controller!.text, isEmpty);
-    });
-
-    testWidgets('no-reply toggle is hidden when the host cannot queue', (
-      tester,
-    ) async {
-      await tester.pumpWidget(buildChatInputBar(initialDraft: 'hello'));
-
-      expect(find.byIcon(Icons.speaker_notes_off_outlined), findsNothing);
-      expect(find.byIcon(Icons.send_rounded), findsOneWidget);
-    });
-
-    testWidgets('no-reply toggle routes the send past generation', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        buildChatInputBar(initialDraft: 'no answer please', canQueue: true),
-      );
-
-      await tester.tap(find.byIcon(Icons.speaker_notes_off_outlined));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-
-      // The send button says what it will do: append, not ask for a reply.
-      await tester.tap(find.byIcon(Icons.playlist_add_rounded));
-      await tester.pump();
-
-      expect(queuedMessages, ['no answer please']);
-      expect(sentMessages, isEmpty);
-      final textField = tester.widget<TextField>(find.byType(TextField));
-      expect(textField.controller!.text, isEmpty);
-    });
-
-    testWidgets('queuing a turn mid-stream sends instead of stopping', (
-      tester,
-    ) async {
-      var stopCalls = 0;
-      await tester.pumpWidget(
-        buildChatInputBar(
-          initialDraft: 'keep writing',
-          canQueue: true,
-          isGenerating: true,
-          onStop: () => stopCalls++,
-        ),
-      );
-
-      // Stop while the composer is the default mode …
-      expect(find.byIcon(Icons.stop_rounded), findsOneWidget);
-
-      await tester.tap(find.byIcon(Icons.speaker_notes_off_outlined));
-      // The send button cross-fades between icons; let that finish before
-      // asserting which one is on screen.
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-
-      // … and a send once queuing is armed: the host cancels the run itself.
-      expect(find.byIcon(Icons.stop_rounded), findsNothing);
-      await tester.tap(find.byIcon(Icons.playlist_add_rounded));
-      await tester.pump();
-
-      expect(queuedMessages, ['keep writing']);
-      expect(stopCalls, 0);
     });
 
     testWidgets('image generation stop button remains tappable', (

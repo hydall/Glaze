@@ -1239,7 +1239,6 @@
   "chat_message_title": "Сообщение",
   "chat_long_message_hint": "Напишите длинное сообщение...",
   "chat_guidance_message_hint": "Сообщение с указанием...",
-  "chat_no_reply_hint": "Сообщение без ответа...",
   "authors_note_placeholder": "Введите заметку автора...",
   "authors_note_role_hint": "Роль, глубина и режим вставки настраиваются в редакторе пресетов.",
   "tokenizer_history_limit_warning": "История близка к лимиту",
