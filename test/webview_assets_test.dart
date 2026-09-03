@@ -1489,7 +1489,7 @@ void main() {
     });
 
     test('clearAll() also closes all panels', () {
-      final marker = 'clearAll() {';
+      final marker = 'clearAll(keepPlaceholder = true) {';
       final idx = bridgeControllerJs.indexOf(marker);
       expect(idx, isNot(-1));
       final body = _extractBlockBody(bridgeControllerJs, idx);
@@ -2579,11 +2579,15 @@ void main() {
       // clearAll + setMessages used to drop it while Flutter still believed
       // it was on screen — every following delta then updated nothing and the
       // reply streamed into a removed node.
-      final clearIdx = bridgeControllerJs.indexOf('clearAll() {');
+      final clearIdx = bridgeControllerJs.indexOf(
+        'clearAll(keepPlaceholder = true) {',
+      );
       expect(clearIdx, isNot(-1));
+      final clearBody = _extractBlockBody(bridgeControllerJs, clearIdx);
+      expect(clearBody, contains('this._detachStreamingPlaceholder()'));
       expect(
-        _extractBlockBody(bridgeControllerJs, clearIdx),
-        contains('_parkedPlaceholder = this._detachStreamingPlaceholder()'),
+        clearBody,
+        contains('this._parkedPlaceholder = keepPlaceholder ? parked : null'),
       );
 
       final setIdx = bridgeControllerJs.indexOf(
@@ -2595,13 +2599,53 @@ void main() {
       expect(setBody, contains('_reattachStreamingPlaceholder(carriedPlaceholder)'));
     });
 
-    test('an update for a lost placeholder re-creates it', () {
+    test('replacing the chat drops the placeholder instead of parking it', () {
+      // The bubble belongs to the session being left. Carried into the chat
+      // being opened it claims a reply is on its way there, and it then rides
+      // along on every following re-render.
+      final clearIdx = bridgeControllerJs.indexOf(
+        'clearAll(keepPlaceholder = true) {',
+      );
+      expect(clearIdx, isNot(-1));
+      final clearBody = _extractBlockBody(bridgeControllerJs, clearIdx);
+      expect(
+        clearBody,
+        contains('if (!keepPlaceholder) this._placeholderActive = false'),
+      );
+    });
+
+    test('an update for a lost placeholder re-creates it, but only while '
+        'one is wanted', () {
       final idx = bridgeControllerJs.indexOf('_executeUpdateMessage(msg) {');
       expect(idx, isNot(-1));
       final body = _extractBlockBody(bridgeControllerJs, idx);
       final guard = body.substring(0, body.indexOf('const animate'));
       expect(guard, contains('msg.id === STREAMING_ID'));
       expect(guard, contains('_renderAndAppend(msg)'));
+      // `updateMessage` is rAF-batched, so a delta issued before the
+      // placeholder was taken away can execute after it. Re-creating one then
+      // puts the finished reply back on screen as a second copy of itself,
+      // and it outlives the run that produced it.
+      expect(guard, contains('this._placeholderActive'));
+
+      final removeIdx = bridgeControllerJs.indexOf('removeMessage(messageId) {');
+      expect(removeIdx, isNot(-1));
+      expect(
+        _extractBlockBody(bridgeControllerJs, removeIdx),
+        contains('if (messageId === STREAMING_ID) this._placeholderActive = false'),
+      );
+
+      final setIdx = bridgeControllerJs.indexOf(
+        'setMessages(messagesJson, preserveScroll = false) {',
+      );
+      expect(
+        _extractBlockBody(bridgeControllerJs, setIdx),
+        contains('if (carriedPlaceholder) this._placeholderActive = true'),
+        reason:
+            'a re-render that carries one says it is live; one that does not '
+            'says nothing — the node may simply have been lost, which is what '
+            'the re-create branch is for',
+      );
     });
   });
 

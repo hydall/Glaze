@@ -598,7 +598,7 @@ void main() {
     });
 
     test('flush() called before clearAll', () {
-      final idx = bridgeJs.indexOf('clearAll()');
+      final idx = bridgeJs.indexOf('clearAll(keepPlaceholder = true)');
       final methodBody = bridgeJs.substring(idx, idx + 100);
       expect(methodBody, contains('this.flush()'));
     });

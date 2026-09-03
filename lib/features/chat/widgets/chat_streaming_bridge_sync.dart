@@ -90,8 +90,17 @@ Future<void> pushStreamingMessageOwned({
       if (!ownsStream()) return;
       if (syncState.streamingSent) {
         await bridge.updateMessage(message);
-      } else {
+      } else if (syncState.wasBusy) {
+        // The first delta of a run whose placeholder append is still in
+        // flight puts the bubble up itself. Only while a reply is actually on
+        // its way, though: this runs on the shared mutation queue, so a delta
+        // that was still crossing the channel when the run settled lands
+        // *after* the falling edge removed the placeholder — and appending it
+        // there stands the finished reply a second time under itself, in a
+        // bubble nothing will ever take away again.
         await bridge.appendMessage(message);
+      } else {
+        return;
       }
       if (ownsStream()) syncState.streamingSent = true;
     } catch (_) {

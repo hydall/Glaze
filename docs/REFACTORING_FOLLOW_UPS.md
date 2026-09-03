@@ -144,7 +144,7 @@ Every extraction stage must:
 - run focused characterization tests for the changed ownership boundary;
 - run `dart run build_runner build --delete-conflicting-outputs` after generated
   model or Drift structural changes;
-- run `dart run easy_localization:generate -S assets/translations -f keys -o locale_keys.g.dart`
+- run `dart run easy_localization:generate -S assets/translations -s en.json -f keys -o locale_keys.g.dart`
   when localization keys or their generated contract can be affected;
 - pass the CI analyzer command:
   `flutter analyze --no-fatal-infos --no-fatal-warnings`;

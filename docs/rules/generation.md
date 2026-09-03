@@ -125,6 +125,24 @@ from "the reply is already on its way".
   (`_keepingPlaceholderLast`) and carries it across a full re-render
   (`clearAll` parks it, `setMessages` puts it back). An update for a
   placeholder whose node is gone re-creates it rather than dropping the reply.
+- **…and the page must never bring one back on its own.** The same constant id
+  makes every late delta look like the live one. `updateMessage` is rAF-batched
+  and the streaming pushes share the message-mutation queue, while the falling
+  edge removes the placeholder *synchronously* — so a delta issued before the
+  run settled routinely executes after it. The page therefore tracks whether
+  Flutter still believes a placeholder is on screen (`_placeholderActive`,
+  cleared by `removeMessage` and by a re-render that carries none) and
+  re-creates only while it does; `pushStreamingMessageOwned` appends only while
+  the send/generation window is open (`ChatWebViewSyncState.wasBusy`). Without
+  both, the finished reply stands a second time under itself in a bubble
+  nothing removes again — it outlives leaving and re-opening the chat, because
+  no persisted message corresponds to it.
+- **A session switch replaces the chat, so it drops the bubble instead of
+  parking it** (`clearAll(keepPlaceholder: false)`). Carried over, it claims a
+  reply is on its way in a chat where nothing is running, and it then rides
+  along on every following re-render. The same-session re-sync keeps the
+  default, because its `clearAll` is always followed by `setMessages` of the
+  list the placeholder belongs to.
 - **Treat it as busy wherever `isGenerating` gates a UI affordance.** It is why
   `ChatMessageSync.sync` takes `busy` rather than `isGenerating`: the
   optimistic bubble is a tail append, and stamping the Regenerate button there

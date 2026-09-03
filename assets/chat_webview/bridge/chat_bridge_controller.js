@@ -39,6 +39,13 @@ export class Bridge {
     // Placeholder element lifted out by clearAll, waiting for the setMessages
     // that follows it. See _keepingPlaceholderLast().
     this._parkedPlaceholder = null;
+    // Whether Flutter still believes a typing placeholder is on screen. The
+    // page may carry that node across a re-render of the same list, but it
+    // must never bring one back on its own: `updateMessage` is rAF-batched, so
+    // a delta issued before the placeholder was taken away can execute after
+    // it, and the re-create branch in _executeUpdateMessage would then put the
+    // finished reply back on screen as a second copy of itself.
+    this._placeholderActive = false;
     // Scroll-hide header state. Lifted out of the _setupScrollListener closure
     // so the rest of the controller can reach it: _ensureHeaderReachable()
     // un-hides the header when the list shrinks out of scroll range, and
@@ -571,6 +578,11 @@ export class Bridge {
     const carriedPlaceholder =
       this._detachStreamingPlaceholder() || this._parkedPlaceholder || null;
     this._parkedPlaceholder = null;
+    // Carrying one across says it is still live. Not carrying one says
+    // nothing: the node may simply have been lost, which is the case the
+    // re-create branch in _executeUpdateMessage exists for. Only removeMessage
+    // and a chat-replacing clearAll retire the placeholder.
+    if (carriedPlaceholder) this._placeholderActive = true;
     this._suppressLoadMore = true;
     // When re-rendering in place (e.g. a preset switch changes display regexes),
     // remember the current reading position so the batch replace below doesn't
@@ -618,6 +630,7 @@ export class Bridge {
     // The placeholder is itself appended through here — pinning it behind
     // itself would evict and re-add the node for nothing.
     if (msg.id === STREAMING_ID) {
+      this._placeholderActive = true;
       this._renderAndAppend(msg);
     } else {
       this._keepingPlaceholderLast(() => this._renderAndAppend(msg));
@@ -679,11 +692,13 @@ export class Bridge {
   _executeUpdateMessage(msg) {
     const section = document.querySelector(`[data-message-id="${msg.id}"]`);
     if (!section) {
-      // Last line of defence for the virtual placeholder: Flutter only sends
-      // updates for it while it believes one is on screen, so if the node is
-      // gone the list lost it somewhere. Re-create it instead of dropping the
-      // reply on the floor.
-      if (msg.id === STREAMING_ID) {
+      // Last line of defence for the virtual placeholder: while Flutter still
+      // believes one is on screen, a node the list lost has to be re-created
+      // or the reply streams into nothing. Once the placeholder has been taken
+      // away — or a full re-render landed without it — a late delta must not
+      // bring it back: that is the finished reply, shown a second time under
+      // itself, and it outlives the run that produced it.
+      if (msg.id === STREAMING_ID && this._placeholderActive) {
         this._renderAndAppend(msg);
         this.virtualList.scrollToBottom();
       }
@@ -873,6 +888,10 @@ export class Bridge {
 
   removeMessage(messageId) {
     this.flush();
+    // The node lingers for its exit animation, but Flutter has stopped
+    // believing in it right here — anything that arrives for it from now on is
+    // a leftover of the run that just ended.
+    if (messageId === STREAMING_ID) this._placeholderActive = false;
     if (this._panelHost) {
       for (const [panelId, panel] of [...this._panelHost._panels.entries()]) {
         if (panel.messageId === messageId) this._panelHost.close(panelId);
@@ -934,14 +953,20 @@ export class Bridge {
     for (const id of orphanIds) this.virtualList.remove(id);
   }
 
-  clearAll() {
+  /* [keepPlaceholder] is false when the chat itself is being replaced. The
+   * typing bubble belongs to the chat being left: carrying it into the next
+   * one shows a reply on its way in a session where nothing is running, and it
+   * then rides along on every following re-render. */
+  clearAll(keepPlaceholder = true) {
     this.flush();
     this._showLoadingScreen();
     this._panelHost?.closeAll();
     // Park the placeholder rather than dropping it: every clearAll on the
     // message-sync path is immediately followed by setMessages, which puts it
     // back at the tail. Without this the reply streams into a removed node.
-    this._parkedPlaceholder = this._detachStreamingPlaceholder();
+    const parked = this._detachStreamingPlaceholder();
+    this._parkedPlaceholder = keepPlaceholder ? parked : null;
+    if (!keepPlaceholder) this._placeholderActive = false;
     this.virtualList.clear();
   }
 

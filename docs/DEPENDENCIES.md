@@ -23,10 +23,17 @@ and recreated in CI.
 ```powershell
 flutter pub get
 dart run build_runner build --delete-conflicting-outputs
-dart run easy_localization:generate -S assets/translations -f keys -o locale_keys.g.dart
+dart run easy_localization:generate -S assets/translations -s en.json -f keys -o locale_keys.g.dart
 flutter analyze --no-fatal-infos --no-fatal-warnings
 flutter test --reporter expanded
 ```
+
+`-s en.json` is required, not decorative: in `keys` format the generator reads
+`files.first` from a bare `Directory.list()` of the source folder
+(easy_localization 3.0.8, `bin/generate.dart`), which is filesystem order. The
+glossary files live in that folder too, so without naming the source file the
+run sometimes generates `LocaleKeys` from `glossary_en.json` — one key — and
+the localization contract test fails on a diff that never touched translations.
 
 Build every affected target platform that is available in the verification
 environment. Glaze targets Windows, Android, iOS, macOS, and Linux; web is not

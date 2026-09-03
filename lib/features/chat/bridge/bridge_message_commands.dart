@@ -215,9 +215,15 @@ class MessageBridgeCommands {
     }
   }
 
-  Future<void> clearAll() {
+  /// Wipes the message list.
+  ///
+  /// [keepPlaceholder] is false when the *chat* is being replaced rather than
+  /// re-rendered: the page parks the typing bubble across a `clearAll` +
+  /// `setMessages` pair, and a session switch must not hand it to the chat
+  /// being opened — nothing is generating there.
+  Future<void> clearAll({bool keepPlaceholder = true}) {
     _host.clearCachedTriggeredRegexes();
-    return _host.evalJs('window.bridge?.clearAll()');
+    return _host.evalJs('window.bridge?.clearAll($keepPlaceholder)');
   }
 
   Future<void> scrollToBottom({bool smooth = false}) {

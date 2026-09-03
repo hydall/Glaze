@@ -99,7 +99,15 @@ void main() {
     final plan = service.planDeleteMessages(session, {1, 3})!;
     final committed = await service.commitDeleteMessages(session, plan);
 
-    expect(identical(committed, plan.session), isTrue);
+    // `commitDeleteMessages` ends in a re-read of the row it just wrote
+    // (#376), so what comes back is the durable session rather than the
+    // planned instance. The contract this guards is that the two carry the
+    // same list — the optimistic paint is exactly what got persisted.
+    expect(committed.id, plan.session.id);
+    expect(
+      committed.messages.map((m) => m.id),
+      plan.session.messages.map((m) => m.id),
+    );
     final persisted = await container.read(chatRepoProvider).getById('s1');
     expect(persisted?.messages.map((m) => m.id), ['m0', 'm2', 'm4']);
     expect(persisted?.deletedMessageCount, 2);
