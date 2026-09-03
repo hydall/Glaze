@@ -15,10 +15,14 @@ import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../chat_provider.dart'
-    show ImpersonationState, impersonationStateProvider;
-import '../composer_actions_provider.dart';
+    show ImpersonationState, chatProvider, impersonationStateProvider;
+import '../composer_pins_provider.dart';
+import '../quick_replies_provider.dart';
+import '../services/drawer_item_launcher.dart';
+import '../state/chat_drawer_editing_provider.dart';
 import 'chat_blur_region_tracker.dart';
-import 'composer_actions_sheet.dart';
+import 'magic_drawer_catalog.dart';
+import 'magic_drawer_widgets.dart';
 
 Border _uiBorder(BuildContext context, ThemePreset preset) {
   final base = preset.borderParsed ?? context.cs.onSurface;
@@ -95,6 +99,11 @@ class ChatInputBar extends ConsumerStatefulWidget {
   /// the composer behaves as a plain input (e.g. theme preview, tests).
   final String? charId;
 
+  /// Runs before a pinned quick reply starts a generation; false aborts it.
+  /// The drawer's Actions tab is handed the same guard, so a reply behaves the
+  /// same whether it is tapped in the grid or up here.
+  final Future<bool> Function()? beforeGeneration;
+
   const ChatInputBar({
     super.key,
     required this.onSend,
@@ -129,6 +138,7 @@ class ChatInputBar extends ConsumerStatefulWidget {
     this.allSelectedHidden = false,
     this.isEditingMessage = false,
     this.charId,
+    this.beforeGeneration,
   });
 
   @override
@@ -153,12 +163,36 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   bool _isImpersonating = false;
   bool _isDispatchingSend = false;
 
+  /// Held rather than looked up on demand: `dispose` has to hand the bridge
+  /// back, and `ref` is off limits once the element is being unmounted.
+  late final ComposerActionBridge _actionBridge;
+
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialDraft);
     _controller.addListener(_onTextChanged);
     _updateFocusNodeHandler();
+    // Attach / fullscreen / guidance act on the controllers this State owns, so
+    // the drawer cannot run them itself once one of their cards is sitting in
+    // its Actions grid. Hand it a way in.
+    _actionBridge = ref.read(composerActionBridgeProvider)
+      ..register(_runComposerAction);
+  }
+
+  /// Runs a composer-owned action asked for from the drawer's Actions tab.
+  void _runComposerAction(ComposerAction action) {
+    if (!mounted) return;
+    switch (action) {
+      case ComposerAction.drawer:
+        widget.onMagicDrawer?.call();
+      case ComposerAction.attach:
+        unawaited(_pickImage());
+      case ComposerAction.fullscreen:
+        unawaited(_openFullscreenEditor());
+      case ComposerAction.guidance:
+        _toggleGuidance();
+    }
   }
 
   void _onTextChanged() {
@@ -235,6 +269,10 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
 
   @override
   void dispose() {
+    // Identity-checked inside, so a session switch — which re-keys this widget
+    // and can mount the replacement before this runs — cannot leave the drawer
+    // holding a handler into a disposed State.
+    _actionBridge.unregister(_runComposerAction);
     _debounce?.cancel();
     _controller.dispose();
     _guidanceController.dispose();
@@ -401,75 +439,233 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
 
   /// The configurable button row under the composer.
   ///
-  /// Which buttons appear, and in what order, comes from
-  /// [composerActionsProvider]; this only maps each enabled action onto its
-  /// callback. An action whose callback is unavailable in the current layout
-  /// (the drawer button on desktop) is skipped whatever the setting says —
-  /// hiding a dead button beats honouring a preference nobody can act on.
+  /// What sits here comes from [composerPinsProvider], and it is no longer only
+  /// composer actions: a quick reply or a Tools card can be pinned up here too,
+  /// and whatever is pinned is filtered out of the drawer tab it came from. A
+  /// pin whose target is gone (a deleted quick reply, a card this build
+  /// dropped, the drawer button on desktop) resolves to nothing and is skipped
+  /// — a dead button is worse than a missing one.
   ///
-  /// Long-pressing anywhere in the row opens the picker, so the setting is
-  /// reachable from the row it configures and not only from Settings.
+  /// The row is edited from the drawer's pencil rather than from a settings
+  /// sheet of its own: while [chatDrawerEditingProvider] is on and the drawer is
+  /// open, each button can be dragged along the row and carries a down-arrow
+  /// that drops it back into its tab. The other direction has no badge — a card
+  /// dragged out of a drawer grid and dropped here is what puts it up.
   Widget _buildActionRow() {
-    final actions =
-        ref.watch(composerActionsProvider).value ?? kDefaultComposerActions;
+    final pins = ref.watch(composerPinsProvider).value ?? kDefaultComposerPins;
+    // Gated on the drawer being open as well as on edit mode: with the drawer
+    // shut there is nowhere for a demoted button to land, and no pencil on
+    // screen to explain the arrows.
+    final editing =
+        widget.isDrawerOpen && ref.watch(chatDrawerEditingProvider);
 
     final buttons = <Widget>[];
-    for (final action in actions) {
-      final button = _buildActionButton(action);
+    for (var index = 0; index < pins.length; index++) {
+      final button = _buildPinnedButton(pins[index], editing);
       if (button == null) continue;
       if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 8));
       buttons.add(button);
     }
+    if (buttons.isEmpty) return const SizedBox.shrink();
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onLongPress: () {
-        Haptics.mediumImpact();
-        ComposerActionsSheet.show(context);
-      },
+    final strip = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      // Dragging a button along the row and scrolling the row are the same
+      // gesture, so edit mode takes the scroll away. A row long enough to
+      // overflow is a row worth thinning out with the down-arrows anyway.
+      physics: editing
+          ? const NeverScrollableScrollPhysics()
+          : const ClampingScrollPhysics(),
+      // Room for the badges edit mode hangs off each button's corner, reserved
+      // in both states so turning edit mode on does not nudge the row.
+      padding: const EdgeInsets.only(top: 6, right: 6),
       child: Row(mainAxisSize: MainAxisSize.min, children: buttons),
+    );
+    if (!editing) return strip;
+
+    // Catches a card dropped on the row rather than on one of its buttons —
+    // the gap past the last one, or anywhere at all when the row is down to the
+    // drawer button. The per-button targets sit deeper in the tree and win when
+    // the drop lands on one, so this only ever handles the leftovers.
+    return DragTarget<ComposerPin>(
+      onWillAcceptWithDetails: (details) => !pins.contains(details.data),
+      onAcceptWithDetails: (details) => _pin(details.data, pins.length),
+      builder: (context, _, _) => strip,
     );
   }
 
-  /// Null when [action] has nothing to do in the current layout.
-  Widget? _buildActionButton(ComposerAction action) {
+  /// Null when [pin] has nothing to do in the current layout.
+  Widget? _buildPinnedButton(ComposerPin pin, bool editing) {
+    final resolved = _resolvePin(pin);
+    if (resolved == null) return null;
+
+    final button = _CircleBtn(
+      icon: resolved.icon,
+      // Edit mode is for arranging the row, not for firing it: a tap that both
+      // reorders and sends would be a trap.
+      onTap: editing ? null : resolved.onTap,
+      color: resolved.color,
+      batterySaver: widget.batterySaver,
+      blurRegionId: 'btn-pin-${pin.encode()}',
+    );
+    if (!editing) return button;
+
+    final content = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        button,
+        // Mirrors the up-arrow the drawer's cards carry, in the same accent:
+        // one gesture, one colour, opposite directions.
+        if (!pin.isPermanent)
+          Positioned(
+            top: -6,
+            right: -6,
+            child: MagicCardBadge(
+              icon: Icons.arrow_downward,
+              color: context.cs.primary,
+              tooltip: 'composer_pin_remove'.tr(),
+              size: 18,
+              onTap: () => _unpin(pin),
+            ),
+          ),
+      ],
+    );
+
+    // Carries the pin itself rather than its index, for two reasons: the drop
+    // resolves against the list as it is *then*, and the payload type is one
+    // the drawer's grids cannot produce. Both grids are on screen right now,
+    // and a shared payload type would have let a card dragged out of one land
+    // in this row as a reorder of whatever happened to share its index.
+    return DragTarget<ComposerPin>(
+      onWillAcceptWithDetails: (details) => details.data != pin,
+      onAcceptWithDetails: (details) {
+        final current =
+            ref.read(composerPinsProvider).value ?? const <ComposerPin>[];
+        final to = current.indexOf(pin);
+        if (to < 0) return;
+        final from = current.indexOf(details.data);
+        // Below zero means the payload came from a drawer grid rather than
+        // from this row, so it is an arrival, not a move.
+        if (from < 0) {
+          _pin(details.data, to);
+        } else {
+          ref.read(composerPinsProvider.notifier).reorder(from, to);
+        }
+      },
+      builder: (context, _, _) => Draggable<ComposerPin>(
+        // A plain [Draggable], not the grid's long-press one: edit mode has
+        // already claimed the row, so a button has nothing else a press could
+        // mean and moving one should cost a single finger movement.
+        data: pin,
+        axis: Axis.horizontal,
+        feedback: Material(
+          color: Colors.transparent,
+          child: Opacity(
+            opacity: 0.92,
+            // No blur region on the copy under the finger: it lives in the root
+            // overlay, outside the chat's tracker scope, and mirroring a moving
+            // rect into the WebView would only chase it.
+            child: _CircleBtn(
+              icon: resolved.icon,
+              color: resolved.color,
+              batterySaver: widget.batterySaver,
+            ),
+          ),
+        ),
+        childWhenDragging: Opacity(opacity: 0.25, child: content),
+        child: content,
+      ),
+    );
+  }
+
+  void _unpin(ComposerPin pin) {
+    Haptics.mediumImpact();
+    unawaited(ref.read(composerPinsProvider.notifier).unpin(pin));
+  }
+
+  /// Lands a card dragged out of a drawer grid at [index] in the row.
+  void _pin(ComposerPin pin, int index) {
+    Haptics.mediumImpact();
+    unawaited(ref.read(composerPinsProvider.notifier).pinAt(pin, index));
+  }
+
+  /// Icon, tint and callback for one pinned button, or null when the thing it
+  /// points at is unavailable here.
+  _ResolvedPin? _resolvePin(ComposerPin pin) {
+    switch (pin.kind) {
+      case ComposerPinKind.action:
+        return _resolveAction(pin.asAction);
+      case ComposerPinKind.reply:
+        final reply = (ref.watch(quickRepliesProvider).value ?? const [])
+            .where((r) => r.id == pin.refId)
+            .firstOrNull;
+        if (reply == null) return null;
+        return _ResolvedPin(
+          icon: reply.icon,
+          onTap: () => _sendQuickReply(reply),
+        );
+      case ComposerPinKind.tool:
+        final charId = widget.charId;
+        final def = magicDrawerItemById(pin.refId);
+        // Tools open sheets against a chat; without a charId (theme preview,
+        // tests) there is none to open them against.
+        if (charId == null || def == null) return null;
+        return _ResolvedPin(
+          icon: def.icon,
+          onTap: () => DrawerItemLauncher(
+            ref: ref,
+            charId: charId,
+          ).open(context, def.id),
+        );
+    }
+  }
+
+  _ResolvedPin? _resolveAction(ComposerAction? action) {
     switch (action) {
+      case null:
+        return null;
       case ComposerAction.drawer:
         // Null on desktop, where the drawer lives in the right sidebar
         // instead — drop the button rather than leave a dead one behind.
         if (widget.onMagicDrawer == null) return null;
-        return _CircleBtn(
+        return _ResolvedPin(
           icon: action.icon,
           onTap: widget.onMagicDrawer,
           color: widget.isDrawerOpen ? Colors.amber : null,
-          batterySaver: widget.batterySaver,
-          blurRegionId: 'btn-magic',
         );
       case ComposerAction.attach:
-        return _CircleBtn(
-          icon: action.icon,
-          onTap: _pickImage,
-          batterySaver: widget.batterySaver,
-          blurRegionId: 'btn-attach',
-        );
+        return _ResolvedPin(icon: action.icon, onTap: _pickImage);
       case ComposerAction.fullscreen:
-        return _CircleBtn(
-          icon: action.icon,
-          onTap: _openFullscreenEditor,
-          batterySaver: widget.batterySaver,
-          blurRegionId: 'btn-fullscreen',
-        );
+        return _ResolvedPin(icon: action.icon, onTap: _openFullscreenEditor);
       case ComposerAction.guidance:
-        return _CircleBtn(
+        return _ResolvedPin(
           icon: action.icon,
-          onTap: () => setState(() {
-            _guidanceMode = !_guidanceMode;
-            if (!_guidanceMode) _guidanceController.clear();
-          }),
+          onTap: _toggleGuidance,
           color: _guidanceMode ? Colors.orange : null,
-          batterySaver: widget.batterySaver,
-          blurRegionId: 'btn-guidance',
         );
+    }
+  }
+
+  void _toggleGuidance() {
+    setState(() {
+      _guidanceMode = !_guidanceMode;
+      if (!_guidanceMode) _guidanceController.clear();
+    });
+  }
+
+  /// Sends a quick reply pinned to the row, on the same terms the drawer's
+  /// Actions tab sends it: the host's pre-generation guard first, then either
+  /// the built-in continue or the reply's text.
+  Future<void> _sendQuickReply(QuickReply reply) async {
+    final charId = widget.charId;
+    if (charId == null) return;
+    if (await widget.beforeGeneration?.call() == false) return;
+    if (!mounted) return;
+    final notifier = ref.read(chatProvider(charId).notifier);
+    if (reply.isContinueAction) {
+      await notifier.continueMessage();
+    } else if (reply.text.trim().isNotEmpty) {
+      await notifier.sendMessage(reply.text);
     }
   }
 
@@ -776,11 +972,15 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 ),
               ),
             ),
-            const SizedBox(height: 10),
+            // 4, not the 10 this gap used to be: the row reserves 6px of its
+            // own for the badges edit mode hangs above the buttons.
+            const SizedBox(height: 4),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _buildActionRow(),
+                // Expanded, so a row long enough to overflow scrolls instead of
+                // shoving the send button off the screen.
+                Expanded(child: _buildActionRow()),
+                const SizedBox(width: 8),
                 _SendBtn(
                   icon: isGenerating
                       ? Icons.stop_rounded
@@ -814,6 +1014,20 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       ),
     );
   }
+}
+
+/// What a [ComposerPin] turns into once the composer has looked it up: the
+/// glyph to draw, the tint to draw it in, and what a tap does. Keeps the row
+/// builder free of the three-way switch that produces it.
+class _ResolvedPin {
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  /// Active-state tint (the drawer button while the drawer is open, guidance
+  /// while the field is up); null leaves the button in the accent colour.
+  final Color? color;
+
+  const _ResolvedPin({required this.icon, this.onTap, this.color});
 }
 
 class _AttachedImagePreview extends StatelessWidget {

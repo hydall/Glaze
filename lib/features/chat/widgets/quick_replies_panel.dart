@@ -5,7 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glass_surface.dart';
 import '../chat_provider.dart';
+import '../composer_pins_provider.dart';
+import '../quick_reply_icons.dart';
 import '../quick_replies_provider.dart';
 import 'drawer_panel_scaffold.dart';
 import 'magic_drawer_models.dart';
@@ -48,6 +51,17 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     super.dispose();
   }
 
+  /// Runs one of the composer's own buttons from its card.
+  ///
+  /// Attach, fullscreen and guidance all land on the composer, so the drawer
+  /// hands them back to it through [ComposerActionBridge] and then gets out of
+  /// the way — every one of them wants the message box next.
+  void _handleActionTap(ComposerAction action) {
+    if (widget.editing) return;
+    ref.read(composerActionBridgeProvider).run(action);
+    widget.onClose?.call();
+  }
+
   Future<void> _handleTap(QuickReply reply) async {
     if (widget.editing) {
       await _showEditSheet(existing: reply);
@@ -68,7 +82,17 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     await ref.read(quickRepliesProvider.notifier).remove(id);
   }
 
-  Future<void> _moveItem(int from, int to) async {
+  /// Reorders by reply id, not by grid position: the grid hides replies that
+  /// are pinned to the composer row, so a drop's display index is not an index
+  /// into the stored list.
+  Future<void> _moveItem(
+    List<QuickReply> all,
+    String movingId,
+    String targetId,
+  ) async {
+    final from = all.indexWhere((r) => r.id == movingId);
+    final to = all.indexWhere((r) => r.id == targetId);
+    if (from < 0 || to < 0 || from == to) return;
     await ref.read(quickRepliesProvider.notifier).reorder(from, to);
     if (mounted) setState(() => _hoverIndex = null);
   }
@@ -84,16 +108,23 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
       child: _QuickReplyEditForm(
         initialLabel: reply?.label ?? '',
         initialText: reply?.text ?? '',
+        initialIconId: reply?.iconId,
         isNew: isNew,
         // Continue runs the app's continue-generation call; it has no prompt
         // body to edit and no delete button, so the form drops both.
         builtIn: reply?.isBuiltIn ?? false,
-        onSubmit: (label, text) async {
+        onSubmit: (label, text, iconId) async {
           final notifier = ref.read(quickRepliesProvider.notifier);
           if (isNew) {
-            await notifier.add(label, text);
+            await notifier.add(label, text, iconId: iconId);
           } else {
-            await notifier.edit(reply.id, label: label, text: text);
+            await notifier.edit(
+              reply.id,
+              label: label,
+              text: text,
+              iconId: iconId,
+              clearIcon: iconId == null,
+            );
           }
         },
         onDelete: (isNew || reply.isBuiltIn)
@@ -112,32 +143,23 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
   @override
   Widget build(BuildContext context) {
     final repliesAsync = ref.watch(quickRepliesProvider);
-    final replies = repliesAsync.value ?? const <QuickReply>[];
+    final allReplies = repliesAsync.value ?? const <QuickReply>[];
+    final pins = ref.watch(composerPinsProvider).value ?? const <ComposerPin>[];
 
-    final cards = <MagicDrawerCardItem>[
-      for (final r in replies)
-        MagicDrawerCardItem(
-          def: MagicDrawerItemDef(
-            id: r.id,
-            label: r.label,
-            icon: r.isContinueAction
-                ? Icons.keyboard_double_arrow_right
-                : Icons.bolt,
-            category: MagicDrawerCategory.session,
-          ),
-          status: _previewText(r),
-        ),
-      // Always last, never gated on edit mode: the "+" in the grid is how a
-      // new user learns this tab is theirs to fill.
-      MagicDrawerCardItem(
-        def: MagicDrawerItemDef(
-          id: '__add__',
-          label: 'action_add'.tr(),
-          icon: Icons.add,
-          category: MagicDrawerCategory.session,
-        ),
-        isAddButton: true,
-      ),
+    // Anything pinned to the composer's row is dropped from the grid: the two
+    // must never offer the same button twice. The stored order is untouched, so
+    // the row's down-arrow puts a card back exactly where it came from.
+    //
+    // Attach / fullscreen / guidance lead the grid as a fixed block. They are
+    // composer behaviour rather than user content, so they have a home rather
+    // than a position: nothing to reorder, nothing to delete.
+    final actions = [
+      for (final action in ComposerAction.demotable)
+        if (!pins.contains(ComposerPin.action(action))) action,
+    ];
+    final replies = [
+      for (final reply in allReplies)
+        if (!pins.contains(ComposerPin.reply(reply.id))) reply,
     ];
 
     final content = RawScrollbar(
@@ -151,6 +173,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final itemWidth = (constraints.maxWidth - 24 - 12) / 3;
+            var cellIndex = 0;
             return SingleChildScrollView(
               controller: _scrollController,
               padding: EdgeInsets.fromLTRB(
@@ -161,73 +184,153 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
               ),
               child: MagicCardGrid(
                 columns: 3,
-                cells: List.generate(cards.length, (index) {
-                  final item = cards[index];
-                  if (item.isAddButton) {
-                    return SizedBox(
+                cells: [
+                  for (final action in actions)
+                    SizedBox(
                       width: itemWidth,
-                      child: AddMagicCard(onTap: () => _showEditSheet()),
-                    );
-                  }
-                  final reply = replies.firstWhere((r) => r.id == item.def.id);
-                  final card = MagicCard(
-                    item: item,
-                    editing: widget.editing,
-                    hovered: _hoverIndex == index && _draggingIndex != index,
-                    onTap: () => _handleTap(reply),
-                    onDelete: () => _remove(reply.id),
-                    deletable: !reply.isBuiltIn,
-                  );
-
-                  return SizedBox(
-                    width: itemWidth,
-                    child: DragTarget<int>(
-                      onWillAcceptWithDetails: (details) {
-                        setState(() => _hoverIndex = index);
-                        return details.data != index;
-                      },
-                      onLeave: (_) {
-                        if (_hoverIndex == index) {
-                          setState(() => _hoverIndex = null);
-                        }
-                      },
-                      onAcceptWithDetails: (details) {
-                        _moveItem(details.data, index);
-                      },
-                      builder: (context, _, _) {
-                        return LongPressDraggable<int>(
-                          data: index,
-                          delay: const Duration(milliseconds: 300),
-                          onDragStarted: () {
-                            Haptics.mediumImpact();
-                            if (!widget.editing) {
-                              widget.onEditingRequested?.call();
-                            }
-                            setState(() => _draggingIndex = index);
-                          },
-                          onDragEnd: (_) {
-                            setState(() {
-                              _draggingIndex = null;
-                              _hoverIndex = null;
-                            });
-                          },
-                          feedback: SizedBox(
-                            width: itemWidth,
-                            child: Material(
-                              color: Colors.transparent,
-                              child: Opacity(opacity: 0.92, child: card),
+                      child: Builder(
+                        builder: (context) {
+                          final card = MagicCard(
+                            key: ValueKey('action-${action.id}'),
+                            item: MagicDrawerCardItem(
+                              def: MagicDrawerItemDef(
+                                id: action.id,
+                                label: action.label,
+                                icon: action.icon,
+                                category: MagicDrawerCategory.session,
+                              ),
                             ),
-                          ),
-                          childWhenDragging: Opacity(
-                            opacity: 0.25,
+                            editing: widget.editing,
+                            hovered: false,
+                            onTap: () => _handleActionTap(action),
+                            onDelete: () {},
+                            deletable: false,
+                          );
+                          // Draggable but not a drop target: this block has a
+                          // fixed home order, so the only move it accepts is
+                          // upwards, into the composer's row.
+                          return LongPressDraggable<ComposerPin>(
+                            data: ComposerPin.action(action),
+                            delay: const Duration(milliseconds: 300),
+                            onDragStarted: () {
+                              Haptics.mediumImpact();
+                              if (!widget.editing) {
+                                widget.onEditingRequested?.call();
+                              }
+                            },
+                            feedback: SizedBox(
+                              width: itemWidth,
+                              child: Material(
+                                color: Colors.transparent,
+                                child: Opacity(opacity: 0.92, child: card),
+                              ),
+                            ),
+                            childWhenDragging: Opacity(
+                              opacity: 0.25,
+                              child: card,
+                            ),
                             child: card,
+                          );
+                        },
+                      ),
+                    ),
+                  for (final reply in replies)
+                    Builder(
+                      builder: (context) {
+                        final index = cellIndex++;
+                        final card = MagicCard(
+                          item: MagicDrawerCardItem(
+                            def: MagicDrawerItemDef(
+                              id: reply.id,
+                              label: reply.label,
+                              icon: reply.icon,
+                              category: MagicDrawerCategory.session,
+                            ),
+                            status: _previewText(reply),
                           ),
-                          child: card,
+                          editing: widget.editing,
+                          hovered:
+                              _hoverIndex == index && _draggingIndex != index,
+                          onTap: () => _handleTap(reply),
+                          onDelete: () => _remove(reply.id),
+                          deletable: !reply.isBuiltIn,
+                        );
+
+                        return SizedBox(
+                          width: itemWidth,
+                          // [ComposerPin] payload, so the very same drag can
+                          // end in the composer's row — the only way to pin a
+                          // card now that the grid carries no badge for it.
+                          // Drops that stay here are guarded to replies this
+                          // grid is showing, so neither a pinned button nor a
+                          // Tools card can reshuffle it.
+                          child: DragTarget<ComposerPin>(
+                            onWillAcceptWithDetails: (details) {
+                              final incoming = details.data;
+                              if (incoming.kind != ComposerPinKind.reply ||
+                                  incoming.refId == reply.id ||
+                                  !replies.any(
+                                    (r) => r.id == incoming.refId,
+                                  )) {
+                                return false;
+                              }
+                              setState(() => _hoverIndex = index);
+                              return true;
+                            },
+                            onLeave: (_) {
+                              if (_hoverIndex == index) {
+                                setState(() => _hoverIndex = null);
+                              }
+                            },
+                            onAcceptWithDetails: (details) {
+                              _moveItem(
+                                allReplies,
+                                details.data.refId,
+                                reply.id,
+                              );
+                            },
+                            builder: (context, _, _) {
+                              return LongPressDraggable<ComposerPin>(
+                                data: ComposerPin.reply(reply.id),
+                                delay: const Duration(milliseconds: 300),
+                                onDragStarted: () {
+                                  Haptics.mediumImpact();
+                                  if (!widget.editing) {
+                                    widget.onEditingRequested?.call();
+                                  }
+                                  setState(() => _draggingIndex = index);
+                                },
+                                onDragEnd: (_) {
+                                  setState(() {
+                                    _draggingIndex = null;
+                                    _hoverIndex = null;
+                                  });
+                                },
+                                feedback: SizedBox(
+                                  width: itemWidth,
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: Opacity(opacity: 0.92, child: card),
+                                  ),
+                                ),
+                                childWhenDragging: Opacity(
+                                  opacity: 0.25,
+                                  child: card,
+                                ),
+                                child: card,
+                              );
+                            },
+                          ),
                         );
                       },
                     ),
-                  );
-                }),
+                  // Always last, never gated on edit mode: the "+" in the grid
+                  // is how a new user learns this tab is theirs to fill.
+                  SizedBox(
+                    width: itemWidth,
+                    child: AddMagicCard(onTap: () => _showEditSheet()),
+                  ),
+                ],
               ),
             );
           },
@@ -238,7 +341,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     // The chrome (background, drag handle, header) belongs to the hosting
     // [ChatDrawerPanel] — this is only the tab body.
     return PanelLoadingOverlay(
-      loading: repliesAsync.isLoading && replies.isEmpty,
+      loading: repliesAsync.isLoading && allReplies.isEmpty,
       child: content,
     );
   }
@@ -250,12 +353,16 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
 class _QuickReplyEditForm extends StatefulWidget {
   final String initialLabel;
   final String initialText;
+
+  /// The card's chosen glyph, or null for the built-in default.
+  final String? initialIconId;
   final bool isNew;
 
   /// True for a built-in action: the prompt field is replaced by a note
   /// explaining what the card does, since its text is never sent.
   final bool builtIn;
-  final Future<void> Function(String label, String text) onSubmit;
+  final Future<void> Function(String label, String text, String? iconId)
+  onSubmit;
   final Future<void> Function()? onDelete;
 
   const _QuickReplyEditForm({
@@ -263,6 +370,7 @@ class _QuickReplyEditForm extends StatefulWidget {
     required this.initialText,
     required this.isNew,
     required this.onSubmit,
+    this.initialIconId,
     this.builtIn = false,
     this.onDelete,
   });
@@ -275,11 +383,16 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
   late final TextEditingController _labelCtrl;
   late final TextEditingController _textCtrl;
 
+  /// Null until the card picks a glyph — and again if it picks the same one
+  /// twice, which is how the default is chosen back.
+  String? _iconId;
+
   @override
   void initState() {
     super.initState();
     _labelCtrl = TextEditingController(text: widget.initialLabel);
     _textCtrl = TextEditingController(text: widget.initialText);
+    _iconId = widget.initialIconId;
   }
 
   @override
@@ -296,8 +409,9 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
     // Captured before the pop — this State is disposed by the time the write
     // completes, so `widget` must not be touched afterwards.
     final onSubmit = widget.onSubmit;
+    final iconId = _iconId;
     Navigator.of(context).pop();
-    await onSubmit(label, text);
+    await onSubmit(label, text, iconId);
   }
 
   Future<void> _delete() async {
@@ -324,6 +438,14 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
               hintText: 'placeholder_block_name'.tr(),
               border: const OutlineInputBorder(),
             ),
+          ),
+          const SizedBox(height: 12),
+          _IconPicker(
+            selected: _iconId,
+            // Tapping the selected glyph clears it, so the built-in default is
+            // reachable without a "none" swatch that would have to explain
+            // itself.
+            onSelect: (id) => setState(() => _iconId = _iconId == id ? null : id),
           ),
           const SizedBox(height: 12),
           if (widget.builtIn)
@@ -367,6 +489,128 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Glyph swatches for the card being edited.
+///
+/// One scrolling row rather than a wrap of all thirty-odd: this form sits in a
+/// bottom sheet with the keyboard up, and a five-row grid pushed the prompt
+/// field and the Save button off the bottom of it. A picker sheet on top of a
+/// picker sheet would be worse again.
+class _IconPicker extends StatefulWidget {
+  final String? selected;
+  final ValueChanged<String> onSelect;
+
+  const _IconPicker({required this.selected, required this.onSelect});
+
+  @override
+  State<_IconPicker> createState() => _IconPickerState();
+}
+
+class _IconPickerState extends State<_IconPicker> {
+  final _controller = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Open on the card's own glyph rather than at the start of the strip: a
+    // card edited a second time should show what it already has.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _revealSelected() {
+    final selected = widget.selected;
+    if (selected == null || !mounted || !_controller.hasClients) return;
+    final index = kQuickReplyIcons.keys.toList().indexOf(selected);
+    if (index < 0) return;
+    const stride = 48.0; // swatch + spacing
+    final viewport = _controller.position.viewportDimension;
+    _controller.jumpTo(
+      (index * stride - viewport / 2 + stride / 2).clamp(
+        _controller.position.minScrollExtent,
+        _controller.position.maxScrollExtent,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'quick_reply_icon'.tr(),
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: context.cs.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 40,
+          child: ListView.separated(
+            controller: _controller,
+            scrollDirection: Axis.horizontal,
+            itemCount: kQuickReplyIcons.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final entry = kQuickReplyIcons.entries.elementAt(index);
+              return _IconSwatch(
+                icon: entry.value,
+                active: entry.key == widget.selected,
+                onTap: () => widget.onSelect(entry.key),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _IconSwatch extends StatelessWidget {
+  final IconData icon;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _IconSwatch({
+    required this.icon,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = context.cs.primary;
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: GlassSurface(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        tint: active ? accent : context.cs.surface,
+        border: Border.all(
+          color: active
+              ? accent.withValues(alpha: 0.6)
+              : context.cs.onSurface.withValues(alpha: 0.08),
+        ),
+        child: Center(
+          child: Icon(
+            icon,
+            size: 20,
+            color: active ? Colors.white : context.cs.onSurface,
+          ),
+        ),
       ),
     );
   }

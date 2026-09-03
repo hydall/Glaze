@@ -1,54 +1,33 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/platform/haptics.dart';
-import '../../../core/services/chat_import_export.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../features/settings/app_settings_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/studio_feature_provider.dart';
 import '../../../core/state/summary_providers.dart';
-import '../../../shared/theme/app_colors.dart';
 
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../../shared/widgets/glaze_error_dialog.dart';
-import '../../../shared/widgets/glaze_toast.dart';
-import '../../image_gen/widgets/image_gen_sheet.dart';
-import '../chat_actions_service.dart';
 import '../chat_provider.dart';
-import '../../card_rewrite/card_rewriter_studio_sheet.dart';
-import '../../character_list/character_detail_screen.dart';
-import '../../lorebooks/lorebook_list_screen.dart';
-import '../../personas/persona_list_screen.dart';
-import '../../presets/preset_list_screen.dart';
-import '../../regex/regex_sheet.dart';
-import '../../settings/api_settings_screen.dart';
-import 'authors_note_sheet.dart';
-import 'agentic_operations_log_dialog.dart';
+import '../composer_pins_provider.dart';
 import 'drawer_panel_scaffold.dart';
+import 'magic_drawer_catalog.dart';
 import 'magic_drawer_models.dart';
+import '../services/drawer_item_launcher.dart';
 import '../services/magic_drawer_layout_service.dart';
 import '../services/magic_drawer_stats_service.dart';
 import 'magic_drawer_widgets.dart';
-import 'memory_sheet.dart';
-import 'prompt_inspector_sheet.dart';
-import 'session_picker_sheet.dart';
 import '../state/magic_drawer_stats_cache.dart';
 import '../state/token_breakdown_cache.dart';
-import '../../glossary/glossary_sheet.dart';
 import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/extensions_settings.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
-import '../../extensions/widgets/ext_blocks_settings_sheet.dart';
 
 class MagicDrawerPanel extends ConsumerStatefulWidget {
   final String charId;
@@ -96,98 +75,7 @@ class MagicDrawerPanel extends ConsumerStatefulWidget {
 }
 
 class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
-  static final _allItems = <MagicDrawerItemDef>[
-    MagicDrawerItemDef(
-      id: 'inspector',
-      label: 'prompt_inspector_title'.tr(),
-      icon: Icons.travel_explore,
-      category: MagicDrawerCategory.tools,
-    ),
-    MagicDrawerItemDef(
-      id: 'memory',
-      label: 'Memory',
-      icon: Icons.subject,
-      category: MagicDrawerCategory.session,
-    ),
-    MagicDrawerItemDef(
-      id: 'sessions',
-      label: 'history_title'.tr(),
-      icon: Icons.history,
-      category: MagicDrawerCategory.session,
-    ),
-    MagicDrawerItemDef(
-      id: 'char-card',
-      label: 'menu_characters'.tr(),
-      icon: Icons.account_box,
-      category: MagicDrawerCategory.library,
-    ),
-    MagicDrawerItemDef(
-      id: 'lorebooks',
-      label: 'label_lorebooks'.tr(),
-      icon: Icons.library_books,
-      category: MagicDrawerCategory.library,
-    ),
-    MagicDrawerItemDef(
-      id: 'regex',
-      label: 'menu_regex'.tr(),
-      icon: Icons.code,
-      category: MagicDrawerCategory.config,
-    ),
-    MagicDrawerItemDef(
-      id: 'api',
-      label: 'tab_api'.tr(),
-      icon: Icons.cloud,
-      category: MagicDrawerCategory.config,
-    ),
-    MagicDrawerItemDef(
-      id: 'presets',
-      label: 'tab_presets'.tr(),
-      icon: Icons.description,
-      category: MagicDrawerCategory.config,
-    ),
-    MagicDrawerItemDef(
-      id: 'personas',
-      label: 'menu_personas'.tr(),
-      icon: Icons.manage_accounts,
-      category: MagicDrawerCategory.library,
-    ),
-    MagicDrawerItemDef(
-      id: 'image-gen',
-      label: 'imggen_title'.tr(),
-      icon: Icons.image,
-      category: MagicDrawerCategory.tools,
-    ),
-    MagicDrawerItemDef(
-      id: 'authors-note',
-      label: 'magic_authors_notes'.tr(),
-      icon: Icons.edit_note,
-      category: MagicDrawerCategory.session,
-    ),
-    MagicDrawerItemDef(
-      id: 'glossary',
-      label: 'menu_glossary'.tr(),
-      icon: Icons.menu_book,
-      category: MagicDrawerCategory.library,
-    ),
-    MagicDrawerItemDef(
-      id: 'ext-blocks',
-      label: 'Ext Blocks',
-      icon: Icons.extension_outlined,
-      category: MagicDrawerCategory.config,
-    ),
-    MagicDrawerItemDef(
-      id: 'agent-ops',
-      label: 'agent_ops_title'.tr(),
-      icon: Icons.smart_toy_outlined,
-      category: MagicDrawerCategory.tools,
-    ),
-    MagicDrawerItemDef(
-      id: 'card-rewriter',
-      label: 'magic_card_rewriter'.tr(),
-      icon: Icons.auto_fix_high_outlined,
-      category: MagicDrawerCategory.tools,
-    ),
-  ];
+  final List<MagicDrawerItemDef> _allItems = buildMagicDrawerItems();
 
   final List<String> _itemIds = [];
   final Set<String> _deletedIds = {};
@@ -361,12 +249,20 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     _debounceTimer = Timer(const Duration(milliseconds: 500), _refreshStats);
   }
 
+  /// The cards this tab paints, in saved order.
+  ///
+  /// A card pinned to the composer's row is dropped here rather than removed
+  /// from [_itemIds]: the row and the grid must never offer the same thing
+  /// twice, and keeping the id in the saved order is what lets the down-arrow
+  /// put the card back exactly where it was.
   List<MagicDrawerCardItem> _displayItems(
     ExtensionsSettings extSettings,
     List<ExtensionPreset> extPresets,
     bool studioFeatureEnabled,
+    Set<String> pinnedIds,
   ) {
     final list = _itemIds
+        .where((id) => !pinnedIds.contains(id))
         .map((id) => _allItems.where((item) => item.id == id).firstOrNull)
         .whereType<MagicDrawerItemDef>()
         .where(
@@ -467,17 +363,18 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     await _saveLayout();
   }
 
-  Future<void> _moveItem(int from, int to) async {
-    if (from == to ||
-        from < 0 ||
-        to < 0 ||
-        from >= _itemIds.length ||
-        to >= _itemIds.length) {
-      return;
-    }
+  /// Reorders by card id, not by grid position.
+  ///
+  /// The grid is a filtered view of [_itemIds] — a feature-gated card or one
+  /// pinned to the composer row is skipped — so a drop's display indices are
+  /// not indices into the saved order and moving by them would shuffle a
+  /// bystander instead.
+  Future<void> _moveItem(String movingId, String targetId) async {
+    final from = _itemIds.indexOf(movingId);
+    final to = _itemIds.indexOf(targetId);
+    if (from < 0 || to < 0 || from == to) return;
     setState(() {
-      final item = _itemIds.removeAt(from);
-      _itemIds.insert(to, item);
+      _itemIds.insert(to, _itemIds.removeAt(from));
       _hoverIndex = null;
     });
     await _saveLayout();
@@ -514,231 +411,14 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
   Future<void> _handleTap(MagicDrawerItemDef item) async {
     if (widget.editing) return;
-
     try {
-      switch (item.id) {
-        case 'inspector':
-          await showPromptInspectorSheet(context, widget.charId);
-          break;
-        case 'memory':
-          await showMemorySheet(context, widget.charId);
-          break;
-        case 'sessions':
-          await _showSessionsSheet();
-          break;
-        case 'char-card':
-          final result = await showModalBottomSheet<String>(
-            context: context,
-            isScrollControlled: true,
-            useRootNavigator: true,
-            backgroundColor: Colors.transparent,
-            builder: (_) => CharacterDetailScreen(charId: widget.charId),
-          );
-          if (result != null && result.isNotEmpty && mounted) {
-            // Real navigation away from the chat - close the panel first.
-            widget.onClose?.call();
-            context.go(result);
-          }
-          break;
-        case 'lorebooks':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            backgroundColor: Colors.transparent,
-            barrierColor: Colors.black54,
-            isScrollControlled: true,
-            builder: (_) => const LorebookListScreen(),
-          );
-          break;
-        case 'regex':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            backgroundColor: Colors.transparent,
-            barrierColor: Colors.black54,
-            isScrollControlled: true,
-            builder: (_) => const RegexSheet(),
-          );
-          break;
-        case 'api':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            backgroundColor: Colors.transparent,
-            barrierColor: Colors.black54,
-            isScrollControlled: true,
-            builder: (_) => const ApiSettingsScreen(),
-          );
-          break;
-        case 'presets':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            backgroundColor: Colors.transparent,
-            barrierColor: Colors.black54,
-            isScrollControlled: true,
-            builder: (_) => PresetListScreen(charId: widget.charId),
-          );
-          break;
-        case 'personas':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
-            builder: (_) => const PersonaListScreen(),
-          );
-          break;
-        case 'image-gen':
-          await showModalBottomSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
-            builder: (_) => ImageGenSheet(charId: widget.charId),
-          );
-          break;
-        case 'authors-note':
-          await showAuthorsNoteSheet(context, widget.charId);
-          break;
-        case 'glossary':
-          await GlossarySheet.show(context);
-          break;
-        case 'ext-blocks':
-          await _showExtBlocksSheet();
-          break;
-        case 'agent-ops':
-          await _showAgentOpsLog();
-          break;
-        case 'card-rewriter':
-          await _showCardRewriter();
-          break;
-      }
+      await DrawerItemLauncher(
+        ref: ref,
+        charId: widget.charId,
+        onClose: widget.onClose,
+      ).open(context, item.id);
     } finally {
       if (mounted) await _refreshStats();
-    }
-  }
-
-  Future<void> _showCardRewriter() async {
-    final session = ref.read(chatProvider(widget.charId)).value?.session;
-    if (session == null) return;
-    final route = await CardRewriterStudioSheet.show(
-      context,
-      charId: widget.charId,
-      sessionId: session.id,
-    );
-    if (!mounted) return;
-    if (route != null && route.isNotEmpty) {
-      widget.onClose?.call();
-      context.go(route);
-    }
-  }
-
-  Future<void> _showAgentOpsLog() async {
-    final session = ref.read(chatProvider(widget.charId)).value?.session;
-    final route = await AgenticOperationsLogDialog.show(
-      context,
-      sessionId: session?.id,
-      characterId: widget.charId,
-    );
-    if (!mounted) return;
-    if (route != null && route.isNotEmpty) {
-      widget.onClose?.call();
-      context.go(route);
-    }
-  }
-
-  Future<void> _showExtBlocksSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      backgroundColor: context.cs.surfaceContainerHigh,
-      isScrollControlled: true,
-      builder: (_) => const ExtBlocksSettingsSheet(),
-    );
-  }
-
-  Future<void> _showSessionsSheet() async {
-    final currentSession = ref.read(chatProvider(widget.charId)).value?.session;
-    if (currentSession == null) return;
-
-    if (!mounted) return;
-    // The same picker the character catalog opens — see
-    // `showSessionPickerSheet`. Only what a pick does differs: here it switches
-    // the open chat in place instead of routing to it.
-    final result = await showSessionPickerSheet(context, charId: widget.charId);
-    if (result == null || !mounted) return;
-    switch (result.action) {
-      case SessionPickerAction.open:
-        final target = result.session!.sessionIndex;
-        final current = ref
-            .read(chatProvider(widget.charId))
-            .value
-            ?.session
-            ?.sessionIndex;
-        if (target == current) return;
-        try {
-          await ref
-              .read(chatProvider(widget.charId).notifier)
-              .switchSession(target)
-              .timeout(const Duration(seconds: 30));
-        } catch (error) {
-          if (mounted) {
-            GlazeErrorDialog.show(
-              context,
-              error,
-              prefix: 'Failed to switch chat session',
-            );
-          }
-        }
-      case SessionPickerAction.newSession:
-        await ref.read(chatProvider(widget.charId).notifier).newSession();
-      case SessionPickerAction.importChat:
-        await _importChat();
-    }
-  }
-
-  Future<void> _importChat() async {
-    final result = await FilePicker.pickFiles(
-      type: Platform.isIOS ? FileType.any : FileType.custom,
-      allowedExtensions: Platform.isIOS ? null : ['jsonl', 'json'],
-      allowMultiple: false,
-      withData: false,
-    );
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    final filePath = file.path;
-    try {
-      ChatImportSaveResult saveResult;
-      if (file.bytes != null) {
-        final importResult = importChatFromJsonlString(
-          utf8.decode(file.bytes!),
-        );
-        saveResult = await ref
-            .read(chatActionsServiceProvider)
-            .importChatFromResult(widget.charId, importResult);
-      } else if (filePath != null) {
-        saveResult = await ref
-            .read(chatActionsServiceProvider)
-            .importChat(widget.charId, filePath);
-      } else {
-        return;
-      }
-      if (!mounted) return;
-      final count = saveResult.count;
-      final sessionIndex = saveResult.sessionIndex;
-      if (count > 0 && sessionIndex != null) {
-        // The sessions sheet has already resolved and closed itself by the
-        // time this runs (`showSessionPickerSheet` pops with the picked
-        // action), so there is nothing left here to pop.
-        context.go('/chat/${widget.charId}?session=$sessionIndex');
-      }
-      GlazeToast.show(
-        context,
-        count == 0 ? 'No messages found in file' : 'Imported $count messages',
-      );
-    } catch (e) {
-      if (mounted) GlazeErrorDialog.show(context, e, prefix: 'Import failed: ');
     }
   }
 
@@ -815,7 +495,16 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     final extSettings = ref.watch(extensionsSettingsProvider);
     final extPresets = ref.watch(extensionPresetsProvider);
     final studioFeatureEnabled = ref.watch(studioFeatureEnabledProvider);
-    final items = _displayItems(extSettings, extPresets, studioFeatureEnabled);
+    final pinnedIds = {
+      for (final pin in ref.watch(composerPinsProvider).value ?? const <ComposerPin>[])
+        if (pin.kind == ComposerPinKind.tool) pin.refId,
+    };
+    final items = _displayItems(
+      extSettings,
+      extPresets,
+      studioFeatureEnabled,
+      pinnedIds,
+    );
     final canAdd = _canAddMore(extSettings, studioFeatureEnabled);
 
     final scrollable = RawScrollbar(
@@ -852,10 +541,22 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
                     return SizedBox(
                       width: itemWidth,
-                      child: DragTarget<int>(
+                      // The payload is a [ComposerPin] rather than a grid
+                      // index so the same drag can end in the composer's row,
+                      // which is how a card is pinned now that the grid has no
+                      // badge for it. Drops that stay here are guarded to
+                      // cards this grid is actually showing, so a button
+                      // dragged down out of the row cannot reshuffle it.
+                      child: DragTarget<ComposerPin>(
                         onWillAcceptWithDetails: (details) {
+                          final incoming = details.data;
+                          if (incoming.kind != ComposerPinKind.tool ||
+                              incoming.refId == item.def.id ||
+                              !items.any((i) => i.def.id == incoming.refId)) {
+                            return false;
+                          }
                           setState(() => _hoverIndex = index);
-                          return details.data != index;
+                          return true;
                         },
                         onLeave: (_) {
                           if (_hoverIndex == index) {
@@ -863,11 +564,11 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
                           }
                         },
                         onAcceptWithDetails: (details) {
-                          _moveItem(details.data, index);
+                          _moveItem(details.data.refId, item.def.id);
                         },
                         builder: (context, _, _) {
-                          return LongPressDraggable<int>(
-                            data: index,
+                          return LongPressDraggable<ComposerPin>(
+                            data: ComposerPin.tool(item.def.id),
                             delay: const Duration(milliseconds: 300),
                             onDragStarted: () {
                               Haptics.mediumImpact();

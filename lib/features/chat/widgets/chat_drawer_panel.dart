@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_tab_bar.dart';
+import '../state/chat_drawer_editing_provider.dart';
 import '../state/chat_drawer_tab.dart';
 import 'drawer_panel_scaffold.dart';
 import 'magic_drawer.dart';
@@ -48,30 +49,32 @@ class ChatDrawerPanel extends ConsumerStatefulWidget {
 }
 
 class _ChatDrawerPanelState extends ConsumerState<ChatDrawerPanel> {
-  /// Edit mode spans both tabs — one pencil, one meaning. Local state, so it
-  /// switches itself off when the drawer closes rather than surprising the
-  /// user with a live edit mode on the next open.
-  bool _editing = false;
-
   void _startEditing() {
-    if (!_editing) setState(() => _editing = true);
+    if (!ref.read(chatDrawerEditingProvider)) {
+      ref.read(chatDrawerEditingProvider.notifier).state = true;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final tab = ref.watch(chatDrawerTabProvider);
+    // Edit mode spans both tabs *and* the composer's pinned row above them —
+    // one pencil, one meaning — so it lives in a provider rather than here:
+    // the row is a sibling of this panel, out of reach of local state.
+    final editing = ref.watch(chatDrawerEditingProvider);
 
     return DrawerPanelScaffold(
       disableEffects: widget.disableEffects,
       onDismiss: widget.onClose,
       header: _ChatDrawerHeader(
         activeIndex: tab.index,
-        editing: _editing,
+        editing: editing,
         onTabChanged: (index) {
           ref.read(chatDrawerTabProvider.notifier).state =
               ChatDrawerTab.values[index];
         },
-        onToggleEditing: () => setState(() => _editing = !_editing),
+        onToggleEditing: () =>
+            ref.read(chatDrawerEditingProvider.notifier).state = !editing,
       ),
       // IndexedStack, not a switcher that discards the hidden tab: Tools
       // computes prompt/token stats on build, and rebuilding it on every tab
@@ -82,14 +85,14 @@ class _ChatDrawerPanelState extends ConsumerState<ChatDrawerPanel> {
         children: [
           MagicDrawerPanel(
             charId: widget.charId,
-            editing: _editing,
+            editing: editing,
             onEditingRequested: _startEditing,
             onClose: widget.onClose,
             onScrollToMessage: widget.onScrollToMessage,
           ),
           QuickRepliesPanel(
             charId: widget.charId,
-            editing: _editing,
+            editing: editing,
             onEditingRequested: _startEditing,
             onClose: widget.onClose,
             beforeGeneration: widget.beforeGeneration,
@@ -120,9 +123,9 @@ class _ChatDrawerHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      // Top inset clears the drag handle (y=10..14) instead of starting on its
-      // edge, which is what made the handle read as a seam across the old
-      // full-width track.
+      // Top inset clears the drag handle (y=8..12, see [kDrawerHandleTop])
+      // instead of starting on its edge, which is what made the handle read as
+      // a seam across the old full-width track.
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,

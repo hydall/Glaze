@@ -4,11 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/haptics.dart';
 import '../../../shared/widgets/menu_group.dart';
-import '../../chat/composer_actions_provider.dart';
-import '../../chat/widgets/composer_actions_sheet.dart';
 import '../../chat/widgets/message_scripts_prompt_sheet.dart';
 import 'settings_group_base.dart';
-import 'settings_highlight.dart';
 
 /// The behaviour half of the settings screen: what the app does, as opposed to
 /// how it looks. Assembled by `appSettingsGroups` in `app_settings_groups.dart`.
@@ -203,27 +200,8 @@ class InputGroup extends SettingsGroup {
           onChanged: (v) =>
               notifierOf(ref).save(settings.copyWith(virtualKeyboardSend: v)),
         ),
-        highlightIf(
-          'composer_actions',
-          highlightId,
-          MenuItem(
-            icon: Icons.tune_rounded,
-            label: 'composer_actions_title'.tr(),
-            subtitle: 'composer_actions_desc'.tr(),
-            value: _composerActionsSummary(ref),
-            onTap: () => ComposerActionsSheet.show(context),
-          ),
-        ),
       ],
     );
-  }
-
-  /// "3 / 4" — how many composer buttons are on out of the ones that exist.
-  /// Cheaper to read at a glance than listing four icon names in a row.
-  String _composerActionsSummary(WidgetRef ref) {
-    final enabled =
-        ref.watch(composerActionsProvider).value ?? kDefaultComposerActions;
-    return '${enabled.length} / ${ComposerAction.values.length}';
   }
 }
 

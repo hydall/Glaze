@@ -1,8 +1,10 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/state/shared_prefs_provider.dart';
+import 'quick_reply_icons.dart';
 
 class QuickReply {
   /// Stable id. The reserved id "continue" triggers continueMessage()
@@ -11,9 +13,25 @@ class QuickReply {
   final String label;
   final String text;
 
-  const QuickReply({required this.id, required this.label, required this.text});
+  /// Chosen glyph, keyed into [kQuickReplyIcons]. Null means the card never
+  /// picked one and takes [defaultIcon].
+  final String? iconId;
+
+  const QuickReply({
+    required this.id,
+    required this.label,
+    required this.text,
+    this.iconId,
+  });
 
   bool get isContinueAction => id == kContinueQuickReplyId;
+
+  /// The glyph to draw, wherever the card appears — the grid, the composer's
+  /// pinned row, both. Falls back when the card has no icon of its own, and
+  /// when a stored id names a glyph this build no longer offers.
+  IconData get icon =>
+      quickReplyIconById(iconId) ??
+      (isContinueAction ? Icons.keyboard_double_arrow_right : Icons.bolt);
 
   /// Built-in actions are wired to app behaviour rather than to a prompt, so
   /// deleting one would take away a feature and leave no way to get it back.
@@ -21,20 +39,34 @@ class QuickReply {
   /// removable.
   bool get isBuiltIn => isContinueAction;
 
-  QuickReply copyWith({String? label, String? text}) {
+  /// [clearIcon] is how "back to the default glyph" is expressed: a null
+  /// [iconId] means "leave it alone", the same as every other field here.
+  QuickReply copyWith({
+    String? label,
+    String? text,
+    String? iconId,
+    bool clearIcon = false,
+  }) {
     return QuickReply(
       id: id,
       label: label ?? this.label,
       text: text ?? this.text,
+      iconId: clearIcon ? null : (iconId ?? this.iconId),
     );
   }
 
-  Map<String, dynamic> toJson() => {'id': id, 'label': label, 'text': text};
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'label': label,
+    'text': text,
+    if (iconId != null) 'icon': iconId,
+  };
 
   factory QuickReply.fromJson(Map<String, dynamic> json) => QuickReply(
     id: json['id'] as String,
     label: json['label'] as String? ?? '',
     text: json['text'] as String? ?? '',
+    iconId: json['icon'] as String?,
   );
 }
 
@@ -94,18 +126,36 @@ class QuickRepliesNotifier extends AsyncNotifier<List<QuickReply>> {
     );
   }
 
-  Future<void> add(String label, String text) async {
+  Future<void> add(String label, String text, {String? iconId}) async {
     final current = state.value ?? const [];
     final id = 'qr-${DateTime.now().microsecondsSinceEpoch}';
-    final next = [...current, QuickReply(id: id, label: label, text: text)];
+    final next = [
+      ...current,
+      QuickReply(id: id, label: label, text: text, iconId: iconId),
+    ];
     state = AsyncData(next);
     await _persist(next);
   }
 
-  Future<void> edit(String id, {String? label, String? text}) async {
+  Future<void> edit(
+    String id, {
+    String? label,
+    String? text,
+    String? iconId,
+    bool clearIcon = false,
+  }) async {
     final current = state.value ?? const [];
     final next = current
-        .map((q) => q.id == id ? q.copyWith(label: label, text: text) : q)
+        .map(
+          (q) => q.id == id
+              ? q.copyWith(
+                  label: label,
+                  text: text,
+                  iconId: iconId,
+                  clearIcon: clearIcon,
+                )
+              : q,
+        )
         .toList();
     state = AsyncData(next);
     await _persist(next);

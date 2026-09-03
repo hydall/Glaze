@@ -277,6 +277,8 @@ lib/
 ├── features/
 │   ├── chat/
 │   │   ├── chat_provider.dart        # ChatNotifier: state owner; delegates to controllers + pipeline
+│   │   ├── composer_pins_provider.dart # What sits in the row under the composer (actions/replies/tools)
+│   │   ├── quick_replies_provider.dart # The Actions tab's user-written replies
 │   │   ├── chat_state.dart           # ChatState + StreamingState value objects
 │   │   ├── editing_message_provider.dart # Tracks which message is being edited
 │   │   ├── chat_screen.dart          # UI: WebView + ChatInputBar + header
@@ -302,7 +304,8 @@ lib/
 │   │   │   ├── stream_generation_service.dart # SSE + prompt build + stream accumulate + save
 │   │   │   ├── image_gen_processor.dart
 │   │   │   ├── magic_drawer_layout_service.dart
-│   │   │   └── magic_drawer_stats_service.dart
+│   │   │   ├── magic_drawer_stats_service.dart
+│   │   │   └── drawer_item_launcher.dart # Opens a Tools card's sheet by id (drawer + pinned row)
 │   │   ├── bridge/                       # WebView ↔ Flutter bridge
 │   │   │   ├── chat_bridge_controller.dart  # Host: shared state + iterates bridgeHandlers
 │   │   │   ├── bridge_handlers.dart         # Single source of truth: 40 JS handler names
@@ -318,6 +321,7 @@ lib/
 │   │   │   └── message_dto.dart
 │   │   ├── state/
 │   │   │   ├── chat_body_selectors.dart # batteryAware dual-read helper
+│   │   │   ├── chat_drawer_editing_provider.dart # Drawer edit mode; also drives the composer row
 │   │   │   ├── cached_token_breakdown.dart
 │   │   │   └── token_breakdown_cache.dart
 │   │   ├── utils/

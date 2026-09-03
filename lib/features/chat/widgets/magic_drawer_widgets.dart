@@ -132,33 +132,73 @@ class _MagicCardState extends State<MagicCard> {
                     Positioned(
                       top: -8,
                       right: -8,
-                      child: GestureDetector(
+                      child: MagicCardBadge(
+                        icon: Icons.close,
+                        color: const Color(0xFFFF3B30),
+                        tooltip: 'btn_delete'.tr(),
                         onTap: widget.onDelete,
-                        child: Container(
-                          width: 24,
-                          height: 24,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFFF3B30),
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Color(0x4DFF3B30),
-                                blurRadius: 8,
-                                offset: Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.close,
-                            size: 14,
-                            color: Colors.white,
-                          ),
-                        ),
                       ),
                     ),
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The small circular badge edit mode hangs off a card's corner.
+///
+/// Shared by the grid's delete badge and the composer row's demote badge, so
+/// the two cannot drift apart in size or weight while meaning the same kind of
+/// thing. There is no badge for the opposite direction: a card goes up into the
+/// row by being dragged there, which is the gesture edit mode already teaches.
+class MagicCardBadge extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  /// Diameter. The composer's row uses a smaller badge than the grid, since it
+  /// hangs off a 40px circle rather than a full-width card.
+  final double size;
+
+  const MagicCardBadge({
+    super.key,
+    required this.icon,
+    required this.color,
+    required this.tooltip,
+    required this.onTap,
+    this.size = 24,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      preferBelow: false,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Icon(icon, size: size * 0.58, color: Colors.white),
           ),
         ),
       ),

@@ -56,6 +56,7 @@ import 'controllers/chat_message_selection_controller.dart';
 import 'chat_search_delegate.dart';
 import 'chat_state.dart';
 import 'state/chat_body_selectors.dart';
+import 'state/chat_drawer_editing_provider.dart';
 import 'state/memory_activity_provider.dart';
 import 'state/studio_history_rotation_provider.dart';
 import 'bridge/chat_overlay_blur_region.dart';
@@ -2318,8 +2319,29 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                       // #btn-magic { display: none }`).
                                       onMagicDrawer: isDesktopLayout(context)
                                           ? null
-                                          : () => widget.drawerCtrl
-                                                .toggleDrawer(context),
+                                          : () {
+                                              // Edit mode never survives a
+                                              // close: it drives the drawer's
+                                              // badges *and* the composer row's,
+                                              // and a flag left standing would
+                                              // greet the next open with arrows
+                                              // nobody asked for.
+                                              if (!widget
+                                                  .drawerCtrl
+                                                  .drawerOpen) {
+                                                ref
+                                                        .read(
+                                                          chatDrawerEditingProvider
+                                                              .notifier,
+                                                        )
+                                                        .state =
+                                                    false;
+                                              }
+                                              widget.drawerCtrl.toggleDrawer(
+                                                context,
+                                              );
+                                            },
+                                      beforeGeneration: _maybeSeedGameTime,
                                       onImpersonate: (guidance) => ref
                                           .read(
                                             chatProvider(
