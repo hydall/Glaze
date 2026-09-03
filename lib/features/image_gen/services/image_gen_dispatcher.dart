@@ -50,9 +50,8 @@ class ImageGenDispatcher {
       params: {
         'apiType': settings.apiType.name,
         'referenceCount': references.length,
-        if (instructionAspectRatio != null)
-          'aspectRatio': instructionAspectRatio,
-        if (instructionImageSize != null) 'imageSize': instructionImageSize,
+        'aspectRatio': ?instructionAspectRatio,
+        'imageSize': ?instructionImageSize,
       },
     );
     switch (settings.apiType) {

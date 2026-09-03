@@ -26,6 +26,7 @@ class _ControlledEmbeddingService extends EmbeddingService {
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    captureContext,
   }) async {
     if (!started.isCompleted) started.complete();
     await release.future;

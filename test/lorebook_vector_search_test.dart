@@ -24,6 +24,7 @@ class _BlockingEmbeddingService extends EmbeddingService {
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    captureContext,
   }) async {
     calls++;
     active++;
@@ -48,6 +49,7 @@ class _RecordingEmbeddingService extends EmbeddingService {
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    captureContext,
   }) async {
     queries.addAll(texts);
     return [
