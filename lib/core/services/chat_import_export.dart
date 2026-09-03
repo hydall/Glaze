@@ -38,7 +38,15 @@ Future<FileExportResult> exportChatAsJsonl({
   for (final msg in session.messages) {
     if (msg.isHidden) continue;
     final isUser = msg.role == 'user';
-    final name = isUser ? userName : character.name;
+    // A user message names the persona it was actually sent as; [userName] is
+    // only the fallback for the ones that carry none (chats written before
+    // messages stored a persona, or an import that had nothing to store).
+    final messagePersona = msg.personaName?.trim();
+    final name = isUser
+        ? (messagePersona == null || messagePersona.isEmpty
+              ? userName
+              : messagePersona)
+        : character.name;
 
     final stMsg = <String, dynamic>{
       'name': name,

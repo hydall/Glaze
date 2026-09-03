@@ -9,6 +9,7 @@ import '../../core/models/chat_message.dart';
 import '../../core/services/chat_import_export.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/persona_resolution.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
@@ -63,10 +64,22 @@ class ChatActionsService {
 
     final outputDir = await getTemporaryDirectory();
 
+    // The fallback name for user messages that carry no persona of their own.
+    // The active persona is the closest thing to who sent them; without it the
+    // export named every one of them the literal "User".
+    final persona = _ref.read(
+      effectivePersonaForChatProvider((
+        charId: charId,
+        sessionId: chatState.session!.id,
+      )),
+    );
+    final personaName = persona?.name.trim() ?? '';
+
     final result = await exportChatAsJsonl(
       session: chatState.session!,
       character: character,
       outputDir: outputDir.path,
+      userName: personaName.isEmpty ? 'User' : personaName,
     );
 
     final filename = p.basename(result.filePath);
