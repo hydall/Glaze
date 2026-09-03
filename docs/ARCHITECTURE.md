@@ -278,6 +278,7 @@ lib/
 │   ├── chat/
 │   │   ├── chat_provider.dart        # ChatNotifier: state owner; delegates to controllers + pipeline
 │   │   ├── composer_pins_provider.dart # What sits in the row under the composer (actions/replies/tools)
+│   │   ├── composer_empty_action_provider.dart # What the send button runs while the composer is empty (default: impersonate)
 │   │   ├── quick_replies_provider.dart # The Actions tab's user-written replies
 │   │   ├── chat_state.dart           # ChatState + StreamingState value objects
 │   │   ├── editing_message_provider.dart # Tracks which message is being edited

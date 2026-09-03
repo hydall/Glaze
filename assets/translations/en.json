@@ -391,6 +391,8 @@
   "composer_action_attach": "Attach image",
   "composer_action_fullscreen": "Fullscreen editor",
   "composer_action_guidance": "Guidance",
+  "composer_empty_action_hint": "Drop a card from the Actions tab here to change what the send button does while the message box is empty",
+  "composer_empty_action_reset": "Restore the default action (impersonate)",
   "btn_reset": "Reset",
   "stat_messages": "Messages",
   "stat_gen_time": "Generation Time",
