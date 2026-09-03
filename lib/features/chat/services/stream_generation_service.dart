@@ -25,6 +25,7 @@ import '../../../core/llm/studio_regex_applicator.dart';
 import '../../../core/llm/beauty_state_parser.dart';
 import '../../../core/llm/idle_timeout_guard.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
+import '../../../core/llm/transport/llm_capture_context.dart';
 import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../core/utils/cast_helpers.dart';
@@ -38,6 +39,7 @@ import '../../../core/models/pipeline_settings.dart';
 import '../../../core/services/model_usage_service.dart';
 import '../../../core/services/preset_defaults.dart';
 import '../../../core/state/active_selection_provider.dart';
+import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../chat_provider.dart';
 import '../chat_state.dart';
@@ -92,6 +94,9 @@ class StreamGenerationService {
     StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     final vsi = currentState.visibleStartIndex;
+    // Everything captured from here on belongs to this turn (see
+    // `bindTurnMessageId`).
+    final turnStartedAtMs = DateTime.now().millisecondsSinceEpoch;
     final cancelToken = CancelToken();
     var studioWasActive = false;
     _ref
@@ -553,6 +558,7 @@ class StreamGenerationService {
             );
         _recordModelUsage(apiConfig.model);
         final messageId = _lastAssistantId(finalState.session!, regenTargetId);
+        _bindTurnCaptures(session.id, messageId, turnStartedAtMs);
         _recorder.recordStudioTrackerOperation(
           sessionId: session.id,
           messageId: messageId,
@@ -668,6 +674,18 @@ class StreamGenerationService {
           previousMessages: previousApiMessages,
           charName: inputs.character.name,
           userName: inputs.persona?.name ?? 'User',
+          // Without this the main request — the one that writes the reply —
+          // was the only call in the app captured with no session and no
+          // stage, so it landed in the session-less bucket and no per-chat
+          // view could ever show it. The assistant message does not exist
+          // yet, so the turn is identified by the generation id and bound to
+          // its message id once the write lands (`bindTurnMessageId`).
+          captureContext: LlmCaptureContext(
+            stage: 'main',
+            sessionId: session.id,
+            messageId: regenTargetId ?? continueTargetId,
+            pipelineRunId: turnRunId(session.id, _genId),
+          ),
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
@@ -764,6 +782,13 @@ class StreamGenerationService {
                 ),
               );
           _recordModelUsage(apiConfig.model);
+          _bindTurnCaptures(
+            session.id,
+            finalState?.session == null
+                ? null
+                : _lastAssistantId(finalState!.session!, regenTargetId),
+            turnStartedAtMs,
+          );
           if (memoryDiagnostics is Map<String, dynamic> &&
               finalState?.session != null) {
             final messageId = _lastAssistantId(
@@ -985,6 +1010,21 @@ class StreamGenerationService {
     excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
     historyWindowStartMessageId: historyWindowStartMessageId,
   );
+
+  /// Ties this turn's generation-phase captures to the message they produced.
+  /// Fire-and-forget: a diagnostics link must never delay or fail a turn.
+  void _bindTurnCaptures(String sessionId, String? messageId, int sinceMs) {
+    if (messageId == null || messageId.isEmpty) return;
+    unawaited(
+      _ref
+          .read(llmRequestCaptureRepoProvider)
+          .bindTurnMessageId(
+            sessionId: sessionId,
+            messageId: messageId,
+            sinceMs: sinceMs,
+          ),
+    );
+  }
 
   static String? _lastAssistantId(ChatSession session, String? regenTargetId) {
     if (regenTargetId != null &&

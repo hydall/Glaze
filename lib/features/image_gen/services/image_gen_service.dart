@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../core/llm/transport/llm_capture_context.dart';
 import '../../../core/models/character.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/services/image_storage_service.dart';
@@ -189,6 +190,7 @@ class ImageGenService {
     String? instructionAspectRatio,
     String? instructionImageSize,
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     final collected = await _references.collect(
       settings: settings,
@@ -247,6 +249,7 @@ class ImageGenService {
       instructionAspectRatio: instructionAspectRatio,
       instructionImageSize: instructionImageSize,
       cancelToken: cancelToken,
+      captureContext: captureContext,
     );
   }
 

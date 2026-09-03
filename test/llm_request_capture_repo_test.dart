@@ -40,6 +40,28 @@ LlmRequestCaptureEvent _event({
   ),
 );
 
+LlmRequestCaptureEvent _fatEvent({
+  required int sequence,
+  required List<Map<String, dynamic>> messages,
+}) => LlmRequestCapture.build(
+  ChatTransportRequest(
+    endpoint: 'https://example.test',
+    apiKey: 'secret',
+    model: 'model',
+    messages: messages,
+    maxTokens: 20,
+    temperature: 0.2,
+    topP: 1,
+    captureContext: LlmCaptureContext(
+      stage: 'studio.final',
+      sessionId: 'session',
+      pipelineRunId: 'pipeline-$sequence',
+      callId: 'call-$sequence',
+      attempt: sequence,
+    ),
+  ),
+);
+
 void main() {
   late AppDatabase db;
   late LlmRequestCaptureRepo repo;
@@ -75,18 +97,56 @@ void main() {
       await repo.record(_event(sequence: i));
     }
 
-    final rows = await repo.newestForSession('session', limit: 100);
+    final rows = await repo.newestForSession(
+      'session',
+      limit: LlmRequestCaptureRepo.maxRowsPerSession + 10,
+    );
     expect(rows, hasLength(LlmRequestCaptureRepo.maxRowsPerSession));
     expect(rows.map((row) => row.attempt), isNot(contains(0)));
   });
 
-  test('retains a separate bounded bucket without session context', () async {
-    for (var i = 0; i <= LlmRequestCaptureRepo.maxRowsWithoutSession; i++) {
-      await repo.record(_event(sequence: i, sessionId: null));
+  test('byte budget evicts before the row ceiling is reached', () async {
+    // Four 190k-char messages per request — just under the per-string
+    // sanitizer cap, so each row lands at roughly 0.77 MB. Twelve of them is
+    // ~9 MB against a 6 MB session budget, and the 200-row ceiling is never
+    // approached: the bytes are what evict.
+    final fat = [
+      for (var i = 0; i < 4; i++) {'role': 'user', 'content': 'x' * 190000},
+    ];
+    for (var i = 0; i < 12; i++) {
+      await repo.record(_fatEvent(sequence: i, messages: fat));
     }
 
-    final rows = await repo.newestWithoutSession(limit: 200);
-    expect(rows, hasLength(LlmRequestCaptureRepo.maxRowsWithoutSession));
+    final rows = await repo.newestForSession(
+      'session',
+      limit: LlmRequestCaptureRepo.maxRowsPerSession,
+    );
+
+    expect(rows.length, lessThan(12), reason: 'the byte budget bit');
+    expect(
+      rows.length,
+      greaterThanOrEqualTo(LlmRequestCaptureRepo.minRowsPerSession),
+      reason: 'the floor keeps the newest rows whatever their size',
+    );
+    expect(rows.first.attempt, 11, reason: 'newest survive, oldest go');
+  });
+
+  test('a single oversized capture never empties the list', () async {
+    for (var i = 0; i < 5; i++) {
+      await repo.record(_event(sequence: i, content: 'small'));
+    }
+    await repo.record(
+      _fatEvent(
+        sequence: 99,
+        messages: [
+          for (var i = 0; i < 7; i++)
+            {'role': 'user', 'content': '${'y' * 180000}$i'},
+        ],
+      ),
+    );
+
+    final rows = await repo.newestForSession('session');
+    expect(rows, hasLength(6));
   });
 
   test('oversized event is replaced with a valid summary', () async {

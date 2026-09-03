@@ -34,6 +34,7 @@ void main() {
       'lorebookBuildPrompt': String,
       'lorebookBuildPromptJs': String,
       'useStandardRandomizer': bool,
+      'hideContextCard': bool,
     };
 
     test('AppSettings defaults match SharedPrefs fallbacks', () {
@@ -328,6 +329,8 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.messageVibration;
     case 'useStandardRandomizer':
       return s.useStandardRandomizer;
+    case 'hideContextCard':
+      return s.hideContextCard;
     default:
       return false;
   }

@@ -7,6 +7,7 @@ import 'package:glaze_flutter/core/state/memory_settings_provider.dart';
 
 import '../../db/app_db.dart';
 import '../../db/repositories/embedding_repo.dart';
+import '../transport/llm_capture_context.dart';
 import '../../models/chat_message.dart';
 import '../../models/memory_book.dart';
 import '../embedding_service.dart';
@@ -146,6 +147,7 @@ class MemoryVectorSearcher {
             [queryText],
             config,
             cancelToken: cancelToken,
+            captureContext: const LlmCaptureContext(stage: 'embedding.memory'),
           )
           .timeout(const Duration(seconds: 30), onTimeout: () => []);
       if (cancelToken?.isCancelled == true) {

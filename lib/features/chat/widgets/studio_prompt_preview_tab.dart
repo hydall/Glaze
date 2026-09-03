@@ -19,9 +19,18 @@ enum _PreviewViewMode { messages, raw, metadata }
 /// Kept under its original class name so callers outside Prompt Inspector do
 /// not break. The content is a live, read-only Studio prompt catalog.
 class StudioPromptPreviewTab extends ConsumerStatefulWidget {
-  const StudioPromptPreviewTab({super.key, required this.charId});
+  const StudioPromptPreviewTab({
+    super.key,
+    required this.charId,
+    this.onBack,
+  });
 
   final String charId;
+
+  /// Set when the catalog is opened as a drill-down (the Requests tab shows it
+  /// as "the next turn" on an agentic preset), so its toolbar leads with a back
+  /// button instead of relying on a tab strip that is hidden.
+  final VoidCallback? onBack;
 
   @override
   ConsumerState<StudioPromptPreviewTab> createState() =>
@@ -77,9 +86,21 @@ class _StudioPromptPreviewTabState
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+            padding: EdgeInsets.fromLTRB(
+              widget.onBack == null ? 16 : 4,
+              widget.onBack == null ? 8 : 4,
+              8,
+              4,
+            ),
             child: Row(
               children: [
+                if (widget.onBack != null)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                    tooltip: 'requests_back_to_list'.tr(),
+                    onPressed: widget.onBack,
+                  ),
                 Expanded(
                   child: Align(
                     alignment: Alignment.centerLeft,

@@ -33,6 +33,7 @@ void main() {
       lorebookBuildPrompt: 'closed prompt',
       lorebookBuildPromptJs: 'script prompt',
       useStandardRandomizer: true,
+      hideContextCard: true,
     );
     final prefs = await SharedPreferences.getInstance();
 

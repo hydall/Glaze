@@ -1,11 +1,9 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/context_calculator.dart';
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glaze_bottom_sheet.dart';
-import '../chat_provider.dart';
+import '../../../shared/widgets/menu_group.dart';
 
 final kSourceMeta = <String, SourceMeta>{
   'preset': SourceMeta(
@@ -417,100 +415,6 @@ class TokenizerLayout extends StatelessWidget {
   }
 }
 
-class TokenizerActionButtons extends ConsumerWidget {
-  final String charId;
-  final int visibleCount;
-  final int hiddenCount;
-  final double hidePercent;
-  final VoidCallback onRefresh;
-
-  const TokenizerActionButtons({
-    super.key,
-    required this.charId,
-    required this.visibleCount,
-    required this.hiddenCount,
-    required this.hidePercent,
-    required this.onRefresh,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final hideCount = (visibleCount * hidePercent / 100).ceil().clamp(
-      1,
-      visibleCount > 1 ? visibleCount - 1 : 0,
-    );
-
-    return Row(
-      children: [
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: hideCount > 0
-                ? () => _confirmHide(context, ref, hideCount)
-                : null,
-            icon: const Icon(Icons.visibility_off, size: 16),
-            label: Text('${'label_hide_top_messages'.tr()} $hideCount'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF2980b9),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            ),
-          ),
-        ),
-        if (hiddenCount > 0) ...[
-          const SizedBox(width: 8),
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                await ref
-                    .read(chatProvider(charId).notifier)
-                    .unhideAllMessages();
-                if (context.mounted) onRefresh();
-              },
-              icon: const Icon(Icons.visibility, size: 16),
-              label: Text(
-                'action_unhide_all_count'.tr(args: ['$hiddenCount']),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: context.cs.primary,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  void _confirmHide(BuildContext context, WidgetRef ref, int count) async {
-    final confirmed = await GlazeBottomSheet.show<bool>(
-      context,
-      title: 'action_hide_msg'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.visibility_off_outlined,
-        description: 'tokenizer_hide_confirm_desc'.tr(args: ['$count']),
-      ),
-      items: [
-        BottomSheetItem(
-          label: '${'action_hide_msg'.tr()} $count',
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
-        ),
-        BottomSheetItem(
-          label: 'btn_cancel'.tr(),
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
-        ),
-      ],
-    );
-    if (confirmed == true) {
-      await ref.read(chatProvider(charId).notifier).hideTopMessages(count);
-      onRefresh();
-    }
-  }
-}
-
 class CutoffWarning extends StatelessWidget {
   final int cutoffCount;
   const CutoffWarning({super.key, required this.cutoffCount});
@@ -585,6 +489,12 @@ class NearLimitWarning extends StatelessWidget {
   }
 }
 
+/// One tokenizer preference, rendered as the app's standard settings row.
+///
+/// Was a bare `Card` wrapping a Material `Slider` with hand-mixed white alphas,
+/// which is exactly the "styled Material widget pretending to be Glaze" the UI
+/// kit calls out. `MenuGroup` + `MenuRangeItem` is the same control the rest of
+/// the settings use, so the value is editable by tap here too.
 class SettingsSlider extends StatelessWidget {
   final String label;
   final double value;
@@ -607,57 +517,21 @@ class SettingsSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: Colors.white.withValues(alpha: 0.03),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.onSurface,
-                  ),
-                ),
-                Text(
-                  '${value.round()}$unit',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: context.cs.primary,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              description,
-              style: TextStyle(
-                fontSize: 12,
-                color: context.cs.onSurfaceVariant,
-              ),
-            ),
-            Slider(
-              value: value,
-              min: min,
-              max: max,
-              divisions: (max - min).round(),
-              activeColor: context.cs.primary,
-              onChanged: onChanged,
-            ),
-          ],
+    return MenuGroup(
+      header: label,
+      description: description,
+      items: [
+        MenuRangeItem(
+          label: unit,
+          value: value,
+          min: min,
+          max: max,
+          divisions: (max - min).round(),
+          editableValue: true,
+          decimalPlaces: 0,
+          onChanged: onChanged,
         ),
-      ),
+      ],
     );
   }
 }
@@ -795,14 +669,18 @@ class TokenizerEmbeddedToolbar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
       child: Row(
         children: [
-          Text(
-            showSettings ? 'context_settings_title'.tr() : 'tab_context'.tr(),
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: context.cs.onSurfaceVariant,
+          // Only the sub-view is named here. The tab strip right above already
+          // says "Context"; printing it again inside the body was one of the
+          // duplicated headings this pass removed.
+          if (showSettings)
+            Text(
+              'context_settings_title'.tr(),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: context.cs.onSurfaceVariant,
+              ),
             ),
-          ),
           const Spacer(),
           IconButton(
             visualDensity: VisualDensity.compact,

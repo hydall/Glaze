@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/context_calculator.dart';
+import '../../../core/models/chat_message.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../providers/prompt_build_providers.dart';
@@ -11,6 +12,7 @@ import '../../../features/settings/api_list_provider.dart';
 import '../../../features/settings/app_settings_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/sheet_view.dart';
+import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
 import '../state/cached_token_breakdown.dart';
@@ -278,6 +280,10 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
       1,
       _visibleCount > 1 ? _visibleCount - 1 : 0,
     );
+    final messages =
+        ref.watch(chatProvider(widget.charId)).value?.messages ??
+        const <ChatMessage>[];
+    final hiddenCount = messages.where((m) => m.isHidden).length;
     final historyTokens = bd.sourceTokens['history'] ?? 0;
     final hideTokens = _visibleCount > 0
         ? ((historyTokens / _visibleCount) * hideCount).toInt()
@@ -307,61 +313,49 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
             NearLimitWarning(hideCount: hideCount, hideTokens: hideTokens),
           ],
           const SizedBox(height: 24),
+          // Glaze tiles, not Material buttons: the pair used to be a
+          // `FilledButton` + a hand-styled `OutlinedButton` (white alphas and
+          // all), which rendered as stock Material under every theme preset.
           Row(
             children: [
               Expanded(
-                child: FilledButton(
-                  onPressed: hideCount > 0
+                child: _ActionTile(
+                  icon: Icons.visibility_off_outlined,
+                  label: hideCount > 0
+                      ? 'tokenizer_hide_top_n'.tr(args: ['$hideCount'])
+                      : 'label_hide_top_messages'.tr(),
+                  accent: true,
+                  onTap: hideCount > 0
                       ? () => _confirmHide(context, hideCount)
                       : null,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: context.cs.primary,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    hideCount > 0
-                        ? 'tokenizer_hide_top_n'.tr(args: ['$hideCount'])
-                        : 'label_hide_top_messages'.tr(),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: OutlinedButton(
-                  onPressed: () => setState(() => _showSettings = true),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: context.cs.onSurface,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-                    side: BorderSide(
-                      color: Colors.white.withValues(alpha: 0.1),
-                    ),
-                    backgroundColor: context.cs.surfaceContainerHighest
-                        .withValues(alpha: 0.5),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    'title_settings'.tr(),
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
+                child: _ActionTile(
+                  icon: Icons.tune_rounded,
+                  label: 'title_settings'.tr(),
+                  onTap: () => setState(() => _showSettings = true),
                 ),
               ),
             ],
           ),
+          if (hiddenCount > 0) ...[
+            const SizedBox(height: 12),
+            // Unhiding used to live in `TokenizerActionButtons`, a widget
+            // nothing rendered — so the action was unreachable. It belongs
+            // next to the one that hides.
+            _ActionTile(
+              icon: Icons.visibility_outlined,
+              label: 'action_unhide_all_count'.tr(args: ['$hiddenCount']),
+              onTap: () async {
+                await ref
+                    .read(chatProvider(widget.charId).notifier)
+                    .unhideAllMessages();
+                await _calculate();
+              },
+            ),
+          ],
         ],
       ),
     );
@@ -410,11 +404,14 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
 
   Widget _buildSettings() {
     return Builder(
+      // No horizontal padding: `MenuGroup` already supplies the 16px gutters,
+      // and adding our own stacked them into a 32px inset.
       builder: (context) => ListView(
         shrinkWrap: true,
-        padding: const EdgeInsets.all(
-          16,
-        ).add(EdgeInsets.only(top: MediaQuery.paddingOf(context).top)),
+        padding: EdgeInsets.only(
+          top: MediaQuery.paddingOf(context).top + 8,
+          bottom: 16,
+        ),
         children: [
           SettingsSlider(
             label: 'tokenizer_history_fill_threshold_label'.tr(),
@@ -428,7 +425,6 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
               _saveSettings();
             },
           ),
-          const SizedBox(height: 16),
           SettingsSlider(
             label: 'label_hide_top_messages'.tr(),
             value: _hidePercent,
@@ -442,6 +438,63 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
             },
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A tappable Glaze tile — the app's stand-in for a button (see `docs/UI_KIT`).
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.accent = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    final tint = accent ? context.cs.primary : context.cs.onSurface;
+    return Opacity(
+      opacity: enabled ? 1 : 0.45,
+      child: GlassSurface(
+        borderRadius: BorderRadius.circular(12),
+        tint: tint.withValues(alpha: accent ? 0.18 : 0.06),
+        border: Border.all(color: tint.withValues(alpha: 0.18)),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: accent ? context.cs.primary : context.cs.onSurface,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: accent ? context.cs.primary : context.cs.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

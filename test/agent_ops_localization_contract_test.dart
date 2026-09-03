@@ -9,9 +9,14 @@ void main() {
     'prompt_inspector_studio_',
     'card_rewriter_studio_',
     'rewrite_resume',
+    // Prompt Inspector surfaces added alongside Agent Ops: the Requests tab and
+    // the context coverage card. Same contract — both locales, same
+    // placeholders, present in the generated keys.
+    'requests_',
+    'coverage_',
   ];
 
-  test('Agent Ops localization keys match in EN, RU, and generated keys', () {
+  test('Diagnostics localization keys match in EN, RU, and generated keys', () {
     final en = _loadTranslations('assets/translations/en.json');
     final ru = _loadTranslations('assets/translations/ru.json');
     final generated = File(

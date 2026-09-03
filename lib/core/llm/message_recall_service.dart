@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../db/app_db.dart' show EmbeddingRow;
 import '../db/repositories/embedding_repo.dart';
 import 'embedding_service.dart';
+import 'transport/llm_capture_context.dart';
 import 'vector_math.dart';
 
 /// Cosine-similarity recall over raw chat-message chunks embedded by
@@ -109,6 +110,10 @@ class MessageRecallService {
             [currentText],
             config,
             cancelToken: cancelToken,
+            captureContext: LlmCaptureContext(
+              stage: 'embedding.recall',
+              sessionId: sessionId,
+            ),
           )
           .timeout(const Duration(seconds: 30), onTimeout: () => []);
       if (cancelToken?.isCancelled == true) {

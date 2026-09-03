@@ -110,6 +110,54 @@ class LlmRequestCapture {
     );
   }
 
+  /// Records a call that does not go through a [ChatTransport] — image
+  /// generation and embeddings talk to their own endpoints over Dio, so the
+  /// transport decorator never sees them and the Requests timeline would show a
+  /// turn with a hole where its picture or its vector search was.
+  ///
+  /// The event is shaped like a transport capture (`model`,
+  /// `protocolEndpoint`, `messages`) so every reader keeps working, and the
+  /// same sanitizer runs over it: no key, no oversized blob.
+  static void recordAuxiliary({
+    required String stage,
+    required String endpoint,
+    required String model,
+    LlmCaptureContext? context,
+    String? sessionId,
+    String? messageId,
+    String? pipelineRunId,
+    String? agentId,
+    List<Map<String, dynamic>> messages = const [],
+    Map<String, dynamic> params = const {},
+  }) {
+    if (!hasSink) return;
+    final sanitizer = _CaptureSanitizer();
+    final sanitizedMessages = sanitizer.sanitize(messages);
+    final event = LlmRequestCaptureEvent(
+      sequence: _sequence++,
+      createdAt: DateTime.now().toUtc(),
+      protocol: stage,
+      context:
+          context ??
+          LlmCaptureContext(
+            stage: stage,
+            sessionId: sessionId,
+            messageId: messageId,
+            pipelineRunId: pipelineRunId,
+            agentId: agentId,
+          ),
+      request: Map<String, dynamic>.unmodifiable({
+        'protocolEndpoint': _stripQuery(endpoint),
+        'model': model,
+        'messageCount': messages.length,
+        'messages': sanitizedMessages,
+        ...params,
+      }),
+      truncated: sanitizer.truncated,
+    );
+    dispatch(event);
+  }
+
   static void dispatch(LlmRequestCaptureEvent event) {
     final target = sink;
     if (target == null) return;

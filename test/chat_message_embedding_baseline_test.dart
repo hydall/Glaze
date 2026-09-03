@@ -20,6 +20,7 @@ class _FakeEmbeddingService extends EmbeddingService {
     List<String> input,
     EmbeddingConfig config, {
     cancelToken,
+    captureContext,
   }) async {
     requests++;
     texts += input.length;

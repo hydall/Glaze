@@ -15,6 +15,7 @@ class _FakeEmbeddingService extends EmbeddingService {
     List<String> texts,
     EmbeddingConfig config, {
     cancelToken,
+    captureContext,
   }) async {
     requestCount++;
     return [

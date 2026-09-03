@@ -1,19 +1,23 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import 'tokenizer_sheet.dart';
-import 'prompt_preview_screen.dart';
-import 'lorebook_coverage_sheet.dart';
-import 'studio_prompt_preview_tab.dart';
+import 'requests/requests_tab.dart';
 
-/// Unified diagnostics surface that merges the Context (tokenizer), Request
-/// Preview, Lorebook Coverage, and current Studio prompt previews into one
-/// sheet. All answer the same question - "what actually goes into the prompt?"
-/// - so they live behind a single Magic Drawer entry instead of three separate
-/// cards.
-class PromptInspectorSheet extends StatefulWidget {
+/// Unified diagnostics surface: Context (the token budget) and Requests (what
+/// the chat sent, and what went into it). Both answer the same question — "what
+/// actually goes into the prompt?" — so they live behind a single Magic Drawer
+/// entry instead of several separate cards.
+///
+/// Two things used to be top-level tabs and are not any more. Agent runs are
+/// requests like any other, so they are steps of the turn they belong to in the
+/// Requests timeline. Coverage is a property *of* a request, so it is the
+/// second view inside Requests — next request as a prediction, past ones as
+/// recorded.
+class PromptInspectorSheet extends ConsumerStatefulWidget {
   final String charId;
   final String initialTabId;
 
@@ -24,50 +28,53 @@ class PromptInspectorSheet extends StatefulWidget {
   });
 
   static const _tabContext = 'context';
-  static const _tabPreview = 'preview';
-  static const _tabCoverage = 'coverage';
-  static const _tabStudio = 'studio';
+  static const _tabRequests = 'requests';
+
+  /// Ids other surfaces deep-link to (the context card under the chat header
+  /// opens the inspector on the layer it is showing). [coverageTabId] is not a
+  /// tab any more — it lands on Requests with its Coverage view selected.
+  static const contextTabId = _tabContext;
+  static const requestsTabId = _tabRequests;
+  static const coverageTabId = 'coverage';
 
   @override
-  State<PromptInspectorSheet> createState() => _PromptInspectorSheetState();
+  ConsumerState<PromptInspectorSheet> createState() =>
+      _PromptInspectorSheetState();
 }
 
-class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
-  late String _activeTabId = widget.initialTabId;
+class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
+  late String _activeTabId =
+      widget.initialTabId == PromptInspectorSheet.coverageTabId
+      ? PromptInspectorSheet._tabRequests
+      : widget.initialTabId;
   late final Set<String> _visitedTabs = {_activeTabId};
+
+  /// True while a tab is showing a drill-down of its own (a single request).
+  /// The tab strip steps aside for it — two levels of navigation stacked on one
+  /// sheet read as one broken level.
+  bool _detailOpen = false;
 
   static const _order = [
     PromptInspectorSheet._tabContext,
-    PromptInspectorSheet._tabPreview,
-    PromptInspectorSheet._tabCoverage,
-    PromptInspectorSheet._tabStudio,
+    PromptInspectorSheet._tabRequests,
   ];
 
-  int get _activeIndex {
-    final i = _order.indexOf(_activeTabId);
-    return i < 0 ? 0 : i;
-  }
+  /// A `coverage` deep link is the Requests tab opened on its Coverage view.
+  RequestsSubTab get _initialSubTab =>
+      widget.initialTabId == PromptInspectorSheet.coverageTabId
+      ? RequestsSubTab.coverage
+      : RequestsSubTab.timeline;
 
   @override
   Widget build(BuildContext context) {
+    final activeId = _order.contains(_activeTabId) ? _activeTabId : _order.first;
+    final activeIndex = _order.indexOf(activeId);
+
     // Preserve visited tabs without eagerly starting every expensive prompt
     // diagnostic when the inspector opens.
     final body = IndexedStack(
-      index: _activeIndex,
-      children: [
-        _visitedTabs.contains(PromptInspectorSheet._tabContext)
-            ? TokenizerSheet(charId: widget.charId, embedded: true)
-            : const SizedBox.shrink(),
-        _visitedTabs.contains(PromptInspectorSheet._tabPreview)
-            ? PromptPreviewScreen(charId: widget.charId, embedded: true)
-            : const SizedBox.shrink(),
-        _visitedTabs.contains(PromptInspectorSheet._tabCoverage)
-            ? CoveragePanel(charId: widget.charId, embedded: true)
-            : const SizedBox.shrink(),
-        _visitedTabs.contains(PromptInspectorSheet._tabStudio)
-            ? StudioPromptPreviewTab(charId: widget.charId)
-            : const SizedBox.shrink(),
-      ],
+      index: activeIndex,
+      children: [for (final id in _order) _tabBody(id)],
     );
 
     return SheetView(
@@ -77,25 +84,45 @@ class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
       onBack: () => Navigator.of(context).maybePop(),
       // Glaze's segmented control instead of SheetView's plain tab pills, so
       // the inspector matches the tab strip used by the rest of the app.
-      headerBottom: GlazeTabBar(
-        tabs: [
-          GlazeTabItem(label: 'tab_context'.tr(), icon: Icons.segment),
-          GlazeTabItem(label: 'tab_request'.tr(), icon: Icons.visibility),
-          GlazeTabItem(label: 'tab_coverage'.tr(), icon: Icons.search),
-          GlazeTabItem(
-            label: 'prompt_inspector_studio_tab'.tr(),
-            icon: Icons.hub_outlined,
-          ),
-        ],
-        activeIndex: _activeIndex,
-        onChanged: (i) => setState(() {
-          _activeTabId = _order[i];
-          _visitedTabs.add(_activeTabId);
-        }),
-      ),
+      headerBottom: _detailOpen
+          ? null
+          : GlazeTabBar(
+              tabs: [for (final id in _order) _tabItem(id)],
+              activeIndex: activeIndex,
+              onChanged: (i) => setState(() {
+                _activeTabId = _order[i];
+                _visitedTabs.add(_activeTabId);
+              }),
+            ),
       body: body,
     );
   }
+
+  Widget _tabBody(String id) {
+    if (!_visitedTabs.contains(id)) return const SizedBox.shrink();
+    return switch (id) {
+      PromptInspectorSheet._tabContext => TokenizerSheet(
+        charId: widget.charId,
+        embedded: true,
+      ),
+      _ => RequestsTab(
+        charId: widget.charId,
+        initialSubTab: _initialSubTab,
+        onDetailChanged: (open) {
+          if (_detailOpen == open) return;
+          setState(() => _detailOpen = open);
+        },
+      ),
+    };
+  }
+
+  GlazeTabItem _tabItem(String id) => switch (id) {
+    PromptInspectorSheet._tabContext => GlazeTabItem(
+      label: 'tab_context'.tr(),
+      icon: Icons.segment,
+    ),
+    _ => GlazeTabItem(label: 'tab_requests'.tr(), icon: Icons.swap_vert_rounded),
+  };
 }
 
 Future<void> showPromptInspectorSheet(

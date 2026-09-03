@@ -1,3 +1,13 @@
+/// Identifies every request made by one generation, before the assistant
+/// message it produces exists.
+///
+/// The reply is written only after the stream ends, so the main request (and
+/// the agent shards that precede it) cannot carry a message id at send time.
+/// They carry this instead, and `LlmRequestCaptureRepo.bindTurnMessageId`
+/// stamps the message id over them once the write lands — after which one
+/// turn is one `messageId` across every stage that took part in it.
+String turnRunId(String sessionId, int genId) => 'turn:$sessionId:$genId';
+
 /// Stable diagnostic identity attached to an outgoing LLM request.
 ///
 /// This is deliberately separate from `ChatTransportRequest.sessionId`, which

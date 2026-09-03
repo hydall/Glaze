@@ -1022,10 +1022,46 @@ replacing `[[GLAZE_DEFERRED_MEMORY_CONTEXT]]` with the excerpt-packed macro
 content. `PromptPayload.memorySelection` must be populated (no shadowed local)
 for this path to run.
 
-**Diagnostics** (`memory_diagnostics.dart`, `memory_activity_card.dart`):
+**Diagnostics** (`memory_diagnostics.dart`, `memory_activity_section.dart`):
 per-candidate reasons include `chunk_rank_trimmed` / `chunk_budget_trimmed`;
-expanded rows show `N из M` chunks and chunk indexes. Labels like `121-135` are
-**chat message ranges** (`messageRange`), not chunk indices.
+expanded rows show `N of M` chunks and chunk indexes. Labels like `121-135` are
+**chat message ranges** (`messageRange`), not chunk indices. The section is the
+memory half of `ContextCoverageCard` (`context_coverage_card.dart`), the panel
+under the chat header that also carries lorebook coverage; the whole card is
+switched off by `AppSettings.hideContextCard`.
+
+**Lorebook coverage** (`core/llm/lorebook_coverage.dart`,
+`state/lorebook_coverage_provider.dart`): a dry run of `scanLorebooks` for the
+diagnostics surfaces — same recursion, sticky/cooldown and per-book caps, so a
+reading matches the built prompt (`entry.probability` is the one rule it does
+not roll). One provider feeds both the context card and the Prompt Inspector's
+coverage tab, so a turn costs one scan and, with vectors configured, one
+embedding query.
+
+**Requests tab** (`widgets/requests/`, `state/request_timeline.dart`): the
+Prompt Inspector's timeline of what this chat actually sent, read from the
+always-on capture sink (`llmRequestCaptureInstallationProvider` →
+`llm_request_capture_rows`) and cut at `AppRuntime.startedAt` so a restart does
+not mix runs. Rows are folded into groups by `messageId` (one chat turn: the
+main model or the agent shards, then cleaner, ledger, ext blocks) or by
+`pipelineRunId` (a background job — card rewrite, reconciliation), and the two
+kinds share one chronological list. Retries of one call collapse into a single
+step carrying an attempt count. Opening a step shows that exact payload; the tab
+strip hides while it is open. The first row is the *next* request — the live
+preview (`PromptPreviewScreen`), or the agent catalog
+(`StudioPromptPreviewTab`) on an agentic preset, which is why there is no
+separate Agents tab.
+
+Two things make the grouping possible. The main request carries a
+`LlmCaptureContext` (`stage: 'main'`, the session, and `turnRunId`) — without it
+it was captured with no session at all and no per-chat view could show it. And
+because the reply does not exist yet when the generation stages are sent,
+`LlmRequestCaptureRepo.bindTurnMessageId` stamps the message id over them once
+the write lands, narrowly: this session, generation stages only, still unbound,
+from the turn's start. Captures are trimmed by a row ceiling *and* a byte budget
+(`maxBytesPerSession`), with `minRowsPerSession` as a floor — a megabyte-sized
+main request must not evict a turn's worth of small ones, and fifty of them must
+not sit on 50 MB.
 
 **LLM request dump** (`core/llm/transport/llm_request_dump.dart`): a debug-only
 diagnostics aid for inspecting every outgoing LLM request made while answering a
