@@ -33,6 +33,7 @@ imports the assets by their real paths, and ES modules do not load over
 | `specs/interaction.spec.js` | clicks, `:target`, links, scripts-off behaviour |
 | `specs/streaming.spec.js` | every prefix of a card body renders as a card |
 | `specs/document_contract.spec.js` | what a card may rely on inside the shadow root (INV-MR1…MR8) |
+| `specs/virtual_window.spec.js` | the render window of the virtualised list — the chat must never go blank |
 
 ## The rule
 

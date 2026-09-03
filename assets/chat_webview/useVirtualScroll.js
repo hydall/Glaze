@@ -335,6 +335,7 @@ class UseVirtualScroll {
             this.items[i].el.dataset.index = i;
         }
         this.cache.shiftKeys(1);
+        this._shiftVisibleIndices(1, 0);
         this.cache.setHeight(0, this._estimateHeight(el));
         this._onItemsChanged('prepend');
     }
@@ -378,6 +379,14 @@ class UseVirtualScroll {
         }
         
         this.cache.shiftKeys(-1, deletedIndex + 1);
+        // The observer reports an index, not an id, so a set left holding the
+        // pre-delete numbering makes every later updateWindow() read somebody
+        // else's row as visible. Shift it exactly the way the height cache is
+        // shifted, and drop the row that is gone: no entry will ever arrive to
+        // retire it, because its element was unobserved above.
+        this.visibleIndices.delete(deletedIndex);
+        this.realVisibleIndices.delete(deletedIndex);
+        this._shiftVisibleIndices(-1, deletedIndex + 1);
         
         if (deletedIndex < this.renderStart) {
             this.renderStart = Math.max(0, this.renderStart - 1);
@@ -385,8 +394,33 @@ class UseVirtualScroll {
         } else if (deletedIndex < this.renderEnd) {
             this.renderEnd = Math.max(0, this.renderEnd - 1);
         }
+        this._clampWindow();
         
         this._onItemsChanged('remove');
+    }
+
+    /* Renumbers the observer-fed index sets after the item list shifts, the
+     * same way VirtualScrollHeightCache.shiftKeys renumbers cached heights. */
+    _shiftVisibleIndices(amount, startIndex) {
+        for (const set of [this.visibleIndices, this.realVisibleIndices]) {
+            if (set.size === 0) continue;
+            const shifted = [];
+            for (const idx of set) {
+                if (idx < startIndex) shifted.push(idx);
+                else if (idx + amount >= 0) shifted.push(idx + amount);
+            }
+            set.clear();
+            for (const idx of shifted) set.add(idx);
+        }
+    }
+
+    /* Keeps the render window inside the list. A window that has collapsed
+     * (or run past the end) renders nothing, and renderDOM has no way to tell
+     * that apart from a deliberately empty list. */
+    _clampWindow() {
+        const count = this.items.length;
+        this.renderEnd = Math.max(0, Math.min(this.renderEnd, count));
+        this.renderStart = Math.max(0, Math.min(this.renderStart, this.renderEnd));
     }
 
     // Lightweight "follow the bottom while streaming" — ported from Vue
@@ -607,9 +641,19 @@ class UseVirtualScroll {
             this.renderStart += 1;
             this.renderEnd += 1;
         }
+        this._clampWindow();
         
         this.updateSpacers();
         this.renderDOM();
+        // Adding or dropping a row moves every spacer under a scroll position
+        // that did not move with it. A delete out of a long chat can push the
+        // mounted rows clean off the viewport, and nothing scrolls afterwards
+        // to notice — so check here rather than waiting for a scroll event.
+        // Not on a prepend: `prependMessages` grows the head one row at a time
+        // and only restores the reading position once the whole page is in, so
+        // mid-loop the viewport is *meant* to be off the band. The scroll it
+        // then applies runs this check anyway.
+        if (type !== 'prepend') this._recoverIfViewportIsBlank();
         
         if (this._scrollToBottomPending) {
             this._scrollToBottomPending = false;
@@ -677,8 +721,96 @@ class UseVirtualScroll {
         }
     }
 
+    /* The scroll-space band the mounted rows occupy, in the same units the
+     * spacers are written in — both come from the height cache, so the two
+     * always agree even while the cache is still catching up with reality. */
+    _renderedBand() {
+        const top = this.paddingTop;
+        return {
+            top,
+            bottom: top + this.cache.getRenderedContentHeight(this.renderStart, this.renderEnd),
+        };
+    }
+
+    /* True when every mounted row lies entirely above or below the viewport:
+     * the chat shows nothing, and the IntersectionObserver cannot say so
+     * because nothing is close enough to the viewport to report on. */
+    _viewportOutsideRenderedBand() {
+        if (this.items.length === 0) return false;
+        if (this.renderEnd <= this.renderStart) return true;
+        const { top, bottom } = this._renderedBand();
+        const viewTop = this.container.scrollTop;
+        const viewBottom = viewTop + this.container.clientHeight;
+        return bottom <= viewTop || top >= viewBottom;
+    }
+
+    /* The window the current scroll position asks for. Derived from the height
+     * cache alone, so it needs neither an observer entry nor a mounted row —
+     * which is what makes it the recovery for a window that has drifted away
+     * from the viewport. */
+    _windowForScrollTop(scrollTop) {
+        const count = this.items.length;
+        const clientHeight = this.container.clientHeight || 800;
+        const targetRow = this.cache.findRowAtScrollTop(scrollTop);
+        const targetIndex = targetRow >= 0
+            ? targetRow * this.columns
+            : Math.max(0, count - 1);
+
+        let newStart = Math.max(0, targetIndex - this.getBuffer());
+        const sums = this.cache.ensure();
+        let hSum = 0;
+        let r = Math.floor(targetIndex / this.columns);
+        while (hSum < clientHeight + 1000 && r * this.columns < count) {
+            hSum += sums[r + 1] - sums[r];
+            r++;
+        }
+        let newEnd = Math.min(count, r * this.columns + this.getBuffer());
+
+        if (this.columns > 1) {
+            newStart = Math.floor(newStart / this.columns) * this.columns;
+            newEnd = Math.ceil(newEnd / this.columns) * this.columns;
+            newEnd = Math.min(count, newEnd);
+        }
+        if (newEnd <= newStart) newEnd = Math.min(count, newStart + 1);
+        return { start: newStart, end: newEnd };
+    }
+
+    /* Rebuilds the window around the scroll position. Moves the window only —
+     * never scrollTop — so a scrollToBottom or smartScroll already in flight
+     * still lands where it meant to. */
+    _recenterOnScrollPosition() {
+        if (this.items.length === 0) return false;
+        const { start, end } = this._windowForScrollTop(this.container.scrollTop);
+        if (start === this.renderStart && end === this.renderEnd) return false;
+        this.renderStart = start;
+        this.renderEnd = end;
+        this.visibleIndices.clear();
+        this.realVisibleIndices.clear();
+        this.updateSpacers();
+        this.renderDOM();
+        return true;
+    }
+
+    /* The single safety net for a blank chat: every path that can move the
+     * rows away from the viewport without a scroll event ends here. */
+    _recoverIfViewportIsBlank() {
+        if (!this.mounted) return false;
+        if (!this._viewportOutsideRenderedBand()) return false;
+        return this._recenterOnScrollPosition();
+    }
+
     updateWindow() {
-        if (this.visibleIndices.size === 0) return;
+        if (this.visibleIndices.size === 0) {
+            // Nothing intersects. Either the list is simply idle, or the window
+            // has drifted off the viewport — and in that second case no
+            // observer entry is ever coming to say so: everything mounted sits
+            // further away than the observer's margin, so it reports nothing
+            // and there is no visible index left to grow the window from.
+            // Returning here is what left the chat permanently blank until the
+            // user opened another chat and came back (a fresh setMessages).
+            this._recoverIfViewportIsBlank();
+            return;
+        }
         const indices = Array.from(this.visibleIndices).sort((a, b) => a - b);
         const minVis = indices[0];
         const maxVis = indices[indices.length - 1];
@@ -757,6 +889,12 @@ class UseVirtualScroll {
                 }
                 if (!changed) return;
                 this.updateSpacers();
+                // A late height correction (images, fonts, badges) rewrites the
+                // spacers under a scroll position that stays put. In a long
+                // chat that can shift the mounted rows out of the viewport with
+                // no scroll event to follow, which is the second way a chat
+                // went blank on its own.
+                this._recoverIfViewportIsBlank();
                 if (wasPinned) {
                     requestAnimationFrame(() => {
                         if (this.mounted && this._pinnedToBottom) this.smartScroll();
@@ -800,6 +938,12 @@ class UseVirtualScroll {
             this._pinnedToBottom = true;
         }
 
+        // Before the programmatic-scroll gate: a chat whose rows have drifted
+        // off the viewport shows nothing, and our own scrolls (the opening jump
+        // to the bottom, the streaming follow) are exactly when that happens.
+        // The recovery moves the window only, so it cannot fight them.
+        this._recoverIfViewportIsBlank();
+
         if (this.isProgrammaticScrolling) return;
         this.isScrolling = true;
         clearTimeout(this.scrollTimeout);
@@ -812,41 +956,14 @@ class UseVirtualScroll {
             
             const scrollTop = this.container.scrollTop;
             const clientHeight = this.container.clientHeight;
-            const renderedTop = this.paddingTop;
-            const renderedHeight = this.cache.getRenderedContentHeight(this.renderStart, this.renderEnd);
-            const renderedBottom = renderedTop + renderedHeight;
+            const { top: renderedTop, bottom: renderedBottom } = this._renderedBand();
+            // A jump this far outside the mounted rows is cheaper to serve by
+            // rebuilding the window than by letting the observer walk to it.
             const scrollBuffer = 2000;
-            
-            if (scrollTop < renderedTop - scrollBuffer || scrollTop + clientHeight > renderedBottom + scrollBuffer) {
-                const count = this.items.length;
-                const targetRow = this.cache.findRowAtScrollTop(scrollTop);
-                const targetIndex = targetRow >= 0 ? targetRow * this.columns : Math.max(0, count - 1);
-                
-                let newStart = Math.max(0, targetIndex - this.getBuffer());
-                const sums = this.cache.ensure();
-                let hSum = 0;
-                let r = Math.floor(targetIndex / this.columns);
-                while (hSum < clientHeight + 1000 && r * this.columns < count) {
-                    hSum += sums[r + 1] - sums[r];
-                    r++;
-                }
-                let newEnd = Math.min(count, r * this.columns + this.getBuffer());
-                
-                if (this.columns > 1) {
-                    newStart = Math.floor(newStart / this.columns) * this.columns;
-                    newEnd = Math.ceil(newEnd / this.columns) * this.columns;
-                    newEnd = Math.min(count, newEnd);
-                }
-                
-                if (newStart !== this.renderStart || newEnd !== this.renderEnd) {
-                    this.renderStart = newStart;
-                    this.renderEnd = newEnd;
-                    this.visibleIndices.clear();
-                    this.realVisibleIndices.clear();
-                    this.updateSpacers();
-                    this.renderDOM();
-                }
-            }
+            const farAway = scrollTop < renderedTop - scrollBuffer ||
+                scrollTop + clientHeight > renderedBottom + scrollBuffer;
+
+            if (farAway) this._recenterOnScrollPosition();
         });
     }
 
