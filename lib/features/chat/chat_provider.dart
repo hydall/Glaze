@@ -482,6 +482,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final sendPendingToken = ++_sendPendingSeq;
 
     try {
+      // Stamp the message with the persona that sent it. The id is what the
+      // chat resolves against later (a renamed persona keeps naming its old
+      // messages correctly, a deleted one falls back to the letter avatar);
+      // the name is the snapshot that survives the persona being deleted.
+      final sendingPersona = ref.read(
+        effectivePersonaForChatProvider((
+          charId: arg,
+          sessionId: current.session!.id,
+        )),
+      );
       final userMsg = ChatMessage(
         id: generateId(),
         role: 'user',
@@ -489,6 +499,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         timestamp: DateTime.now().millisecondsSinceEpoch,
         tokens: estimateTokens(text),
         imagePath: imageDataUrl,
+        personaId: sendingPersona?.id,
+        personaName: sendingPersona?.name,
       );
 
       // Only the assistant *immediately* before the new message is accepted —

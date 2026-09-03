@@ -123,11 +123,17 @@ export class Bridge {
       const isUser = section.classList.contains('user');
       const stored = section.dataset.personaName || '';
       const storedPersonaName = stored === 'You' ? '' : stored;
+      // A message pinned to the persona it was sent as keeps that persona's
+      // name and avatar — the letter included, when the persona was deleted.
+      // Only unpinned messages follow the active identity.
+      const pinned = section.dataset.avatarPinned === '1';
       // Per-message stored persona wins; otherwise use the active identity.
       const newName = isUser
-        ? (storedPersonaName || this._personaName || 'You')
+        ? ((pinned ? stored : storedPersonaName) || this._personaName || 'You')
         : (this._charName || stored || 'Character');
-      const newAvatarUrl = isUser ? this._personaAvatarUrl : this._charAvatarUrl;
+      const newAvatarUrl = pinned
+        ? (section.dataset.avatarUrl || null)
+        : (isUser ? this._personaAvatarUrl : this._charAvatarUrl);
 
       const label = section.querySelector('.msg-name-label');
       if (label) label.textContent = newName;
