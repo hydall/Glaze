@@ -111,26 +111,56 @@ class StudioMessageBuilder {
         ? context.continueInstruction
         : null;
 
+    // Blocks flagged `appendToLastMessage` are merged into the last user-role
+    // history message instead of being emitted on their own (mirrors the
+    // classic non-Studio pipeline — see `applyAppendToLastMessage` in
+    // `prompt_builder.dart`). Their macros are expanded once here so the merged
+    // copy is identical to what a plain instruction block would have emitted.
+    final appendableEntries = <({String name, String content})>[];
+    for (final block in blocks) {
+      if (block.type != StudioBlockType.instruction) continue;
+      if (!block.appendToLastMessage) continue;
+      final content = _blockExpander
+          .expandStudioBlockContent(
+            block.content,
+            context: context,
+            priorBriefs: priorBriefs,
+            preset: studioPreset,
+          )
+          .trim();
+      if (content.isEmpty) continue;
+      _recordLorebookMacroClassifications(
+        block.content,
+        emittedLorebookClassifications,
+      );
+      appendableEntries.add((name: block.id, content: content));
+    }
+
     // Emits one chat-history block: depth-anchored blocks interleaved in, the
     // continue instruction (when set) pinned directly after the last chat
     // message, and per-message reasoning attached on the final writer's run.
     List<Map<String, dynamic>> emitHistory(List<PromptMessage> history) {
+      final mergedHistory = _applyAppendToLastMessage(history, appendableEntries);
       if (isFinalResponse &&
           (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
         return _historyWithReasoning(
-          history,
+          mergedHistory,
           reasoningHistoryCount,
           depthMessages: depthMessages,
           continueInstruction: continueInstruction,
         );
       }
       return insertContinueInstruction(
-        interleaveDepthWithHistory(history, depthMessages),
+        interleaveDepthWithHistory(mergedHistory, depthMessages),
         continueInstruction,
       ).map((m) => m.toApiMap()).toList();
     }
 
     for (final block in blocks) {
+      // appendToLastMessage blocks are already merged into the last user
+      // history message (see appendableEntries above) — do not emit them again
+      // as their own message.
+      if (block.appendToLastMessage) continue;
       // Type-based resolution takes precedence over mode/id. The codec sets
       // `type` and `contextSlot` correctly for every preset, but block ids vary
       // (final_chat_history, loom_chat_history, etc.) so id matching alone is
@@ -525,6 +555,43 @@ class StudioMessageBuilder {
     'runtime_dynamic' => StudioContextSlot.runtimeDynamic,
     _ => null,
   };
+
+  /// Appends the expanded contents of preset blocks flagged
+  /// `appendToLastMessage` to the last user-role history message, mirroring the
+  /// classic `applyAppendToLastMessage` in `prompt_builder.dart`. Studio history
+  /// messages are not flagged `isHistory`, so the last user turn is located by
+  /// `role` alone. No-op when there are no appendable entries or no user turn.
+  List<PromptMessage> _applyAppendToLastMessage(
+    List<PromptMessage> history,
+    List<({String name, String content})> appendableEntries,
+  ) {
+    if (appendableEntries.isEmpty || history.isEmpty) return history;
+
+    final lastUserIdx = history.lastIndexWhere((m) => m.role == 'user');
+    if (lastUserIdx < 0) return history;
+
+    final joined = appendableEntries
+        .map((b) => b.content.trim())
+        .where((s) => s.isNotEmpty)
+        .join('\n\n');
+    if (joined.isEmpty) return history;
+
+    final blockNames = appendableEntries
+        .map((b) => b.name.isNotEmpty ? b.name : 'block')
+        .join(', ');
+    final original = history[lastUserIdx];
+    final updated = <PromptMessage>[...history];
+    updated[lastUserIdx] = PromptMessage(
+      role: original.role,
+      content: '${original.content}\n\n$joined',
+      isHistory: original.isHistory,
+      blockName: '${original.blockName ?? 'Last user'} + $blockNames',
+      sourceMessageId: original.sourceMessageId,
+      reasoningContent: original.reasoningContent,
+      imagePath: original.imagePath,
+    );
+    return updated;
+  }
 
   List<Map<String, dynamic>> _historyWithReasoning(
     List<PromptMessage> history,

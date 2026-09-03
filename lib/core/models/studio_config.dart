@@ -90,6 +90,17 @@ abstract class StudioPresetBlock with _$StudioPresetBlock {
     /// blocks themselves.
     @Default('relative') String insertionMode,
     int? depth,
+
+    /// When true, this block's content (after macro expansion) is appended to
+    /// the last user-role message in the chat history at prompt-assembly time,
+    /// mirroring the classic (non-Studio) `PresetBlock.appendToLastMessage`
+    /// (see `preset.dart` and `applyAppendToLastMessage` in
+    /// `prompt_builder.dart`). The block's own [role] is ignored in this mode —
+    /// content is always merged into the last user message, and the block is
+    /// NOT additionally emitted as its own message. If no user message exists
+    /// in history, the block is silently dropped. Only meaningful for
+    /// `type: instruction` blocks; ignored on `history`/`context` blocks.
+    @Default(false) bool appendToLastMessage,
   }) = _StudioPresetBlock;
 
   factory StudioPresetBlock.fromJson(Map<String, dynamic> json) =>
