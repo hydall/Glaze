@@ -754,6 +754,21 @@ void main() {
         contains("const storedPersonaName = stored === 'You' ? '' : stored"),
       );
     });
+
+    // A user message carries the persona it was sent as, and the renderer
+    // stamps `data-avatar-pinned` on it. An identity push repaints every
+    // avatar in the DOM, so it has to leave those alone — otherwise switching
+    // persona re-faces the whole history, and a message from a deleted persona
+    // borrows the picture of whoever is active now.
+    test('identity refresh leaves a message-pinned avatar alone', () {
+      for (final source in [bridgeControllerJs, _asset('bridge.legacy.js')]) {
+        expect(
+          source,
+          contains("const pinned = section.dataset.avatarPinned === '1'"),
+        );
+        expect(source, contains('section.dataset.avatarUrl || null'));
+      }
+    });
   });
 
   group('renderer ES module layout', () {
@@ -784,6 +799,24 @@ void main() {
       ]) {
         expect(rendererMessageJs, contains("'./$module'"));
       }
+    });
+
+    // The Dart mapper sends `avatarFallback` for a message whose stored persona
+    // no longer resolves (deleted, or never given a picture). The renderer must
+    // draw the initial letter for it instead of falling through to the active
+    // persona's avatar.
+    test('message renderer pins the avatar of a stored persona', () {
+      expect(
+        rendererMessageJs,
+        contains('const pinnedAvatar = !!(m.avatarUrl || m.avatarFallback)'),
+      );
+      expect(
+        rendererMessageJs,
+        contains(
+          'if (messageData.avatarUrl || messageData.avatarFallback) '
+          "section.dataset.avatarPinned = '1'",
+        ),
+      );
     });
 
     test('legacy renderer shim points at active module entrypoint', () {

@@ -9,6 +9,31 @@ import 'package:glaze_flutter/core/utils/think_tags.dart';
 
 part 'chat_message_mapper.freezed.dart';
 
+/// A persona as the chat needs it for rendering: the live name and its avatar,
+/// already resolved to a URL the WebView can load — null when the persona
+/// carries no avatar image.
+///
+/// Only personas that still exist appear in
+/// [ChatMessageMapperContext.personasById] — a message whose `personaId` is
+/// missing from that map was sent by a persona that has since been deleted,
+/// which is what makes its avatar fall back to the initial letter.
+class PersonaIdentity {
+  final String name;
+  final String? avatarUrl;
+
+  const PersonaIdentity({required this.name, this.avatarUrl});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PersonaIdentity &&
+          other.name == name &&
+          other.avatarUrl == avatarUrl;
+
+  @override
+  int get hashCode => Object.hash(name, avatarUrl);
+}
+
 @freezed
 abstract class ChatMessageMapperContext with _$ChatMessageMapperContext {
   const factory ChatMessageMapperContext({
@@ -30,6 +55,10 @@ abstract class ChatMessageMapperContext with _$ChatMessageMapperContext {
     /// trailing user message from the map alone — and that message's reply is
     /// already on its way.
     @Default(false) bool isSendPending,
+
+    /// Every persona that still exists, by id — the roster the WebView
+    /// resolves a message's stored `personaId` against. See [PersonaIdentity].
+    @Default({}) Map<String, PersonaIdentity> personasById,
     @Default({}) Set<String> coveredMemoryIds,
     @Default({}) Set<String> pendingMemoryIds,
     @Default({}) Set<String> draftMemoryIds,
@@ -110,13 +139,26 @@ class ChatMessageMapper {
         ? null
         : m.personaName;
 
+    // The persona the message was sent as, resolved against the live roster.
+    // A renamed persona renames its own past messages; a deleted one keeps the
+    // name stored on the message and loses its avatar (see [PersonaIdentity]).
+    final senderPersonaId = isUser ? m.personaId : null;
+    final senderPersona = senderPersonaId == null
+        ? null
+        : ctx.personasById[senderPersonaId];
+    final senderAvatarUrl = senderPersona?.avatarUrl;
+
     String? displayName;
     String? avatarColor;
     if (isAssistant) {
       displayName = ctx.currentCharName ?? m.personaName ?? 'Character';
       avatarColor = ctx.currentCharColor;
     } else if (isUser) {
-      displayName = userMessagePersonaName ?? ctx.currentPersonaName ?? 'You';
+      displayName =
+          senderPersona?.name ??
+          userMessagePersonaName ??
+          ctx.currentPersonaName ??
+          'You';
     } else {
       displayName = m.personaName ?? 'System';
     }
@@ -165,7 +207,18 @@ class ChatMessageMapper {
       'avatarColor': ?avatarColor,
       if (m.imagePath != null) 'imagePath': m.imagePath,
       if (m.imagePath != null) 'imageHidden': m.imageHidden,
-      if (m.personaName != null && (!isUser || userMessagePersonaName != null))
+      if (isUser && senderPersonaId != null) ...{
+        // Sent as a named persona: the WebView pins this message's name and
+        // avatar to it instead of following whichever persona is active now.
+        'personaId': senderPersonaId,
+        'personaName': displayName,
+        'avatarUrl': ?senderAvatarUrl,
+        // Nothing to pin — the persona was deleted, or it has no avatar image.
+        // Either way the renderer must draw the initial letter rather than
+        // falling back to the active persona's picture.
+        if (senderAvatarUrl == null) 'avatarFallback': true,
+      } else if (m.personaName != null &&
+          (!isUser || userMessagePersonaName != null))
         'personaName': m.personaName,
       if (m.swipes.isNotEmpty) 'swipeIndex': m.swipeId,
       if (m.swipes.isNotEmpty) 'swipeTotal': m.swipes.length,
