@@ -4,6 +4,16 @@ import '../models/lorebook.dart';
 import 'glaze_matcher.dart';
 import 'lorebook_activation.dart';
 
+/// Why an activated entry still did not make it into the prompt.
+enum CoverageCutOff {
+  /// The global `maxInjectedEntries` (or `vectorTopK`) budget ran out.
+  budget,
+
+  /// The entry's own lorebook hit its per-book `maxInjectedEntries` cap first
+  /// — the same cut `applyLorebookPerBookLimits` makes in the real scan.
+  bookLimit,
+}
+
 class CoverageEntry {
   final String id;
   final String comment;
@@ -17,7 +27,19 @@ class CoverageEntry {
   final List<String> matchedKeys;
   final List<String> matchedSecondaryKeys;
   final int? matchMessageIndex;
-  final bool cutOffByBudget;
+  final CoverageCutOff? cutOff;
+
+  /// Which recursion pass activated the entry. 1 is the ordinary first pass;
+  /// anything higher means the entry was only reached because an earlier
+  /// entry's content was fed back into the scan text.
+  final int recursionPass;
+
+  /// The entry did not match on this turn but is still held active by its
+  /// `sticky` window.
+  final bool stickyHeld;
+
+  /// The entry matched but its `cooldown` window suppresses it.
+  final bool onCooldown;
 
   const CoverageEntry({
     required this.id,
@@ -32,8 +54,17 @@ class CoverageEntry {
     this.matchedKeys = const [],
     this.matchedSecondaryKeys = const [],
     this.matchMessageIndex,
-    this.cutOffByBudget = false,
+    this.cutOff,
+    this.recursionPass = 1,
+    this.stickyHeld = false,
+    this.onCooldown = false,
   });
+
+  /// Activated but not injected, for whatever reason. Kept as the name the
+  /// filters and badges have always used; [cutOff] says which cap did it.
+  bool get cutOffByBudget => cutOff != null;
+
+  bool get viaRecursion => recursionPass > 1;
 }
 
 class CoverageResult {
@@ -48,8 +79,28 @@ class CoverageResult {
     required this.activatedCount,
     required this.cutOffCount,
   });
+
+  static const empty = CoverageResult(
+    entries: [],
+    totalCandidates: 0,
+    activatedCount: 0,
+    cutOffCount: 0,
+  );
+
+  int get injectedCount => activatedCount - cutOffCount;
+  int get inactiveCount => totalCandidates - activatedCount;
 }
 
+/// Dry-runs lorebook activation for the diagnostics surfaces (the coverage tab
+/// of the Prompt Inspector and the context card under the chat header).
+///
+/// It mirrors [scanLorebooks] (`lorebook_scanner.dart`) deliberately: recursive
+/// scanning, sticky/cooldown windows and per-book entry caps all behave the way
+/// the real prompt build behaves, so a reading here is not a different answer
+/// from what the model will actually receive. The one rule it does NOT
+/// reproduce is `entry.probability`: rolling dice would make the same chat
+/// report a different coverage on every refresh, so a sub-100 % entry is shown
+/// as it would be at 100 %.
 CoverageResult computeLorebookCoverage({
   required List<ChatMessage> history,
   required Character? char,
@@ -78,14 +129,7 @@ CoverageResult computeLorebookCoverage({
 
   // In vector-only mode, show only vector results (keyword scan is skipped).
   if (globalSettings.searchType == 'vector') {
-    if (vectorEntries.isEmpty) {
-      return const CoverageResult(
-        entries: [],
-        totalCandidates: 0,
-        activatedCount: 0,
-        cutOffCount: 0,
-      );
-    }
+    if (vectorEntries.isEmpty) return CoverageResult.empty;
     final entries = vectorEntries.map((e) {
       final lb = lbForEntry(e);
       return CoverageEntry(
@@ -98,7 +142,7 @@ CoverageResult computeLorebookCoverage({
         lorebookId: lb?.id ?? '',
         constant: e.constant,
         activated: true,
-        matchedKeys: ['[vector]'],
+        matchedKeys: const ['[vector]'],
       );
     }).toList();
     return CoverageResult(
@@ -118,14 +162,7 @@ CoverageResult computeLorebookCoverage({
     activations: activations,
   );
 
-  if (activeLorebooks.isEmpty) {
-    return const CoverageResult(
-      entries: [],
-      totalCandidates: 0,
-      activatedCount: 0,
-      cutOffCount: 0,
-    );
-  }
+  if (activeLorebooks.isEmpty) return CoverageResult.empty;
 
   final maxInjectedEntries = globalSettings.maxInjectedEntries.clamp(1, 100);
   final candidates = <String, _Candidate>{};
@@ -136,6 +173,8 @@ CoverageResult computeLorebookCoverage({
     final lbCaseSensitive =
         lbSettings?.caseSensitive ?? globalSettings.caseSensitive;
     final lbMatchWholeWords = lbSettings?.matchWholeWords;
+    final lbRecursiveScan = lbSettings?.recursiveScan;
+    final lbMaxInjected = lbSettings?.maxInjectedEntries;
 
     for (final entry in lb.entries) {
       final isVectorOnly = entry.vectorSearch && !entry.useKeywordSearch;
@@ -170,97 +209,162 @@ CoverageResult computeLorebookCoverage({
         activated: entry.constant,
         matchedKeys: [],
         matchedSecondaryKeys: [],
-        matchMessageIndex: entry.constant ? null : null,
+        matchMessageIndex: null,
         caseSensitive: effectiveCaseSensitive,
         wholeWords: effectiveWholeWords,
         scanDepth: effectiveScanDepth,
+        recursiveScan: lbRecursiveScan,
+        maxInjectedEntries: (lbMaxInjected != null && lbMaxInjected > 0)
+            ? lbMaxInjected
+            : null,
       );
     }
   }
 
-  final nonHidden = history.where((m) => !m.isHidden).toList();
+  // Same visibility rule as the scanner: a hidden or still-streaming message is
+  // not part of the prompt, so it must not trigger an entry here either.
+  final nonHidden = history
+      .where((m) => !m.isHidden && !m.isTyping)
+      .toList(growable: false);
 
-  for (final c in candidates.values) {
-    final entry = c.entry;
-    if (entry.constant) continue;
+  // Recursion feeds activated entry content back into the scan text, exactly as
+  // `scanLorebooks` does, so a chain A -> B -> C reads the same in the preview
+  // as it does in the built prompt.
+  final recursiveScan =
+      candidates.values.firstOrNull?.recursiveScan ??
+      globalSettings.recursiveScan;
+  final maxIterations = recursiveScan ? 5 : 1;
+  var recursionText = textToScan;
+  var changed = true;
+  var iteration = 0;
 
-    final caseSensitive = c.caseSensitive;
-    final wholeWords = c.wholeWords;
-    final scanDepth = c.scanDepth;
+  while (changed && iteration < maxIterations) {
+    changed = false;
+    iteration++;
 
-    final scanMessages = nonHidden.length > scanDepth
-        ? nonHidden.sublist(nonHidden.length - scanDepth)
-        : nonHidden;
+    for (final c in candidates.values) {
+      final entry = c.entry;
+      if (entry.constant || c.activated) continue;
 
-    final scanText = caseSensitive
-        ? '$textToScan\n${scanMessages.map((m) => m.content).join('\n')}'
-        : '${textToScan.toLowerCase()}\n${scanMessages.map((m) => m.content).join('\n').toLowerCase()}';
+      final caseSensitive = c.caseSensitive;
+      final wholeWords = c.wholeWords;
 
-    final matchedPrimary = <String>[];
-    for (final key in entry.keys) {
-      if (key.isEmpty) continue;
-      if (glazeCheckMatch(key, scanText, caseSensitive, wholeWords)) {
-        matchedPrimary.add(key);
-      }
-    }
+      // Sticky/cooldown shorten the window the entry is judged on.
+      final temporalDepth = entry.sticky > entry.cooldown
+          ? entry.sticky
+          : entry.cooldown;
+      final scanDepth = temporalDepth > 0 && temporalDepth < c.scanDepth
+          ? temporalDepth
+          : c.scanDepth;
 
-    int? matchIdx;
-    if (matchedPrimary.isNotEmpty) {
-      for (int i = scanMessages.length - 1; i >= 0; i--) {
-        final msgText = caseSensitive
-            ? scanMessages[i].content
-            : scanMessages[i].content.toLowerCase();
-        for (final key in entry.keys) {
-          if (key.isNotEmpty &&
-              glazeCheckMatch(key, msgText, caseSensitive, wholeWords)) {
-            matchIdx = history.indexOf(scanMessages[i]);
+      final scanMessages = nonHidden.length > scanDepth
+          ? nonHidden.sublist(nonHidden.length - scanDepth)
+          : nonHidden;
+
+      final historyText = scanMessages.map((m) => m.content).join('\n');
+      final scanText = caseSensitive
+          ? '$historyText\n$recursionText'
+          : '${historyText.toLowerCase()}\n${recursionText.toLowerCase()}';
+
+      // A sticky entry stays on for `sticky` messages after its last hit; a
+      // cooling one is suppressed for `cooldown` messages after it.
+      var stickyHeld = false;
+      var onCooldown = false;
+      if (entry.sticky > 0 || entry.cooldown > 0) {
+        for (var i = 1; i <= temporalDepth; i++) {
+          final idx = nonHidden.length - i;
+          if (idx < 0) break;
+          final histSource = caseSensitive
+              ? nonHidden[idx].content
+              : nonHidden[idx].content.toLowerCase();
+          final wasMatched = entry.keys.any(
+            (key) =>
+                key.isNotEmpty &&
+                glazeCheckMatch(key, histSource, caseSensitive, wholeWords),
+          );
+          if (wasMatched) {
+            if (i <= entry.sticky) stickyHeld = true;
+            if (i <= entry.cooldown) onCooldown = true;
             break;
           }
         }
-        if (matchIdx != null) break;
       }
-    }
 
-    final matchedSecondary = <String>[];
-    if (matchedPrimary.isNotEmpty && entry.secondaryKeys.isNotEmpty) {
-      for (final key in entry.secondaryKeys) {
+      final matchedPrimary = <String>[];
+      for (final key in entry.keys) {
         if (key.isEmpty) continue;
         if (glazeCheckMatch(key, scanText, caseSensitive, wholeWords)) {
-          matchedSecondary.add(key);
+          matchedPrimary.add(key);
         }
       }
-    }
 
-    c.matchedKeys = matchedPrimary;
-    c.matchedSecondaryKeys = matchedSecondary;
-    c.matchMessageIndex = matchIdx;
-
-    if (matchedPrimary.isEmpty) continue;
-
-    bool secondaryPass = true;
-    final logic = entry.selectiveLogic;
-    if (logic != 4 && entry.secondaryKeys.isNotEmpty) {
-      final anyMatch = matchedSecondary.isNotEmpty;
-      final allMatch = entry.secondaryKeys.every(
-        (k) =>
-            k.isEmpty ||
-            glazeCheckMatch(k, scanText, caseSensitive, wholeWords),
-      );
-
-      switch (logic) {
-        case 0:
-          secondaryPass = anyMatch;
-        case 1:
-          secondaryPass = allMatch;
-        case 2:
-          secondaryPass = !anyMatch;
-        case 3:
-          secondaryPass = !allMatch;
+      int? matchIdx;
+      if (matchedPrimary.isNotEmpty) {
+        for (var i = scanMessages.length - 1; i >= 0; i--) {
+          final msgText = caseSensitive
+              ? scanMessages[i].content
+              : scanMessages[i].content.toLowerCase();
+          for (final key in entry.keys) {
+            if (key.isNotEmpty &&
+                glazeCheckMatch(key, msgText, caseSensitive, wholeWords)) {
+              matchIdx = history.indexOf(scanMessages[i]);
+              break;
+            }
+          }
+          if (matchIdx != null) break;
+        }
       }
-    }
 
-    if (secondaryPass) {
+      final matchedSecondary = <String>[];
+      if (matchedPrimary.isNotEmpty && entry.secondaryKeys.isNotEmpty) {
+        for (final key in entry.secondaryKeys) {
+          if (key.isEmpty) continue;
+          if (glazeCheckMatch(key, scanText, caseSensitive, wholeWords)) {
+            matchedSecondary.add(key);
+          }
+        }
+      }
+
+      c.matchedKeys = matchedPrimary;
+      c.matchedSecondaryKeys = matchedSecondary;
+      c.matchMessageIndex = matchIdx;
+      c.stickyHeld = stickyHeld;
+      c.onCooldown = onCooldown;
+
+      if (onCooldown) continue;
+      if (matchedPrimary.isEmpty && !stickyHeld) continue;
+
+      var secondaryPass = true;
+      final logic = entry.selectiveLogic;
+      if (logic != 4 && entry.secondaryKeys.isNotEmpty) {
+        final anyMatch = matchedSecondary.isNotEmpty;
+        final allMatch = entry.secondaryKeys.every(
+          (k) =>
+              k.isEmpty ||
+              glazeCheckMatch(k, scanText, caseSensitive, wholeWords),
+        );
+
+        switch (logic) {
+          case 0:
+            secondaryPass = anyMatch;
+          case 1:
+            secondaryPass = allMatch;
+          case 2:
+            secondaryPass = !anyMatch;
+          case 3:
+            secondaryPass = !allMatch;
+        }
+      }
+
+      if (!secondaryPass) continue;
+
       c.activated = true;
+      c.recursionPass = iteration;
+
+      if (!entry.preventRecursion && iteration < maxIterations) {
+        recursionText = '$recursionText\n${entry.content.toLowerCase()}';
+        changed = true;
+      }
     }
   }
 
@@ -276,6 +380,25 @@ CoverageResult computeLorebookCoverage({
 
   final notActivatedList = candidates.values.where((c) => !c.activated).toList()
     ..sort((a, b) => a.entry.order.compareTo(b.entry.order));
+
+  // Per-book caps come first, before the global budget — the same order as
+  // `scanLorebooks` -> `applyLorebookPerBookLimits` -> `mergeKeywordVector`.
+  final perBookCounts = <String, int>{};
+  final withinBookLimit = <_Candidate>[];
+  final bookLimitCutOff = <_Candidate>[];
+  for (final c in keywordActivatedList) {
+    final limit = c.maxInjectedEntries;
+    if (limit != null) {
+      final used = perBookCounts[c.lorebookId] ?? 0;
+      if (used >= limit) {
+        c.cutOff = CoverageCutOff.bookLimit;
+        bookLimitCutOff.add(c);
+        continue;
+      }
+      perBookCounts[c.lorebookId] = used + 1;
+    }
+    withinBookLimit.add(c);
+  }
 
   // Dedupe vector entries against all keyword-activated IDs (constants excluded —
   // they can't be vector-matched anyway since constant=true disables vectorSearch).
@@ -301,7 +424,7 @@ CoverageResult computeLorebookCoverage({
       maxInjectedEntries - constantActivated.length < 0
       ? 0
       : maxInjectedEntries - constantActivated.length;
-  final usedKeyword = keywordActivatedList.take(triggeredKeywordSlots).toList();
+  final usedKeyword = withinBookLimit.take(triggeredKeywordSlots).toList();
 
   final keywordSlotCount = constantActivated.length + usedKeyword.length;
   final remainingSlots = maxInjectedEntries - keywordSlotCount;
@@ -313,11 +436,9 @@ CoverageResult computeLorebookCoverage({
   final usedVector = dedupedVectorEntries.take(usableVectorSlots).toList();
 
   // Keyword entries beyond the keyword budget are cut off by the entry cap.
-  final keywordCutOffCount = keywordActivatedList.length > usedKeyword.length
-      ? keywordActivatedList.length - usedKeyword.length
-      : 0;
-  for (int i = usedKeyword.length; i < keywordActivatedList.length; i++) {
-    keywordActivatedList[i].cutOffByBudget = true;
+  final budgetCutOff = withinBookLimit.skip(usedKeyword.length).toList();
+  for (final c in budgetCutOff) {
+    c.cutOff = CoverageCutOff.budget;
   }
 
   // Vector entries beyond usableVectorSlots are cut off by the entry cap.
@@ -329,7 +450,8 @@ CoverageResult computeLorebookCoverage({
       .skip(usableVectorSlots)
       .toList();
 
-  final totalCutOff = keywordCutOffCount + vectorCutOffCount;
+  final totalCutOff =
+      budgetCutOff.length + bookLimitCutOff.length + vectorCutOffCount;
   // Constants are always active; keyword/vector cut-offs still count as "activated"
   // for the summary bar (they were triggered, just not injected).
   final totalActivated =
@@ -348,8 +470,8 @@ CoverageResult computeLorebookCoverage({
       lorebookId: lb?.id ?? '',
       constant: e.constant,
       activated: true,
-      matchedKeys: ['[vector]'],
-      cutOffByBudget: cutOff,
+      matchedKeys: const ['[vector]'],
+      cutOff: cutOff ? CoverageCutOff.budget : null,
     );
   }
 
@@ -358,25 +480,9 @@ CoverageResult computeLorebookCoverage({
     ...constantActivated.map(_toCoverage),
     // In-budget keyword entries.
     ...usedKeyword.map(_toCoverage),
-    // Over-budget keyword entries (cut off by entry cap).
-    ...keywordActivatedList.skip(usedKeyword.length).map((c) {
-      final base = _toCoverage(c);
-      return CoverageEntry(
-        id: base.id,
-        comment: base.comment,
-        content: base.content,
-        position: base.position,
-        order: base.order,
-        lorebookName: base.lorebookName,
-        lorebookId: base.lorebookId,
-        constant: base.constant,
-        activated: base.activated,
-        matchedKeys: base.matchedKeys,
-        matchedSecondaryKeys: base.matchedSecondaryKeys,
-        matchMessageIndex: base.matchMessageIndex,
-        cutOffByBudget: true,
-      );
-    }),
+    // Over-budget keyword entries (cut off by the global cap or a per-book one).
+    ...budgetCutOff.map(_toCoverage),
+    ...bookLimitCutOff.map(_toCoverage),
     ...vectorInBudget.map((e) => vectorToCoverage(e, false)),
     ...vectorOverBudget.map((e) => vectorToCoverage(e, true)),
     ...notActivatedList.map(_toCoverage),
@@ -403,7 +509,10 @@ CoverageEntry _toCoverage(_Candidate c) => CoverageEntry(
   matchedKeys: c.matchedKeys,
   matchedSecondaryKeys: c.matchedSecondaryKeys,
   matchMessageIndex: c.matchMessageIndex,
-  cutOffByBudget: c.cutOffByBudget,
+  cutOff: c.cutOff,
+  recursionPass: c.recursionPass,
+  stickyHeld: c.stickyHeld,
+  onCooldown: c.onCooldown,
 );
 
 class _Candidate {
@@ -414,10 +523,15 @@ class _Candidate {
   List<String> matchedKeys;
   List<String> matchedSecondaryKeys;
   int? matchMessageIndex;
-  bool cutOffByBudget = false;
+  CoverageCutOff? cutOff;
+  int recursionPass = 1;
+  bool stickyHeld = false;
+  bool onCooldown = false;
   final bool caseSensitive;
   final WholeWordMode wholeWords;
   final int scanDepth;
+  final bool? recursiveScan;
+  final int? maxInjectedEntries;
 
   _Candidate({
     required this.entry,
@@ -430,5 +544,7 @@ class _Candidate {
     required this.caseSensitive,
     required this.wholeWords,
     required this.scanDepth,
+    this.recursiveScan,
+    this.maxInjectedEntries,
   });
 }

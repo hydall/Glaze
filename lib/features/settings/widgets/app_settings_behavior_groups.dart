@@ -104,6 +104,14 @@ class ChatGroup extends SettingsGroup {
               notifierOf(ref).save(settings.copyWith(hideTokenCount: !v)),
         ),
         toggle(
+          id: 'show_context_card',
+          label: 'menu_show_context_card'.tr(),
+          description: 'desc_show_context_card'.tr(),
+          value: !settings.hideContextCard,
+          onChanged: (v) =>
+              notifierOf(ref).save(settings.copyWith(hideContextCard: !v)),
+        ),
+        toggle(
           id: 'allow_message_scripts',
           label: 'menu_allow_message_scripts'.tr(),
           description: 'desc_allow_message_scripts'.tr(),

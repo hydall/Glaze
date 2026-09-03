@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
@@ -5,30 +6,31 @@ import '../state/memory_activity_provider.dart';
 import 'agentic_operations_log_dialog.dart';
 import 'memory_graph_panel.dart';
 
-class MemoryActivityCard extends StatefulWidget {
+/// The memory half of the context card under the chat header.
+///
+/// Body only: the card owns the surface, the title row and the expand state, so
+/// this renders the warning, the run's stat chips and the candidate list and
+/// nothing else.
+class MemoryActivitySection extends StatefulWidget {
   final MemoryActivityState activity;
-  final bool expanded;
-  final VoidCallback onToggle;
   final String? sessionId;
 
-  const MemoryActivityCard({
+  const MemoryActivitySection({
     super.key,
     required this.activity,
-    required this.expanded,
-    required this.onToggle,
     this.sessionId,
   });
 
   @override
-  State<MemoryActivityCard> createState() => _MemoryActivityCardState();
+  State<MemoryActivitySection> createState() => _MemoryActivitySectionState();
 }
 
-class _MemoryActivityCardState extends State<MemoryActivityCard> {
+class _MemoryActivitySectionState extends State<MemoryActivitySection> {
   final Set<String> _expandedEntryIds = {};
   final ScrollController _listScrollController = ScrollController();
 
   @override
-  void didUpdateWidget(covariant MemoryActivityCard oldWidget) {
+  void didUpdateWidget(covariant MemoryActivitySection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.activity.messageId != widget.activity.messageId) {
       _expandedEntryIds.clear();
@@ -44,164 +46,81 @@ class _MemoryActivityCardState extends State<MemoryActivityCard> {
   @override
   Widget build(BuildContext context) {
     final diagnostics = widget.activity.diagnostics;
-    final selectedCount = diagnostics['selectedCount'] as int? ?? 0;
-    final selectedTokens = diagnostics['selectedTokens'] as int? ?? 0;
-    final totalCandidates =
-        diagnostics['eligibleCandidates'] as int? ??
-        diagnostics['totalCandidates'] as int? ??
-        0;
-    final skippedCount =
-        diagnostics['eligibleSkippedCount'] as int? ??
-        diagnostics['skippedCount'] as int? ??
-        0;
-    final sourceVisibleCount =
-        diagnostics['excludedBySourceWindow'] as int? ?? 0;
-    final latencyMs = diagnostics['latencyMs'] as int? ?? 0;
-    final title = selectedCount == 0
-        ? 'Memory: no entries selected'
-        : 'Memory: $selectedCount entries, $selectedTokens tokens';
+    final summary = MemoryActivitySummary.of(widget.activity);
+    final sessionId = widget.sessionId;
 
-    return Material(
-      color: Colors.transparent,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: context.cs.surface.withValues(alpha: 0.94),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: context.cs.primary.withValues(alpha: 0.22)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.24),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (summary.macroMissing) ...[
+          _MemoryActivityWarning(text: 'memory_macro_missing_warning'.tr()),
+          const SizedBox(height: 8),
+        ],
+        Row(
+          children: [
+            Expanded(
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _MemoryActivityChip(
+                    label: 'memory_chip_skipped'.tr(
+                      args: ['${summary.skippedCount}'],
+                    ),
+                  ),
+                  if (summary.sourceVisibleCount > 0)
+                    _MemoryActivityChip(
+                      label: 'memory_chip_source_visible'.tr(
+                        args: ['${summary.sourceVisibleCount}'],
+                      ),
+                    ),
+                  _MemoryActivityChip(
+                    label: 'memory_chip_latency'.tr(
+                      args: ['${summary.latencyMs}'],
+                    ),
+                  ),
+                  _MemoryActivityChip(
+                    label: _budgetLabel(diagnostics['budget']),
+                  ),
+                ],
+              ),
             ),
+            if (sessionId != null && sessionId.isNotEmpty) ...[
+              IconButton(
+                onPressed: () => AgenticOperationsLogDialog.show(
+                  context,
+                  sessionId: sessionId,
+                ),
+                icon: const Icon(Icons.smart_toy_outlined, size: 18),
+                tooltip: 'agent_ops_title'.tr(),
+                visualDensity: VisualDensity.compact,
+              ),
+              IconButton(
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => MemoryGraphPanel(sessionId: sessionId),
+                ),
+                icon: const Icon(Icons.account_tree_outlined, size: 18),
+                tooltip: 'memory_graph_title'.tr(),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
           ],
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                InkWell(
-                  onTap: widget.onToggle,
-                  borderRadius: BorderRadius.circular(8),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.psychology_alt_outlined,
-                          size: 18,
-                          color: context.cs.primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            title,
-                            style: TextStyle(
-                              color: context.cs.onSurface,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '$totalCandidates candidates',
-                          style: TextStyle(
-                            color: context.cs.onSurfaceVariant,
-                            fontSize: 11,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Icon(
-                          widget.expanded
-                              ? Icons.expand_more_rounded
-                              : Icons.chevron_left_rounded,
-                          color: context.cs.onSurfaceVariant,
-                          size: 20,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (diagnostics['memoryMacroMissing'] == true)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: _MemoryActivityWarning(
-                      text:
-                          'Память собрана, но не вставлена: в пресете нет '
-                          '{{memory}}, а инжект настроен на макрос. Добавьте '
-                          '{{memory}} в пресет или переключите инжект на блок.',
-                    ),
-                  ),
-                if (widget.expanded) ...[
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            _MemoryActivityChip(label: 'skipped $skippedCount'),
-                            if (sourceVisibleCount > 0)
-                              _MemoryActivityChip(
-                                label: 'source visible $sourceVisibleCount',
-                              ),
-                            _MemoryActivityChip(
-                              label: 'latency ${latencyMs}ms',
-                            ),
-                            _MemoryActivityChip(
-                              label: _budgetLabel(diagnostics['budget']),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (widget.sessionId != null &&
-                          widget.sessionId!.isNotEmpty) ...[
-                        IconButton(
-                          onPressed: () => AgenticOperationsLogDialog.show(
-                            context,
-                            sessionId: widget.sessionId,
-                          ),
-                          icon: const Icon(Icons.smart_toy_outlined, size: 18),
-                          tooltip: 'Agentic operations log',
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        IconButton(
-                          onPressed: () => showDialog<void>(
-                            context: context,
-                            builder: (_) =>
-                                MemoryGraphPanel(sessionId: widget.sessionId!),
-                          ),
-                          icon: const Icon(
-                            Icons.account_tree_outlined,
-                            size: 18,
-                          ),
-                          tooltip: 'Memory Graph',
-                          visualDensity: VisualDensity.compact,
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  _candidateList(context, diagnostics),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
+        const SizedBox(height: 8),
+        _candidateList(context, diagnostics),
+      ],
     );
   }
 
   static String _budgetLabel(Object? raw) {
-    if (raw is! Map) return 'budget none';
-    final source = raw['source'] ?? 'none';
+    if (raw is! Map) return 'memory_chip_budget_none'.tr();
+    final source = '${raw['source'] ?? 'none'}';
     final tokens = raw['effectiveTokens'];
-    return tokens is int ? 'budget $tokens ($source)' : 'budget $source';
+    return tokens is int
+        ? 'memory_chip_budget'.tr(args: ['$tokens', source])
+        : 'memory_chip_budget_source'.tr(args: [source]);
   }
 
   Widget _candidateList(
@@ -249,11 +168,11 @@ class _MemoryActivityCardState extends State<MemoryActivityCard> {
     final injected = candidate['excerptChunksInjected'] as int? ?? 0;
     final total = candidate['excerptChunksTotal'] as int? ?? 0;
     if (injected > 0 && total > 0) {
-      return '$injected из $total';
+      return 'memory_chunks_of'.tr(args: ['$injected', '$total']);
     }
     final indexes = candidate['excerptChunkIndexes'];
     if (indexes is List && indexes.isNotEmpty) {
-      return '${indexes.length} ch';
+      return 'memory_chunks_count'.tr(args: ['${indexes.length}']);
     }
     return '';
   }
@@ -372,7 +291,7 @@ class _MemoryActivityCardState extends State<MemoryActivityCard> {
                 children: [
                   if (chunkLabel.isNotEmpty)
                     Text(
-                      'Чанки: $chunkLabel',
+                      'memory_detail_chunks'.tr(args: [chunkLabel]),
                       style: TextStyle(
                         fontSize: 11,
                         color: context.cs.onSurfaceVariant,
@@ -382,7 +301,11 @@ class _MemoryActivityCardState extends State<MemoryActivityCard> {
                       chunkIndexes is List &&
                       chunkIndexes.isNotEmpty)
                     Text(
-                      'Индексы: ${chunkIndexes.map((index) => '#$index').join(', ')}',
+                      'memory_detail_indexes'.tr(
+                        args: [
+                          chunkIndexes.map((index) => '#$index').join(', '),
+                        ],
+                      ),
                       style: TextStyle(
                         fontSize: 11,
                         color: context.cs.onSurfaceVariant,
@@ -390,7 +313,9 @@ class _MemoryActivityCardState extends State<MemoryActivityCard> {
                     ),
                   if (injectionType == 'full_entry')
                     Text(
-                      'Полная запись ($tokens / $originalTokens tok)',
+                      'memory_detail_full_entry'.tr(
+                        args: ['$tokens', '$originalTokens'],
+                      ),
                       style: TextStyle(
                         fontSize: 11,
                         color: context.cs.onSurfaceVariant,
@@ -400,7 +325,9 @@ class _MemoryActivityCardState extends State<MemoryActivityCard> {
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        'Ключи: ${matchedKeys.join(', ')}',
+                        'memory_detail_keys'.tr(
+                          args: [matchedKeys.join(', ')],
+                        ),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -413,7 +340,9 @@ class _MemoryActivityCardState extends State<MemoryActivityCard> {
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        'Каталог: ${catalogTerms.join(', ')}',
+                        'memory_detail_catalog'.tr(
+                          args: [catalogTerms.join(', ')],
+                        ),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -426,7 +355,9 @@ class _MemoryActivityCardState extends State<MemoryActivityCard> {
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        'Matched: ${matchedTerms.whereType<String>().join(', ')}',
+                        'memory_detail_matched'.tr(
+                          args: [matchedTerms.whereType<String>().join(', ')],
+                        ),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

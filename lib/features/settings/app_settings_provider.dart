@@ -130,6 +130,11 @@ abstract class AppSettings with _$AppSettings {
     /// detail sheet (the classic behaviour) instead of the randomizing
     /// (Holocard) discovery overlay. Off by default.
     @Default(false) bool useStandardRandomizer,
+
+    /// Hides the context coverage card that floats under the chat header (the
+    /// memory + lorebook panel). Stored as "hide" like the other chat-surface
+    /// switches, so an absent preference keeps the card on.
+    @Default(false) bool hideContextCard,
   }) = _AppSettings;
 }
 
@@ -164,6 +169,7 @@ abstract final class AppSettingsPreferences {
     'lorebookBuildPrompt',
     'lorebookBuildPromptJs',
     'useStandardRandomizer',
+    'hideContextCard',
   };
 
   static AppSettings read(SharedPreferences prefs) {
@@ -241,6 +247,8 @@ abstract final class AppSettingsPreferences {
       useStandardRandomizer:
           _coerceBool(prefs.get('useStandardRandomizer')) ??
           defaults.useStandardRandomizer,
+      hideContextCard:
+          _coerceBool(prefs.get('hideContextCard')) ?? defaults.hideContextCard,
     );
   }
 
@@ -273,6 +281,7 @@ abstract final class AppSettingsPreferences {
       'lorebookBuildPrompt': normalized.lorebookBuildPrompt,
       'lorebookBuildPromptJs': normalized.lorebookBuildPromptJs,
       'useStandardRandomizer': normalized.useStandardRandomizer,
+      'hideContextCard': normalized.hideContextCard,
     };
   }
 
@@ -383,6 +392,7 @@ abstract final class AppSettingsPreferences {
     lorebookBuildPrompt: values['lorebookBuildPrompt'] as String,
     lorebookBuildPromptJs: values['lorebookBuildPromptJs'] as String,
     useStandardRandomizer: values['useStandardRandomizer'] as bool,
+    hideContextCard: values['hideContextCard'] as bool,
   );
 }
 

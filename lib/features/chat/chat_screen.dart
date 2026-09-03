@@ -57,6 +57,7 @@ import 'chat_search_delegate.dart';
 import 'chat_state.dart';
 import 'state/chat_body_selectors.dart';
 import 'state/chat_drawer_editing_provider.dart';
+import 'state/lorebook_coverage_provider.dart';
 import 'state/memory_activity_provider.dart';
 import 'state/studio_history_rotation_provider.dart';
 import 'bridge/chat_overlay_blur_region.dart';
@@ -65,7 +66,7 @@ import 'widgets/chat_background.dart';
 import 'widgets/chat_header.dart';
 import 'widgets/chat_input_bar.dart';
 import 'widgets/chat_drawer_panel.dart';
-import 'widgets/memory_activity_card.dart';
+import 'widgets/context_coverage_card.dart';
 import 'widgets/memory_sheet.dart';
 import 'widgets/studio_history_rotation_sheet.dart';
 import 'widgets/post_cleaner_status_card.dart';
@@ -703,11 +704,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// [didChangeAppLifecycleState].
   double _lastMessageListBottom = 0;
 
-  /// Measured height of the floating [MemoryActivityCard] (0 when hidden) so
+  /// Measured height of the floating [ContextCoverageCard] (0 when hidden) so
   /// the message list reserves room at the *top* for it — otherwise the card
   /// floats under the header and covers the first visible messages.
-  double _memoryCardHeight = 0.0;
-  final GlobalKey _memoryCardKey = GlobalKey();
+  double _contextCardHeight = 0.0;
+  final GlobalKey _contextCardKey = GlobalKey();
 
   /// Measured height of the box the chat WebView is laid out in. Pushed to the
   /// page alongside the bottom inset: whether the soft keyboard shrinks the
@@ -722,7 +723,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
 
   final _selectionCtrl = ChatMessageSelectionController();
   bool _showScrollToBottom = false;
-  bool _showMemoryActivity = false;
+  bool _contextCardExpanded = false;
   bool _showingHistoryRotation = false;
   final GlobalKey<ChatWebViewWidgetState> _webViewStateKey = GlobalKey();
 
@@ -824,7 +825,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     if (!mounted) return;
     var changed = false;
     var nextInputBarHeight = _inputBarHeight;
-    var nextMemoryCardHeight = _memoryCardHeight;
+    var nextContextCardHeight = _contextCardHeight;
     var nextWebViewBoxHeight = _webViewBoxHeight;
 
     final inputCtx = _inputBarKey.currentContext;
@@ -836,11 +837,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       }
     }
 
-    // The memory card is only mounted while visible. When it is absent its
+    // The context card is only mounted while visible. When it is absent its
     // reserved top height collapses back to 0 so the list reclaims the space.
-    final memoryHeight = _memoryCardKey.currentContext?.size?.height ?? 0.0;
-    if (memoryHeight != _memoryCardHeight) {
-      nextMemoryCardHeight = memoryHeight;
+    final contextHeight = _contextCardKey.currentContext?.size?.height ?? 0.0;
+    if (contextHeight != _contextCardHeight) {
+      nextContextCardHeight = contextHeight;
       changed = true;
     }
 
@@ -856,7 +857,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     if (changed) {
       setState(() {
         _inputBarHeight = nextInputBarHeight;
-        _memoryCardHeight = nextMemoryCardHeight;
+        _contextCardHeight = nextContextCardHeight;
         _webViewBoxHeight = nextWebViewBoxHeight;
       });
     }
@@ -1337,6 +1338,23 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       themeProvider.select((p) => p.activePreset),
     );
     final batterySaver = appSettings?.batterySaver ?? false;
+    // The context card under the header: an opt-out in the interface settings,
+    // and it only earns its space when a layer has something to report.
+    final contextCardEnabled = !(appSettings?.hideContextCard ?? false);
+    final hasMemoryActivity =
+        memoryEnabled &&
+        memoryActivity != null &&
+        memoryActivity.hasDiagnostics;
+    // Subscribed to only while the card can actually show it — the coverage
+    // provider runs a full keyword scan (and, with embeddings configured, a
+    // vector query) per turn.
+    final lorebookCandidates = contextCardEnabled
+        ? ref.watch(
+            lorebookCoverageProvider(
+              widget.charId,
+            ).select((v) => v.value?.totalCandidates ?? 0),
+          )
+        : 0;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     final messageListTop = MediaQuery.paddingOf(context).top + 10 + 56;
     _blurSafeTop = MediaQuery.paddingOf(context).top;
@@ -1418,21 +1436,24 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         final panelHeight = math.max(targetDrawerInset, widget.keyboardHeight);
         final factor = math.min(1.0, panelHeight / math.max(1.0, safeBottom));
         final effectiveBottomInset = panelHeight + (safeBottom * (1 - factor));
-        // The memory activity card floats under the header (top of the chat).
-        // Hidden entirely when memory books are disabled globally.
-        final showMemoryCard =
-            memoryActivity != null &&
-            memoryActivity.hasDiagnostics &&
-            memoryEnabled;
+        // The context card floats under the header (top of the chat). It is
+        // shown when either retrieval layer has something to report, and can be
+        // switched off entirely in the interface settings.
+        final showContextCard =
+            contextCardEnabled && (hasMemoryActivity || lorebookCandidates > 0);
         // When the card is dismissed its widget unmounts, so the size notifier
         // can't fire — reclaim the reserved top space on the next frame.
-        if (!showMemoryCard && _memoryCardHeight != 0.0) {
+        if (!showContextCard && _contextCardHeight != 0.0) {
           WidgetsBinding.instance.addPostFrameCallback((_) => _checkHeight());
         }
         // Reserve room at the top so the card sits in a gap under the header
-        // instead of covering the first visible messages.
-        final memoryTopReserve = showMemoryCard ? _memoryCardHeight + 8 : 0.0;
-        final effectiveTopInset = messageListTop + memoryTopReserve;
+        // instead of covering the first visible messages. The gap above the
+        // card is part of the reserve — the card is a separate surface from the
+        // header, not a strip welded to its bottom edge.
+        final contextTopReserve = showContextCard
+            ? kContextCardHeaderGap + _contextCardHeight + 8
+            : 0.0;
+        final effectiveTopInset = messageListTop + contextTopReserve;
 
         final messageListBottom = _inputBarHeight + effectiveBottomInset;
 
@@ -2004,20 +2025,21 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 ),
               ),
             ),
-            // Triggered-entries panel: part of the chat header. It sits flush
-            // under the header and rides the header's own hide-on-scroll
-            // animation (same curve, same pixel travel — see
+            // Context coverage panel: memory + lorebook for the next prompt.
+            // It sits under the header, separated by [kContextCardHeaderGap],
+            // and rides the header's own hide-on-scroll animation (same curve,
+            // same pixel travel — see
             // [kGlazeHeaderHideDuration]), so the two slide away and come back
             // as one unit. It cannot live inside GlazeScaffold's header itself:
             // its measured height is what insets the top of the message list
-            // (see [_memoryCardHeight]), and that measurement belongs to this
+            // (see [_contextCardHeight]), and that measurement belongs to this
             // body. The animation wrappers stay OUTSIDE the size notifier so
             // the reserved space is the panel's natural height — the reserve
             // does not collapse while the header is hidden, exactly like the
             // header's own reserved strip.
-            if (showMemoryCard)
+            if (showContextCard)
               Positioned(
-                top: messageListTop,
+                top: messageListTop + kContextCardHeaderGap,
                 left: 12,
                 right: 12,
                 child: IgnorePointer(
@@ -2027,12 +2049,13 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         ? Offset(
                             0,
                             -glazeHeaderHideSlideFor(
-                              // The panel is anchored right below the header,
-                              // so `messageListTop` (safe-area top + 10px
-                              // padding + the 56px app bar) IS the header
-                              // strip's height.
-                              headerHeight: messageListTop,
-                              overlayHeight: _memoryCardHeight,
+                              // The panel is anchored below the header, one
+                              // gap down: `messageListTop` (safe-area top +
+                              // 10px padding + the 56px app bar) plus that gap
+                              // is how far it has to travel to clear it.
+                              headerHeight:
+                                  messageListTop + kContextCardHeaderGap,
+                              overlayHeight: _contextCardHeight,
                             ),
                           )
                         : Offset.zero,
@@ -2052,15 +2075,18 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             },
                             child: SizeChangedLayoutNotifier(
                               child: Container(
-                                key: _memoryCardKey,
-                                child: MemoryActivityCard(
-                                  activity: memoryActivity,
-                                  expanded: _showMemoryActivity,
+                                key: _contextCardKey,
+                                child: ContextCoverageCard(
+                                  charId: widget.charId,
+                                  memory: hasMemoryActivity
+                                      ? memoryActivity
+                                      : null,
+                                  expanded: _contextCardExpanded,
                                   sessionId: widget.state.session?.id,
                                   onToggle: () {
                                     setState(() {
-                                      _showMemoryActivity =
-                                          !_showMemoryActivity;
+                                      _contextCardExpanded =
+                                          !_contextCardExpanded;
                                     });
                                   },
                                 ),
@@ -2077,7 +2103,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             Positioned(
               left: 12,
               right: 12,
-              top: messageListTop + memoryTopReserve,
+              top: messageListTop + contextTopReserve,
               child: const PostCleanerStatusCard(),
             ),
             // Studio tracker-cycle live status card. Shown during generation
@@ -2085,14 +2111,14 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             Positioned(
               left: 12,
               right: 12,
-              top: messageListTop + memoryTopReserve + 56,
+              top: messageListTop + contextTopReserve + 56,
               child: const StudioStatusCard(),
             ),
             // Post-generation tasks (Ledger and extension blocks) live status.
             Positioned(
               left: 12,
               right: 12,
-              top: messageListTop + memoryTopReserve + 112,
+              top: messageListTop + contextTopReserve + 112,
               child: PostGenStatusCard(sessionId: widget.state.session?.id),
             ),
             // Bottom panel: drawer + input bar

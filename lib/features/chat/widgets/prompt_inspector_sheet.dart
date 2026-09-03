@@ -28,6 +28,11 @@ class PromptInspectorSheet extends StatefulWidget {
   static const _tabCoverage = 'coverage';
   static const _tabStudio = 'studio';
 
+  /// Tab ids other surfaces deep-link to (the context card under the chat
+  /// header opens the inspector on the layer it is showing).
+  static const contextTabId = _tabContext;
+  static const coverageTabId = _tabCoverage;
+
   @override
   State<PromptInspectorSheet> createState() => _PromptInspectorSheetState();
 }

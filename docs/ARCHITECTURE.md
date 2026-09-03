@@ -1022,10 +1022,21 @@ replacing `[[GLAZE_DEFERRED_MEMORY_CONTEXT]]` with the excerpt-packed macro
 content. `PromptPayload.memorySelection` must be populated (no shadowed local)
 for this path to run.
 
-**Diagnostics** (`memory_diagnostics.dart`, `memory_activity_card.dart`):
+**Diagnostics** (`memory_diagnostics.dart`, `memory_activity_section.dart`):
 per-candidate reasons include `chunk_rank_trimmed` / `chunk_budget_trimmed`;
-expanded rows show `N из M` chunks and chunk indexes. Labels like `121-135` are
-**chat message ranges** (`messageRange`), not chunk indices.
+expanded rows show `N of M` chunks and chunk indexes. Labels like `121-135` are
+**chat message ranges** (`messageRange`), not chunk indices. The section is the
+memory half of `ContextCoverageCard` (`context_coverage_card.dart`), the panel
+under the chat header that also carries lorebook coverage; the whole card is
+switched off by `AppSettings.hideContextCard`.
+
+**Lorebook coverage** (`core/llm/lorebook_coverage.dart`,
+`state/lorebook_coverage_provider.dart`): a dry run of `scanLorebooks` for the
+diagnostics surfaces — same recursion, sticky/cooldown and per-book caps, so a
+reading matches the built prompt (`entry.probability` is the one rule it does
+not roll). One provider feeds both the context card and the Prompt Inspector's
+coverage tab, so a turn costs one scan and, with vectors configured, one
+embedding query.
 
 **LLM request dump** (`core/llm/transport/llm_request_dump.dart`): a debug-only
 diagnostics aid for inspecting every outgoing LLM request made while answering a

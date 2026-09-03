@@ -122,6 +122,14 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       groupKey: 'settings_group_chat',
     ),
     row(
+      'show_context_card',
+      'menu_show_context_card',
+      'desc_show_context_card',
+      Icons.layers_outlined,
+      const ['coverage', 'memory', 'lorebook', 'покрытие', 'память', 'лорбук'],
+      groupKey: 'settings_group_chat',
+    ),
+    row(
       'allow_message_scripts',
       'menu_allow_message_scripts',
       'desc_allow_message_scripts',
