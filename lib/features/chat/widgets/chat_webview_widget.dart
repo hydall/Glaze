@@ -821,7 +821,14 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         if (!ownsSwitch()) return;
       }
 
-      await _bridgeOp(bridge.clearAll(), label: 'clearAll');
+      // The chat itself is being replaced, so the page must drop the typing
+      // bubble instead of parking it for the setMessages below: it belongs to
+      // the session being left, and carried over it shows a reply on its way
+      // in a chat where nothing is running.
+      await _bridgeOp(
+        bridge.clearAll(keepPlaceholder: false),
+        label: 'clearAll',
+      );
       if (!ownsSwitch()) return;
       _resetStreamingPresentationState();
       await _bridgeOp(

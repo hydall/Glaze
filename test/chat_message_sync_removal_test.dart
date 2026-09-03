@@ -140,7 +140,7 @@ class _RecordingBridge implements ChatBridgeController {
   }
 
   @override
-  Future<void> clearAll() async {
+  Future<void> clearAll({bool keepPlaceholder = true}) async {
     clearAllCalls++;
   }
 

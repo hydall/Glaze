@@ -676,7 +676,8 @@ class ChatBridgeController {
       messages.updateMessageContent(id, text, isUser);
   Future<void> removeMessage(String id) => messages.removeMessage(id);
   Future<void> setLastMessage(String? id) => messages.setLastMessage(id);
-  Future<void> clearAll() => messages.clearAll();
+  Future<void> clearAll({bool keepPlaceholder = true}) =>
+      messages.clearAll(keepPlaceholder: keepPlaceholder);
   Future<void> scrollToBottom({bool smooth = false}) =>
       messages.scrollToBottom(smooth: smooth);
   Future<void> requestScrollToBottomOnAppend() =>

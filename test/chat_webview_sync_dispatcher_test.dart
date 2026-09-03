@@ -415,6 +415,30 @@ void main() {
       expect(bridge.searchCalls, [('foo', 2, false)]);
     });
 
+    test('a delta that settles after the run does not re-append the bubble', () async {
+      // The shared mutation queue can hold a delta that was still crossing the
+      // channel when the run settled: the falling edge removes the placeholder
+      // synchronously, so this lands after it. Appending there stood the
+      // finished reply a second time under itself, in a bubble nothing takes
+      // away again — it survived leaving and re-opening the chat.
+      final bridge = _FakeBridge();
+      final syncState = ChatWebViewSyncState()
+        ..wasBusy = false
+        ..streamingSent = false;
+
+      await pushStreamingMessageOwned(
+        bridge: bridge,
+        message: _assistant('__streaming__'),
+        syncState: syncState,
+        epoch: syncState.streamEpoch,
+        isCurrent: () => true,
+      );
+
+      expect(bridge.appendedMessages, isEmpty);
+      expect(bridge.updatedMessages, isEmpty);
+      expect(syncState.streamingSent, isFalse);
+    });
+
     test('session switch invalidates a delayed streaming delta', () async {
       final bridge = _FakeBridge();
       final delayedAppend = Completer<void>();
