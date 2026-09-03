@@ -45,7 +45,7 @@ interactive.** Use only one-shot commands such as:
 - `flutter analyze`
 - `flutter test`
 - `dart run build_runner build --delete-conflicting-outputs`
-- `dart run easy_localization:generate -S assets/translations -f keys -o locale_keys.g.dart`
+- `dart run easy_localization:generate -S assets/translations -s en.json -f keys -o locale_keys.g.dart`
 
 Fall back to `& "$env:FLUTTER_ROOT\bin\flutter.bat"` if `flutter` is not on
 `PATH`. If runtime or hot-reload verification is required, ask the user to run

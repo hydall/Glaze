@@ -61,9 +61,16 @@ jobs:
         # generator, not build_runner, and is gitignored like the rest of the
         # generated code. Without this step the localization contract test has
         # no file to check the translation keys against.
+        #
+        # `-s en.json` is not optional. In `keys` format the generator reads
+        # `files.first` from a bare `Directory.list()` (easy_localization
+        # 3.0.8, bin/generate.dart), which is filesystem order — with the
+        # glossary files sitting next to the locales in that folder, the run
+        # picked one of them often enough to fail the contract test at random
+        # on unrelated PRs. Naming the source file makes the step deterministic.
         run: >-
           dart run easy_localization:generate
-          -S assets/translations -f keys -o locale_keys.g.dart
+          -S assets/translations -s en.json -f keys -o locale_keys.g.dart
 
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
