@@ -153,6 +153,12 @@ void main() {
     expect(requestStageFamily('card.collector'), RequestStageFamily.card);
     expect(requestStageFamily('lorebook_writer'), RequestStageFamily.card);
     expect(requestStageFamily('summary'), RequestStageFamily.summary);
+    expect(requestStageFamily('memory.draft'), RequestStageFamily.memory);
+    expect(
+      requestStageFamily('embedding.lorebook'),
+      RequestStageFamily.embedding,
+    );
+    expect(requestStageFamily('image.generate'), RequestStageFamily.image);
     expect(requestStageFamily(null), RequestStageFamily.other);
   });
 }

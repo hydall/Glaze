@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import '../../../core/llm/transport/llm_capture_context.dart';
+import '../../../core/llm/transport/llm_request_capture.dart';
 import '../image_gen_capabilities.dart';
 import '../image_gen_models.dart';
 import 'a1111_image_provider.dart';
@@ -30,7 +32,29 @@ class ImageGenDispatcher {
     String? instructionAspectRatio,
     String? instructionImageSize,
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
+    // Image providers talk to their own endpoints over Dio, so nothing in the
+    // transport layer sees them: without this the turn that drew a picture
+    // showed every request it made except the one that drew it.
+    LlmRequestCapture.recordAuxiliary(
+      stage: captureContext?.stage ?? 'image.generate',
+      endpoint: settings.useSameEndpoint
+          ? llmEndpoint
+          : settings.customEndpoint,
+      model: _captureModel(settings),
+      context: captureContext,
+      messages: [
+        {'role': 'prompt', 'content': prompt},
+      ],
+      params: {
+        'apiType': settings.apiType.name,
+        'referenceCount': references.length,
+        if (instructionAspectRatio != null)
+          'aspectRatio': instructionAspectRatio,
+        if (instructionImageSize != null) 'imageSize': instructionImageSize,
+      },
+    );
     switch (settings.apiType) {
       case ImageGenApiType.openai:
         return _openai(
@@ -121,6 +145,17 @@ class ImageGenDispatcher {
         );
     }
   }
+
+  /// Best-effort name of the model that will draw: each provider keeps its own
+  /// field, and the capture is a diagnostic, not a contract.
+  static String _captureModel(ImageGenSettings settings) =>
+      switch (settings.apiType) {
+        ImageGenApiType.naistera => settings.naisteraModel,
+        ImageGenApiType.routmy => settings.routmyModel,
+        _ => settings.customModel.isEmpty
+            ? settings.apiType.name
+            : settings.customModel,
+      };
 
   Future<Uint8List> _openai(
     ImageGenSettings settings,

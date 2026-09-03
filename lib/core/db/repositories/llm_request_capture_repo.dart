@@ -107,10 +107,11 @@ final class LlmRequestCaptureRepo
   /// assistant message is written, this binds them to it — that is what lets a
   /// diagnostics view group a turn without guessing from timestamps.
   ///
-  /// Deliberately narrow: only rows of this session, only the generation
-  /// stages, only ones still unbound, and only from [sinceMs] on. A background
-  /// job (card rewriter, reconciliation) running in the same window keeps its
-  /// own identity.
+  /// Deliberately narrow: only rows of this session, only the stages that run
+  /// inside a generation (the model itself, the agent shards, and the vector
+  /// searches that build its prompt), only ones still unbound, and only from
+  /// [sinceMs] on. A background job (card rewriter, reconciliation) running in
+  /// the same window keeps its own identity.
   Future<void> bindTurnMessageId({
     required String sessionId,
     required String messageId,
@@ -123,7 +124,9 @@ final class LlmRequestCaptureRepo
               row.sessionId.equals(sessionId) &
               row.messageId.isNull() &
               row.createdAtMs.isBiggerOrEqualValue(sinceMs) &
-              (row.stage.equals('main') | row.stage.like('studio.%')),
+              (row.stage.equals('main') |
+                  row.stage.like('studio.%') |
+                  row.stage.like('embedding.%')),
         );
       await update.write(
         LlmRequestCaptureRowsCompanion(messageId: Value(messageId)),

@@ -77,7 +77,7 @@ class LorebookUseManifestRepo {
     required List<LorebookUseManifestEntryInput> entries,
   }) async {
     final canonical = _verifyCanonicalManifest(manifest, entries);
-    final existing = await _manifest(identity);
+    final existing = await manifestFor(identity);
     if (existing != null) {
       if (existing.manifestJson != canonical.manifestJson ||
           existing.manifestHash != canonical.manifestHash ||
@@ -206,7 +206,7 @@ class LorebookUseManifestRepo {
     String? selectedEntryId,
     int? selectedEntryOrder,
   }) async {
-    if (await _manifest(identity) == null) {
+    if (await manifestFor(identity) == null) {
       throw const LorebookUseManifestIntegrityConflict(
         'acceptance requires an existing manifest',
       );
@@ -255,7 +255,10 @@ class LorebookUseManifestRepo {
     }
   }
 
-  Future<LorebookUseManifestRow?> _manifest(
+  /// The stored manifest for one message variation, or null when that
+  /// generation predates manifests (or produced none). Read by the Prompt
+  /// Inspector to show what a past turn actually injected.
+  Future<LorebookUseManifestRow?> manifestFor(
     LorebookUseGenerationIdentity identity,
   ) =>
       (_db.select(_db.lorebookUseManifests)

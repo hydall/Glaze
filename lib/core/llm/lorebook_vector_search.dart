@@ -6,6 +6,7 @@ import '../db/repositories/session_lorebook_evolution_repo.dart';
 import '../utils/cast_helpers.dart';
 import 'package:dio/dio.dart';
 import 'embedding_service.dart';
+import 'transport/llm_capture_context.dart';
 import 'embedding_types.dart';
 import 'lorebook_activation.dart';
 import 'lorebook_embedding_service.dart';
@@ -235,6 +236,10 @@ class LorebookVectorSearch {
         [query],
         config,
         cancelToken: cancelToken,
+        captureContext: LlmCaptureContext(
+          stage: 'embedding.lorebook',
+          sessionId: chatId,
+        ),
       );
       return chunks
           .map((c) => VectorChunk(text: c.text, vector: c.vector))

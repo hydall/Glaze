@@ -3,6 +3,9 @@ import 'dart:collection';
 
 import 'package:dio/dio.dart';
 
+import 'transport/llm_capture_context.dart';
+import 'transport/llm_request_capture.dart';
+
 import 'embedding_request_gate.dart';
 import 'transport/endpoint_normalizer.dart';
 import 'transport/endpoint_resolution_cache.dart';
@@ -129,6 +132,7 @@ class EmbeddingService {
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     final allChunks = <List<String>>[];
     final chunkMap = <int, int>{};
@@ -148,6 +152,7 @@ class EmbeddingService {
       flatChunks,
       config,
       cancelToken: cancelToken,
+      captureContext: captureContext,
     );
 
     final result = <List<double>>[];
@@ -170,6 +175,7 @@ class EmbeddingService {
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     final allChunks = <String>[];
     final textChunkRanges = <_ChunkRange>[];
@@ -185,6 +191,7 @@ class EmbeddingService {
       allChunks,
       config,
       cancelToken: cancelToken,
+      captureContext: captureContext,
     );
 
     final result = <EmbeddingChunk>[];
@@ -210,6 +217,7 @@ class EmbeddingService {
     List<String> chunks,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     const batchSize = 32;
     final allVectors = <List<double>>[];
@@ -243,6 +251,7 @@ class EmbeddingService {
         missingTexts,
         config,
         cancelToken: cancelToken,
+        captureContext: captureContext,
       );
       final batchVectors = List<List<double>?>.filled(batch.length, null);
       for (final entry in cached.entries) {
@@ -273,6 +282,7 @@ class EmbeddingService {
     List<String> texts,
     EmbeddingConfig config, {
     CancelToken? cancelToken,
+    LlmCaptureContext? captureContext,
   }) async {
     if (texts.isEmpty) return [];
 
@@ -298,6 +308,19 @@ class EmbeddingService {
       await EmbeddingRequestRateLimiter.acquire(
         config.requestsPerMinute,
         requestToken,
+      );
+      // Embeddings never touch a chat transport, so nothing captured them and
+      // a turn's vector search was invisible in the Requests timeline. Only the
+      // texts that actually go out are recorded — cache hits never reach here.
+      LlmRequestCapture.recordAuxiliary(
+        stage: captureContext?.stage ?? 'embedding',
+        endpoint: config.endpoint,
+        model: config.model,
+        context: captureContext,
+        messages: [
+          for (final text in texts) {'role': 'input', 'content': text},
+        ],
+        params: {'inputCount': texts.length},
       );
       final response = await _postEmbeddings(
         urls: urls,

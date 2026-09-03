@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../../core/llm/transport/llm_capture_context.dart';
 import '../../../../core/db/repositories/info_blocks_repository.dart';
 import '../../../../core/models/character.dart';
 import '../../../../core/models/persona.dart';
@@ -187,6 +188,12 @@ class ImagePixelRenderer {
         instructionAspectRatio: instructionAspectRatio,
         instructionImageSize: instructionImageSize,
         cancelToken: cancelToken,
+        // Identity so the drawing lands in the turn that asked for it.
+        captureContext: LlmCaptureContext(
+          stage: 'image.generate',
+          sessionId: sessionId,
+          messageId: messageId,
+        ),
       );
 
       if (cancelToken.isCancelled) {

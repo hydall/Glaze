@@ -6,17 +6,17 @@ import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import 'tokenizer_sheet.dart';
 import 'requests/requests_tab.dart';
-import 'lorebook_coverage_sheet.dart';
 
-/// Unified diagnostics surface: Context (tokenizer), Requests and Lorebook
-/// Coverage in one sheet. All answer the same question — "what actually goes
-/// into the prompt?" — so they live behind a single Magic Drawer entry instead
-/// of several separate cards.
+/// Unified diagnostics surface: Context (the token budget) and Requests (what
+/// the chat sent, and what went into it). Both answer the same question — "what
+/// actually goes into the prompt?" — so they live behind a single Magic Drawer
+/// entry instead of several separate cards.
 ///
-/// There is no Agents tab. Agent runs are requests like any other and appear in
-/// the Requests timeline as the steps of the turn they belong to; the catalog
-/// of what the agents *would* send next is the "next turn" row at the top of
-/// that same list.
+/// Two things used to be top-level tabs and are not any more. Agent runs are
+/// requests like any other, so they are steps of the turn they belong to in the
+/// Requests timeline. Coverage is a property *of* a request, so it is the
+/// second view inside Requests — next request as a prediction, past ones as
+/// recorded.
 class PromptInspectorSheet extends ConsumerStatefulWidget {
   final String charId;
   final String initialTabId;
@@ -29,13 +29,13 @@ class PromptInspectorSheet extends ConsumerStatefulWidget {
 
   static const _tabContext = 'context';
   static const _tabRequests = 'requests';
-  static const _tabCoverage = 'coverage';
 
-  /// Tab ids other surfaces deep-link to (the context card under the chat
-  /// header opens the inspector on the layer it is showing).
+  /// Ids other surfaces deep-link to (the context card under the chat header
+  /// opens the inspector on the layer it is showing). [coverageTabId] is not a
+  /// tab any more — it lands on Requests with its Coverage view selected.
   static const contextTabId = _tabContext;
   static const requestsTabId = _tabRequests;
-  static const coverageTabId = _tabCoverage;
+  static const coverageTabId = 'coverage';
 
   @override
   ConsumerState<PromptInspectorSheet> createState() =>
@@ -43,7 +43,10 @@ class PromptInspectorSheet extends ConsumerStatefulWidget {
 }
 
 class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
-  late String _activeTabId = widget.initialTabId;
+  late String _activeTabId =
+      widget.initialTabId == PromptInspectorSheet.coverageTabId
+      ? PromptInspectorSheet._tabRequests
+      : widget.initialTabId;
   late final Set<String> _visitedTabs = {_activeTabId};
 
   /// True while a tab is showing a drill-down of its own (a single request).
@@ -54,8 +57,13 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
   static const _order = [
     PromptInspectorSheet._tabContext,
     PromptInspectorSheet._tabRequests,
-    PromptInspectorSheet._tabCoverage,
   ];
+
+  /// A `coverage` deep link is the Requests tab opened on its Coverage view.
+  RequestsSubTab get _initialSubTab =>
+      widget.initialTabId == PromptInspectorSheet.coverageTabId
+      ? RequestsSubTab.coverage
+      : RequestsSubTab.timeline;
 
   @override
   Widget build(BuildContext context) {
@@ -97,14 +105,14 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
         charId: widget.charId,
         embedded: true,
       ),
-      PromptInspectorSheet._tabRequests => RequestsTab(
+      _ => RequestsTab(
         charId: widget.charId,
+        initialSubTab: _initialSubTab,
         onDetailChanged: (open) {
           if (_detailOpen == open) return;
           setState(() => _detailOpen = open);
         },
       ),
-      _ => CoveragePanel(charId: widget.charId, embedded: true),
     };
   }
 
@@ -113,11 +121,7 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
       label: 'tab_context'.tr(),
       icon: Icons.segment,
     ),
-    PromptInspectorSheet._tabRequests => GlazeTabItem(
-      label: 'tab_requests'.tr(),
-      icon: Icons.swap_vert_rounded,
-    ),
-    _ => GlazeTabItem(label: 'tab_coverage'.tr(), icon: Icons.search),
+    _ => GlazeTabItem(label: 'tab_requests'.tr(), icon: Icons.swap_vert_rounded),
   };
 }
 

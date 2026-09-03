@@ -11,6 +11,8 @@ enum RequestStageFamily {
   extBlock,
   card,
   summary,
+  embedding,
+  image,
   other,
 }
 
@@ -24,6 +26,8 @@ RequestStageFamily requestStageFamily(String? stage) {
   if (stage.startsWith('card') || stage.startsWith('lorebook_')) {
     return RequestStageFamily.card;
   }
+  if (stage.startsWith('embedding')) return RequestStageFamily.embedding;
+  if (stage.startsWith('image')) return RequestStageFamily.image;
   if (stage.startsWith('memory')) return RequestStageFamily.memory;
   if (stage.startsWith('summary')) return RequestStageFamily.summary;
   return RequestStageFamily.other;

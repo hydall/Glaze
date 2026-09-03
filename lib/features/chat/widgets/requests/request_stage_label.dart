@@ -18,6 +18,8 @@ Color requestFamilyColor(BuildContext context, RequestStageFamily family) {
     RequestStageFamily.extBlock => pick(0xFFFBBF24, 0xFFB45309),
     RequestStageFamily.card => pick(0xFFF472B6, 0xFFBE185D),
     RequestStageFamily.summary => pick(0xFF94A3B8, 0xFF64748B),
+    RequestStageFamily.embedding => pick(0xFF2DD4BF, 0xFF0F766E),
+    RequestStageFamily.image => pick(0xFFFB7185, 0xFFBE123C),
     RequestStageFamily.other => pick(0xFFA9AAAB, 0xFF6B6C6E),
   };
 }
@@ -31,6 +33,8 @@ String requestFamilyLabel(RequestStageFamily family) => switch (family) {
   RequestStageFamily.extBlock => 'requests_stage_extblock'.tr(),
   RequestStageFamily.card => 'requests_stage_card'.tr(),
   RequestStageFamily.summary => 'requests_stage_summary'.tr(),
+  RequestStageFamily.embedding => 'requests_stage_embedding'.tr(),
+  RequestStageFamily.image => 'requests_stage_image'.tr(),
   RequestStageFamily.other => 'requests_stage_unknown'.tr(),
 };
 
@@ -43,6 +47,8 @@ IconData requestFamilyIcon(RequestStageFamily family) => switch (family) {
   RequestStageFamily.extBlock => Icons.extension_outlined,
   RequestStageFamily.card => Icons.badge_outlined,
   RequestStageFamily.summary => Icons.notes_rounded,
+  RequestStageFamily.embedding => Icons.scatter_plot_outlined,
+  RequestStageFamily.image => Icons.image_outlined,
   RequestStageFamily.other => Icons.bolt_outlined,
 };
 

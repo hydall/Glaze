@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 
 import '../../core/llm/transport/chat_transport_request.dart';
+import '../../core/llm/transport/llm_capture_context.dart';
 import '../../core/llm/macro_engine.dart';
 import '../../core/llm/memory_book_api_config_resolver.dart';
 import '../../core/llm/memory_draft_response_parser.dart';
@@ -167,6 +168,13 @@ class MemoryDraftGenerator {
         stream: false,
         useResponsesApi: useResponsesApi,
         receiveTimeoutMs: receiveTimeoutMs,
+        // Memory-book drafting goes through a chat transport, so it was always
+        // captured — but with no identity, which parked it in the session-less
+        // bucket where no per-chat view could reach it.
+        captureContext: LlmCaptureContext(
+          stage: 'memory.draft',
+          sessionId: sessionId,
+        ),
       ),
       cancelToken: cancelToken,
       onComplete: (text, _, {rawResponseJson}) {
