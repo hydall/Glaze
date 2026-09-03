@@ -22,9 +22,24 @@ final class LlmRequestCaptureRepo
 
   final AppDatabase db;
 
-  static const int maxRowsPerSession = 50;
+  // Captures are trimmed by two budgets at once: a row ceiling and a byte
+  // budget, whichever bites first.
+  //
+  // Rows alone were the wrong unit. A cleaner request is a couple of KB while a
+  // main-model request can be a megabyte, so "keep the newest 50" meant either
+  // holding ~50 MB of prompts or — on an agentic preset, where one turn is 5-10
+  // requests — keeping barely five turns of history. Bytes make the two cases
+  // behave: many small requests survive, a handful of huge ones do not squat on
+  // the whole allowance.
+  //
+  // [minRowsPerSession] is the floor the byte budget may not cross, so a single
+  // oversized request can never empty the list.
+  static const int maxRowsPerSession = 200;
+  static const int maxBytesPerSession = 6 * 1024 * 1024;
+  static const int minRowsPerSession = 8;
   static const int maxRowsWithoutSession = 100;
-  static const int maxRowsTotal = 1000;
+  static const int maxRowsTotal = 2000;
+  static const int maxBytesTotal = 24 * 1024 * 1024;
   static const int maxEventBytes = 1024 * 1024;
 
   Future<void> _chain = Future<void>.value();
@@ -83,6 +98,39 @@ final class LlmRequestCaptureRepo
       ])
       ..limit(limit);
     return query.get();
+  }
+
+  /// Stamps [messageId] over the generation-phase rows of one turn.
+  ///
+  /// The main request and the Studio agent shards are sent before the reply
+  /// exists, so they are captured with a turn id and no message id. Once the
+  /// assistant message is written, this binds them to it — that is what lets a
+  /// diagnostics view group a turn without guessing from timestamps.
+  ///
+  /// Deliberately narrow: only rows of this session, only the generation
+  /// stages, only ones still unbound, and only from [sinceMs] on. A background
+  /// job (card rewriter, reconciliation) running in the same window keeps its
+  /// own identity.
+  Future<void> bindTurnMessageId({
+    required String sessionId,
+    required String messageId,
+    required int sinceMs,
+  }) async {
+    try {
+      final update = db.update(db.llmRequestCaptureRows)
+        ..where(
+          (row) =>
+              row.sessionId.equals(sessionId) &
+              row.messageId.isNull() &
+              row.createdAtMs.isBiggerOrEqualValue(sinceMs) &
+              (row.stage.equals('main') | row.stage.like('studio.%')),
+        );
+      await update.write(
+        LlmRequestCaptureRowsCompanion(messageId: Value(messageId)),
+      );
+    } catch (error) {
+      debugPrint('[LlmRequestCapture] turn binding failed: $error');
+    }
   }
 
   Future<ExactLlmPromptCapture?> exactPromptForCall({
@@ -250,20 +298,51 @@ final class LlmRequestCaptureRepo
         ? 'session_id IS NULL'
         : 'session_id = ?';
     final args = sessionId == null ? <Object?>[] : <Object?>[sessionId];
-    final limit = sessionId == null ? maxRowsWithoutSession : maxRowsPerSession;
-    await db.customStatement(
-      'DELETE FROM llm_request_capture_rows WHERE $predicate AND id NOT IN ('
-      'SELECT id FROM llm_request_capture_rows WHERE $predicate '
-      'ORDER BY created_at_ms DESC, id DESC LIMIT ?)',
-      [...args, ...args, limit],
+    final rowCeiling = sessionId == null
+        ? maxRowsWithoutSession
+        : maxRowsPerSession;
+    await _trimTo(
+      predicate: predicate,
+      args: args,
+      rowCeiling: rowCeiling,
+      byteBudget: maxBytesPerSession,
+      minRows: minRowsPerSession,
     );
   }
 
-  Future<void> _trimGlobal() => db.customStatement(
-    'DELETE FROM llm_request_capture_rows WHERE id NOT IN ('
-    'SELECT id FROM llm_request_capture_rows '
-    'ORDER BY created_at_ms DESC, id DESC LIMIT ?)',
-    [maxRowsTotal],
+  Future<void> _trimGlobal() => _trimTo(
+    predicate: '1 = 1',
+    args: const [],
+    rowCeiling: maxRowsTotal,
+    byteBudget: maxBytesTotal,
+    minRows: minRowsPerSession,
+  );
+
+  /// Deletes everything past *either* budget, newest first.
+  ///
+  /// The window walks the rows from newest to oldest keeping a running byte
+  /// total (`LENGTH(CAST(... AS BLOB))` is bytes; bare `LENGTH` on TEXT counts
+  /// characters and would under-count every non-ASCII prompt). A row is dropped
+  /// when it is past the row ceiling, or when it is past [minRows] *and* the
+  /// running total has already exceeded the byte budget.
+  Future<void> _trimTo({
+    required String predicate,
+    required List<Object?> args,
+    required int rowCeiling,
+    required int byteBudget,
+    required int minRows,
+  }) => db.customStatement(
+    'DELETE FROM llm_request_capture_rows WHERE id IN ('
+    'SELECT id FROM ('
+    'SELECT id, '
+    'ROW_NUMBER() OVER w AS rn, '
+    'SUM(LENGTH(CAST(event_json AS BLOB))) OVER w AS running_bytes '
+    'FROM llm_request_capture_rows WHERE $predicate '
+    'WINDOW w AS (ORDER BY created_at_ms DESC, id DESC '
+    'ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)'
+    ') WHERE rn > ? OR (rn > ? AND running_bytes > ?)'
+    ')',
+    [...args, rowCeiling, minRows, byteBudget],
   );
 
   static _EncodedCapture _encodeBounded(LlmRequestCaptureEvent event) {

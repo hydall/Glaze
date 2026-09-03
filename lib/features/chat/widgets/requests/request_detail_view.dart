@@ -7,6 +7,7 @@ import '../../../../shared/widgets/glass_surface.dart';
 import '../../../../shared/widgets/glaze_filter_chip_bar.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
 import '../../services/prompt_capture_view_service.dart';
+import '../../state/request_timeline.dart';
 import 'request_message_card.dart';
 import 'request_stage_label.dart';
 
@@ -38,7 +39,12 @@ class _RequestDetailViewState extends State<RequestDetailView> {
   @override
   Widget build(BuildContext context) {
     final capture = widget.capture;
-    final stage = requestStageLabel(context, capture.row.stage);
+    final family = requestStageFamily(capture.row.stage);
+    final color = requestFamilyColor(context, family);
+    final title = requestStepLabel(
+      stage: capture.row.stage,
+      agentId: capture.row.agentId,
+    );
     final time = DateTime.fromMillisecondsSinceEpoch(capture.row.createdAtMs);
 
     return Column(
@@ -59,17 +65,17 @@ class _RequestDetailViewState extends State<RequestDetailView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      stage.label,
+                      '${requestFamilyLabel(family)} · $title',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: stage.color,
+                        color: color,
                       ),
                     ),
                     Text(
-                      '${_formatTime(time)} · ${capture.messages.length} '
+                      '${formatRequestTime(time)} · ${capture.messages.length} '
                       '${'requests_messages_short'.tr()}',
                       style: TextStyle(
                         fontSize: 11,
@@ -235,8 +241,4 @@ class _RequestDetailViewState extends State<RequestDetailView> {
     ),
   );
 
-  static String _formatTime(DateTime time) =>
-      '${_two(time.hour)}:${_two(time.minute)}:${_two(time.second)}';
-
-  static String _two(int value) => value.toString().padLeft(2, '0');
 }

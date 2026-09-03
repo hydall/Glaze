@@ -1038,13 +1038,30 @@ not roll). One provider feeds both the context card and the Prompt Inspector's
 coverage tab, so a turn costs one scan and, with vectors configured, one
 embedding query.
 
-**Requests tab** (`widgets/requests/`, `state/session_requests_provider.dart`):
-the Prompt Inspector's list of every request this chat has actually sent, read
-from the always-on capture sink (`llmRequestCaptureInstallationProvider` →
-`llm_request_capture_rows`) and cut at `AppRuntime.startedAt`, so a restart does
-not mix runs. Opening a row shows that exact payload; the tab strip hides while
-a row is open. The live "next request" preview (`PromptPreviewScreen`) is the
-first row of the same list.
+**Requests tab** (`widgets/requests/`, `state/request_timeline.dart`): the
+Prompt Inspector's timeline of what this chat actually sent, read from the
+always-on capture sink (`llmRequestCaptureInstallationProvider` →
+`llm_request_capture_rows`) and cut at `AppRuntime.startedAt` so a restart does
+not mix runs. Rows are folded into groups by `messageId` (one chat turn: the
+main model or the agent shards, then cleaner, ledger, ext blocks) or by
+`pipelineRunId` (a background job — card rewrite, reconciliation), and the two
+kinds share one chronological list. Retries of one call collapse into a single
+step carrying an attempt count. Opening a step shows that exact payload; the tab
+strip hides while it is open. The first row is the *next* request — the live
+preview (`PromptPreviewScreen`), or the agent catalog
+(`StudioPromptPreviewTab`) on an agentic preset, which is why there is no
+separate Agents tab.
+
+Two things make the grouping possible. The main request carries a
+`LlmCaptureContext` (`stage: 'main'`, the session, and `turnRunId`) — without it
+it was captured with no session at all and no per-chat view could show it. And
+because the reply does not exist yet when the generation stages are sent,
+`LlmRequestCaptureRepo.bindTurnMessageId` stamps the message id over them once
+the write lands, narrowly: this session, generation stages only, still unbound,
+from the turn's start. Captures are trimmed by a row ceiling *and* a byte budget
+(`maxBytesPerSession`), with `minRowsPerSession` as a floor — a megabyte-sized
+main request must not evict a turn's worth of small ones, and fifty of them must
+not sit on 50 MB.
 
 **LLM request dump** (`core/llm/transport/llm_request_dump.dart`): a debug-only
 diagnostics aid for inspecting every outgoing LLM request made while answering a

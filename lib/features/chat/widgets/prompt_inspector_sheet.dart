@@ -2,18 +2,21 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/state/studio_feature_provider.dart';
 import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import 'tokenizer_sheet.dart';
 import 'requests/requests_tab.dart';
 import 'lorebook_coverage_sheet.dart';
-import 'studio_prompt_preview_tab.dart';
 
-/// Unified diagnostics surface that merges the Context (tokenizer), Requests,
-/// Lorebook Coverage and Agents views into one sheet. All answer the same
-/// question - "what actually goes into the prompt?" - so they live behind a
-/// single Magic Drawer entry instead of several separate cards.
+/// Unified diagnostics surface: Context (tokenizer), Requests and Lorebook
+/// Coverage in one sheet. All answer the same question — "what actually goes
+/// into the prompt?" — so they live behind a single Magic Drawer entry instead
+/// of several separate cards.
+///
+/// There is no Agents tab. Agent runs are requests like any other and appear in
+/// the Requests timeline as the steps of the turn they belong to; the catalog
+/// of what the agents *would* send next is the "next turn" row at the top of
+/// that same list.
 class PromptInspectorSheet extends ConsumerStatefulWidget {
   final String charId;
   final String initialTabId;
@@ -27,14 +30,12 @@ class PromptInspectorSheet extends ConsumerStatefulWidget {
   static const _tabContext = 'context';
   static const _tabRequests = 'requests';
   static const _tabCoverage = 'coverage';
-  static const _tabAgents = 'agents';
 
   /// Tab ids other surfaces deep-link to (the context card under the chat
   /// header opens the inspector on the layer it is showing).
   static const contextTabId = _tabContext;
   static const requestsTabId = _tabRequests;
   static const coverageTabId = _tabCoverage;
-  static const agentsTabId = _tabAgents;
 
   @override
   ConsumerState<PromptInspectorSheet> createState() =>
@@ -50,29 +51,22 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
   /// sheet read as one broken level.
   bool _detailOpen = false;
 
+  static const _order = [
+    PromptInspectorSheet._tabContext,
+    PromptInspectorSheet._tabRequests,
+    PromptInspectorSheet._tabCoverage,
+  ];
+
   @override
   Widget build(BuildContext context) {
-    // The Studio master switch is the app's "which kind of preset is active"
-    // flag (see preset_list_screen): ON means an agentic preset is in effect.
-    // With a plain preset there are no agents to inspect, so the tab is not
-    // just empty — it is meaningless, and it goes.
-    final agentic = ref.watch(studioFeatureEnabledProvider);
-    final order = <String>[
-      PromptInspectorSheet._tabContext,
-      PromptInspectorSheet._tabRequests,
-      PromptInspectorSheet._tabCoverage,
-      if (agentic) PromptInspectorSheet._tabAgents,
-    ];
-    // The active tab can vanish under us when the switch flips while the sheet
-    // is open.
-    final activeId = order.contains(_activeTabId) ? _activeTabId : order.first;
-    final activeIndex = order.indexOf(activeId);
+    final activeId = _order.contains(_activeTabId) ? _activeTabId : _order.first;
+    final activeIndex = _order.indexOf(activeId);
 
     // Preserve visited tabs without eagerly starting every expensive prompt
     // diagnostic when the inspector opens.
     final body = IndexedStack(
       index: activeIndex,
-      children: [for (final id in order) _tabBody(id)],
+      children: [for (final id in _order) _tabBody(id)],
     );
 
     return SheetView(
@@ -85,10 +79,10 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
       headerBottom: _detailOpen
           ? null
           : GlazeTabBar(
-              tabs: [for (final id in order) _tabItem(id)],
+              tabs: [for (final id in _order) _tabItem(id)],
               activeIndex: activeIndex,
               onChanged: (i) => setState(() {
-                _activeTabId = order[i];
+                _activeTabId = _order[i];
                 _visitedTabs.add(_activeTabId);
               }),
             ),
@@ -110,11 +104,7 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
           setState(() => _detailOpen = open);
         },
       ),
-      PromptInspectorSheet._tabCoverage => CoveragePanel(
-        charId: widget.charId,
-        embedded: true,
-      ),
-      _ => StudioPromptPreviewTab(charId: widget.charId),
+      _ => CoveragePanel(charId: widget.charId, embedded: true),
     };
   }
 
@@ -127,14 +117,7 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
       label: 'tab_requests'.tr(),
       icon: Icons.swap_vert_rounded,
     ),
-    PromptInspectorSheet._tabCoverage => GlazeTabItem(
-      label: 'tab_coverage'.tr(),
-      icon: Icons.search,
-    ),
-    _ => GlazeTabItem(
-      label: 'tab_agents'.tr(),
-      icon: Icons.smart_toy_outlined,
-    ),
+    _ => GlazeTabItem(label: 'tab_coverage'.tr(), icon: Icons.search),
   };
 }
 
