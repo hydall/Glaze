@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
+import 'core/app_runtime.dart';
 import 'core/debug/perf_debug.dart';
 import 'core/platform/desktop_window.dart';
 import 'core/services/dev_mode_flag_migration.dart';
@@ -13,6 +14,7 @@ final appRestartKey = GlobalKey();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  AppRuntime.markStarted();
   PerfDebug.installFrameLoggerIfEnabled();
   try {
     await migrateLegacyWindowsPreferences();

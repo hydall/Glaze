@@ -48,10 +48,16 @@ class PromptPreviewScreen extends ConsumerStatefulWidget {
   /// embedding inside the Prompt Inspector's tabbed shell.
   final bool embedded;
 
+  /// Set when the screen is a drill-down (the Requests tab opens it as "the
+  /// request that would go out next"): the embedded toolbar then leads with a
+  /// back button instead of relying on a tab strip that is hidden.
+  final VoidCallback? onBack;
+
   const PromptPreviewScreen({
     super.key,
     required this.charId,
     this.embedded = false,
+    this.onBack,
   });
 
   @override
@@ -150,9 +156,21 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+                padding: EdgeInsets.fromLTRB(
+                  widget.onBack == null ? 16 : 4,
+                  widget.onBack == null ? 8 : 4,
+                  8,
+                  4,
+                ),
                 child: Row(
                   children: [
+                    if (widget.onBack != null)
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                        tooltip: 'requests_back_to_list'.tr(),
+                        onPressed: widget.onBack,
+                      ),
                     Text(
                       'magic_request_preview'.tr(),
                       style: TextStyle(

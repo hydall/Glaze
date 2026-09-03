@@ -1038,6 +1038,14 @@ not roll). One provider feeds both the context card and the Prompt Inspector's
 coverage tab, so a turn costs one scan and, with vectors configured, one
 embedding query.
 
+**Requests tab** (`widgets/requests/`, `state/session_requests_provider.dart`):
+the Prompt Inspector's list of every request this chat has actually sent, read
+from the always-on capture sink (`llmRequestCaptureInstallationProvider` →
+`llm_request_capture_rows`) and cut at `AppRuntime.startedAt`, so a restart does
+not mix runs. Opening a row shows that exact payload; the tab strip hides while
+a row is open. The live "next request" preview (`PromptPreviewScreen`) is the
+first row of the same list.
+
 **LLM request dump** (`core/llm/transport/llm_request_dump.dart`): a debug-only
 diagnostics aid for inspecting every outgoing LLM request made while answering a
 single chat turn — studio shards, the main model, the post-cleaner audit +

@@ -64,17 +64,11 @@ class _CoveragePanelState extends ConsumerState<CoveragePanel> {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+                padding: const EdgeInsets.fromLTRB(16, 4, 8, 0),
                 child: Row(
                   children: [
-                    Text(
-                      'lorebook_coverage_title'.tr(),
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
+                    // No title: the inspector's tab strip directly above
+                    // already reads "Coverage".
                     const Spacer(),
                     IconButton(
                       visualDensity: VisualDensity.compact,
