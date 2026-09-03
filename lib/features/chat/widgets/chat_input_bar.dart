@@ -581,9 +581,10 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   /// mode leaves both of those alone: neither is a preference. Empty, it has
   /// always guessed — it impersonated the user — so that state is the one the
   /// user gets to assign. Whatever [composerEmptyActionProvider] holds lends
-  /// the button its glyph and its tap; a card or a pinned button dropped on it
-  /// in edit mode is what puts it there, and the undo badge hands the
-  /// impersonation back.
+  /// the button its glyph and its tap; an Actions card dropped on it in edit
+  /// mode is what puts it there, and the undo badge hands the impersonation
+  /// back. Tools are turned away at the drop — see
+  /// [ComposerEmptyActionNotifier.isAssignable].
   ///
   /// Only the empty state goes dead in edit mode, for the reason the row's
   /// buttons all do: a tap that both retargets and fires would be a trap.
@@ -595,8 +596,8 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     required bool editing,
   }) {
     final emptyPin = ref.watch(composerEmptyActionProvider).value;
-    // Null once the thing it points at is gone — a deleted quick reply, a tool
-    // with no chat to open against. The button falls back to impersonation
+    // Null once the thing it points at is gone — a quick reply since deleted,
+    // the drawer button on desktop. The button falls back to impersonation
     // rather than wearing a glyph that does nothing.
     final emptyAction = emptyPin == null ? null : _resolvePin(emptyPin);
 
@@ -660,7 +661,12 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       message: 'composer_empty_action_hint'.tr(),
       preferBelow: false,
       child: DragTarget<ComposerPin>(
-        onWillAcceptWithDetails: (details) => details.data != emptyPin,
+        // Actions only, so a Tools card dragged across the button is refused
+        // rather than silently swallowed: the drag keeps looking for the row
+        // below, which is where a tool belongs.
+        onWillAcceptWithDetails: (details) =>
+            details.data != emptyPin &&
+            ComposerEmptyActionNotifier.isAssignable(details.data),
         onAcceptWithDetails: (details) => _assignEmptyAction(details.data),
         // Scale rather than a ring: a border would grow the 40px circle and
         // shove the row it shares a baseline with.

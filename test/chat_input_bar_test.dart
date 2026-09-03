@@ -305,6 +305,81 @@ void main() {
       expect(impersonateCalls, 1);
     });
 
+    testWidgets('the empty slot takes an Actions drop and refuses a tool', (
+      tester,
+    ) async {
+      // Stands in for the drawer's grids, which drag this very payload type.
+      Widget handle(String label, ComposerPin pin) => Draggable<ComposerPin>(
+        key: ValueKey(label),
+        data: pin,
+        feedback: const SizedBox(width: 20, height: 20),
+        // Painted, not a bare SizedBox: an empty box does not hit-test, so the
+        // gesture would never reach the [Draggable] and the drag would never
+        // start — a green test proving nothing.
+        child: const ColoredBox(
+          color: Color(0xFF00FF00),
+          child: SizedBox(width: 20, height: 20),
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: Column(
+                children: [
+                  handle('tool', ComposerPin.tool('char-card')),
+                  handle('reply', ComposerPin.action(ComposerAction.guidance)),
+                  ChatInputBar(
+                    isGenerating: false,
+                    isDrawerOpen: true,
+                    onMagicDrawer: () {},
+                    onSend: (_) async => true,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ChatInputBar)),
+      );
+      container.read(chatDrawerEditingProvider.notifier).state = true;
+      await tester.pumpAndSettle();
+
+      Future<void> dragOntoSendButton(String label) async {
+        final target = tester.getCenter(
+          find.byIcon(Icons.account_circle_rounded),
+        );
+        final origin = tester.getCenter(find.byKey(ValueKey(label)));
+        final gesture = await tester.startGesture(origin);
+        // Past the drag slop first, so the [Draggable] is actually up before
+        // the pointer reaches the button.
+        await gesture.moveTo(origin + const Offset(0, 24));
+        await tester.pump();
+        await gesture.moveTo(target);
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+      }
+
+      // A Tools card opens a sheet about the chat — not what a thumb resting
+      // on the send button is reaching for.
+      await dragOntoSendButton('tool');
+      expect(container.read(composerEmptyActionProvider).value, isNull);
+      expect(find.byIcon(Icons.account_circle_rounded), findsOneWidget);
+
+      await dragOntoSendButton('reply');
+      expect(
+        container.read(composerEmptyActionProvider).value,
+        ComposerPin.action(ComposerAction.guidance),
+      );
+      expect(find.byIcon(Icons.account_circle_rounded), findsNothing);
+    });
+
     testWidgets('edit mode kills the empty tap but not send or stop', (
       tester,
     ) async {
