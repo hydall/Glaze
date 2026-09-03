@@ -440,4 +440,77 @@ void main() {
       'Second',
     ]);
   });
+
+  test('appendToLastMessage merges expanded content into the last user turn', () {
+    final messages = builder.buildAgentMessages(
+      agent: const StudioAgent(id: 'final'),
+      context: context,
+      config: config,
+      studioPreset: const StudioPreset(
+        id: 'studio',
+        blocks: [
+          StudioPresetBlock(
+            id: 'chat_history',
+            type: StudioBlockType.history,
+            mode: 'direct',
+            injectionPoint: 'final',
+            order: 1,
+          ),
+          StudioPresetBlock(
+            id: 'memory',
+            appendToLastMessage: true,
+            content: '<memory>{{char}}</memory>',
+            injectionPoint: 'final',
+            order: 2,
+          ),
+        ],
+      ),
+      priorBriefs: const [],
+      isFinalResponse: true,
+    );
+
+    expect(messages.map((message) => message['role']), ['user', 'assistant']);
+    expect(messages.first['content'], 'First\n\n<memory>Lucy</memory>');
+  });
+
+  test('appendToLastMessage is silently dropped when history has no user turn',
+      () {
+        final messages = builder.buildAgentMessages(
+          agent: const StudioAgent(id: 'final'),
+          context: const StudioContext(
+            slots: {},
+            history: [
+              PromptMessage(role: 'assistant', content: 'Only assistant'),
+            ],
+            sessionVars: {},
+            globalVars: {},
+            macroContext: MacroContext(charName: 'Lucy', charId: 'char', sessionId: 's'),
+            diagnostics: StudioContextDiagnostics(),
+          ),
+          config: config,
+          studioPreset: const StudioPreset(
+            id: 'studio',
+            blocks: [
+              StudioPresetBlock(
+                id: 'chat_history',
+                type: StudioBlockType.history,
+                mode: 'direct',
+                injectionPoint: 'final',
+              ),
+              StudioPresetBlock(
+                id: 'memory',
+                appendToLastMessage: true,
+                content: '<memory>Lucy</memory>',
+                injectionPoint: 'final',
+              ),
+            ],
+          ),
+          priorBriefs: const [],
+          isFinalResponse: true,
+        );
+
+        expect(messages.map((message) => message['content']), [
+          'Only assistant',
+        ]);
+      });
 }

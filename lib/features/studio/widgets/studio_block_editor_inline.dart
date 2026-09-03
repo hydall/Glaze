@@ -128,6 +128,16 @@ class StudioBlockEditorInline extends StatelessWidget {
         showIf: (item) =>
             item['mode'] == 'direct' && item['insertionMode'] == 'depth',
       ),
+      // Append-to-last-user-message: merge this block's (macro-expanded)
+      // content into the last user-role history message instead of emitting it
+      // as its own message — mirrors the classic preset's `appendToLastMessage`
+      // toggle. Only meaningful for instruction blocks.
+      GenericEditorField(
+        key: 'appendToLastMessage',
+        label: 'label_append_last_user'.tr(),
+        type: 'switch',
+        showIf: (item) => item['type'] == 'instruction',
+      ),
     ];
     if (headerPrompt) {
       fields

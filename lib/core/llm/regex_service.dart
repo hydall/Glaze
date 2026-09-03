@@ -97,7 +97,7 @@ String _applySingleScript(
   var processed = text;
 
   var pattern = script.regex;
-  final replacement = script.replacement;
+  final replacement = _decodeReplacementEscapes(script.replacement);
   final macroCtx = _macroContextFor(ctx);
 
   // ST's `filterString`: every trim string is macro-substituted, and the
@@ -291,4 +291,83 @@ _parseRegexPattern(String raw) {
 
 String _escapeRegex(String s) {
   return RegExp.escape(s);
+}
+
+/// Decodes escape sequences in a "Replace With" template before it is applied,
+/// mirroring SillyTavern's behavior for the replacement field.
+///
+/// - `\uXXXX` and `\u{XXXX}` → the corresponding code point.
+/// - `\n`, `\t`, `\r`, `\\` → newline / tab / carriage return / backslash.
+/// - `\0`..`\9` are left untouched so `_resolveReplacement` can treat them as
+///   capture-group backreferences.
+String _decodeReplacementEscapes(String input) {
+  if (input.isEmpty || !input.contains('\\')) return input;
+
+  final out = StringBuffer();
+  var i = 0;
+  while (i < input.length) {
+    final c = input[i];
+    if (c != '\\' || i == input.length - 1) {
+      out.write(c);
+      i++;
+      continue;
+    }
+
+    final next = input[i + 1];
+
+    if (next == 'u') {
+      var consumed = false;
+      if (i + 2 < input.length && input[i + 2] == '{') {
+        final close = input.indexOf('}', i + 3);
+        if (close != -1) {
+          final code = int.tryParse(input.substring(i + 3, close), radix: 16);
+          if (code != null && code > 0 && code <= 0x10FFFF) {
+            out.write(String.fromCharCodes([code]));
+            i = close + 1;
+            consumed = true;
+          }
+        }
+      } else if (i + 5 < input.length) {
+        final hex = input.substring(i + 2, i + 6);
+        if (RegExp(r'^[0-9a-fA-F]{4}$').hasMatch(hex)) {
+          final code = int.tryParse(hex, radix: 16);
+          if (code != null && code > 0) {
+            out.write(String.fromCharCodes([code]));
+            i += 6;
+            consumed = true;
+          }
+        }
+      }
+      if (consumed) continue;
+      out.write(c);
+      i++;
+      continue;
+    }
+
+    // Digit following a backslash is a capture-group reference, not an escape.
+    if (RegExp(r'[0-9]').hasMatch(next)) {
+      out.write(c);
+      i++;
+      continue;
+    }
+
+    switch (next) {
+      case 'n':
+        out.write('\n');
+        i += 2;
+      case 't':
+        out.write('\t');
+        i += 2;
+      case 'r':
+        out.write('\r');
+        i += 2;
+      case '\\':
+        out.write(r'\');
+        i += 2;
+      default:
+        out.write(c);
+        i++;
+    }
+  }
+  return out.toString();
 }
