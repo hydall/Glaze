@@ -223,6 +223,8 @@ class ChatMessageOpsController {
         _messageSvc.toggleMessageHidden,
       ),
     );
+    if (!_ref.mounted) return;
+    _dropTokenBreakdown();
     _publish(updated, token: token);
   }
 
@@ -255,6 +257,8 @@ class ChatMessageOpsController {
         _messageSvc.unhideAllMessages,
       ),
     );
+    if (!_ref.mounted) return;
+    _dropTokenBreakdown();
     _publish(updated, token: token);
   }
 
@@ -269,7 +273,19 @@ class ChatMessageOpsController {
         (latest) => _messageSvc.hideTopMessages(latest, count),
       ),
     );
+    if (!_ref.mounted) return;
+    _dropTokenBreakdown();
     _publish(updated, token: token);
+  }
+
+  /// Hiding a message takes it out of the prompt exactly the way editing one
+  /// rewrites it, so the cached breakdowns now describe a prompt that no
+  /// longer exists. Without this the Context screen reads the stale one back
+  /// (its own hash cache misses, the Riverpod copy is returned unchecked) and
+  /// shows a budget that still counts the hidden messages.
+  void _dropTokenBreakdown() {
+    TokenBreakdownCache.invalidate();
+    _ref.read(cachedTokenBreakdownProvider(_charId).notifier).state = null;
   }
 
   /// Publishes [updated] on top of the *latest* state instead of the snapshot

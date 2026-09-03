@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import 'tokenizer_sheet.dart';
-import 'requests/requests_tab.dart';
+import 'requests/request_timeline_view.dart';
 
 /// Unified diagnostics surface: Context (the token budget) and Requests (what
 /// the chat sent, and what went into it). Both answer the same question — "what
@@ -14,9 +14,10 @@ import 'requests/requests_tab.dart';
 ///
 /// Two things used to be top-level tabs and are not any more. Agent runs are
 /// requests like any other, so they are steps of the turn they belong to in the
-/// Requests timeline. Coverage is a property *of* a request, so it is the
-/// second view inside Requests — next request as a prediction, past ones as
-/// recorded.
+/// Requests timeline. Coverage is a property *of* a request, so it is a block
+/// inside the opened request — with only the next request's coverage, which no
+/// captured request owns yet, still a row of its own at the top of the
+/// timeline.
 class PromptInspectorSheet extends ConsumerStatefulWidget {
   final String charId;
   final String initialTabId;
@@ -32,7 +33,8 @@ class PromptInspectorSheet extends ConsumerStatefulWidget {
 
   /// Ids other surfaces deep-link to (the context card under the chat header
   /// opens the inspector on the layer it is showing). [coverageTabId] is not a
-  /// tab any more — it lands on Requests with its Coverage view selected.
+  /// tab any more — it lands on Requests, opened on the next request's
+  /// coverage.
   static const contextTabId = _tabContext;
   static const requestsTabId = _tabRequests;
   static const coverageTabId = 'coverage';
@@ -59,11 +61,10 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
     PromptInspectorSheet._tabRequests,
   ];
 
-  /// A `coverage` deep link is the Requests tab opened on its Coverage view.
-  RequestsSubTab get _initialSubTab =>
-      widget.initialTabId == PromptInspectorSheet.coverageTabId
-      ? RequestsSubTab.coverage
-      : RequestsSubTab.timeline;
+  /// A `coverage` deep link is the Requests tab opened on the next request's
+  /// coverage.
+  bool get _initialCoverage =>
+      widget.initialTabId == PromptInspectorSheet.coverageTabId;
 
   @override
   Widget build(BuildContext context) {
@@ -105,9 +106,9 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
         charId: widget.charId,
         embedded: true,
       ),
-      _ => RequestsTab(
+      _ => RequestTimelineView(
         charId: widget.charId,
-        initialSubTab: _initialSubTab,
+        initialCoverage: _initialCoverage,
         onDetailChanged: (open) {
           if (_detailOpen == open) return;
           setState(() => _detailOpen = open);

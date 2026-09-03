@@ -12,6 +12,8 @@ import '../../state/request_timeline.dart';
 import '../../state/session_requests_provider.dart';
 import '../prompt_preview_screen.dart';
 import '../studio_prompt_preview_tab.dart';
+import 'coverage_rows.dart';
+import 'next_turn_coverage_view.dart';
 import 'request_detail_view.dart';
 import 'request_group_card.dart';
 import 'request_rows.dart';
@@ -24,11 +26,17 @@ import 'request_rows.dart';
 /// Grouping lives in [buildRequestTimeline]; this widget only decides what is
 /// open. Three levels: timeline → the steps of one group → the payload of one
 /// step. The inspector hides its tab strip for the last two.
+///
+/// Coverage is not a view next to this one any more. A past request's coverage
+/// is a block inside that request; only the *next* request's — a live dry-run
+/// of the scan, which belongs to no captured request yet — still gets a row of
+/// its own at the top.
 class RequestTimelineView extends ConsumerStatefulWidget {
   const RequestTimelineView({
     super.key,
     required this.charId,
     required this.onDetailChanged,
+    this.initialCoverage = false,
   });
 
   final String charId;
@@ -36,6 +44,10 @@ class RequestTimelineView extends ConsumerStatefulWidget {
   /// Fires whenever this tab enters or leaves a detail view, so the inspector
   /// can hide its tab strip for the drill-down.
   final ValueChanged<bool> onDetailChanged;
+
+  /// Opens straight on the next request's coverage — where the context card's
+  /// lorebook layer deep-links to.
+  final bool initialCoverage;
 
   @override
   ConsumerState<RequestTimelineView> createState() =>
@@ -45,12 +57,33 @@ class RequestTimelineView extends ConsumerStatefulWidget {
 class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
   PromptCaptureView? _openCapture;
   bool _openPreview = false;
+  late bool _openCoverage = widget.initialCoverage;
   final Set<String> _expandedGroups = {};
 
-  void _open({PromptCaptureView? capture, bool preview = false}) {
+  bool get _inDetail => _openCapture != null || _openPreview || _openCoverage;
+
+  @override
+  void initState() {
+    super.initState();
+    // A deep link opens on a drill-down, so the inspector has to be told to
+    // step its tab strip aside — after the frame that mounts us, never during
+    // the parent's own build.
+    if (_openCoverage) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _openCoverage) widget.onDetailChanged(true);
+      });
+    }
+  }
+
+  void _open({
+    PromptCaptureView? capture,
+    bool preview = false,
+    bool coverage = false,
+  }) {
     setState(() {
       _openCapture = capture;
       _openPreview = preview;
+      _openCoverage = coverage;
     });
     widget.onDetailChanged(true);
   }
@@ -59,6 +92,7 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
     setState(() {
       _openCapture = null;
       _openPreview = false;
+      _openCoverage = false;
     });
     widget.onDetailChanged(false);
   }
@@ -67,7 +101,7 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
   void dispose() {
     // Torn down with a detail open (sheet closed, chat left): leave the
     // inspector's own state consistent for the next open.
-    if (_openCapture != null || _openPreview) widget.onDetailChanged(false);
+    if (_inDetail) widget.onDetailChanged(false);
     super.dispose();
   }
 
@@ -92,13 +126,29 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
 
     final capture = _openCapture;
     if (capture != null) {
-      return RequestDetailView(capture: capture, onBack: _close);
+      return _inset(
+        RequestDetailView(
+          charId: widget.charId,
+          capture: capture,
+          onBack: _close,
+        ),
+      );
+    }
+    if (_openCoverage) {
+      return _inset(
+        NextTurnCoverageView(
+          charId: widget.charId,
+          sessionId: sessionId,
+          onBack: _close,
+        ),
+      );
     }
     if (_openPreview) {
       // No header of our own: both preview screens title themselves, and a
       // second title stacked on top is the duplication this rework removed.
       // They get the back button instead.
       final agentic = ref.watch(studioFeatureEnabledProvider);
+      // The preview screens read the inset themselves, so they are not wrapped.
       return agentic
           ? StudioPromptPreviewTab(charId: widget.charId, onBack: _close)
           : PromptPreviewScreen(
@@ -109,7 +159,8 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
     }
 
     final timeline = ref.watch(requestTimelineProvider(sessionId));
-    return timeline.when(
+    return _inset(
+      timeline.when(
         loading: () => const Center(child: GlazeSpinner()),
         error: (error, _) => Center(
           child: Padding(
@@ -120,9 +171,23 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
             ),
           ),
         ),
-      data: (groups) => _timeline(context, sessionId, groups),
+        data: (groups) => _timeline(context, sessionId, groups),
+      ),
     );
   }
+
+  /// The inspector hands its floating-header height down as the body's top
+  /// inset; consume it once here so nothing below adds the gap again.
+  Widget _inset(Widget child) => Builder(
+    builder: (context) => Padding(
+      padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
+      child: MediaQuery.removePadding(
+        context: context,
+        removeTop: true,
+        child: child,
+      ),
+    ),
+  );
 
   Widget _timeline(
     BuildContext context,
@@ -137,6 +202,8 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
       children: [
         RequestPreviewRow(onTap: () => _open(preview: true)),
+        const SizedBox(height: 8),
+        CoverageNextRow(onTap: () => _open(coverage: true)),
         const SizedBox(height: 12),
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
