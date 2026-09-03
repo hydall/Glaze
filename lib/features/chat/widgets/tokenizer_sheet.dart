@@ -43,17 +43,28 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
   int _visibleCount = 0;
   bool _showSettings = false;
 
+  /// Slider positions while the sheet is open, null until the user drags one.
+  ///
+  /// The stored setting is the value until then. Reading it once in
+  /// `initState` instead froze whatever was loaded at that moment — the
+  /// defaults, when the sheet opened before settings arrived — and the next
+  /// save wrote those defaults back over the stored ones.
+  double? _hideOverride;
+  double? _thresholdOverride;
+
   @override
   void initState() {
     super.initState();
-    final settings = ref.read(appSettingsProvider).value ?? const AppSettings();
-    _hidePercent = settings.tokenizerHidePercent;
-    _historyFillThreshold = settings.tokenizerHistoryFillThreshold;
     _loadOrCalculate();
   }
 
-  double _hidePercent = 30;
-  double _historyFillThreshold = 85;
+  AppSettings get _settings =>
+      ref.watch(appSettingsProvider).value ?? const AppSettings();
+
+  double get _hidePercent => _hideOverride ?? _settings.tokenizerHidePercent;
+
+  double get _historyFillThreshold =>
+      _thresholdOverride ?? _settings.tokenizerHistoryFillThreshold;
 
   void _loadOrCalculate() {
     final chatState = ref.read(chatProvider(widget.charId)).value;
@@ -69,7 +80,9 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
       return;
     }
 
-    final visibleCount = session.messages.where((m) => !m.isHidden).length;
+    final visibleCount = session.messages
+        .where((m) => !m.isHidden && !m.isTyping)
+        .length;
     final summaryContent = ref.read(
       cachedTokenBreakdownProvider(widget.charId),
     );
@@ -111,6 +124,9 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
   }
 
   Future<void> _calculate() async {
+    // Callers await a write first (hide, unhide), so the sheet can be gone by
+    // the time we get here.
+    if (!mounted) return;
     setState(() => _loading = true);
 
     try {
@@ -121,7 +137,11 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
         return;
       }
 
-      _visibleCount = session.messages.where((m) => !m.isHidden).length;
+      // Same predicate `HistoryAssembler` uses, so the count matches what the
+      // prompt actually carries — the typing placeholder is not a message.
+      _visibleCount = session.messages
+          .where((m) => !m.isHidden && !m.isTyping)
+          .length;
 
       final builder = ref.read(promptPayloadBuilderProvider);
       final inputs = await builder.collectInputs(
@@ -276,17 +296,25 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     double historyFill,
     bool nearLimit,
   ) {
-    final hideCount = (_visibleCount * _hidePercent / 100).ceil().clamp(
-      1,
-      _visibleCount > 1 ? _visibleCount - 1 : 0,
-    );
+    // The newest message always stays, so a chat with one visible message has
+    // nothing to hide. `clamp(1, 0)` — the empty range that case used to
+    // produce — throws, and took the whole Context tab down with it.
+    final maxHide = _visibleCount > 1 ? _visibleCount - 1 : 0;
+    final hideCount = maxHide == 0
+        ? 0
+        : (_visibleCount * _hidePercent / 100).ceil().clamp(1, maxHide);
     final messages =
         ref.watch(chatProvider(widget.charId)).value?.messages ??
         const <ChatMessage>[];
     final hiddenCount = messages.where((m) => m.isHidden).length;
     final historyTokens = bd.sourceTokens['history'] ?? 0;
-    final hideTokens = _visibleCount > 0
-        ? ((historyTokens / _visibleCount) * hideCount).toInt()
+    // Messages the history budget already cut are not in the prompt, so
+    // hiding them frees nothing — only the ones past the cutoff count, and
+    // `historyTokens` is spread over exactly those.
+    final inPrompt = (_visibleCount - bd.cutoffIndex).clamp(0, _visibleCount);
+    final freedCount = (hideCount - bd.cutoffIndex).clamp(0, hideCount);
+    final hideTokens = inPrompt > 0
+        ? ((historyTokens / inPrompt) * freedCount).round()
         : 0;
 
     return Builder(
@@ -308,7 +336,9 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
             const SizedBox(height: 12),
             CutoffWarning(cutoffCount: bd.cutoffIndex),
           ],
-          if (nearLimit) ...[
+          // Nothing to suggest when the newest message is the only one left:
+          // the banner's whole body is "hide N of them".
+          if (nearLimit && hideCount > 0) ...[
             const SizedBox(height: 24),
             NearLimitWarning(hideCount: hideCount, hideTokens: hideTokens),
           ],
@@ -367,8 +397,10 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
         .read(appSettingsProvider.notifier)
         .save(
           settings.copyWith(
-            tokenizerHidePercent: _hidePercent,
-            tokenizerHistoryFillThreshold: _historyFillThreshold,
+            tokenizerHidePercent:
+                _hideOverride ?? settings.tokenizerHidePercent,
+            tokenizerHistoryFillThreshold:
+                _thresholdOverride ?? settings.tokenizerHistoryFillThreshold,
           ),
         );
   }
@@ -421,7 +453,7 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
             unit: '%',
             description: 'tokenizer_history_fill_threshold_desc'.tr(),
             onChanged: (v) {
-              setState(() => _historyFillThreshold = v);
+              setState(() => _thresholdOverride = v);
               _saveSettings();
             },
           ),
@@ -433,7 +465,7 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
             unit: '%',
             description: 'tokenizer_hide_percent_desc'.tr(),
             onChanged: (v) {
-              setState(() => _hidePercent = v);
+              setState(() => _hideOverride = v);
               _saveSettings();
             },
           ),

@@ -1036,8 +1036,10 @@ switched off by `AppSettings.hideContextCard`.
 diagnostics surfaces — same recursion, sticky/cooldown and per-book caps, so a
 reading matches the built prompt (`entry.probability` is the one rule it does
 not roll). One provider feeds both the context card and the Prompt Inspector's
-coverage tab, so a turn costs one scan and, with vectors configured, one
-embedding query.
+next-request coverage view, so a turn costs one scan and, with vectors
+configured, one embedding query. It answers for the request that has *not* been
+sent; a request that already ran answers from its own stored manifest
+(`turn_coverage_provider.dart`), inside the opened request.
 
 **Requests tab** (`widgets/requests/`, `state/request_timeline.dart`): the
 Prompt Inspector's timeline of what this chat actually sent, read from the
@@ -1048,10 +1050,16 @@ main model or the agent shards, then cleaner, ledger, ext blocks) or by
 `pipelineRunId` (a background job — card rewrite, reconciliation), and the two
 kinds share one chronological list. Retries of one call collapse into a single
 step carrying an attempt count. Opening a step shows that exact payload; the tab
-strip hides while it is open. The first row is the *next* request — the live
-preview (`PromptPreviewScreen`), or the agent catalog
+strip hides while it is open. The first two rows are about the *next* request —
+the live preview (`PromptPreviewScreen`), or the agent catalog
 (`StudioPromptPreviewTab`) on an agentic preset, which is why there is no
-separate Agents tab.
+separate Agents tab, and its coverage dry-run (`NextTurnCoverageView`).
+
+Coverage of a request that already ran is not a view of its own: it is a
+collapsed block at the top of the opened request (`RequestCoverageBlock`),
+carrying the memory selection saved on the turn's message and the lorebook
+entries from its stored manifest. Nothing there is recomputed — a re-scan would
+answer what would fire *now*, which is the next request's question.
 
 Two things make the grouping possible. The main request carries a
 `LlmCaptureContext` (`stage: 'main'`, the session, and `turnRunId`) — without it

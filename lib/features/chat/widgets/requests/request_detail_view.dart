@@ -8,6 +8,7 @@ import '../../../../shared/widgets/glaze_filter_chip_bar.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
 import '../../services/prompt_capture_view_service.dart';
 import '../../state/request_timeline.dart';
+import 'request_coverage_block.dart';
 import 'request_message_card.dart';
 import 'request_stage_label.dart';
 
@@ -19,13 +20,19 @@ enum _DetailMode { messages, params, json }
 /// out, only for a request that actually happened rather than for the next one
 /// that might. The inspector hides its tab strip while it is open, so the body
 /// gets the full sheet height.
+///
+/// Coverage of the turn this request belongs to rides at the top of every view
+/// as a collapsed block — it is a property of this request, not a separate
+/// list to navigate to.
 class RequestDetailView extends StatefulWidget {
   const RequestDetailView({
     super.key,
+    required this.charId,
     required this.capture,
     required this.onBack,
   });
 
+  final String charId;
   final PromptCaptureView capture;
   final VoidCallback onBack;
 
@@ -120,15 +127,33 @@ class _RequestDetailViewState extends State<RequestDetailView> {
     GlazeToast.show(context, 'chat_copied'.tr());
   }
 
+  /// Coverage of this request's turn, first in every view so it is reachable
+  /// whichever one is open.
+  Widget _coverage() => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: RequestCoverageBlock(
+      charId: widget.charId,
+      messageId: widget.capture.row.messageId,
+    ),
+  );
+
   Widget _messages(BuildContext context, PromptCaptureView capture) {
     final messages = capture.messages;
     if (messages.isEmpty) {
-      return _empty(context, 'requests_detail_no_messages'.tr());
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+        children: [
+          _coverage(),
+          _empty(context, 'requests_detail_no_messages'.tr()),
+        ],
+      );
     }
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
-      itemCount: messages.length,
-      itemBuilder: (_, i) => RequestMessageCard(index: i, message: messages[i]),
+      itemCount: messages.length + 1,
+      itemBuilder: (_, i) => i == 0
+          ? _coverage()
+          : RequestMessageCard(index: i - 1, message: messages[i - 1]),
     );
   }
 
@@ -165,6 +190,7 @@ class _RequestDetailViewState extends State<RequestDetailView> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
       children: [
+        _coverage(),
         GlassSurface(
           borderRadius: BorderRadius.circular(12),
           child: Padding(
@@ -219,6 +245,7 @@ class _RequestDetailViewState extends State<RequestDetailView> {
       ListView(
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
         children: [
+          _coverage(),
           SelectableText(
             capture.formattedJson,
             style: TextStyle(
@@ -240,5 +267,4 @@ class _RequestDetailViewState extends State<RequestDetailView> {
       ),
     ),
   );
-
 }
