@@ -601,9 +601,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
             .firstOrNull;
         if (reply == null) return null;
         return _ResolvedPin(
-          icon: reply.isContinueAction
-              ? Icons.keyboard_double_arrow_right
-              : Icons.bolt,
+          icon: reply.icon,
           onTap: () => _sendQuickReply(reply),
         );
       case ComposerPinKind.tool:

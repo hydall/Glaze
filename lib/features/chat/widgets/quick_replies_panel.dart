@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glass_surface.dart';
 import '../chat_provider.dart';
 import '../composer_pins_provider.dart';
+import '../quick_reply_icons.dart';
 import '../quick_replies_provider.dart';
 import 'drawer_panel_scaffold.dart';
 import 'magic_drawer_models.dart';
@@ -106,16 +108,23 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
       child: _QuickReplyEditForm(
         initialLabel: reply?.label ?? '',
         initialText: reply?.text ?? '',
+        initialIconId: reply?.iconId,
         isNew: isNew,
         // Continue runs the app's continue-generation call; it has no prompt
         // body to edit and no delete button, so the form drops both.
         builtIn: reply?.isBuiltIn ?? false,
-        onSubmit: (label, text) async {
+        onSubmit: (label, text, iconId) async {
           final notifier = ref.read(quickRepliesProvider.notifier);
           if (isNew) {
-            await notifier.add(label, text);
+            await notifier.add(label, text, iconId: iconId);
           } else {
-            await notifier.edit(reply.id, label: label, text: text);
+            await notifier.edit(
+              reply.id,
+              label: label,
+              text: text,
+              iconId: iconId,
+              clearIcon: iconId == null,
+            );
           }
         },
         onDelete: (isNew || reply.isBuiltIn)
@@ -234,9 +243,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                             def: MagicDrawerItemDef(
                               id: reply.id,
                               label: reply.label,
-                              icon: reply.isContinueAction
-                                  ? Icons.keyboard_double_arrow_right
-                                  : Icons.bolt,
+                              icon: reply.icon,
                               category: MagicDrawerCategory.session,
                             ),
                             status: _previewText(reply),
@@ -346,12 +353,16 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
 class _QuickReplyEditForm extends StatefulWidget {
   final String initialLabel;
   final String initialText;
+
+  /// The card's chosen glyph, or null for the built-in default.
+  final String? initialIconId;
   final bool isNew;
 
   /// True for a built-in action: the prompt field is replaced by a note
   /// explaining what the card does, since its text is never sent.
   final bool builtIn;
-  final Future<void> Function(String label, String text) onSubmit;
+  final Future<void> Function(String label, String text, String? iconId)
+  onSubmit;
   final Future<void> Function()? onDelete;
 
   const _QuickReplyEditForm({
@@ -359,6 +370,7 @@ class _QuickReplyEditForm extends StatefulWidget {
     required this.initialText,
     required this.isNew,
     required this.onSubmit,
+    this.initialIconId,
     this.builtIn = false,
     this.onDelete,
   });
@@ -371,11 +383,16 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
   late final TextEditingController _labelCtrl;
   late final TextEditingController _textCtrl;
 
+  /// Null until the card picks a glyph — and again if it picks the same one
+  /// twice, which is how the default is chosen back.
+  String? _iconId;
+
   @override
   void initState() {
     super.initState();
     _labelCtrl = TextEditingController(text: widget.initialLabel);
     _textCtrl = TextEditingController(text: widget.initialText);
+    _iconId = widget.initialIconId;
   }
 
   @override
@@ -392,8 +409,9 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
     // Captured before the pop — this State is disposed by the time the write
     // completes, so `widget` must not be touched afterwards.
     final onSubmit = widget.onSubmit;
+    final iconId = _iconId;
     Navigator.of(context).pop();
-    await onSubmit(label, text);
+    await onSubmit(label, text, iconId);
   }
 
   Future<void> _delete() async {
@@ -420,6 +438,14 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
               hintText: 'placeholder_block_name'.tr(),
               border: const OutlineInputBorder(),
             ),
+          ),
+          const SizedBox(height: 12),
+          _IconPicker(
+            selected: _iconId,
+            // Tapping the selected glyph clears it, so the built-in default is
+            // reachable without a "none" swatch that would have to explain
+            // itself.
+            onSelect: (id) => setState(() => _iconId = _iconId == id ? null : id),
           ),
           const SizedBox(height: 12),
           if (widget.builtIn)
@@ -463,6 +489,128 @@ class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Glyph swatches for the card being edited.
+///
+/// One scrolling row rather than a wrap of all thirty-odd: this form sits in a
+/// bottom sheet with the keyboard up, and a five-row grid pushed the prompt
+/// field and the Save button off the bottom of it. A picker sheet on top of a
+/// picker sheet would be worse again.
+class _IconPicker extends StatefulWidget {
+  final String? selected;
+  final ValueChanged<String> onSelect;
+
+  const _IconPicker({required this.selected, required this.onSelect});
+
+  @override
+  State<_IconPicker> createState() => _IconPickerState();
+}
+
+class _IconPickerState extends State<_IconPicker> {
+  final _controller = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Open on the card's own glyph rather than at the start of the strip: a
+    // card edited a second time should show what it already has.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _revealSelected() {
+    final selected = widget.selected;
+    if (selected == null || !mounted || !_controller.hasClients) return;
+    final index = kQuickReplyIcons.keys.toList().indexOf(selected);
+    if (index < 0) return;
+    const stride = 48.0; // swatch + spacing
+    final viewport = _controller.position.viewportDimension;
+    _controller.jumpTo(
+      (index * stride - viewport / 2 + stride / 2).clamp(
+        _controller.position.minScrollExtent,
+        _controller.position.maxScrollExtent,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'quick_reply_icon'.tr(),
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: context.cs.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 40,
+          child: ListView.separated(
+            controller: _controller,
+            scrollDirection: Axis.horizontal,
+            itemCount: kQuickReplyIcons.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final entry = kQuickReplyIcons.entries.elementAt(index);
+              return _IconSwatch(
+                icon: entry.value,
+                active: entry.key == widget.selected,
+                onTap: () => widget.onSelect(entry.key),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _IconSwatch extends StatelessWidget {
+  final IconData icon;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _IconSwatch({
+    required this.icon,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = context.cs.primary;
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: GlassSurface(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        tint: active ? accent : context.cs.surface,
+        border: Border.all(
+          color: active
+              ? accent.withValues(alpha: 0.6)
+              : context.cs.onSurface.withValues(alpha: 0.08),
+        ),
+        child: Center(
+          child: Icon(
+            icon,
+            size: 20,
+            color: active ? Colors.white : context.cs.onSurface,
+          ),
+        ),
       ),
     );
   }
