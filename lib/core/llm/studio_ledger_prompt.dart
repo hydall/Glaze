@@ -52,6 +52,7 @@ class StudioLedgerPrompt {
     Character? character,
     Map<String, String> entityAliases = const {},
     String focalUserName = '',
+    List<String> gameClockHistory = const [],
   }) {
     final trackerBlock = buildCurrentStateBlock(
       currentTrackers,
@@ -61,6 +62,7 @@ class StudioLedgerPrompt {
     final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
     final cardBlock = buildCharacterCardSection(character);
     final entityBlock = buildEntityAliasSection(entityAliases);
+    final clockBlock = buildGameClockHistoryBlock(gameClockHistory);
 
     return '''$_systemPrompt
 
@@ -69,7 +71,7 @@ $cardBlock
 $trackerBlock
 </current_state>
 
-<existing_keys>
+$clockBlock<existing_keys>
 $keyCatalog
 </existing_keys>
 
@@ -142,6 +144,7 @@ knowledgeFacts rules:
     required List<Tracker> currentTrackers,
     required List<MemoryEntry> recentMemoryEntries,
     String focalUserName = '',
+    List<String> gameClockHistory = const [],
   }) {
     final trackerBlock = buildCurrentStateBlock(
       currentTrackers,
@@ -149,13 +152,14 @@ knowledgeFacts rules:
     );
     final keyCatalog = buildExistingKeyCatalog(currentTrackers);
     final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
+    final clockBlock = buildGameClockHistoryBlock(gameClockHistory);
     return '''$_legacyTurnOnlySystemPrompt
 
 <current_state>
 $trackerBlock
 </current_state>
 
-<existing_keys>
+$clockBlock<existing_keys>
 $keyCatalog
 </existing_keys>
 
@@ -322,6 +326,15 @@ knowledgeFacts rules:
     return '<existing_fact_entities>\n$lines\n</existing_fact_entities>\n\n';
   }
 
+  /// Compact `<clock_history>` section listing the recent game-clock
+  /// trajectory (oldest→newest). Lets the ledger see that a timeskip already
+  /// happened and where the clock currently stands, so it does not re-apply a
+  /// previous skip or over-advance time. Empty entries yield an empty block.
+  static String buildGameClockHistoryBlock(List<String> entries) {
+    if (entries.isEmpty) return '';
+    return '<clock_history>\n${entries.join('\n')}\n</clock_history>\n\n';
+  }
+
   static const String _systemPrompt =
       '''You are Studio Ledger, an internal continuity and state extractor.
 You do not write story prose.
@@ -397,7 +410,14 @@ Rules:
   world:day (day 0 = first story day) and world:date.
   For an ordinary continuous turn with no explicit duration, advance the clock
   by 1–5 minutes. Use an explicitly narrated duration instead when available.
-  Do not invent time skips the narrative does not support.''';
+  Do not invent time skips the narrative does not support.
+  A timeskip already applied in a prior turn is consummated: it advances the
+  clock once and the new world:date/day stand from then on. Do not re-apply the
+  same timeskip on a later turn, and do not advance the clock for time the
+  narrative does not actually spend. Unless the user explicitly requests a NEW
+  timeskip, advance only by the hours/minutes the narrated events require.
+  Treat <clock_history> as the authoritative recent trajectory — its newest
+  line is where the clock currently stands.''';
 
   static const String _legacyTurnOnlySystemPrompt =
       '''You are Studio Ledger, an internal continuity and state extractor.

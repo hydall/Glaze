@@ -185,6 +185,9 @@ class LedgerTurnRunner {
       }
 
       // ── 3. Build prompt ─────────────────────────────────────────────────
+      final gameClockHistory = await _canonAuthority.loadRecentGameClock(
+        request.sessionId,
+      );
       final rawPrompt = _promptFactory.buildLedgerPrompt(
         finalAssistantText: request.finalAssistantText,
         recentHistoryText: request.recentHistoryText,
@@ -195,6 +198,7 @@ class LedgerTurnRunner {
         character: canon.source,
         entityAliases: entityAliases,
         engine: request.engine,
+        gameClockHistory: gameClockHistory,
       );
       final prompt = request.macroCtx == null
           ? rawPrompt
