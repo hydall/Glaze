@@ -57,7 +57,11 @@ class MessageBridgeCommands {
     // the image-resolve pass above so the synthetic (text-less) entry is not
     // fed through resolveImgResults.
     final origin = _host.chatOrigin;
-    if (visibleStartIndex == 0 && origin != null) {
+    // Nothing left to head: an emptied chat gets no origin marker, the same
+    // rule the page applies when the last message under one is deleted
+    // (`_pruneOrphanSeparators` retires `__date_origin` once no real message
+    // remains).
+    if (visibleStartIndex == 0 && origin != null && mapped.isNotEmpty) {
       mapped.insert(0, {...origin, '__separator': true});
     }
     final json = jsonEncode(mapped);

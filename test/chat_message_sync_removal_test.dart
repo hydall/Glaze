@@ -107,6 +107,26 @@ void main() {
       ]);
     });
 
+    test('emptying the chat re-renders instead of only clearing', () async {
+      final bridge = _RecordingBridge();
+
+      // `clearAll` raises the page's loading screen for the `setMessages` that
+      // follows it everywhere else. Without one here the spinner stayed up over
+      // the emptied chat and nothing rendered until the session was re-entered.
+      await const ChatMessageSync().sync(
+        bridge: bridge,
+        oldMsgs: [_msg('a1', 'assistant')],
+        newMsgs: const [],
+        visibleStartIndex: 0,
+        busy: false,
+        sessionSwitching: false,
+      );
+
+      expect(bridge.clearAllCalls, 1);
+      expect(bridge.setMessagesCalls, [<String>[]]);
+      expect(bridge.removedIds, isEmpty);
+    });
+
     test('an unrelated shorter list falls back to a full re-render', () async {
       final bridge = _RecordingBridge();
 

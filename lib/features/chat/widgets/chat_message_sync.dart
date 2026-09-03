@@ -11,7 +11,7 @@ import '../bridge/chat_bridge_controller.dart';
 /// contract is preserved exactly:
 ///   * No-op when a session switch is in progress (defer to caller).
 ///   * First load (old empty) → `setMessages`.
-///   * Cleared (new empty) → `clearAll`.
+///   * Cleared (new empty) → `clearAll` + an empty `setMessages`.
 ///   * Head prepend → `prependMessages` for the prefix.
 ///   * Tail append → `appendMessages`.
 ///   * Any pure removal — head truncation, tail truncation, mid-chat
@@ -69,6 +69,11 @@ class ChatMessageSync {
     if (newIds.isEmpty) {
       onDomReset?.call();
       await bridge.clearAll();
+      // `clearAll` raises the page's loading screen for the `setMessages` that
+      // follows it on every other reset path. Deleting the last message has no
+      // such call, so the spinner sat over the emptied chat — a chat that
+      // renders nothing until it is re-entered — until this one arrived.
+      await bridge.setMessages(const [], visibleStartIndex: visibleStartIndex);
       return;
     }
 

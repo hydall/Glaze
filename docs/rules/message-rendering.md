@@ -1,9 +1,10 @@
 # Message Rendering Rules
 
-Rules for `assets/chat_webview/formatter/` and `assets/chat_webview/renderer/` —
-everything that turns a message body into what the reader sees.
+Rules for `assets/chat_webview/formatter/`, `assets/chat_webview/renderer/` and
+the virtualised list they render into (`assets/chat_webview/useVirtualScroll.js`)
+— everything that turns a message body into what the reader sees.
 
-Read this before changing either directory. The behaviour it describes is
+Read this before changing any of them. The behaviour it describes is
 covered by `test/webview_js` (a real browser renders the card corpus); the
 shape of the modules is covered by `test/webview_assets_test.dart`.
 
@@ -125,6 +126,41 @@ whole card, taking its `<style>` with it; the same scan reached inside a `<pre>`
 the block pass never formats, so the run it held was never restored and the
 leak sweep deleted it. Do not move it back in front of the parse: there is now
 no markdown pass anywhere that reads a string containing live HTML.
+
+---
+
+## The render window is never allowed to leave the viewport
+
+The list is virtualised (`useVirtualScroll.js`): only a window of rows is
+mounted, and an `IntersectionObserver` grows that window as rows come into
+view. The observer is a *local* mechanism — it can only report on rows that
+are already mounted and within its `1000px` margin. So the one state it cannot
+recover from is the window drifting entirely off the viewport: nothing is near
+enough to report, `visibleIndices` empties, and there is no visible index left
+to grow the window from. The chat renders nothing, and no amount of scrolling
+brings it back — only a fresh `setMessages`, which is why the symptom was
+"open another chat and come back".
+
+Three things move the rows out from under a scroll position that does not move
+with them: a delete or an append rewrites the spacers, a late height correction
+(images, fonts, badges) rewrites them again from the `ResizeObserver`, and a
+fast scroll can outrun the observer entirely.
+
+So every one of those paths ends at `_recoverIfViewportIsBlank()`, and the
+recovery it runs (`_recenterOnScrollPosition`) is derived from the scroll
+position and the height cache alone — it needs neither an observer entry nor a
+mounted row. It moves the window and never `scrollTop`, so a `scrollToBottom`
+or a streaming `smartScroll` already in flight still lands where it meant to.
+
+Two rules follow, and `specs/virtual_window.spec.js` holds them:
+
+* **no early return may leave the list with nothing rendered.** `updateWindow`
+  returning on an empty `visibleIndices` is exactly the bug above.
+* **anything that renumbers `items` renumbers the observer's index sets too.**
+  The observer reports an index, not an id. `remove` and `prepend` shift
+  `visibleIndices` / `realVisibleIndices` the same way they shift the height
+  cache; a set left on the old numbering points the next `updateWindow` at
+  somebody else's row, and past the end of the list once enough rows go.
 
 ---
 
