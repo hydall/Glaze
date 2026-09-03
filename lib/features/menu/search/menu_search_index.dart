@@ -181,21 +181,6 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       const ['keyboard', 'send', 'клавиатура', 'отправка'],
       groupKey: 'settings_group_input',
     ),
-    row(
-      'composer_actions',
-      'composer_actions_title',
-      'composer_actions_desc',
-      Icons.tune_rounded,
-      const [
-        'composer',
-        'buttons',
-        'input',
-        'кнопки',
-        'ввод',
-        'поле',
-      ],
-      groupKey: 'settings_group_input',
-    ),
     // ── Prompts ─────────────────────────────────────────────────────────────
     row(
       'add_block_at_top',

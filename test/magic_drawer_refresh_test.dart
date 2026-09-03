@@ -30,16 +30,23 @@ void main() {
       final handlerStart = source.indexOf(
         'Future<void> _handleTap(MagicDrawerItemDef item)',
       );
-      final nextMethod = source.indexOf(
-        'Future<void> _showAgentOpsLog()',
-        handlerStart,
-      );
+      final nextMethod = source.indexOf('\n  @override', handlerStart);
       final handler = source.substring(handlerStart, nextMethod);
 
       expect(handler, contains('try {'));
       expect(handler, contains('finally {'));
       expect(handler, contains('if (mounted) await _refreshStats();'));
-      expect(handler, contains('await showPromptInspectorSheet('));
+      // Every card routes through the one launcher, so a single try/finally
+      // covers all of them. The launcher itself must not refresh: it also
+      // serves the composer's pinned row, where there is no open drawer and
+      // no stats on screen to bring up to date.
+      expect(handler, contains('DrawerItemLauncher('));
+
+      final launcher = File(
+        'lib/features/chat/services/drawer_item_launcher.dart',
+      ).readAsStringSync();
+      expect(launcher, contains('await showPromptInspectorSheet('));
+      expect(launcher, isNot(contains('_refreshStats')));
     });
 
     test('rejects token results calculated from an older stats snapshot', () {

@@ -13,6 +13,11 @@ class MagicCard extends StatefulWidget {
   final VoidCallback onDelete;
   final VoidCallback? onLongPress;
 
+  /// Lifts the card out of the grid and into the composer's pinned row, from
+  /// the up-arrow badge edit mode draws opposite the delete badge. Null for a
+  /// card with nothing to pin (the "+" tile) or one already up there.
+  final VoidCallback? onPin;
+
   /// False for cards that back a built-in feature rather than user content:
   /// edit mode still reorders and renames them, but the delete badge is not
   /// drawn, because removing one would take the feature away for good.
@@ -26,6 +31,7 @@ class MagicCard extends StatefulWidget {
     required this.onTap,
     required this.onDelete,
     this.onLongPress,
+    this.onPin,
     this.deletable = true,
   });
 
@@ -132,33 +138,86 @@ class _MagicCardState extends State<MagicCard> {
                     Positioned(
                       top: -8,
                       right: -8,
-                      child: GestureDetector(
+                      child: MagicCardBadge(
+                        icon: Icons.close,
+                        color: const Color(0xFFFF3B30),
+                        tooltip: 'btn_delete'.tr(),
                         onTap: widget.onDelete,
-                        child: Container(
-                          width: 24,
-                          height: 24,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFFF3B30),
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Color(0x4DFF3B30),
-                                blurRadius: 8,
-                                offset: Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.close,
-                            size: 14,
-                            color: Colors.white,
-                          ),
-                        ),
+                      ),
+                    ),
+                  // Opposite corner from delete, and accent- rather than
+                  // danger-coloured: promoting a card is the reversible half of
+                  // edit mode, and the two must not be confusable at a glance.
+                  if (editing && widget.onPin != null)
+                    Positioned(
+                      top: -8,
+                      left: -8,
+                      child: MagicCardBadge(
+                        icon: Icons.arrow_upward,
+                        color: context.cs.primary,
+                        tooltip: 'composer_pin_add'.tr(),
+                        onTap: widget.onPin!,
                       ),
                     ),
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The small circular badge edit mode hangs off a card's corner.
+///
+/// Shared by the delete badge and the pin badge, and by the composer's pinned
+/// row for the matching down-arrow, so the three cannot drift apart in size or
+/// weight while meaning the same kind of thing.
+class MagicCardBadge extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  /// Diameter. The composer's row uses a smaller badge than the grid, since it
+  /// hangs off a 40px circle rather than a full-width card.
+  final double size;
+
+  const MagicCardBadge({
+    super.key,
+    required this.icon,
+    required this.color,
+    required this.tooltip,
+    required this.onTap,
+    this.size = 24,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      preferBelow: false,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Icon(icon, size: size * 0.58, color: Colors.white),
           ),
         ),
       ),

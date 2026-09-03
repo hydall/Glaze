@@ -13,6 +13,11 @@ import '../../../shared/widgets/top_edge_blur.dart';
 /// enough that the active tab's underline does not sit on a card's edge.
 const double kDrawerContentTopInset = 66;
 
+/// Where the drag handle's bar starts, and how thick it is — so the header can
+/// state the gap it leaves without guessing at the numbers.
+const double kDrawerHandleTop = 8;
+const double kDrawerHandleHeight = 4;
+
 /// Shared shell for the chat drawer. Provides background, drag handle, top
 /// soft-edge blur and the header slot; the tab bodies hosted inside supply
 /// their own content and, while they are still loading, their own
@@ -102,11 +107,16 @@ class _DismissHandleState extends State<_DismissHandle> {
   @override
   Widget build(BuildContext context) {
     final bar = Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Center(
+      padding: const EdgeInsets.only(top: kDrawerHandleTop),
+      child: Align(
+        // Top-aligned, not centred: [Center] took the 34px swipe zone the bar
+        // is painted in and split the leftover 24px around it, dropping the bar
+        // to y=20 — twice the inset this padding asks for, and low enough to
+        // crowd the tab strip underneath it.
+        alignment: Alignment.topCenter,
         child: Container(
           width: 32,
-          height: 4,
+          height: kDrawerHandleHeight,
           decoration: BoxDecoration(
             color: Colors.grey[600],
             borderRadius: BorderRadius.circular(2),

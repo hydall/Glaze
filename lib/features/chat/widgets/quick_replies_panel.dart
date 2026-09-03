@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +8,7 @@ import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
+import '../composer_pins_provider.dart';
 import '../quick_replies_provider.dart';
 import 'drawer_panel_scaffold.dart';
 import 'magic_drawer_models.dart';
@@ -48,6 +51,22 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     super.dispose();
   }
 
+  /// Runs one of the composer's own buttons from its card.
+  ///
+  /// Attach, fullscreen and guidance all land on the composer, so the drawer
+  /// hands them back to it through [ComposerActionBridge] and then gets out of
+  /// the way — every one of them wants the message box next.
+  void _handleActionTap(ComposerAction action) {
+    if (widget.editing) return;
+    ref.read(composerActionBridgeProvider).run(action);
+    widget.onClose?.call();
+  }
+
+  void _pin(ComposerPin pin) {
+    Haptics.mediumImpact();
+    unawaited(ref.read(composerPinsProvider.notifier).pin(pin));
+  }
+
   Future<void> _handleTap(QuickReply reply) async {
     if (widget.editing) {
       await _showEditSheet(existing: reply);
@@ -68,7 +87,17 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     await ref.read(quickRepliesProvider.notifier).remove(id);
   }
 
-  Future<void> _moveItem(int from, int to) async {
+  /// Reorders by reply id, not by grid position: the grid hides replies that
+  /// are pinned to the composer row, so a drop's display index is not an index
+  /// into the stored list.
+  Future<void> _moveItem(
+    List<QuickReply> all,
+    String movingId,
+    String targetId,
+  ) async {
+    final from = all.indexWhere((r) => r.id == movingId);
+    final to = all.indexWhere((r) => r.id == targetId);
+    if (from < 0 || to < 0 || from == to) return;
     await ref.read(quickRepliesProvider.notifier).reorder(from, to);
     if (mounted) setState(() => _hoverIndex = null);
   }
@@ -112,32 +141,23 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
   @override
   Widget build(BuildContext context) {
     final repliesAsync = ref.watch(quickRepliesProvider);
-    final replies = repliesAsync.value ?? const <QuickReply>[];
+    final allReplies = repliesAsync.value ?? const <QuickReply>[];
+    final pins = ref.watch(composerPinsProvider).value ?? const <ComposerPin>[];
 
-    final cards = <MagicDrawerCardItem>[
-      for (final r in replies)
-        MagicDrawerCardItem(
-          def: MagicDrawerItemDef(
-            id: r.id,
-            label: r.label,
-            icon: r.isContinueAction
-                ? Icons.keyboard_double_arrow_right
-                : Icons.bolt,
-            category: MagicDrawerCategory.session,
-          ),
-          status: _previewText(r),
-        ),
-      // Always last, never gated on edit mode: the "+" in the grid is how a
-      // new user learns this tab is theirs to fill.
-      MagicDrawerCardItem(
-        def: MagicDrawerItemDef(
-          id: '__add__',
-          label: 'action_add'.tr(),
-          icon: Icons.add,
-          category: MagicDrawerCategory.session,
-        ),
-        isAddButton: true,
-      ),
+    // Anything pinned to the composer's row is dropped from the grid: the two
+    // must never offer the same button twice. The stored order is untouched, so
+    // the row's down-arrow puts a card back exactly where it came from.
+    //
+    // Attach / fullscreen / guidance lead the grid as a fixed block. They are
+    // composer behaviour rather than user content, so they have a home rather
+    // than a position: nothing to reorder, nothing to delete.
+    final actions = [
+      for (final action in ComposerAction.demotable)
+        if (!pins.contains(ComposerPin.action(action))) action,
+    ];
+    final replies = [
+      for (final reply in allReplies)
+        if (!pins.contains(ComposerPin.reply(reply.id))) reply,
     ];
 
     final content = RawScrollbar(
@@ -151,6 +171,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final itemWidth = (constraints.maxWidth - 24 - 12) / 3;
+            var cellIndex = 0;
             return SingleChildScrollView(
               controller: _scrollController,
               padding: EdgeInsets.fromLTRB(
@@ -161,73 +182,110 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
               ),
               child: MagicCardGrid(
                 columns: 3,
-                cells: List.generate(cards.length, (index) {
-                  final item = cards[index];
-                  if (item.isAddButton) {
-                    return SizedBox(
+                cells: [
+                  for (final action in actions)
+                    SizedBox(
                       width: itemWidth,
-                      child: AddMagicCard(onTap: () => _showEditSheet()),
-                    );
-                  }
-                  final reply = replies.firstWhere((r) => r.id == item.def.id);
-                  final card = MagicCard(
-                    item: item,
-                    editing: widget.editing,
-                    hovered: _hoverIndex == index && _draggingIndex != index,
-                    onTap: () => _handleTap(reply),
-                    onDelete: () => _remove(reply.id),
-                    deletable: !reply.isBuiltIn,
-                  );
-
-                  return SizedBox(
-                    width: itemWidth,
-                    child: DragTarget<int>(
-                      onWillAcceptWithDetails: (details) {
-                        setState(() => _hoverIndex = index);
-                        return details.data != index;
-                      },
-                      onLeave: (_) {
-                        if (_hoverIndex == index) {
-                          setState(() => _hoverIndex = null);
-                        }
-                      },
-                      onAcceptWithDetails: (details) {
-                        _moveItem(details.data, index);
-                      },
-                      builder: (context, _, _) {
-                        return LongPressDraggable<int>(
-                          data: index,
-                          delay: const Duration(milliseconds: 300),
-                          onDragStarted: () {
-                            Haptics.mediumImpact();
-                            if (!widget.editing) {
-                              widget.onEditingRequested?.call();
-                            }
-                            setState(() => _draggingIndex = index);
-                          },
-                          onDragEnd: (_) {
-                            setState(() {
-                              _draggingIndex = null;
-                              _hoverIndex = null;
-                            });
-                          },
-                          feedback: SizedBox(
-                            width: itemWidth,
-                            child: Material(
-                              color: Colors.transparent,
-                              child: Opacity(opacity: 0.92, child: card),
+                      child: MagicCard(
+                        key: ValueKey('action-${action.id}'),
+                        item: MagicDrawerCardItem(
+                          def: MagicDrawerItemDef(
+                            id: action.id,
+                            label: action.label,
+                            icon: action.icon,
+                            category: MagicDrawerCategory.session,
+                          ),
+                        ),
+                        editing: widget.editing,
+                        hovered: false,
+                        onTap: () => _handleActionTap(action),
+                        onDelete: () {},
+                        deletable: false,
+                        onPin: () => _pin(ComposerPin.action(action)),
+                      ),
+                    ),
+                  for (final reply in replies)
+                    Builder(
+                      builder: (context) {
+                        final index = cellIndex++;
+                        final card = MagicCard(
+                          item: MagicDrawerCardItem(
+                            def: MagicDrawerItemDef(
+                              id: reply.id,
+                              label: reply.label,
+                              icon: reply.isContinueAction
+                                  ? Icons.keyboard_double_arrow_right
+                                  : Icons.bolt,
+                              category: MagicDrawerCategory.session,
                             ),
+                            status: _previewText(reply),
                           ),
-                          childWhenDragging: Opacity(
-                            opacity: 0.25,
-                            child: card,
+                          editing: widget.editing,
+                          hovered:
+                              _hoverIndex == index && _draggingIndex != index,
+                          onTap: () => _handleTap(reply),
+                          onDelete: () => _remove(reply.id),
+                          deletable: !reply.isBuiltIn,
+                          onPin: () => _pin(ComposerPin.reply(reply.id)),
+                        );
+
+                        return SizedBox(
+                          width: itemWidth,
+                          child: DragTarget<String>(
+                            onWillAcceptWithDetails: (details) {
+                              setState(() => _hoverIndex = index);
+                              return details.data != reply.id;
+                            },
+                            onLeave: (_) {
+                              if (_hoverIndex == index) {
+                                setState(() => _hoverIndex = null);
+                              }
+                            },
+                            onAcceptWithDetails: (details) {
+                              _moveItem(allReplies, details.data, reply.id);
+                            },
+                            builder: (context, _, _) {
+                              return LongPressDraggable<String>(
+                                data: reply.id,
+                                delay: const Duration(milliseconds: 300),
+                                onDragStarted: () {
+                                  Haptics.mediumImpact();
+                                  if (!widget.editing) {
+                                    widget.onEditingRequested?.call();
+                                  }
+                                  setState(() => _draggingIndex = index);
+                                },
+                                onDragEnd: (_) {
+                                  setState(() {
+                                    _draggingIndex = null;
+                                    _hoverIndex = null;
+                                  });
+                                },
+                                feedback: SizedBox(
+                                  width: itemWidth,
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: Opacity(opacity: 0.92, child: card),
+                                  ),
+                                ),
+                                childWhenDragging: Opacity(
+                                  opacity: 0.25,
+                                  child: card,
+                                ),
+                                child: card,
+                              );
+                            },
                           ),
-                          child: card,
                         );
                       },
                     ),
-                  );
-                }),
+                  // Always last, never gated on edit mode: the "+" in the grid
+                  // is how a new user learns this tab is theirs to fill.
+                  SizedBox(
+                    width: itemWidth,
+                    child: AddMagicCard(onTap: () => _showEditSheet()),
+                  ),
+                ],
               ),
             );
           },
@@ -238,7 +296,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     // The chrome (background, drag handle, header) belongs to the hosting
     // [ChatDrawerPanel] — this is only the tab body.
     return PanelLoadingOverlay(
-      loading: repliesAsync.isLoading && replies.isEmpty,
+      loading: repliesAsync.isLoading && allReplies.isEmpty,
       child: content,
     );
   }
