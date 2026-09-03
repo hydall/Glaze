@@ -13,11 +13,6 @@ class MagicCard extends StatefulWidget {
   final VoidCallback onDelete;
   final VoidCallback? onLongPress;
 
-  /// Lifts the card out of the grid and into the composer's pinned row, from
-  /// the up-arrow badge edit mode draws opposite the delete badge. Null for a
-  /// card with nothing to pin (the "+" tile) or one already up there.
-  final VoidCallback? onPin;
-
   /// False for cards that back a built-in feature rather than user content:
   /// edit mode still reorders and renames them, but the delete badge is not
   /// drawn, because removing one would take the feature away for good.
@@ -31,7 +26,6 @@ class MagicCard extends StatefulWidget {
     required this.onTap,
     required this.onDelete,
     this.onLongPress,
-    this.onPin,
     this.deletable = true,
   });
 
@@ -145,20 +139,6 @@ class _MagicCardState extends State<MagicCard> {
                         onTap: widget.onDelete,
                       ),
                     ),
-                  // Opposite corner from delete, and accent- rather than
-                  // danger-coloured: promoting a card is the reversible half of
-                  // edit mode, and the two must not be confusable at a glance.
-                  if (editing && widget.onPin != null)
-                    Positioned(
-                      top: -8,
-                      left: -8,
-                      child: MagicCardBadge(
-                        icon: Icons.arrow_upward,
-                        color: context.cs.primary,
-                        tooltip: 'composer_pin_add'.tr(),
-                        onTap: widget.onPin!,
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -171,9 +151,10 @@ class _MagicCardState extends State<MagicCard> {
 
 /// The small circular badge edit mode hangs off a card's corner.
 ///
-/// Shared by the delete badge and the pin badge, and by the composer's pinned
-/// row for the matching down-arrow, so the three cannot drift apart in size or
-/// weight while meaning the same kind of thing.
+/// Shared by the grid's delete badge and the composer row's demote badge, so
+/// the two cannot drift apart in size or weight while meaning the same kind of
+/// thing. There is no badge for the opposite direction: a card goes up into the
+/// row by being dragged there, which is the gesture edit mode already teaches.
 class MagicCardBadge extends StatelessWidget {
   final IconData icon;
   final Color color;

@@ -380,13 +380,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     await _saveLayout();
   }
 
-  /// Moves a card up into the composer's pinned row. Its id stays in
-  /// [_itemIds], so the row's down-arrow drops it back into this slot.
-  void _pinItem(String id) {
-    Haptics.mediumImpact();
-    unawaited(ref.read(composerPinsProvider.notifier).pin(ComposerPin.tool(id)));
-  }
-
   Future<void> _showAddItemSheet() async {
     final extSettings = ref.read(extensionsSettingsProvider);
     final studioFeatureEnabled = ref.read(studioFeatureEnabledProvider);
@@ -544,15 +537,26 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
                       hovered: _hoverIndex == index && _draggingIndex != index,
                       onTap: () => _handleTap(item.def),
                       onDelete: () => _removeItem(item.def.id),
-                      onPin: () => _pinItem(item.def.id),
                     );
 
                     return SizedBox(
                       width: itemWidth,
-                      child: DragTarget<int>(
+                      // The payload is a [ComposerPin] rather than a grid
+                      // index so the same drag can end in the composer's row,
+                      // which is how a card is pinned now that the grid has no
+                      // badge for it. Drops that stay here are guarded to
+                      // cards this grid is actually showing, so a button
+                      // dragged down out of the row cannot reshuffle it.
+                      child: DragTarget<ComposerPin>(
                         onWillAcceptWithDetails: (details) {
+                          final incoming = details.data;
+                          if (incoming.kind != ComposerPinKind.tool ||
+                              incoming.refId == item.def.id ||
+                              !items.any((i) => i.def.id == incoming.refId)) {
+                            return false;
+                          }
                           setState(() => _hoverIndex = index);
-                          return details.data != index;
+                          return true;
                         },
                         onLeave: (_) {
                           if (_hoverIndex == index) {
@@ -560,15 +564,11 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
                           }
                         },
                         onAcceptWithDetails: (details) {
-                          // Indices address this render's grid; the drop can
-                          // land after a rebuild shortened it.
-                          final from = details.data;
-                          if (from < 0 || from >= items.length) return;
-                          _moveItem(items[from].def.id, item.def.id);
+                          _moveItem(details.data.refId, item.def.id);
                         },
                         builder: (context, _, _) {
-                          return LongPressDraggable<int>(
-                            data: index,
+                          return LongPressDraggable<ComposerPin>(
+                            data: ComposerPin.tool(item.def.id),
                             delay: const Duration(milliseconds: 300),
                             onDragStarted: () {
                               Haptics.mediumImpact();

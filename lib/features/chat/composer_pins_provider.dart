@@ -200,6 +200,19 @@ class ComposerPinsNotifier extends AsyncNotifier<List<ComposerPin>> {
     await _persist([...current, pin]);
   }
 
+  /// Same, but landing at [index] — where a card dropped onto the row goes, so
+  /// the button appears under the finger rather than at the far end of a row
+  /// the user may not even be able to see the end of. An index past the end
+  /// appends; a pin that is already up here is a no-op, since that gesture is
+  /// a [reorder].
+  Future<void> pinAt(ComposerPin pin, int index) async {
+    final current = state.value ?? const <ComposerPin>[];
+    if (current.contains(pin)) return;
+    final next = List<ComposerPin>.from(current);
+    next.insert(index.clamp(0, next.length), pin);
+    await _persist(next);
+  }
+
   /// Sends a button back to its tab. Permanent buttons ignore the call — the
   /// UI hides their badge, and this is the backstop.
   Future<void> unpin(ComposerPin pin) async {

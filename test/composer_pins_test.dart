@@ -146,6 +146,39 @@ void main() {
       ]);
     });
 
+    test('pinAt lands a dragged card at the drop position', () async {
+      SharedPreferences.setMockInitialValues({
+        ComposerPinsNotifier.storageKey: ['action:drawer', 'action:attach'],
+      });
+      final container = makeContainer();
+      await load(container);
+      await container
+          .read(composerPinsProvider.notifier)
+          .pinAt(ComposerPin.tool('memory'), 1);
+
+      expect(container.read(composerPinsProvider).value, [
+        pinOf(ComposerAction.drawer),
+        ComposerPin.tool('memory'),
+        pinOf(ComposerAction.attach),
+      ]);
+    });
+
+    test('pinAt clamps an index past the end and ignores a repeat', () async {
+      SharedPreferences.setMockInitialValues({
+        ComposerPinsNotifier.storageKey: ['action:drawer'],
+      });
+      final container = makeContainer();
+      await load(container);
+      final notifier = container.read(composerPinsProvider.notifier);
+      await notifier.pinAt(ComposerPin.reply('qr-3'), 99);
+      await notifier.pinAt(ComposerPin.reply('qr-3'), 0);
+
+      expect(container.read(composerPinsProvider).value, [
+        pinOf(ComposerAction.drawer),
+        ComposerPin.reply('qr-3'),
+      ]);
+    });
+
     test('reorder moves a pin to the given index', () async {
       SharedPreferences.setMockInitialValues({});
       final container = makeContainer();
@@ -182,29 +215,39 @@ void main() {
 
   group('drag payloads', () {
     // Edit mode puts the composer's pinned row and a drawer grid on screen at
-    // the same time, and a DragTarget accepts by payload type alone. Sharing a
-    // type between them let a card dragged out of the grid land in the row as a
-    // reorder of whatever pin happened to share its index.
-    test('the row and the two grids cannot accept each other\'s drags', () {
+    // once, and a DragTarget accepts by payload type alone. All three carry the
+    // same ComposerPin — that is what lets a card be dragged out of a grid and
+    // into the row — so each grid must guard its own drops by kind, or a button
+    // dragged the other way would reshuffle it.
+    test('every surface drags a ComposerPin', () {
+      String source(String path) => File(path).readAsStringSync();
+
+      for (final path in const [
+        'lib/features/chat/widgets/chat_input_bar.dart',
+        'lib/features/chat/widgets/magic_drawer.dart',
+        'lib/features/chat/widgets/quick_replies_panel.dart',
+      ]) {
+        expect(
+          source(path),
+          allOf(
+            contains('DragTarget<ComposerPin>('),
+            contains('Draggable<ComposerPin>('),
+          ),
+          reason: path,
+        );
+      }
+    });
+
+    test('each grid guards its drops by pin kind', () {
       String source(String path) => File(path).readAsStringSync();
 
       expect(
-        source('lib/features/chat/widgets/chat_input_bar.dart'),
-        allOf(
-          contains('DragTarget<ComposerPin>('),
-          contains('Draggable<ComposerPin>('),
-        ),
-      );
-      expect(
         source('lib/features/chat/widgets/magic_drawer.dart'),
-        allOf(contains('DragTarget<int>('), isNot(contains('<ComposerPin>('))),
+        contains('incoming.kind != ComposerPinKind.tool'),
       );
       expect(
         source('lib/features/chat/widgets/quick_replies_panel.dart'),
-        allOf(
-          contains('DragTarget<String>('),
-          isNot(contains('<ComposerPin>(')),
-        ),
+        contains('incoming.kind != ComposerPinKind.reply'),
       );
     });
   });

@@ -449,7 +449,8 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   /// The row is edited from the drawer's pencil rather than from a settings
   /// sheet of its own: while [chatDrawerEditingProvider] is on and the drawer is
   /// open, each button can be dragged along the row and carries a down-arrow
-  /// that drops it back into its tab.
+  /// that drops it back into its tab. The other direction has no badge — a card
+  /// dragged out of a drawer grid and dropped here is what puts it up.
   Widget _buildActionRow() {
     final pins = ref.watch(composerPinsProvider).value ?? kDefaultComposerPins;
     // Gated on the drawer being open as well as on edit mode: with the drawer
@@ -467,7 +468,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     }
     if (buttons.isEmpty) return const SizedBox.shrink();
 
-    return SingleChildScrollView(
+    final strip = SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       // Dragging a button along the row and scrolling the row are the same
       // gesture, so edit mode takes the scroll away. A row long enough to
@@ -479,6 +480,17 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       // in both states so turning edit mode on does not nudge the row.
       padding: const EdgeInsets.only(top: 6, right: 6),
       child: Row(mainAxisSize: MainAxisSize.min, children: buttons),
+    );
+    if (!editing) return strip;
+
+    // Catches a card dropped on the row rather than on one of its buttons —
+    // the gap past the last one, or anywhere at all when the row is down to the
+    // drawer button. The per-button targets sit deeper in the tree and win when
+    // the drop lands on one, so this only ever handles the leftovers.
+    return DragTarget<ComposerPin>(
+      onWillAcceptWithDetails: (details) => !pins.contains(details.data),
+      onAcceptWithDetails: (details) => _pin(details.data, pins.length),
+      builder: (context, _, _) => strip,
     );
   }
 
@@ -529,10 +541,16 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       onAcceptWithDetails: (details) {
         final current =
             ref.read(composerPinsProvider).value ?? const <ComposerPin>[];
-        final from = current.indexOf(details.data);
         final to = current.indexOf(pin);
-        if (from < 0 || to < 0) return;
-        ref.read(composerPinsProvider.notifier).reorder(from, to);
+        if (to < 0) return;
+        final from = current.indexOf(details.data);
+        // Below zero means the payload came from a drawer grid rather than
+        // from this row, so it is an arrival, not a move.
+        if (from < 0) {
+          _pin(details.data, to);
+        } else {
+          ref.read(composerPinsProvider.notifier).reorder(from, to);
+        }
       },
       builder: (context, _, _) => Draggable<ComposerPin>(
         // A plain [Draggable], not the grid's long-press one: edit mode has
@@ -563,6 +581,12 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   void _unpin(ComposerPin pin) {
     Haptics.mediumImpact();
     unawaited(ref.read(composerPinsProvider.notifier).unpin(pin));
+  }
+
+  /// Lands a card dragged out of a drawer grid at [index] in the row.
+  void _pin(ComposerPin pin, int index) {
+    Haptics.mediumImpact();
+    unawaited(ref.read(composerPinsProvider.notifier).pinAt(pin, index));
   }
 
   /// Icon, tint and callback for one pinned button, or null when the thing it

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -60,11 +58,6 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     if (widget.editing) return;
     ref.read(composerActionBridgeProvider).run(action);
     widget.onClose?.call();
-  }
-
-  void _pin(ComposerPin pin) {
-    Haptics.mediumImpact();
-    unawaited(ref.read(composerPinsProvider.notifier).pin(pin));
   }
 
   Future<void> _handleTap(QuickReply reply) async {
@@ -186,22 +179,50 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                   for (final action in actions)
                     SizedBox(
                       width: itemWidth,
-                      child: MagicCard(
-                        key: ValueKey('action-${action.id}'),
-                        item: MagicDrawerCardItem(
-                          def: MagicDrawerItemDef(
-                            id: action.id,
-                            label: action.label,
-                            icon: action.icon,
-                            category: MagicDrawerCategory.session,
-                          ),
-                        ),
-                        editing: widget.editing,
-                        hovered: false,
-                        onTap: () => _handleActionTap(action),
-                        onDelete: () {},
-                        deletable: false,
-                        onPin: () => _pin(ComposerPin.action(action)),
+                      child: Builder(
+                        builder: (context) {
+                          final card = MagicCard(
+                            key: ValueKey('action-${action.id}'),
+                            item: MagicDrawerCardItem(
+                              def: MagicDrawerItemDef(
+                                id: action.id,
+                                label: action.label,
+                                icon: action.icon,
+                                category: MagicDrawerCategory.session,
+                              ),
+                            ),
+                            editing: widget.editing,
+                            hovered: false,
+                            onTap: () => _handleActionTap(action),
+                            onDelete: () {},
+                            deletable: false,
+                          );
+                          // Draggable but not a drop target: this block has a
+                          // fixed home order, so the only move it accepts is
+                          // upwards, into the composer's row.
+                          return LongPressDraggable<ComposerPin>(
+                            data: ComposerPin.action(action),
+                            delay: const Duration(milliseconds: 300),
+                            onDragStarted: () {
+                              Haptics.mediumImpact();
+                              if (!widget.editing) {
+                                widget.onEditingRequested?.call();
+                              }
+                            },
+                            feedback: SizedBox(
+                              width: itemWidth,
+                              child: Material(
+                                color: Colors.transparent,
+                                child: Opacity(opacity: 0.92, child: card),
+                              ),
+                            ),
+                            childWhenDragging: Opacity(
+                              opacity: 0.25,
+                              child: card,
+                            ),
+                            child: card,
+                          );
+                        },
                       ),
                     ),
                   for (final reply in replies)
@@ -226,15 +247,28 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                           onTap: () => _handleTap(reply),
                           onDelete: () => _remove(reply.id),
                           deletable: !reply.isBuiltIn,
-                          onPin: () => _pin(ComposerPin.reply(reply.id)),
                         );
 
                         return SizedBox(
                           width: itemWidth,
-                          child: DragTarget<String>(
+                          // [ComposerPin] payload, so the very same drag can
+                          // end in the composer's row — the only way to pin a
+                          // card now that the grid carries no badge for it.
+                          // Drops that stay here are guarded to replies this
+                          // grid is showing, so neither a pinned button nor a
+                          // Tools card can reshuffle it.
+                          child: DragTarget<ComposerPin>(
                             onWillAcceptWithDetails: (details) {
+                              final incoming = details.data;
+                              if (incoming.kind != ComposerPinKind.reply ||
+                                  incoming.refId == reply.id ||
+                                  !replies.any(
+                                    (r) => r.id == incoming.refId,
+                                  )) {
+                                return false;
+                              }
                               setState(() => _hoverIndex = index);
-                              return details.data != reply.id;
+                              return true;
                             },
                             onLeave: (_) {
                               if (_hoverIndex == index) {
@@ -242,11 +276,15 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                               }
                             },
                             onAcceptWithDetails: (details) {
-                              _moveItem(allReplies, details.data, reply.id);
+                              _moveItem(
+                                allReplies,
+                                details.data.refId,
+                                reply.id,
+                              );
                             },
                             builder: (context, _, _) {
-                              return LongPressDraggable<String>(
-                                data: reply.id,
+                              return LongPressDraggable<ComposerPin>(
+                                data: ComposerPin.reply(reply.id),
                                 delay: const Duration(milliseconds: 300),
                                 onDragStarted: () {
                                   Haptics.mediumImpact();
