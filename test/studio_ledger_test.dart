@@ -229,6 +229,46 @@ void main() {
       expect(prompt, isNot(contains('rename_entity')));
       expect(prompt, isNot(contains('accepted assistant prose as evidence')));
     });
+
+    test('clock history block renders ordered entries and is omitted when empty', () {
+      final withEntries = const StudioLedgerPrompt().build(
+        finalAssistantText: 'Lucy closes the door.',
+        recentHistoryText: '',
+        currentTrackers: const [],
+        recentMemoryEntries: const [],
+        gameClockHistory: const [
+          '14.09.0755 · day 0 · 12:11',
+          '28.09.0755 · day 14 · 12:11',
+        ],
+      );
+      expect(withEntries, contains('<clock_history>'));
+      expect(withEntries, contains('14.09.0755 · day 0 · 12:11'));
+      expect(withEntries, contains('28.09.0755 · day 14 · 12:11'));
+      expect(withEntries, contains('A timeskip already applied in a prior turn is consummated'));
+      expect(withEntries, contains('Treat <clock_history> as the authoritative recent trajectory'));
+
+      final withoutEntries = const StudioLedgerPrompt().build(
+        finalAssistantText: 'Lucy closes the door.',
+        recentHistoryText: '',
+        currentTrackers: const [],
+        recentMemoryEntries: const [],
+      );
+      expect(withoutEntries, isNot(contains('</clock_history>')));
+      expect(withoutEntries, isNot(contains('14.09.0755 · day 0 · 12:11')));
+    });
+
+    test('buildGameClockHistoryBlock is empty for no entries', () {
+      expect(
+        StudioLedgerPrompt.buildGameClockHistoryBlock(const []),
+        isEmpty,
+      );
+      expect(
+        StudioLedgerPrompt.buildGameClockHistoryBlock([
+          '29.09.0755 · day 15 · 08:00',
+        ]),
+        contains('29.09.0755 · day 15 · 08:00'),
+      );
+    });
   });
 
   group('Ledger reconciliation', () {

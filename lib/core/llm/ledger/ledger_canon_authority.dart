@@ -137,6 +137,39 @@ class LedgerCanonAuthority {
     ...context.manualControls,
   ];
 
+  /// Recent committed game-clock trajectory (oldest→newest), capped at [limit]
+  /// entries. Each entry is `DD.MM.YYYY · day N · HH:MM`. Fed into the ledger
+  /// prompt so the model sees that a prior timeskip already happened and where
+  /// the clock currently stands — preventing a timeskip from being re-applied
+  /// or time from being over-advanced on later turns.
+  Future<List<String>> loadRecentGameClock(
+    String sessionId, {
+    int limit = 5,
+  }) async {
+    final snaps = await snapshotRepo.getBySessionId(sessionId);
+    final committed = snaps.where((s) => s.committed).toList().reversed;
+    final out = <String>[];
+    for (final s in committed) {
+      String? date;
+      String? day;
+      String? time;
+      for (final t in s.trackers) {
+        if (t.name == 'world:date') {
+          date = t.value;
+        } else if (t.name == 'world:day') {
+          day = t.value;
+        } else if (t.name == 'world:time') {
+          time = t.value;
+        }
+      }
+      if (date != null && time != null) {
+        out.add('$date · day ${day ?? '?'} · $time');
+      }
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
   Future<Character> _loadSourceCharacter(String sessionId) async {
     final session = await chatRepo.getById(sessionId);
     if (session == null) {

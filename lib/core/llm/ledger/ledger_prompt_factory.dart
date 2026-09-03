@@ -23,6 +23,7 @@ class LedgerPromptFactory {
     Character? character,
     Map<String, String> entityAliases = const {},
     StudioLedgerEngine engine = StudioLedgerEngine.currentReconciled,
+    List<String> gameClockHistory = const [],
   }) {
     if (engine == StudioLedgerEngine.legacyTurnOnly) {
       return _promptBuilder.buildLegacyTurnOnly(
@@ -31,6 +32,7 @@ class LedgerPromptFactory {
         currentTrackers: currentTrackers,
         recentMemoryEntries: recentMemoryEntries,
         focalUserName: macroCtx?.userName ?? '',
+        gameClockHistory: gameClockHistory,
       );
     }
     final hasActiveLedgerBlocks = ledgerBlocks.any(
@@ -49,6 +51,7 @@ class LedgerPromptFactory {
         character: character,
         entityAliases: entityAliases,
         focalUserName: macroCtx?.userName ?? '',
+        gameClockHistory: gameClockHistory,
       );
     }
 
@@ -69,7 +72,7 @@ $cardSection$entitySection<current_state>
 $trackerBlock
 </current_state>
 
-<existing_keys>
+${_clockBlock(gameClockHistory)}<existing_keys>
 $keyCatalog
 </existing_keys>
 
@@ -138,7 +141,14 @@ Game clock (world:time, world:date, world:day):
 - The game clock only moves FORWARD. Never rewind time; flashbacks and memories
   stay in prose without touching world:time. When time passes midnight, advance
   world:day (day 0 is the first day of the story) and world:date.
-- Do not invent time skips that the narrative does not support.''';
+- Do not invent time skips that the narrative does not support.
+- A timeskip already applied in a prior turn is consummated: it advances the
+  clock once and the new world:date/day stand from then on. Do not re-apply the
+  same timeskip on a later turn, and do not advance the clock for time the
+  narrative does not actually spend. Unless the user explicitly requests a NEW
+  timeskip, advance only by the hours/minutes the narrated events require.
+  Treat the <clock_history> block as the authoritative recent trajectory — its
+  newest line is where the clock currently stands.''';
 
     return const StudioAuxPromptAssembler().assemble(
       blocks: ledgerBlocks,
@@ -163,4 +173,7 @@ Game clock (world:time, world:date, world:day):
         })
         .join('\n');
   }
+
+  String _clockBlock(List<String> gameClockHistory) =>
+      StudioLedgerPrompt.buildGameClockHistoryBlock(gameClockHistory);
 }
