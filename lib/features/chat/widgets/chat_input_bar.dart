@@ -16,6 +16,7 @@ import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../chat_provider.dart'
     show ImpersonationState, chatProvider, impersonationStateProvider;
+import '../composer_empty_action_provider.dart';
 import '../composer_pins_provider.dart';
 import '../quick_replies_provider.dart';
 import '../services/drawer_item_launcher.dart';
@@ -451,13 +452,8 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   /// open, each button can be dragged along the row and carries a down-arrow
   /// that drops it back into its tab. The other direction has no badge — a card
   /// dragged out of a drawer grid and dropped here is what puts it up.
-  Widget _buildActionRow() {
+  Widget _buildActionRow(bool editing) {
     final pins = ref.watch(composerPinsProvider).value ?? kDefaultComposerPins;
-    // Gated on the drawer being open as well as on edit mode: with the drawer
-    // shut there is nowhere for a demoted button to land, and no pencil on
-    // screen to explain the arrows.
-    final editing =
-        widget.isDrawerOpen && ref.watch(chatDrawerEditingProvider);
 
     final buttons = <Widget>[];
     for (var index = 0; index < pins.length; index++) {
@@ -576,6 +572,117 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
         child: content,
       ),
     );
+  }
+
+  /// The send button — and, while the composer is empty, the one slot in the
+  /// composer the drawer's pencil can retarget.
+  ///
+  /// With text in the box the button sends, mid-generation it stops, and edit
+  /// mode leaves both of those alone: neither is a preference. Empty, it has
+  /// always guessed — it impersonated the user — so that state is the one the
+  /// user gets to assign. Whatever [composerEmptyActionProvider] holds lends
+  /// the button its glyph and its tap; a card or a pinned button dropped on it
+  /// in edit mode is what puts it there, and the undo badge hands the
+  /// impersonation back.
+  ///
+  /// Only the empty state goes dead in edit mode, for the reason the row's
+  /// buttons all do: a tap that both retargets and fires would be a trap.
+  /// Sending and stopping stay live, since neither is what the drop is aimed
+  /// at.
+  Widget _buildSendButton({
+    required bool isGenerating,
+    required bool hasContent,
+    required bool editing,
+  }) {
+    final emptyPin = ref.watch(composerEmptyActionProvider).value;
+    // Null once the thing it points at is gone — a deleted quick reply, a tool
+    // with no chat to open against. The button falls back to impersonation
+    // rather than wearing a glyph that does nothing.
+    final emptyAction = emptyPin == null ? null : _resolvePin(emptyPin);
+
+    final button = _SendBtn(
+      icon: isGenerating
+          ? Icons.stop_rounded
+          : hasContent
+          ? (_guidanceMode && _controller.text.trim().isEmpty
+                ? Icons.check_rounded
+                : Icons.send_rounded)
+          : (emptyAction?.icon ?? Icons.account_circle_rounded),
+      batterySaver: widget.batterySaver,
+      onTap: editing && !isGenerating && !hasContent
+          ? null
+          : () {
+              if (isGenerating) {
+                widget.onStop?.call();
+              } else if (widget.isEditingMessage) {
+                return;
+              } else if (hasContent) {
+                _handleSend();
+              } else if (emptyAction?.onTap != null) {
+                emptyAction!.onTap!();
+              } else {
+                final guidance =
+                    _guidanceMode &&
+                        _guidanceController.text.trim().isNotEmpty
+                    ? _guidanceController.text.trim()
+                    : null;
+                widget.onImpersonate?.call(guidance);
+              }
+            },
+    );
+    if (!editing) return button;
+
+    final content = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        button,
+        // Reset, not the row's demote arrow: an assignment here never took the
+        // card out of its tab, so there is nothing to send back — only a
+        // default to restore.
+        if (emptyPin != null)
+          Positioned(
+            top: -6,
+            right: -6,
+            child: MagicCardBadge(
+              icon: Icons.undo,
+              color: context.cs.primary,
+              tooltip: 'composer_empty_action_reset'.tr(),
+              size: 18,
+              onTap: _resetEmptyAction,
+            ),
+          ),
+      ],
+    );
+
+    return Tooltip(
+      // The slot is invisible the moment anything is typed, so the hint is the
+      // only thing that says a drop lands here at all.
+      message: 'composer_empty_action_hint'.tr(),
+      preferBelow: false,
+      child: DragTarget<ComposerPin>(
+        onWillAcceptWithDetails: (details) => details.data != emptyPin,
+        onAcceptWithDetails: (details) => _assignEmptyAction(details.data),
+        // Scale rather than a ring: a border would grow the 40px circle and
+        // shove the row it shares a baseline with.
+        builder: (context, candidate, _) => AnimatedScale(
+          duration: const Duration(milliseconds: 120),
+          scale: candidate.isEmpty ? 1.0 : 1.15,
+          child: content,
+        ),
+      ),
+    );
+  }
+
+  /// Points the empty composer's button at [pin]. The pin keeps its place in
+  /// the drawer or the row — see [composerEmptyActionProvider].
+  void _assignEmptyAction(ComposerPin pin) {
+    Haptics.mediumImpact();
+    unawaited(ref.read(composerEmptyActionProvider.notifier).assign(pin));
+  }
+
+  void _resetEmptyAction() {
+    Haptics.mediumImpact();
+    unawaited(ref.read(composerEmptyActionProvider.notifier).reset());
   }
 
   void _unpin(ComposerPin pin) {
@@ -835,6 +942,10 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
         widget.isGenerating ||
         widget.isGeneratingImage ||
         widget.isPostGenRunning;
+    // Gated on the drawer being open as well as on edit mode: with the drawer
+    // shut there is nowhere for a demoted button to land, nothing on screen to
+    // drag into the send button, and no pencil to explain the badges.
+    final editing = widget.isDrawerOpen && ref.watch(chatDrawerEditingProvider);
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -979,33 +1090,12 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
               children: [
                 // Expanded, so a row long enough to overflow scrolls instead of
                 // shoving the send button off the screen.
-                Expanded(child: _buildActionRow()),
+                Expanded(child: _buildActionRow(editing)),
                 const SizedBox(width: 8),
-                _SendBtn(
-                  icon: isGenerating
-                      ? Icons.stop_rounded
-                      : hasContent
-                      ? (_guidanceMode && _controller.text.trim().isEmpty
-                            ? Icons.check_rounded
-                            : Icons.send_rounded)
-                      : Icons.account_circle_rounded,
-                  batterySaver: widget.batterySaver,
-                  onTap: () {
-                    if (isGenerating) {
-                      widget.onStop?.call();
-                    } else if (widget.isEditingMessage) {
-                      return;
-                    } else if (hasContent) {
-                      _handleSend();
-                    } else {
-                      final guidance =
-                          _guidanceMode &&
-                              _guidanceController.text.trim().isNotEmpty
-                          ? _guidanceController.text.trim()
-                          : null;
-                      widget.onImpersonate?.call(guidance);
-                    }
-                  },
+                _buildSendButton(
+                  isGenerating: isGenerating,
+                  hasContent: hasContent,
+                  editing: editing,
                 ),
               ],
             ),

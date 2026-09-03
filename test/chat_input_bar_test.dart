@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/features/chat/composer_empty_action_provider.dart';
+import 'package:glaze_flutter/features/chat/composer_pins_provider.dart';
+import 'package:glaze_flutter/features/chat/state/chat_drawer_editing_provider.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_input_bar.dart';
 import 'package:glaze_flutter/features/chat/widgets/input_bar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,12 +28,16 @@ void main() {
       void Function(String? guidance)? onImpersonate,
       VoidCallback? onStop,
       bool acceptSend = true,
+      bool isDrawerOpen = false,
+      VoidCallback? onMagicDrawer,
     }) {
       sentMessages = [];
       return ProviderScope(
         child: MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
+              isDrawerOpen: isDrawerOpen,
+              onMagicDrawer: onMagicDrawer,
               onSend: (text) async {
                 sentMessages.add(text);
                 return acceptSend;
@@ -233,6 +240,104 @@ void main() {
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
         'the new one',
       );
+    });
+
+    testWidgets('the empty composer impersonates when nothing is assigned', (
+      tester,
+    ) async {
+      var impersonateCalls = 0;
+      await tester.pumpWidget(
+        buildChatInputBar(onImpersonate: (_) => impersonateCalls++),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byIcon(Icons.account_circle_rounded), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.account_circle_rounded));
+
+      expect(impersonateCalls, 1);
+    });
+
+    testWidgets('an assigned action takes over the empty composer', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({
+        ComposerEmptyActionNotifier.storageKey: 'action:guidance',
+      });
+      var impersonateCalls = 0;
+      await tester.pumpWidget(
+        buildChatInputBar(onImpersonate: (_) => impersonateCalls++),
+      );
+      await tester.pumpAndSettle();
+
+      // The assignment lends the button its glyph, so the state is readable
+      // without tapping it.
+      expect(find.byIcon(Icons.account_circle_rounded), findsNothing);
+      final sendButton = find.ancestor(
+        of: find.byIcon(ComposerAction.guidance.icon),
+        matching: find.byType(InkWell),
+      );
+      expect(sendButton, findsOneWidget);
+
+      await tester.tap(sendButton);
+      await tester.pumpAndSettle();
+
+      expect(impersonateCalls, 0);
+      // Guidance mode opened: the steering field is the composer's second box.
+      expect(find.byType(TextField), findsNWidgets(2));
+    });
+
+    testWidgets('a stored action this build cannot resolve impersonates', (
+      tester,
+    ) async {
+      // A quick reply that has since been deleted resolves to nothing. The
+      // button falls back rather than going dead.
+      SharedPreferences.setMockInitialValues({
+        ComposerEmptyActionNotifier.storageKey: 'reply:qr-gone',
+      });
+      var impersonateCalls = 0;
+      await tester.pumpWidget(
+        buildChatInputBar(onImpersonate: (_) => impersonateCalls++),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.account_circle_rounded));
+
+      expect(impersonateCalls, 1);
+    });
+
+    testWidgets('edit mode kills the empty tap but not send or stop', (
+      tester,
+    ) async {
+      var impersonateCalls = 0;
+      var stopCalls = 0;
+      await tester.pumpWidget(
+        buildChatInputBar(
+          isDrawerOpen: true,
+          onMagicDrawer: () {},
+          onImpersonate: (_) => impersonateCalls++,
+          onStop: () => stopCalls++,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ChatInputBar)),
+      );
+      container.read(chatDrawerEditingProvider.notifier).state = true;
+      await tester.pumpAndSettle();
+
+      // A tap that both retargets the slot and fires it would be a trap.
+      await tester.tap(find.byIcon(Icons.account_circle_rounded));
+      await tester.pump();
+      expect(impersonateCalls, 0);
+
+      // Sending is not what the drop is aimed at, so it stays live.
+      await tester.enterText(find.byType(TextField).first, 'still sends');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pumpAndSettle();
+      expect(sentMessages, ['still sends']);
+      expect(stopCalls, 0);
     });
 
     testWidgets('image generation stop button remains tappable', (

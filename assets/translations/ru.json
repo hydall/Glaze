@@ -285,6 +285,8 @@
   "composer_action_attach": "Прикрепить изображение",
   "composer_action_fullscreen": "Полноэкранный редактор",
   "composer_action_guidance": "Направление",
+  "composer_empty_action_hint": "Перетащите сюда действие, чтобы изменить кнопку отправки при пустом поле ввода",
+  "composer_empty_action_reset": "Вернуть действие по умолчанию (имперсонация)",
   "btn_reset": "Сбросить",
   "action_new_session": "Новая сессия",
   "action_rename": "Переименовать",
