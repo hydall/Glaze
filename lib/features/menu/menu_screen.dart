@@ -12,6 +12,7 @@ import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../core/models/chat_message.dart';
 import '../chat/widgets/triggered_items_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
+import '../../core/services/generation_notification_service.dart';
 import '../../core/state/dev_mode_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
@@ -131,6 +132,50 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
       return;
     }
     open(id);
+  }
+
+  /// Posts a message notification on demand and reports what the OS did with
+  /// it. Delivery depends on platform state the app cannot read back — a
+  /// revoked permission, a drawable the notification plugin cannot resolve, a
+  /// channel the user silenced — and every one of those failures is otherwise
+  /// invisible: the reply simply arrives with no notification and no error.
+  Future<void> _sendTestNotification() async {
+    final service = GenerationNotificationService.instance;
+    if (!service.notificationsSupported) {
+      GlazeToast.show(context, 'notification_test_unsupported'.tr());
+      return;
+    }
+
+    final enabled = await service.areNotificationsEnabled();
+    if (!mounted) return;
+    if (enabled == false) {
+      GlazeToast.show(
+        context,
+        'notification_test_blocked'.tr(),
+        isError: true,
+        duration: 5000,
+      );
+      return;
+    }
+
+    final sent = await service.sendTestNotification(
+      'Glaze',
+      'menu_notifications_test'.tr(),
+    );
+    if (!mounted) return;
+    if (sent) {
+      GlazeToast.show(context, 'notification_test_sent'.tr());
+    } else {
+      GlazeToast.show(
+        context,
+        'notification_test_failed'.tr(
+          args: [service.lastNotificationError ?? '—'],
+        ),
+        isError: true,
+        duration: 8000,
+        showCopyButton: true,
+      );
+    }
   }
 
   Future<void> _openLink(String url) async {
@@ -270,6 +315,11 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                           builder: (_) => const SpinnerDemoScreen(),
                         ),
                       ),
+                    ),
+                    MenuItem(
+                      icon: Icons.notifications_active_outlined,
+                      label: 'menu_notifications_test'.tr(),
+                      onTap: _sendTestNotification,
                     ),
                     const MenuSubHeader('Connections sheets'),
                     MenuItem(

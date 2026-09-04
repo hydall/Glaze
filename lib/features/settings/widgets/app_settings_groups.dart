@@ -5,11 +5,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../../core/platform/system_settings.dart';
-import '../../../core/services/generation_notification_service.dart';
 import '../../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/theme/theme_provider.dart';
-import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../app_settings_provider.dart';
 import 'app_settings_behavior_groups.dart';
@@ -147,61 +145,8 @@ class _GeneralGroup extends SettingsGroup {
               onTap: SystemSettings.openNotificationSettings,
             ),
           ),
-        highlightIf(
-          'notifications_test',
-          highlightId,
-          MenuItem(
-            icon: Icons.notifications_active_outlined,
-            label: 'menu_notifications_test'.tr(),
-            onTap: () => _sendTestNotification(context),
-          ),
-        ),
       ],
     );
-  }
-
-  /// Posts a message notification on demand and reports what the OS did with
-  /// it. Delivery depends on platform state this app cannot read back — a
-  /// revoked permission, a resource the notification plugin cannot resolve, a
-  /// channel the user silenced — and every one of those failures is otherwise
-  /// invisible: the reply simply arrives with no notification and no error.
-  Future<void> _sendTestNotification(BuildContext context) async {
-    final service = GenerationNotificationService.instance;
-    if (!service.notificationsSupported) {
-      GlazeToast.show(context, 'notification_test_unsupported'.tr());
-      return;
-    }
-
-    final enabled = await service.areNotificationsEnabled();
-    if (!context.mounted) return;
-    if (enabled == false) {
-      GlazeToast.show(
-        context,
-        'notification_test_blocked'.tr(),
-        isError: true,
-        duration: 5000,
-      );
-      return;
-    }
-
-    final sent = await service.sendTestNotification(
-      'Glaze',
-      'menu_notifications_test'.tr(),
-    );
-    if (!context.mounted) return;
-    if (sent) {
-      GlazeToast.show(context, 'notification_test_sent'.tr());
-    } else {
-      GlazeToast.show(
-        context,
-        'notification_test_failed'.tr(
-          args: [service.lastNotificationError ?? '—'],
-        ),
-        isError: true,
-        duration: 8000,
-        showCopyButton: true,
-      );
-    }
   }
 }
 
