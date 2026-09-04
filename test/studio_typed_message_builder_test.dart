@@ -247,6 +247,37 @@ void main() {
     });
   });
 
+  test('two-pass functionPrefill collects the prefill instead of a tool call', () {
+    final prefills = <String>[];
+    final schema = <String, dynamic>{};
+    final messages = builder.buildAgentMessages(
+      agent: const StudioAgent(id: 'final'),
+      context: context,
+      config: config,
+      studioPreset: const StudioPreset(
+        id: 'studio',
+        blocks: [
+          StudioPresetBlock(
+            id: 'audit_prefill',
+            mode: 'functionPrefill',
+            prefillStyle: 'two-pass',
+            content: '<thinking>\nSafety audit passed.\n</thinking>',
+            injectionPoint: 'final',
+            order: 0,
+          ),
+        ],
+      ),
+      priorBriefs: const [],
+      isFinalResponse: true,
+      responseJsonSchema: schema,
+      twoPassPrefills: prefills,
+    );
+
+    expect(messages, isEmpty);
+    expect(schema, isEmpty);
+    expect(prefills, ['<thinking>\nSafety audit passed.\n</thinking>']);
+  });
+
   test('instruction blocks pass through author-set user/assistant roles', () {
     final messages = builder.buildAgentMessages(
       agent: const StudioAgent(id: 'final'),

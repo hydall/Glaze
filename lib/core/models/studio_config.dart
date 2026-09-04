@@ -80,9 +80,11 @@ abstract class StudioPresetBlock with _$StudioPresetBlock {
     /// Gemini 3.8, which requires a `thought_signature` on tool calls it did
     /// not author. `'structured'`: an OpenAI `response_format` / Gemini
     /// `responseMimeType`+`responseSchema` instead, so no tool call is ever
-    /// emitted. Only meaningful for `mode: 'functionPrefill'` blocks; carried
-    /// through preset import/export so it can be set per-preset without a code
-    /// change.
+    /// emitted. `'two-pass'`: the final generator runs twice — a quiet pass
+    /// produces the `<thinking>` block, a second pass writes the visible reply
+    /// seeded by that block. Only meaningful for `mode: 'functionPrefill'`
+    /// blocks; carried through preset import/export so it can be set per-preset
+    /// without a code change.
     @Default('tool') String prefillStyle,
     @Default(false) bool isStatic,
     @Default('pregen') String injectionPoint,
