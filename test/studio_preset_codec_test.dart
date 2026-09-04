@@ -138,6 +138,31 @@ void main() {
     expect(twice, once);
   });
 
+  test('function prefill style survives codec canonicalization', () {
+    final structured = StudioPresetCodec.canonicalizeBlock({
+      'id': 'structured_prefill',
+      'type': 'instruction',
+      'mode': 'functionPrefill',
+      'prefillStyle': 'structured',
+      'content': '<thinking>',
+    }).block;
+    final legacy = StudioPresetCodec.canonicalizeBlock({
+      'id': 'legacy_prefill',
+      'type': 'instruction',
+      'mode': 'functionPrefill',
+      'content': '<thinking>',
+    }).block;
+
+    expect(structured.prefillStyle, 'structured');
+    expect(
+      StudioPresetCodec.canonicalizeBlockJson(structured.toJson())[
+        'prefillStyle'
+      ],
+      'structured',
+    );
+    expect(legacy.prefillStyle, 'tool');
+  });
+
   test('canonical blocks keep their pipeline section on round-trip', () {
     const source = StudioPreset(
       id: 'pipeline-sections',
