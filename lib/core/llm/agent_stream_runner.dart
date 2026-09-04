@@ -151,7 +151,7 @@ class AgentStreamRunner {
         },
         onComplete: (text, finalReasoning, {rawResponseJson}) {
           idleTimer?.cancel();
-          if (shouldStream && accumulator.text.isEmpty && text.isNotEmpty) {
+          if (accumulator.text.isEmpty && text.isNotEmpty) {
             accumulator.consumeDelta(text, reasoningDelta: finalReasoning);
           }
           final effectiveText = accumulator.text.trimLeft();
@@ -179,7 +179,7 @@ class AgentStreamRunner {
             final accumulatedText = effectiveText.isEmpty && text.isNotEmpty
                 ? text.trim()
                 : effectiveText;
-            final finalText = shouldStream && accumulatedText.isNotEmpty
+            final finalText = accumulatedText.isNotEmpty
                 ? accumulatedText
                 : text.trim();
             final reasoningText = isFinalResponse

@@ -418,9 +418,15 @@ class StudioAgentExecutor {
       userName: context.macroContext.userName,
       onFinalResponseUpdate: onFinalResponseUpdate,
     );
+    final secondReasoning = answer.reasoning.trim();
+    final combinedReasoning = [
+      thinkingText,
+      if (secondReasoning.isNotEmpty && secondReasoning != thinkingText)
+        secondReasoning,
+    ].join('\n\n---\n\n');
     return AgentRunResult(
       text: answer.text,
-      reasoning: thinkingText,
+      reasoning: combinedReasoning,
       rawResponseJson: answer.rawResponseJson,
     );
   }

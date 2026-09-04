@@ -9,10 +9,17 @@ import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 
 class _FakeTransport implements ChatTransport {
-  _FakeTransport({this.delay, this.waitForCancellation = false});
+  _FakeTransport({
+    this.delay,
+    this.waitForCancellation = false,
+    this.completedText = 'complete response',
+    this.completedReasoning,
+  });
 
   final Duration? delay;
   final bool waitForCancellation;
+  final String completedText;
+  final String? completedReasoning;
   ChatTransportRequest? request;
   bool cancelled = false;
 
@@ -31,7 +38,7 @@ class _FakeTransport implements ChatTransport {
       return;
     }
     await Future<void>.delayed(delay!);
-    onComplete?.call('complete response', null);
+    onComplete?.call(completedText, completedReasoning);
   }
 
   @override
@@ -173,6 +180,43 @@ void main() {
     expect(request.messages.single['content'], contains('hidden reasoning'));
     expect(request.messages.single['content'], isNot(contains('<think>')));
   });
+
+  test(
+    'non-streaming inline reasoning tags are split out of the reply',
+    () async {
+      final transport = _FakeTransport(
+        delay: Duration.zero,
+        completedText: '<audit>step analysis</audit>actual reply',
+        completedReasoning: null,
+      );
+      final runner = AgentStreamRunner((_) => transport);
+
+      final result = await runner.run(
+        agent: _agent,
+        messages: const [
+          {'role': 'user', 'content': 'hi'},
+        ],
+        resolved: const ResolvedAgentConfig(
+          endpoint: 'https://example.com',
+          apiKey: 'key',
+          model: 'model',
+          protocol: 'custom_chat_completion',
+          stream: false,
+          reasoningTagStart: '<audit>',
+          reasoningTagEnd: '</audit>',
+        ),
+        sessionId: 'session',
+        isFinalResponse: true,
+        cancelToken: CancelToken(),
+        timeoutMs: 100,
+        tagStart: '<audit>',
+        tagEnd: '</audit>',
+      );
+
+      expect(result.text, 'actual reply');
+      expect(result.reasoning, 'step analysis');
+    },
+  );
 
   test('timeout cancels the in-flight transport request', () async {
     final transport = _FakeTransport(waitForCancellation: true);
