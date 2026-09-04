@@ -113,9 +113,10 @@ class StudioMessageBuilder {
 
     // Blocks flagged `appendToLastMessage` are merged into the last user-role
     // history message instead of being emitted on their own (mirrors the
-    // classic non-Studio pipeline — see `applyAppendToLastMessage` in
-    // `prompt_builder.dart`). Their macros are expanded once here so the merged
-    // copy is identical to what a plain instruction block would have emitted.
+    // classic non-Studio pipeline — see `applyAppendToLastMessage` in the
+    // ordinary prompt builder). Their macros are expanded once here so the
+    // merged copy is identical to what a plain instruction block would have
+    // emitted.
     final appendableEntries = <({String name, String content})>[];
     for (final block in blocks) {
       if (block.type != StudioBlockType.instruction) continue;
@@ -558,9 +559,10 @@ class StudioMessageBuilder {
 
   /// Appends the expanded contents of preset blocks flagged
   /// `appendToLastMessage` to the last user-role history message, mirroring the
-  /// classic `applyAppendToLastMessage` in `prompt_builder.dart`. Studio history
-  /// messages are not flagged `isHistory`, so the last user turn is located by
-  /// `role` alone. No-op when there are no appendable entries or no user turn.
+  /// classic `applyAppendToLastMessage` in the ordinary prompt builder. Studio
+  /// history messages are not flagged `isHistory`, so the last user turn is
+  /// located by `role` alone. No-op when there are no appendable entries or no
+  /// user turn.
   List<PromptMessage> _applyAppendToLastMessage(
     List<PromptMessage> history,
     List<({String name, String content})> appendableEntries,
