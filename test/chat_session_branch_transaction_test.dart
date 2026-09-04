@@ -308,9 +308,27 @@ void main() {
           .read(_serviceProvider)
           .branchSession('c1', current, 1);
 
-      expect(branch.id, '${branch.characterId}_0');
-      expect(branch.characterId, isNot('c1'));
-      expect(branch.sessionIndex, 0);
+      // No rewrite ran in the source session, so the branch keeps its card
+      // and is just the character's next session.
+      expect(branch.characterId, 'c1');
+      expect(branch.id, 'c1_2');
+      expect(branch.sessionIndex, 2);
+      expect(
+        await container.read(characterRepoProvider).getAll(),
+        hasLength(1),
+      );
+      expect(
+        await container
+            .read(characterRevisionRepoProvider)
+            .getForCharacter('c1'),
+        isEmpty,
+      );
+      expect(
+        await container
+            .read(sessionCanonCheckpointRepoProvider)
+            .getForSession(branch.id),
+        isEmpty,
+      );
       expect(branch.messages.map((message) => message.id), ['m0', 'm1']);
       expect(
         (await container.read(chatRepoProvider).getById(branch.id))?.id,
@@ -319,7 +337,7 @@ void main() {
       expect(
         (await container.read(characterRepoProvider).getById('c1'))!
             .currentSessionIndex,
-        0,
+        2,
       );
       expect(
         (await container.read(chatRepoProvider).getById('c1_1'))!
@@ -332,14 +350,9 @@ void main() {
       final baseline = await container
           .read(characterSessionBaselineRepoProvider)
           .getBySessionId(branch.id);
-      final branchRoot =
-          (await container
-                  .read(characterRevisionRepoProvider)
-                  .getForCharacter(branch.characterId))
-              .single;
-      expect(baseline?.baselineHash, branchRoot.revisionHash);
-      expect(baseline?.baselineCardJson, branchRoot.snapshotJson);
-      expect(baseline?.characterId, branch.characterId);
+      expect(baseline?.baselineHash, 'baseline-hash');
+      expect(baseline?.baselineCardJson, '{"name":"baseline"}');
+      expect(baseline?.characterId, 'c1');
       expect(
         baseline?.cardUpdatePolicy,
         CharacterCardUpdatePolicy.pinnedBaseline,
@@ -506,6 +519,89 @@ void main() {
     )..where((row) => row.sessionId.equals('c1_0'))).get();
     expect(sourceManifests, hasLength(4));
     expect(await manifests.getVariationAcceptances('c1_0'), hasLength(2));
+  });
+
+  test('branch forks the card for a session-owned variant', () async {
+    await container
+        .read(characterRepoProvider)
+        .put(
+          const Character(
+            id: 'c1',
+            name: 'Character',
+            currentSessionIndex: 0,
+            variantGroupId: 'group',
+            variantName: 'Session 1',
+            variantOrder: 1,
+          ),
+        );
+    final current = ChatSession(
+      id: 'c1_0',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: [_message('m0'), _message('m1')],
+    );
+    await container.read(chatRepoProvider).put(current);
+
+    final branch = await container
+        .read(_serviceProvider)
+        .branchSession('c1', current, 0);
+
+    // The variant is the source session's own card: a shared one would let a
+    // rewrite in the branch edit the card the source session is still using.
+    expect(branch.characterId, isNot('c1'));
+    expect(branch.id, '${branch.characterId}_0');
+    final forked = await container
+        .read(characterRepoProvider)
+        .getById(branch.characterId);
+    expect(forked?.variantGroupId, 'group');
+    expect(forked?.variantOrder, 2);
+    expect(
+      (await container
+              .read(sessionCanonCheckpointRepoProvider)
+              .getForSession(branch.id))
+          .single
+          .sequence,
+      0,
+    );
+  });
+
+  test('branch forks the card for an evolved lorebook entry', () async {
+    final current = ChatSession(
+      id: 'c1_0',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: [_message('m0'), _message('m1')],
+    );
+    await container.read(chatRepoProvider).put(current);
+    await db
+        .into(db.sessionLorebookEvolutionRows)
+        .insert(
+          SessionLorebookEvolutionRowsCompanion.insert(
+            chatSessionId: current.id,
+            lorebookId: 'book',
+            entryId: 'entry',
+            baseContent: 'base',
+            baseContentHash: CardCanonicalizer.scalarSha256('base'),
+            content: 'evolved',
+            contentHash: CardCanonicalizer.scalarSha256('evolved'),
+            createdAt: 1,
+            updatedAt: 2,
+          ),
+        );
+
+    final branch = await container
+        .read(_serviceProvider)
+        .branchSession('c1', current, 0);
+
+    expect(branch.characterId, isNot('c1'));
+    final overlay = await container
+        .read(sessionLorebookEvolutionRepoProvider)
+        .getByTarget(
+          sessionId: branch.id,
+          lorebookId: 'book',
+          entryId: 'entry',
+        );
+    expect(overlay?.content, 'evolved');
   });
 
   test('branch roots card and lore at latest surviving checkpoint', () async {

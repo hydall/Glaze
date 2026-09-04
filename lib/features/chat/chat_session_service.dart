@@ -244,6 +244,40 @@ class ChatSessionService {
     });
   }
 
+  /// Inserts a branch that keeps the source card: a plain extra session on
+  /// that character, carrying the retained slice instead of a fresh greeting.
+  ///
+  /// Runs inside [branchSession]'s transaction, so it claims the index the
+  /// same way [_insertNewSession] does — insert-if-absent, stepping forward
+  /// while the id is taken — and moves the character's current session onto
+  /// the branch the user is about to be sent to.
+  Future<ChatSession> _insertBranchSession({
+    required Character character,
+    required ChatSession source,
+    required List<ChatMessage> retainedMessages,
+    required Map<String, String> sessionVars,
+  }) async {
+    final repo = _ref.read(chatRepoProvider);
+    final charRepo = _ref.read(characterRepoProvider);
+    var index = await _nextSessionIndex(character.id);
+    while (true) {
+      final session = ChatSession(
+        id: '${character.id}_$index',
+        characterId: character.id,
+        sessionIndex: index,
+        messages: retainedMessages,
+        sessionVars: sessionVars,
+        authorsNote: source.authorsNote,
+        updatedAt: currentTimestampSeconds(),
+      );
+      if (await repo.insertIfAbsent(session)) {
+        await charRepo.setCurrentSessionIndex(character.id, index);
+        return session;
+      }
+      index++;
+    }
+  }
+
   Future<ChatSession> branchSession(
     String charId,
     ChatSession current,
@@ -272,21 +306,39 @@ class ChatSessionService {
       if (character == null) {
         throw StateError('Character ${durableSource.characterId} not found');
       }
-      final branchResult = await _ref
-          .read(chatSessionBranchRepoProvider)
-          .createInTransaction(
-            sourceCharacter: character,
-            sourceSession: durableSource,
-            retainedMessages: durableSource.messages.sublist(
-              0,
-              durableIndex + 1,
-            ),
-            sessionVars: {
-              ...current.sessionVars,
-              'branchedAt': DateTime.now().millisecondsSinceEpoch.toString(),
-            },
+      final retainedMessages = durableSource.messages.sublist(
+        0,
+        durableIndex + 1,
+      );
+      final sessionVars = {
+        ...current.sessionVars,
+        'branchedAt': DateTime.now().millisecondsSinceEpoch.toString(),
+      };
+      // A branch only needs a card of its own once the Card Rewriter can have
+      // moved this session's card away from the character it points at. With
+      // no rewrite behind it the branch is a plain extra session on the same
+      // card, and the first rewrite in either session forks the card itself.
+      final branchRepo = _ref.read(chatSessionBranchRepoProvider);
+      final forksCard = await branchRepo.requiresCardForkInTransaction(
+        sourceCharacter: character,
+        sourceSessionId: durableSource.id,
+      );
+      final branchResult = forksCard
+          ? await branchRepo.createInTransaction(
+              sourceCharacter: character,
+              sourceSession: durableSource,
+              retainedMessages: retainedMessages,
+              sessionVars: sessionVars,
+            )
+          : null;
+      final branch =
+          branchResult?.session ??
+          await _insertBranchSession(
+            character: character,
+            source: durableSource,
+            retainedMessages: retainedMessages,
+            sessionVars: sessionVars,
           );
-      final branch = branchResult.session;
       final messageIds = branch.messages.map((message) => message.id).toSet();
       await _ref
           .read(characterSessionBaselineRepoProvider)
@@ -294,8 +346,10 @@ class ChatSessionService {
             fromSessionId: current.id,
             toSessionId: branch.id,
             characterId: branch.characterId,
-            baselineCardJson: branchResult.rootSnapshotJson,
-            baselineHash: branchResult.rootRevisionHash,
+            // Null keeps the source session's own baseline evidence, which is
+            // exactly the card an unforked branch inherits.
+            baselineCardJson: branchResult?.rootSnapshotJson,
+            baselineHash: branchResult?.rootRevisionHash,
           );
       await _ref
           .read(memoryBookRepoProvider)
@@ -332,18 +386,21 @@ class ChatSessionService {
             toSessionId: branch.id,
             messageIds: messageIds,
           );
-      final root = await _ref
-          .read(sessionCanonCheckpointRepoProvider)
-          .getLatest(branch.id);
-      await _ref
-          .read(chatSessionBranchRepoProvider)
-          .copyCanonTransitionsInTransaction(
-            sourceSessionId: current.id,
-            branchSessionId: branch.id,
-            branchCharacterId: branch.characterId,
-            branchRevisionHash: root!.characterRevisionHash,
-            sourceCheckpointSequence: branchResult.sourceCheckpointSequence,
-          );
+      // Only a forked branch has a canon timeline to inherit: an unforked one
+      // branches a session that never applied a rewrite, so there is neither a
+      // root checkpoint nor a transition to copy.
+      if (branchResult != null) {
+        final root = await _ref
+            .read(sessionCanonCheckpointRepoProvider)
+            .getLatest(branch.id);
+        await branchRepo.copyCanonTransitionsInTransaction(
+          sourceSessionId: current.id,
+          branchSessionId: branch.id,
+          branchCharacterId: branch.characterId,
+          branchRevisionHash: root!.characterRevisionHash,
+          sourceCheckpointSequence: branchResult.sourceCheckpointSequence,
+        );
+      }
       await _ref
           .read(ledgerReconciliationCheckpointRepoProvider)
           .copyForSessionBranch(

@@ -36,6 +36,33 @@ class ChatSessionBranchRepo {
   final SessionCanonCheckpointRepo _checkpointRepo;
   final SessionLorebookEmbeddingJobRepo _embeddingJobRepo;
 
+  /// Whether a branch of [sourceSessionId] needs its own card variant.
+  ///
+  /// It does once the session's card can differ from the source character:
+  /// a rewrite has already been applied here (a checkpoint past the root, or
+  /// a session lorebook overlay), or the card is a session-owned variant that
+  /// the next rewrite would edit in place — a variant shared by two sessions
+  /// would let one branch rewrite the other's card.
+  ///
+  /// Otherwise the branch is just another session on the same card: the first
+  /// rewrite in either session forks the root card on its own
+  /// (`ManualRewriteApplyRepo._forkSessionCharacter`), so forking here only
+  /// buries the character list under variants no rewrite ever touched.
+  Future<bool> requiresCardForkInTransaction({
+    required Character sourceCharacter,
+    required String sourceSessionId,
+  }) async {
+    if (sourceCharacter.variantOrder != 0) return true;
+    final checkpoints = await _checkpointRepo.getForSession(sourceSessionId);
+    if (checkpoints.any((checkpoint) => checkpoint.sequence > 0)) return true;
+    final overlay =
+        await (db.select(db.sessionLorebookEvolutionRows)
+              ..where((row) => row.chatSessionId.equals(sourceSessionId))
+              ..limit(1))
+            .getSingleOrNull();
+    return overlay != null;
+  }
+
   Future<ChatSessionBranchResult> createInTransaction({
     required Character sourceCharacter,
     required ChatSession sourceSession,
