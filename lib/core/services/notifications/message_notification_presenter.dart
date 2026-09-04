@@ -17,8 +17,8 @@ import '../../utils/platform_paths.dart';
 /// a single `_initialized` flag on the first `initialize()` call and dropped
 /// every notification for the rest of the process when that call threw, with
 /// nothing but a `debugPrint` to show for it — a silent, permanent outage.
-/// Here a failed init is retried on the next send, and a rich notification that
-/// the platform rejects falls back to a plain one.
+/// Here a failed init is retried on the next send, and a notification the
+/// platform rejects is re-posted in a simpler form that keeps the same icon.
 class MessageNotificationPresenter {
   MessageNotificationPresenter({FlutterLocalNotificationsPlugin? plugin})
     : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
@@ -27,7 +27,12 @@ class MessageNotificationPresenter {
   static const channelName = 'New Messages';
   static const channelDescription = 'Notifications for new chat messages';
 
-  /// Android small-icon candidates in preference order.
+  /// The envelope, carried over from the Vue app. Every notification this
+  /// plugin posts in Glaze is a new-message notification, so it is both the
+  /// default registered at init and the per-notification override.
+  static const _androidMessageIcon = 'new_message';
+
+  /// Android small-icon candidates in preference order, the envelope first.
   ///
   /// `flutter_local_notifications` resolves an icon by *name* through
   /// `Resources.getIdentifier(name, "drawable", context.getPackageName())` and
@@ -36,16 +41,17 @@ class MessageNotificationPresenter {
   /// per-channel `applicationIdSuffix`, a renamed drawable — and it used to
   /// abort `initialize()` outright. Trying several names means one broken
   /// resource costs the icon, not the notification.
+  ///
+  /// `ic_stat_icon_config_sample` is the generation spinner the foreground
+  /// service uses; it sits here only as a fallback that is known to exist, and
+  /// must never be the first choice — a new message showing a refresh arrow is
+  /// exactly the confusion this ordering avoids.
   static const _androidIconCandidates = <String>[
+    _androidMessageIcon,
     'ic_stat_icon_config_sample',
-    'new_message',
     'transparent_splash_icon',
     'launch_background',
   ];
-
-  /// Small icon for the message notification itself, overriding the default one
-  /// picked at init. Dropped for the rest of the session if Android rejects it.
-  static const _androidMessageIcon = 'new_message';
 
   // Windows toasts are addressed by an Application User Model ID; the GUID
   // identifies the COM activation callback. Both are per-install identities, so
@@ -65,6 +71,7 @@ class MessageNotificationPresenter {
   bool _androidMessageIconRejected = false;
   int _initAttempts = 0;
   String? _lastError;
+  String? _lastDeliveredForm;
 
   /// How many times initialization may be re-attempted before it is treated as
   /// permanently broken. Retrying at all is what recovers from a failure that
@@ -76,6 +83,12 @@ class MessageNotificationPresenter {
   /// the notification self-test in settings so a platform-side refusal is
   /// visible instead of living in `debugPrint`.
   String? get lastError => _lastError;
+
+  /// Which form of the notification the OS actually accepted on the last
+  /// successful send — the self-test reports it, because a step-down to
+  /// "plain" is the visible sign that this device refuses the messaging style
+  /// or the avatar.
+  String? get lastDeliveredForm => _lastDeliveredForm;
 
   /// Platforms with a notification backend in `flutter_local_notifications`.
   /// Web is excluded — Glaze does not target it (see CLAUDE.md).
@@ -217,12 +230,15 @@ class MessageNotificationPresenter {
 
   /// Posts one message notification. Returns whether it reached the OS.
   ///
-  /// Two attempts: the rich notification (messaging style, sender avatar,
-  /// dedicated small icon), then a plain title+body one. The rich form pulls in
-  /// a decoded avatar bitmap and a name-resolved drawable, either of which the
-  /// platform can reject for a notification that is otherwise perfectly
-  /// postable — the fallback is what makes a rejected avatar cost the avatar
-  /// rather than the notification.
+  /// Three attempts, each dropping the part most likely to have been refused:
+  /// the full notification, then the same without the sender avatar, then a
+  /// plain title+body one. The avatar is a file the platform decodes into a
+  /// bitmap and the messaging style is an OEM-sensitive layout, so either can
+  /// sink a notification that is otherwise perfectly postable — stepping down
+  /// makes a rejected avatar cost the avatar rather than the message.
+  ///
+  /// Every step keeps the envelope icon: a fallback the user cannot tell apart
+  /// from a normal notification is the point.
   Future<bool> show({
     required int id,
     required String title,
@@ -234,36 +250,53 @@ class MessageNotificationPresenter {
     if (!isSupported) return false;
 
     final avatar = _existingAvatarPath(avatarPath);
-    if (await _post(
-      id: id,
-      title: title,
-      body: body,
-      payload: payload,
-      details: _richDetails(
+    // Built on demand, not up front: an attempt can mark the small icon
+    // rejected, and a later step has to be constructed after that to leave the
+    // icon out rather than repeat the rejection.
+    final attempts = <(String, NotificationDetails Function())>[
+      if (avatar != null)
+        (
+          'rich',
+          () => _richDetails(
+            title: title,
+            body: body,
+            groupKey: groupKey,
+            avatar: avatar,
+          ),
+        ),
+      (
+        avatar == null ? 'rich' : 'rich, no avatar',
+        () => _richDetails(
+          title: title,
+          body: body,
+          groupKey: groupKey,
+          avatar: null,
+        ),
+      ),
+      ('plain', () => _plainDetails(groupKey: groupKey)),
+    ];
+
+    for (final (form, buildDetails) in attempts) {
+      if (await _post(
+        id: id,
         title: title,
         body: body,
-        groupKey: groupKey,
-        avatar: avatar,
-      ),
-    )) {
-      return true;
+        payload: payload,
+        details: buildDetails(),
+      )) {
+        _lastDeliveredForm = form;
+        return true;
+      }
+      // An unresolvable small icon is the one rejection that repeats for every
+      // send, so remember it and stop asking for that icon. Anything else (a
+      // bad avatar on this one message) stays a per-send step-down.
+      if (!kIsWeb &&
+          Platform.isAndroid &&
+          (_lastError?.contains('invalid_icon') ?? false)) {
+        _androidMessageIconRejected = true;
+      }
     }
-
-    // An unresolvable small icon is the one rejection that will repeat for
-    // every send, so remember it and stop asking for that icon. Anything else
-    // (a bad avatar on this one message) stays a per-send fallback.
-    if (!kIsWeb &&
-        Platform.isAndroid &&
-        (_lastError?.contains('invalid_icon') ?? false)) {
-      _androidMessageIconRejected = true;
-    }
-    return _post(
-      id: id,
-      title: title,
-      body: body,
-      payload: payload,
-      details: _plainDetails(groupKey: groupKey),
-    );
+    return false;
   }
 
   Future<bool> _post({
@@ -355,6 +388,7 @@ class MessageNotificationPresenter {
                 channelDescription: channelDescription,
                 importance: Importance.high,
                 priority: Priority.high,
+                icon: _androidMessageIconRejected ? null : _androidMessageIcon,
                 autoCancel: true,
                 groupKey: groupKey,
                 category: AndroidNotificationCategory.message,

@@ -164,7 +164,12 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
     );
     if (!mounted) return;
     if (sent) {
-      GlazeToast.show(context, 'notification_test_sent'.tr());
+      GlazeToast.show(
+        context,
+        'notification_test_sent'.tr(
+          args: [service.lastDeliveredNotificationForm ?? '—'],
+        ),
+      );
     } else {
       GlazeToast.show(
         context,

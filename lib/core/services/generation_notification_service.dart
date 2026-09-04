@@ -110,6 +110,10 @@ class GenerationNotificationService {
   /// Why the last message notification failed to reach the OS, if it did.
   String? get lastNotificationError => _presenter.lastError;
 
+  /// Which form of the notification the OS accepted last — "plain" means this
+  /// device refused the messaging style or the sender avatar.
+  String? get lastDeliveredNotificationForm => _presenter.lastDeliveredForm;
+
   /// Whether this platform has a notification backend at all.
   bool get notificationsSupported => _presenter.isSupported;
 
