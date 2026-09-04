@@ -344,10 +344,13 @@ class StudioAgentExecutor {
   /// Two-pass prefill: the final generator runs twice. Pass 1 is a quiet
   /// ask that produces the internal `<thinking>` block (plain text — no
   /// synthetic tool call, no JSON schema, so it survives Gemini 3.8's
-  /// `thought_signature` requirement). Pass 2 seeds that block back into the
-  /// conversation as a prior assistant turn and asks for the visible reply
-  /// only. The produced reasoning is returned as `AgentRunResult.reasoning`
-  /// so it still surfaces in the UI.
+  /// `thought_signature` requirement). Both passes run through the final
+  /// generator config (`isFinalResponse: true`) so they hit the final model
+  /// and its reasoning settings — a controller-lane pass would resolve the
+  /// pre-gen model instead. Pass 2 seeds the block back into the conversation
+  /// as a prior assistant turn and asks for the visible reply only. The
+  /// produced reasoning is returned as `AgentRunResult.reasoning` so it still
+  /// surfaces in the UI.
   Future<AgentRunResult> _runTwoPassGenerator({
     required StudioAgent agent,
     required StudioContext context,
@@ -378,7 +381,7 @@ class StudioAgentExecutor {
       messages: thinkingMessages,
       apiConfig: apiConfig,
       sessionId: sessionId,
-      isFinalResponse: false,
+      isFinalResponse: true,
       cancelToken: cancelToken,
       apiConfigId: apiConfigId,
       turnConfig: turnConfig,
