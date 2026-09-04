@@ -805,19 +805,38 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// Waits for the keep-alive WebView to finish initializing, then scrolls to
   /// and flashes the message that a tapped notification points at. Mirrors
   /// Vue's openChat(msgId) → scrollToAnchor + search-highlight behaviour.
+  ///
+  /// A notification tap also selects the session the message landed in, and
+  /// that switch is asynchronous. So readiness is not just "the WebView is up":
+  /// the target message has to be in the session currently loaded, or the
+  /// scroll would run against the chat that was open before the switch and
+  /// quietly do nothing.
   Future<void> _scrollToTargetMessage(String messageId) async {
+    const tick = Duration(milliseconds: 100);
     for (var i = 0; i < 100; i++) {
       if (!mounted) return;
       final st = _webViewStateKey.currentState;
-      if (st != null && st.isReady) {
-        // Let the initializer's opening scroll-to-bottom settle before
-        // retargeting, otherwise the two scrolls fight each other.
-        await Future<void>.delayed(const Duration(milliseconds: 400));
-        if (!mounted) return;
-        await st.scrollToMessage(messageId, highlight: true);
-        return;
+      if (st == null || !st.isReady) {
+        await Future<void>.delayed(tick);
+        continue;
       }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      final loaded =
+          ref
+              .read(chatProvider(widget.charId))
+              .value
+              ?.messages
+              .any((m) => m.id == messageId) ??
+          false;
+      if (!loaded) {
+        await Future<void>.delayed(tick);
+        continue;
+      }
+      // Let the initializer's opening scroll-to-bottom settle before
+      // retargeting, otherwise the two scrolls fight each other.
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      if (!mounted) return;
+      await st.scrollToMessage(messageId, highlight: true);
+      return;
     }
   }
 

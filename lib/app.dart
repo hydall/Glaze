@@ -232,7 +232,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     _navSub = GenerationNotificationService.instance.navigationStream.listen((
       data,
     ) {
-      if (mounted) _openChatFromNotification(data);
+      if (mounted) unawaited(_openChatFromNotification(data));
     });
   }
 
@@ -240,19 +240,43 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     final data = GenerationNotificationService.instance
         .consumePendingNotificationData();
     if (data != null && mounted) {
-      _openChatFromNotification(data);
+      unawaited(_openChatFromNotification(data));
     }
   }
 
-  /// Opens the chat for a tapped notification, carrying the target message id
-  /// so the chat can scroll to and flash it (mirrors Vue's openChat msgId).
-  void _openChatFromNotification(NotificationNavigationData data) {
+  /// Opens the chat for a tapped notification: the *session* the message landed
+  /// in, scrolled to and flashing that message (mirrors Vue's openChat msgId).
+  ///
+  /// The payload carries a session id, while the route selects a session by its
+  /// index, so the id is resolved through the repo first. Without it the tap
+  /// opened whichever session that character last had active — for a reply that
+  /// arrived in another session, the wrong chat with no message to scroll to.
+  Future<void> _openChatFromNotification(
+    NotificationNavigationData data,
+  ) async {
     final msgId = data.msgId;
+    final sessionId = data.sessionId;
+
+    int? sessionIndex;
+    if (sessionId != null && sessionId.isNotEmpty) {
+      try {
+        final session = await ref.read(chatRepoProvider).getById(sessionId);
+        sessionIndex = session?.sessionIndex;
+      } catch (error, stackTrace) {
+        debugPrint(
+          'NOTIF: could not resolve session $sessionId — $error\n$stackTrace',
+        );
+      }
+      if (!mounted) return;
+    }
+
+    final query = <String, String>{
+      if (sessionIndex != null) 'session': '$sessionIndex',
+      if (msgId != null && msgId.isNotEmpty) 'msg': msgId,
+    };
     final uri = Uri(
       path: '/chat/${data.charId}',
-      queryParameters: (msgId != null && msgId.isNotEmpty)
-          ? {'msg': msgId}
-          : null,
+      queryParameters: query.isEmpty ? null : query,
     );
     context.push(uri.toString());
   }

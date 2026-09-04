@@ -244,6 +244,21 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
         const ['notifications', 'уведомления'],
         groupKey: 'settings_group_general',
       ),
+    row(
+      'notifications_test',
+      'menu_notifications_test',
+      null,
+      Icons.notifications_active_outlined,
+      const [
+        'notifications',
+        'test',
+        'уведомления',
+        'тест',
+        'проверка',
+        'не приходят',
+      ],
+      groupKey: 'settings_group_general',
+    ),
     // ── Advanced ────────────────────────────────────────────────────────────
     MenuSearchEntry(
       title: 'experimental_features_title'.tr(),

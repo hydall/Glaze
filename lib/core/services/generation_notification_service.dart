@@ -5,13 +5,13 @@ import 'dart:ui';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart'
-    hide NotificationVisibility;
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart'
+    show NotificationResponse;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../platform/haptics.dart';
-import '../utils/platform_paths.dart';
+import 'notifications/message_notification_presenter.dart';
 
 class NotificationNavigationData {
   final String charId;
@@ -67,6 +67,12 @@ class PostGenerationForegroundLease {
   }
 }
 
+/// Decides when the user should be told a reply landed, and keeps the Android
+/// foreground service alive while one is being generated.
+///
+/// Presentation lives in [MessageNotificationPresenter]; this class owns the
+/// policy around it — app lifecycle, which chat is on screen, and the
+/// foreground/wake-lock leases the generation pipeline takes out.
 class GenerationNotificationService {
   GenerationNotificationService._();
   static final GenerationNotificationService instance =
@@ -74,20 +80,16 @@ class GenerationNotificationService {
 
   static const _generationChannelId = 'glaze_generation';
   static const _generationChannelName = 'Generation';
-  static const _messageChannelId = 'glaze_message';
-  static const _messageChannelName = 'New Messages';
   static const _iosAudioChannel = MethodChannel(
     'com.hydall.glaze/background_audio',
   );
 
-  final FlutterLocalNotificationsPlugin _notifications =
-      FlutterLocalNotificationsPlugin();
+  MessageNotificationPresenter _presenter = MessageNotificationPresenter();
   final StreamController<NotificationNavigationData> _navigationController =
       StreamController<NotificationNavigationData>.broadcast();
   final StreamController<void> _activeContextChanges =
       StreamController<void>.broadcast();
 
-  bool _initialized = false;
   int _foregroundHoldCount = 0;
   int _generationLeaseCount = 0;
   Future<void> _foregroundTransition = Future<void>.value();
@@ -105,6 +107,19 @@ class GenerationNotificationService {
 
   bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
+  /// Why the last message notification failed to reach the OS, if it did.
+  String? get lastNotificationError => _presenter.lastError;
+
+  /// Whether this platform has a notification backend at all.
+  bool get notificationsSupported => _presenter.isSupported;
+
+  /// Swaps in a fake presenter so the notification *policy* — which reply
+  /// warrants telling the user — can be tested without a platform channel.
+  @visibleForTesting
+  void debugSetPresenter(MessageNotificationPresenter presenter) {
+    _presenter = presenter;
+  }
+
   /// Stable notification ID in range 1..2147483646, mirrors Vue stableIdFromString.
   int _stableId(String str) {
     int hash = 0;
@@ -116,105 +131,44 @@ class GenerationNotificationService {
   }
 
   Future<void> init() async {
-    if (!_isMobile) return;
-
-    // Resource name only — flutter_local_notifications resolves it via
-    // Resources.getIdentifier(name, "drawable", pkg), which rejects the
-    // "@drawable/" XML-reference prefix (returns 0 → init throws and aborts
-    // channel setup, leaving _initialized=false).
-    const androidSettings = AndroidInitializationSettings(
-      'ic_stat_icon_config_sample',
-    );
-    const iosSettings = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-    const settings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
-    );
-
-    try {
-      await _notifications.initialize(
-        settings: settings,
-        onDidReceiveNotificationResponse: _onNotificationTapped,
-      );
-      _initialized = true;
-    } catch (e, st) {
-      // Local notifications (message alerts) failed to init, but keep going:
-      // the foreground generation channel is owned by flutter_foreground_task
-      // and must still be configured below regardless.
-      debugPrint('NOTIF: initialize failed: $e\n$st');
-    }
-
-    try {
-      if (!kIsWeb && Platform.isAndroid) {
-        final androidPlugin = _notifications
-            .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin
-            >();
-        if (androidPlugin != null) {
-          await androidPlugin.createNotificationChannel(
-            const AndroidNotificationChannel(
-              _messageChannelId,
-              _messageChannelName,
-              description: 'Notifications for new chat messages',
-              // Mirror Vue sc_message_channel: importance High (sound + heads-up)
-              // with vibration enabled.
-              importance: Importance.high,
-              enableVibration: true,
-            ),
-          );
-          await androidPlugin.requestNotificationsPermission();
-        }
-      } else if (!kIsWeb && Platform.isIOS) {
-        final iosPlugin = _notifications
-            .resolvePlatformSpecificImplementation<
-              IOSFlutterLocalNotificationsPlugin
-            >();
-        await iosPlugin?.requestPermissions(
-          alert: true,
-          badge: true,
-          sound: true,
-        );
-      }
-
-      if (_isMobile) {
-        FlutterForegroundTask.init(
-          androidNotificationOptions: AndroidNotificationOptions(
-            channelId: _generationChannelId,
-            channelName: _generationChannelName,
-            channelDescription: 'Shows when the app is generating text',
-            // Mirror Vue: Importance.Min + silent so the ongoing generation
-            // notice never makes a sound or heads-up popup.
-            channelImportance: NotificationChannelImportance.MIN,
-            priority: NotificationPriority.MIN,
-            onlyAlertOnce: true,
-          ),
-          iosNotificationOptions: const IOSNotificationOptions(
-            showNotification: false,
-            playSound: false,
-          ),
-          foregroundTaskOptions: ForegroundTaskOptions(
-            eventAction: ForegroundTaskEventAction.nothing(),
-            allowWakeLock: true,
-            allowWifiLock: true,
-          ),
-        );
-      }
+    // Message notifications run everywhere Glaze ships, desktop included; the
+    // foreground service below is Android/iOS only.
+    if (_presenter.isSupported) {
+      await _presenter.ensureInitialized(onTap: _onNotificationTapped);
 
       // Restore pending data when app is cold-launched from a notification tap.
-      final launchDetails = await _notifications
-          .getNotificationAppLaunchDetails();
-      if (launchDetails?.didNotificationLaunchApp == true) {
-        final payload = launchDetails!.notificationResponse?.payload;
-        if (payload != null) _pendingNotificationData = _parsePayload(payload);
-      }
+      final payload = await _presenter.consumeLaunchPayload();
+      if (payload != null) _pendingNotificationData = _parsePayload(payload);
+    }
+
+    if (!_isMobile) return;
+
+    try {
+      FlutterForegroundTask.init(
+        androidNotificationOptions: AndroidNotificationOptions(
+          channelId: _generationChannelId,
+          channelName: _generationChannelName,
+          channelDescription: 'Shows when the app is generating text',
+          // Mirror Vue: Importance.Min + silent so the ongoing generation
+          // notice never makes a sound or heads-up popup.
+          channelImportance: NotificationChannelImportance.MIN,
+          priority: NotificationPriority.MIN,
+          onlyAlertOnce: true,
+        ),
+        iosNotificationOptions: const IOSNotificationOptions(
+          showNotification: false,
+          playSound: false,
+        ),
+        foregroundTaskOptions: ForegroundTaskOptions(
+          eventAction: ForegroundTaskEventAction.nothing(),
+          allowWakeLock: true,
+          allowWifiLock: true,
+        ),
+      );
 
       await _maybeRequestBatteryExemption();
     } catch (e, st) {
-      debugPrint('NOTIF: platform init failed: $e\n$st');
+      debugPrint('NOTIF: foreground task init failed: $e\n$st');
     }
   }
 
@@ -291,12 +245,19 @@ class GenerationNotificationService {
 
   /// Call when the user opens / focuses a chat screen to suppress redundant
   /// notifications for that character+session. Pass nulls when leaving.
+  ///
+  /// Focusing a chat also dismisses whatever notification that character has
+  /// already posted: the user is looking at the message it points to, so
+  /// leaving it in the shade would send them back to a chat they are in.
   void setActiveContext(String? charId, String? sessionId) {
     if (_activeCharId == charId && _activeSessionId == sessionId) return;
     _activeCharId = charId;
     _activeSessionId = sessionId;
     _activeContextRevision++;
     _activeContextChanges.add(null);
+    if (charId != null && charId.isNotEmpty) {
+      unawaited(clearMessageNotifications(charId));
+    }
   }
 
   Future<GenerationForegroundLease> acquireGenerationLease(
@@ -328,16 +289,21 @@ class GenerationNotificationService {
     // below). Gated by the user's incoming-message vibration toggle.
     await Haptics.messageReceived();
 
-    if (_isMobile && _lifecycleState != AppLifecycleState.resumed) {
-      await sendMessageNotification(
-        charName,
-        messagePreview ?? 'New message received',
-        avatarPath,
-        charId,
-        sessionId: sessionId,
-        msgId: msgId,
-      );
-    }
+    // No lifecycle gate here: a reply is worth a notification whenever the user
+    // is not looking at the chat it landed in, and being in *another* chat (or
+    // on the character list) counts. [sendMessageNotification] owns that check
+    // — it compares the target chat against the one on screen, which is the
+    // only comparison that distinguishes "already read it" from "did not see
+    // it". Gating on `AppLifecycleState.resumed` here made that check dead code
+    // and dropped every notification while Glaze was open.
+    await sendMessageNotification(
+      charName,
+      messagePreview ?? 'New message received',
+      avatarPath,
+      charId,
+      sessionId: sessionId,
+      msgId: msgId,
+    );
   }
 
   /// Acquire an additional foreground hold for detached post-generation work.
@@ -363,10 +329,10 @@ class GenerationNotificationService {
 
   bool get isGenerating => _generationLeaseCount > 0;
 
-  /// Shows a message notification. Suppressed while the app is foregrounded
-  /// and the user is viewing the same charId+sessionId (mirrors Vue.js
-  /// visibility + activeContext check).
-  Future<void> sendMessageNotification(
+  /// Shows a message notification. Suppressed only while the user is actually
+  /// looking at that chat — the app is resumed *and* the same charId+sessionId
+  /// is the one on screen (mirrors Vue.js visibility + activeContext check).
+  Future<bool> sendMessageNotification(
     String title,
     String body,
     String? avatarPath,
@@ -377,89 +343,69 @@ class GenerationNotificationService {
     if (_lifecycleState == AppLifecycleState.resumed) {
       if (_activeCharId == charId &&
           (sessionId == null || _activeSessionId == sessionId)) {
-        return;
+        return false;
       }
     }
-
-    if (!_isMobile || !_initialized) return;
-
-    try {
-      final notifId = _stableId(charId);
-      final payload = _buildPayload(charId, sessionId, msgId);
-      final resolvedAvatar = resolveGlazeFilePath(avatarPath);
-
-      final NotificationDetails details;
-      if (Platform.isAndroid) {
-        final personIcon =
-            resolvedAvatar != null && File(resolvedAvatar).existsSync()
-            ? BitmapFilePathAndroidIcon(resolvedAvatar)
-            : null;
-        final person = Person(name: title, icon: personIcon);
-        final messagingStyle = MessagingStyleInformation(
-          person,
-          messages: [Message(body, DateTime.now(), person)],
-          conversationTitle: title,
-        );
-        details = NotificationDetails(
-          android: AndroidNotificationDetails(
-            _messageChannelId,
-            _messageChannelName,
-            channelDescription: 'Notifications for new chat messages',
-            importance: Importance.high,
-            priority: Priority.high,
-            styleInformation: messagingStyle,
-            icon: 'new_message',
-            autoCancel: true,
-            groupKey: charId,
-            // Mirror Vue: messaging content type + public lock-screen
-            // visibility + vibration.
-            category: AndroidNotificationCategory.message,
-            visibility: NotificationVisibility.public,
-            enableVibration: true,
-          ),
-          iOS: const DarwinNotificationDetails(
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-          ),
-        );
-      } else {
-        final attachments =
-            resolvedAvatar != null && File(resolvedAvatar).existsSync()
-            ? [DarwinNotificationAttachment(resolvedAvatar)]
-            : <DarwinNotificationAttachment>[];
-        details = NotificationDetails(
-          iOS: DarwinNotificationDetails(
-            attachments: attachments,
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-          ),
-        );
-      }
-
-      await _notifications.show(
-        id: notifId,
-        title: title,
-        body: body,
-        notificationDetails: details,
-        payload: payload,
-      );
-    } catch (e) {
-      debugPrint('NOTIF: sendMessageNotification failed: $e');
-    }
+    return _post(
+      title: title,
+      body: body,
+      avatarPath: avatarPath,
+      charId: charId,
+      sessionId: sessionId,
+      msgId: msgId,
+    );
   }
+
+  /// Posts a notification for the user's own "test notification" action,
+  /// bypassing the on-screen-chat suppression. Returns whether it reached the
+  /// OS; on failure [lastNotificationError] says why.
+  Future<bool> sendTestNotification(String title, String body) => _post(
+    title: title,
+    body: body,
+    avatarPath: null,
+    charId: '__glaze_notification_self_test__',
+    sessionId: null,
+    msgId: null,
+    // No chat behind this one, so give the tap nothing to navigate to.
+    payloadOverride: '',
+  );
+
+  Future<bool> _post({
+    required String title,
+    required String body,
+    required String? avatarPath,
+    required String charId,
+    required String? sessionId,
+    required String? msgId,
+    String? payloadOverride,
+  }) async {
+    if (!_presenter.isSupported) return false;
+    // Retry initialization rather than staying dead for the process: a failure
+    // during startup (missing drawable, permission not yet granted) must not
+    // cost every notification afterwards.
+    if (!await _presenter.ensureInitialized(onTap: _onNotificationTapped)) {
+      return false;
+    }
+    return _presenter.show(
+      id: _stableId(charId),
+      title: title,
+      body: body,
+      payload: payloadOverride ?? _buildPayload(charId, sessionId, msgId),
+      groupKey: charId,
+      avatarPath: avatarPath,
+    );
+  }
+
+  /// Whether the OS currently lets Glaze post notifications (`null` where the
+  /// platform cannot answer). Used by the settings self-test to tell a blocked
+  /// app apart from a broken notification.
+  Future<bool?> areNotificationsEnabled() =>
+      _presenter.areNotificationsEnabled();
 
   /// Cancels delivered notifications for a character (e.g. when the user
   /// opens that chat). Mirrors Vue.js clearMessageNotifications.
-  Future<void> clearMessageNotifications(String charId) async {
-    if (!_isMobile) return;
-    try {
-      await _notifications.cancel(id: _stableId(charId));
-    } catch (e) {
-      debugPrint('NOTIF: clearMessageNotifications failed: $e');
-    }
-  }
+  Future<void> clearMessageNotifications(String charId) =>
+      _presenter.cancel(_stableId(charId));
 
   /// Returns and clears the notification data from the last tap — used to
   /// navigate on app launch from a background/terminated notification.

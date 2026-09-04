@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -59,6 +61,16 @@ class _SessionLifecycleTrackerState extends ConsumerState<SessionLifecycleTracke
       // Coming back to it is reading it — clear the dot (and restore the active
       // context, which suppresses redundant notifications).
       _syncActiveContext();
+      // `setActiveContext` only dismisses the character's notification when the
+      // context actually changes, and coming back to the same chat does not
+      // change it — clear it here so a reply the user has now read does not sit
+      // in the shade. Not folded into `_syncActiveContext`: that runs on every
+      // chatProvider emission, which during streaming is every chunk.
+      unawaited(
+        GenerationNotificationService.instance.clearMessageNotifications(
+          widget.charId,
+        ),
+      );
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _flushTime();
     }

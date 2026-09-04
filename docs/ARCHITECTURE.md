@@ -243,7 +243,9 @@ lib/
 │   │   ├── chat_import_export.dart   # Import/export individual chat sessions as JSONL
 │   │   ├── file_export_service.dart  # Platform-aware file export (file_selector / share)
 │   │   ├── deep_link_service.dart    # Listens for OAuth deep-link URIs
-│   │   ├── generation_notification_service.dart # Android foreground/background notifications
+│   │   ├── generation_notification_service.dart # When to notify: lifecycle, active chat, foreground leases
+│   │   ├── notifications/
+│   │   │   └── message_notification_presenter.dart # How to notify: plugin init + one notification, per platform
 │   │   ├── memory_prompt_presets.dart           # Built-in memory prompt templates
 │   │   └── onboarding_service.dart   # Completion check + showOnboarding (UI in features/onboarding/)
 │   ├── import/
