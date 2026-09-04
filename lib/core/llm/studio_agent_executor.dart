@@ -388,7 +388,10 @@ class StudioAgentExecutor {
       charName: context.macroContext.charName,
       userName: context.macroContext.userName,
     );
-    final thinkingText = thinking.text.trim();
+    final thinkingText = (thinking.reasoning.trim().isNotEmpty
+            ? thinking.reasoning
+            : thinking.text)
+        .trim();
     if (thinkingText.isEmpty) {
       return const AgentRunResult(text: '', reasoning: '');
     }
