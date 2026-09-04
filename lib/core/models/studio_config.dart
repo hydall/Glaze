@@ -74,6 +74,16 @@ abstract class StudioPresetBlock with _$StudioPresetBlock {
     @Default(0) int order,
     @Default('pregen') String section,
     @Default('direct') String mode,
+
+    /// How a `functionPrefill` block forces the start of the reply.
+    /// `'tool'` (default): the legacy synthetic `tool_calls` tail — breaks on
+    /// Gemini 3.8, which requires a `thought_signature` on tool calls it did
+    /// not author. `'structured'`: an OpenAI `response_format` / Gemini
+    /// `responseMimeType`+`responseSchema` instead, so no tool call is ever
+    /// emitted. Only meaningful for `mode: 'functionPrefill'` blocks; carried
+    /// through preset import/export so it can be set per-preset without a code
+    /// change.
+    @Default('tool') String prefillStyle,
     @Default(false) bool isStatic,
     @Default('pregen') String injectionPoint,
     @Default('') String sourceAgentId,

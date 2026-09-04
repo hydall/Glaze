@@ -288,6 +288,7 @@ class StudioAgentExecutor {
   }) async {
     final settings = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     final emittedLorebookClassifications = <String>{};
+    final responseJsonSchema = <String, dynamic>{};
     final messages = _messageBuilder.buildAgentMessages(
       agent: agent,
       context: context,
@@ -301,6 +302,7 @@ class StudioAgentExecutor {
       excludeReasoningFromContextBudget:
           settings.studioAgent.studioFinalExcludeReasoningFromContextBudget,
       emittedLorebookClassifications: emittedLorebookClassifications,
+      responseJsonSchema: responseJsonSchema,
     );
     onLorebookClassificationsBuilt?.call(emittedLorebookClassifications);
     onMessagesBuilt?.call(messages);
@@ -315,6 +317,7 @@ class StudioAgentExecutor {
       turnConfig: turnConfig,
       charName: context.macroContext.charName,
       userName: context.macroContext.userName,
+      responseJsonSchema: responseJsonSchema.isEmpty ? null : responseJsonSchema,
       onFinalResponseUpdate: onFinalResponseUpdate,
     );
   }

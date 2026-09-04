@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../utils/error_format.dart';
 import '../converters/gemini_messages.dart';
+import '../converters/structured_response.dart';
 import '../converters/thinking_budget.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
@@ -139,6 +140,11 @@ class GeminiChatTransport implements ChatTransport {
       generationConfig['thinkingConfig'] = thinkingConfig;
     }
 
+    if (request.responseJsonSchema != null) {
+      generationConfig['responseMimeType'] = 'application/json';
+      generationConfig['responseSchema'] = request.responseJsonSchema;
+    }
+
     final body = <String, dynamic>{
       'contents': converted.contents,
       'safetySettings': _safetyAllOff,
@@ -187,7 +193,7 @@ class GeminiChatTransport implements ChatTransport {
     for (var attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
         final built = buildRequest(request);
-        if (request.stream) {
+        if (request.stream && request.responseJsonSchema == null) {
           await _streamResponse(
             built.url,
             built.headers,
@@ -209,6 +215,7 @@ class GeminiChatTransport implements ChatTransport {
             omitReasoning:
                 !(request.showNativeReasoning ?? !request.omitReasoning),
             receiveTimeoutMs: request.receiveTimeoutMs,
+            unwrapStructured: request.responseJsonSchema != null,
           );
         }
         return; // success — no retry needed
@@ -386,6 +393,7 @@ class GeminiChatTransport implements ChatTransport {
     ChatTransportOnComplete? onComplete,
     bool omitReasoning = false,
     int? receiveTimeoutMs,
+    bool unwrapStructured = false,
   }) async {
     final response = await _dio.post<dynamic>(
       url,
@@ -443,8 +451,11 @@ class GeminiChatTransport implements ChatTransport {
       }
     }
 
+    final finalText = unwrapStructured
+        ? unwrapStructuredResponse(textBuf.toString())
+        : textBuf.toString();
     onComplete?.call(
-      textBuf.toString(),
+      finalText,
       reasoningBuf.isEmpty ? null : reasoningBuf.toString(),
       rawResponseJson: rawJson ?? jsonEncode(data),
     );

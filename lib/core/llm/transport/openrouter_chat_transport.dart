@@ -110,6 +110,7 @@ class OpenRouterChatTransport implements ChatTransport {
       cacheControlTtl: 'off',
       charName: input.charName,
       userName: input.userName,
+      responseJsonSchema: input.responseJsonSchema,
       extraRequestParameters: input.extraRequestParameters,
       captureContext: input.captureContext,
     );

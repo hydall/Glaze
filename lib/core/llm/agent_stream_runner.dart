@@ -48,6 +48,7 @@ class AgentStreamRunner {
     String? headerInline,
     String? charName,
     String? userName,
+    Map<String, dynamic>? responseJsonSchema,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
@@ -83,6 +84,7 @@ class AgentStreamRunner {
       temperatureOverride: temperatureOverride,
       charName: charName,
       userName: userName,
+      responseJsonSchema: responseJsonSchema,
     );
     final transport = _pickTransport(resolved.protocol);
     final startedAt = DateTime.now();
@@ -229,6 +231,7 @@ class AgentStreamRunner {
     double? temperatureOverride,
     String? charName,
     String? userName,
+    Map<String, dynamic>? responseJsonSchema,
   }) {
     final hasInlineReasoningTags =
         resolved.reasoningTagStart?.isNotEmpty == true &&
@@ -275,6 +278,7 @@ class AgentStreamRunner {
       promptPostProcessing: resolved.promptPostProcessing,
       charName: charName,
       userName: userName,
+      responseJsonSchema: responseJsonSchema,
       extraRequestParameters: resolved.extraRequestParameters,
       captureContext: LlmCaptureContext(
         stage: isFinalResponse

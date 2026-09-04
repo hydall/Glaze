@@ -52,6 +52,7 @@ class StudioMessageBuilder {
     int reasoningHistoryCount = 0,
     bool excludeReasoningFromContextBudget = false,
     Set<String>? emittedLorebookClassifications,
+    Map<String, dynamic>? responseJsonSchema,
   }) {
     final point = _blockExpander.injectionPointForRun(agent, isFinalResponse);
     final spec = StudioControllerOntology.specForAgent(agent);
@@ -368,7 +369,11 @@ class StudioMessageBuilder {
               )
               .trim();
           if (prefill.isNotEmpty) {
-            _addFunctionPrefillTail(messages, block.id, prefill);
+            if (block.prefillStyle == 'structured') {
+              _setStructuredPrefillSchema(block.id, prefill, responseJsonSchema);
+            } else {
+              _addFunctionPrefillTail(messages, block.id, prefill);
+            }
           }
           break;
         case 'agentResponse':
@@ -515,6 +520,32 @@ class StudioMessageBuilder {
       'tool_call_id': callId,
       'content': prefill,
     });
+  }
+
+  /// Sets [responseJsonSchema] (mutating the caller's map) to a strict JSON
+  /// schema that forces the model to begin its reply with [prefill] and then
+  /// continue in `content`. Used by `prefillStyle: 'structured'` blocks, which
+  /// avoid the synthetic tool-call entirely — Gemini 3.8 rejects the function
+  /// call for a missing `thought_signature`, while structured output carries
+  /// no such requirement. The transport unwraps the returned object back into
+  /// `prefix + content`.
+  void _setStructuredPrefillSchema(
+    String blockId,
+    String prefill,
+    Map<String, dynamic>? responseJsonSchema,
+  ) {
+    if (responseJsonSchema == null) return;
+    responseJsonSchema
+      ..clear()
+      ..addAll({
+        'type': 'object',
+        'properties': {
+          'prefix': {'type': 'string', 'enum': [prefill]},
+          'content': {'type': 'string'},
+        },
+        'required': ['prefix', 'content'],
+        'additionalProperties': false,
+      });
   }
 
   static final _standaloneClosingTag = RegExp(r'^</([A-Za-z][\w-]*)>$');
