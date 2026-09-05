@@ -668,19 +668,22 @@ converters). The eye button on the attachment
 and `buildFallbackPrompt` then drop every attachment from the prompt message.
 The bubble keeps rendering them either way — hiding affects the request only.
 
-### INV-PS1c: A message carries up to `maxMessageAttachments` images
+### INV-PS1c: A message carries any number of images
 
-The composer accepts at most `maxMessageAttachments` (4, in
-`lib/core/models/chat_message.dart`) images per message, from the file picker
-or the clipboard (Ctrl/Cmd+V, or the drawer's Paste card → `ClipboardImages`).
-Storage keeps them split — `ChatMessage.imagePath` is the first and
+The composer takes as many images per message as are handed to it — from the
+file picker, or from a paste (Ctrl/Cmd+V and the field's own selection
+toolbar, both routed through `ClipboardImages`). Nothing caps the count or the
+size; the composer offers no paste button of its own, because the system
+already offers one wherever a paste is possible.
+
+Storage keeps the attachments split — `ChatMessage.imagePath` is the first and
 `extraImagePaths` the rest — so a session written before multi-attach still
 renders; `ChatMessage.attachments` is the single list every reader uses, and
 `splitAttachments` is the only writer of the pair. One `imageHidden` flag
 covers the whole set (INV-PS1b), and the WebView renders it as one
-`.msg-image-attachment` block: a free-size picture for one, a tile grid for
-two to four (`renderer/image_embed.js` + the `.count-N` rules in
-`styles.css`). Raising the limit needs a matching grid case in both.
+`.msg-image-attachment` block: a free-size picture for one, a tile grid past
+that (`renderer/image_embed.js` + the `.count-N` rules in `styles.css`, with
+`.count-many` as the three-up fallback that grows downwards for any number).
 
 ### INV-PS2: Vector scan runs before keyword scan; keyword deduplicates vector
 

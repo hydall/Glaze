@@ -96,6 +96,11 @@
 }
 /* Three: one tall tile on the left, two stacked on the right. */
 .msg-image-attachment.count-3 img:first-child { grid-row: span 2; }
+/* Five or more: a three-up grid that grows downwards. The block has no aspect
+ * ratio of its own here — the rows come from the square tiles, so any number
+ * of pictures lays out without a case of its own. */
+.msg-image-attachment.count-many { grid-template-columns: repeat(3, 1fr); }
+.msg-image-attachment.count-many img { height: auto; aspect-ratio: 1 / 1; }
 
 .image-ctx-toggle {
   position: absolute;

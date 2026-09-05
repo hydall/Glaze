@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/models/chat_message.dart' show maxMessageAttachments;
 import '../../../core/platform/clipboard_images.dart';
 import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
@@ -16,7 +15,6 @@ import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glass_surface.dart';
-import '../../../shared/widgets/glaze_toast.dart';
 import '../chat_provider.dart'
     show ImpersonationState, chatProvider, impersonationStateProvider;
 import '../composer_empty_action_provider.dart';
@@ -60,7 +58,7 @@ class ChatInputBar extends ConsumerStatefulWidget {
 
   /// Sends the composed text together with its attachments. [imageDataUrls]
   /// holds one `data:` URL per attached image, in the order they were
-  /// attached, and never more than [maxMessageAttachments].
+  /// attached.
   final Future<bool> Function(
     String text,
     String? guidanceText,
@@ -163,8 +161,6 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   final _internalFocusNode = FocusNode();
 
   /// Images queued for the next message, in the order they were attached.
-  /// Capped at [maxMessageAttachments] — the chat bubble lays exactly that
-  /// many out as a grid.
   final List<ClipboardImage> _attachments = [];
   double _verticalDragDistance = 0;
 
@@ -199,8 +195,6 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
         widget.onMagicDrawer?.call();
       case ComposerAction.attach:
         unawaited(_pickImages());
-      case ComposerAction.paste:
-        unawaited(_pasteImagesFromClipboard());
       case ComposerAction.fullscreen:
         unawaited(_openFullscreenEditor());
       case ComposerAction.guidance:
@@ -219,23 +213,15 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     setState(() {});
   }
 
-  /// Free attachment slots left on the next message.
-  int get _remainingAttachmentSlots =>
-      maxMessageAttachments - _attachments.length;
-
   Future<void> _pickImages() async {
-    if (_atAttachmentLimit()) return;
     final result = await FilePicker.pickFiles(
       type: FileType.image,
       allowMultiple: true,
       withData: true,
     );
     if (result == null || result.files.isEmpty || !mounted) return;
-    final slots = _remainingAttachmentSlots;
     final picked = <ClipboardImage>[];
-    // Take only what still fits, so reading files the limit would drop is
-    // never paid for.
-    for (final file in result.files.take(slots)) {
+    for (final file in result.files) {
       var bytes = file.bytes;
       if (bytes == null && file.path != null) {
         try {
@@ -247,55 +233,18 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       if (bytes == null || bytes.isEmpty) continue;
       picked.add(ClipboardImage.fromBytes(bytes, sourcePath: file.path));
     }
-    if (!mounted) return;
-    _addAttachments(picked, droppedByLimit: result.files.length > slots);
+    if (!mounted || picked.isEmpty) return;
+    setState(() => _attachments.addAll(picked));
   }
 
   /// Attaches whatever images are on the clipboard. Answers false when there
-  /// were none, which is how the paste shortcut decides to fall through to the
-  /// ordinary text paste.
+  /// were none, which is how a paste decides to fall through to the ordinary
+  /// text paste.
   Future<bool> _pasteImagesFromClipboard() async {
-    final images = await ClipboardImages.read(limit: maxMessageAttachments);
+    final images = await ClipboardImages.read();
     if (!mounted || images.isEmpty) return false;
-    _addAttachments(images, droppedByLimit: false);
+    setState(() => _attachments.addAll(images));
     return true;
-  }
-
-  /// Appends [images] up to the limit. [droppedByLimit] reports that the
-  /// caller already had more on offer than it handed over, so the toast is
-  /// shown for a full selection as well as for an overflowing one.
-  void _addAttachments(
-    List<ClipboardImage> images, {
-    required bool droppedByLimit,
-  }) {
-    if (images.isEmpty) {
-      if (droppedByLimit) _warnAttachmentLimit();
-      return;
-    }
-    final accepted = images.take(_remainingAttachmentSlots).toList();
-    if (accepted.isNotEmpty) {
-      setState(() => _attachments.addAll(accepted));
-    }
-    if (droppedByLimit || accepted.length < images.length) {
-      _warnAttachmentLimit();
-    }
-  }
-
-  /// True — with the toast already shown — when there is no room left.
-  bool _atAttachmentLimit() {
-    if (_remainingAttachmentSlots > 0) return false;
-    _warnAttachmentLimit();
-    return true;
-  }
-
-  void _warnAttachmentLimit() {
-    if (!mounted) return;
-    GlazeToast.show(
-      context,
-      'chat_attachment_limit'.tr(
-        namedArgs: {'count': '$maxMessageAttachments'},
-      ),
-    );
   }
 
   void _removeAttachment(int index) {
@@ -355,6 +304,52 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     return defaultTargetPlatform == TargetPlatform.macOS
         ? keyboard.isMetaPressed
         : keyboard.isControlPressed;
+  }
+
+  /// The field's own selection toolbar, with **Paste** rewired to
+  /// [_handlePaste].
+  ///
+  /// This is the way in on touch: the system offers paste from the long-press
+  /// toolbar and from the keyboard's clipboard strip, and the stock handler
+  /// only ever inserts text. The item is added when Flutter left it out, which
+  /// it does whenever the clipboard holds no *text* — exactly the case an
+  /// image paste has to survive.
+  Widget _buildContextMenu(
+    BuildContext context,
+    EditableTextState editableTextState,
+  ) {
+    void paste() {
+      editableTextState.hideToolbar();
+      unawaited(_handlePaste());
+    }
+
+    final items = <ContextMenuButtonItem>[];
+    var rewired = false;
+    for (final item in editableTextState.contextMenuButtonItems) {
+      if (item.type == ContextMenuButtonType.paste) {
+        rewired = true;
+        items.add(
+          ContextMenuButtonItem(
+            type: ContextMenuButtonType.paste,
+            onPressed: paste,
+          ),
+        );
+      } else {
+        items.add(item);
+      }
+    }
+    if (!rewired && !widget.isEditingMessage) {
+      items.add(
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.paste,
+          onPressed: paste,
+        ),
+      );
+    }
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: editableTextState.contextMenuAnchors,
+      buttonItems: items,
+    );
   }
 
   Future<void> _handlePaste() async {
@@ -861,11 +856,6 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
         );
       case ComposerAction.attach:
         return _ResolvedPin(icon: action.icon, onTap: _pickImages);
-      case ComposerAction.paste:
-        return _ResolvedPin(
-          icon: action.icon,
-          onTap: () => unawaited(_pasteImagesFromClipboard()),
-        );
       case ComposerAction.fullscreen:
         return _ResolvedPin(icon: action.icon, onTap: _openFullscreenEditor);
       case ComposerAction.guidance:
@@ -1166,6 +1156,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                     child: TextField(
                       controller: _controller,
                       focusNode: _effectiveFocusNode,
+                      contextMenuBuilder: _buildContextMenu,
                       readOnly: widget.isEditingMessage || _isImpersonating,
                       canRequestFocus: !widget.isEditingMessage,
                       enableInteractiveSelection: !widget.isEditingMessage,
@@ -1245,8 +1236,9 @@ class _ResolvedPin {
 }
 
 /// The strip of queued attachments above the input. A single image keeps the
-/// roomy preview it always had; several become a row of square thumbnails, so
-/// four of them still fit a phone's width.
+/// roomy preview it always had; several become square thumbnails in one
+/// horizontally scrolling row — nothing caps how many can be queued, and a
+/// wrapping grid of them would push the composer off the screen.
 class _AttachedImagesPreview extends StatelessWidget {
   final List<ClipboardImage> attachments;
   final ValueChanged<int> onRemove;
@@ -1260,23 +1252,33 @@ class _AttachedImagesPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final single = attachments.length == 1;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (var i = 0; i < attachments.length; i++)
-            _AttachedImageThumb(
-              key: ObjectKey(attachments[i]),
-              imageBytes: attachments[i].bytes,
-              onRemove: () => onRemove(i),
-              border: border,
-              size: single ? 150 : 84,
-              fit: single ? BoxFit.contain : BoxFit.cover,
-            ),
-        ],
+    if (attachments.length == 1) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: _AttachedImageThumb(
+          key: ObjectKey(attachments.first),
+          imageBytes: attachments.first.bytes,
+          onRemove: () => onRemove(0),
+          border: border,
+          size: 150,
+          fit: BoxFit.contain,
+        ),
+      );
+    }
+    return SizedBox(
+      height: 84,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: attachments.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, i) => _AttachedImageThumb(
+          key: ObjectKey(attachments[i]),
+          imageBytes: attachments[i].bytes,
+          onRemove: () => onRemove(i),
+          border: border,
+          size: 84,
+          fit: BoxFit.cover,
+        ),
       ),
     );
   }

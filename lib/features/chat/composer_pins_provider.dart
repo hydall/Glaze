@@ -18,11 +18,6 @@ enum ComposerAction {
   /// Attaches an image to the next message.
   attach('attach', Icons.attach_file, 'composer_action_attach'),
 
-  /// Attaches whatever image is on the clipboard. Ctrl/Cmd+V does the same
-  /// thing from the keyboard; this is the way in on touch, where there is no
-  /// paste shortcut to press.
-  paste('paste', Icons.content_paste, 'composer_action_paste'),
-
   /// Opens the fullscreen composer.
   fullscreen('fullscreen', Icons.fullscreen, 'composer_action_fullscreen'),
 
@@ -135,15 +130,10 @@ class ComposerPin {
   String toString() => encode();
 }
 
-/// Actions that ship unpinned: they start as cards in the drawer's Actions tab
-/// and only reach the row if the user puts them there.
-const Set<ComposerAction> _unpinnedByDefault = {ComposerAction.paste};
-
 /// The row as shipped: the four composer actions, in the order the buttons had
 /// before the row became configurable.
 final List<ComposerPin> kDefaultComposerPins = [
-  for (final action in ComposerAction.values)
-    if (!_unpinnedByDefault.contains(action)) ComposerPin.action(action),
+  for (final action in ComposerAction.values) ComposerPin.action(action),
 ];
 
 /// Which buttons sit under the composer, in display order.

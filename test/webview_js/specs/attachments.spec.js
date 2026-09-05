@@ -45,7 +45,12 @@ async function attach(page, count, { hidden = false } = {}) {
         rows: style.gridTemplateRows,
         boxes: images.map((img) => {
           const rect = img.getBoundingClientRect();
-          return { width: Math.round(rect.width), height: Math.round(rect.height) };
+          return {
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+          };
         }),
       };
     },
@@ -100,22 +105,35 @@ test('four attachments form a 2x2 grid of equal tiles', async ({ page }) => {
   expect(built.display).toBe('grid');
   expect(built.columns.split(' ')).toHaveLength(2);
   expect(built.rows.split(' ')).toHaveLength(2);
+  const size = ({ width, height }) => ({ width, height });
   const [a, b, c, d] = built.boxes;
-  expect(b).toEqual(a);
-  expect(c).toEqual(a);
-  expect(d).toEqual(a);
+  expect(size(b)).toEqual(size(a));
+  expect(size(c)).toEqual(size(a));
+  expect(size(d)).toEqual(size(a));
+  // Two rows of two: the third tile drops below the first.
+  expect(c.y).toBeGreaterThan(a.y);
+  expect(b.x).toBeGreaterThan(a.x);
 });
 
-test('more attachments than the grid can lay out are dropped', async ({ page }) => {
+test('past four the grid goes three-up and keeps every picture', async ({ page }) => {
   const built = await attach(page, 7);
 
-  expect(built.images).toBe(4);
-  expect(built.className).toContain('count-4');
+  // Nothing caps the attachment count, so the block must lay out whatever it
+  // is handed rather than drop the overflow.
+  expect(built.images).toBe(7);
+  expect(built.className).toContain('count-many');
+  expect(built.columns.split(' ')).toHaveLength(3);
+  // Square tiles, three per row, wrapping onto as many rows as it takes.
+  const [a, b, c, d] = built.boxes;
+  expect(b.height).toBe(a.height);
+  expect(c.height).toBe(a.height);
+  expect(a.height).toBeCloseTo(a.width, 0);
+  expect(d.y).toBeGreaterThan(a.y);
 });
 
 test('the whole block carries one eye toggle, whatever the count', async ({ page }) => {
   expect((await attach(page, 1)).toggles).toBe(1);
-  expect((await attach(page, 4)).toggles).toBe(1);
+  expect((await attach(page, 9)).toggles).toBe(1);
 
   const dimmed = await attach(page, 4, { hidden: true });
   expect(dimmed.className).toContain('image-hidden');

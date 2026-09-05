@@ -6,8 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:glaze_flutter/core/models/chat_message.dart'
-    show maxMessageAttachments;
 import 'package:glaze_flutter/features/chat/composer_empty_action_provider.dart';
 import 'package:glaze_flutter/features/chat/composer_pins_provider.dart';
 import 'package:glaze_flutter/features/chat/state/chat_drawer_editing_provider.dart';
@@ -258,7 +256,9 @@ void main() {
         expect(find.byType(Image), findsNothing);
       });
 
-      testWidgets('a fifth paste is refused, not silently swallowed', (
+      // Nothing caps the composer: the message carries as many pictures as
+      // were pasted into it.
+      testWidgets('pasting keeps attaching past any round number', (
         tester,
       ) async {
         mockClipboard(image: png);
@@ -268,20 +268,45 @@ void main() {
         focusNode.requestFocus();
         await tester.pump();
 
-        for (var i = 0; i < 5; i++) {
+        for (var i = 0; i < 6; i++) {
           await pressPaste(tester);
         }
-        // The fifth paste raises the limit toast; let it expire so the test
-        // does not end on a pending timer.
-        await tester.pump(const Duration(seconds: 3));
-        await tester.pumpAndSettle();
 
-        expect(find.byType(Image), findsNWidgets(maxMessageAttachments));
+        expect(find.byType(Image), findsNWidgets(6));
 
         await tester.tap(find.byIcon(Icons.send_rounded));
         await tester.pump();
 
-        expect(sentAttachments.single, hasLength(maxMessageAttachments));
+        expect(sentAttachments.single, hasLength(6));
+      });
+
+      // The way in on touch. The stock Paste handler only ever inserts text,
+      // and Flutter drops the item entirely when the clipboard holds no text —
+      // so the composer's own toolbar has to carry one either way, and it has
+      // to attach the picture rather than paste its name.
+      testWidgets('the system Paste item attaches the clipboard image', (
+        tester,
+      ) async {
+        mockClipboard(image: png);
+        await tester.pumpWidget(buildChatInputBar(initialDraft: 'hi'));
+
+        final field = tester.widget<TextField>(find.byType(TextField));
+        final toolbar =
+            field.contextMenuBuilder!(
+                  tester.element(find.byType(EditableText)),
+                  tester.state<EditableTextState>(find.byType(EditableText)),
+                )
+                as AdaptiveTextSelectionToolbar;
+        final paste = toolbar.buttonItems!.where(
+          (item) => item.type == ContextMenuButtonType.paste,
+        );
+
+        expect(paste, hasLength(1));
+
+        paste.single.onPressed!();
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Image), findsOneWidget);
       });
     });
 

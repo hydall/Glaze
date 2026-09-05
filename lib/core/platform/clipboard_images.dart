@@ -38,11 +38,6 @@ class ClipboardImage {
 class ClipboardImages {
   ClipboardImages._();
 
-  /// Images larger than this are refused rather than base64-encoded into a
-  /// message: an attachment is stored inline in the session, so a 50 MB PNG
-  /// would be carried in every read of that chat.
-  static const int maxBytes = 12 * 1024 * 1024;
-
   static const Set<String> _imageExtensions = {
     '.png',
     '.jpg',
@@ -52,34 +47,27 @@ class ClipboardImages {
     '.bmp',
   };
 
-  /// Every image sitting on the clipboard right now, capped at [limit]. Empty
-  /// when the clipboard holds no image — which is the common case, so callers
-  /// use it to decide between "attach this" and "let the normal text paste
-  /// happen".
-  static Future<List<ClipboardImage>> read({int limit = 1}) async {
-    if (limit <= 0) return const [];
+  /// Every image sitting on the clipboard right now. Empty when it holds no
+  /// image — which is the common case, so callers use it to decide between
+  /// "attach this" and "let the normal text paste happen".
+  static Future<List<ClipboardImage>> read() async {
     final images = <ClipboardImage>[];
 
     final bitmap = await _readBitmap();
     if (bitmap != null) images.add(bitmap);
 
-    if (images.length < limit) {
-      for (final path in await _readFilePaths()) {
-        if (images.length >= limit) break;
-        final image = await _readImageFile(path);
-        if (image != null) images.add(image);
-      }
+    for (final path in await _readFilePaths()) {
+      final image = await _readImageFile(path);
+      if (image != null) images.add(image);
     }
 
-    return images.take(limit).toList(growable: false);
+    return images;
   }
 
   static Future<ClipboardImage?> _readBitmap() async {
     try {
       final bytes = await Pasteboard.image;
-      if (bytes == null || bytes.isEmpty || bytes.length > maxBytes) {
-        return null;
-      }
+      if (bytes == null || bytes.isEmpty) return null;
       return ClipboardImage.fromBytes(bytes);
     } catch (error) {
       debugPrint('[ClipboardImages] bitmap read failed: $error');
@@ -102,7 +90,6 @@ class ClipboardImages {
     try {
       final file = File(path);
       if (!await file.exists()) return null;
-      if (await file.length() > maxBytes) return null;
       final bytes = await file.readAsBytes();
       if (bytes.isEmpty) return null;
       return ClipboardImage.fromBytes(bytes, sourcePath: path);

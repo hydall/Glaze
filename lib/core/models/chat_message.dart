@@ -3,12 +3,6 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'chat_message.freezed.dart';
 part 'chat_message.g.dart';
 
-/// How many images one message may carry. The composer stops accepting
-/// attachments at this many, and the WebView lays them out as a grid up to
-/// exactly this count — raising it needs a matching grid case in
-/// `assets/chat_webview/renderer/image_embed.js` and `styles.css`.
-const int maxMessageAttachments = 4;
-
 class TriggeredEntry {
   final String id;
   final String name;
