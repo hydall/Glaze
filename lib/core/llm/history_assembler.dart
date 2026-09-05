@@ -34,7 +34,7 @@ class HistoryAssembler {
           sourceMessageId: msg.id,
           // The eye toggle on an attachment hides it from the model only —
           // the bubble keeps rendering it. Default is visible.
-          imagePath: msg.imageHidden ? null : msg.imagePath,
+          imagePaths: msg.imageHidden ? const [] : msg.attachments,
         ),
       );
     }
@@ -118,7 +118,12 @@ class PromptMessage {
   final String? blockName;
   final String? sourceMessageId;
   final String? reasoningContent;
-  final String? imagePath;
+
+  /// Every attachment carried by the message, in the order they were
+  /// attached. A message can hold several (the composer takes up to
+  /// [maxMessageAttachments]), and each becomes its own `image_url` content
+  /// part.
+  final List<String> imagePaths;
   final bool sendEmptyBlock;
 
   const PromptMessage({
@@ -133,11 +138,19 @@ class PromptMessage {
     this.blockName,
     this.sourceMessageId,
     this.reasoningContent,
-    this.imagePath,
+    this.imagePaths = const [],
     this.sendEmptyBlock = false,
   });
 
-  bool get hasImage => imagePath?.isNotEmpty == true;
+  bool get hasImage => imagePaths.any((path) => path.isNotEmpty);
+
+  /// The first attachment, for the callers that only ever show one.
+  String? get imagePath {
+    for (final path in imagePaths) {
+      if (path.isNotEmpty) return path;
+    }
+    return null;
+  }
 
   Map<String, dynamic> toApiMap() {
     if (!hasImage) return {'role': role, 'content': content};
@@ -145,10 +158,12 @@ class PromptMessage {
       'role': role,
       'content': [
         if (content.isNotEmpty) {'type': 'text', 'text': content},
-        {
-          'type': 'image_url',
-          'image_url': {'url': imagePath},
-        },
+        for (final path in imagePaths)
+          if (path.isNotEmpty)
+            {
+              'type': 'image_url',
+              'image_url': {'url': path},
+            },
       ],
     };
   }
@@ -165,7 +180,7 @@ class PromptMessage {
     'blockName': blockName,
     'sourceMessageId': sourceMessageId,
     'reasoningContent': reasoningContent,
-    'imagePath': imagePath,
+    'imagePaths': imagePaths,
     'sendEmptyBlock': sendEmptyBlock,
   };
 
@@ -181,9 +196,22 @@ class PromptMessage {
     blockName: json['blockName'] as String?,
     sourceMessageId: json['sourceMessageId'] as String?,
     reasoningContent: json['reasoningContent'] as String?,
-    imagePath: json['imagePath'] as String?,
+    imagePaths: _imagePathsFromJson(json),
     sendEmptyBlock: json['sendEmptyBlock'] as bool? ?? false,
   );
+}
+
+/// Reads the attachment list off a prompt-isolate payload.
+///
+/// `imagePath` is what a pre-multi-attach payload carries. Payloads are built
+/// and read in the same run, so that shape only matters while a build straddles
+/// the change — but a dropped attachment there is a request sent without the
+/// picture the user attached, so it is read anyway.
+List<String> _imagePathsFromJson(Map<String, dynamic> json) {
+  final paths = json['imagePaths'];
+  if (paths is List) return paths.whereType<String>().toList();
+  final single = json['imagePath'];
+  return single is String && single.isNotEmpty ? [single] : const [];
 }
 
 List<Map<String, dynamic>> buildApiMessages(

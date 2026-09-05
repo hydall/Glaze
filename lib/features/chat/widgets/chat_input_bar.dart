@@ -1,19 +1,22 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/models/chat_message.dart' show maxMessageAttachments;
+import '../../../core/platform/clipboard_images.dart';
 import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/glaze_toast.dart';
 import '../chat_provider.dart'
     show ImpersonationState, chatProvider, impersonationStateProvider;
 import '../composer_empty_action_provider.dart';
@@ -54,12 +57,16 @@ class ChatInputBar extends ConsumerStatefulWidget {
   final bool isPostGenRunning;
   final VoidCallback? onStop;
   final VoidCallback? onMagicDrawer;
+
+  /// Sends the composed text together with its attachments. [imageDataUrls]
+  /// holds one `data:` URL per attached image, in the order they were
+  /// attached, and never more than [maxMessageAttachments].
   final Future<bool> Function(
     String text,
     String? guidanceText,
-    String imageDataUrl,
+    List<String> imageDataUrls,
   )?
-  onSendWithImage;
+  onSendWithImages;
   final VoidCallback? onFullScreen;
 
   /// Triggered by the account-circle button when the composer is empty.
@@ -115,7 +122,7 @@ class ChatInputBar extends ConsumerStatefulWidget {
     this.isPostGenRunning = false,
     this.onStop,
     this.onMagicDrawer,
-    this.onSendWithImage,
+    this.onSendWithImages,
     this.onFullScreen,
     this.onImpersonate,
     this.virtualKeyboardSend = false,
@@ -154,8 +161,11 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   bool _guidanceMode = false;
   Timer? _debounce;
   final _internalFocusNode = FocusNode();
-  Uint8List? _attachedImageBytes;
-  String? _attachedImageDataUrl;
+
+  /// Images queued for the next message, in the order they were attached.
+  /// Capped at [maxMessageAttachments] — the chat bubble lays exactly that
+  /// many out as a grid.
+  final List<ClipboardImage> _attachments = [];
   double _verticalDragDistance = 0;
 
   /// True while an impersonation stream is filling the composer. The input is
@@ -188,7 +198,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       case ComposerAction.drawer:
         widget.onMagicDrawer?.call();
       case ComposerAction.attach:
-        unawaited(_pickImage());
+        unawaited(_pickImages());
       case ComposerAction.fullscreen:
         unawaited(_openFullscreenEditor());
       case ComposerAction.guidance:
@@ -207,33 +217,111 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     setState(() {});
   }
 
-  Future<void> _pickImage() async {
+  /// Free attachment slots left on the next message.
+  int get _remainingAttachmentSlots =>
+      maxMessageAttachments - _attachments.length;
+
+  Future<void> _pickImages() async {
+    if (_atAttachmentLimit()) return;
     final result = await FilePicker.pickFiles(
       type: FileType.image,
-      allowMultiple: false,
+      allowMultiple: true,
       withData: true,
     );
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    var bytes = file.bytes;
-    if (bytes == null && file.path != null) {
-      bytes = await File(file.path!).readAsBytes();
+    if (result == null || result.files.isEmpty || !mounted) return;
+    final slots = _remainingAttachmentSlots;
+    final picked = <ClipboardImage>[];
+    // Take only what still fits, so reading files the limit would drop is
+    // never paid for.
+    for (final file in result.files.take(slots)) {
+      var bytes = file.bytes;
+      if (bytes == null && file.path != null) {
+        try {
+          bytes = await File(file.path!).readAsBytes();
+        } catch (error) {
+          debugPrint('[ChatInputBar] attachment read failed: $error');
+        }
+      }
+      if (bytes == null || bytes.isEmpty) continue;
+      picked.add(ClipboardImage.fromBytes(bytes, sourcePath: file.path));
     }
-    if (bytes == null || !mounted) return;
-    final ext = (file.extension ?? 'png').toLowerCase();
-    final mime = (ext == 'jpg' || ext == 'jpeg') ? 'image/jpeg' : 'image/png';
-    final dataUrl = 'data:$mime;base64,${base64Encode(bytes)}';
-    setState(() {
-      _attachedImageBytes = bytes;
-      _attachedImageDataUrl = dataUrl;
-    });
+    if (!mounted) return;
+    _addAttachments(picked, droppedByLimit: result.files.length > slots);
   }
 
-  void _clearImage() {
-    setState(() {
-      _attachedImageBytes = null;
-      _attachedImageDataUrl = null;
-    });
+  /// Attaches whatever images are on the clipboard. Answers false when there
+  /// were none, which is how a paste decides to fall through to the ordinary
+  /// text paste.
+  Future<bool> _pasteImagesFromClipboard() async {
+    final images = await ClipboardImages.read(limit: maxMessageAttachments);
+    if (!mounted || images.isEmpty) return false;
+    _addAttachments(images, droppedByLimit: false);
+    return true;
+  }
+
+  /// A picture handed over by the on-screen keyboard — the clipboard chip and
+  /// the sticker/GIF pickers in Gboard and the rest.
+  ///
+  /// Those never reach the clipboard at all: the keyboard commits the content
+  /// straight into the field over the input connection, so neither a paste
+  /// shortcut nor the selection toolbar can see it. The engine hands the bytes
+  /// over here instead.
+  void _handleInsertedContent(KeyboardInsertedContent content) {
+    if (!mounted || widget.isEditingMessage) return;
+    final bytes = content.data;
+    if (bytes == null || bytes.isEmpty) {
+      // The engine could not read the content:// URI it was given. Nothing in
+      // Dart can open one either, so there is no fallback to try.
+      debugPrint(
+        '[ChatInputBar] keyboard content had no bytes: ${content.uri}',
+      );
+      return;
+    }
+    _addAttachments([
+      ClipboardImage.fromBytes(bytes, declaredMimeType: content.mimeType),
+    ], droppedByLimit: false);
+  }
+
+  /// Appends [images] up to the limit. [droppedByLimit] reports that the
+  /// caller already had more on offer than it handed over, so the toast is
+  /// shown for a full selection as well as for an overflowing one.
+  void _addAttachments(
+    List<ClipboardImage> images, {
+    required bool droppedByLimit,
+  }) {
+    if (images.isEmpty) {
+      if (droppedByLimit) _warnAttachmentLimit();
+      return;
+    }
+    final accepted = images.take(_remainingAttachmentSlots).toList();
+    if (accepted.isNotEmpty) {
+      setState(() => _attachments.addAll(accepted));
+    }
+    if (droppedByLimit || accepted.length < images.length) {
+      _warnAttachmentLimit();
+    }
+  }
+
+  /// True — with the toast already shown — when there is no room left.
+  bool _atAttachmentLimit() {
+    if (_remainingAttachmentSlots > 0) return false;
+    _warnAttachmentLimit();
+    return true;
+  }
+
+  void _warnAttachmentLimit() {
+    if (!mounted) return;
+    GlazeToast.show(
+      context,
+      'chat_attachment_limit'.tr(
+        namedArgs: {'count': '$maxMessageAttachments'},
+      ),
+    );
+  }
+
+  void _removeAttachment(int index) {
+    if (index < 0 || index >= _attachments.length) return;
+    setState(() => _attachments.removeAt(index));
   }
 
   @override
@@ -242,30 +330,130 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     if (old.enterToSend != widget.enterToSend ||
         old.isEditingMessage != widget.isEditingMessage ||
         old.focusNode != widget.focusNode) {
+      // A swapped-in host node leaves the old one holding a handler that
+      // closes over this State.
+      if (old.focusNode != widget.focusNode) old.focusNode?.onKeyEvent = null;
       _updateFocusNodeHandler();
     }
   }
 
   void _updateFocusNodeHandler() {
-    final fn = widget.focusNode;
     final effective = _effectiveFocusNode;
     effective.canRequestFocus = !widget.isEditingMessage;
     if (widget.isEditingMessage && effective.hasFocus) {
       effective.unfocus();
     }
-    if (fn == null || !widget.enterToSend) return;
-    fn.onKeyEvent = (node, event) {
-      if (widget.isEditingMessage) {
-        return KeyEventResult.ignored;
+    effective.onKeyEvent = _handleComposerKey;
+  }
+
+  /// Hardware-keyboard handling for the composer: Enter sends (host node only,
+  /// and only when the host asked for it), and Ctrl/Cmd+V pastes an image off
+  /// the clipboard when there is one.
+  KeyEventResult _handleComposerKey(FocusNode node, KeyEvent event) {
+    if (widget.isEditingMessage) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (_isPasteShortcut(event)) {
+      // The clipboard can only be read asynchronously, so the paste is taken
+      // over wholesale: an image is attached, and anything else is inserted
+      // as text by hand. Letting the field paste natively as well would put
+      // the source URL of a copied picture into the box next to it.
+      unawaited(_handlePaste());
+      return KeyEventResult.handled;
+    }
+    if (widget.focusNode != null &&
+        widget.enterToSend &&
+        event.logicalKey == LogicalKeyboardKey.enter &&
+        !HardwareKeyboard.instance.isShiftPressed) {
+      _handleSend();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  static bool _isPasteShortcut(KeyEvent event) {
+    if (event.logicalKey != LogicalKeyboardKey.keyV) return false;
+    final keyboard = HardwareKeyboard.instance;
+    return defaultTargetPlatform == TargetPlatform.macOS
+        ? keyboard.isMetaPressed
+        : keyboard.isControlPressed;
+  }
+
+  /// The field's own selection toolbar, with **Paste** rewired to
+  /// [_handlePaste].
+  ///
+  /// This is the way in on touch: the system offers paste from the long-press
+  /// toolbar and from the keyboard's clipboard strip, and the stock handler
+  /// only ever inserts text. The item is added when Flutter left it out, which
+  /// it does whenever the clipboard holds no *text* — exactly the case an
+  /// image paste has to survive.
+  Widget _buildContextMenu(
+    BuildContext context,
+    EditableTextState editableTextState,
+  ) {
+    void paste() {
+      editableTextState.hideToolbar();
+      unawaited(_handlePaste());
+    }
+
+    final items = <ContextMenuButtonItem>[];
+    var rewired = false;
+    for (final item in editableTextState.contextMenuButtonItems) {
+      if (item.type == ContextMenuButtonType.paste) {
+        rewired = true;
+        items.add(
+          ContextMenuButtonItem(
+            type: ContextMenuButtonType.paste,
+            onPressed: paste,
+          ),
+        );
+      } else {
+        items.add(item);
       }
-      if (event is KeyDownEvent &&
-          event.logicalKey == LogicalKeyboardKey.enter &&
-          !HardwareKeyboard.instance.isShiftPressed) {
-        _handleSend();
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
-    };
+    }
+    if (!rewired && !widget.isEditingMessage) {
+      items.add(
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.paste,
+          onPressed: paste,
+        ),
+      );
+    }
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: editableTextState.contextMenuAnchors,
+      buttonItems: items,
+    );
+  }
+
+  Future<void> _handlePaste() async {
+    if (await _pasteImagesFromClipboard()) return;
+    if (!mounted) return;
+    await _pasteClipboardText();
+  }
+
+  /// The text half of the intercepted paste: inserts the clipboard's text at
+  /// the caret, replacing the selection, exactly as the field would have.
+  Future<void> _pasteClipboardText() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final pasted = data?.text;
+    if (pasted == null || pasted.isEmpty || !mounted) return;
+    final value = _controller.value;
+    final selection = value.selection;
+    if (!selection.isValid) {
+      _controller.value = TextEditingValue(
+        text: value.text + pasted,
+        selection: TextSelection.collapsed(
+          offset: value.text.length + pasted.length,
+        ),
+      );
+      return;
+    }
+    _controller.value = TextEditingValue(
+      text: value.text.replaceRange(selection.start, selection.end, pasted),
+      selection: TextSelection.collapsed(
+        offset: selection.start + pasted.length,
+      ),
+      composing: TextRange.empty,
+    );
   }
 
   @override
@@ -343,13 +531,11 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   Future<void> _handleSend() async {
     if (widget.isEditingMessage || _isDispatchingSend) return;
     final text = _controller.text;
-    final hasImage = _attachedImageDataUrl != null;
-    if (text.trim().isEmpty && !hasImage) return;
+    if (text.trim().isEmpty && _attachments.isEmpty) return;
     // Prerequisites (e.g. a selected provider) failed: keep the composed text
-    // and image so nothing is lost while the host shows its modal.
+    // and attachments so nothing is lost while the host shows its modal.
     if (widget.canSend != null && !widget.canSend!()) return;
-    final imageDataUrl = _attachedImageDataUrl;
-    final imageBytes = _attachedImageBytes;
+    final attachments = List<ClipboardImage>.unmodifiable(_attachments);
     final guidance = _guidanceMode && _guidanceController.text.trim().isNotEmpty
         ? _guidanceController.text.trim()
         : null;
@@ -362,9 +548,11 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     _clearComposedPayload();
     bool accepted;
     try {
-      if (imageDataUrl != null) {
+      if (attachments.isNotEmpty) {
         accepted =
-            await widget.onSendWithImage?.call(text, guidance, imageDataUrl) ??
+            await widget.onSendWithImages?.call(text, guidance, [
+              for (final attachment in attachments) attachment.dataUrl,
+            ]) ??
             false;
       } else if (guidance != null) {
         accepted =
@@ -379,18 +567,14 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     _restoreComposedPayload(
       text: text,
       guidance: guidance,
-      imageBytes: imageBytes,
-      imageDataUrl: imageDataUrl,
+      attachments: attachments,
     );
   }
 
   void _clearComposedPayload() {
     _controller.clear();
     _guidanceController.clear();
-    setState(() {
-      _attachedImageBytes = null;
-      _attachedImageDataUrl = null;
-    });
+    setState(_attachments.clear);
   }
 
   /// Puts a rejected send's payload back in the composer — unless the user has
@@ -398,10 +582,9 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   void _restoreComposedPayload({
     required String text,
     required String? guidance,
-    required Uint8List? imageBytes,
-    required String? imageDataUrl,
+    required List<ClipboardImage> attachments,
   }) {
-    if (_controller.text.isNotEmpty || _attachedImageDataUrl != null) return;
+    if (_controller.text.isNotEmpty || _attachments.isNotEmpty) return;
     _controller.value = TextEditingValue(
       text: text,
       selection: TextSelection.collapsed(offset: text.length),
@@ -409,10 +592,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     if (guidance != null && _guidanceController.text.isEmpty) {
       _guidanceController.text = guidance;
     }
-    setState(() {
-      _attachedImageBytes = imageBytes;
-      _attachedImageDataUrl = imageDataUrl;
-    });
+    setState(() => _attachments.addAll(attachments));
   }
 
   Future<void> _openFullscreenEditor() async {
@@ -747,7 +927,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
           color: widget.isDrawerOpen ? Colors.amber : null,
         );
       case ComposerAction.attach:
-        return _ResolvedPin(icon: action.icon, onTap: _pickImage);
+        return _ResolvedPin(icon: action.icon, onTap: _pickImages);
       case ComposerAction.fullscreen:
         return _ResolvedPin(icon: action.icon, onTap: _openFullscreenEditor);
       case ComposerAction.guidance:
@@ -943,7 +1123,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     final hasContent =
         _controller.text.trim().isNotEmpty ||
         (_guidanceMode && _guidanceController.text.trim().isNotEmpty) ||
-        _attachedImageDataUrl != null;
+        _attachments.isNotEmpty;
     final isGenerating =
         widget.isGenerating ||
         widget.isGeneratingImage ||
@@ -965,10 +1145,10 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (_attachedImageBytes != null) ...[
-              _AttachedImagePreview(
-                imageBytes: _attachedImageBytes!,
-                onClear: _clearImage,
+            if (_attachments.isNotEmpty) ...[
+              _AttachedImagesPreview(
+                attachments: _attachments,
+                onRemove: _removeAttachment,
                 border: uiBorder,
               ),
               const SizedBox(height: 8),
@@ -1048,6 +1228,11 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                     child: TextField(
                       controller: _controller,
                       focusNode: _effectiveFocusNode,
+                      contextMenuBuilder: _buildContextMenu,
+                      contentInsertionConfiguration:
+                          ContentInsertionConfiguration(
+                            onContentInserted: _handleInsertedContent,
+                          ),
                       readOnly: widget.isEditingMessage || _isImpersonating,
                       canRequestFocus: !widget.isEditingMessage,
                       enableInteractiveSelection: !widget.isEditingMessage,
@@ -1126,52 +1311,97 @@ class _ResolvedPin {
   const _ResolvedPin({required this.icon, this.onTap, this.color});
 }
 
-class _AttachedImagePreview extends StatelessWidget {
-  final Uint8List imageBytes;
-  final VoidCallback onClear;
+/// The strip of queued attachments above the input. A single image keeps the
+/// roomy preview it always had; several become square thumbnails, wrapping
+/// onto a second row on a narrow phone.
+class _AttachedImagesPreview extends StatelessWidget {
+  final List<ClipboardImage> attachments;
+  final ValueChanged<int> onRemove;
   final BoxBorder? border;
 
-  const _AttachedImagePreview({
-    required this.imageBytes,
-    required this.onClear,
+  const _AttachedImagesPreview({
+    required this.attachments,
+    required this.onRemove,
     this.border,
   });
 
   @override
   Widget build(BuildContext context) {
+    final single = attachments.length == 1;
     return Align(
       alignment: Alignment.centerLeft,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 150, maxHeight: 150),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border:
-              border ?? Border.all(color: Colors.white.withValues(alpha: 0.08)),
-        ),
-        child: Stack(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.memory(imageBytes, fit: BoxFit.contain),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (var i = 0; i < attachments.length; i++)
+            _AttachedImageThumb(
+              key: ObjectKey(attachments[i]),
+              imageBytes: attachments[i].bytes,
+              onRemove: () => onRemove(i),
+              border: border,
+              size: single ? 150 : 84,
+              fit: single ? BoxFit.contain : BoxFit.cover,
             ),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: GestureDetector(
-                onTap: onClear,
-                child: Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.close, color: Colors.white, size: 14),
+        ],
+      ),
+    );
+  }
+}
+
+class _AttachedImageThumb extends StatelessWidget {
+  final Uint8List imageBytes;
+  final VoidCallback onRemove;
+  final BoxBorder? border;
+  final double size;
+  final BoxFit fit;
+
+  const _AttachedImageThumb({
+    super.key,
+    required this.imageBytes,
+    required this.onRemove,
+    required this.size,
+    required this.fit,
+    this.border,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(maxWidth: size, maxHeight: size),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border:
+            border ?? Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: fit == BoxFit.cover
+                ? SizedBox.square(
+                    dimension: size,
+                    child: Image.memory(imageBytes, fit: fit),
+                  )
+                : Image.memory(imageBytes, fit: fit),
+          ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  shape: BoxShape.circle,
                 ),
+                child: const Icon(Icons.close, color: Colors.white, size: 14),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

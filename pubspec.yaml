@@ -47,6 +47,7 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   desktop_drop: ^0.8.3
+  pasteboard: ^0.5.0
   window_manager: ^0.5.2
 
 dev_dependencies:

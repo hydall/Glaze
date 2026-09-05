@@ -218,6 +218,7 @@
   "section_images": "Images",
   "hint_drag_blocks": "Drag blocks by the icon on the left",
   "chat_placeholder": "Message...",
+  "chat_attachment_limit": "Up to {count} images per message",
   "magic_regenerate": "Regenerate",
   "magic_impersonate": "Impersonate",
   "magic_send": "Send",

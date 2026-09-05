@@ -1076,6 +1076,6 @@ void applyAppendToLastMessage(
     blockName: '${original.blockName ?? 'Last user'} + $blockNames',
     sourceMessageId: original.sourceMessageId,
     reasoningContent: original.reasoningContent,
-    imagePath: original.imagePath,
+    imagePaths: original.imagePaths,
   );
 }

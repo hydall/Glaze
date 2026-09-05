@@ -659,13 +659,39 @@ If a block is disabled, that field is omitted. `PromptBuilder` is the sole enfor
 
 ### INV-PS1b: Image attachments are sent to the model unless explicitly hidden
 
-`ChatMessage.imageHidden` defaults to `false`, so a picture attached to a
-message travels with it into the request (`PromptMessage.imagePath` →
-`toApiMap()` → the protocol converters). The eye button on the attachment
+`ChatMessage.imageHidden` defaults to `false`, so the pictures attached to a
+message travel with it into the request (`PromptMessage.imagePaths` →
+`toApiMap()`, one `image_url` content part each, in order → the protocol
+converters). The eye button on the attachment
 (`toggle-image-hidden` → `onToggleImageHidden` →
 `ChatMessageService.toggleImageHidden`) flips the flag; `HistoryAssembler.assemble`
-and `buildFallbackPrompt` then drop `imagePath` from the prompt message. The
-bubble keeps rendering the image either way — hiding affects the request only.
+and `buildFallbackPrompt` then drop every attachment from the prompt message.
+The bubble keeps rendering them either way — hiding affects the request only.
+
+### INV-PS1c: A message carries up to `maxMessageAttachments` images
+
+The composer accepts at most `maxMessageAttachments` (4, in
+`lib/core/models/chat_message.dart`) images per message. Nothing caps their
+size. They arrive by three routes, and the composer offers no button of its
+own for any of them, because the system already offers one wherever a paste is
+possible:
+
+* the file picker (the attach button);
+* a paste — Ctrl/Cmd+V, or the field's own selection toolbar, which
+  `_buildContextMenu` rebuilds so **Paste** reaches `ClipboardImages` and is
+  offered even when the clipboard holds no text;
+* content committed by the on-screen keyboard — Gboard's clipboard chip and
+  its sticker/GIF pickers — which never touches the clipboard at all and
+  arrives through `TextField.contentInsertionConfiguration` instead.
+
+Storage keeps the attachments split — `ChatMessage.imagePath` is the first and
+`extraImagePaths` the rest — so a session written before multi-attach still
+renders; `ChatMessage.attachments` is the single list every reader uses, and
+`splitAttachments` is the only writer of the pair. One `imageHidden` flag
+covers the whole set (INV-PS1b), and the WebView renders it as one
+`.msg-image-attachment` block: a free-size picture for one, a tile grid for
+two to four (`renderer/image_embed.js` + the `.count-N` rules in
+`styles.css`). Raising the limit needs a matching grid case in both.
 
 ### INV-PS2: Vector scan runs before keyword scan; keyword deduplicates vector
 

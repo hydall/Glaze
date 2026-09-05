@@ -1,6 +1,6 @@
 import { reportCssErrors } from './css_diagnostics.js';
 import { ICON } from './icon_library.js';
-import { createImageAttachment, setImageAttachmentHidden } from './image_embed.js';
+import { createImageAttachments, setImageAttachmentHidden } from './image_embed.js';
 import { isolateImgGenPlaceholders } from './imggen_placeholder.js';
 import { writeShadowContent } from './markdown.js';
 import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
@@ -91,7 +91,7 @@ export class Renderer {
       id, role, text, reasoning,
       isError, isHidden, isLast, isTyping,
       guidanceText, guidanceType,
-      imagePath, imageHidden,
+      imagePath, imagePaths, imageHidden,
     } = messageData;
 
     const layout = this._currentLayout();
@@ -172,9 +172,13 @@ if (messageData.isEditing) classes.push('editing');
       this._writeShadowContent(content, text, this._isUser(role), false);
     }
 
-    if (imagePath) {
-      body.appendChild(this._createImageAttachment(imagePath, imageHidden));
-    }
+    // `imagePaths` is the whole set; `imagePath` is the first one, still sent
+    // for anything that only knows the single-attachment shape.
+    const attachments = this._createImageAttachment(
+      imagePaths && imagePaths.length ? imagePaths : imagePath,
+      imageHidden,
+    );
+    if (attachments) body.appendChild(attachments);
 
     if (layout === 'bubble') {
       body.appendChild(this._createBubbleMeta(messageData));
@@ -397,7 +401,7 @@ if (messageData.isEditing) classes.push('editing');
 
   /* ----- Image attachment ----- */
   _createImageAttachment(src, hidden) {
-    return createImageAttachment(src, hidden, ICON);
+    return createImageAttachments(src, hidden, ICON);
   }
 
   /* Flip an existing attachment between "sent to the model" and "hidden from

@@ -69,6 +69,34 @@
 }
 .msg-image-attachment.image-hidden img { opacity: 0.35; }
 
+/* Several attachments on one message: a tile grid rather than a stack of
+ * full-width pictures. `aspect-ratio` on the container gives the `1fr` rows a
+ * definite height, so the tiles are square-ish whatever the source images are;
+ * `object-fit: cover` fills each tile without letterboxing. The eye toggle is
+ * absolutely positioned, so it never becomes a grid item. */
+.msg-image-attachment.multi {
+  display: grid;
+  gap: 3px;
+  width: min(100%, 320px);
+  grid-template-columns: 1fr 1fr;
+}
+.msg-image-attachment.multi img {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  object-fit: cover;
+}
+.msg-image-attachment.count-2 { aspect-ratio: 2 / 1; }
+.msg-image-attachment.count-3,
+.msg-image-attachment.count-4 {
+  grid-template-rows: 1fr 1fr;
+  aspect-ratio: 1 / 1;
+}
+/* Three: one tall tile on the left, two stacked on the right. */
+.msg-image-attachment.count-3 img:first-child { grid-row: span 2; }
+
 .image-ctx-toggle {
   position: absolute;
   top: 6px;

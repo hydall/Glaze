@@ -1931,6 +1931,53 @@ void main() {
     });
   });
 
+  // ─── message attachments ──────────────────────────────────────────────────
+  group('message attachments', () {
+    // The Dart mapper sends `imagePaths` (every attachment) alongside
+    // `imagePath` (the first). The renderer must prefer the list, or a
+    // multi-image message renders only its first picture.
+    test('the renderer lays out the whole attachment list', () {
+      expect(
+        rendererMessageJs,
+        contains('imagePaths && imagePaths.length ? imagePaths : imagePath'),
+      );
+      expect(
+        _rendererAsset('image_embed.js'),
+        contains('export function createImageAttachments'),
+      );
+    });
+
+    test('several attachments are a grid, not a stack', () {
+      expect(
+        stylessCss,
+        contains('.msg-image-attachment.multi {'),
+        reason:
+            'Without the grid rules a multi-image message renders as one '
+            'full-width picture under another.',
+      );
+      for (final rule in [
+        '.msg-image-attachment.count-2 {',
+        '.msg-image-attachment.count-3,',
+        '.msg-image-attachment.count-4 {',
+        '.msg-image-attachment.count-3 img:first-child { grid-row: span 2; }',
+      ]) {
+        expect(stylessCss, contains(rule));
+      }
+    });
+
+    // One `imageHidden` flag covers the message, so the block keeps exactly
+    // one eye toggle however many pictures it holds — and `updateMessage`
+    // lifts that single block out of the body and puts it back.
+    test('the attachment block stays a single element', () {
+      final embedJs = _rendererAsset('image_embed.js');
+      expect(embedJs, contains("wrap.className = 'msg-image-attachment'"));
+      expect(
+        rendererMessageJs,
+        contains("const image = body.querySelector('.msg-image-attachment')"),
+      );
+    });
+  });
+
   // ─── edit textarea CSS (styles.css) ───────────────────────────────────────
   group('edit textarea CSS (styles.css)', () {
     test('overscroll-behavior:contain prevents scroll bleed to parent', () {

@@ -41,7 +41,8 @@ class PreviewMessage {
   /// into one message, so the card renders the list rather than a single path.
   List<String> get imagePaths => [
     for (final source in sources)
-      if (source.hasImage) source.imagePath!,
+      for (final path in source.imagePaths)
+        if (path.isNotEmpty) path,
   ];
 }
 
@@ -190,7 +191,7 @@ PromptMessage _synthesize(
       blockName: source.blockName,
       sourceMessageId: source.sourceMessageId,
       reasoningContent: source.reasoningContent,
-      imagePath: source.imagePath,
+      imagePaths: source.imagePaths,
       sendEmptyBlock: source.sendEmptyBlock,
     );
   }

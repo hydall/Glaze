@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/models/chat_message.dart'
+    show maxMessageAttachments;
 import 'package:glaze_flutter/features/chat/composer_empty_action_provider.dart';
 import 'package:glaze_flutter/features/chat/composer_pins_provider.dart';
 import 'package:glaze_flutter/features/chat/state/chat_drawer_editing_provider.dart';
@@ -17,6 +22,7 @@ void main() {
 
   group('ChatInputBar', () {
     late List<String> sentMessages;
+    late List<List<String>> sentAttachments;
 
     Widget buildChatInputBar({
       FocusNode? focusNode,
@@ -32,6 +38,7 @@ void main() {
       VoidCallback? onMagicDrawer,
     }) {
       sentMessages = [];
+      sentAttachments = [];
       return ProviderScope(
         child: MaterialApp(
           home: Scaffold(
@@ -40,6 +47,11 @@ void main() {
               onMagicDrawer: onMagicDrawer,
               onSend: (text) async {
                 sentMessages.add(text);
+                return acceptSend;
+              },
+              onSendWithImages: (text, guidance, imageDataUrls) async {
+                sentMessages.add(text);
+                sentAttachments.add(imageDataUrls);
                 return acceptSend;
               },
               isGenerating: false,
@@ -132,6 +144,231 @@ void main() {
       await tester.tap(find.byIcon(Icons.send_rounded));
 
       expect(sentMessages, isEmpty);
+    });
+
+    group('clipboard attachments', () {
+      // A 1x1 PNG, so the thumbnail really decodes and the data URL really
+      // round-trips through the send callback.
+      final png = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8'
+        'z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      );
+
+      /// What the platform side of `pasteboard` hands back for `image` on this
+      /// host: bytes everywhere except Windows, which passes a path to a file
+      /// the plugin reads and deletes.
+      Object clipboardImagePayload(Uint8List bytes) {
+        if (!Platform.isWindows) return bytes;
+        final file = File(
+          '${Directory.systemTemp.createTempSync('glaze_pb').path}/clip.png',
+        )..writeAsBytesSync(bytes);
+        return file.path;
+      }
+
+      /// Puts an image and/or text on the fake clipboard. No image is what
+      /// makes a paste fall through to the ordinary text paste.
+      void mockClipboard({
+        Uint8List? image,
+        List<String> files = const [],
+        String? text,
+      }) {
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(const MethodChannel('pasteboard'), (
+          call,
+        ) async {
+          switch (call.method) {
+            case 'image':
+              return image == null ? null : clipboardImagePayload(image);
+            case 'files':
+              return files;
+          }
+          return null;
+        });
+        messenger.setMockMethodCallHandler(SystemChannels.platform, (
+          call,
+        ) async {
+          if (call.method == 'Clipboard.getData') {
+            return text == null ? null : <String, dynamic>{'text': text};
+          }
+          return null;
+        });
+        addTearDown(() {
+          messenger.setMockMethodCallHandler(
+            const MethodChannel('pasteboard'),
+            null,
+          );
+          messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+        });
+      }
+
+      Future<void> pressPaste(WidgetTester tester) async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('Ctrl+V attaches the clipboard image and sends it', (
+        tester,
+      ) async {
+        mockClipboard(image: png);
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+        await tester.pumpWidget(buildChatInputBar(focusNode: focusNode));
+        focusNode.requestFocus();
+        await tester.pump();
+
+        await pressPaste(tester);
+
+        expect(
+          find.byType(Image),
+          findsOneWidget,
+          reason: 'the pasted image must show as a composer thumbnail',
+        );
+
+        await tester.tap(find.byIcon(Icons.send_rounded));
+        await tester.pump();
+
+        expect(sentAttachments, hasLength(1));
+        expect(sentAttachments.single, hasLength(1));
+        expect(
+          sentAttachments.single.single,
+          'data:image/png;base64,${base64Encode(png)}',
+        );
+      });
+
+      testWidgets('Ctrl+V with no image on the clipboard pastes the text', (
+        tester,
+      ) async {
+        mockClipboard(text: 'pasted');
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+        await tester.pumpWidget(
+          buildChatInputBar(focusNode: focusNode, initialDraft: 'a'),
+        );
+        focusNode.requestFocus();
+        await tester.pump();
+
+        await pressPaste(tester);
+
+        final textField = tester.widget<TextField>(find.byType(TextField));
+        expect(textField.controller!.text, 'apasted');
+        expect(find.byType(Image), findsNothing);
+      });
+
+      testWidgets('a fifth paste is refused, not silently swallowed', (
+        tester,
+      ) async {
+        mockClipboard(image: png);
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+        await tester.pumpWidget(buildChatInputBar(focusNode: focusNode));
+        focusNode.requestFocus();
+        await tester.pump();
+
+        for (var i = 0; i < 5; i++) {
+          await pressPaste(tester);
+        }
+        // The fifth paste raises the limit toast; let it expire so the test
+        // does not end on a pending timer.
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Image), findsNWidgets(maxMessageAttachments));
+
+        await tester.tap(find.byIcon(Icons.send_rounded));
+        await tester.pump();
+
+        expect(sentAttachments.single, hasLength(maxMessageAttachments));
+      });
+
+      // Gboard's clipboard chip, sticker and GIF pickers never put anything on
+      // the clipboard: the keyboard commits the content straight into the
+      // field, so this is the only path that sees it.
+      testWidgets('a picture committed by the keyboard is attached', (
+        tester,
+      ) async {
+        mockClipboard();
+        await tester.pumpWidget(buildChatInputBar());
+
+        final config = tester
+            .widget<TextField>(find.byType(TextField))
+            .contentInsertionConfiguration!;
+        expect(config.allowedMimeTypes, contains('image/png'));
+
+        config.onContentInserted(
+          KeyboardInsertedContent(
+            mimeType: 'image/png',
+            uri: 'content://com.google.android.inputmethod/1',
+            data: png,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Image), findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.send_rounded));
+        await tester.pump();
+
+        expect(
+          sentAttachments.single.single,
+          'data:image/png;base64,${base64Encode(png)}',
+        );
+      });
+
+      // The engine could not read the content:// URI it was handed. Nothing in
+      // Dart can open one either, so the composer must sit still rather than
+      // attach an empty picture.
+      testWidgets('keyboard content with no bytes attaches nothing', (
+        tester,
+      ) async {
+        mockClipboard();
+        await tester.pumpWidget(buildChatInputBar());
+
+        tester
+            .widget<TextField>(find.byType(TextField))
+            .contentInsertionConfiguration!
+            .onContentInserted(
+              const KeyboardInsertedContent(
+                mimeType: 'image/gif',
+                uri: 'content://com.google.android.inputmethod/2',
+              ),
+            );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Image), findsNothing);
+      });
+
+      // The way in on touch. The stock Paste handler only ever inserts text,
+      // and Flutter drops the item entirely when the clipboard holds no text —
+      // so the composer's own toolbar has to carry one either way, and it has
+      // to attach the picture rather than paste its name.
+      testWidgets('the system Paste item attaches the clipboard image', (
+        tester,
+      ) async {
+        mockClipboard(image: png);
+        await tester.pumpWidget(buildChatInputBar(initialDraft: 'hi'));
+
+        final field = tester.widget<TextField>(find.byType(TextField));
+        final toolbar =
+            field.contextMenuBuilder!(
+                  tester.element(find.byType(EditableText)),
+                  tester.state<EditableTextState>(find.byType(EditableText)),
+                )
+                as AdaptiveTextSelectionToolbar;
+        final paste = toolbar.buttonItems!.where(
+          (item) => item.type == ContextMenuButtonType.paste,
+        );
+
+        expect(paste, hasLength(1));
+
+        paste.single.onPressed!();
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Image), findsOneWidget);
+      });
     });
 
     testWidgets('rejected send keeps the composed text', (tester) async {

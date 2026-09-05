@@ -320,7 +320,7 @@ class ChatMessageService {
   ChatSession toggleImageHidden(ChatSession session, int index) {
     if (index < 0 || index >= session.messages.length) return session;
     final msg = session.messages[index];
-    if (msg.imagePath == null || msg.imagePath!.isEmpty) return session;
+    if (!msg.hasAttachments) return session;
     final newMessages = List<ChatMessage>.from(session.messages);
     newMessages[index] = msg.copyWith(imageHidden: !msg.imageHidden);
     return _persist(session, newMessages);

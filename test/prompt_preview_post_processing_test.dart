@@ -149,8 +149,8 @@ void main() {
     const png = 'data:image/png;base64,AAAA';
     const jpg = 'data:image/jpeg;base64,BBBB';
     final rows = buildPreviewMessages(const [
-      PromptMessage(role: 'user', content: 'look', imagePath: png),
-      PromptMessage(role: 'user', content: '', imagePath: jpg),
+      PromptMessage(role: 'user', content: 'look', imagePaths: [png]),
+      PromptMessage(role: 'user', content: '', imagePaths: [jpg]),
     ], PromptPostProcessing.merge);
 
     expect(rows, hasLength(1));

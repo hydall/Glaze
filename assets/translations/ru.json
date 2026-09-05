@@ -217,6 +217,7 @@
   "section_images": "Изображения",
   "hint_drag_blocks": "Перетаскивайте блоки за иконку слева",
   "chat_placeholder": "Сообщение...",
+  "chat_attachment_limit": "Не больше {count} изображений в сообщении",
   "magic_regenerate": "Регенерация",
   "magic_impersonate": "Имперсонизация",
   "magic_send": "Отправить",

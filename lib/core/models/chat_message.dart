@@ -3,6 +3,12 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'chat_message.freezed.dart';
 part 'chat_message.g.dart';
 
+/// How many images one message may carry. The composer stops accepting
+/// attachments at this many, and the WebView lays them out as a grid up to
+/// exactly this count — raising it needs a matching grid case in
+/// `assets/chat_webview/renderer/image_embed.js` and `styles.css`.
+const int maxMessageAttachments = 4;
+
 class TriggeredEntry {
   final String id;
   final String name;
@@ -125,12 +131,22 @@ abstract class ChatMessage with _$ChatMessage {
     int? timestamp,
     String? personaId,
     String? personaName,
+
+    /// First attachment. Kept as its own field so sessions written before
+    /// multi-attach — and every reader that only knows this one — keep
+    /// working; attachments 2..N live in [extraImagePaths]. Read
+    /// [ChatMessageAttachments.attachments] instead of either field.
     String? imagePath,
 
+    /// Attachments after the first, in the order they were attached. Empty on
+    /// a single-image message.
+    @Default([]) List<String> extraImagePaths,
+
     /// Attachment visibility for the LLM. `false` (the default) means the
-    /// image travels with the message in the prompt; the eye toggle on the
-    /// bubble flips it so the attachment stays visible in the chat but is
-    /// dropped from the request (see [HistoryAssembler.assemble]).
+    /// images travel with the message in the prompt; the eye toggle on the
+    /// bubble flips it so they stay visible in the chat but are dropped from
+    /// the request (see [HistoryAssembler.assemble]). One flag covers every
+    /// attachment on the message.
     @Default(false) bool imageHidden,
     @Default([]) List<String> swipes,
     @Default(0) int swipeId,
@@ -159,6 +175,32 @@ abstract class ChatMessage with _$ChatMessage {
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) =>
       _$ChatMessageFromJson(json);
+}
+
+/// The attachments of a message as one list, whichever field they were stored
+/// in. Everything that renders or sends attachments reads this — the split
+/// between [ChatMessage.imagePath] and [ChatMessage.extraImagePaths] exists
+/// only so old sessions keep rendering.
+extension ChatMessageAttachments on ChatMessage {
+  List<String> get attachments => [
+    if (imagePath?.isNotEmpty == true) imagePath!,
+    for (final path in extraImagePaths)
+      if (path.isNotEmpty) path,
+  ];
+
+  bool get hasAttachments => attachments.isNotEmpty;
+}
+
+/// Splits [paths] across the two storage fields of [ChatMessage].
+({String? imagePath, List<String> extraImagePaths}) splitAttachments(
+  List<String> paths,
+) {
+  final kept = paths.where((p) => p.isNotEmpty).toList(growable: false);
+  if (kept.isEmpty) return (imagePath: null, extraImagePaths: const []);
+  return (
+    imagePath: kept.first,
+    extraImagePaths: kept.skip(1).toList(growable: false),
+  );
 }
 
 @freezed

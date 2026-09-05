@@ -185,7 +185,7 @@ bool replaceDeferredMemoryPlaceholders(
       blockName: message.blockName,
       sourceMessageId: message.sourceMessageId,
       reasoningContent: message.reasoningContent,
-      imagePath: message.imagePath,
+      imagePaths: message.imagePaths,
     );
     replaced = true;
   }
