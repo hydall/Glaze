@@ -405,7 +405,6 @@
   "notification_generating": "Generating response...",
   "magic_authors_notes": "Author's Notes",
   "label_tokenizer": "Tokenizer",
-  "label_hide_top_messages": "Hide top messages",
   "magic_summary": "Chat Summary",
   "summary_title": "Current Summary",
   "unique_for_chat": "Content is unique for each chat",
@@ -1392,7 +1391,6 @@
   "authors_note_placeholder": "Enter author's note...",
   "authors_note_role_hint": "Role, depth and insertion mode are set per preset, in the preset editor.",
   "tokenizer_history_limit_warning": "History is near its limit",
-  "tokenizer_hide_confirm_desc": "Hide the top {} visible message(s) from prompt? They will still be visible in chat (dimmed) but excluded from generation.",
   "image_gen_generating": "Generating image...",
   "image_viewer_load_failed": "Couldn't load the image",
   "image_viewer_unsupported_src": "This image can't be opened",
@@ -1413,12 +1411,8 @@
   "prompt_inspector_title": "Prompt Inspector",
   "tab_context": "Context",
   "label_no_data": "No data",
-  "context_settings_title": "Context Settings",
-  "action_close_settings": "Close settings",
   "action_recalculate": "Recalculate",
   "action_refresh": "Refresh",
-  "tokenizer_hide_top_n": "Hide top {}",
-  "tokenizer_hide_messages_title": "Hide Messages",
   "tokenizer_history_fill_threshold_label": "History fill threshold",
   "tokenizer_history_fill_threshold_desc": "Warn when history fills this % of its budget",
   "tokenizer_hide_percent_desc": "What % of visible messages the Hide button will hide",
@@ -2223,14 +2217,6 @@
     "one": "{} session",
     "other": "{} sessions"
   },
-  "count_message_cut": {
-    "one": "{} message cut from history",
-    "other": "{} messages cut from history"
-  },
-  "tokenizer_near_limit_body": {
-    "one": "Hide about {} top message to free about {} tokens.",
-    "other": "Hide about {} top messages to free about {} tokens."
-  },
   "post_building_recovery": "Recover trackers",
   "post_building_recovery_desc": "Re-run Studio controllers for every assistant message in this session. Use when Studio Ledger values were lost.",
   "post_building_recovery_button": "Recover",
@@ -2802,5 +2788,20 @@
   "coverage_injected_count": "{} entries injected",
   "coverage_row_counts": "{} lorebook · {} memory",
   "requests_stage_embedding": "Embeddings",
-  "requests_stage_image": "Image"
+  "requests_stage_image": "Image",
+  "count_message_didnt_fit": {
+    "one": "{} message didn't fit into context size",
+    "other": "{} messages didn't fit into context size"
+  },
+  "context_open_api_settings": "Context settings",
+  "section_context": "Context",
+  "label_history_trim_mode": "History trimming",
+  "history_trim_sliding": "Continuous",
+  "history_trim_sliding_hint": "Drops exactly what no longer fits, every turn. Simple and always shows the most history — but the prompt starts differently each turn, so a provider's prompt cache never hits.",
+  "history_trim_stepped": "In blocks",
+  "history_trim_stepped_hint": "Drops a block at a time and keeps the start of the history still in between. Shows a little less history, but the prompt begins identically for many turns, so a provider's prompt cache can hit.",
+  "label_history_trim_threshold": "Step threshold",
+  "desc_history_trim_threshold": "Move the anchor once the held history fills this % of its budget",
+  "label_history_trim_step": "Step size",
+  "desc_history_trim_step": "How much of the history budget a step gives back"
 }

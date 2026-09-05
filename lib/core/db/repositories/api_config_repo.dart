@@ -6,6 +6,7 @@ import '../app_db.dart';
 import '../../models/api_config.dart';
 import '../../application/sync_repo_interfaces.dart';
 import '../../models/extra_request_parameter.dart';
+import '../../llm/history_trim.dart';
 import '../../llm/transport/endpoint_normalizer.dart';
 
 class ApiConfigRepo implements SyncApiConfigStore {
@@ -68,6 +69,9 @@ class ApiConfigRepo implements SyncApiConfigStore {
     mode: c.mode,
     maxTokens: c.maxTokens,
     contextSize: c.contextSize,
+    historyTrimMode: HistoryTrimMode.normalize(c.historyTrimMode),
+    historyTrimTriggerPercent: c.historyTrimTriggerPercent,
+    historyTrimStepPercent: c.historyTrimStepPercent,
     temperature: c.temperature,
     topP: c.topP,
     topK: c.topK,
@@ -124,6 +128,9 @@ class ApiConfigRepo implements SyncApiConfigStore {
     mode: Value(m.mode),
     maxTokens: Value(m.maxTokens),
     contextSize: Value(m.contextSize),
+    historyTrimMode: Value(HistoryTrimMode.normalize(m.historyTrimMode)),
+    historyTrimTriggerPercent: Value(m.historyTrimTriggerPercent),
+    historyTrimStepPercent: Value(m.historyTrimStepPercent),
     temperature: Value(m.temperature),
     topP: Value(m.topP),
     topK: Value(m.topK),

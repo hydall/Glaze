@@ -51,6 +51,10 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
     reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
     excludeReasoningFromContextBudget:
         payload.apiConfig.excludeReasoningFromContextBudget,
+    historyTrimMode: payload.apiConfig.historyTrimMode,
+    historyAnchorId: payload.sessionVars[ChatSessionX.historyAnchorVarKey],
+    historyTrimTriggerPercent: payload.apiConfig.historyTrimTriggerPercent,
+    historyTrimStepPercent: payload.apiConfig.historyTrimStepPercent,
   );
   final ledgerMessages = <PromptMessage>[
     if (payload.characterKnowledgeContent case final content?

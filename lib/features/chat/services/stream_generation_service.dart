@@ -219,6 +219,12 @@ class StreamGenerationService {
       _ref.read(cachedTokenBreakdownProvider(_charId).notifier).state =
           promptResult.breakdown;
 
+      // A stepped trim anchors on the oldest message it kept. Persisting that
+      // id is the whole mechanism: next turn reuses the same anchor, so the
+      // request keeps the same prefix and the provider's cache hits instead of
+      // being invalidated by a cut that moved one message along.
+      _persistHistoryAnchor(session, promptResult.breakdown.historyAnchorId);
+
       _ref.read(lastVectorLoreTokensProvider(_charId).notifier).state =
           promptResult.breakdown.vectorLoreTokens;
 
@@ -621,13 +627,14 @@ class StreamGenerationService {
       // typing bubble.
       var streamPublishClosed = false;
       void publishStreamedText() {
-        _ref.read(streamingStateProvider(_charId).notifier).state =
-            StreamingState(
-              text: accumulator.text.trimLeft(),
-              reasoning: accumulator.reasoning.isNotEmpty
-                  ? accumulator.reasoning
-                  : null,
-            );
+        _ref
+            .read(streamingStateProvider(_charId).notifier)
+            .state = StreamingState(
+          text: accumulator.text.trimLeft(),
+          reasoning: accumulator.reasoning.isNotEmpty
+              ? accumulator.reasoning
+              : null,
+        );
       }
 
       void closeStreamPublishing() {
@@ -1054,5 +1061,33 @@ class StreamGenerationService {
   ) {
     final override = pipelineSettings.studioAgent.studioControllerModelOverride;
     return override.isNotEmpty ? override : apiConfig.model;
+  }
+
+  /// Stores the history anchor a stepped trim settled on, when it moved.
+  ///
+  /// Fire-and-forget and change-guarded: it must never delay a generation, and
+  /// the anchor holds still for many turns, so the common case writes nothing.
+  /// Failure is survivable — the next turn simply re-anchors.
+  void _persistHistoryAnchor(ChatSession session, String? anchorId) {
+    final current = session.sessionVars[ChatSessionX.historyAnchorVarKey];
+    final next = (anchorId == null || anchorId.isEmpty) ? null : anchorId;
+    if (current == next) return;
+    unawaited(
+      _ref
+          .read(chatRepoProvider)
+          .updateSessionVarsJson(session.id, (vars) {
+            final updated = Map<String, dynamic>.from(vars);
+            if (next == null) {
+              updated.remove(ChatSessionX.historyAnchorVarKey);
+            } else {
+              updated[ChatSessionX.historyAnchorVarKey] = next;
+            }
+            return updated;
+          })
+          .catchError((Object e) {
+            debugPrint('[history-anchor] persist failed: $e');
+            return <String, dynamic>{};
+          }),
+    );
   }
 }

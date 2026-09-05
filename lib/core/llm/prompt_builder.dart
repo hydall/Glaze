@@ -802,6 +802,10 @@ PromptResult _assembleMessages({
     reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
     excludeReasoningFromContextBudget:
         payload.apiConfig.excludeReasoningFromContextBudget,
+    historyTrimMode: payload.apiConfig.historyTrimMode,
+    historyAnchorId: payload.sessionVars[ChatSessionX.historyAnchorVarKey],
+    historyTrimTriggerPercent: payload.apiConfig.historyTrimTriggerPercent,
+    historyTrimStepPercent: payload.apiConfig.historyTrimStepPercent,
   );
   var historyOnly = messages.where((m) => m.isHistory).toList();
 

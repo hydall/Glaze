@@ -43,10 +43,7 @@ class StudioConfigRepo implements SyncStudioConfigStore {
     if (profiles.isNotEmpty) return profiles.first;
     const id = 'studio_profile_default';
     final now = currentTimestampSeconds();
-    const profile = StudioConfig(
-      sessionId: id,
-      enabled: true,
-    );
+    const profile = StudioConfig(sessionId: id, enabled: true);
     final stamped = profile.copyWith(createdAt: now, updatedAt: now);
     await upsert(stamped);
     return stamped;

@@ -12,8 +12,9 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
   SummaryRepo(super.db);
 
   Future<ChatSummary?> get(String sessionId) {
-    return (select(chatSummaries)..where((t) => t.sessionId.equals(sessionId)))
-        .getSingleOrNull();
+    return (select(
+      chatSummaries,
+    )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
   }
 
   Future<List<String>> getAllSessionIds() async {
@@ -81,9 +82,9 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
   }
 
   Future<void> deleteBySessionId(String sessionId) {
-    return (delete(chatSummaries)..where((t) => t.sessionId.equals(sessionId)))
-        .go()
-        .then((_) {});
+    return (delete(
+      chatSummaries,
+    )..where((t) => t.sessionId.equals(sessionId))).go().then((_) {});
   }
 
   /// Carries user settings, but resets generated content because this model

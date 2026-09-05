@@ -14,6 +14,9 @@ import '../../core/llm/transport/endpoint_resolution_cache.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/llm/transport/transport_factory.dart';
 import '../../core/services/api_connection_tester.dart';
+import '../chat/state/token_breakdown_cache.dart';
+import '../chat/state/cached_token_breakdown.dart';
+import '../../core/llm/history_trim.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/extra_request_parameter.dart';
 import '../../core/state/shared_prefs_provider.dart';
@@ -36,9 +39,22 @@ import 'widgets/connection_status.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/extra_request_parameters_editor.dart';
 
+/// A section of the API screen a caller can open it *on*.
+enum ApiSettingsSection { context }
+
 class ApiSettingsScreen extends ConsumerStatefulWidget {
   final bool startExpanded;
-  const ApiSettingsScreen({super.key, this.startExpanded = false});
+
+  /// Scrolls to this section once the first frame is laid out. The Prompt
+  /// Inspector's cutoff notice uses it to land on the context window rather
+  /// than at the top of a long form.
+  final ApiSettingsSection? focusSection;
+
+  const ApiSettingsScreen({
+    super.key,
+    this.startExpanded = false,
+    this.focusSection,
+  });
 
   @override
   ConsumerState<ApiSettingsScreen> createState() => _ApiSettingsScreenState();
@@ -107,6 +123,30 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   String _embeddingLlmPresetId = '';
   String _cacheControlTtl = 'off';
   String _cacheBreakpointMode = 'depth';
+  String _historyTrimMode = HistoryTrimMode.sliding;
+  int _historyTrimTriggerPercent = kDefaultHistoryTrimTriggerPercent;
+  int _historyTrimStepPercent = kDefaultHistoryTrimStepPercent;
+
+  /// Scroll target for a deep link that opens this screen *on* the context
+  /// settings — the Prompt Inspector's cutoff notice links here.
+  final GlobalKey _contextGroupKey = GlobalKey();
+
+  /// Runs once: a deep link names a section, and the form it lives in is only
+  /// measurable after the first layout pass.
+  void _scrollToFocusSection() {
+    if (widget.focusSection != ApiSettingsSection.context) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = _contextGroupKey.currentContext;
+      if (target == null || !mounted) return;
+      Scrollable.ensureVisible(
+        target,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+        alignment: 0.1,
+      );
+    });
+  }
+
   String _sessionIdMode = 'openrouter';
   String _promptPostProcessing = PromptPostProcessing.none;
   String _protocol = LlmProtocol.openai;
@@ -161,7 +201,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     for (final c in _ctrls) {
       c.addListener(_scheduleSave);
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadActivePreset());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadActivePreset();
+      _scrollToFocusSection();
+    });
   }
 
   @override
@@ -291,6 +334,9 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _omitReasoningEffort = values.omitReasoningEffort;
       _cacheControlTtl = values.cacheControlTtl;
       _cacheBreakpointMode = values.cacheBreakpointMode;
+      _historyTrimMode = HistoryTrimMode.normalize(values.historyTrimMode);
+      _historyTrimTriggerPercent = values.historyTrimTriggerPercent;
+      _historyTrimStepPercent = values.historyTrimStepPercent;
       _sessionIdMode = values.sessionIdMode;
       _promptPostProcessing = values.promptPostProcessing;
       _protocol = values.protocol;
@@ -367,6 +413,9 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         embeddingLlmPresetId: _embeddingLlmPresetId,
         cacheControlTtl: _cacheControlTtl,
         cacheBreakpointMode: _cacheBreakpointMode,
+        historyTrimMode: _historyTrimMode,
+        historyTrimTriggerPercent: _historyTrimTriggerPercent,
+        historyTrimStepPercent: _historyTrimStepPercent,
         sessionIdMode: _sessionIdMode,
         promptPostProcessing: _promptPostProcessing,
         protocol: _protocol,
@@ -390,7 +439,18 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     // own row: a save from the LLM tab must never copy this editor's embedding
     // fields onto the LLM preset, nor the other way round.
     if (config != null) {
-      await _ref.read(apiListProvider.notifier).put(draft.applyLlmTo(config));
+      final updated = draft.applyLlmTo(config);
+      // The window and the trim mode decide which messages survive into the
+      // prompt, so every cached breakdown taken under the old values is stale
+      // the moment this lands — including the ones on surfaces nobody has open
+      // right now (the drawer's stats, the context card under the chat header).
+      final budgetChanged =
+          updated.contextBudgetSignature != config.contextBudgetSignature;
+      await _ref.read(apiListProvider.notifier).put(updated);
+      if (budgetChanged) {
+        TokenBreakdownCache.invalidate();
+        _ref.invalidate(cachedTokenBreakdownProvider);
+      }
     }
     if (embeddingConfig == null) return;
     await _ref
@@ -730,6 +790,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             child: _buildTopControls(list, activeName, forEmbedding: false),
           ),
           _buildConnectionGroup(context),
+          _buildContextGroup(),
           _buildGenerationGroup(),
           _buildReasoningGroup(),
           // Everything below is for troubleshooting or provider quirks, not
@@ -737,7 +798,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           MenuCollapsibleSection(
             label: 'section_advanced'.tr(),
             children: [
-              _buildSamplingGroup(),
               _buildPromptPostProcessingGroup(),
               _buildCacheGroup(),
               _buildReasoningDeliveryGroup(),
@@ -857,6 +917,105 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     );
   }
 
+  /// The window the prompt is cut against, and how it is cut.
+  ///
+  /// `contextSize` and `maxTokens` used to sit among the sampling knobs, which
+  /// put the two numbers that decide what the model *sees* next to the ones
+  /// that decide how it writes. They belong with the trim mode that spends
+  /// them.
+  Widget _buildContextGroup() {
+    return MenuGroup(
+      key: _contextGroupKey,
+      compact: true,
+      header: 'section_context'.tr(),
+      items: [
+        // No description here: the two modes are explained where the choice is
+        // actually made, in the picker's hints. Repeating it under the closed
+        // dropdown pushed the fields it belongs with off the screen.
+        MenuSelectorItem(
+          label: 'label_history_trim_mode'.tr(),
+          currentValue: _historyTrimModeLabel(_historyTrimMode),
+          onTap: _openHistoryTrimModeSelector,
+        ),
+        // Only stepped spends them; under sliding they would be two dead rows.
+        if (_historyTrimMode == HistoryTrimMode.stepped) ...[
+          MenuRangeItem(
+            label: 'label_history_trim_threshold'.tr(),
+            description: 'desc_history_trim_threshold'.tr(),
+            value: _historyTrimTriggerPercent.toDouble(),
+            min: 10,
+            max: 100,
+            divisions: 90,
+            decimalPlaces: 0,
+            editableValue: true,
+            onChanged: (v) {
+              setState(() => _historyTrimTriggerPercent = v.round());
+              _scheduleSave();
+            },
+          ),
+          MenuRangeItem(
+            label: 'label_history_trim_step'.tr(),
+            description: 'desc_history_trim_step'.tr(),
+            value: _historyTrimStepPercent.toDouble(),
+            min: 5,
+            max: 95,
+            divisions: 90,
+            decimalPlaces: 0,
+            editableValue: true,
+            onChanged: (v) {
+              setState(() => _historyTrimStepPercent = v.round());
+              _scheduleSave();
+            },
+          ),
+        ],
+        MenuFieldItem(
+          label: 'label_max_tokens'.tr(),
+          helpTerm: 'max-tokens',
+          controller: _maxTokensCtrl,
+          placeholder: '8000',
+          keyboardType: TextInputType.number,
+        ),
+        MenuFieldItem(
+          label: 'label_context_size'.tr(),
+          helpTerm: 'context-size',
+          controller: _contextSizeCtrl,
+          placeholder: '32000',
+          keyboardType: TextInputType.number,
+        ),
+      ],
+    );
+  }
+
+  String _historyTrimModeLabel(String mode) => mode == HistoryTrimMode.stepped
+      ? 'history_trim_stepped'.tr()
+      : 'history_trim_sliding'.tr();
+
+  String _historyTrimModeDescription(String mode) =>
+      mode == HistoryTrimMode.stepped
+      ? 'history_trim_stepped_hint'.tr()
+      : 'history_trim_sliding_hint'.tr();
+
+  void _openHistoryTrimModeSelector() {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'label_history_trim_mode'.tr(),
+      items: HistoryTrimMode.all.map((mode) {
+        final active = mode == _historyTrimMode;
+        return BottomSheetItem(
+          label: _historyTrimModeLabel(mode),
+          hint: _historyTrimModeDescription(mode),
+          icon: active ? Icons.check : null,
+          iconColor: context.cs.primary,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            setState(() => _historyTrimMode = mode);
+            _scheduleSave();
+          },
+        );
+      }).toList(),
+    );
+  }
+
   Widget _buildGenerationGroup() {
     return MenuGroup(
       compact: true,
@@ -882,20 +1041,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               _scheduleSave();
             },
           ),
-        MenuFieldItem(
-          label: 'label_max_tokens'.tr(),
-          helpTerm: 'max-tokens',
-          controller: _maxTokensCtrl,
-          placeholder: '8000',
-          keyboardType: TextInputType.number,
-        ),
-        MenuFieldItem(
-          label: 'label_context_size'.tr(),
-          helpTerm: 'context-size',
-          controller: _contextSizeCtrl,
-          placeholder: '32000',
-          keyboardType: TextInputType.number,
-        ),
+        ..._samplingItems(),
       ],
     );
   }
@@ -958,10 +1104,14 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   // ── Advanced ──────────────────────────────────────────────────────────────
 
-  Widget _buildSamplingGroup() {
-    // Anthropic with thinking on hides every sampling control — don't leave an
-    // empty card behind.
-    final items = <Widget>[
+  /// Sampling knobs, inlined into the generation group.
+  ///
+  /// They used to be a card of their own behind "Advanced", which hid the
+  /// controls people reach for most often behind a disclosure. Returns a list
+  /// rather than a group so an all-hidden protocol (Anthropic with thinking on)
+  /// simply contributes nothing.
+  List<Widget> _samplingItems() {
+    return <Widget>[
       if (_supportsTopP && !_hideSamplingWhileReasoningAnthropic)
         MenuRangeItem(
           label: 'label_top_p'.tr(),
@@ -1040,12 +1190,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           },
         ),
     ];
-    if (items.isEmpty) return const SizedBox.shrink();
-    return MenuGroup(
-      compact: true,
-      header: 'section_sampling'.tr(),
-      items: items,
-    );
   }
 
   /// Reshapes the finished conversation to the message layout a given endpoint
@@ -2306,4 +2450,22 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         );
     }
   }
+}
+
+/// Opens the API screen as a sheet, optionally landing on one section.
+///
+/// The screen is presented as a modal sheet everywhere it is reached from a
+/// chat, so callers do not each rebuild the `showModalBottomSheet` boilerplate.
+Future<void> showApiSettingsSheet(
+  BuildContext context, {
+  ApiSettingsSection? focusSection,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    useRootNavigator: true,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    barrierColor: Colors.black54,
+    builder: (_) => ApiSettingsScreen(focusSection: focusSection),
+  );
 }

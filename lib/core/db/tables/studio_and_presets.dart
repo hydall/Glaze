@@ -109,6 +109,12 @@ class ApiConfigs extends Table {
   TextColumn get mode => text().withDefault(const Constant('chat'))();
   IntColumn get maxTokens => integer().withDefault(const Constant(8000))();
   IntColumn get contextSize => integer().withDefault(const Constant(32000))();
+  TextColumn get historyTrimMode =>
+      text().withDefault(const Constant('sliding'))();
+  IntColumn get historyTrimTriggerPercent =>
+      integer().withDefault(const Constant(85))();
+  IntColumn get historyTrimStepPercent =>
+      integer().withDefault(const Constant(30))();
   RealColumn get temperature => real().withDefault(const Constant(0.7))();
   RealColumn get topP => real().withDefault(const Constant(0.9))();
   IntColumn get topK => integer().withDefault(const Constant(0))();

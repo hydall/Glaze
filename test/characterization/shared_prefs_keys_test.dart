@@ -19,8 +19,6 @@ void main() {
       'allowMessageScripts': bool,
       'language': String,
       'virtualKeyboardSend': bool,
-      'tokenizerHidePercent': double,
-      'tokenizerHistoryFillThreshold': double,
       'showOurPicks': bool,
       'gz_force_mobile_layout': bool,
       'gz_chat_max_width': double,
@@ -81,11 +79,7 @@ void main() {
             }
           // ignore: type_literal_in_constant_pattern
           case double:
-            if (entry.key == 'tokenizerHidePercent') {
-              expect(defaults.tokenizerHidePercent, 30);
-            } else if (entry.key == 'tokenizerHistoryFillThreshold') {
-              expect(defaults.tokenizerHistoryFillThreshold, 85);
-            } else if (entry.key == 'gz_chat_max_width') {
+            if (entry.key == 'gz_chat_max_width') {
               expect(defaults.chatMaxWidth, 900);
             }
         }
@@ -97,13 +91,11 @@ void main() {
         enterToSend: false,
         hideMessageId: true,
         language: 'ru',
-        tokenizerHidePercent: 50,
       );
       final copy = original.copyWith();
       expect(copy.enterToSend, original.enterToSend);
       expect(copy.hideMessageId, original.hideMessageId);
       expect(copy.language, original.language);
-      expect(copy.tokenizerHidePercent, original.tokenizerHidePercent);
     });
 
     test('all expected SharedPrefs keys are covered', () {
@@ -114,8 +106,6 @@ void main() {
       SharedPreferences.setMockInitialValues({
         'enterToSend': 'false',
         'hideMessageId': '1',
-        'tokenizerHidePercent': '45.5',
-        'tokenizerHistoryFillThreshold': '90',
         'gz_force_mobile_layout': '0',
         'addBlockAtTop': 'true',
         'allowMessageScripts': 'true',
@@ -127,8 +117,6 @@ void main() {
 
       expect(settings.enterToSend, isFalse);
       expect(settings.hideMessageId, isTrue);
-      expect(settings.tokenizerHidePercent, 45.5);
-      expect(settings.tokenizerHistoryFillThreshold, 90);
       expect(settings.forceMobileLayout, isFalse);
       expect(settings.addBlockAtTop, isTrue);
       expect(settings.allowMessageScripts, isTrue);
@@ -241,8 +229,6 @@ void main() {
         'disableSwipeRegeneration',
         'language',
         'virtualKeyboardSend',
-        'tokenizerHidePercent',
-        'tokenizerHistoryFillThreshold',
         'showOurPicks',
         'gz_force_mobile_layout',
         'addBlockAtTop',

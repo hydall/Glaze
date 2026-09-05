@@ -50,26 +50,32 @@ class AppliedCanonTransitionRepo {
     required String characterId,
     required String sessionId,
   }) =>
-      (_db.select(_db.appliedCanonTransitionRows)
-            ..where((row) =>
+      (_db.select(_db.appliedCanonTransitionRows)..where(
+            (row) =>
                 row.characterId.equals(characterId) &
-                (row.chatSessionId.equals(sessionId) | row.chatSessionId.isNull())))
+                (row.chatSessionId.equals(sessionId) |
+                    row.chatSessionId.isNull()),
+          ))
           .get()
           .then((rows) => rows.map(_fromRow).toList(growable: false));
 
   Future<void> insert(AppliedCanonTransitionRecord value) => _db
       .into(_db.appliedCanonTransitionRows)
-      .insertOnConflictUpdate(AppliedCanonTransitionRowsCompanion.insert(
-        id: value.id, characterId: value.characterId,
-        chatSessionId: Value(value.chatSessionId),
-        rewriteOperationId: Value(value.rewriteOperationId),
-        revision: Value(value.revision), revisionHash: Value(value.revisionHash),
-        semanticScopeKey: Value(value.semanticScopeKey),
-        canonicalClaim: Value(value.canonicalClaim),
-        promotionDestination: Value(value.promotionDestination),
-        affectedTrackerKeysJson: Value(jsonEncode(value.affectedTrackerKeys)),
-        transitionJson: value.transitionJson,
-      ));
+      .insertOnConflictUpdate(
+        AppliedCanonTransitionRowsCompanion.insert(
+          id: value.id,
+          characterId: value.characterId,
+          chatSessionId: Value(value.chatSessionId),
+          rewriteOperationId: Value(value.rewriteOperationId),
+          revision: Value(value.revision),
+          revisionHash: Value(value.revisionHash),
+          semanticScopeKey: Value(value.semanticScopeKey),
+          canonicalClaim: Value(value.canonicalClaim),
+          promotionDestination: Value(value.promotionDestination),
+          affectedTrackerKeysJson: Value(jsonEncode(value.affectedTrackerKeys)),
+          transitionJson: value.transitionJson,
+        ),
+      );
 
   AppliedCanonTransitionRecord _fromRow(AppliedCanonTransitionRow row) {
     List<String> keys;
@@ -81,12 +87,17 @@ class AppliedCanonTransitionRepo {
       keys = const [];
     }
     return AppliedCanonTransitionRecord(
-      id: row.id, characterId: row.characterId, chatSessionId: row.chatSessionId,
-      rewriteOperationId: row.rewriteOperationId, revision: row.revision,
-      revisionHash: row.revisionHash, semanticScopeKey: row.semanticScopeKey,
+      id: row.id,
+      characterId: row.characterId,
+      chatSessionId: row.chatSessionId,
+      rewriteOperationId: row.rewriteOperationId,
+      revision: row.revision,
+      revisionHash: row.revisionHash,
+      semanticScopeKey: row.semanticScopeKey,
       canonicalClaim: row.canonicalClaim,
       promotionDestination: row.promotionDestination,
-      affectedTrackerKeys: keys, transitionJson: row.transitionJson,
+      affectedTrackerKeys: keys,
+      transitionJson: row.transitionJson,
     );
   }
 }

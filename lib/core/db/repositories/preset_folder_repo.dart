@@ -15,22 +15,21 @@ class PresetFolderRepo {
   // ── Folders ────────────────────────────────────────────────────────────
 
   Stream<List<PresetFolder>> watchFolders() {
-    return (_db.select(_db.presetFolders)
-          ..orderBy([
-            (t) => OrderingTerm.asc(t.sortOrder),
-            (t) => OrderingTerm.asc(t.createdAt),
-          ]))
+    return (_db.select(_db.presetFolders)..orderBy([
+          (t) => OrderingTerm.asc(t.sortOrder),
+          (t) => OrderingTerm.asc(t.createdAt),
+        ]))
         .watch()
         .map((rows) => rows.map(_toModel).toList());
   }
 
   Future<List<PresetFolder>> getFolders() async {
-    final rows = await (_db.select(_db.presetFolders)
-          ..orderBy([
-            (t) => OrderingTerm.asc(t.sortOrder),
-            (t) => OrderingTerm.asc(t.createdAt),
-          ]))
-        .get();
+    final rows =
+        await (_db.select(_db.presetFolders)..orderBy([
+              (t) => OrderingTerm.asc(t.sortOrder),
+              (t) => OrderingTerm.asc(t.createdAt),
+            ]))
+            .get();
     return rows.map(_toModel).toList();
   }
 
@@ -60,25 +59,25 @@ class PresetFolderRepo {
   }
 
   Future<void> rename(String folderId, String name) async {
-    await (_db.update(_db.presetFolders)
-          ..where((t) => t.folderId.equals(folderId)))
-        .write(
-          PresetFoldersCompanion(
-            name: Value(name),
-            updatedAt: Value(currentTimestampSeconds()),
-          ),
-        );
+    await (_db.update(
+      _db.presetFolders,
+    )..where((t) => t.folderId.equals(folderId))).write(
+      PresetFoldersCompanion(
+        name: Value(name),
+        updatedAt: Value(currentTimestampSeconds()),
+      ),
+    );
   }
 
   /// Deletes the folder and its membership rows (presets are untouched).
   Future<void> delete(String folderId) async {
     await _db.transaction(() async {
-      await (_db.delete(_db.presetFolderMembers)
-            ..where((t) => t.folderId.equals(folderId)))
-          .go();
-      await (_db.delete(_db.presetFolders)
-            ..where((t) => t.folderId.equals(folderId)))
-          .go();
+      await (_db.delete(
+        _db.presetFolderMembers,
+      )..where((t) => t.folderId.equals(folderId))).go();
+      await (_db.delete(
+        _db.presetFolders,
+      )..where((t) => t.folderId.equals(folderId))).go();
     });
   }
 

@@ -18,13 +18,15 @@ class PresetRepo implements SyncPresetStore {
       final original = rows[i].dataJson;
       final repaired = jsonEncode(presets[i].toJson());
       if (original != repaired) {
-        await _db.into(_db.presets).insertOnConflictUpdate(
-          PresetsCompanion(
-            presetId: Value(presets[i].id),
-            name: Value(presets[i].name),
-            dataJson: Value(repaired),
-          ),
-        );
+        await _db
+            .into(_db.presets)
+            .insertOnConflictUpdate(
+              PresetsCompanion(
+                presetId: Value(presets[i].id),
+                name: Value(presets[i].name),
+                dataJson: Value(repaired),
+              ),
+            );
       }
     }
     return presets;
@@ -32,9 +34,9 @@ class PresetRepo implements SyncPresetStore {
 
   @override
   Future<Preset?> getById(String id) async {
-    final row = await (_db.select(_db.presets)
-          ..where((t) => t.presetId.equals(id)))
-        .getSingleOrNull();
+    final row = await (_db.select(
+      _db.presets,
+    )..where((t) => t.presetId.equals(id))).getSingleOrNull();
     return row != null ? _toModel(row) : null;
   }
 
@@ -57,8 +59,8 @@ class PresetRepo implements SyncPresetStore {
       Preset.fromJson(jsonDecode(c.dataJson) as Map<String, dynamic>);
 
   PresetsCompanion _toCompanion(Preset m) => PresetsCompanion(
-        presetId: Value(m.id),
-        name: Value(m.name),
-        dataJson: Value(jsonEncode(m.toJson())),
-      );
+    presetId: Value(m.id),
+    name: Value(m.name),
+    dataJson: Value(jsonEncode(m.toJson())),
+  );
 }
