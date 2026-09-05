@@ -494,7 +494,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       );
       // Attachments are stored split across `imagePath` (the first) and
       // `extraImagePaths` (the rest) — see [splitAttachments].
-      final attachments = splitAttachments(imageDataUrls);
+      final attachments = splitAttachments(
+        imageDataUrls.take(maxMessageAttachments).toList(),
+      );
       final userMsg = ChatMessage(
         id: generateId(),
         role: 'user',

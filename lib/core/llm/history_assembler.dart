@@ -120,8 +120,9 @@ class PromptMessage {
   final String? reasoningContent;
 
   /// Every attachment carried by the message, in the order they were
-  /// attached. A message can hold any number, and each becomes its own
-  /// `image_url` content part.
+  /// attached. A message can hold several (the composer takes up to
+  /// [maxMessageAttachments]), and each becomes its own `image_url` content
+  /// part.
   final List<String> imagePaths;
   final bool sendEmptyBlock;
 

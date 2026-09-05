@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/models/chat_message.dart'
+    show maxMessageAttachments;
 import 'package:glaze_flutter/features/chat/composer_empty_action_provider.dart';
 import 'package:glaze_flutter/features/chat/composer_pins_provider.dart';
 import 'package:glaze_flutter/features/chat/state/chat_drawer_editing_provider.dart';
@@ -256,9 +258,7 @@ void main() {
         expect(find.byType(Image), findsNothing);
       });
 
-      // Nothing caps the composer: the message carries as many pictures as
-      // were pasted into it.
-      testWidgets('pasting keeps attaching past any round number', (
+      testWidgets('a fifth paste is refused, not silently swallowed', (
         tester,
       ) async {
         mockClipboard(image: png);
@@ -268,16 +268,77 @@ void main() {
         focusNode.requestFocus();
         await tester.pump();
 
-        for (var i = 0; i < 6; i++) {
+        for (var i = 0; i < 5; i++) {
           await pressPaste(tester);
         }
+        // The fifth paste raises the limit toast; let it expire so the test
+        // does not end on a pending timer.
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pumpAndSettle();
 
-        expect(find.byType(Image), findsNWidgets(6));
+        expect(find.byType(Image), findsNWidgets(maxMessageAttachments));
 
         await tester.tap(find.byIcon(Icons.send_rounded));
         await tester.pump();
 
-        expect(sentAttachments.single, hasLength(6));
+        expect(sentAttachments.single, hasLength(maxMessageAttachments));
+      });
+
+      // Gboard's clipboard chip, sticker and GIF pickers never put anything on
+      // the clipboard: the keyboard commits the content straight into the
+      // field, so this is the only path that sees it.
+      testWidgets('a picture committed by the keyboard is attached', (
+        tester,
+      ) async {
+        mockClipboard();
+        await tester.pumpWidget(buildChatInputBar());
+
+        final config = tester
+            .widget<TextField>(find.byType(TextField))
+            .contentInsertionConfiguration!;
+        expect(config.allowedMimeTypes, contains('image/png'));
+
+        config.onContentInserted(
+          KeyboardInsertedContent(
+            mimeType: 'image/png',
+            uri: 'content://com.google.android.inputmethod/1',
+            data: png,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Image), findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.send_rounded));
+        await tester.pump();
+
+        expect(
+          sentAttachments.single.single,
+          'data:image/png;base64,${base64Encode(png)}',
+        );
+      });
+
+      // The engine could not read the content:// URI it was handed. Nothing in
+      // Dart can open one either, so the composer must sit still rather than
+      // attach an empty picture.
+      testWidgets('keyboard content with no bytes attaches nothing', (
+        tester,
+      ) async {
+        mockClipboard();
+        await tester.pumpWidget(buildChatInputBar());
+
+        tester
+            .widget<TextField>(find.byType(TextField))
+            .contentInsertionConfiguration!
+            .onContentInserted(
+              const KeyboardInsertedContent(
+                mimeType: 'image/gif',
+                uri: 'content://com.google.android.inputmethod/2',
+              ),
+            );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(Image), findsNothing);
       });
 
       // The way in on touch. The stock Paste handler only ever inserts text,

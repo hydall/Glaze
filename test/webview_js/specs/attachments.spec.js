@@ -115,25 +115,16 @@ test('four attachments form a 2x2 grid of equal tiles', async ({ page }) => {
   expect(b.x).toBeGreaterThan(a.x);
 });
 
-test('past four the grid goes three-up and keeps every picture', async ({ page }) => {
+test('more attachments than the grid can lay out are dropped', async ({ page }) => {
   const built = await attach(page, 7);
 
-  // Nothing caps the attachment count, so the block must lay out whatever it
-  // is handed rather than drop the overflow.
-  expect(built.images).toBe(7);
-  expect(built.className).toContain('count-many');
-  expect(built.columns.split(' ')).toHaveLength(3);
-  // Square tiles, three per row, wrapping onto as many rows as it takes.
-  const [a, b, c, d] = built.boxes;
-  expect(b.height).toBe(a.height);
-  expect(c.height).toBe(a.height);
-  expect(a.height).toBeCloseTo(a.width, 0);
-  expect(d.y).toBeGreaterThan(a.y);
+  expect(built.images).toBe(4);
+  expect(built.className).toContain('count-4');
 });
 
 test('the whole block carries one eye toggle, whatever the count', async ({ page }) => {
   expect((await attach(page, 1)).toggles).toBe(1);
-  expect((await attach(page, 9)).toggles).toBe(1);
+  expect((await attach(page, 4)).toggles).toBe(1);
 
   const dimmed = await attach(page, 4, { hidden: true });
   expect(dimmed.className).toContain('image-hidden');

@@ -1960,9 +1960,6 @@ void main() {
         '.msg-image-attachment.count-3,',
         '.msg-image-attachment.count-4 {',
         '.msg-image-attachment.count-3 img:first-child { grid-row: span 2; }',
-        // Nothing caps the attachment count, so past the named layouts the
-        // grid has to keep working for any number.
-        '.msg-image-attachment.count-many {',
       ]) {
         expect(stylessCss, contains(rule));
       }

@@ -59,6 +59,34 @@ void main() {
       );
     });
 
+    // What a keyboard hands over: it names one of the MIME types the field
+    // asked for, which need not be what the bytes actually are.
+    test('a declared type is only consulted when the header says nothing', () {
+      final png = bytes([0x89, 0x50, 0x4E, 0x47, 7]);
+      final unknown = bytes([1, 2, 3, 4]);
+
+      expect(
+        encodeImageDataUrl(png, fallbackMimeType: 'image/gif'),
+        startsWith('data:image/png;base64,'),
+      );
+      expect(
+        encodeImageDataUrl(unknown, fallbackMimeType: 'image/webp'),
+        startsWith('data:image/webp;base64,'),
+      );
+      // `image/jpg` is what Android keyboards send and is not a registered
+      // type; providers expect `image/jpeg`.
+      expect(
+        encodeImageDataUrl(unknown, fallbackMimeType: 'IMAGE/JPG'),
+        startsWith('data:image/jpeg;base64,'),
+      );
+      // Not an image type at all: ignored rather than carried into the
+      // request as a lie about the bytes.
+      expect(
+        encodeImageDataUrl(unknown, fallbackMimeType: 'text/plain'),
+        startsWith('data:image/png;base64,'),
+      );
+    });
+
     test('an unrecognised header falls back to the extension', () {
       final unknown = bytes([1, 2, 3, 4]);
 

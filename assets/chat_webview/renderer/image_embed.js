@@ -1,6 +1,8 @@
-/* Counts with a layout of their own; past this the grid falls back to the
- * three-up `count-many` rule, which grows downwards for any number. */
-const NAMED_LAYOUTS = 4;
+/* How many attachments the grid has a layout for. Kept in step with
+ * `maxMessageAttachments` in lib/core/models/chat_message.dart — anything past
+ * this many is dropped rather than rendered into a layout that does not
+ * exist. */
+export const MAX_ATTACHMENTS = 4;
 
 /* One attachment block per message, holding every image the message carries.
  *
@@ -11,14 +13,13 @@ const NAMED_LAYOUTS = 4;
  * `<img>` under the pointer. */
 export function createImageAttachments(sources, hidden, icon) {
   const paths = (Array.isArray(sources) ? sources : [sources])
-    .filter((src) => typeof src === 'string' && src);
+    .filter((src) => typeof src === 'string' && src)
+    .slice(0, MAX_ATTACHMENTS);
   if (!paths.length) return null;
 
   const wrap = document.createElement('div');
   wrap.className = 'msg-image-attachment';
-  wrap.classList.add(
-    paths.length <= NAMED_LAYOUTS ? `count-${paths.length}` : 'count-many',
-  );
+  wrap.classList.add(`count-${paths.length}`);
   // The grid layouts start at two: one image keeps the free-size block it has
   // always had, so a portrait screenshot is not cropped into a square.
   if (paths.length > 1) wrap.classList.add('multi');

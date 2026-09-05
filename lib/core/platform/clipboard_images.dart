@@ -13,11 +13,18 @@ class ClipboardImage {
 
   const ClipboardImage({required this.bytes, required this.dataUrl});
 
-  factory ClipboardImage.fromBytes(Uint8List bytes, {String? sourcePath}) =>
-      ClipboardImage(
-        bytes: bytes,
-        dataUrl: encodeImageDataUrl(bytes, fallbackPath: sourcePath),
-      );
+  factory ClipboardImage.fromBytes(
+    Uint8List bytes, {
+    String? sourcePath,
+    String? declaredMimeType,
+  }) => ClipboardImage(
+    bytes: bytes,
+    dataUrl: encodeImageDataUrl(
+      bytes,
+      fallbackPath: sourcePath,
+      fallbackMimeType: declaredMimeType,
+    ),
+  );
 }
 
 /// Reading images out of the system clipboard.
@@ -47,21 +54,26 @@ class ClipboardImages {
     '.bmp',
   };
 
-  /// Every image sitting on the clipboard right now. Empty when it holds no
-  /// image — which is the common case, so callers use it to decide between
-  /// "attach this" and "let the normal text paste happen".
-  static Future<List<ClipboardImage>> read() async {
+  /// Every image sitting on the clipboard right now, capped at [limit]. Empty
+  /// when the clipboard holds no image — which is the common case, so callers
+  /// use it to decide between "attach this" and "let the normal text paste
+  /// happen".
+  static Future<List<ClipboardImage>> read({int limit = 1}) async {
+    if (limit <= 0) return const [];
     final images = <ClipboardImage>[];
 
     final bitmap = await _readBitmap();
     if (bitmap != null) images.add(bitmap);
 
-    for (final path in await _readFilePaths()) {
-      final image = await _readImageFile(path);
-      if (image != null) images.add(image);
+    if (images.length < limit) {
+      for (final path in await _readFilePaths()) {
+        if (images.length >= limit) break;
+        final image = await _readImageFile(path);
+        if (image != null) images.add(image);
+      }
     }
 
-    return images;
+    return images.take(limit).toList(growable: false);
   }
 
   static Future<ClipboardImage?> _readBitmap() async {
@@ -102,14 +114,32 @@ class ClipboardImages {
 
 /// Wraps raw image [bytes] as a `data:` URL.
 ///
-/// The MIME type is sniffed from the magic bytes rather than taken from the
-/// extension: a clipboard bitmap has no filename, and a mislabelled type is
-/// what makes a provider reject an otherwise valid multimodal request.
-/// [fallbackPath]'s extension is only consulted when the sniff finds nothing
-/// it recognises.
-String encodeImageDataUrl(Uint8List bytes, {String? fallbackPath}) {
-  final mime = sniffImageMimeType(bytes) ?? _mimeFromPath(fallbackPath);
+/// The MIME type is sniffed from the magic bytes rather than taken from what
+/// the source claims: a clipboard bitmap has no filename, a keyboard reports
+/// whichever of the requested types it feels like, and a mislabelled type is
+/// what makes a provider reject an otherwise valid multimodal request. Only
+/// when the sniff recognises nothing does [fallbackMimeType] — then
+/// [fallbackPath]'s extension — get a say.
+String encodeImageDataUrl(
+  Uint8List bytes, {
+  String? fallbackPath,
+  String? fallbackMimeType,
+}) {
+  final mime =
+      sniffImageMimeType(bytes) ??
+      _normalizeMimeType(fallbackMimeType) ??
+      _mimeFromPath(fallbackPath);
   return 'data:$mime;base64,${base64Encode(bytes)}';
+}
+
+/// A declared type, kept only when it names an image format at all — anything
+/// else would be carried straight into the request as a lie about the bytes.
+String? _normalizeMimeType(String? mimeType) {
+  final normalized = mimeType?.trim().toLowerCase();
+  if (normalized == null || !normalized.startsWith('image/')) return null;
+  // Android keyboards send `image/jpg`, which is not a registered type; every
+  // provider expects `image/jpeg`.
+  return normalized == 'image/jpg' ? 'image/jpeg' : normalized;
 }
 
 /// The MIME type [bytes] start with, or null when the header matches none of
