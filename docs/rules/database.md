@@ -493,7 +493,25 @@ tracked via `SyncDeletionTracker.record('tracker_snapshot', sessionId)`.
 
 `ChatSessionService.branchSession` creates the branch, copies DB state,
 reconstructs live tracker rows, and updates the character's current session in
-one Drift transaction. Session baseline and
+one Drift transaction.
+
+The branch gets a **card of its own only when the session's card can already
+differ from the character it points at** — `ChatSessionBranchRepo`
+`requiresCardForkInTransaction`: a canon checkpoint past the root (a Card
+Rewriter apply or a rollback), a session lorebook overlay, or a source card
+that is itself a session-owned variant (`variantOrder != 0`), which a rewrite
+would edit in place and so must not be shared by two sessions. Then the branch
+forks the card at the latest surviving checkpoint, roots its own canon
+timeline, and lands on `${newCharacterId}_0`.
+
+With no rewrite behind it the branch keeps the source card and is a plain extra
+session on that character (`${charId}_$nextIndex`, the character's current
+session index moved onto it), with no character row, no revision row and no
+canon checkpoint: the first rewrite in either session forks the root card by
+itself (`ManualRewriteApplyRepo._forkSessionCharacter`). Branching a chat that
+never ran the Card Rewriter must not leave a variant behind.
+
+Session baseline and
 Studio configuration are copied as settings. Provenance-backed state is copied
 only when its complete source range is retained: tracker snapshots, character
 knowledge facts, reconciliation checkpoints, cleanup journals (copied with the

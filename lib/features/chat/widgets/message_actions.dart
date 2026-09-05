@@ -101,7 +101,11 @@ void showMessageContextMenu({
                 .read(chatProvider(charId).notifier)
                 .branchSession(messageIndex);
             if (branch != null && context.mounted) {
-              context.go('/chat/${branch.characterId}?session=0');
+              // A branch that kept the source card lands on that character's
+              // next session index, not on 0.
+              context.go(
+                '/chat/${branch.characterId}?session=${branch.sessionIndex}',
+              );
             }
           },
         ),
