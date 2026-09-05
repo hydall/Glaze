@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../shared/theme/app_colors.dart';
 import '../../state/request_timeline.dart';
+import 'inspector_surface.dart';
 import 'request_stage_label.dart';
 
 /// One group in the timeline — a chat turn or a background job — with its steps
@@ -34,67 +35,60 @@ class RequestGroupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final family = group.leadFamily;
-    final color = requestFamilyColor(context, family);
+    final color = requestFamilyColor(context, group.leadFamily);
     final started = DateTime.fromMillisecondsSinceEpoch(group.startedAtMs);
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Material(
-        color: context.cs.onSurface.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(10),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          children: [
-            InkWell(
-              onTap: onToggle,
-              child: IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Container(width: 3, color: color),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _titleRow(context, color, started),
-                            const SizedBox(height: 2),
-                            _subtitle(context),
-                          ],
-                        ),
+    return InspectorPlaque(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.zero,
+      accent: color,
+      child: Column(
+        children: [
+          InkWell(
+            onTap: onToggle,
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(width: 3, color: color),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _titleRow(context, color, started),
+                          const SizedBox(height: 2),
+                          _subtitle(context),
+                        ],
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: Icon(
-                        expanded
-                            ? Icons.expand_less_rounded
-                            : Icons.expand_more_rounded,
-                        size: 18,
-                        color: context.cs.onSurfaceVariant,
-                      ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Icon(
+                      expanded
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      size: 18,
+                      color: context.cs.onSurfaceVariant,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            if (expanded)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(13, 0, 6, 6),
-                child: Column(
-                  children: [
-                    for (final entry in group.entries)
-                      _StepRow(
-                        entry: entry,
-                        onTap: () => onOpenEntry(entry),
-                      ),
-                  ],
-                ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(13, 0, 8, 8),
+              child: Column(
+                children: [
+                  for (final entry in group.entries)
+                    _StepRow(entry: entry, onTap: () => onOpenEntry(entry)),
+                ],
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -185,10 +179,7 @@ class _StepRow extends StatelessWidget {
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: context.cs.onSurface,
-                ),
+                style: TextStyle(fontSize: 12, color: context.cs.onSurface),
               ),
             ),
             if (entry.attempts > 1) ...[

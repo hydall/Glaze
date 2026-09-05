@@ -12,8 +12,7 @@ import '../../state/request_timeline.dart';
 import '../../state/session_requests_provider.dart';
 import '../prompt_preview_screen.dart';
 import '../studio_prompt_preview_tab.dart';
-import 'coverage_rows.dart';
-import 'next_turn_coverage_view.dart';
+import 'inspector_surface.dart';
 import 'request_detail_view.dart';
 import 'request_group_card.dart';
 import 'request_rows.dart';
@@ -27,10 +26,10 @@ import 'request_rows.dart';
 /// open. Three levels: timeline → the steps of one group → the payload of one
 /// step. The inspector hides its tab strip for the last two.
 ///
-/// Coverage is not a view next to this one any more. A past request's coverage
-/// is a block inside that request; only the *next* request's — a live dry-run
-/// of the scan, which belongs to no captured request yet — still gets a row of
-/// its own at the top.
+/// Coverage is not a view next to this one any more, and not a row either: a
+/// past request's coverage is a block inside that request, and the next
+/// request's is a block inside its preview. The timeline lists requests, and
+/// there is exactly one row for the request that has not happened yet.
 class RequestTimelineView extends ConsumerStatefulWidget {
   const RequestTimelineView({
     super.key,
@@ -45,8 +44,8 @@ class RequestTimelineView extends ConsumerStatefulWidget {
   /// can hide its tab strip for the drill-down.
   final ValueChanged<bool> onDetailChanged;
 
-  /// Opens straight on the next request's coverage — where the context card's
-  /// lorebook layer deep-links to.
+  /// Opens straight on the next request, with its coverage block unfolded —
+  /// where the context card's lorebook layer deep-links to.
   final bool initialCoverage;
 
   @override
@@ -56,11 +55,10 @@ class RequestTimelineView extends ConsumerStatefulWidget {
 
 class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
   PromptCaptureView? _openCapture;
-  bool _openPreview = false;
-  late bool _openCoverage = widget.initialCoverage;
+  late bool _openPreview = widget.initialCoverage;
   final Set<String> _expandedGroups = {};
 
-  bool get _inDetail => _openCapture != null || _openPreview || _openCoverage;
+  bool get _inDetail => _openCapture != null || _openPreview;
 
   @override
   void initState() {
@@ -68,22 +66,17 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
     // A deep link opens on a drill-down, so the inspector has to be told to
     // step its tab strip aside — after the frame that mounts us, never during
     // the parent's own build.
-    if (_openCoverage) {
+    if (_openPreview) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _openCoverage) widget.onDetailChanged(true);
+        if (mounted && _openPreview) widget.onDetailChanged(true);
       });
     }
   }
 
-  void _open({
-    PromptCaptureView? capture,
-    bool preview = false,
-    bool coverage = false,
-  }) {
+  void _open({PromptCaptureView? capture, bool preview = false}) {
     setState(() {
       _openCapture = capture;
       _openPreview = preview;
-      _openCoverage = coverage;
     });
     widget.onDetailChanged(true);
   }
@@ -92,7 +85,6 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
     setState(() {
       _openCapture = null;
       _openPreview = false;
-      _openCoverage = false;
     });
     widget.onDetailChanged(false);
   }
@@ -134,15 +126,6 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
         ),
       );
     }
-    if (_openCoverage) {
-      return _inset(
-        NextTurnCoverageView(
-          charId: widget.charId,
-          sessionId: sessionId,
-          onBack: _close,
-        ),
-      );
-    }
     if (_openPreview) {
       // No header of our own: both preview screens title themselves, and a
       // second title stacked on top is the duplication this rework removed.
@@ -150,11 +133,16 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
       final agentic = ref.watch(studioFeatureEnabledProvider);
       // The preview screens read the inset themselves, so they are not wrapped.
       return agentic
-          ? StudioPromptPreviewTab(charId: widget.charId, onBack: _close)
+          ? StudioPromptPreviewTab(
+              charId: widget.charId,
+              onBack: _close,
+              coverageExpanded: widget.initialCoverage,
+            )
           : PromptPreviewScreen(
               charId: widget.charId,
               embedded: true,
               onBack: _close,
+              coverageExpanded: widget.initialCoverage,
             );
     }
 
@@ -199,33 +187,17 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
         const <ChatMessage>[];
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
       children: [
         RequestPreviewRow(onTap: () => _open(preview: true)),
-        const SizedBox(height: 8),
-        CoverageNextRow(onTap: () => _open(coverage: true)),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-          child: Row(
-            children: [
-              Text(
-                'requests_since_start'.tr(),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                tooltip: 'action_refresh'.tr(),
-                onPressed: () =>
-                    ref.invalidate(promptCaptureViewsProvider(sessionId)),
-              ),
-            ],
+        InspectorSectionTitle(
+          'requests_since_start'.tr(),
+          trailing: IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            tooltip: 'action_refresh'.tr(),
+            onPressed: () =>
+                ref.invalidate(promptCaptureViewsProvider(sessionId)),
           ),
         ),
         if (groups.isEmpty)

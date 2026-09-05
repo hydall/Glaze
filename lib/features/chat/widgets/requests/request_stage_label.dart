@@ -7,8 +7,7 @@ import '../../state/request_timeline.dart';
 /// same on a light preset as on a dark one.
 Color requestFamilyColor(BuildContext context, RequestStageFamily family) {
   final dark = Theme.of(context).brightness == Brightness.dark;
-  Color pick(int onDark, int onLight) =>
-      Color(dark ? onDark : onLight);
+  Color pick(int onDark, int onLight) => Color(dark ? onDark : onLight);
   return switch (family) {
     RequestStageFamily.main => pick(0xFF7996CE, 0xFF3F5C96),
     RequestStageFamily.agent => pick(0xFFC084FC, 0xFF7C3AED),
