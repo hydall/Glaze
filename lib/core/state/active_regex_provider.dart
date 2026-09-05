@@ -26,5 +26,13 @@ final activeRegexesProvider = FutureProvider<List<PresetRegex>>((ref) async {
 
 final displayRegexesProvider = FutureProvider<List<PresetRegex>>((ref) async {
   final all = await ref.watch(activeRegexesProvider.future);
-  return all.where((r) => r.ephemerality.contains(1) && !r.promptOnly).toList();
+  // "Only Format Prompt" keeps a script out of the display pass — unless it
+  // also ticks "Only Format Display", which opts it into both passes (ST ORs
+  // the two flags; see [applyRegexes]).
+  return all
+      .where(
+        (r) =>
+            r.ephemerality.contains(1) && (!r.promptOnly || r.markdownOnly),
+      )
+      .toList();
 });

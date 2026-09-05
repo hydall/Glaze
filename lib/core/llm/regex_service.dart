@@ -49,8 +49,22 @@ String applyRegexes(
         continue;
       }
     }
-    if (script.promptOnly && !isPrompt) continue;
-    if (script.markdownOnly && !isMarkdown) continue;
+    // ST semantics: "Only Format Display" (markdownOnly) and "Only Format
+    // Prompt" (promptOnly) are two independent opt-ins, not one exclusive
+    // switch — `getRegexedString` ORs the two clauses. A script that ticks
+    // both therefore runs in the display pass *and* in the prompt pass.
+    // Requiring both at once made such a script dead everywhere, because no
+    // caller passes `isMarkdown` and `isPrompt` together.
+    //
+    // The storage pass (run-on-edit) passes neither flag, and still skips
+    // both kinds: a display- or prompt-scoped rewrite must never be baked
+    // into the stored message.
+    if (script.promptOnly || script.markdownOnly) {
+      final wantsThisPass =
+          (script.promptOnly && isPrompt) ||
+          (script.markdownOnly && isMarkdown);
+      if (!wantsThisPass) continue;
+    }
 
     final sEphemerality = script.ephemerality;
     if (!ignoreEphemerality &&
