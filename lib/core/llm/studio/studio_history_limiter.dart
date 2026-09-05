@@ -180,7 +180,7 @@ class StudioHistoryLimiter {
     content: stripFontTags(message.content),
     sourceMessageId: message.sourceMessageId,
     reasoningContent: message.reasoningContent,
-    imagePath: message.imagePath,
+    imagePaths: message.imagePaths,
   );
 
   /// Trim trailing chat history for a tracker (intermediate agent).
@@ -201,7 +201,7 @@ class StudioHistoryLimiter {
               role: m.role,
               content: stripHtmlTags(m.content),
               sourceMessageId: m.sourceMessageId,
-              imagePath: m.imagePath,
+              imagePaths: m.imagePaths,
             ),
           )
           .toList();
@@ -213,7 +213,7 @@ class StudioHistoryLimiter {
             role: m.role,
             content: stripHtmlTags(m.content),
             sourceMessageId: m.sourceMessageId,
-            imagePath: m.imagePath,
+            imagePaths: m.imagePaths,
           ),
         )
         .toList();

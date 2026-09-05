@@ -1,3 +1,4 @@
+import '../models/chat_message.dart';
 import 'context_calculator.dart';
 import 'history_assembler.dart';
 import 'macro_engine.dart';
@@ -39,7 +40,7 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
         reasoningContent: msg.reasoning,
         isHistory: true,
         sourceMessageId: msg.id,
-        imagePath: msg.imageHidden ? null : msg.imagePath,
+        imagePaths: msg.imageHidden ? const [] : msg.attachments,
       ),
     );
   }

@@ -62,7 +62,7 @@ List<PromptMessage> applyPromptRegexes({
           depth: msg.depth,
           sourceMessageId: msg.sourceMessageId,
           reasoningContent: msg.reasoningContent,
-          imagePath: msg.imagePath,
+          imagePaths: msg.imagePaths,
           sendEmptyBlock: msg.sendEmptyBlock,
         ),
       );
@@ -88,7 +88,7 @@ List<PromptMessage> applyPromptRegexes({
           depth: msg.depth,
           sourceMessageId: msg.sourceMessageId,
           reasoningContent: msg.reasoningContent,
-          imagePath: msg.imagePath,
+          imagePaths: msg.imagePaths,
           sendEmptyBlock: msg.sendEmptyBlock,
         ),
       );

@@ -191,6 +191,7 @@ lib/
 │   ├── navigation/
 │   │   └── router.dart               # GoRouter routes + shell (used by app.dart)
 │   ├── platform/                     # Platform-specific integrations
+│   │   ├── clipboard_images.dart     # Clipboard → image data URLs (bitmap + copied files)
 │   │   ├── haptics.dart              # Haptic feedback helpers
 │   │   ├── system_settings.dart      # OS settings (wallpaper, dark mode)
 │   │   └── wallpaper.dart            # Device wallpaper fetch

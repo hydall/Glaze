@@ -2306,11 +2306,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                         // write and missed that append.
                                         return accepted;
                                       },
-                                      onSendWithImage:
+                                      onSendWithImages:
                                           (
                                             text,
                                             guidanceText,
-                                            imageDataUrl,
+                                            imageDataUrls,
                                           ) async {
                                             if (!await _maybeSeedGameTime()) {
                                               return false;
@@ -2324,7 +2324,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                                 .trySendMessage(
                                                   text,
                                                   guidanceText: guidanceText,
-                                                  imageDataUrl: imageDataUrl,
+                                                  imageDataUrls: imageDataUrls,
                                                 );
                                             // Armed by the sync dispatcher —
                                             // see onSend above.

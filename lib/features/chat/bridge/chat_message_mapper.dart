@@ -205,8 +205,12 @@ class ChatMessageMapper {
       'isSystem': m.role == 'system',
       'displayName': displayName,
       'avatarColor': ?avatarColor,
-      if (m.imagePath != null) 'imagePath': m.imagePath,
-      if (m.imagePath != null) 'imageHidden': m.imageHidden,
+      // `imagePath` stays the first attachment so nothing that only knows the
+      // single-image shape breaks; `imagePaths` carries the whole set, which
+      // is what the renderer lays out as a grid.
+      if (m.hasAttachments) 'imagePath': m.attachments.first,
+      if (m.hasAttachments) 'imagePaths': m.attachments,
+      if (m.hasAttachments) 'imageHidden': m.imageHidden,
       if (isUser && senderPersonaId != null) ...{
         // Sent as a named persona: the WebView pins this message's name and
         // avatar to it instead of following whichever persona is active now.

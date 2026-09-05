@@ -128,7 +128,7 @@ class StudioStreamInterceptor {
               content: message.content,
               reasoningContent: message.reasoning,
               sourceMessageId: message.id,
-              imagePath: message.imageHidden ? null : message.imagePath,
+              imagePaths: message.imageHidden ? const [] : message.attachments,
             ),
           )
           .toList(growable: false);

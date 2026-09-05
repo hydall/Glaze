@@ -80,7 +80,7 @@ void main() {
 
   test('preview request retains image-only messages and exact data URI', () {
     final messages = buildPreviewApiMessages(const [
-      PromptMessage(role: 'user', content: '', imagePath: png),
+      PromptMessage(role: 'user', content: '', imagePaths: [png]),
     ]);
 
     expect(messages, [

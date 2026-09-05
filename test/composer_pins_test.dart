@@ -51,6 +51,19 @@ void main() {
       expect(await load(makeContainer()), kDefaultComposerPins);
     });
 
+    // Paste ships as a drawer card rather than a fifth button: the row was
+    // already full, and Ctrl/Cmd+V covers the case on a keyboard.
+    test('paste ships unpinned but is pinnable', () async {
+      SharedPreferences.setMockInitialValues({});
+
+      expect(
+        await load(makeContainer()),
+        isNot(contains(pinOf(ComposerAction.paste))),
+      );
+      expect(ComposerAction.demotable, contains(ComposerAction.paste));
+      expect(ComposerPin.decode('action:paste'), pinOf(ComposerAction.paste));
+    });
+
     test('migrates the pre-mixed-row key of bare action ids', () async {
       SharedPreferences.setMockInitialValues({
         ComposerPinsNotifier.legacyStorageKey: ['drawer', 'guidance'],

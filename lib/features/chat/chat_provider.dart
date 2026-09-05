@@ -393,7 +393,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<bool> trySendMessage(
     String text, {
     String? guidanceText,
-    String? imageDataUrl,
+    List<String> imageDataUrls = const [],
   }) {
     if (!ref.mounted ||
         _sendInFlight ||
@@ -415,7 +415,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       _sendMessage(
         text,
         guidanceText: guidanceText,
-        imageDataUrl: imageDataUrl,
+        imageDataUrls: imageDataUrls,
         durableAcceptance: durableAcceptance,
       ).catchError((Object error, StackTrace stackTrace) {
         debugPrint('[ChatNotifier] accepted send failed: $error\n$stackTrace');
@@ -430,17 +430,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<void> sendMessage(
     String text, {
     String? guidanceText,
-    String? imageDataUrl,
+    List<String> imageDataUrls = const [],
   }) => _sendMessage(
     text,
     guidanceText: guidanceText,
-    imageDataUrl: imageDataUrl,
+    imageDataUrls: imageDataUrls,
   );
 
   Future<void> _sendMessage(
     String text, {
     String? guidanceText,
-    String? imageDataUrl,
+    List<String> imageDataUrls = const [],
     Completer<bool>? durableAcceptance,
   }) async {
     if (!ref.mounted) {
@@ -492,13 +492,19 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           sessionId: current.session!.id,
         )),
       );
+      // Attachments are stored split across `imagePath` (the first) and
+      // `extraImagePaths` (the rest) — see [splitAttachments].
+      final attachments = splitAttachments(
+        imageDataUrls.take(maxMessageAttachments).toList(),
+      );
       final userMsg = ChatMessage(
         id: generateId(),
         role: 'user',
         content: text,
         timestamp: DateTime.now().millisecondsSinceEpoch,
         tokens: estimateTokens(text),
-        imagePath: imageDataUrl,
+        imagePath: attachments.imagePath,
+        extraImagePaths: attachments.extraImagePaths,
         personaId: sendingPersona?.id,
         personaName: sendingPersona?.name,
       );

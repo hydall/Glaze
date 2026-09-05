@@ -197,6 +197,24 @@ class MessageBridgeCommands {
   }
 
   void _resolveMappedFileUrls(Map<String, dynamic> map) {
+    final paths = map['imagePaths'];
+    if (paths is List) {
+      // A path the WebView cannot reach (the file is gone, or it lives outside
+      // the served root) is dropped rather than rendered as a broken tile.
+      final resolved = <String>[
+        for (final path in paths.whereType<String>())
+          ?_host.resolveLocalFileUrl(path),
+      ];
+      if (resolved.isEmpty) {
+        map.remove('imagePath');
+        map.remove('imagePaths');
+        map.remove('imageHidden');
+      } else {
+        map['imagePaths'] = resolved;
+        map['imagePath'] = resolved.first;
+      }
+      return;
+    }
     final imagePath = map['imagePath'];
     if (imagePath is String) {
       final resolved = _host.resolveLocalFileUrl(imagePath);
