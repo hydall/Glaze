@@ -52,12 +52,20 @@ String? chatWebViewAndroidAssetUrl() {
 }
 
 /// Android [WebViewAssetLoader] for bundled chat assets, or `null` elsewhere.
+/// One loader for the whole app. The chat WebView is kept alive and reused
+/// ([chatWebViewKeepAliveForPlatform]), and the plugin only parses
+/// `initialSettings` when it actually builds a new native WebView — a
+/// keep-alive reuse skips `FlutterWebView` entirely. A per-mount handler would
+/// therefore register a MethodChannel that the native side never calls, and
+/// nothing disposes it.
+WebViewAssetLoader? _sharedChatAssetLoader;
+
 WebViewAssetLoader? chatWebViewAssetLoader() {
   if (!chatWebViewUsesAndroidAssetLoader()) return null;
   // Bundled chat assets only. Local Glaze files are served by the loopback
   // HTTP server started in [initChatWebViewEnvironment] — not
   // [InternalStoragePathHandler], which crashes on 6.1.5 (#1980 / #2451).
-  return WebViewAssetLoader(
+  return _sharedChatAssetLoader ??= WebViewAssetLoader(
     pathHandlers: [AssetsPathHandler(path: '/assets/')],
   );
 }
