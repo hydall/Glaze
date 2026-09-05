@@ -129,6 +129,61 @@ void main() {
       expect(prompt, equals('aYb'));
     });
 
+    test(
+      'markdownOnly + promptOnly runs in both passes, never on stored text',
+      () {
+        // The pair a user imports to swap spaces for U+2007 on the way out and
+        // back on the way in: the "return" half ticks both "Only Format
+        // Display" and "Only Format Prompt". ST ORs the two flags, so it must
+        // fire in the display pass and in the prompt pass alike.
+        final script = PresetRegex.fromJson({
+          'id': 'both-only',
+          'name': 'Return Normal Spaces',
+          'regex': '/\u2007/g',
+          'replacement': ' ',
+          'markdownOnly': true,
+          'promptOnly': true,
+          'placement': [1, 2],
+          'ephemerality': [1, 2],
+        });
+
+        const input = 'a\u2007b';
+
+        expect(
+          applyRegexes(input, 2, 2, [script], ctx(), isPrompt: true),
+          equals('a b'),
+        );
+        expect(
+          applyRegexes(input, 2, 1, [script], ctx(), isMarkdown: true),
+          equals('a b'),
+        );
+        // Storage pass (run-on-edit): neither flag is set, so the rewrite must
+        // not be baked into the message.
+        expect(applyRegexes(input, 2, 1, [script], ctx()), equals(input));
+      },
+    );
+
+    test('promptOnly script rewrites spaces to figure spaces in the prompt', () {
+      final script = PresetRegex.fromJson({
+        'id': 'figure-spaces',
+        'name': 'Use Figure Spaces',
+        'regex': '/ /g',
+        'replacement': '\u2007',
+        'promptOnly': true,
+        'placement': [1, 2],
+        'ephemerality': [1, 2],
+      });
+
+      expect(
+        applyRegexes('a b', 2, 2, [script], ctx(), isPrompt: true),
+        equals('a\u2007b'),
+      );
+      expect(
+        applyRegexes('a b', 2, 1, [script], ctx(), isMarkdown: true),
+        equals('a b'),
+      );
+    });
+
     test('World Info placement 5 applies to lorebook blocks', () {
       final script = PresetRegex.fromJson({
         'id': 'wi-only',
