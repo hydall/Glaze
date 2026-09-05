@@ -597,6 +597,9 @@ class MenuFieldItem extends StatelessWidget {
 class MenuRangeItem extends StatefulWidget {
   final String label;
   final String? helpTerm;
+
+  /// Muted hint under the label — same role as [MenuFieldItem.description].
+  final String? description;
   final double value;
   final double min;
   final double max;
@@ -611,6 +614,7 @@ class MenuRangeItem extends StatefulWidget {
     super.key,
     required this.label,
     this.helpTerm,
+    this.description,
     required this.value,
     required this.min,
     required this.max,
@@ -749,6 +753,18 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
               ),
             ],
           ),
+          if (widget.description != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Text(
+                widget.description!,
+                style: const TextStyle(
+                  color: Color(0xFF99A2AD),
+                  fontSize: 12,
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+            ),
           AnimatedCrossFade(
             duration: _toggleDuration,
             sizeCurve: Curves.easeInOut,
@@ -1042,12 +1058,16 @@ class MenuSelectorItem extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 6),
+            // Same box as [MenuFieldItem]'s text field — fill, radius, border
+            // and metrics. Without the outline a selector read as a different
+            // kind of control from the fields it sits between.
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              height: 46,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              constraints: const BoxConstraints(minHeight: 48),
               decoration: BoxDecoration(
                 color: const Color(0xFF252525),
                 borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: context.cs.outlineVariant),
               ),
               child: Row(
                 children: [

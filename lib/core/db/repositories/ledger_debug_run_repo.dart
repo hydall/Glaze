@@ -143,12 +143,9 @@ class LedgerDebugRunRepo {
     final query = db.select(db.ledgerDebugRuns)
       ..where((table) => table.sessionId.equals(sessionId))
       ..orderBy([
-        (table) => OrderingTerm(
-          expression: table.createdAt,
-          mode: OrderingMode.desc,
-        ),
         (table) =>
-            OrderingTerm(expression: table.id, mode: OrderingMode.desc),
+            OrderingTerm(expression: table.createdAt, mode: OrderingMode.desc),
+        (table) => OrderingTerm(expression: table.id, mode: OrderingMode.desc),
       ])
       ..limit(limit);
     return query.get();

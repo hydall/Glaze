@@ -305,10 +305,23 @@ extension ChatSessionX on ChatSession {
   /// along with it, so chat-deletion is excluded from the "Deleted" statistic.
   static const deletedMessagesVarKey = '__deletedMessages';
 
+  /// Reserved [sessionVars] key holding the id of the oldest message the last
+  /// stepped history trim anchored on. Kept here rather than in a column of its
+  /// own so it rides the existing atomic session-var write path
+  /// (`ChatRepo.updateSessionVarsJson`) instead of a new read-modify-write.
+  /// Meaningless while the connection is on `sliding`, where it is cleared.
+  static const historyAnchorVarKey = '__historyAnchor';
+
   /// Cumulative count of messages deleted from this session. See
   /// [deletedMessagesVarKey].
   int get deletedMessageCount =>
       int.tryParse(sessionVars[deletedMessagesVarKey] ?? '') ?? 0;
+
+  /// Anchor the last stepped trim settled on. See [historyAnchorVarKey].
+  String? get historyAnchorId {
+    final value = sessionVars[historyAnchorVarKey];
+    return value == null || value.isEmpty ? null : value;
+  }
 
   String get historyText => messages
       .where((m) => (m.role == 'user' || m.role == 'assistant') && !m.isHidden)

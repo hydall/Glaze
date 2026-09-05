@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 
 import '../../../core/llm/context_calculator.dart';
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/menu_group.dart';
 
 final kSourceMeta = <String, SourceMeta>{
   'preset': SourceMeta(
@@ -415,123 +414,54 @@ class TokenizerLayout extends StatelessWidget {
   }
 }
 
+/// Amber accent for the cutoff notice. A semantic status with no token behind
+/// it, hoisted per `docs/UI_KIT.md` § Colours.
+const Color _cutoffAccent = Color(0xFFE0A030);
+
+/// How much of the history did not make it into the prompt.
+///
+/// Not a failure — it is what a long chat in a finite window looks like. The
+/// gear leads to the connection's Context section, where the window and the
+/// trim mode that produced this number actually live.
 class CutoffWarning extends StatelessWidget {
   final int cutoffCount;
-  const CutoffWarning({super.key, required this.cutoffCount});
+  final VoidCallback? onOpenSettings;
+
+  const CutoffWarning({
+    super.key,
+    required this.cutoffCount,
+    this.onOpenSettings,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 12, 6, 12),
       decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.08),
+        color: _cutoffAccent.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.orange.withValues(alpha: 0.25)),
+        border: Border.all(color: _cutoffAccent.withValues(alpha: 0.25)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning_amber, size: 18, color: Colors.orange),
+          const Icon(Icons.warning_amber, size: 18, color: _cutoffAccent),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'count_message_cut'.plural(cutoffCount),
-              style: const TextStyle(fontSize: 13, color: Colors.orange),
+              'count_message_didnt_fit'.plural(cutoffCount),
+              style: const TextStyle(fontSize: 13, color: _cutoffAccent),
             ),
           ),
+          if (onOpenSettings != null)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.settings_outlined, size: 18),
+              color: _cutoffAccent,
+              tooltip: 'context_open_api_settings'.tr(),
+              onPressed: onOpenSettings,
+            ),
         ],
       ),
-    );
-  }
-}
-
-class NearLimitWarning extends StatelessWidget {
-  final int hideCount;
-  final int hideTokens;
-  const NearLimitWarning({
-    super.key,
-    required this.hideCount,
-    required this.hideTokens,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFB84D).withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFFFFB84D).withValues(alpha: 0.3),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'tokenizer_history_limit_warning'.tr(),
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFFFFB84D),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'tokenizer_near_limit_body'.plural(
-              hideCount,
-              args: ['$hideCount', '$hideTokens'],
-            ),
-            style: TextStyle(fontSize: 14, color: context.cs.onSurfaceVariant),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// One tokenizer preference, rendered as the app's standard settings row.
-///
-/// Was a bare `Card` wrapping a Material `Slider` with hand-mixed white alphas,
-/// which is exactly the "styled Material widget pretending to be Glaze" the UI
-/// kit calls out. `MenuGroup` + `MenuRangeItem` is the same control the rest of
-/// the settings use, so the value is editable by tap here too.
-class SettingsSlider extends StatelessWidget {
-  final String label;
-  final double value;
-  final double min;
-  final double max;
-  final String unit;
-  final String description;
-  final ValueChanged<double> onChanged;
-
-  const SettingsSlider({
-    super.key,
-    required this.label,
-    required this.value,
-    this.min = 1,
-    this.max = 100,
-    this.unit = '%',
-    required this.description,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return MenuGroup(
-      header: label,
-      description: description,
-      items: [
-        MenuRangeItem(
-          label: unit,
-          value: value,
-          min: min,
-          max: max,
-          divisions: (max - min).round(),
-          editableValue: true,
-          decimalPlaces: 0,
-          onChanged: onChanged,
-        ),
-      ],
     );
   }
 }
@@ -646,63 +576,5 @@ class _BarChartPainter extends CustomPainter {
       }
     }
     return false;
-  }
-}
-
-/// Compact action row shown at the top of the Tokenizer body when it is
-/// embedded inside the Prompt Inspector (replaces the SheetView action slot).
-class TokenizerEmbeddedToolbar extends StatelessWidget {
-  final bool showSettings;
-  final VoidCallback onToggleSettings;
-  final VoidCallback? onRefresh;
-
-  const TokenizerEmbeddedToolbar({
-    super.key,
-    required this.showSettings,
-    required this.onToggleSettings,
-    required this.onRefresh,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
-      child: Row(
-        children: [
-          // Only the sub-view is named here. The tab strip right above already
-          // says "Context"; printing it again inside the body was one of the
-          // duplicated headings this pass removed.
-          if (showSettings)
-            Text(
-              'context_settings_title'.tr(),
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: context.cs.onSurfaceVariant,
-              ),
-            ),
-          const Spacer(),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: Icon(
-              showSettings ? Icons.close : Icons.tune,
-              size: 20,
-              color: showSettings ? context.cs.primary : context.cs.onSurface,
-            ),
-            tooltip: showSettings
-                ? 'action_close_settings'.tr()
-                : 'context_settings_title'.tr(),
-            onPressed: onToggleSettings,
-          ),
-          if (!showSettings)
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.refresh, size: 20),
-              tooltip: 'action_recalculate'.tr(),
-              onPressed: onRefresh,
-            ),
-        ],
-      ),
-    );
   }
 }

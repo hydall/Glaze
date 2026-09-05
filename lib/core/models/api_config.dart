@@ -19,6 +19,17 @@ abstract class ApiConfig with _$ApiConfig {
     @Default('chat') String mode,
     @Default(8000) int maxTokens,
     @Default(32000) int contextSize,
+
+    /// How history is cut once it stops fitting — `sliding` or `stepped`.
+    /// See [HistoryTrimMode]; it is a cache property of the connection, which
+    /// is why it sits next to the window it is cut against.
+    @Default('sliding') String historyTrimMode,
+
+    /// Stepped mode only: how full the held window may get before the anchor
+    /// moves, and how much of the budget a move gives back. See
+    /// [kDefaultHistoryTrimTriggerPercent] / [kDefaultHistoryTrimStepPercent].
+    @Default(85) int historyTrimTriggerPercent,
+    @Default(30) int historyTrimStepPercent,
     @Default(0.7) double temperature,
     @Default(0.9) double topP,
     @Default(0) int topK,
@@ -97,4 +108,16 @@ Map<String, dynamic> _normalizeApiConfigJson(Map<String, dynamic> json) {
     normalized['providerId'] = 'custom_chat_completion';
   }
   return normalized;
+}
+
+extension ApiConfigContextX on ApiConfig {
+  /// Every field that changes which messages survive into the prompt.
+  ///
+  /// Anything that reuses a cached [TokenBreakdown] — or shows a preview of the
+  /// next request — has to notice when one of these moves, or it keeps showing
+  /// a prompt the app would no longer send.
+  String get contextBudgetSignature =>
+      '$id|$contextSize|$maxTokens|$historyTrimMode|'
+      '$historyTrimTriggerPercent|$historyTrimStepPercent|'
+      '$reasoningHistoryCount|$excludeReasoningFromContextBudget';
 }

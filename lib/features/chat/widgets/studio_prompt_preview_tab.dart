@@ -6,13 +6,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_filter_chip_bar.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/list_controls.dart';
 import '../chat_provider.dart';
 import '../services/studio_prompt_preview_service.dart';
+import 'requests/inspector_surface.dart';
+import 'requests/next_turn_coverage_block.dart';
 
 enum _PreviewViewMode { messages, raw, metadata }
 
@@ -23,6 +24,7 @@ class StudioPromptPreviewTab extends ConsumerStatefulWidget {
     super.key,
     required this.charId,
     this.onBack,
+    this.coverageExpanded = false,
   });
 
   final String charId;
@@ -31,6 +33,10 @@ class StudioPromptPreviewTab extends ConsumerStatefulWidget {
   /// as "the next turn" on an agentic preset), so its toolbar leads with a back
   /// button instead of relying on a tab strip that is hidden.
   final VoidCallback? onBack;
+
+  /// Opens with the coverage block unfolded — the deep link the context card
+  /// under the chat header uses.
+  final bool coverageExpanded;
 
   @override
   ConsumerState<StudioPromptPreviewTab> createState() =>
@@ -41,6 +47,10 @@ class _StudioPromptPreviewTabState
     extends ConsumerState<StudioPromptPreviewTab> {
   String? _selectedId;
   _PreviewViewMode _mode = _PreviewViewMode.messages;
+
+  /// Kept from the last build so the coverage block can name the session its
+  /// memory half belongs to.
+  String? _sessionId;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +63,7 @@ class _StudioPromptPreviewTabState
     final catalog = ref.watch(
       studioPromptPreviewCatalogProvider(widget.charId),
     );
+    _sessionId = sessionId;
     return catalog.when(
       loading: () => const Center(child: GlazeSpinner()),
       error: (error, _) => _EmptyState(
@@ -160,12 +171,22 @@ class _StudioPromptPreviewTabState
             text: _unavailableText(selected.unavailableReason!),
             color: context.cs.tertiary,
           )
-        else if (_mode == _PreviewViewMode.messages)
+        else if (_mode == _PreviewViewMode.messages) ...[
+          // Coverage rides above the messages for the same reason it does in
+          // the plain preview: it is a property of the request on screen, not
+          // a view of its own.
+          NextTurnCoverageBlock(
+            charId: widget.charId,
+            sessionId: _sessionId,
+            initiallyExpanded: widget.coverageExpanded,
+          ),
+          const SizedBox(height: 10),
           if (selected.messages.isEmpty)
             _InfoCard(text: 'prompt_inspector_studio_no_messages'.tr())
           else
             for (final message in selected.messages)
               _MessageCard(message: message),
+        ],
         if (_mode == _PreviewViewMode.raw && selected.isAvailable) ...[
           _InfoCard(text: 'prompt_inspector_studio_pre_protocol_note'.tr()),
           _CodeCard(text: selected.formattedRawRequest),
@@ -325,30 +346,24 @@ class _MessageCard extends StatelessWidget {
   final Map<String, dynamic> message;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
-    child: GlassSurface(
-      borderRadius: BorderRadius.circular(14),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              (message['role'] ?? 'unknown').toString().toUpperCase(),
-              style: TextStyle(
-                color: context.cs.primary,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            SelectableText(
-              _StudioPromptPreviewTabState._contentText(message['content']),
-            ),
-          ],
+  Widget build(BuildContext context) => InspectorPlaque(
+    margin: const EdgeInsets.only(bottom: 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          (message['role'] ?? 'unknown').toString().toUpperCase(),
+          style: TextStyle(
+            color: context.cs.primary,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        SelectableText(
+          _StudioPromptPreviewTabState._contentText(message['content']),
+        ),
+      ],
     ),
   );
 }
@@ -359,14 +374,10 @@ class _CodeCard extends StatelessWidget {
   final String text;
 
   @override
-  Widget build(BuildContext context) => GlassSurface(
-    borderRadius: BorderRadius.circular(14),
-    child: Padding(
-      padding: const EdgeInsets.all(12),
-      child: SelectableText(
-        text,
-        style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-      ),
+  Widget build(BuildContext context) => InspectorPlaque(
+    child: SelectableText(
+      text,
+      style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
     ),
   );
 }
@@ -378,15 +389,10 @@ class _InfoCard extends StatelessWidget {
   final Color? color;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
-    child: GlassSurface(
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(
-        color: (color ?? context.cs.outline).withValues(alpha: 0.3),
-      ),
-      child: Padding(padding: const EdgeInsets.all(12), child: Text(text)),
-    ),
+  Widget build(BuildContext context) => InspectorPlaque(
+    margin: const EdgeInsets.only(bottom: 10),
+    accent: color,
+    child: Text(text),
   );
 }
 
@@ -409,10 +415,27 @@ class _EmptyState extends StatelessWidget {
           Text(text, textAlign: TextAlign.center),
           if (onRefresh != null) ...[
             const SizedBox(height: 12),
-            TextButton.icon(
-              onPressed: onRefresh,
-              icon: const Icon(Icons.refresh_rounded),
-              label: Text('action_refresh'.tr()),
+            InspectorPlaque(
+              onTap: onRefresh,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.refresh_rounded,
+                    size: 18,
+                    color: context.cs.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'action_refresh'.tr(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: context.cs.primary,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ],

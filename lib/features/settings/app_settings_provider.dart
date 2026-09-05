@@ -82,8 +82,6 @@ abstract class AppSettings with _$AppSettings {
     @Default(false) bool allowMessageScripts,
     @Default('en') String language,
     @Default(false) bool virtualKeyboardSend,
-    @Default(30) double tokenizerHidePercent,
-    @Default(85) double tokenizerHistoryFillThreshold,
     @Default(true) bool showOurPicks,
 
     /// Widest the chat column is allowed to get, in logical pixels. 0 means
@@ -154,8 +152,6 @@ abstract final class AppSettingsPreferences {
     'allowMessageScripts',
     'language',
     'virtualKeyboardSend',
-    'tokenizerHidePercent',
-    'tokenizerHistoryFillThreshold',
     'showOurPicks',
     'gz_force_mobile_layout',
     'gz_chat_max_width',
@@ -203,12 +199,6 @@ abstract final class AppSettingsPreferences {
       virtualKeyboardSend:
           _coerceBool(prefs.get('virtualKeyboardSend')) ??
           defaults.virtualKeyboardSend,
-      tokenizerHidePercent:
-          _coerceDouble(prefs.get('tokenizerHidePercent')) ??
-          defaults.tokenizerHidePercent,
-      tokenizerHistoryFillThreshold:
-          _coerceDouble(prefs.get('tokenizerHistoryFillThreshold')) ??
-          defaults.tokenizerHistoryFillThreshold,
       showOurPicks:
           _coerceBool(prefs.get('showOurPicks')) ?? defaults.showOurPicks,
       forceMobileLayout:
@@ -266,8 +256,6 @@ abstract final class AppSettingsPreferences {
       'allowMessageScripts': normalized.allowMessageScripts,
       'language': normalized.language,
       'virtualKeyboardSend': normalized.virtualKeyboardSend,
-      'tokenizerHidePercent': normalized.tokenizerHidePercent,
-      'tokenizerHistoryFillThreshold': normalized.tokenizerHistoryFillThreshold,
       'showOurPicks': normalized.showOurPicks,
       'gz_force_mobile_layout': normalized.forceMobileLayout,
       'gz_chat_max_width': normalized.chatMaxWidth,
@@ -370,9 +358,6 @@ abstract final class AppSettingsPreferences {
     allowMessageScripts: values['allowMessageScripts'] as bool,
     language: values['language'] as String,
     virtualKeyboardSend: values['virtualKeyboardSend'] as bool,
-    tokenizerHidePercent: values['tokenizerHidePercent'] as double,
-    tokenizerHistoryFillThreshold:
-        values['tokenizerHistoryFillThreshold'] as double,
     showOurPicks: values['showOurPicks'] as bool,
     forceMobileLayout: values['gz_force_mobile_layout'] as bool,
     chatMaxWidth: values['gz_chat_max_width'] as double,

@@ -100,6 +100,11 @@ class ChatInputBar extends ConsumerStatefulWidget {
   final VoidCallback? onCancelSelection;
   final VoidCallback? onHideSelected;
   final VoidCallback? onDeleteSelected;
+
+  /// Selects everything above / below the last tapped message. Tapping again
+  /// with that run already selected clears it.
+  final VoidCallback? onSelectAbove;
+  final VoidCallback? onSelectBelow;
   final bool allSelectedHidden;
   final bool isEditingMessage;
 
@@ -143,6 +148,8 @@ class ChatInputBar extends ConsumerStatefulWidget {
     this.onCancelSelection,
     this.onHideSelected,
     this.onDeleteSelected,
+    this.onSelectAbove,
+    this.onSelectBelow,
     this.allSelectedHidden = false,
     this.isEditingMessage = false,
     this.charId,
@@ -1063,7 +1070,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                   onTap: widget.onCancelSelection,
                   batterySaver: widget.batterySaver,
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     '${widget.selectedCount} ${'selected_count'.tr()}',
@@ -1078,6 +1085,20 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                   ),
                 ),
                 _CircleBtn(
+                  icon: Icons.keyboard_double_arrow_up,
+                  onTap: widget.onSelectAbove,
+                  color: textColor,
+                  batterySaver: widget.batterySaver,
+                ),
+                const SizedBox(width: 6),
+                _CircleBtn(
+                  icon: Icons.keyboard_double_arrow_down,
+                  onTap: widget.onSelectBelow,
+                  color: textColor,
+                  batterySaver: widget.batterySaver,
+                ),
+                const SizedBox(width: 6),
+                _CircleBtn(
                   icon: widget.allSelectedHidden
                       ? Icons.visibility
                       : Icons.visibility_off,
@@ -1089,7 +1110,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                       : secondaryColor.withValues(alpha: 0.5),
                   batterySaver: widget.batterySaver,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 _CircleBtn(
                   icon: Icons.delete,
                   onTap: widget.selectedCount > 0

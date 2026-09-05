@@ -21,8 +21,6 @@ class LorebookUseGenerationIdentity {
   final int agentSwipeId;
 }
 
-
-
 class LorebookUseManifestInput {
   const LorebookUseManifestInput({
     required this.manifestJson,

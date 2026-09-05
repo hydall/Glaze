@@ -2,7 +2,6 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:gpt_markdown/gpt_markdown.dart';
 
 import 'dart:convert';
 
@@ -22,18 +21,27 @@ import '../../../core/llm/transport/openai_chat_transport.dart';
 import '../../../core/llm/transport/openai_responses_transport.dart';
 import '../../../core/llm/transport/openrouter_chat_transport.dart';
 import '../../../core/llm/transport/post_processing_chat_transport.dart';
-import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/api_config.dart';
 import '../services/prompt_preview_post_processor.dart';
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glaze_filter_chip_bar.dart';
 import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/swipe_tab_switcher.dart';
 import '../../../shared/widgets/tab_slide_switcher.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/sheet_view.dart';
+import '../../settings/api_list_provider.dart';
 import '../chat_provider.dart';
 import '../state/cached_token_breakdown.dart';
+import 'requests/inspector_message.dart';
+import 'requests/inspector_toolbar.dart';
+import 'requests/next_turn_coverage_block.dart';
+import 'requests/request_body_view.dart';
+
+/// The markdown and attachment renderers moved next to the rest of the
+/// inspector's message chrome, where a captured request reaches them too. Kept
+/// visible from here because this is the file they were named after.
+export 'requests/prompt_attachment_preview.dart'
+    show PromptAttachmentPreview, PromptMarkdownPreview;
 
 @visibleForTesting
 List<Map<String, dynamic>> buildPreviewApiMessages(
@@ -41,6 +49,13 @@ List<Map<String, dynamic>> buildPreviewApiMessages(
   int reasoningHistoryCount = 0,
 }) => buildApiMessages(messages, reasoningHistoryCount: reasoningHistoryCount);
 
+/// The request that would go out next, built for real and rendered the way the
+/// inspector renders every request: budget bar, parameters, coverage, messages.
+///
+/// There is only one of these in the Requests timeline. Coverage of the next
+/// turn used to be a second row beside it, which put the same request on screen
+/// twice; it is now the [NextTurnCoverageBlock] between the parameters and the
+/// messages — the slot a captured request keeps its own coverage in.
 class PromptPreviewScreen extends ConsumerStatefulWidget {
   final String charId;
 
@@ -53,11 +68,16 @@ class PromptPreviewScreen extends ConsumerStatefulWidget {
   /// back button instead of relying on a tab strip that is hidden.
   final VoidCallback? onBack;
 
+  /// Opens with the coverage block unfolded — where the context card under the
+  /// chat header deep-links to.
+  final bool coverageExpanded;
+
   const PromptPreviewScreen({
     super.key,
     required this.charId,
     this.embedded = false,
     this.onBack,
+    this.coverageExpanded = false,
   });
 
   @override
@@ -76,8 +96,12 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
   /// The built prompt after the connection's post-processing mode, computed
   /// once per build rather than per frame. Empty until the first prompt lands.
   List<PreviewMessage> _previewMessages = const [];
+
+  /// The same rows in the shape the shared request body renders, mapped once
+  /// per prompt build rather than once per frame.
+  List<InspectorMessage> _messages = const [];
+
   bool _loading = true;
-  _SectionFilter _filter = _SectionFilter.all;
   int _dataTabIndex = 0;
   int _previewTabIndex = 0;
 
@@ -124,6 +148,10 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
             charName: _charName,
             userName: _userName,
           );
+          _messages = [
+            for (final row in _previewMessages)
+              InspectorMessage.fromPreview(row),
+          ];
           _requestBody = _buildRequestBody();
           _loading = false;
         });
@@ -143,6 +171,19 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         _build();
       }
     });
+
+    // "What would go out next" has to answer for the connection as it is right
+    // now: switching the trim mode changes where the history starts, so the
+    // built prompt is stale the moment the setting is saved.
+    ref.listen(
+      activeApiConfigProvider.select(
+        (config) => config?.contextBudgetSignature ?? '',
+      ),
+      (previous, next) {
+        if (previous == null || previous == next || _loading) return;
+        _build();
+      },
+    );
     if (widget.embedded) {
       // The Prompt Inspector injects the floating-header height as the body's
       // top inset. Offset the whole embedded column (toolbar + tab bar) by it,
@@ -155,65 +196,20 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
           removeTop: true,
           child: Column(
             children: [
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  widget.onBack == null ? 16 : 4,
-                  widget.onBack == null ? 8 : 4,
-                  8,
-                  4,
-                ),
-                child: Row(
-                  children: [
-                    if (widget.onBack != null)
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                        tooltip: 'requests_back_to_list'.tr(),
-                        onPressed: widget.onBack,
-                      ),
-                    Text(
-                      'magic_request_preview'.tr(),
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                    const Spacer(),
-                    if (_previewTabIndex == 1) ...[
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        icon: Icon(
-                          Icons.copy,
-                          size: 20,
-                          color: context.cs.primary,
-                        ),
-                        tooltip: 'action_copy'.tr(),
-                        onPressed: _copyContent,
-                      ),
-                      const SizedBox(width: 4),
-                    ],
-                    _SegmentedToggle(
-                      isRaw: _previewTabIndex == 1,
-                      onChanged: (isRaw) =>
-                          setState(() => _previewTabIndex = isRaw ? 1 : 0),
-                    ),
-                  ],
-                ),
+              InspectorToolbar(
+                title: 'magic_request_preview'.tr(),
+                onBack: widget.onBack,
+                actions: _toolbarActions(context),
               ),
-              GlazeTabBar(
-                tabs: [
-                  GlazeTabItem(
-                    label: 'tab_request'.tr(),
-                    icon: Icons.upload_rounded,
-                  ),
-                  GlazeTabItem(
-                    label: 'tab_response'.tr(),
-                    icon: Icons.download_rounded,
-                  ),
-                ],
-                activeIndex: _dataTabIndex,
-                onChanged: (i) => setState(() => _dataTabIndex = i),
+              // Same 12 px gutter the body's plaques sit in — the strip used
+              // to run edge to edge over an inset body.
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: GlazeTabBar(
+                  tabs: _dataTabs(),
+                  activeIndex: _dataTabIndex,
+                  onChanged: (i) => setState(() => _dataTabIndex = i),
+                ),
               ),
               Expanded(child: _buildBody()),
             ],
@@ -237,54 +233,40 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
               ),
             ),
           ),
-          if (_previewTabIndex == 1) ...[
-            Material(
-              color: Colors.white.withValues(alpha: 0.06),
-              shape: const CircleBorder(),
-              child: Tooltip(
-                message: 'action_copy'.tr(),
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: _copyContent,
-                  child: SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: Center(
-                      child: Icon(
-                        Icons.copy,
-                        size: 20,
-                        color: context.cs.primary,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
-          _SegmentedToggle(
-            isRaw: _previewTabIndex == 1,
-            onChanged: (isRaw) =>
-                setState(() => _previewTabIndex = isRaw ? 1 : 0),
-          ),
+          ..._toolbarActions(context),
         ],
       ),
       showBack: true,
       onBack: () => Navigator.of(context).maybePop(),
       headerBottom: GlazeTabBar(
-        tabs: [
-          GlazeTabItem(label: 'tab_request'.tr(), icon: Icons.upload_rounded),
-          GlazeTabItem(
-            label: 'tab_response'.tr(),
-            icon: Icons.download_rounded,
-          ),
-        ],
+        tabs: _dataTabs(),
         activeIndex: _dataTabIndex,
         onChanged: (i) => setState(() => _dataTabIndex = i),
       ),
       body: _buildBody(),
     );
   }
+
+  List<GlazeTabItem> _dataTabs() => [
+    GlazeTabItem(label: 'tab_request'.tr(), icon: Icons.upload_rounded),
+    GlazeTabItem(label: 'tab_response'.tr(), icon: Icons.download_rounded),
+  ];
+
+  List<Widget> _toolbarActions(BuildContext context) => [
+    if (_previewTabIndex == 1) ...[
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        icon: Icon(Icons.copy, size: 20, color: context.cs.primary),
+        tooltip: 'action_copy'.tr(),
+        onPressed: _copyContent,
+      ),
+      const SizedBox(width: 4),
+    ],
+    InspectorViewToggle(
+      isRaw: _previewTabIndex == 1,
+      onChanged: (isRaw) => setState(() => _previewTabIndex = isRaw ? 1 : 0),
+    ),
+  ];
 
   Widget _buildBody() {
     return SwipeTabSwitcher(
@@ -302,77 +284,31 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
                 return const Center(child: GlazeSpinner());
               }
               if (_result == null) {
-                return Center(
-                  child: Text(
-                    'no_preview_available'.tr(),
-                    style: TextStyle(color: context.cs.onSurfaceVariant),
-                  ),
-                );
+                return _empty(context);
               }
               if (_previewTabIndex == 1) {
                 return _buildRawView(_getRawPromptJson(), topPad);
               }
-              return CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(child: SizedBox(height: topPad)),
-                  if (_apiConfig != null) ...[
-                    SliverToBoxAdapter(
-                      child: _SummaryBar(
-                        result: _result!,
-                        contextSize: _apiConfig!.contextSize,
-                        tokenOverride: null,
-                        messageCountOverride: _previewMessages.length,
-                      ),
-                    ),
-                    SliverToBoxAdapter(child: _SectionTitle(_protocolLabel)),
-                    if (_requestBody != null)
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        sliver: SliverToBoxAdapter(
-                          child: _buildParamsGrid(_requestBody!),
-                        ),
-                      ),
-                  ],
-                  SliverToBoxAdapter(
-                    child: _SectionTitle(
-                      'label_messages_count'.tr(
-                        args: ['${_previewMessages.length}'],
-                      ),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: GlazeFilterChipBar<_SectionFilter>(
-                        current: _filter,
-                        options: _SectionFilter.values.toList(),
-                        labelBuilder: _labelForFilter,
-                        onSelected: (f) => setState(() => _filter = f),
-                      ),
-                    ),
-                  ),
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
-                    sliver: SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, i) =>
-                            _PromptMessageCard(row: _filteredMessages[i]),
-                        childCount: _filteredMessages.length,
-                      ),
-                    ),
-                  ),
-                ],
+              return RequestBodyView(
+                topInset: topPad,
+                tokens: _result!.breakdown.totalTokens,
+                contextSize: _apiConfig?.contextSize ?? 0,
+                paramsTitle: _protocolLabel,
+                params: _requestBody == null
+                    ? const []
+                    : _paramsFromBody(_requestBody!),
+                messages: _messages,
+                coverage: NextTurnCoverageBlock(
+                  charId: widget.charId,
+                  sessionId: _sessionId,
+                  initiallyExpanded: widget.coverageExpanded,
+                ),
               );
             } else {
               final chatState = ref.watch(chatProvider(widget.charId)).value;
               final raw = chatState?.lastRawResponse;
               if (raw == null || raw.isEmpty) {
-                return Center(
-                  child: Text(
-                    'no_preview_available'.tr(),
-                    style: TextStyle(color: context.cs.onSurfaceVariant),
-                  ),
-                );
+                return _empty(context);
               }
               String displayString = raw;
               if (_previewTabIndex == 1) {
@@ -398,6 +334,13 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     );
   }
 
+  Widget _empty(BuildContext context) => Center(
+    child: Text(
+      'no_preview_available'.tr(),
+      style: TextStyle(color: context.cs.onSurfaceVariant),
+    ),
+  );
+
   Widget _buildRawView(String text, double topPad) {
     return SingleChildScrollView(
       padding: const EdgeInsets.only(bottom: 24),
@@ -421,26 +364,6 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     );
   }
 
-  /// Renders the request parameters straight from the protocol-specific body
-  /// so the grid always matches what's actually sent. Bulk message-carrying
-  /// keys are skipped; nested config maps (`generationConfig`, `thinking`,
-  /// `cache_control`, …) are flattened into individual chips.
-  Widget _buildParamsGrid(Map<String, dynamic> body) {
-    final items = _paramItemsFromBody(body);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final itemWidth = (constraints.maxWidth - 8) / 2;
-        return Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: items
-              .map((w) => SizedBox(width: itemWidth, child: w))
-              .toList(),
-        );
-      },
-    );
-  }
-
   /// Keys whose values are bulky message payloads, not tunable parameters —
   /// excluded from the parameter grid (they're shown in the Messages list /
   /// raw view instead).
@@ -452,23 +375,27 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     'safetySettings',
   };
 
-  List<_ParamItem> _paramItemsFromBody(Map<String, dynamic> body) {
-    final items = <_ParamItem>[];
+  /// Reads the request parameters straight from the protocol-specific body so
+  /// the grid always matches what's actually sent. Nested config maps
+  /// (`generationConfig`, `thinking`, `cache_control`, …) are flattened into
+  /// individual tiles.
+  List<InspectorParam> _paramsFromBody(Map<String, dynamic> body) {
+    final items = <InspectorParam>[];
 
     // Model lives in the URL (not the body) for Gemini, so surface it from the
     // config to keep it visible across every protocol.
     final model = _apiConfig?.model;
     if (model != null && model.isNotEmpty) {
-      items.add(_ParamItem(label: 'label_model'.tr(), value: model));
+      items.add(InspectorParam(label: 'label_model'.tr(), value: model));
     }
 
     // Post-processing reshapes the conversation without leaving a trace in the
     // body, so the message list would otherwise be the only hint it ran. Shown
-    // only when it is on — every other connection would carry a "None" chip.
+    // only when it is on — every other connection would carry a "None" tile.
     if (_postProcessingMode != PromptPostProcessing.none) {
       final base = PromptPostProcessing.baseOf(_postProcessingMode);
       items.add(
-        _ParamItem(
+        InspectorParam(
           label: 'section_prompt_post_processing'.tr(),
           value: 'prompt_post_processing_$base'.tr(),
         ),
@@ -480,15 +407,15 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         value.forEach((k, v) => add('$label.$k', v));
       } else if (value is List) {
         // Lists here are nested structures (e.g. cache_control breakpoints);
-        // not meaningful as a single chip — skip.
+        // not meaningful as a single tile — skip.
       } else {
-        items.add(_ParamItem(label: label, value: '$value'));
+        items.add(InspectorParam(label: label, value: '$value'));
       }
     }
 
     body.forEach((key, value) {
       if (_bulkBodyKeys.contains(key) || key == 'model') return;
-      // Hoist Gemini's generationConfig children to top-level chips.
+      // Hoist Gemini's generationConfig children to top-level tiles.
       if (key == 'generationConfig' && value is Map) {
         value.forEach((k, v) => add('$k', v));
       } else {
@@ -497,29 +424,6 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     });
 
     return items;
-  }
-
-  /// Section filters read the post-processed message: a merged row carries the
-  /// union of its sources' flags, so it still shows up under `history` or
-  /// `lorebook` when one of the blocks folded into it was of that kind.
-  List<PreviewMessage> get _filteredMessages {
-    final rows = _previewMessages;
-    return switch (_filter) {
-      _SectionFilter.all => rows,
-      _SectionFilter.system =>
-        rows
-            .where(
-              (r) =>
-                  r.message.role == 'system' &&
-                  !r.message.isHistory &&
-                  !r.message.isLorebook,
-            )
-            .toList(),
-      _SectionFilter.lorebook =>
-        rows.where((r) => r.message.isLorebook).toList(),
-      _SectionFilter.history => rows.where((r) => r.message.isHistory).toList(),
-      _SectionFilter.depth => rows.where((r) => r.message.isDepth).toList(),
-    };
   }
 
   void _copyContent() {
@@ -641,551 +545,5 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     final protocol = _apiConfig?.protocol;
     if (protocol == null) return 'label_generation_params'.tr();
     return LlmProtocol.labels[protocol] ?? protocol;
-  }
-}
-
-class _SummaryBar extends StatelessWidget {
-  final PromptResult result;
-  final int contextSize;
-  final int? tokenOverride;
-  final int? messageCountOverride;
-  const _SummaryBar({
-    required this.result,
-    required this.contextSize,
-    this.tokenOverride,
-    this.messageCountOverride,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final total = tokenOverride ?? result.breakdown.totalTokens;
-    final pct = contextSize > 0
-        ? (total / contextSize * 100).clamp(0, 100)
-        : 0.0;
-    final barColor = pct > 90
-        ? Colors.red
-        : pct > 75
-        ? Colors.orange
-        : Colors.green;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                '$total',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: barColor,
-                ),
-              ),
-              Text(
-                ' / $contextSize tokens',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '${pct.toStringAsFixed(1)}%',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: barColor,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '${messageCountOverride ?? result.messages.length} msgs',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: pct / 100,
-              backgroundColor: Colors.white10,
-              color: barColor,
-              minHeight: 6,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-enum _SectionFilter { all, system, lorebook, history, depth }
-
-String _labelForFilter(_SectionFilter f) => switch (f) {
-  _SectionFilter.all => 'filter_all'.tr(),
-  _SectionFilter.system => 'role_system'.tr(),
-  _SectionFilter.lorebook => 'filter_lorebook'.tr(),
-  _SectionFilter.history => 'filter_history'.tr(),
-  _SectionFilter.depth => 'label_depth'.tr(),
-};
-
-class _SectionTitle extends StatelessWidget {
-  final String title;
-  const _SectionTitle(this.title);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 20, bottom: 10, left: 16, right: 16),
-      child: Text(
-        title.toUpperCase(),
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: context.cs.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
-}
-
-class _ParamItem extends StatelessWidget {
-  final String label;
-  final String value;
-  const _ParamItem({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              fontSize: 11,
-              color: context.cs.onSurfaceVariant,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: context.cs.onSurface,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PromptMessageCard extends StatefulWidget {
-  final PreviewMessage row;
-  const _PromptMessageCard({required this.row});
-
-  @override
-  State<_PromptMessageCard> createState() => _PromptMessageCardState();
-}
-
-class _PromptMessageCardState extends State<_PromptMessageCard> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final msg = widget.row.message;
-    final images = widget.row.imagePaths;
-    final tokenCount = estimateTokens(msg.content);
-
-    return Card(
-      color: Colors.white.withValues(alpha: 0.05),
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => setState(() => _expanded = !_expanded),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  _buildRoleChip(msg.role),
-                  if (widget.row.isMerged) ...[
-                    const SizedBox(width: 4),
-                    _MergedBadge(count: widget.row.sources.length),
-                  ],
-                  if (msg.blockName != null) ...[
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        msg.blockName!,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: context.cs.onSurfaceVariant,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                  const Spacer(),
-                  Text(
-                    '$tokenCount t',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: context.cs.onSurfaceVariant,
-                    ),
-                  ),
-                  if (msg.isDepth && msg.depth != null) ...[
-                    const SizedBox(width: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'd${msg.depth}',
-                        style: const TextStyle(
-                          fontSize: 9,
-                          color: Colors.orange,
-                        ),
-                      ),
-                    ),
-                  ],
-                  Icon(
-                    _expanded ? Icons.expand_less : Icons.expand_more,
-                    size: 16,
-                    color: context.cs.onSurfaceVariant,
-                  ),
-                ],
-              ),
-              if (!_expanded && msg.content.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  msg.content,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: context.cs.onSurfaceVariant.withValues(alpha: 0.8),
-                  ),
-                ),
-              ],
-              // A merge can pull several attachments into one message, so every
-              // source image is listed rather than just the first.
-              if (!_expanded)
-                for (final path in images) ...[
-                  const SizedBox(height: 8),
-                  PromptAttachmentPreview(imagePath: path),
-                ],
-              if (_expanded) ...[
-                const SizedBox(height: 8),
-                for (final path in images) ...[
-                  PromptAttachmentPreview(imagePath: path, expanded: true),
-                  const SizedBox(height: 8),
-                ],
-                if (msg.content.isNotEmpty)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    constraints: const BoxConstraints(maxHeight: 300),
-                    child: SingleChildScrollView(
-                      child: PromptMarkdownPreview(content: msg.content),
-                    ),
-                  ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRoleChip(String role) {
-    Color bg = const Color(0xFF424242);
-    Color fg = const Color(0xFFE0E0E0);
-    if (role == 'system') {
-      bg = const Color(0xFF1565C0);
-      fg = const Color(0xFFE3F2FD);
-    } else if (role == 'user') {
-      bg = const Color(0xFF7B1FA2);
-      fg = const Color(0xFFF3E5F5);
-    } else if (role == 'assistant') {
-      bg = const Color(0xFF2E7D32);
-      fg = const Color(0xFFE8F5E9);
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        role.toUpperCase(),
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: fg),
-      ),
-    );
-  }
-}
-
-/// How many built blocks post-processing folded into this one message.
-/// Without it a merged card reads as one oversized block and nothing on screen
-/// says the connection reshaped the prompt.
-class _MergedBadge extends StatelessWidget {
-  final int count;
-  const _MergedBadge({required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: 'prompt_preview_merged_blocks'.tr(args: ['$count']),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-        decoration: BoxDecoration(
-          color: context.cs.primary.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.merge_rounded, size: 11, color: context.cs.primary),
-            const SizedBox(width: 2),
-            Text(
-              '$count',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: context.cs.primary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-@visibleForTesting
-class PromptMarkdownPreview extends StatelessWidget {
-  final String content;
-
-  const PromptMarkdownPreview({super.key, required this.content});
-
-  @override
-  Widget build(BuildContext context) {
-    return GptMarkdown(
-      content,
-      style: TextStyle(fontSize: 12, color: context.cs.onSurface),
-      imageBuilder: (context, url, width, height) {
-        final uri = Uri.tryParse(url);
-        if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
-          return const Icon(
-            Icons.broken_image_outlined,
-            key: ValueKey('prompt-markdown-image-unavailable'),
-          );
-        }
-        return Image.network(
-          url,
-          key: const ValueKey('prompt-markdown-image'),
-          width: width,
-          height: height,
-          fit: BoxFit.contain,
-          errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined),
-        );
-      },
-    );
-  }
-}
-
-@visibleForTesting
-class PromptAttachmentPreview extends StatefulWidget {
-  final String imagePath;
-  final bool expanded;
-
-  const PromptAttachmentPreview({
-    super.key,
-    required this.imagePath,
-    this.expanded = false,
-  });
-
-  @override
-  State<PromptAttachmentPreview> createState() =>
-      _PromptAttachmentPreviewState();
-}
-
-class _PromptAttachmentPreviewState extends State<PromptAttachmentPreview> {
-  static const _maxEncodedLength = 8 * 1024 * 1024;
-  Uint8List? _bytes;
-
-  @override
-  void initState() {
-    super.initState();
-    _decode();
-  }
-
-  @override
-  void didUpdateWidget(PromptAttachmentPreview oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.imagePath != oldWidget.imagePath) _decode();
-  }
-
-  void _decode() {
-    final match = RegExp(
-      r'^data:image/(?:png|jpeg|jpg|gif|webp);base64,([A-Za-z0-9+/=]+)$',
-      caseSensitive: false,
-    ).firstMatch(widget.imagePath);
-    final encoded = match?.group(1);
-    if (encoded == null || encoded.length > _maxEncodedLength) {
-      _bytes = null;
-      return;
-    }
-    try {
-      _bytes = base64Decode(encoded);
-    } on FormatException {
-      _bytes = null;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bytes = _bytes;
-    if (bytes == null || bytes.isEmpty) {
-      return Container(
-        key: const ValueKey('prompt-attachment-unavailable'),
-        height: 56,
-        width: double.infinity,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(
-          Icons.broken_image_outlined,
-          color: context.cs.onSurfaceVariant,
-        ),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.memory(
-        bytes,
-        key: const ValueKey('prompt-attachment-image'),
-        width: double.infinity,
-        height: widget.expanded ? 220 : 96,
-        cacheWidth: widget.expanded ? 1024 : 480,
-        cacheHeight: widget.expanded ? 640 : 288,
-        fit: BoxFit.contain,
-        errorBuilder: (_, _, _) => Container(
-          key: const ValueKey('prompt-attachment-unavailable'),
-          height: 56,
-          alignment: Alignment.center,
-          color: Colors.white.withValues(alpha: 0.04),
-          child: Icon(
-            Icons.broken_image_outlined,
-            color: context.cs.onSurfaceVariant,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SegmentedToggle extends StatelessWidget {
-  final bool isRaw;
-  final ValueChanged<bool> onChanged;
-
-  const _SegmentedToggle({required this.isRaw, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => onChanged(!isRaw),
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 32,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Stack(
-          children: [
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeOutCubic,
-              left: isRaw ? 32 : 0,
-              top: 0,
-              bottom: 0,
-              width: 32,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: context.cs.primary,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
-            ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: 32,
-                  child: Center(
-                    child: Icon(
-                      Icons.visibility,
-                      size: 16,
-                      color: !isRaw
-                          ? Colors.white
-                          : context.cs.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 32,
-                  child: Center(
-                    child: Icon(
-                      Icons.code,
-                      size: 16,
-                      color: isRaw ? Colors.white : context.cs.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }

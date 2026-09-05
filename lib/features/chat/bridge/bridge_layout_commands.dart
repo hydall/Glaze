@@ -88,6 +88,18 @@ class LayoutBridgeCommands {
     return _host.evalJs('window.bridge?.setSelectionMode($enabled)');
   }
 
+  /// Selects (or, when the run is already selected, deselects) every message
+  /// above the last tapped one.
+  Future<void> selectMessagesAbove() {
+    return _host.evalJs('window.bridge?.selectMessagesAbove()');
+  }
+
+  /// Same as [selectMessagesAbove], for everything below the last tapped
+  /// message.
+  Future<void> selectMessagesBelow() {
+    return _host.evalJs('window.bridge?.selectMessagesBelow()');
+  }
+
   Future<void> toggleMessageSelection(String id) {
     return _host.evalJs(
       'window.bridge?.renderer?.toggleMessageSelection("${_host.escape(id)}")',

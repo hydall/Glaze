@@ -15,9 +15,8 @@ import 'requests/request_timeline_view.dart';
 /// Two things used to be top-level tabs and are not any more. Agent runs are
 /// requests like any other, so they are steps of the turn they belong to in the
 /// Requests timeline. Coverage is a property *of* a request, so it is a block
-/// inside the opened request — with only the next request's coverage, which no
-/// captured request owns yet, still a row of its own at the top of the
-/// timeline.
+/// inside the opened request — including the next one, whose coverage lives in
+/// its preview rather than in a row beside it.
 class PromptInspectorSheet extends ConsumerStatefulWidget {
   final String charId;
   final String initialTabId;
@@ -33,8 +32,8 @@ class PromptInspectorSheet extends ConsumerStatefulWidget {
 
   /// Ids other surfaces deep-link to (the context card under the chat header
   /// opens the inspector on the layer it is showing). [coverageTabId] is not a
-  /// tab any more — it lands on Requests, opened on the next request's
-  /// coverage.
+  /// tab any more — it lands on Requests, opened on the next request with its
+  /// coverage block unfolded.
   static const contextTabId = _tabContext;
   static const requestsTabId = _tabRequests;
   static const coverageTabId = 'coverage';
@@ -68,7 +67,9 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final activeId = _order.contains(_activeTabId) ? _activeTabId : _order.first;
+    final activeId = _order.contains(_activeTabId)
+        ? _activeTabId
+        : _order.first;
     final activeIndex = _order.indexOf(activeId);
 
     // Preserve visited tabs without eagerly starting every expensive prompt
@@ -122,7 +123,10 @@ class _PromptInspectorSheetState extends ConsumerState<PromptInspectorSheet> {
       label: 'tab_context'.tr(),
       icon: Icons.segment,
     ),
-    _ => GlazeTabItem(label: 'tab_requests'.tr(), icon: Icons.swap_vert_rounded),
+    _ => GlazeTabItem(
+      label: 'tab_requests'.tr(),
+      icon: Icons.swap_vert_rounded,
+    ),
   };
 }
 

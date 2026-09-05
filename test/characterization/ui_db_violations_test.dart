@@ -11,9 +11,9 @@ void main() {
       'lib/features/chat/widgets/summary_tab.dart',
       'lib/features/chat/widgets/authors_note_sheet.dart',
       'lib/features/chat/widgets/chat_stats_sheet.dart',
-      'lib/features/chat/widgets/lorebook_coverage_sheet.dart',
-      // context_info_sheet.dart and chat_dialogs.dart were deleted in 0565341;
-      // they are intentionally absent from this list.
+      // context_info_sheet.dart and chat_dialogs.dart were deleted in 0565341,
+      // and lorebook_coverage_sheet.dart when coverage became a block inside a
+      // request; they are intentionally absent from this list.
       'lib/features/chat/widgets/memory_books_tab.dart',
       'lib/features/regex/regex_sheet.dart',
       'lib/features/personas/persona_list_screen.dart',
@@ -75,8 +75,8 @@ void main() {
       }
     });
 
-    test('total widget files count is 16', () {
-      expect(widgetFiles.length, 16);
+    test('total widget files count is 15', () {
+      expect(widgetFiles.length, 15);
     });
 
     test('no .put() calls on repos in widget code', () async {

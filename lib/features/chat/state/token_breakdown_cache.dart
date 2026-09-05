@@ -15,12 +15,17 @@ class TokenBreakdownCache {
     required int maxTokens,
     required String authorsNote,
     required String summary,
+
+    /// [ApiConfigContextX.contextBudgetSignature] — the trim mode and its knobs
+    /// decide the cutoff just as much as the window size does, so a cached
+    /// breakdown taken under one mode must not be served under another.
+    String trimSignature = '',
   }) =>
-      '${charId}_${sessionId}_${messageCount}_${contextSize}_${maxTokens}_${authorsNote}_$summary';
+      '${charId}_${sessionId}_${messageCount}_${contextSize}_${maxTokens}_'
+      '${authorsNote}_${summary}_$trimSignature';
 
   /// Get cached breakdown if hash matches, otherwise null.
-  static TokenBreakdown? get(String hash) =>
-      _hash == hash ? _breakdown : null;
+  static TokenBreakdown? get(String hash) => _hash == hash ? _breakdown : null;
 
   /// Store breakdown with its hash.
   static void set(String hash, TokenBreakdown breakdown) {

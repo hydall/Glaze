@@ -19,8 +19,6 @@ void main() {
       allowMessageScripts: true,
       language: 'ru',
       virtualKeyboardSend: true,
-      tokenizerHidePercent: 42.5,
-      tokenizerHistoryFillThreshold: 91.5,
       showOurPicks: false,
       forceMobileLayout: false,
       addBlockAtTop: true,

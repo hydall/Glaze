@@ -53,7 +53,9 @@ class CharacterRepo implements SyncCharacterStore {
     if (field == CharacterSortField.lastChat) {
       return _lastChatOrder(dir);
     }
-    final mode = dir == CharacterSortDir.asc ? OrderingMode.asc : OrderingMode.desc;
+    final mode = dir == CharacterSortDir.asc
+        ? OrderingMode.asc
+        : OrderingMode.desc;
     final primaryExpr = switch (field) {
       CharacterSortField.name => _db.characters.name,
       CharacterSortField.date => _db.characters.createdAt,
@@ -73,11 +75,14 @@ class CharacterRepo implements SyncCharacterStore {
   List<OrderClauseGenerator<$CharactersTable>> _lastChatOrder(
     CharacterSortDir dir,
   ) {
-    final mode = dir == CharacterSortDir.asc ? OrderingMode.asc : OrderingMode.desc;
+    final mode = dir == CharacterSortDir.asc
+        ? OrderingMode.asc
+        : OrderingMode.desc;
     final nullExpr = _lastChatAtColumn().isNull();
     final chatExpr = _lastChatAtColumn();
     return [
-      ($CharactersTable t) => OrderingTerm(expression: nullExpr, mode: OrderingMode.asc),
+      ($CharactersTable t) =>
+          OrderingTerm(expression: nullExpr, mode: OrderingMode.asc),
       ($CharactersTable t) => OrderingTerm(expression: chatExpr, mode: mode),
       ($CharactersTable t) =>
           OrderingTerm(expression: t.charId, mode: OrderingMode.asc),
@@ -85,7 +90,9 @@ class CharacterRepo implements SyncCharacterStore {
   }
 
   List<OrderingTerm> _lastChatOrderTerms(CharacterSortDir dir) {
-    final mode = dir == CharacterSortDir.asc ? OrderingMode.asc : OrderingMode.desc;
+    final mode = dir == CharacterSortDir.asc
+        ? OrderingMode.asc
+        : OrderingMode.desc;
     final nullExpr = _lastChatAtColumn().isNull();
     final chatExpr = _lastChatAtColumn();
     return [
@@ -97,9 +104,9 @@ class CharacterRepo implements SyncCharacterStore {
 
   @override
   Future<List<Character>> getAll() async {
-    final rows = await (_db.select(_db.characters)
-          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
-        .get();
+    final rows = await (_db.select(
+      _db.characters,
+    )..orderBy([(t) => OrderingTerm.desc(t.createdAt)])).get();
     return rows.map(_toModel).toList();
   }
 
@@ -127,25 +134,29 @@ class CharacterRepo implements SyncCharacterStore {
     bool includeHidden = false,
   }) async {
     if (sort == CharacterSortField.lastChat) {
-      final rows = await (_db.select(_db.characters).join([
-            leftOuterJoin(
-              _db.chatSessions,
-              _db.chatSessions.characterId.equalsExp(_db.characters.charId),
-            ),
-          ])
-            ..where(_listPredicate(includeHidden))
-            ..addColumns([_lastChatAtColumn()])
-            ..groupBy([_db.characters.charId])
-            ..orderBy(_lastChatOrderTerms(dir))
-            ..limit(limit, offset: offset))
-          .get();
+      final rows =
+          await (_db.select(_db.characters).join([
+                  leftOuterJoin(
+                    _db.chatSessions,
+                    _db.chatSessions.characterId.equalsExp(
+                      _db.characters.charId,
+                    ),
+                  ),
+                ])
+                ..where(_listPredicate(includeHidden))
+                ..addColumns([_lastChatAtColumn()])
+                ..groupBy([_db.characters.charId])
+                ..orderBy(_lastChatOrderTerms(dir))
+                ..limit(limit, offset: offset))
+              .get();
       return rows.map((r) => _toModel(r.readTable(_db.characters))).toList();
     }
-    final rows = await (_db.select(_db.characters)
-          ..where((t) => _listPredicate(includeHidden))
-          ..orderBy(_orderBy(sort, dir))
-          ..limit(limit, offset: offset))
-        .get();
+    final rows =
+        await (_db.select(_db.characters)
+              ..where((t) => _listPredicate(includeHidden))
+              ..orderBy(_orderBy(sort, dir))
+              ..limit(limit, offset: offset))
+            .get();
     return rows.map(_toModel).toList();
   }
 
@@ -158,19 +169,21 @@ class CharacterRepo implements SyncCharacterStore {
   }) {
     if (sort == CharacterSortField.lastChat) {
       return (_db.select(_db.characters).join([
-            leftOuterJoin(
-              _db.chatSessions,
-              _db.chatSessions.characterId.equalsExp(_db.characters.charId),
-            ),
-          ])
+              leftOuterJoin(
+                _db.chatSessions,
+                _db.chatSessions.characterId.equalsExp(_db.characters.charId),
+              ),
+            ])
             ..where(_listPredicate(includeHidden))
             ..addColumns([_lastChatAtColumn()])
             ..groupBy([_db.characters.charId])
             ..orderBy(_lastChatOrderTerms(dir))
             ..limit(limit, offset: offset))
           .watch()
-          .map((rows) =>
-              rows.map((r) => _toModel(r.readTable(_db.characters))).toList());
+          .map(
+            (rows) =>
+                rows.map((r) => _toModel(r.readTable(_db.characters))).toList(),
+          );
     }
     return (_db.select(_db.characters)
           ..where((t) => _listPredicate(includeHidden))
@@ -190,17 +203,17 @@ class CharacterRepo implements SyncCharacterStore {
 
   @override
   Future<Character?> getById(String id) async {
-    final row = await (_db.select(_db.characters)
-          ..where((t) => t.charId.equals(id)))
-        .getSingleOrNull();
+    final row = await (_db.select(
+      _db.characters,
+    )..where((t) => t.charId.equals(id))).getSingleOrNull();
     return row != null ? _toModel(row) : null;
   }
 
   Future<Map<String, Character>> getByIds(Set<String> ids) async {
     if (ids.isEmpty) return {};
-    final rows = await (_db.select(_db.characters)
-          ..where((t) => t.charId.isIn(ids.toList())))
-        .get();
+    final rows = await (_db.select(
+      _db.characters,
+    )..where((t) => t.charId.isIn(ids.toList()))).get();
     return {for (final r in rows) r.charId: _toModel(r)};
   }
 
@@ -214,9 +227,12 @@ class CharacterRepo implements SyncCharacterStore {
   Future<void> put(Character character) async {
     // Cache the estimated token count on every write (import/save) so the UI
     // reads it instead of re-encoding during scroll/filter.
-    final withTokens =
-        character.copyWith(tokenCount: estimateCharacterTokens(character));
-    await _db.into(_db.characters).insertOnConflictUpdate(_toCompanion(withTokens));
+    final withTokens = character.copyWith(
+      tokenCount: estimateCharacterTokens(character),
+    );
+    await _db
+        .into(_db.characters)
+        .insertOnConflictUpdate(_toCompanion(withTokens));
   }
 
   /// Writes [characters] in a single batch, so the reactive watchers emit
@@ -246,9 +262,9 @@ class CharacterRepo implements SyncCharacterStore {
   /// (existing characters from before the column was added). Runs in one batch
   /// → a single reactive emission; safe to call unawaited at startup.
   Future<void> backfillMissingTokenCounts() async {
-    final rows = await (_db.select(_db.characters)
-          ..where((t) => t.tokenCount.equals(0)))
-        .get();
+    final rows = await (_db.select(
+      _db.characters,
+    )..where((t) => t.tokenCount.equals(0))).get();
     if (rows.isEmpty) return;
 
     final updates = <String, int>{};
@@ -276,19 +292,22 @@ class CharacterRepo implements SyncCharacterStore {
     Map<String, dynamic> Function(Map<String, dynamic> extensions) update,
   ) async {
     return _db.transaction(() async {
-      final row = await (_db.select(_db.characters)
-            ..where((t) => t.charId.equals(charId)))
-          .getSingleOrNull();
+      final row = await (_db.select(
+        _db.characters,
+      )..where((t) => t.charId.equals(charId))).getSingleOrNull();
       if (row == null) {
         throw StateError('Character "$charId" was not found');
       }
 
       final current = _decodeJsonMap(row.extensionsJson);
       final updated = update(Map<String, dynamic>.from(current));
-      await (_db.update(_db.characters)..where((t) => t.charId.equals(charId)))
-          .write(
+      await (_db.update(
+        _db.characters,
+      )..where((t) => t.charId.equals(charId))).write(
         CharactersCompanion(
-          extensionsJson: Value(updated.isNotEmpty ? jsonEncode(updated) : null),
+          extensionsJson: Value(
+            updated.isNotEmpty ? jsonEncode(updated) : null,
+          ),
         ),
       );
       return updated;
@@ -311,10 +330,11 @@ class CharacterRepo implements SyncCharacterStore {
 
   /// All variations in a group, ordered by variant_order (representative first).
   Future<List<Character>> getVariants(String groupId) async {
-    final rows = await (_db.select(_db.characters)
-          ..where((t) => _groupPredicate(t, groupId))
-          ..orderBy([(t) => OrderingTerm.asc(t.variantOrder)]))
-        .get();
+    final rows =
+        await (_db.select(_db.characters)
+              ..where((t) => _groupPredicate(t, groupId))
+              ..orderBy([(t) => OrderingTerm.asc(t.variantOrder)]))
+            .get();
     return rows.map(_toModel).toList();
   }
 
@@ -424,10 +444,13 @@ class CharacterRepo implements SyncCharacterStore {
 
   Future<void> renameVariant(String charId, String? name) async {
     final trimmed = name?.trim();
-    await (_db.update(_db.characters)..where((t) => t.charId.equals(charId)))
-        .write(CharactersCompanion(
-      variantName: Value(trimmed == null || trimmed.isEmpty ? null : trimmed),
-    ));
+    await (_db.update(
+      _db.characters,
+    )..where((t) => t.charId.equals(charId))).write(
+      CharactersCompanion(
+        variantName: Value(trimmed == null || trimmed.isEmpty ? null : trimmed),
+      ),
+    );
   }
 
   /// Hides or reveals an entire variation group. Applied group-wide so that
@@ -447,22 +470,22 @@ class CharacterRepo implements SyncCharacterStore {
     if (charIds.isEmpty) return;
     await _db.transaction(() async {
       final ids = charIds.toList();
-      final rows = await (_db.select(_db.characters)
-            ..where((t) => t.charId.isIn(ids)))
-          .get();
+      final rows = await (_db.select(
+        _db.characters,
+      )..where((t) => t.charId.isIn(ids))).get();
       // Resolve each selected card to its whole variation group so hidden state
       // stays consistent (mirrors the single-character [setHidden] semantics).
       final groupIds = <String>{
-        for (final r in rows) r.variantGroupId.isEmpty ? r.charId : r.variantGroupId,
+        for (final r in rows)
+          r.variantGroupId.isEmpty ? r.charId : r.variantGroupId,
       };
       if (groupIds.isEmpty) return;
       final groupList = groupIds.toList();
-      await (_db.update(_db.characters)
-            ..where(
-              (t) =>
-                  t.variantGroupId.isIn(groupList) |
-                  (t.variantGroupId.equals('') & t.charId.isIn(groupList)),
-            ))
+      await (_db.update(_db.characters)..where(
+            (t) =>
+                t.variantGroupId.isIn(groupList) |
+                (t.variantGroupId.equals('') & t.charId.isIn(groupList)),
+          ))
           .write(CharactersCompanion(hidden: Value(hidden)));
     });
   }
@@ -488,7 +511,9 @@ class CharacterRepo implements SyncCharacterStore {
     final extensionsJson = (sourceUrl != null && sourceUrl.isNotEmpty)
         ? jsonEncode({'catalogUrl': sourceUrl})
         : null;
-    await _db.into(_db.characters).insertOnConflictUpdate(
+    await _db
+        .into(_db.characters)
+        .insertOnConflictUpdate(
           CharactersCompanion(
             charId: Value(id),
             // A catalog import is a standalone character: seed its group id so
@@ -510,14 +535,16 @@ class CharacterRepo implements SyncCharacterStore {
             tagsJson: Value(jsonEncode(tags)),
             alternateGreetingsJson: Value(jsonEncode(alternateGreetings)),
             extensionsJson: Value(extensionsJson),
-            tokenCount: Value(estimateCharacterTokensFromParts(
-              name: name,
-              description: description,
-              personality: personality,
-              scenario: scenario,
-              firstMes: firstMes,
-              mesExample: mesExample,
-            )),
+            tokenCount: Value(
+              estimateCharacterTokensFromParts(
+                name: name,
+                description: description,
+                personality: personality,
+                scenario: scenario,
+                firstMes: firstMes,
+                mesExample: mesExample,
+              ),
+            ),
           ),
         );
   }
@@ -549,12 +576,14 @@ class CharacterRepo implements SyncCharacterStore {
           ? List<String>.from(jsonDecode(c.tagsJson!) as List<dynamic>)
           : [],
       alternateGreetings: c.alternateGreetingsJson != null
-          ? List<String>.from(jsonDecode(c.alternateGreetingsJson!) as List<dynamic>)
+          ? List<String>.from(
+              jsonDecode(c.alternateGreetingsJson!) as List<dynamic>,
+            )
           : [],
       gallery: c.galleryJson != null
           ? (jsonDecode(c.galleryJson!) as List)
-              .map((e) => GalleryEntry.fromJson(e as Map<String, dynamic>))
-              .toList()
+                .map((e) => GalleryEntry.fromJson(e as Map<String, dynamic>))
+                .toList()
           : [],
       currentSessionIndex: c.currentSessionIndex,
       fav: c.fav,
@@ -571,37 +600,36 @@ class CharacterRepo implements SyncCharacterStore {
   }
 
   CharactersCompanion _toCompanion(Character m) => CharactersCompanion(
-        charId: Value(m.id),
-        name: Value(m.name),
-        avatarPath: Value(m.avatarPath),
-        description: Value(m.description),
-        personality: Value(m.personality),
-        scenario: Value(m.scenario),
-        firstMes: Value(m.firstMes),
-        mesExample: Value(m.mesExample),
-        systemPrompt: Value(m.systemPrompt),
-        postHistoryInstructions: Value(m.postHistoryInstructions),
-        creator: Value(m.creator),
-        creatorNotes: Value(m.creatorNotes),
-        color: Value(m.color),
-        updatedAt: Value(m.updatedAt),
-        createdAt: Value(m.createdAt),
-        tagsJson: Value(jsonEncode(m.tags)),
-        alternateGreetingsJson: Value(jsonEncode(m.alternateGreetings)),
-        galleryJson: Value(jsonEncode(m.gallery.map((e) => e.toJson()).toList())),
-        currentSessionIndex: Value(m.currentSessionIndex),
-        fav: Value(m.fav),
-        extensionsJson: Value(_encodeCharacterExtensions(m)),
-        characterVersion: Value(m.characterVersion),
-        macroName: Value(m.macroName),
-        picksHash: Value(m.picksHash),
-        tokenCount: Value(m.tokenCount),
-        variantGroupId:
-            Value(m.variantGroupId.isEmpty ? m.id : m.variantGroupId),
-        variantName: Value(m.variantName),
-        variantOrder: Value(m.variantOrder),
-        hidden: Value(m.hidden),
-      );
+    charId: Value(m.id),
+    name: Value(m.name),
+    avatarPath: Value(m.avatarPath),
+    description: Value(m.description),
+    personality: Value(m.personality),
+    scenario: Value(m.scenario),
+    firstMes: Value(m.firstMes),
+    mesExample: Value(m.mesExample),
+    systemPrompt: Value(m.systemPrompt),
+    postHistoryInstructions: Value(m.postHistoryInstructions),
+    creator: Value(m.creator),
+    creatorNotes: Value(m.creatorNotes),
+    color: Value(m.color),
+    updatedAt: Value(m.updatedAt),
+    createdAt: Value(m.createdAt),
+    tagsJson: Value(jsonEncode(m.tags)),
+    alternateGreetingsJson: Value(jsonEncode(m.alternateGreetings)),
+    galleryJson: Value(jsonEncode(m.gallery.map((e) => e.toJson()).toList())),
+    currentSessionIndex: Value(m.currentSessionIndex),
+    fav: Value(m.fav),
+    extensionsJson: Value(_encodeCharacterExtensions(m)),
+    characterVersion: Value(m.characterVersion),
+    macroName: Value(m.macroName),
+    picksHash: Value(m.picksHash),
+    tokenCount: Value(m.tokenCount),
+    variantGroupId: Value(m.variantGroupId.isEmpty ? m.id : m.variantGroupId),
+    variantName: Value(m.variantName),
+    variantOrder: Value(m.variantOrder),
+    hidden: Value(m.hidden),
+  );
 
   String? _encodeCharacterExtensions(Character m) {
     final extensions = Map<String, dynamic>.from(m.extensions);

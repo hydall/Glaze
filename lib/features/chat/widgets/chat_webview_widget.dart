@@ -1347,4 +1347,19 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     if (b == null) return Future.value();
     return b.toggleMessageSelection(id);
   }
+
+  /// Selects every message above the last tapped one; a second call with that
+  /// run already selected deselects it again.
+  Future<void> selectMessagesAbove() {
+    final b = _bridge;
+    if (b == null) return Future.value();
+    return b.selectMessagesAbove();
+  }
+
+  /// Mirror of [selectMessagesAbove] for the messages below the anchor.
+  Future<void> selectMessagesBelow() {
+    final b = _bridge;
+    if (b == null) return Future.value();
+    return b.selectMessagesBelow();
+  }
 }
