@@ -1621,6 +1621,11 @@ export class Bridge {
 
   setSelectionMode(enabled) { this._selectionManager.setSelectionMode(enabled); }
 
+  // Toolbar "select everything above / below the last tapped message" buttons.
+  selectMessagesAbove() { this._selectionManager.selectAbove(); }
+
+  selectMessagesBelow() { this._selectionManager.selectBelow(); }
+
   // Ordered list of real message ids (top → bottom), excluding date separators.
   // Range selection needs the full order even for messages currently outside
   // the virtual-scroll render window, so it reads from the complete backing

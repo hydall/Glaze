@@ -2224,6 +2224,18 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                           _selectionCtrl.clearSelection();
                                         });
                                       },
+                                      // The WebView owns the selection set, so
+                                      // the range buttons ask it to extend
+                                      // (or clear) the run; the resulting
+                                      // onSelectionChange updates the toolbar.
+                                      onSelectAbove: () {
+                                        _webViewStateKey.currentState
+                                            ?.selectMessagesAbove();
+                                      },
+                                      onSelectBelow: () {
+                                        _webViewStateKey.currentState
+                                            ?.selectMessagesBelow();
+                                      },
                                       onHideSelected: () async {
                                         await _selectionCtrl.hideSelected(
                                           ref,
