@@ -95,6 +95,12 @@ class ChatWebViewSurface extends ConsumerStatefulWidget {
 class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
   bool _mountNativeView = !Platform.isWindows;
 
+  /// Built once per surface. [InAppWebViewSettings] is only read when the
+  /// platform view is first created, but every rebuild used to allocate a
+  /// fresh one — along with the WebViewAssetLoader/AssetsPathHandler it
+  /// carries, which register with the plugin and are never released.
+  late final InAppWebViewSettings _webViewSettings = chatWebViewInAppSettings();
+
   @override
   void initState() {
     super.initState();
@@ -247,7 +253,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
                       keepAlive: chatWebViewKeepAliveForPlatform(),
                       initialFile: chatWebViewInitialFile(),
                       initialUrlRequest: chatWebViewInitialUrlRequest(),
-                      initialSettings: chatWebViewInAppSettings(),
+                      initialSettings: _webViewSettings,
                       onWebViewCreated: _onWebViewCreated,
                       onLoadStop: _onLoadStop,
                       shouldOverrideUrlLoading: (controller, request) async {

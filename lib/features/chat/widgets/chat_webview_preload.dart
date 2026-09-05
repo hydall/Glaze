@@ -17,6 +17,10 @@ class ChatWebViewPreloader extends StatefulWidget {
 class _ChatWebViewPreloaderState extends State<ChatWebViewPreloader> {
   bool _preloaded = false;
 
+  /// Same reasoning as the chat surface: allocate the settings once instead
+  /// of on every rebuild of the preloader.
+  late final InAppWebViewSettings _webViewSettings = chatWebViewInAppSettings();
+
   @override
   Widget build(BuildContext context) {
     // Skip webview preloading on Windows and Linux (no InAppWebView
@@ -41,7 +45,7 @@ class _ChatWebViewPreloaderState extends State<ChatWebViewPreloader> {
                   keepAlive: chatWebViewKeepAlive,
                   initialFile: chatWebViewInitialFile(),
                   initialUrlRequest: chatWebViewInitialUrlRequest(),
-                  initialSettings: chatWebViewInAppSettings(),
+                  initialSettings: _webViewSettings,
                   onLoadStop: (_, _) {
                     if (mounted) setState(() => _preloaded = true);
                   },
