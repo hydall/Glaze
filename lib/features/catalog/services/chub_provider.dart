@@ -152,8 +152,11 @@ CharacterData _convertToGlaze(Map<String, dynamic> node) {
 
   return CharacterData(
     name: (def['name'] ?? node['name'] ?? 'Unknown') as String,
-    description: '',
-    personality: (def['personality'] ?? '') as String,
+    // Chub's `personality` IS the card body, `tavern_personality` is the V2
+    // personality field, and `description` is the storefront tagline (kept in
+    // creatorNotes below).
+    description: (def['personality'] ?? '') as String,
+    personality: (def['tavern_personality'] ?? '') as String,
     scenario: (def['scenario'] ?? '') as String,
     firstMes: (def['first_message'] ?? '') as String,
     mesExample: (def['example_dialogs'] ?? '') as String,

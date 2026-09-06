@@ -245,8 +245,10 @@ Future<DownloadedCharacter> jannyFetchCharacter(String characterId, String? slug
   return DownloadedCharacter(
     charData: CharacterData(
       name: (character['name'] ?? 'Unnamed') as String,
-      description: '',
-      personality: (character['personality'] ?? '') as String,
+      // Janny keeps the definition in `personality` and the blurb in
+      // `description`; the definition goes to the prompt body field.
+      description: (character['personality'] ?? '') as String,
+      personality: '',
       scenario: (character['scenario'] ?? '') as String,
       firstMes: (character['firstMessage'] ?? '') as String,
       mesExample: (character['exampleDialogs'] ?? '') as String,
