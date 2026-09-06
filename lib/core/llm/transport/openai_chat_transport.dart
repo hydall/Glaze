@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../utils/error_format.dart';
 import '../converters/reasoning_effort.dart';
+import '../converters/structured_response.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
 import 'endpoint_normalizer.dart';
@@ -112,25 +113,30 @@ class OpenAiChatTransport implements ChatTransport {
     final omitReasoning =
         !(request.showNativeReasoning ?? !request.omitReasoning);
 
+    // Structured output is unwrapped from a complete JSON object, so it runs
+    // one-shot regardless of the stream flag.
+    final oneShot = !request.stream || request.responseJsonSchema != null;
+
     for (var attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
-        if (request.stream) {
+        if (oneShot) {
+          await _oneShotResponse(
+            url,
+            request.apiKey,
+            body,
+            cancelToken,
+            onComplete,
+            omitReasoning: omitReasoning,
+            receiveTimeoutMs: request.receiveTimeoutMs,
+            unwrapStructured: request.responseJsonSchema != null,
+          );
+        } else {
           await _streamResponse(
             url,
             request.apiKey,
             body,
             cancelToken,
             onUpdate,
-            onComplete,
-            omitReasoning: omitReasoning,
-            receiveTimeoutMs: request.receiveTimeoutMs,
-          );
-        } else {
-          await _oneShotResponse(
-            url,
-            request.apiKey,
-            body,
-            cancelToken,
             onComplete,
             omitReasoning: omitReasoning,
             receiveTimeoutMs: request.receiveTimeoutMs,
@@ -213,6 +219,17 @@ class OpenAiChatTransport implements ChatTransport {
     if (r.tools != null && r.tools!.isNotEmpty) {
       body['tools'] = r.tools;
       body['tool_choice'] = r.toolChoice ?? 'auto';
+    }
+
+    if (r.responseJsonSchema != null) {
+      body['response_format'] = <String, dynamic>{
+        'type': 'json_schema',
+        'json_schema': <String, dynamic>{
+          'name': 'glaze_prefill_response',
+          'strict': true,
+          'schema': r.responseJsonSchema,
+        },
+      };
     }
 
     applyExtraRequestParameters(body, r.extraRequestParameters);
@@ -407,6 +424,7 @@ class OpenAiChatTransport implements ChatTransport {
     ChatTransportOnComplete? onComplete, {
     bool omitReasoning = false,
     int? receiveTimeoutMs,
+    bool unwrapStructured = false,
   }) async {
     final response = await _dio.post<dynamic>(
       url,
@@ -475,8 +493,11 @@ class OpenAiChatTransport implements ChatTransport {
         ? null
         : (reasoningRaw is String ? reasoningRaw : null);
 
+    final unwrapped = unwrapStructured
+        ? unwrapStructuredResponse(content)
+        : content;
     onComplete?.call(
-      content,
+      unwrapped,
       reasoning,
       rawResponseJson: rawResponseJson ?? jsonEncode(data),
     );

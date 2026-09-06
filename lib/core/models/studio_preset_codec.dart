@@ -394,6 +394,7 @@ abstract final class StudioPresetCodec {
       json.containsKey('injectionPoint') ? '' : 'pregen',
     ),
     mode: _string(json['mode'], 'direct'),
+    prefillStyle: _string(json['prefillStyle'], 'tool'),
     isStatic: json['isStatic'] == true,
     injectionPoint: _string(json['injectionPoint'], 'pregen'),
     sourceAgentId: _string(json['sourceAgentId']),

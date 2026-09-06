@@ -14,6 +14,7 @@ ChatTransportRequest _req({
   bool requestReasoning = false,
   String? reasoningEffort,
   bool useSystemInstruction = true,
+  Map<String, dynamic>? responseJsonSchema,
 }) {
   return ChatTransportRequest(
     endpoint: 'https://generativelanguage.googleapis.com',
@@ -34,6 +35,7 @@ ChatTransportRequest _req({
     requestReasoning: requestReasoning,
     reasoningEffort: reasoningEffort,
     useSystemInstruction: useSystemInstruction,
+    responseJsonSchema: responseJsonSchema,
   );
 }
 
@@ -217,6 +219,46 @@ void main() {
 
       expect((included.body['generationConfig'] as Map)['topK'], 40);
       expect(omitted.body['generationConfig'] as Map, isNot(contains('topK')));
+    });
+
+    test('responseJsonSchema sets responseMimeType + responseSchema', () {
+      final built = GeminiChatTransport.buildRequest(
+        _req(
+          responseJsonSchema: const {
+            'type': 'object',
+            'properties': {
+              'prefix': {
+                'type': 'string',
+                'enum': ['<thinking>'],
+              },
+              'content': {'type': 'string'},
+            },
+            'required': ['prefix', 'content'],
+            'additionalProperties': false,
+          },
+        ),
+      );
+      final cfg = built.body['generationConfig'] as Map;
+      expect(cfg['responseMimeType'], 'application/json');
+      expect(cfg['responseSchema'], {
+        'type': 'object',
+        'properties': {
+          'prefix': {
+            'type': 'string',
+            'enum': ['<thinking>'],
+          },
+          'content': {'type': 'string'},
+        },
+        'required': ['prefix', 'content'],
+        'additionalProperties': false,
+      });
+    });
+
+    test('no responseSchema is emitted without responseJsonSchema', () {
+      final built = GeminiChatTransport.buildRequest(_req());
+      final cfg = built.body['generationConfig'] as Map;
+      expect(cfg.containsKey('responseMimeType'), isFalse);
+      expect(cfg.containsKey('responseSchema'), isFalse);
     });
 
     test('assistant role mapped to model in contents', () {

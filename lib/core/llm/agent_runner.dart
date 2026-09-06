@@ -74,6 +74,7 @@ class AgentRunner {
     // agent spec's own values — an agent carries none of its own (§4).
     int? batchMaxTokens,
     double? batchTemperature,
+    Map<String, dynamic>? responseJsonSchema,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
@@ -101,6 +102,7 @@ class AgentRunner {
         userName: userName,
         batchMaxTokens: batchMaxTokens,
         batchTemperature: batchTemperature,
+        responseJsonSchema: responseJsonSchema,
         onFinalResponseUpdate: onFinalResponseUpdate,
         onIntermediateUpdate: onIntermediateUpdate,
       );
@@ -138,6 +140,7 @@ class AgentRunner {
     String? userName,
     int? batchMaxTokens,
     double? batchTemperature,
+    Map<String, dynamic>? responseJsonSchema,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
@@ -192,6 +195,7 @@ class AgentRunner {
       headerInline: isFinalResponse ? 'reasoning_inline'.tr() : null,
       charName: charName,
       userName: userName,
+      responseJsonSchema: responseJsonSchema,
       onFinalResponseUpdate: onFinalResponseUpdate,
       onIntermediateUpdate: onIntermediateUpdate,
     );

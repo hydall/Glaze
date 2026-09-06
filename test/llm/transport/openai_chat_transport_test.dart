@@ -27,6 +27,7 @@ ChatTransportRequest _req({
     {'role': 'user', 'content': 'hi'},
   ],
   List<ExtraRequestParameter> extraRequestParameters = const [],
+  Map<String, dynamic>? responseJsonSchema,
 }) {
   return ChatTransportRequest(
     endpoint: endpoint,
@@ -47,6 +48,7 @@ ChatTransportRequest _req({
     sessionId: 'sess-1',
     sessionIdMode: sessionIdMode,
     receiveTimeoutMs: receiveTimeoutMs,
+    responseJsonSchema: responseJsonSchema,
     extraRequestParameters: extraRequestParameters,
   );
 }
@@ -285,4 +287,48 @@ data: [DONE]
       expect(completed, 'Привет\n\nмир');
     },
   );
+
+  test('responseJsonSchema emits a strict json_schema response_format', () {
+    final body = OpenAiChatTransport.buildBody(
+      _req(
+        responseJsonSchema: const {
+          'type': 'object',
+          'properties': {
+            'prefix': {
+              'type': 'string',
+              'enum': ['<thinking>'],
+            },
+            'content': {'type': 'string'},
+          },
+          'required': ['prefix', 'content'],
+          'additionalProperties': false,
+        },
+      ),
+    );
+
+    expect(body['response_format'], {
+      'type': 'json_schema',
+      'json_schema': {
+        'name': 'glaze_prefill_response',
+        'strict': true,
+        'schema': {
+          'type': 'object',
+          'properties': {
+            'prefix': {
+              'type': 'string',
+              'enum': ['<thinking>'],
+            },
+            'content': {'type': 'string'},
+          },
+          'required': ['prefix', 'content'],
+          'additionalProperties': false,
+        },
+      },
+    });
+  });
+
+  test('no response_format is emitted without responseJsonSchema', () {
+    final body = OpenAiChatTransport.buildBody(_req());
+    expect(body.containsKey('response_format'), isFalse);
+  });
 }

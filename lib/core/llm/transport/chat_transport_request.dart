@@ -76,6 +76,15 @@ class ChatTransportRequest {
   /// Transports that don't support tools will ignore this field.
   final List<Map<String, dynamic>>? tools;
 
+  /// Optional JSON-Schema enforcing structured output instead of free text.
+  /// When non-null, the OpenAI transport emits `response_format` (json_schema)
+  /// and the Gemini transport emits `responseMimeType` + `responseSchema`, and
+  /// both unwrap the returned object back into plain text. This is how a
+  /// `functionPrefill` block with `prefillStyle: 'structured'` forces the start
+  /// of a reply without emitting a synthetic tool call (which Gemini 3.8
+  /// rejects for a missing `thought_signature`).
+  final Map<String, dynamic>? responseJsonSchema;
+
   /// Controls tool choice: `'none' | 'auto' | 'required'` or a specific tool.
   /// Only sent when [tools] is non-null.
   final String? toolChoice;
@@ -138,6 +147,7 @@ class ChatTransportRequest {
     this.userName,
     this.tools,
     this.toolChoice,
+    this.responseJsonSchema,
     this.useSystemInstruction = true,
     this.extraRequestParameters = const [],
     this.captureContext,
@@ -237,6 +247,7 @@ class ChatTransportRequest {
     userName: userName,
     tools: tools,
     toolChoice: toolChoice,
+    responseJsonSchema: responseJsonSchema,
     useSystemInstruction: useSystemInstruction,
     extraRequestParameters: extraRequestParameters,
     captureContext: captureContext,
