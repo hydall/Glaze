@@ -15,7 +15,6 @@ import '../../core/utils/time_helpers.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/state/persona_resolution.dart';
 import '../chat_history/chat_history_provider.dart';
-import '../memory/state/memory_active_drafts_provider.dart';
 import 'abort_handler.dart';
 import 'chat_session_service.dart';
 import 'chat_state.dart';
@@ -405,8 +404,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (current == null ||
         current.isGenerating ||
         current.isGeneratingImage ||
-        current.isPostGenRunning ||
-        _isMemoryDraftActive(current)) {
+        current.isPostGenRunning) {
       return Future.value(false);
     }
 
@@ -469,10 +467,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         current.isGenerating ||
         current.isGeneratingImage ||
         current.isPostGenRunning) {
-      durableAcceptance?.complete(false);
-      return;
-    }
-    if (_isMemoryDraftActive(current)) {
       durableAcceptance?.complete(false);
       return;
     }
@@ -791,8 +785,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         current.isPostGenRunning) {
       return;
     }
-    if (_isMemoryDraftActive(current)) return;
-
     final lastIdx = current.messages.length - 1;
     if (lastIdx < 0) return;
 
@@ -911,8 +903,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         current.isPostGenRunning) {
       return;
     }
-    if (_isMemoryDraftActive(current)) return;
-
     final session = current.session!;
     // Impersonation never restores a chat message on abort — clear any stale
     // restoration target left by a prior regenerate so Stop only drops the
@@ -1025,8 +1015,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         current.isPostGenRunning) {
       return;
     }
-    if (_isMemoryDraftActive(current)) return;
-
     final lastIdx = current.messages.length - 1;
     if (lastIdx < 0) return;
     final lastMsg = current.messages[lastIdx];
@@ -1056,12 +1044,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       updatedAt: currentTimestampSeconds(),
     );
     await _runGeneration(promptSession, current, continueTargetId: lastMsg.id);
-  }
-
-  bool _isMemoryDraftActive(ChatState current) {
-    final sessionId = current.session?.id;
-    if (sessionId == null) return false;
-    return ref.read(memoryActiveDraftsProvider).contains(sessionId);
   }
 
   Future<void> _runGeneration(

@@ -1980,7 +1980,6 @@
   "imggen_match_mode_match": "совпадение",
   "imggen_ref_keyword": "ключевое слово",
   "memory_books_all_covered": "Все сообщения уже покрыты",
-  "memory_books_chat_generation_active": "Генерация чата активна — дождитесь её завершения перед генерацией черновика памяти",
   "memory_books_current_llm_model": "Текущая LLM модель",
   "memory_books_drafts_created": "Создано черновиков: {arg0}",
   "memory_books_messages_not_found": "Сообщения для этого черновика не найдены",

@@ -1,9 +1,13 @@
 import 'dart:async';
 
+// Public named constructor arguments intentionally initialize private fields.
+// ignore_for_file: prefer_initializing_formals
+
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/state/memory_settings_provider.dart';
@@ -15,17 +19,26 @@ import 'memory_book_write_queue.dart';
 import 'memory_draft_generation_update.dart';
 import 'memory_settings_mapper.dart';
 
+typedef GenerateMemoryDraft =
+    Future<MemoryDraft> Function({
+      required MemoryDraft draft,
+      required MemoryBookSettings settings,
+      required PipelineSettings pipeline,
+      required List<ChatMessage> messages,
+      required String charId,
+      required String sessionId,
+      required Map<String, String> sessionVars,
+      CancelToken? cancelToken,
+    });
+
 /// Owns the memory-draft generation lifecycle for a single chat session:
 /// the active/generating sets, cancel tokens, and the elapsed-timer. Extracted
 /// from [MemoryBookController] (plan §6) so the host controller stays a thin
 /// orchestrator for entry/index CRUD + settings mapping.
 ///
-/// INV-M3 (chat vs memory-draft mutual exclusion) is preserved: `generateDraft`
-/// refuses to start when `chatProvider(charId).value?.isGenerating == true`
-/// and marks the sessionId active on `memoryActiveDraftsProvider` for the
-/// duration of the generation (matching the chat-side INV-M4 guard). The mutex
-/// contract is characterized by `test/characterization/memory_draft_mutex_test.dart`
-/// (which pins the shared provider, not this controller directly).
+/// Chat and memory generation may overlap. The session lease coordinates
+/// memory workflows with each other; per-draft ownership keeps late or
+/// cancelled results from mutating another operation.
 ///
 /// The controller does not own the [MemoryBook] — the host does. It reads the
 /// book via [bookGetter] and atomically applies targeted updates via
@@ -36,6 +49,7 @@ class MemoryDraftGenerationController {
   final String _charId;
   final String _sessionId;
   final MemorySettingsMapper _settingsMapper;
+  final GenerateMemoryDraft _generate;
 
   /// Returns the host's current [MemoryBook] (or `null` if not loaded).
   final MemoryBook? Function() bookGetter;
@@ -53,13 +67,38 @@ class MemoryDraftGenerationController {
   Timer? _genElapsedTimer;
 
   MemoryDraftGenerationController({
-    required this._ref,
-    required this._charId,
-    required this._sessionId,
-    required this._settingsMapper,
+    required WidgetRef ref,
+    required String charId,
+    required String sessionId,
+    required MemorySettingsMapper settingsMapper,
     required this.bookGetter,
     required this.persistMutation,
-  });
+    GenerateMemoryDraft? generate,
+  }) : _ref = ref,
+       _charId = charId,
+       _sessionId = sessionId,
+       _settingsMapper = settingsMapper,
+       _generate =
+           generate ??
+           (({
+             required draft,
+             required settings,
+             required pipeline,
+             required messages,
+             required charId,
+             required sessionId,
+             required sessionVars,
+             cancelToken,
+           }) => MemoryDraftGenerator.widget(ref).generate(
+             draft: draft,
+             settings: settings,
+             pipeline: pipeline,
+             messages: messages,
+             charId: charId,
+             sessionId: sessionId,
+             sessionVars: sessionVars,
+             cancelToken: cancelToken,
+           ));
   Map<String, bool> get generatingDrafts => Map.unmodifiable(_generatingDrafts);
   Map<String, DateTime> get genStartTimes => Map.unmodifiable(_genStartTimes);
 
@@ -105,10 +144,6 @@ class MemoryDraftGenerationController {
     final book = bookGetter();
     if (book == null || _activeDraftIds.contains(draftId)) return;
     final chatState = _ref.read(chatProvider(_charId));
-    if (chatState.value?.isGenerating == true) {
-      onError('memory_books_chat_generation_active'.tr());
-      return;
-    }
     final draftIndex = book.pendingDrafts.indexWhere((d) => d.id == draftId);
     if (draftIndex < 0) return;
 
@@ -137,8 +172,7 @@ class MemoryDraftGenerationController {
     onStart();
 
     try {
-      final generator = MemoryDraftGenerator.widget(_ref);
-      final result = await generator.generate(
+      final result = await _generate(
         draft: draft,
         settings: _bookSettings,
         pipeline: _pipeline,

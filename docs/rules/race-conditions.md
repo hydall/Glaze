@@ -65,14 +65,13 @@ Rule of thumb: if there's an `await` before the mutation, there's a potential ra
 
 ---
 
-## Rule 5: Mutual exclusion for concurrent operations
+## Rule 5: Isolate concurrent operation ownership
 
-- Chat generation and memory draft generation **are** mutually exclusive for the same session/character:
-  - `MemoryBookController.generateDraft()` rejects when `chatProvider(charId).isGenerating`.
-  - `sendMessage` / `regenerateLastAssistant` / `continueMessage` reject when
-    `memoryActiveDraftsProvider` contains the session id.
-  - `glaze.triggerGeneration` reuses `GenerationDispatcher`, which enforces the same
-    mutex (INV-JS3). The dispatcher returns `TriggerBusy` instead of auto-aborting.
+- Chat generation and memory draft generation may overlap for the same session.
+- Each operation must retain independent transport callbacks, response state,
+  cancellation ownership, staleness checks, and targeted persistence.
+- `memoryActiveDraftsProvider` prevents conflicting memory workflows; it is not
+  a chat mutex. Duplicate generation of one draft remains prohibited.
 - Image generation runs only after text generation completes (enforced by call order).
 - Background operations (auto-sync, embedding indexing) should check `isGenerating`
   for the relevant `charId` before starting.
@@ -81,8 +80,9 @@ Rule of thumb: if there's an `await` before the mutation, there's a potential ra
   contend with chat generation but the `jsRunner` ticks share
   `SseClient` with chat — keep heavy ticks ≤ 1 per preset at a time.
 
-If adding a new request type alongside chat generation, add mutual exclusion guards
-in **both** directions.
+If adding a new request type alongside chat generation, serialize only a
+concrete shared mutable owner or resource. Otherwise test concurrent completion
+and cancellation in both orders.
 
 ---
 
@@ -107,9 +107,9 @@ Verify: after pressing Stop, the network tab shows the request was actually term
 | Two memory drafts start for same draft ID | No in-flight ID tracking in generator | Tracked in widget: `memory_books_tab.dart._generatingDrafts` map |
 | `apiListProvider` null on cold start | Sync provider read before async load | `await ref.read(apiListProvider.future)` first; also used by `MemoryDraftGenerator` |
 | Image retry state corruption | A late retry could overwrite newer chat state | ✅ **Fixed** — operation generation IDs plus targeted `mutateMessage` and durable-state publication |
-| Chat ↔ memory draft mutual exclusion | Neither side checks the other | ✅ **Fixed** — `memory_active_drafts_provider` enforces mutex in both directions; `glaze.triggerGeneration` reuses the same mutex via `GenerationDispatcher` (INV-M3, INV-M4, INV-JS3) |
+| Chat ↔ memory draft output isolation | Concurrent requests could be routed or persisted into the wrong owner | ✅ **Covered** — independent ownership and targeted persistence; production concurrency markers in `memory_chat_concurrency_test.dart` (INV-M3, INV-M4) |
 | Character deletion orphan rows | Independent provider-level deletion lists missed newer session tables | ✅ **Fixed** — `SessionDeletionQueries` is the shared complete session cascade; `CharacterDeletionRepo` composes it atomically with character lorebooks, folders, rows, and variation promotion. |
-| `glaze.triggerGeneration` racing chat generation | JS call while chat is generating | ✅ **Fixed** — `GenerationDispatcher.dispatch` returns `TriggerBusy` when `isGenerating` or `memoryActiveDrafts` is set (INV-JS3). |
+| `glaze.triggerGeneration` racing chat generation | JS call while chat is generating | ✅ **Fixed** — `GenerationDispatcher.dispatch` returns `TriggerBusy` for active chat generation; memory generation may overlap (INV-JS3). |
 | Stale periodic ticks after app background | `Timer.periodic` keeps firing while app is paused | ✅ **Fixed** — `PeriodicTriggerScheduler` pauses on `paused`/`inactive`/`hidden`/`detached` (INV-JS6). No catch-up tick on resume. |
 | Rapid session switch — stale switch overwrites newer one | `ChatSessionController.switchSession` has no epoch/switchId guard; two concurrent calls race, last `_setState` wins | ✅ **Fixed** — `_switchEpoch` counter in `ChatSessionController`; after each `await`, stale-epoch operations bail out without calling `_setState`. Covers `switchSession`, `createNewSession`, `branchSession`. Tests in `test/characterization/session_switch_race_test.dart` |
 | `_applySessionPreference` — no cancellation of in-flight switch | `didUpdateWidget` resets `_sessionApplied` and starts a new `_applySessionPreference` without cancelling the old one; shared `_sessionSwitchPending` flag cleared prematurely | ✅ **Fixed** — `_applyEpoch` counter in `_ChatScreenState`; only the latest apply clears `_sessionSwitchPending` in its `finally` block |

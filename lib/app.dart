@@ -53,7 +53,15 @@ class GlazeApp extends ConsumerStatefulWidget {
   /// without waiting for network-bound initialization.
   final bool skipStartup;
 
-  const GlazeApp({super.key, this.restart, this.skipStartup = false});
+  @visibleForTesting
+  final NotificationNavigationData? notificationForTesting;
+
+  const GlazeApp({
+    super.key,
+    this.restart,
+    this.skipStartup = false,
+    this.notificationForTesting,
+  });
 
   static VoidCallback? _restart;
 
@@ -84,6 +92,14 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     _initInBackground(loadLorebookSettings(ref), 'lorebook settings');
     _initInBackground(seedDefaultPresets(ref), 'default preset seeding');
     _initInBackground(seedFeaturedPresets(ref), 'featured preset seeding');
+    final notificationForTesting = widget.notificationForTesting;
+    if (notificationForTesting != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_openChatFromNotification(notificationForTesting));
+        }
+      });
+    }
     if (!widget.skipStartup) {
       _warmInitialListProviders();
     }
@@ -278,7 +294,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
       path: '/chat/${data.charId}',
       queryParameters: query.isEmpty ? null : query,
     );
-    context.push(uri.toString());
+    unawaited(ref.read(routerProvider).push(uri.toString()));
   }
 
   @override

@@ -578,7 +578,7 @@ the result to recover which blocks landed where.
 | Image gen | `ChatState.isGeneratingImage` + `_imgGenCancelToken` | No (one-shot) | `_imgGenCancelToken` in `ChatNotifier` |
 | Summary (manual) | Widget-local in `summary_tab.dart` | No | Not abortable (INV-S2) |
 | Summary (auto) | `AutoSummaryStage`, from `PostGenCoordinator` | No | Not abortable (INV-S2) |
-| Memory draft | `MemoryDraftGenerationController` (delegated by `MemoryBookController`) | No | Per-draft `CancelToken`; mutex via `memory_active_drafts_provider` |
+| Memory draft | `MemoryDraftGenerationController` (delegated by `MemoryBookController`) | No | Per-draft `CancelToken`; memory-workflow leases via `memory_active_drafts_provider` |
 
 ### Reasoning / Thinking
 
@@ -1564,7 +1564,7 @@ Resolved (kept for history; details in git / PR notes):
 - **prompt_payload_builder split** — `prompt_inputs_collector` + `prompt_payload_assembler`.
 - **chat_provider decomposition** — controllers + `generation_pipeline` + `saved_message_writer` (~420 lines; further splits possible).
 - **lorebook_vector_search providers** — moved to `core/state/lorebook_embedding_provider.dart`.
-- **Chat ↔ memory draft mutex** — `memory_active_drafts_provider` + `MemoryBookController` (INV-M3/INV-M4).
+- **Chat ↔ memory draft isolation** — independent request ownership plus targeted persistence; `memory_active_drafts_provider` now coordinates memory workflows only (INV-M3/INV-M4).
 - **Session vars on abort/error** — only a successful guarded commit applies the
   isolate variable delta (INV-C5).
 - **Memory injection token budget** — `memory_budget.dart` + INV-PS4.

@@ -2044,7 +2044,6 @@
   "memory_books_all_covered": "All messages are already covered",
   "memory_books_need_more_uncovered": "Need more uncovered messages before creating a draft",
   "memory_books_drafts_created": "{arg0} drafts created",
-  "memory_books_chat_generation_active": "Chat generation is active — wait for it to finish before generating a memory draft",
   "memory_books_messages_not_found": "Messages not found for this draft",
   "memory_books_setup_embedding_first": "Set up embedding API in Embedding Settings first",
   "memory_books_reindex_result": "Indexed: {indexed}, Skipped: {skipped}, Failed: {failed}",

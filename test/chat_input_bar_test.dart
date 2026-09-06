@@ -153,16 +153,18 @@ void main() {
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8'
         'z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
       );
+      File? clipboardImageFile;
+      var waitForWindowsImage = false;
 
       /// What the platform side of `pasteboard` hands back for `image` on this
       /// host: bytes everywhere except Windows, which passes a path to a file
       /// the plugin reads and deletes.
       Object clipboardImagePayload(Uint8List bytes) {
         if (!Platform.isWindows) return bytes;
-        final file = File(
+        clipboardImageFile = File(
           '${Directory.systemTemp.createTempSync('glaze_pb').path}/clip.png',
         )..writeAsBytesSync(bytes);
-        return file.path;
+        return clipboardImageFile!.path;
       }
 
       /// Puts an image and/or text on the fake clipboard. No image is what
@@ -172,6 +174,7 @@ void main() {
         List<String> files = const [],
         String? text,
       }) {
+        waitForWindowsImage = Platform.isWindows && image != null;
         final messenger =
             TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
         messenger.setMockMethodCallHandler(const MethodChannel('pasteboard'), (
@@ -203,6 +206,24 @@ void main() {
       }
 
       Future<void> pressPaste(WidgetTester tester) async {
+        if (waitForWindowsImage) {
+          // pasteboard turns the mocked path back into bytes with real file
+          // I/O. Start the unawaited paste in the real async zone so that I/O
+          // can finish before pumpAndSettle looks for the resulting setState.
+          await tester.runAsync(() async {
+            clipboardImageFile = null;
+            await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+            await tester.sendKeyDownEvent(LogicalKeyboardKey.keyV);
+            await tester.sendKeyUpEvent(LogicalKeyboardKey.keyV);
+            await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+            while (clipboardImageFile == null ||
+                await clipboardImageFile!.exists()) {
+              await Future<void>.delayed(const Duration(milliseconds: 1));
+            }
+          });
+          await tester.pumpAndSettle();
+          return;
+        }
         await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
         await tester.sendKeyDownEvent(LogicalKeyboardKey.keyV);
         await tester.sendKeyUpEvent(LogicalKeyboardKey.keyV);
@@ -364,7 +385,18 @@ void main() {
 
         expect(paste, hasLength(1));
 
-        paste.single.onPressed!();
+        if (waitForWindowsImage) {
+          await tester.runAsync(() async {
+            clipboardImageFile = null;
+            paste.single.onPressed!();
+            while (clipboardImageFile == null ||
+                await clipboardImageFile!.exists()) {
+              await Future<void>.delayed(const Duration(milliseconds: 1));
+            }
+          });
+        } else {
+          paste.single.onPressed!();
+        }
         await tester.pumpAndSettle();
 
         expect(find.byType(Image), findsOneWidget);

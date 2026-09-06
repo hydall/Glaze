@@ -3,24 +3,11 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/features/memory/state/memory_active_drafts_provider.dart';
 
-/// Characterization test for INV-M3 / INV-M4: memory draft generation and
-/// chat generation must be mutually exclusive per (charId, sessionId).
-///
-/// The fix (PR-B C12) introduces a global
-/// [memoryActiveDraftsProvider] — a `StateNotifier<Set<String>>` of
-/// sessionIds whose memory drafts are currently generating. Two
-/// guards in production code observe this set:
-///
-/// * `MemoryBookController.generateDraft` (INV-M3) refuses to start if
-///   `chatProvider(charId).value?.isGenerating == true`, and marks the
-///   sessionId active for the duration of the generation.
-/// * `ChatNotifier.sendMessage`/`regenerateLastAssistant`/
-///   `continueMessage` (INV-M4) refuse to start if the sessionId is
-///   in the active set.
-///
-/// This test pins down the contract of the shared state container.
+/// Characterization test for the memory-workflow lease registry. Manual and
+/// automatic memory jobs use [memoryActiveDraftsProvider] to coordinate work
+/// for a session. Chat generation does not read this registry and may overlap.
 void main() {
-  group('MemoryActiveDraftsNotifier (INV-M3/INV-M4 shared state)', () {
+  group('MemoryActiveDraftsNotifier memory workflow leases', () {
     test('initial state is empty', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);

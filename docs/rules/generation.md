@@ -34,16 +34,18 @@ Full formal invariants with code references: `docs/INVARIANTS.md`
 
 ---
 
-## Mutual exclusion ✅ ENFORCED (PR-B C12)
+## Chat and memory concurrency
 
-Chat generation and memory draft **cannot** overlap for the same session/character:
+Chat generation and memory draft generation may overlap, including when they
+use the same session:
 
-- `MemoryBookController.generateDraft()` rejects when `chatProvider(charId).isGenerating`.
-- `sendMessage` / `regenerateLastAssistant` / `continueMessage` reject when
-  `memoryActiveDraftsProvider` contains the session id.
+- Each request owns its transport, callbacks, accumulator/completer, and cancel token.
+- Chat persists only its owned session result; memory uses targeted draft mutation.
+- Duplicate generation of the same draft remains prohibited.
+- `memoryActiveDraftsProvider` coordinates memory workflows only; it does not block chat.
 
 See `docs/INVARIANTS.md` INV-M3, INV-M4 and
-`test/characterization/memory_draft_mutex_test.dart`.
+`test/memory_chat_concurrency_test.dart`.
 
 Image generation runs after text generation completes on the normal/regen path
 (`GenerationPipeline` → `processImageTags()`). Summary is independent.
@@ -470,14 +472,15 @@ on expiry. The token is independent of the chat text generation
 token — aborting the chat does NOT cancel in-flight JS generate calls.
 
 `glaze.triggerGeneration` reuses the chat path entirely — see
-`GenerationDispatcher.dispatch` for the mutex / abort chain.
+`GenerationDispatcher.dispatch` for the ownership / abort chain.
 
 ---
 
 ## Adding a new generation path
 
 1. Define abort mechanism (`AbortHandler` or separate `CancelToken`).
-2. Add mutual exclusion in **both** directions if it shares a `charId` / session.
+2. Add mutual exclusion only for shared mutable ownership or a concrete shared
+   resource; sharing a `charId` / session alone is not sufficient.
 3. Verify `isCurrentGen(genId)` before mutating shared state after every `await`.
 4. Clear `isGenerating*` on every exit path.
 5. Decide whether post-SSE steps (image tags, extensions) must run — use
@@ -498,7 +501,7 @@ Before merging any generation-related PR:
 - [x] Memory injection respects token budget (INV-PS4)
 - [ ] History cutoff trims oldest first
 - [ ] Summary does not touch `ChatState.isGenerating` or messages
-- [x] Memory draft mutex enforced (INV-M3, INV-M4)
+- [ ] Chat and memory overlap without cross-cancellation or cross-persistence (INV-M3, INV-M4)
 - [ ] Image tags run after text on send/regen (not on continue unless changed)
   - [ ] Extensions post-gen on send/regen only (INV-EG1)
   - [ ] Block chain does not start on aborted or errored generation (INV-EG4)

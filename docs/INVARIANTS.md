@@ -312,31 +312,27 @@ It never reads or writes `ChatState.isGenerating`.
 
 `MemoryDraftGenerator.generate()` calls the API with `stream: false` unconditionally.
 
-### INV-M3: Memory draft cannot start while chat generation is active ✅ ENFORCED (PR-B C12)
+### INV-M3: Chat and memory draft generation may overlap ✅ ENFORCED
 
-`MemoryBookController.generateDraft()` rejects a start request
-when `chatProvider(_charId).value?.isGenerating == true` for the
-target character. The user gets a "Chat generation is active"
-error message via the existing `onError` callback.
+The two pipelines own separate transports, callbacks, response accumulators,
+cancel tokens, and persistence targets. A memory result may mutate only its
+target `MemoryDraft`; a chat result may mutate only its owned chat generation
+and session state. Cancelling either operation must not cancel or publish into
+the other.
 
-The check is read-only on the chat notifier — it does not wait for
-the generation to finish; the user must explicitly abort the chat
-generation or wait for it to complete.
+This contract is exercised in `test/memory_chat_concurrency_test.dart` with
+distinct marker responses and reversed completion order.
 
-### INV-M4: Chat generation cannot start while memory draft is active ✅ ENFORCED (PR-B C12)
+### INV-M4: Memory draft ownership remains exclusive ✅ ENFORCED
 
-`ChatNotifier.sendMessage()`, `ChatNotifier.regenerateLastAssistant()`,
-and `ChatNotifier.continueMessage()` reject a start request when a
-memory draft is currently being generated for the same `sessionId`.
-
-Both invariants share a single new state container:
+Starting the same draft twice remains prohibited. Memory workflows use:
 `lib/features/memory/state/memory_active_drafts_provider.dart`
-(`StateNotifierProvider<MemoryActiveDraftsNotifier, Set<String>>`).
-Drafts are added to the set when generation starts and removed when
-it ends (success, error, or cancel).
+to coordinate manual and automatic memory work for a session. The lease is not
+a chat-generation mutex and chat entry points must not reject because it is
+active.
 
 Shared state contract is pinned by
-`test/characterization/memory_draft_mutex_test.dart` (7 tests).
+`test/characterization/memory_draft_mutex_test.dart`.
 
 ### INV-M5: Memory draft approval preserves source range ✅ ENFORCED
 
@@ -1053,8 +1049,8 @@ extend: a trailing user message is delegated to `regenerateLastAssistant()`,
 which generates a normal reply through `GenerationPipeline`; any other trailing
 role is a no-op.
 
-Mutex: `continueMessage()` rejects when `_isMemoryDraftActive` (same as
-`sendMessage` / `regenerateLastAssistant`) — see INV-M4.
+`continueMessage()` may overlap memory draft generation under the same
+ownership and persistence isolation contract as other chat entry points (INV-M3).
 
 ### INV-CM2: Continue runs the same post-generation stages as a send
 
@@ -1270,7 +1266,7 @@ read-modify-write in a Drift transaction:
 (no NaN, finite numbers, string keys, ≤ 64 KiB total per payload) and
 surfaces failures as `ArgumentError` → bridge `invalid_request` code.
 
-### INV-JS3: `glaze.triggerGeneration` respects generation mutexes (INV-C1, INV-M3/M4) ✅ ENFORCED
+### INV-JS3: `glaze.triggerGeneration` respects chat ownership (INV-C1) ✅ ENFORCED
 
 `GenerationDispatcher.dispatch(charId, rawMode, reason)` is the only
 entry point that touches the chat notifier from a JS call. The
@@ -1278,8 +1274,9 @@ dispatcher returns `TriggerResult`:
 
 * `TriggerNoSession` — no chat state for `charId`
 * `TriggerBusy(busyKind: 'chat')` — INV-C1 violated
-* `TriggerBusy(busyKind: 'memory_draft')` — INV-M3/M4 violated
 * `TriggerAccepted` / `TriggerError`
+
+An active memory draft does not make chat busy (INV-M3).
 
 `auto` mode resolves to `continue` (last msg = assistant) or
 `regenerate` (last msg = user). The dispatcher never auto-aborts;
@@ -1524,7 +1521,7 @@ Before merging any structural PR:
 - [x] Memory injection respects token budget (PR-B C13 / INV-PS4)
 - [ ] History cutoff trims oldest messages first
 - [ ] Summary returns a string without affecting chat state
-- [x] Memory draft mutex with chat generation (PR-B C12 / INV-M3, INV-M4)
+- [x] Chat/memory concurrency keeps independent ownership and persistence (INV-M3, INV-M4)
 - [ ] Image generation completes after text generation (continue included — INV-CM2)
   - [ ] Extensions post-gen runs after normal/regen/continue (INV-EG1, INV-CM2)
   - [ ] Continue injects one system turn after the extended reply (INV-CM3)
