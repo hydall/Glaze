@@ -318,6 +318,71 @@ void main() {
     },
   );
 
+  test(
+    'regex that merges entry boundaries keeps entries with pre-transform text',
+    () {
+      final result = buildPrompt(
+        PromptPayload(
+          character: const Character(id: 'character', name: 'Character'),
+          preset: const Preset(
+            id: 'preset',
+            name: 'Preset',
+            regexes: [
+              PresetRegex(
+                id: 'regex',
+                name: 'Collapse entries',
+                regex: 'E\\n\\nL',
+                replacement: 'E_L',
+                placement: [4],
+                ephemerality: [2],
+              ),
+            ],
+            blocks: [
+              PresetBlock(
+                id: 'custom',
+                name: 'Custom',
+                role: 'system',
+                content: '{{lorebooks}}',
+              ),
+            ],
+          ),
+          history: const [],
+          apiConfig: const ApiConfig(id: 'api'),
+          lorebooks: [
+            Lorebook(
+              id: 'book',
+              name: 'Book',
+              entries: [
+                LorebookEntry(
+                  id: 'entry-1',
+                  constant: true,
+                  content: 'LORE_ONE',
+                  position: 'lorebooksMacro',
+                ),
+                LorebookEntry(
+                  id: 'entry-2',
+                  constant: true,
+                  content: 'LORE_TWO',
+                  position: 'lorebooksMacro',
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+      final manifest = result.exactLorebookManifest!;
+      expect(manifest.entries, hasLength(2));
+      expect(manifest.entries.map((e) => e.entryId), ['entry-1', 'entry-2']);
+      expect(manifest.entries[0].renderedContent, 'LORE_ONE');
+      expect(manifest.entries[1].renderedContent, 'LORE_TWO');
+      expect(result.messages.single.content, contains('LORE_ONE_LORE_TWO'));
+      expect(
+        manifest.providerMessagesHash,
+        computeHash(jsonEncode(buildApiMessages(result.messages))),
+      );
+    },
+  );
+
   for (final mode in ['append', 'depth']) {
     test('records every lore placeholder emitted through $mode blocks', () {
       for (final fixture in [

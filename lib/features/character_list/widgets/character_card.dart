@@ -624,6 +624,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
         character: character,
         format: format,
       );
+      if (savedPath.isEmpty) return; // user cancelled the save dialog
       if (context.mounted) {
         GlazeToast.show(
           context,

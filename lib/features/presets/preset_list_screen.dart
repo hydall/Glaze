@@ -1190,11 +1190,12 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     String? lastError;
     for (final item in _selectedItems(selection)) {
       try {
-        if (item.isAgentic) {
-          await saveStudioPresetJson(item.studioPreset!);
-        } else {
-          await savePresetJson(item.preset!);
-        }
+        final path = item.isAgentic
+            ? await saveStudioPresetJson(item.studioPreset!)
+            : await savePresetJson(item.preset!);
+        // Empty path = the user cancelled the save dialog — stop the loop
+        // instead of counting the file as exported (or re-prompting).
+        if (path.isEmpty) break;
         exported++;
       } catch (e) {
         lastError = '$e';

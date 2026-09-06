@@ -600,10 +600,10 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
         filename: filename,
         subfolder: 'themes',
       );
+      if (path.isEmpty) return; // user cancelled the save dialog
       if (!mounted) return;
       GlazeToast.show(context, 'Theme exported to $path');
     } catch (e) {
-      if (e.toString().contains('cancelled')) return;
       if (!mounted) return;
       GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
     }

@@ -10,6 +10,7 @@ import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/import/st_lorebook_importer.dart';
 import '../../core/models/lorebook.dart';
 import '../../core/services/file_export_service.dart';
+import '../../core/services/st_lorebook_exporter.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/lorebook_embedding_provider.dart';
@@ -327,65 +328,20 @@ class LorebookListScreen extends ConsumerWidget {
     try {
       final json = const JsonEncoder.withIndent(
         '  ',
-      ).convert(_toSTLorebookJson(lb));
-      final safeName = lb.name.trim().isEmpty ? 'lorebook' : lb.name.trim();
-      await FileExportService.export(
+      ).convert(glazeLorebookToSTJson(lb));
+      final safeName =
+          lb.name.trim().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+      final path = await FileExportService.export(
         data: json,
-        filename: '$safeName.json',
+        filename: '${safeName.isEmpty ? 'lorebook' : safeName}.json',
         subfolder: 'lorebooks',
       );
+      if (path.isEmpty) return; // user cancelled the save dialog
     } catch (e) {
       if (context.mounted) {
         GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
       }
     }
-  }
-
-  /// Minimal SillyTavern world-info shape: `{ entries: { "0": {...}, ... } }`.
-  Map<String, dynamic> _toSTLorebookJson(Lorebook lb) {
-    final entries = <String, dynamic>{};
-    for (var i = 0; i < lb.entries.length; i++) {
-      final e = lb.entries[i];
-      entries['$i'] = {
-        'uid': i,
-        'key': e.keys,
-        'keysecondary': e.secondaryKeys,
-        'comment': e.comment,
-        'content': e.content,
-        'constant': e.constant,
-        'selective': e.selectiveLogic != 4,
-        'selectiveLogic': e.selectiveLogic,
-        'order': e.order,
-        'position': 0,
-        'disable': !e.enabled,
-        'probability': e.probability,
-        'useProbability': true,
-        'excludeRecursion': e.preventRecursion,
-        'delayUntilRecursion': e.delayUntilRecursion,
-        'group': e.group,
-        'groupWeight': e.groupProminence,
-        'sticky': e.sticky,
-        'cooldown': e.cooldown,
-        'delay': e.delay,
-        'scanDepth': e.scanDepth,
-        'caseSensitive': e.caseSensitive,
-        'matchWholeWords': e.matchWholeWords,
-        'useGroupScoring': e.useGroupScoring,
-        'glazeMetadata': {
-          'position': e.position,
-          'vectorSearch': e.vectorSearch,
-          'useKeywordSearch': e.useKeywordSearch,
-          'ignoreBudget': e.ignoreBudget,
-          'characterFilter': e.characterFilter == null
-              ? null
-              : {
-                  'names': e.characterFilter!.names,
-                  'isExclude': e.characterFilter!.isExclude,
-                },
-        },
-      };
-    }
-    return {'name': lb.name, 'entries': entries};
   }
 
   void _deleteLorebook(BuildContext context, WidgetRef ref, Lorebook lb) {

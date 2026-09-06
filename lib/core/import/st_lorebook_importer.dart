@@ -52,14 +52,8 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
   }
 
   final rawFilter = e['characterFilter'];
-  LorebookCharacterFilter? charFilter;
-  if (rawFilter is List && rawFilter.isNotEmpty) {
-    charFilter = LorebookCharacterFilter(
-      names: rawFilter.map((n) => n.toString()).toList(),
-    );
-  } else if (rawFilter is String && rawFilter.isNotEmpty) {
-    charFilter = LorebookCharacterFilter(names: [rawFilter]);
-  }
+  LorebookCharacterFilter? charFilter = _parseCharacterFilter(rawFilter) ??
+      _parseCharacterFilter(glazeMeta?['characterFilter']);
 
   return LorebookEntry(
     id: (e['uid']?.toString()) ?? '${DateTime.now().millisecondsSinceEpoch}_$index',
@@ -76,17 +70,53 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
     caseSensitive: (e['caseSensitive'] as bool?) ?? false,
     matchWholeWords: (e['matchWholeWords'] as bool?) ?? false,
     probability: (e['probability'] as int?) ?? 100,
-    preventRecursion: (e['preventRecursion'] as bool?) ?? false,
+    preventRecursion:
+        (e['preventRecursion'] as bool?) ?? (e['excludeRecursion'] as bool?) ?? false,
     sticky: (e['sticky'] as int?) ?? 0,
     cooldown: (e['cooldown'] as int?) ?? 0,
     delay: (e['delay'] as int?) ?? 0,
     group: (e['group'] as String?) ?? '',
-    groupProminence: (e['groupProminence'] as int?) ?? 100,
+    groupProminence:
+        (e['groupProminence'] as int?) ?? (e['groupWeight'] as int?) ?? 100,
     characterFilter: charFilter,
-    ignoreBudget: (e['ignoreBudget'] as bool?) ?? false,
-    vectorSearch: (e['vectorSearch'] as bool?) ?? (e['vector_search'] as bool?) ?? false,
-    useKeywordSearch: (e['useKeywordSearch'] as bool?) ?? (e['use_keyword_search'] as bool?) ?? true,
+    ignoreBudget:
+        (e['ignoreBudget'] as bool?) ?? (glazeMeta?['ignoreBudget'] as bool?) ?? false,
+    vectorSearch: (e['vectorSearch'] as bool?) ??
+        (e['vector_search'] as bool?) ??
+        (glazeMeta?['vectorSearch'] as bool?) ??
+        false,
+    useKeywordSearch: (e['useKeywordSearch'] as bool?) ??
+        (e['use_keyword_search'] as bool?) ??
+        (glazeMeta?['useKeywordSearch'] as bool?) ??
+        true,
+    delayUntilRecursion: (e['delayUntilRecursion'] as bool?) ?? false,
+    useGroupScoring: (e['useGroupScoring'] as bool?) ?? false,
   );
+}
+
+/// Accepts the shapes seen in the wild:
+/// - ST native map: `{isExclude: bool, names: [...], tags: [...]}`
+/// - Glaze `glazeMetadata` map: `{names: [...], isExclude: bool}`
+/// - bare name list `[...]` or a single `'Name'` string.
+LorebookCharacterFilter? _parseCharacterFilter(dynamic raw) {
+  if (raw is Map) {
+    final names = (raw['names'] as List?)
+            ?.map((n) => n.toString())
+            .where((n) => n.isNotEmpty)
+            .toList() ??
+        const <String>[];
+    if (names.isEmpty) return null;
+    return LorebookCharacterFilter(names: names, isExclude: raw['isExclude'] == true);
+  }
+  if (raw is List && raw.isNotEmpty) {
+    return LorebookCharacterFilter(
+      names: raw.map((n) => n.toString()).toList(),
+    );
+  }
+  if (raw is String && raw.isNotEmpty) {
+    return LorebookCharacterFilter(names: [raw]);
+  }
+  return null;
 }
 
 Future<STLorebookImportResult> importSTLorebookFromFile(String filePath, {String? nameOverride}) async {

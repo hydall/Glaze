@@ -373,11 +373,12 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     final safe = script.name.replaceAll(RegExp(r'[^\w\-]'), '_');
     final filename = 'regex-$safe.json';
     try {
-      await FileExportService.export(
+      final path = await FileExportService.export(
         data: json,
         filename: filename,
         subfolder: 'regexes',
       );
+      if (path.isEmpty) return; // user cancelled the save dialog
       if (context.mounted) GlazeToast.show(context, 'export_success'.tr());
     } catch (e) {
       if (context.mounted) {

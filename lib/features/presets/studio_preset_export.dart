@@ -16,6 +16,7 @@ Future<void> exportStudioPreset(
 ) async {
   try {
     final savedPath = await saveStudioPresetJson(preset);
+    if (savedPath.isEmpty) return; // user cancelled the save dialog
     if (context.mounted) {
       GlazeToast.show(context, 'export_saved_to'.tr(args: [savedPath]));
     }

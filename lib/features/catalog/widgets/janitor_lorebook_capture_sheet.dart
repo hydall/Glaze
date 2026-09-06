@@ -499,11 +499,12 @@ class _JanitorLorebookCaptureState
   Future<void> _exportJson(Map<String, dynamic> json, String name) async {
     try {
       final safe = name.replaceAll(RegExp(r'[^\w\- ]+'), '').trim();
-      await FileExportService.export(
+      final path = await FileExportService.export(
         data: const JsonEncoder.withIndent('  ').convert(json),
         filename: '${safe.isEmpty ? 'lorebook' : safe}.json',
         subfolder: 'Lorebooks',
       );
+      if (path.isEmpty) return; // user cancelled the save dialog
       if (mounted) {
         GlazeToast.show(
           context,
@@ -700,11 +701,12 @@ class _JanitorLorebookCaptureState
         : _nameController.text.trim();
     try {
       final safe = name.replaceAll(RegExp(r'[^\w\- ]+'), '').trim();
-      await FileExportService.export(
+      final path = await FileExportService.export(
         data: text,
         filename: '${safe.isEmpty ? 'lorebook' : safe}.txt',
         subfolder: 'Lorebooks',
       );
+      if (path.isEmpty) return; // user cancelled the save dialog
       if (mounted) {
         GlazeToast.show(
           context,

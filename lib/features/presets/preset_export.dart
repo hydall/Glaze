@@ -11,6 +11,7 @@ import '../../shared/widgets/glaze_toast.dart';
 Future<void> exportPreset(BuildContext context, Preset preset) async {
   try {
     final savedPath = await savePresetJson(preset);
+    if (savedPath.isEmpty) return; // user cancelled the save dialog
     if (context.mounted) {
       GlazeToast.show(context, 'Exported to $savedPath');
     }

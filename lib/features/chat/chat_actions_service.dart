@@ -109,13 +109,13 @@ class ChatActionsService {
 
     try {
       final filePath = await exportChat(charId);
+      if (filePath.isEmpty) return; // user cancelled the save dialog
       if (context.mounted) {
         GlazeToast.show(context, 'Chat exported to $filePath');
       }
     } on StateError catch (e) {
       if (context.mounted) GlazeToast.show(context, e.message);
     } on Exception catch (e) {
-      if (e.toString().contains('Save cancelled')) return;
       if (context.mounted) GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
     } catch (e) {
       if (context.mounted) GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');

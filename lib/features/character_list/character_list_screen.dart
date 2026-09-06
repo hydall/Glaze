@@ -1165,7 +1165,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     String? lastError;
     for (final c in chars) {
       try {
-        await exportCharacterToFile(ref: ref, character: c, format: format);
+        final path = await exportCharacterToFile(ref: ref, character: c, format: format);
+        // Empty path = the user cancelled the save dialog — stop the loop
+        // instead of counting the file as exported (or re-prompting).
+        if (path.isEmpty) break;
         exported++;
       } catch (e) {
         lastError = '$e';

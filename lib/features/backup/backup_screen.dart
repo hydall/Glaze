@@ -118,6 +118,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       final service = await ref.read(backupServiceProvider.future);
       final path = await service.exportBackup();
 
+      if (path.isEmpty) return; // user cancelled the save dialog
       if (mounted) {
         GlazeToast.show(context, '${'msg_saved_to'.tr()} $path');
       }

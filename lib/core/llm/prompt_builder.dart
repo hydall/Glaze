@@ -1004,10 +1004,16 @@ List<ExactLorebookInjectionReport> _transformLorebookAssemblyReports({
             context,
             isPrompt: true,
           );
-    // A transform that crosses entry boundaries cannot be mapped back to an
-    // exact entry snapshot.  Fail closed instead of guessing from substrings.
+    // A transform that crossed entry boundaries (merged or removed parts)
+    // cannot prove per-entry post-transform content. The assembly event
+    // already happened at the emission site, so the entries stay confirmed
+    // with their pre-transform content — coverage must never report a false
+    // "not injected" because a regex pass reshaped the joined block.
     final parts = transformed.split('\n\n');
-    if (parts.length != group.length) continue;
+    if (parts.length != group.length) {
+      transformedReports.addAll(group);
+      continue;
+    }
     for (var index = 0; index < group.length; index++) {
       if (parts[index].trim().isEmpty) continue;
       transformedReports.add(

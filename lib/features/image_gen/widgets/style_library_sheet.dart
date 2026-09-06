@@ -174,11 +174,12 @@ class _StyleLibrarySheetState extends State<StyleLibrarySheet> {
 
   Future<void> _export(List<ImageStyle> styles, String title) async {
     try {
-      await FileExportService.export(
+      final path = await FileExportService.export(
         data: ImageStyleIo.encode(styles),
         filename: ImageStyleIo.fileName(title),
         subfolder: 'styles',
       );
+      if (path.isEmpty) return; // user cancelled the save dialog
       if (mounted) GlazeToast.show(context, 'imggen_styles_exported'.tr());
     } catch (error) {
       if (mounted) GlazeToast.show(context, '$error', isError: true);
