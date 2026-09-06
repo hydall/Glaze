@@ -19,6 +19,7 @@ import '../chat_provider.dart';
 import '../chat_state.dart';
 import '../editing_message_provider.dart';
 import '../services/continuation_message_merger.dart';
+import '../state/context_window_marker.dart';
 import '../state/generation_phase_provider.dart';
 import 'chat_message_sync.dart';
 import 'chat_streaming_bridge_sync.dart';
@@ -81,6 +82,7 @@ class ChatWebViewBuildListeners {
     _listenPersonaRoster();
     _listenEditingMessage();
     _listenGenerationPhase();
+    _listenContextWindowStart();
     _listenStreaming();
     _listenInfoBlocks();
     _listenExtSettingsAndPresets();
@@ -196,6 +198,20 @@ class ChatWebViewBuildListeners {
   /// tracks the work the app is actually doing (assembling the prompt,
   /// retrieving memory, waiting on the model) instead of claiming the reply
   /// is being written from the moment the bubble appears.
+  /// Keeps the CONTEXT LIMIT rule on the message the prompt actually starts
+  /// at. The boundary moves whenever a prompt is built — a turn, the inspector
+  /// preview, the drawer's recount — and is cleared with the breakdown itself
+  /// (a delete, a changed connection): pushing the null through is what retires
+  /// a rule the trim no longer draws.
+  void _listenContextWindowStart() {
+    ref.listen<String?>(contextWindowStartProvider(charId), (prev, next) {
+      final b = bridge;
+      if (b == null || !ready()) return;
+      if (prev == next) return;
+      unawaited(b.setContextWindowStart(next));
+    });
+  }
+
   void _listenGenerationPhase() {
     ref.listen<GenerationPhase>(generationPhaseProvider(charId), (prev, next) {
       final b = bridge;

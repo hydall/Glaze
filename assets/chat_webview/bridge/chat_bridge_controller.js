@@ -679,6 +679,33 @@ export class Bridge {
     this._updateBatcher.enqueue(msg.id, () => this._executeUpdateMessage(msg));
   }
 
+  // Moves the CONTEXT LIMIT rule to the oldest message the next prompt still
+  // carries; '' retires it. Patches only the two rows involved instead of
+  // re-rendering the chat, and reaches them through `itemMap`, which retains
+  // every row element — so the rule is right whether or not the boundary is
+  // currently mounted. The renderer keeps the id as well, which is what makes a
+  // later full re-render draw the rule again without another call from Flutter.
+  setContextWindowStart(messageId) {
+    const next = messageId || null;
+    const previous = this.renderer.contextStartId || null;
+    this.renderer.setContextWindowStart(next);
+    if (previous === next) return;
+    if (previous) {
+      const el = this.virtualList.itemMap?.get(previous)?.el;
+      if (el) {
+        el.querySelector(':scope > .context-limit-marker')?.remove();
+        delete el.dataset.contextStart;
+      }
+    }
+    if (next) {
+      const el = this.virtualList.itemMap?.get(next)?.el;
+      if (el && !el.querySelector(':scope > .context-limit-marker')) {
+        el.dataset.contextStart = '1';
+        el.insertBefore(this.renderer.createContextLimitMarker(), el.firstChild);
+      }
+    }
+  }
+
   // Patch only memory badges when the async memory providers settle. This
   // deliberately avoids rebuilding message bodies/panels and works for both
   // mounted and virtualized rows because itemMap retains every row element.

@@ -1675,6 +1675,28 @@
 }
 
 /* ============================================================
+ * Context-limit rule
+ * Drawn inside the oldest message the next prompt still carries: the
+ * chat above it is history the model no longer sees. Amber matches the
+ * cutoff notice in the tokenizer sheet, which counts the same messages.
+ * ============================================================ */
+.context-limit-marker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 10px;
+  user-select: none;
+}
+.context-limit-marker .date-separator-line {
+  background: rgba(224, 160, 48, 0.35);
+}
+.context-limit-marker .date-separator-label {
+  color: #e0a030;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+/* ============================================================
  * Background layer
  * Flutter paints the theme surface color (and a fallback background)
  * behind the transparent WebView. When a bg image is set, a duplicate

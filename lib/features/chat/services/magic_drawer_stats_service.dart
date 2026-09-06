@@ -7,6 +7,7 @@ import '../../../core/llm/context_calculator.dart';
 import '../../../core/llm/lorebook_activation.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../providers/prompt_build_providers.dart';
+import '../../../core/models/api_config.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
@@ -256,6 +257,11 @@ class MagicDrawerStatsService {
         maxTokens: chatApi.maxTokens,
         authorsNote: session.authorsNote?.content ?? '',
         summary: base.summaryContent ?? '',
+        // The trim mode and its knobs decide where the history starts just as
+        // much as the window size does, so a breakdown taken under one mode
+        // must not be handed back under another — the drawer's numbers and the
+        // chat's context rule both come off this cache.
+        trimSignature: chatApi.contextBudgetSignature,
       );
 
       final cached = TokenBreakdownCache.get(hash);
@@ -303,6 +309,11 @@ class MagicDrawerStatsService {
           totalTokens: breakdown.totalTokens + lastVectorTokens,
           cutoffIndex: breakdown.cutoffIndex,
           trimmedHistory: breakdown.trimmedHistory,
+          // Carried, not dropped: the anchor is what the next stepped trim
+          // reuses, and the visible ids are what the chat's context rule and
+          // the memory refilter read off this breakdown.
+          historyAnchorId: breakdown.historyAnchorId,
+          visibleMessageIds: breakdown.visibleMessageIds,
           lorebookReserveTokens: breakdown.lorebookReserveTokens,
           memoryTokens: breakdown.memoryTokens,
           vectorLoreTokens: lastVectorTokens,
