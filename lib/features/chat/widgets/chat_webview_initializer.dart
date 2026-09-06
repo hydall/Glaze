@@ -12,6 +12,7 @@ import '../../personas/persona_list_provider.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_overlay_blur_region.dart';
 import '../chat_provider.dart';
+import '../state/context_window_marker.dart';
 import '../state/generation_phase_provider.dart';
 
 /// Snapshot of the [ChatWebViewWidget] fields needed by
@@ -214,6 +215,14 @@ class ChatWebViewInitializer {
           .map((e) => {'messageIds': e.messageIds})
           .toList(),
       patchMessages: false,
+    );
+    // The WebView is kept alive across chats, so the renderer still holds the
+    // previous chat's context boundary and would draw its rule on whichever
+    // message happens to share that id. Push this chat's boundary — usually
+    // null — before the first paint, the same reason the search state above is
+    // pushed early.
+    await bridge.setContextWindowStart(
+      ref.read(contextWindowStartProvider(input.charId)),
     );
     // Seed the phase before rendering an active typing node. The renderer uses
     // this value while constructing the node, not only on later transitions.

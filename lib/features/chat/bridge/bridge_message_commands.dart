@@ -21,6 +21,17 @@ class MessageBridgeCommands {
     return _host.callJs('setGenerationPhase', label);
   }
 
+  /// Marks where the prompt's history begins: the page draws a CONTEXT LIMIT
+  /// rule inside [messageId] and retires the one it drew before. Everything
+  /// above that rule is chat the model no longer sees.
+  ///
+  /// A null id (sent as an empty string) clears the rule — which is what a
+  /// chat that fits its window whole, and a chat with no calculated prompt yet,
+  /// both look like.
+  Future<void> setContextWindowStart(String? messageId) {
+    return _host.callJs('setContextWindowStart', messageId ?? '');
+  }
+
   Future<void> setMessages(
     List<ChatMessage> messages, {
     int visibleStartIndex = 0,

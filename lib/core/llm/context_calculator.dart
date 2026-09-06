@@ -331,6 +331,21 @@ class TokenBreakdown {
         .toSet(),
   );
 
+  /// Oldest message the prompt still carries — where the history the model
+  /// sees begins. Null when the trim kept nothing, or when the kept messages
+  /// carry no source id (a Studio-built window, a synthetic block).
+  ///
+  /// Read from [trimmedHistory] rather than from [historyAnchorId]: the anchor
+  /// exists only under [HistoryTrimMode.stepped], and the chat marks the same
+  /// boundary whichever mode produced it.
+  String? get windowStartMessageId {
+    for (final message in trimmedHistory) {
+      final id = message.sourceMessageId;
+      if (id != null && id.isNotEmpty) return id;
+    }
+    return null;
+  }
+
   int get lorebookTotal =>
       (sourceTokens['lorebook'] ?? 0) +
       (macroTokens['lorebooks'] ?? 0) +

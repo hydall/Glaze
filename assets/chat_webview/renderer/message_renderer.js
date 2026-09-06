@@ -44,6 +44,16 @@ export class Renderer {
     this._lastTimestamps = { date: null, idx: -1 };
     this.selectionManager = null;
     this.allowMessageScripts = false;
+    // Id of the oldest message the next prompt still carries. Every render of
+    // that message draws the CONTEXT LIMIT rule above it; null draws none.
+    // Held here rather than on the message map so a re-render (a preset switch,
+    // a scrollback batch) keeps the rule without Flutter re-sending it.
+    this.contextStartId = null;
+  }
+
+  /** Sets which message opens the prompt window; '' or null clears the rule. */
+  setContextWindowStart(messageId) {
+    this.contextStartId = messageId || null;
   }
 
   /* ----- Public: render a message ----- */
@@ -133,6 +143,12 @@ if (messageData.isEditing) classes.push('editing');
     section.className = classes.join(' ');
     section.classList.add('msg-appear');
     section.addEventListener('animationend', () => section.classList.remove('msg-appear'), { once: true });
+
+    /* --- Context-window rule: the chat above it is out of the prompt --- */
+    if (id && id === this.contextStartId) {
+      section.dataset.contextStart = '1';
+      section.appendChild(this.createContextLimitMarker());
+    }
 
     /* --- Header --- */
     section.appendChild(this._createHeader(messageData));
@@ -1006,6 +1022,16 @@ if (messageData.isEditing) classes.push('editing');
     el.className = 'date-separator';
     el.dataset.dateSeparator = dateStr;
     el.innerHTML = `<div class="date-separator-line"></div><span class="date-separator-label">${this._formatDateDisplay(dateStr)}</span><div class="date-separator-line"></div>`;
+    return el;
+  }
+
+  /// The rule the first in-prompt message wears. Built like a date separator
+  /// so the two read as the same kind of divider, and public because the bridge
+  /// stamps it onto an already-rendered row when the boundary moves.
+  createContextLimitMarker() {
+    const el = document.createElement('div');
+    el.className = 'context-limit-marker';
+    el.innerHTML = `<div class="date-separator-line"></div><span class="date-separator-label">Context limit</span><div class="date-separator-line"></div>`;
     return el;
   }
 
