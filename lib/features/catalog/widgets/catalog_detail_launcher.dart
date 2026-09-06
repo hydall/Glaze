@@ -235,7 +235,7 @@ class _CatalogDetailLauncherState
         },
       );
       final data = res.charData;
-      if (data == null || data.personality.trim().isEmpty) return null;
+      if (data == null || data.description.trim().isEmpty) return null;
       return _datacatResult = DownloadedCharacter(
         charData: data,
         avatarUrl: res.avatarUrl,
@@ -251,20 +251,20 @@ class _CatalogDetailLauncherState
   Character _toCharacter(DownloadedCharacter d) {
     final data = d.charData;
     // A closed JanitorAI definition hides the real prompt (it isn't in the
-    // public card, only in the blurb which we keep out of personality). Show a
-    // hint in the preview's prompt slot instead of a blank field. Display-only:
-    // _doImport imports `downloaded` (empty personality), not this preview
-    // object, so the hint text is never written to the library.
+    // public card, only in the blurb which we keep out of the description).
+    // Show a hint in the preview's prompt slot instead of a blank field.
+    // Display-only: _doImport imports `downloaded` (empty description), not
+    // this preview object, so the hint text is never written to the library.
     final janitorClosed =
         widget.provider == CatalogProvider.janitor && !_definitionPublic;
-    final personality = janitorClosed && data.personality.trim().isEmpty
+    final description = janitorClosed && data.description.trim().isEmpty
         ? 'catalog_janitor_closed_prompt'.tr()
-        : data.personality;
+        : data.description;
     return Character(
       id: 'preview:${widget.item.id}',
       name: data.name.isEmpty ? widget.item.name : data.name,
-      description: data.description,
-      personality: personality,
+      description: description,
+      personality: data.personality,
       scenario: data.scenario,
       firstMes: data.firstMes,
       mesExample: data.mesExample,

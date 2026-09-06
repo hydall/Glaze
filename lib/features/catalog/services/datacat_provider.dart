@@ -280,9 +280,11 @@ String _stripDatacatMarkers(String text) {
 /// SillyTavern-CharacterLibrary reference. For JanitorAI-source rows the real
 /// definition is in `personality` and the website blurb (often HTML) is in
 /// `description`; Saucepan rows overload `description` / recovery variants. We
-/// keep the definition in [CharacterData.personality] and the blurb in
-/// [CharacterData.creatorNotes] — consistent with the JanitorAI provider, so the
-/// blurb never lands in the prompt body.
+/// keep the definition in [CharacterData.description] and the blurb in
+/// [CharacterData.creatorNotes] — the same placement `buildV2FromDatacat` uses
+/// (definition into `data.description`, `data.personality` left empty), so
+/// `{{description}}` resolves to the prompt body and the blurb never lands in
+/// it.
 CharacterData _datacatCharacterData(Map<String, dynamic> char) {
   String s(dynamic v) => v == null ? '' : v.toString();
   String pick(List<String> xs) =>
@@ -331,8 +333,8 @@ CharacterData _datacatCharacterData(Map<String, dynamic> char) {
 
   return CharacterData(
     name: name.isEmpty ? 'Unknown' : name,
-    description: '',
-    personality: definition,
+    description: definition,
+    personality: '',
     scenario: scenario,
     firstMes: firstMes,
     mesExample:
