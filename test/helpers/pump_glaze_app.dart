@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/app.dart';
+import 'package:glaze_flutter/core/services/generation_notification_service.dart';
 
 /// Call once in setUpAll to initialise EasyLocalization's static state
 /// (device locale + saved locale from SharedPreferences).
@@ -31,6 +32,7 @@ Future<void> pumpGlazeApp(
   required ProviderContainer container,
   VoidCallback? restart,
   Map<String, Object> prefsSeed = const {},
+  NotificationNavigationData? notificationForTesting,
 }) async {
   SharedPreferences.setMockInitialValues({
     'onboarding_complete': true,
@@ -44,7 +46,9 @@ Future<void> pumpGlazeApp(
   });
 
   await tester.runAsync(() async {
-    await tester.pumpWidget(_buildApp(container, restart));
+    await tester.pumpWidget(
+      _buildApp(container, restart, notificationForTesting),
+    );
     await Future<void>.delayed(Duration.zero);
     for (var i = 0; i < 3; i++) {
       await tester.pump(Duration.zero);
@@ -69,13 +73,20 @@ Future<void> pumpNavigation(WidgetTester tester) async {
   });
 }
 
-Widget _buildApp(ProviderContainer container, VoidCallback? restart) =>
-    UncontrolledProviderScope(
-      container: container,
-      child: EasyLocalization(
-        supportedLocales: const [Locale('en'), Locale('ru')],
-        path: 'assets/translations',
-        fallbackLocale: const Locale('en'),
-        child: GlazeApp(restart: restart, skipStartup: true),
-      ),
-    );
+Widget _buildApp(
+  ProviderContainer container,
+  VoidCallback? restart,
+  NotificationNavigationData? notificationForTesting,
+) => UncontrolledProviderScope(
+  container: container,
+  child: EasyLocalization(
+    supportedLocales: const [Locale('en'), Locale('ru')],
+    path: 'assets/translations',
+    fallbackLocale: const Locale('en'),
+    child: GlazeApp(
+      restart: restart,
+      skipStartup: true,
+      notificationForTesting: notificationForTesting,
+    ),
+  ),
+);

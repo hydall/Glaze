@@ -19,7 +19,7 @@ import 'memory_settings_mapper.dart';
 ///
 /// Thin orchestrator: owns the [MemoryBook] + entry/index CRUD + settings
 /// mapping + reindex, and delegates the draft-generation lifecycle (active
-/// set, cancel tokens, elapsed timer, INV-M3 mutex) to
+/// set, cancel tokens, elapsed timer, memory-workflow leases) to
 /// [MemoryDraftGenerationController].
 class MemoryBookController {
   final WidgetRef _ref;

@@ -153,9 +153,8 @@ class PostGenCoordinator {
 
     final sessionId = result.session!.id;
     final studioEnabled = studioTurnConfig?.enabled == true;
-    // Normal chat has no foreground post-gen hold. Claim the memory session
-    // before the first await so a new send cannot enter while auto-generation
-    // is waiting to be scheduled.
+    // Reserve the memory session before the first await so another memory
+    // workflow cannot claim the same auto-generation batch while scheduling.
     final ordinaryMemoryLease = studioEnabled
         ? null
         : draftStage.reserveAutoGeneration(result.session);

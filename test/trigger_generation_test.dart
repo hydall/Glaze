@@ -152,7 +152,7 @@ void main() {
       expect((result as TriggerBusy).busyKind, 'chat');
     });
 
-    test('rejects with TriggerBusy when a memory draft is active', () async {
+    test('accepts while a memory draft is active', () async {
       final state = ChatState(
         session: ChatSession(
           id: 's1',
@@ -169,8 +169,10 @@ void main() {
       final dispatcher = container.read(generationDispatcherProvider);
       final result = await dispatcher.dispatch(charId: 'c1');
 
-      expect(result, isA<TriggerBusy>());
-      expect((result as TriggerBusy).busyKind, 'memory_draft');
+      expect(result, isA<TriggerAccepted>());
+      final notifier = container.read(chatProvider('c1').notifier);
+      expect((notifier as _MockChatNotifier).calls, ['regenerate']);
+      expect(dispatcher.peekResolvedMode(charId: 'c1'), TriggerMode.regenerate);
     });
 
     test('rejects with TriggerBusy while a message is being edited', () async {

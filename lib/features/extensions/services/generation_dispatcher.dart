@@ -8,7 +8,6 @@ import '../../../core/utils/error_format.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/chat_state.dart';
 import '../../chat/editing_message_provider.dart';
-import '../../memory/state/memory_active_drafts_provider.dart';
 import '../models/trigger_mode.dart';
 import '../models/trigger_result.dart';
 
@@ -20,8 +19,6 @@ import '../models/trigger_result.dart';
 /// - INV-C1: at most one active generation per `charId`. The call is
 ///   rejected (not auto-aborted) when `isGenerating == true` so the JS
 ///   script can decide whether to retry / await.
-/// - INV-M3 / INV-M4: memory draft mutex. The call is rejected when a
-///   memory draft is currently being generated for the same session id.
 /// - INV-CM1 / INV-CM2 / INV-A3: `continue` and `regenerate` delegate to
 ///   the regular [ChatNotifier.continueMessage] /
 ///   [ChatNotifier.regenerateLastAssistant] entry points so the same
@@ -62,13 +59,6 @@ class GenerationDispatcher {
 
     if (ref.read(editingMessageIdProvider(charId)) != null) {
       return TriggerBusy(busyKind: 'message_edit', mode: mode);
-    }
-
-    final memoryActive = ref
-        .read(memoryActiveDraftsProvider)
-        .contains(current.session!.id);
-    if (memoryActive) {
-      return TriggerBusy(busyKind: 'memory_draft', mode: mode);
     }
 
     if (current.isGenerating || current.isPostGenRunning) {
@@ -132,9 +122,6 @@ class GenerationDispatcher {
     if (current == null || current.session == null) return null;
     if (ref.read(editingMessageIdProvider(charId)) != null) return null;
     if (current.isGenerating || current.isPostGenRunning) return null;
-    if (ref.read(memoryActiveDraftsProvider).contains(current.session!.id)) {
-      return null;
-    }
     return _resolveAuto(current, TriggerMode.parse(rawMode));
   }
 
