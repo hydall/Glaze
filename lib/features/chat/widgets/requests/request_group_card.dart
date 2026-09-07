@@ -12,6 +12,11 @@ import 'request_stage_label.dart';
 /// Collapsed it is a single line: what ran, when, how many requests, and
 /// whether anything went wrong. That is the density a log needs; the steps are
 /// one tap away and a step's payload one more.
+///
+/// A group of exactly one request is not a group. Unfolding it only ever
+/// revealed a list of one step, so the card *is* that request: it names the
+/// step, wears a chevron instead of an expander, and opens the payload on the
+/// first tap.
 class RequestGroupCard extends StatelessWidget {
   const RequestGroupCard({
     super.key,
@@ -37,6 +42,7 @@ class RequestGroupCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = requestFamilyColor(context, group.leadFamily);
     final started = DateTime.fromMillisecondsSinceEpoch(group.startedAtMs);
+    final single = group.entries.length == 1 ? group.entries.first : null;
 
     return InspectorPlaque(
       margin: const EdgeInsets.only(bottom: 8),
@@ -45,7 +51,7 @@ class RequestGroupCard extends StatelessWidget {
       child: Column(
         children: [
           InkWell(
-            onTap: onToggle,
+            onTap: single == null ? onToggle : () => onOpenEntry(single),
             child: IntrinsicHeight(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -57,9 +63,9 @@ class RequestGroupCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _titleRow(context, color, started),
+                          _titleRow(context, color, started, single),
                           const SizedBox(height: 2),
-                          _subtitle(context),
+                          _subtitle(context, single),
                         ],
                       ),
                     ),
@@ -67,7 +73,9 @@ class RequestGroupCard extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: Icon(
-                      expanded
+                      single != null
+                          ? Icons.chevron_right_rounded
+                          : expanded
                           ? Icons.expand_less_rounded
                           : Icons.expand_more_rounded,
                       size: 18,
@@ -78,7 +86,7 @@ class RequestGroupCard extends StatelessWidget {
               ),
             ),
           ),
-          if (expanded)
+          if (expanded && single == null)
             Padding(
               padding: const EdgeInsets.fromLTRB(13, 0, 8, 8),
               child: Column(
@@ -93,8 +101,24 @@ class RequestGroupCard extends StatelessWidget {
     );
   }
 
-  Widget _titleRow(BuildContext context, Color color, DateTime started) {
-    final title = group.kind == RequestGroupKind.turn
+  Widget _titleRow(
+    BuildContext context,
+    Color color,
+    DateTime started,
+    RequestTimelineEntry? single,
+  ) {
+    // A lone request titles itself exactly the way the opened request does —
+    // family and step — rather than as "the turn that made it"; the turn number
+    // moves to the subtitle.
+    final step = single == null
+        ? ''
+        : requestStepLabel(
+            stage: single.stage,
+            agentId: single.capture.row.agentId,
+          );
+    final title = single != null
+        ? '${requestFamilyLabel(single.family)} · $step'
+        : group.kind == RequestGroupKind.turn
         ? (turnNumber == null
               ? 'requests_turn'.tr()
               : 'requests_turn_numbered'.tr(args: ['$turnNumber']))
@@ -129,11 +153,23 @@ class RequestGroupCard extends StatelessWidget {
     );
   }
 
-  Widget _subtitle(BuildContext context) {
+  Widget _subtitle(BuildContext context, RequestTimelineEntry? single) {
     final preview = replyPreview;
+    // The step row a one-request group used to unfold into carried the model
+    // and the attempt count, so the line that replaces it carries them too.
+    final model = single == null
+        ? ''
+        : '${single.capture.request['model'] ?? ''}';
     final parts = <String>[
-      'requests_request_count'.tr(args: ['${group.requestCount}']),
-      if (group.hasRetry) 'requests_had_retry'.tr(),
+      if (single != null) ...[
+        if (turnNumber != null && group.kind == RequestGroupKind.turn)
+          'requests_turn_numbered'.tr(args: ['$turnNumber']),
+        if (model.isNotEmpty) model,
+        if (single.attempts > 1) '×${single.attempts}',
+      ] else ...[
+        'requests_request_count'.tr(args: ['${group.requestCount}']),
+        if (group.hasRetry) 'requests_had_retry'.tr(),
+      ],
     ];
     final text = preview == null || preview.isEmpty
         ? parts.join(' · ')
