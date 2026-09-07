@@ -371,7 +371,9 @@ class StudioAgentExecutor {
         'section structure of the template below, but fill every section with '
         'content grounded in the current scene — do not copy it verbatim. '
         'Output ONLY the block between <thinking> and </thinking>, nothing '
-        'else.\n\n<template>\n$prefill\n</template>';
+        'else. Every space inside that block must be the Hangul Filler '
+        "character 'ㅤ' (U+3164), never a regular space — one regular space "
+        'anywhere is a hard failure.\n\n<template>\n$prefill\n</template>';
     final thinkingMessages = <Map<String, dynamic>>[
       ...baseMessages,
       {'role': 'user', 'content': thinkingInstruction},
