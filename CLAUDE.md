@@ -135,10 +135,46 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 |------|---------|---------|
 | Characters | Drift `Characters` table | Repository |
 | Chat sessions | Drift `ChatSessions` table | Repository |
-| Presets | Drift `Presets` table | Repository |
+| Regular presets | Drift `presets` table | `PresetRepo` |
+| Studio presets | Drift `studio_preset_rows` table | `StudioPresetRepo` |
 | API config | Drift `ApiConfigs` table | Repository |
 | Personas | Drift `Personas` table | Repository |
 | Images | File system (`dart:io` Platform) | Image storage service |
+
+### Runtime data location
+
+- The SQLite database is `glaze.db` under the data root returned by
+  `getAppDataDir()` in `lib/core/utils/platform_paths.dart`; do not assume it is
+  inside the repository.
+- On Windows, use these canonical environment-relative paths directly. Agents
+  should not search the codebase merely to rediscover them:
+  - local development, feature branches, and nightly: `%APPDATA%\Glaze-nightly\glaze.db`
+  - staging: `%APPDATA%\Glaze-staging\glaze.db`
+  - stable: `%APPDATA%\Glaze\glaze.db`
+  In PowerShell, resolve `%APPDATA%` through `$env:APPDATA`; never hard-code a
+  user's profile directory.
+- Desktop data roots are build-channel-specific: stable uses `Glaze`, while
+  staging/nightly use `Glaze-<channel>`. `buildChannel` defaults to `nightly`
+  when no `BUILD_CHANNEL` dart define is supplied, so local development and
+  feature-branch runs normally use the nightly data root. See
+  `lib/core/constants/build_channel.dart`.
+- Android and iOS separate channels by application/bundle ID and keep the
+  inner data folder named `Glaze`.
+
+### Preset storage and code
+
+Regular roleplay presets and Studio presets are separate domains even though
+both are stored in the same `glaze.db` database. Their IDs may overlap; never
+read or write one through the other domain's table or repository.
+
+| Domain | Drift table | Repository | Main code directories |
+|--------|-------------|------------|-----------------------|
+| Regular presets | `presets` | `lib/core/db/repositories/preset_repo.dart` | `lib/features/presets/`, `lib/core/models/preset.dart` |
+| Studio presets | `studio_preset_rows` | `lib/core/db/repositories/studio_preset_repo.dart` | `lib/features/studio/`, Studio-specific files under `lib/features/presets/`, and `lib/core/models/studio_*` |
+
+The table declarations for both domains live in
+`lib/core/db/tables/studio_and_presets.dart`. Studio seed data lives separately
+in `lib/core/db/studio_preset_seed.dart`.
 
 ## Architecture Layers
 
