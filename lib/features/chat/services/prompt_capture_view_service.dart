@@ -28,6 +28,28 @@ final class PromptCaptureView {
     return null;
   }
 
+  /// What came back for this request, when the call events kept it.
+  ///
+  /// The transport outcome of this very attempt is the honest answer; a parser
+  /// verdict's copy is the fallback for the attempts whose transport event
+  /// recorded no body. Null when nothing was captured — a stream that was
+  /// aborted, or a row from before response capture existed.
+  String? get responseText {
+    final outcome = transportOutcome?.responseText;
+    if (outcome != null && outcome.isNotEmpty) return outcome;
+    for (final item in callEvents) {
+      final text = item.responseText;
+      if (text != null && text.isNotEmpty) return text;
+    }
+    return null;
+  }
+
+  /// The transport error of this attempt, when it failed.
+  String? get responseError {
+    final error = transportOutcome?.error;
+    return error == null || error.isEmpty ? null : error;
+  }
+
   List<LlmCallEventRow> get parserVerdicts => [
     for (final item in callEvents)
       if (item.kind.startsWith('parser_')) item,

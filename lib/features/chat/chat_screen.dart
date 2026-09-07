@@ -708,6 +708,16 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// the message list reserves room at the *top* for it — otherwise the card
   /// floats under the header and covers the first visible messages.
   double _contextCardHeight = 0.0;
+
+  /// The same height, but frozen at the card's *collapsed* size.
+  ///
+  /// Only this one insets the message list. Reserving the expanded height too
+  /// would rewrite the WebView's `padding-top` on every open/close, and the
+  /// page keeps its `scrollTop` across that rewrite — so the chat visibly
+  /// jumped each time the panel was toggled. The expanded body is an overlay
+  /// instead: it floats over the first messages for as long as it is open and
+  /// the list underneath never moves.
+  double _contextCardCollapsedHeight = 0.0;
   final GlobalKey _contextCardKey = GlobalKey();
 
   /// Measured height of the box the chat WebView is laid out in. Pushed to the
@@ -845,6 +855,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     var changed = false;
     var nextInputBarHeight = _inputBarHeight;
     var nextContextCardHeight = _contextCardHeight;
+    var nextContextCardCollapsedHeight = _contextCardCollapsedHeight;
     var nextWebViewBoxHeight = _webViewBoxHeight;
 
     final inputCtx = _inputBarKey.currentContext;
@@ -864,6 +875,17 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       changed = true;
     }
 
+    // The reserve follows the card only while it is collapsed (and all the way
+    // down to 0 when it unmounts). While it is expanded the last collapsed
+    // height stands, so opening the panel never moves the message list.
+    final reserveHeight = (_contextCardExpanded && contextHeight > 0)
+        ? _contextCardCollapsedHeight
+        : contextHeight;
+    if (reserveHeight != _contextCardCollapsedHeight) {
+      nextContextCardCollapsedHeight = reserveHeight;
+      changed = true;
+    }
+
     // Only ever grows/shrinks with the window itself (rotation, desktop resize)
     // — the keyboard cannot move it, since the scaffold runs with
     // `resizeToAvoidBottomInset: false`.
@@ -877,6 +899,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       setState(() {
         _inputBarHeight = nextInputBarHeight;
         _contextCardHeight = nextContextCardHeight;
+        _contextCardCollapsedHeight = nextContextCardCollapsedHeight;
         _webViewBoxHeight = nextWebViewBoxHeight;
       });
     }
@@ -1469,10 +1492,21 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         // instead of covering the first visible messages. The gap above the
         // card is part of the reserve — the card is a separate surface from the
         // header, not a strip welded to its bottom edge.
+        //
+        // Only the collapsed height is reserved: the reserve is pushed to the
+        // WebView as its top padding, and re-pushing it while the panel opens
+        // would shift the messages under a stationary scroll offset. See
+        // [_contextCardCollapsedHeight].
         final contextTopReserve = showContextCard
-            ? kContextCardHeaderGap + _contextCardHeight + 8
+            ? kContextCardHeaderGap + _contextCardCollapsedHeight + 8
             : 0.0;
         final effectiveTopInset = messageListTop + contextTopReserve;
+        // Where the card actually ends — the expanded body included. The
+        // floating status cards stack below that, so an open panel does not
+        // render underneath them.
+        final contextCardBottom = showContextCard
+            ? messageListTop + kContextCardHeaderGap + _contextCardHeight + 8
+            : messageListTop;
 
         final messageListBottom = _inputBarHeight + effectiveBottomInset;
 
@@ -2122,7 +2156,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             Positioned(
               left: 12,
               right: 12,
-              top: messageListTop + contextTopReserve,
+              top: contextCardBottom,
               child: const PostCleanerStatusCard(),
             ),
             // Studio tracker-cycle live status card. Shown during generation
@@ -2130,14 +2164,14 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             Positioned(
               left: 12,
               right: 12,
-              top: messageListTop + contextTopReserve + 56,
+              top: contextCardBottom + 56,
               child: const StudioStatusCard(),
             ),
             // Post-generation tasks (Ledger and extension blocks) live status.
             Positioned(
               left: 12,
               right: 12,
-              top: messageListTop + contextTopReserve + 112,
+              top: contextCardBottom + 112,
               child: PostGenStatusCard(sessionId: widget.state.session?.id),
             ),
             // Bottom panel: drawer + input bar

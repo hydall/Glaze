@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../state/memory_activity_provider.dart';
 import 'agentic_operations_log_dialog.dart';
+import 'context_coverage/coverage_reasons.dart';
 import 'memory_graph_panel.dart';
 
 /// The memory half of the context card under the chat header.
@@ -177,6 +178,21 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
     return '';
   }
 
+  /// One wrapped line of an expanded record. Nothing is rendered when the run
+  /// did not record that detail — hence the nullable return, spread into the
+  /// column as a null-aware element.
+  static Widget? _detailLine(BuildContext context, String? text) {
+    if (text == null || text.isEmpty) return null;
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 11,
+        height: 1.3,
+        color: context.cs.onSurfaceVariant,
+      ),
+    );
+  }
+
   Widget _candidateTile(BuildContext context, Map<String, dynamic> candidate) {
     final title = (candidate['title'] as String?)?.trim();
     final entryId = candidate['entryId'] as String? ?? '';
@@ -203,24 +219,10 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
     final hasKeyword = matchedKeys.isNotEmpty || _isPositive(keywordScore);
     final hasVector = _isPositive(vectorScore);
     final hasCatalog = catalogTerms.isNotEmpty || _isPositive(catalogScore);
-    final triggers = <String>[
-      if (hasKeyword) 'key',
-      if (hasVector) 'vec',
-      if (hasCatalog) 'cat',
-    ];
-    final triggerLabel = triggers.isEmpty ? '' : triggers.join('+');
-    final baseTypeLabel = switch (injectionType) {
-      'excerpt' when chunkLabel.isNotEmpty => chunkLabel,
-      'excerpt' => 'excerpt',
-      'full_entry' => 'full',
-      _ => reason,
-    };
-    final typeLabel = triggerLabel.isEmpty
-        ? baseTypeLabel
-        : '$baseTypeLabel · $triggerLabel';
     final matchedTerms = candidate['excerptMatchedTerms'];
     final chunkIndexes = candidate['excerptChunkIndexes'];
-    final canExpand = selected;
+    // Every row opens, selected or not: the reason a candidate was left out is
+    // exactly what its expanded record is for.
     final expanded = _expandedEntryIds.contains(entryId);
 
     return Padding(
@@ -231,17 +233,15 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
           Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: canExpand
-                  ? () {
-                      setState(() {
-                        if (expanded) {
-                          _expandedEntryIds.remove(entryId);
-                        } else {
-                          _expandedEntryIds.add(entryId);
-                        }
-                      });
-                    }
-                  : null,
+              onTap: () {
+                setState(() {
+                  if (expanded) {
+                    _expandedEntryIds.remove(entryId);
+                  } else {
+                    _expandedEntryIds.add(entryId);
+                  }
+                });
+              },
               borderRadius: BorderRadius.circular(8),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
@@ -259,20 +259,19 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                     const SizedBox(width: 7),
                     Expanded(
                       child: Text(
-                        '$label · $typeLabel',
+                        label,
                         maxLines: expanded ? 4 : 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 12),
                       ),
                     ),
-                    if (canExpand)
-                      Icon(
-                        expanded
-                            ? Icons.expand_less_rounded
-                            : Icons.expand_more_rounded,
-                        size: 16,
-                        color: context.cs.onSurfaceVariant,
-                      ),
+                    Icon(
+                      expanded
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      size: 16,
+                      color: context.cs.onSurfaceVariant,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       '$tokens tok · $scoreText',
@@ -283,17 +282,41 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
               ),
             ),
           ),
-          if (expanded && canExpand)
+          if (expanded)
             Padding(
               padding: const EdgeInsets.only(left: 25, top: 2, bottom: 6),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // The verdict first, in words. It used to be the raw
+                  // diagnostic code appended to the row's title, where it was
+                  // untranslated and clipped by the single line.
+                  Text(
+                    memoryReasonLabel(reason),
+                    style: TextStyle(
+                      fontSize: 11,
+                      height: 1.3,
+                      fontWeight: FontWeight.w600,
+                      color: selected
+                          ? Colors.greenAccent
+                          : Colors.orangeAccent,
+                    ),
+                  ),
+                  ?_detailLine(context, memoryInjectionLabel(injectionType)),
+                  ?_detailLine(
+                    context,
+                    memoryTriggerLabel(
+                      keyword: hasKeyword,
+                      vector: hasVector,
+                      catalog: hasCatalog,
+                    ),
+                  ),
                   if (chunkLabel.isNotEmpty)
                     Text(
                       'memory_detail_chunks'.tr(args: [chunkLabel]),
                       style: TextStyle(
                         fontSize: 11,
+                        height: 1.3,
                         color: context.cs.onSurfaceVariant,
                       ),
                     ),
@@ -308,6 +331,7 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                       ),
                       style: TextStyle(
                         fontSize: 11,
+                        height: 1.3,
                         color: context.cs.onSurfaceVariant,
                       ),
                     ),
@@ -318,6 +342,7 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                       ),
                       style: TextStyle(
                         fontSize: 11,
+                        height: 1.3,
                         color: context.cs.onSurfaceVariant,
                       ),
                     ),
@@ -328,10 +353,9 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                         'memory_detail_keys'.tr(
                           args: [matchedKeys.join(', ')],
                         ),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 11,
+                          height: 1.3,
                           color: context.cs.onSurfaceVariant,
                         ),
                       ),
@@ -343,10 +367,9 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                         'memory_detail_catalog'.tr(
                           args: [catalogTerms.join(', ')],
                         ),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 11,
+                          height: 1.3,
                           color: context.cs.onSurfaceVariant,
                         ),
                       ),
@@ -358,10 +381,9 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                         'memory_detail_matched'.tr(
                           args: [matchedTerms.whereType<String>().join(', ')],
                         ),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 11,
+                          height: 1.3,
                           color: context.cs.onSurfaceVariant.withValues(
                             alpha: 0.85,
                           ),

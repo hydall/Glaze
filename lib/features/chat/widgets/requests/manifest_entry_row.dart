@@ -1,12 +1,19 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/llm/prompt/exact_lorebook_manifest.dart';
 import '../../../../shared/theme/app_colors.dart';
-import '../context_coverage/coverage_badges.dart';
+import '../context_coverage/coverage_reasons.dart';
 import '../context_coverage/coverage_tone.dart';
 
 /// One entry from a past turn's manifest — what was injected, where, and the
 /// text as it was rendered into the prompt.
+///
+/// The line carries the entry's name and nothing else; how it got into the
+/// prompt (what activated it, where it landed, in what order) is spelled out in
+/// full sentences when the row is opened. The raw manifest codes — `keyword`,
+/// `worldInfoAfter` — used to be printed on the line verbatim, untranslated and
+/// clipped.
 class ManifestEntryRow extends StatefulWidget {
   const ManifestEntryRow({super.key, required this.entry});
 
@@ -45,7 +52,7 @@ class _ManifestEntryRowState extends State<ManifestEntryRow> {
                       children: [
                         Row(
                           children: [
-                            Flexible(
+                            Expanded(
                               child: Text(
                                 entry.name,
                                 maxLines: 1,
@@ -57,13 +64,6 @@ class _ManifestEntryRowState extends State<ManifestEntryRow> {
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 4),
-                            CoverageBadge(
-                              label: entry.source,
-                              color: tone.vector,
-                            ),
-                            const Spacer(),
-                            CoveragePositionBadge(position: entry.position),
                             const SizedBox(width: 6),
                             Icon(
                               _expanded
@@ -74,13 +74,7 @@ class _ManifestEntryRowState extends State<ManifestEntryRow> {
                             ),
                           ],
                         ),
-                        Text(
-                          '#${entry.injectionIndex + 1} · ${entry.classification}',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: context.cs.onSurfaceVariant,
-                          ),
-                        ),
+                        if (_expanded) _provenance(context, entry, tone),
                         if (_expanded)
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
@@ -120,4 +114,48 @@ class _ManifestEntryRowState extends State<ManifestEntryRow> {
       ),
     );
   }
+
+  /// How the entry reached the prompt, in full sentences: what activated it,
+  /// where it was placed, and its order among the injected entries.
+  Widget _provenance(
+    BuildContext context,
+    ExactLorebookManifestEntry entry,
+    CoverageTone tone,
+  ) => Padding(
+    padding: const EdgeInsets.only(top: 4),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'coverage_manifest_source'.tr(
+            args: [manifestSourceLabel(entry.source)],
+          ),
+          style: TextStyle(
+            fontSize: 11,
+            height: 1.3,
+            fontWeight: FontWeight.w600,
+            color: tone.injected,
+          ),
+        ),
+        Text(
+          'coverage_lore_position'.tr(
+            args: [coveragePositionLabel(entry.classification)],
+          ),
+          style: TextStyle(
+            fontSize: 11,
+            height: 1.3,
+            color: context.cs.onSurfaceVariant,
+          ),
+        ),
+        Text(
+          'coverage_manifest_order'.tr(args: ['${entry.injectionIndex + 1}']),
+          style: TextStyle(
+            fontSize: 11,
+            height: 1.3,
+            color: context.cs.onSurfaceVariant,
+          ),
+        ),
+      ],
+    ),
+  );
 }
