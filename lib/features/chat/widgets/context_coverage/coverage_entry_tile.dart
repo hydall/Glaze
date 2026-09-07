@@ -5,14 +5,20 @@ import '../../../../core/llm/lorebook_coverage.dart';
 import '../../../../core/llm/tokenizer.dart';
 import '../../../../shared/theme/app_colors.dart';
 import 'coverage_badges.dart';
+import 'coverage_reasons.dart';
 import 'coverage_tone.dart';
 
 /// One lorebook entry in a coverage list.
 ///
-/// Collapsed it is a single line — status rail, title, badges, token cost — so
-/// twenty entries read as a scannable list instead of twenty stacked cards of
-/// key chips. Everything else (which keys fired, where they fired, the body
-/// text) opens on tap.
+/// Collapsed it is a single line — status rail, title, token cost — so twenty
+/// entries read as a scannable list instead of twenty stacked cards of key
+/// chips. Everything else opens on tap: why the entry did or did not reach the
+/// prompt, which keys fired, where they fired, the body text.
+///
+/// The verdict is deliberately *not* on the collapsed line. It used to be a row
+/// of abbreviated pills there, which both squeezed the entry's name into an
+/// ellipsis and had no room to say what the abbreviation meant; expanded, the
+/// same verdict is a full sentence that wraps.
 class CoverageEntryTile extends StatefulWidget {
   const CoverageEntryTile({super.key, required this.entry, this.dense = false});
 
@@ -96,10 +102,9 @@ class _CoverageEntryTileState extends State<CoverageEntryTile> {
   }
 
   Widget _titleRow(BuildContext context, CoverageEntry e) {
-    final badges = coverageEntryBadges(context, e);
     return Row(
       children: [
-        Flexible(
+        Expanded(
           child: Text(
             e.comment.isNotEmpty ? e.comment : e.id,
             maxLines: 1,
@@ -113,10 +118,6 @@ class _CoverageEntryTileState extends State<CoverageEntryTile> {
             ),
           ),
         ),
-        for (final badge in badges) ...[const SizedBox(width: 4), badge],
-        const Spacer(),
-        const SizedBox(width: 6),
-        CoveragePositionBadge(position: e.position),
         const SizedBox(width: 6),
         Text(
           'coverage_tokens_short'.tr(args: ['${estimateTokens(e.content)}']),
@@ -136,6 +137,7 @@ class _CoverageEntryTileState extends State<CoverageEntryTile> {
     CoverageEntry e,
     CoverageTone tone,
   ) => [
+    _reasons(context, e, tone.forEntry(e)),
     if (e.matchedKeys.isNotEmpty)
       _keyWrap(context, e.matchedKeys, tone.injected),
     if (e.matchedSecondaryKeys.isNotEmpty)
@@ -165,6 +167,31 @@ class _CoverageEntryTileState extends State<CoverageEntryTile> {
         ),
       ),
   ];
+
+  /// The verdict, spelled out: whether the entry reached the prompt, what cut
+  /// it if it did not, and what qualifies it. Wraps freely — these are the
+  /// sentences the collapsed line has no room for.
+  Widget _reasons(BuildContext context, CoverageEntry e, Color statusColor) {
+    final lines = lorebookCoverageReasons(e);
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final (index, line) in lines.indexed)
+            Text(
+              line,
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.3,
+                fontWeight: index == 0 ? FontWeight.w600 : FontWeight.w400,
+                color: index == 0 ? statusColor : context.cs.onSurfaceVariant,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _keyWrap(BuildContext context, List<String> keys, Color color) =>
       Padding(

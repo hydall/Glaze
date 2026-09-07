@@ -4,12 +4,16 @@ import '../../../../shared/theme/app_colors.dart';
 
 /// The plaque every Prompt Inspector surface is built on.
 ///
-/// It is the context card under the chat header reduced to its shell (see
-/// `ContextCoverageCard`): a nearly opaque `surface` fill, a primary-tinted
-/// hairline and a soft drop shadow. The inspector used to mix three looks —
-/// `GlassSurface` tiles, `Material(onSurface @ 3 %)` rows and hand-styled
-/// `Colors.white.withValues(...)` containers — which read as three screens
-/// stitched together. One shell, one look.
+/// It speaks the app's Triggered Items card language (`triggered_items_sheet.
+/// dart`, `style_library_sheet.dart`): a faint ink wash, a hairline of the same
+/// ink, a 12 px radius and no shadow. It used to be the context card's shell —
+/// a nearly opaque `surface` fill under a drop shadow — which read as a stack
+/// of Material cards rather than as this app's own surface. An [accent] takes
+/// the place of the card language's "active" state: it tints the hairline, the
+/// way a selected style card is outlined in the theme's primary.
+///
+/// The wash is `onSurface`, not the literal `Colors.white` those two sheets
+/// use, so the same card reads correctly on a light theme preset.
 ///
 /// Unlike `GlassSurface` this paints no `BackdropFilter`, so it is safe per row
 /// of a long list (`docs/UI_KIT.md` § Performance notes) — which is exactly
@@ -22,7 +26,7 @@ class InspectorPlaque extends StatelessWidget {
     this.margin,
     this.onTap,
     this.accent,
-    this.radius = 16,
+    this.radius = 12,
   });
 
   final Widget child;
@@ -30,32 +34,28 @@ class InspectorPlaque extends StatelessWidget {
   final EdgeInsetsGeometry? margin;
   final VoidCallback? onTap;
 
-  /// Tints the hairline. The timeline colours a row by its stage family; every
-  /// other plaque leaves it at the theme's primary.
+  /// Tints the hairline. The timeline colours a row by its stage family, a
+  /// message card by its role, the budget bar by how full the window is; every
+  /// other plaque leaves the hairline at the neutral ink.
   final Color? accent;
 
   final double radius;
 
   @override
   Widget build(BuildContext context) {
-    final cs = context.cs;
+    final ink = context.cs.onSurface;
     final body = Padding(padding: padding, child: child);
 
     return Container(
       margin: margin,
       decoration: BoxDecoration(
-        color: cs.surface.withValues(alpha: 0.94),
+        color: ink.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(
-          color: (accent ?? cs.primary).withValues(alpha: 0.22),
+          color: accent == null
+              ? ink.withValues(alpha: 0.10)
+              : accent!.withValues(alpha: 0.40),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 12,
-            offset: const Offset(0, 5),
-          ),
-        ],
       ),
       clipBehavior: Clip.antiAlias,
       // Inside the decoration, not around it: an InkWell splashes on its

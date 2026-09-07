@@ -54,9 +54,23 @@ void main() {
     expect(find.text('memory_chip_skipped'), findsOneWidget);
     expect(find.text('memory_chip_latency'), findsOneWidget);
     expect(find.text('memory_chip_budget'), findsOneWidget);
-    expect(find.textContaining('Bridge memory · selected'), findsOneWidget);
+    // The row carries the entry's name alone — the verdict is a sentence in
+    // the expanded record, not a raw code appended to the line.
+    expect(find.text('Bridge memory'), findsOneWidget);
+    expect(find.text('Visible memory'), findsOneWidget);
+    expect(find.text('coverage_memory_reason_selected'), findsNothing);
+  });
+
+  testWidgets('a skipped candidate opens on why it was left out', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildSection());
+
+    await tester.tap(find.text('Visible memory'));
+    await tester.pump();
+
     expect(
-      find.textContaining('Visible memory · source_visible_in_prompt'),
+      find.text('coverage_memory_reason_source_visible'),
       findsOneWidget,
     );
   });
@@ -99,8 +113,10 @@ void main() {
     );
 
     expect(find.text('memory_detail_chunks'), findsNothing);
-    await tester.tap(find.textContaining('Bridge memory · memory_chunks_of'));
+    await tester.tap(find.text('Bridge memory'));
     await tester.pump();
+    expect(find.text('coverage_memory_reason_selected'), findsOneWidget);
+    expect(find.text('coverage_memory_injection_excerpt'), findsOneWidget);
     expect(find.text('memory_detail_chunks'), findsOneWidget);
     expect(find.text('memory_detail_indexes'), findsOneWidget);
   });
@@ -142,11 +158,12 @@ void main() {
       ),
     );
 
-    // The inline type label must advertise the keyword trigger so a
-    // keyword-only injection is not mistaken for a vector-only badge.
-    expect(find.textContaining('Keyword memory · full · key'), findsOneWidget);
-    await tester.tap(find.textContaining('Keyword memory · full · key'));
+    // The expanded record must advertise the keyword trigger so a keyword-only
+    // injection is not mistaken for a vector-only one.
+    await tester.tap(find.text('Keyword memory'));
     await tester.pump();
+    expect(find.text('coverage_memory_injection_full'), findsOneWidget);
+    expect(find.text('coverage_memory_triggers'), findsOneWidget);
     expect(find.text('memory_detail_keys'), findsOneWidget);
   });
 }

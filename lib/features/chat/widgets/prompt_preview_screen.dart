@@ -9,7 +9,6 @@ import '../../../core/llm/converters/prompt_post_processing.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_builder.dart';
 import '../../../core/llm/prompt_isolate.dart';
-import '../../../core/llm/raw_response_text.dart';
 import '../../../core/llm/prompt_worker.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../providers/prompt_build_providers.dart';
@@ -24,9 +23,6 @@ import '../../../core/llm/transport/post_processing_chat_transport.dart';
 import '../../../core/models/api_config.dart';
 import '../services/prompt_preview_post_processor.dart';
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glaze_tab_bar.dart';
-import '../../../shared/widgets/swipe_tab_switcher.dart';
-import '../../../shared/widgets/tab_slide_switcher.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../../settings/api_list_provider.dart';
@@ -56,6 +52,11 @@ List<Map<String, dynamic>> buildPreviewApiMessages(
 /// turn used to be a second row beside it, which put the same request on screen
 /// twice; it is now the [NextTurnCoverageBlock] between the parameters and the
 /// messages — the slot a captured request keeps its own coverage in.
+///
+/// It carries no response view. A request that has not been sent has no
+/// response; the tab that lived here could only show the *last* run's reply,
+/// which belongs to a captured request and is now shown there — see
+/// `RequestDetailView`.
 class PromptPreviewScreen extends ConsumerStatefulWidget {
   final String charId;
 
@@ -102,8 +103,8 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
   List<InspectorMessage> _messages = const [];
 
   bool _loading = true;
-  int _dataTabIndex = 0;
-  int _previewTabIndex = 0;
+  /// Raw JSON of the built request instead of the rendered message list.
+  bool _raw = false;
 
   @override
   void initState() {
@@ -186,7 +187,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     );
     if (widget.embedded) {
       // The Prompt Inspector injects the floating-header height as the body's
-      // top inset. Offset the whole embedded column (toolbar + tab bar) by it,
+      // top inset. Offset the whole embedded column (toolbar + body) by it,
       // then strip the inset from descendants so _buildBody — which also reads
       // padding.top — doesn't add the gap a second time.
       return Padding(
@@ -200,16 +201,6 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
                 title: 'magic_request_preview'.tr(),
                 onBack: widget.onBack,
                 actions: _toolbarActions(context),
-              ),
-              // Same 12 px gutter the body's plaques sit in — the strip used
-              // to run edge to edge over an inset body.
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: GlazeTabBar(
-                  tabs: _dataTabs(),
-                  activeIndex: _dataTabIndex,
-                  onChanged: (i) => setState(() => _dataTabIndex = i),
-                ),
               ),
               Expanded(child: _buildBody()),
             ],
@@ -238,22 +229,12 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       ),
       showBack: true,
       onBack: () => Navigator.of(context).maybePop(),
-      headerBottom: GlazeTabBar(
-        tabs: _dataTabs(),
-        activeIndex: _dataTabIndex,
-        onChanged: (i) => setState(() => _dataTabIndex = i),
-      ),
       body: _buildBody(),
     );
   }
 
-  List<GlazeTabItem> _dataTabs() => [
-    GlazeTabItem(label: 'tab_request'.tr(), icon: Icons.upload_rounded),
-    GlazeTabItem(label: 'tab_response'.tr(), icon: Icons.download_rounded),
-  ];
-
   List<Widget> _toolbarActions(BuildContext context) => [
-    if (_previewTabIndex == 1) ...[
+    if (_raw) ...[
       IconButton(
         visualDensity: VisualDensity.compact,
         icon: Icon(Icons.copy, size: 20, color: context.cs.primary),
@@ -263,74 +244,41 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       const SizedBox(width: 4),
     ],
     InspectorViewToggle(
-      isRaw: _previewTabIndex == 1,
-      onChanged: (isRaw) => setState(() => _previewTabIndex = isRaw ? 1 : 0),
+      isRaw: _raw,
+      onChanged: (isRaw) => setState(() => _raw = isRaw),
     ),
   ];
 
   Widget _buildBody() {
-    return SwipeTabSwitcher(
-      index: _dataTabIndex,
-      length: 2,
-      onChanged: (i) => setState(() => _dataTabIndex = i),
-      child: TabSlideSwitcher(
-        index: _dataTabIndex,
-        child: Builder(
-          builder: (context) {
-            final topPad = MediaQuery.paddingOf(context).top;
+    return Builder(
+      builder: (context) {
+        final topPad = MediaQuery.paddingOf(context).top;
 
-            if (_dataTabIndex == 0) {
-              if (_loading) {
-                return const Center(child: GlazeSpinner());
-              }
-              if (_result == null) {
-                return _empty(context);
-              }
-              if (_previewTabIndex == 1) {
-                return _buildRawView(_getRawPromptJson(), topPad);
-              }
-              return RequestBodyView(
-                topInset: topPad,
-                tokens: _result!.breakdown.totalTokens,
-                contextSize: _apiConfig?.contextSize ?? 0,
-                paramsTitle: _protocolLabel,
-                params: _requestBody == null
-                    ? const []
-                    : _paramsFromBody(_requestBody!),
-                messages: _messages,
-                coverage: NextTurnCoverageBlock(
-                  charId: widget.charId,
-                  sessionId: _sessionId,
-                  initiallyExpanded: widget.coverageExpanded,
-                ),
-              );
-            } else {
-              final chatState = ref.watch(chatProvider(widget.charId)).value;
-              final raw = chatState?.lastRawResponse;
-              if (raw == null || raw.isEmpty) {
-                return _empty(context);
-              }
-              String displayString = raw;
-              if (_previewTabIndex == 1) {
-                // Raw/code view: pretty-print the full JSON so fields like
-                // completion_tokens, usage, etc. are visible and readable.
-                try {
-                  final decoded = jsonDecode(raw);
-                  displayString = const JsonEncoder.withIndent(
-                    '  ',
-                  ).convert(decoded);
-                } catch (_) {}
-              } else {
-                // Pretty/preview view: just the assistant text, whichever
-                // protocol shape the payload came back in. Falls through to
-                // the raw JSON when nothing could be extracted.
-                displayString = extractAssistantText(raw) ?? raw;
-              }
-              return _buildRawView(displayString, topPad);
-            }
-          },
-        ),
-      ),
+        if (_loading) {
+          return const Center(child: GlazeSpinner());
+        }
+        if (_result == null) {
+          return _empty(context);
+        }
+        if (_raw) {
+          return _buildRawView(_getRawPromptJson(), topPad);
+        }
+        return RequestBodyView(
+          topInset: topPad,
+          tokens: _result!.breakdown.totalTokens,
+          contextSize: _apiConfig?.contextSize ?? 0,
+          paramsTitle: _protocolLabel,
+          params: _requestBody == null
+              ? const []
+              : _paramsFromBody(_requestBody!),
+          messages: _messages,
+          coverage: NextTurnCoverageBlock(
+            charId: widget.charId,
+            sessionId: _sessionId,
+            initiallyExpanded: widget.coverageExpanded,
+          ),
+        );
+      },
     );
   }
 
@@ -428,37 +376,19 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
 
   void _copyContent() {
     String textToCopy = '';
-    if (_dataTabIndex == 0) {
-      if (_previewTabIndex == 0) {
-        if (_result == null) return;
-        final json = _previewMessages.map((row) {
-          final m = row.message;
-          final map = <String, dynamic>{'role': m.role, 'content': m.content};
-          if (m.isLorebook) map['lorebook'] = true;
-          if (m.blockName != null) map['block'] = m.blockName;
-          if (m.isDepth) map['depth'] = m.depth;
-          return map;
-        }).toList();
-        textToCopy = jsonEncode(json);
-      } else {
-        textToCopy = _getRawPromptJson();
-      }
+    if (!_raw) {
+      if (_result == null) return;
+      final json = _previewMessages.map((row) {
+        final m = row.message;
+        final map = <String, dynamic>{'role': m.role, 'content': m.content};
+        if (m.isLorebook) map['lorebook'] = true;
+        if (m.blockName != null) map['block'] = m.blockName;
+        if (m.isDepth) map['depth'] = m.depth;
+        return map;
+      }).toList();
+      textToCopy = jsonEncode(json);
     } else {
-      final chatState = ref.read(chatProvider(widget.charId)).value;
-      final raw = chatState?.lastRawResponse ?? '';
-      if (_previewTabIndex == 1) {
-        // Raw view: copy pretty-printed full JSON.
-        try {
-          final decoded = jsonDecode(raw);
-          textToCopy = const JsonEncoder.withIndent('  ').convert(decoded);
-        } catch (_) {
-          textToCopy = raw;
-        }
-      } else {
-        // Pretty view: copy just the assistant text — same extraction the
-        // view uses, so what's copied matches what's on screen.
-        textToCopy = extractAssistantText(raw) ?? raw;
-      }
+      textToCopy = _getRawPromptJson();
     }
 
     if (textToCopy.isEmpty) return;

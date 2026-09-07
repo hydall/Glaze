@@ -1032,7 +1032,17 @@ expanded rows show `N of M` chunks and chunk indexes. Labels like `121-135` are
 **chat message ranges** (`messageRange`), not chunk indices. The section is the
 memory half of `ContextCoverageCard` (`context_coverage_card.dart`), the panel
 under the chat header that also carries lorebook coverage; the whole card is
-switched off by `AppSettings.hideContextCard`.
+switched off by `AppSettings.hideContextCard`. Only the card's *collapsed*
+height insets the message list (`_contextCardCollapsedHeight` in
+`chat_screen.dart`): that inset is the WebView's `padding-top`, and rewriting it
+on every open/close moved the chat under a scroll offset that does not move, so
+the expanded body floats over the messages instead.
+
+Raw diagnostic codes (`chunk_rank_trimmed`, `worldInfoAfter`, `keyword`,
+`full_entry`…) are never rendered as such. `context_coverage/coverage_reasons.dart`
+maps them to localized sentences shown in the *expanded* record — memory rows,
+lorebook coverage tiles and past-turn manifest rows alike — so the collapsed
+line carries the entry's name and cost only and the reason has room to wrap.
 
 **Lorebook coverage** (`core/llm/lorebook_coverage.dart`,
 `state/lorebook_coverage_provider.dart`): a dry run of `scanLorebooks` for the
@@ -1053,7 +1063,11 @@ main model or the agent shards, then cleaner, ledger, ext blocks) or by
 `pipelineRunId` (a background job — card rewrite, reconciliation), and the two
 kinds share one chronological list. Retries of one call collapse into a single
 step carrying an attempt count. Opening a step shows that exact payload; the tab
-strip hides while it is open. The first two rows are about the *next* request —
+strip hides while it is open, and the step gets two tabs of its own: what was
+sent, and what came back (`PromptCaptureView.responseText`, read from the call
+events the request recorded). The next-request preview has no response tab — a
+request that has not been sent has no response of its own, and the one that used
+to sit there showed the last run's reply. The first two rows are about the *next* request —
 the live preview (`PromptPreviewScreen`), or the agent catalog
 (`StudioPromptPreviewTab`) on an agentic preset, which is why there is no
 separate Agents tab, and its coverage dry-run (`NextTurnCoverageView`).
