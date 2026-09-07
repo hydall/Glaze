@@ -205,15 +205,32 @@ class UseVirtualScroll {
         this._scrollToBottomPending = false;
         this._pendingScrollToId = null;
 
+        // A jump to a row (search navigation, "jump to source message") is not
+        // one scroll but a settle: the target is mounted, landed on by
+        // measurement, and re-measured while its real height arrives. The token
+        // identifies the jump in flight so a newer one — or the reader taking
+        // over — retires it instead of two of them fighting over scrollTop.
+        this._settleToken = 0;
+        this._settleActive = false;
+        this._settleTimer = null;
+        this._fineTarget = null;
+
         this.initObservers();
         
         this._onContainerScroll = this._onContainerScroll.bind(this);
         this.container.addEventListener('scroll', this._onContainerScroll, { passive: true });
+        // The reader always wins over a jump that is still settling: a wheel
+        // notch or a finger on the glass retires it on the spot, rather than
+        // having the next correction pass drag the view back.
+        this._onUserScrollIntent = () => this._cancelSettle();
+        this.container.addEventListener('wheel', this._onUserScrollIntent, { passive: true });
+        this.container.addEventListener('touchstart', this._onUserScrollIntent, { passive: true });
     }
 
     // --- API parity with VirtualList ---
 
     clear() {
+        this._cancelSettle();
         this._clearDOM();
         this.items = [];
         this.itemMap.clear();
@@ -273,6 +290,7 @@ class UseVirtualScroll {
     // no longer exists) so callers can fall back to the default position.
     restoreAnchor(anchor) {
         if (!anchor) return false;
+        this._cancelSettle();
         const item = this.itemMap.get(anchor.id);
         if (!item) return false;
         const container = this.container;
@@ -448,6 +466,7 @@ class UseVirtualScroll {
         const count = this.items.length;
         if (count === 0) return Promise.resolve();
 
+        this._cancelSettle();
         this._pinnedToBottom = true;
         let effectiveBehavior = behavior;
         if (this.container.scrollHeight - this.container.scrollTop - this.container.clientHeight > 3000) {
@@ -498,19 +517,28 @@ class UseVirtualScroll {
     }
 
     scrollToTop() {
+        this._cancelSettle();
         this.isProgrammaticScrolling = true;
         this.container.scrollTop = 0;
         setTimeout(() => { this.isProgrammaticScrolling = false; }, 150);
     }
 
-    scrollToMessage(id, highlight = false) {
+    /* Resolves true once the row has been landed on and has stopped moving,
+     * false when the jump was retired (a newer one, or the reader taking
+     * over). Callers that need to aim at something *inside* the row — the
+     * active search match — must wait for that: until the row's real height is
+     * in, every offset inside it is a guess. */
+    scrollToMessage(id, highlight = false, options = {}) {
         const item = this.itemMap.get(id);
-        if (!item) return;
-        this.scrollToIndex(item.index, 'smooth');
+        if (!item) return Promise.resolve(false);
+        const landed = this.scrollToIndex(item.index, options.behavior || 'smooth', options.fineTarget || null);
         // Mirror Vue: briefly flash the message the user navigated to (e.g.
-        // from a tapped "new message" notification). Wait for scrollToIndex to
-        // (re)render the row so the element exists before flashing it.
-        if (highlight) setTimeout(() => this.flashMessage(id), 400);
+        // from a tapped "new message" notification). After the settle, not on a
+        // fixed timer — the row exists from the first pass, but flashing it
+        // while it is still being corrected into place draws the eye to a
+        // rectangle that is about to move.
+        if (highlight) landed.then((ok) => { if (ok) this.flashMessage(id); });
+        return landed;
     }
 
     flashMessage(id) {
@@ -524,42 +552,157 @@ class UseVirtualScroll {
         setTimeout(() => el.classList.remove('message-flash-highlight'), 2000);
     }
 
-    scrollToIndex(index, behavior = 'auto') {
+    /* A jump lands by *measuring* the target, never by computing an offset out
+     * of the height cache.
+     *
+     * A row that has never been mounted has no measured height: everything the
+     * cache holds for it is `estimateHeight` or the crude guess in
+     * `_estimateHeight`. An offset summed out of those is wrong by whatever the
+     * guesses were wrong by — hundreds of pixels per row in a chat of long
+     * messages — so the old jump landed near the target at best, and off the
+     * viewport entirely at worst, which then looked like the list refusing to
+     * go there at all.
+     *
+     * So: mount the window around the target, land on it by reading its real
+     * rect, then keep re-reading it while the real heights arrive. The
+     * corrections are what make the landing survive the two things that move
+     * the rows out from under it — the observers replacing estimates with
+     * measurements (which rewrites the top spacer under a scroll position that
+     * does not move with it) and late reflow from images, fonts and badges.
+     *
+     * Returns a promise resolving true once the row is still, false if the jump
+     * was retired. */
+    scrollToIndex(index, behavior = 'auto', fineTarget = null) {
         const count = this.items.length;
-        if (count === 0) return;
+        if (count === 0) return Promise.resolve(false);
         index = Math.max(0, Math.min(index, count - 1));
-        
-        this.isProgrammaticScrolling = true;
-        
-        if (index >= this.renderStart && index < this.renderEnd) {
-            const item = this.items[index];
-            if (item && item.el) {
-                const cRect = this.container.getBoundingClientRect();
-                const elRect = item.el.getBoundingClientRect();
-                const targetTop = this.container.scrollTop + (elRect.top - cRect.top) - (cRect.height / 2) + (elRect.height / 2);
-                this.container.scrollTo({ top: Math.max(0, targetTop), behavior });
-            }
-            setTimeout(() => { this.isProgrammaticScrolling = false; }, behavior === 'smooth' ? 300 : 50);
-            return;
+
+        // Jumping off the end detaches the streaming follow: otherwise the next
+        // chunk's smartScroll pins the list back to the bottom and the row the
+        // reader asked for is gone again.
+        this._pinnedToBottom = index >= count - 1;
+
+        this._cancelSettle();
+        this._fineTarget = fineTarget;
+        const mounted = this._isMounted(index);
+        if (!mounted) this._mountAround(index);
+
+        // Animate only a move the reader can actually follow. Over rows that
+        // are being mounted by this very call there is nothing on screen to
+        // animate through, and the animation would still be in flight while the
+        // corrections below move its destination.
+        const animated = mounted && behavior === 'smooth';
+        this._alignToIndex(index, animated ? 'smooth' : 'auto');
+        return this._settleOn(index, animated);
+    }
+
+    _isMounted(index) {
+        const item = this.items[index];
+        return !!item && item.el && item.el.parentNode === this.container;
+    }
+
+    /* Mounts a window centred on `index` so the row has a rect to measure. */
+    _mountAround(index) {
+        const count = this.items.length;
+        this.renderStart = Math.max(0, index - this.getBuffer());
+        this.renderEnd = Math.min(count, index + this.getBuffer() + 1);
+        if (this.columns > 1) {
+            this.renderStart = Math.floor(this.renderStart / this.columns) * this.columns;
+            this.renderEnd = Math.min(count, Math.ceil(this.renderEnd / this.columns) * this.columns);
         }
-        
-        let newStart = Math.max(0, index - this.getBuffer());
-        let newEnd = Math.min(count, index + this.getBuffer() + 1);
-        this.renderStart = newStart;
-        this.renderEnd = newEnd;
+        this._clampWindow();
         this.visibleIndices.clear();
         this.realVisibleIndices.clear();
         this.cache.invalidate();
         this.updateSpacers();
         this.renderDOM();
-        
-        setTimeout(() => {
-            let targetTop = this.paddingTop + this.cache.computeTargetTop(this.renderStart, index, this.columns);
-            const itemH = this.cache.getHeight(index);
-            targetTop = targetTop - (this.container.clientHeight / 2) + (itemH / 2);
-            this.container.scrollTo({ top: Math.max(0, targetTop), behavior });
-            setTimeout(() => { this.isProgrammaticScrolling = false; }, behavior === 'smooth' ? 300 : 50);
-        }, 50);
+    }
+
+    /* Centres the row on the viewport from its live rect. Relative to the
+     * current scrollTop, not an absolute offset: a delta stays correct however
+     * far the spacers have drifted from what the cache thought they were.
+     *
+     * A `fineTarget` (the active search hit, which lives in the row's shadow
+     * root) is aimed at instead of the row: centring the row only gets the
+     * reader to the right message, and in a long message the word they are
+     * looking for is pages away from its middle. It is aimed at *here*, inside
+     * the settle, rather than by a second scroll afterwards — two things
+     * writing scrollTop over the same landing is what made a hit end up
+     * anywhere but on the match. */
+    _alignToIndex(index, behavior = 'auto') {
+        const item = this.items[index];
+        if (!item || !item.el) return false;
+        // A correction pass can find the row unmounted — a height correction
+        // may have rebuilt the window under it. Put it back rather than
+        // scrolling to where it used to be.
+        if (item.el.parentNode !== this.container) this._mountAround(index);
+
+        const cRect = this.container.getBoundingClientRect();
+        const fine = this._fineTarget;
+        let elRect = item.el.getBoundingClientRect();
+        if (fine && fine.isConnected) {
+            const fineRect = fine.getBoundingClientRect();
+            // A hit with no box — inside a collapsed reasoning block, say —
+            // leaves the row itself as the closest thing to aim at.
+            if (fineRect.height > 0) elRect = fineRect;
+        }
+        if (elRect.height === 0) return false;
+        const delta = (elRect.top - cRect.top) - (cRect.height / 2) + (elRect.height / 2);
+        if (Math.abs(delta) < 1) return true;
+        const top = Math.max(0, this.container.scrollTop + delta);
+        if (behavior === 'smooth') this.container.scrollTo({ top, behavior: 'smooth' });
+        else this.container.scrollTop = top;
+        return true;
+    }
+
+    /* Re-measures the target over the window in which its height settles, and
+     * only then hands the list back to the observers.
+     *
+     * `afterAnimation` waits out a smooth scroll before correcting anything:
+     * a correction is an assignment to scrollTop, and an assignment cancels the
+     * browser's animation. The corrections are spread over the same window the
+     * rest of the list uses for late height changes, so the last one runs after
+     * the ResizeObserver has had its say about images and fonts. */
+    _settleOn(index, afterAnimation = false) {
+        const token = ++this._settleToken;
+        this._settleActive = true;
+        this.isProgrammaticScrolling = true;
+        const delays = afterAnimation ? [420, 540, 760] : [0, 60, 160, 320, 600];
+        return new Promise((resolve) => {
+            let i = 0;
+            const step = () => {
+                if (!this.mounted || token !== this._settleToken) { resolve(false); return; }
+                this._alignToIndex(index, 'auto');
+                if (++i < delays.length) {
+                    this._settleTimer = setTimeout(step, delays[i] - delays[i - 1]);
+                    return;
+                }
+                this._settleActive = false;
+                this._fineTarget = null;
+                this.isProgrammaticScrolling = false;
+                // The pin tracker must not read the settle's own landing as the
+                // reader scrolling away on the next event.
+                this._lastScrollTop = this.container.scrollTop;
+                this.updateWindow();
+                this._recoverIfViewportIsBlank();
+                resolve(true);
+            };
+            if (delays[0] > 0) this._settleTimer = setTimeout(step, delays[0]);
+            else requestAnimationFrame(step);
+        });
+    }
+
+    /* Retires the jump in flight. Called by every other scroll entry point and
+     * by the reader's first wheel notch or touch, so two scrolls never fight
+     * over scrollTop. */
+    _cancelSettle() {
+        this._fineTarget = null;
+        if (!this._settleActive) return;
+        this._settleToken++;
+        this._settleActive = false;
+        clearTimeout(this._settleTimer);
+        this._settleTimer = null;
+        this.isProgrammaticScrolling = false;
     }
 
     getMessageCount() { return this.items.length; }
@@ -668,6 +811,7 @@ class UseVirtualScroll {
     }
 
     refresh({ startAtBottom = true } = {}) {
+        this._cancelSettle();
         this.cache.clear();
         this.visibleIndices.clear();
         this.realVisibleIndices.clear();
@@ -795,6 +939,15 @@ class UseVirtualScroll {
      * rows away from the viewport without a scroll event ends here. */
     _recoverIfViewportIsBlank() {
         if (!this.mounted) return false;
+        // A jump that is still settling is its own, stronger recovery: it
+        // re-mounts the window around the target and re-measures it on every
+        // pass, so it cannot leave the list rendering nothing (`_settleOn` runs
+        // this check itself the moment it hands the list back). Recentring
+        // underneath it, on the other hand, unmounts the row being landed on —
+        // and it would do exactly that, because it reads a scroll position the
+        // height cache has not caught up with yet and maps it to some other
+        // row entirely.
+        if (this._settleActive) return false;
         if (!this._viewportOutsideRenderedBand()) return false;
         return this._recenterOnScrollPosition();
     }
@@ -969,9 +1122,12 @@ class UseVirtualScroll {
 
     destroy() {
         this.mounted = false;
+        this._cancelSettle();
         if (this.observer) this.observer.disconnect();
         if (this.realObserver) this.realObserver.disconnect();
         if (this.resizeObserver) this.resizeObserver.disconnect();
         this.container.removeEventListener('scroll', this._onContainerScroll);
+        this.container.removeEventListener('wheel', this._onUserScrollIntent);
+        this.container.removeEventListener('touchstart', this._onUserScrollIntent);
     }
 }

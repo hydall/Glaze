@@ -164,6 +164,81 @@ Two rules follow, and `specs/virtual_window.spec.js` holds them:
 
 ---
 
+## A jump lands by measuring the target, never by summing the cache
+
+Everything the height cache holds for a row that has never been mounted is a
+guess — `estimateHeight`, or the coarse bands in `_estimateHeight`. So a jump
+(`scrollToIndex`) mounts a window around the target first, then reads the row's
+real rect and scrolls by the *delta* to centre it. A delta stays correct however
+far the spacers have drifted from what the cache thought they were; an absolute
+offset summed out of the cache is wrong by whatever the guesses were wrong by,
+which in a chat of long messages is screens, not pixels.
+
+Landing once is not enough either. Two things move the rows out from under a
+landing with no scroll event to follow: the observers replacing estimates with
+measurements (which rewrites the top spacer under a scroll position that does
+not move with it) and late reflow from images, fonts and badges. So a jump is a
+**settle**, not a scroll — `_settleOn` re-measures and re-corrects across the
+same window the rest of the list uses for late height changes, and only then
+hands the list back to `updateWindow`.
+
+Three rules follow, and `specs/search_navigation.spec.js` holds them:
+
+* **one thing writes `scrollTop` per landing.** A caller that needs to aim at
+  something *inside* the row — the active search hit, which lives in the row's
+  shadow root — hands that node to the jump as `fineTarget` and lets every
+  correction pass aim at it. A second scroll of its own afterwards (what
+  `scrollIntoView` on the highlight used to be) races the corrections, and the
+  hit ends up anywhere but in view.
+* **the reader outranks a settle.** A wheel notch or a touch retires it, as does
+  any other scroll entry point (`scrollToBottom`, `scrollToTop`, `refresh`,
+  `restoreAnchor`), so two of them are never in flight at once.
+* **`_recoverIfViewportIsBlank` stands down while a settle runs.** It is the
+  weaker recovery of the two: it maps a scroll position through a cache that has
+  not caught up yet, which unmounts the row being landed on. The settle re-mounts
+  its target on every pass and runs the blank check itself the moment it
+  finishes, so the invariant above still holds.
+
+---
+
+## State that has to reach the whole chat is written to `items`, not the document
+
+`document.querySelectorAll('.message-section')` is the twenty-odd rows the list
+has mounted, not the chat. And the list re-mounts the element it built once
+rather than re-rendering it, so a row that was outside the window when the
+write happened never gets a second chance at it.
+
+Anything whose truth spans the whole chat therefore goes through
+`virtualList.items` — `Bridge._allMessageSections()` for elements,
+`Bridge._orderedMessageIds()` for ids. Selection is the case that taught this:
+"select everything above" already walked the item order, so the toolbar counted
+messages the reader then scrolled back to and found unselected, in a chat that
+did not look like it was in selection mode at all
+(`specs/selection_window.spec.js`).
+
+Class writes that only ever concern one section — `applyClassesToSection` at
+render time, the editing section, the flash highlight — stay where they are.
+
+---
+
+## Walking the search hits moves a class, not the chat
+
+`setSearch` re-formats and rewrites the shadow body of **every message in the
+chat**. That is the right thing when the query changes; it is the wrong thing
+for the prev/next arrows, which change one thing only — which highlight is
+active. Doing the full pass per press costs hundreds of milliseconds on a long
+chat, and the presses arrive faster than the passes finish, which is what made
+the arrows look dead.
+
+So an active-index-only change takes `_moveActiveMatch`: re-collect the
+highlight nodes in the numbering the last pass gave them (message order,
+reasoning before body), move the `active-search-match` class, reveal. The count
+check is what keeps it honest — when the highlights in the page are not the set
+the last pass numbered, the full pass runs instead of a class landing on the
+wrong word.
+
+---
+
 ## A user message wears the persona it was sent as, not the active one
 
 Every user message stores the persona it was sent under — `personaId` and

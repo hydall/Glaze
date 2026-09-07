@@ -3,11 +3,21 @@
 import { appBody } from '../renderer/message_document.js';
 
 export class SelectionManager {
-  constructor(sendToFlutter, getOrderedIds) {
+  constructor(sendToFlutter, getOrderedIds, getSections) {
     this._sendToFlutter = sendToFlutter;
     // Returns all real message ids in display order (top → bottom). Injected so
     // range selection can reach messages outside the virtual-scroll window.
     this._getOrderedIds = typeof getOrderedIds === 'function' ? getOrderedIds : () => [];
+    // Returns every message element, mounted or not — for the same reason.
+    // Selecting a run of messages picks ids the render window does not hold,
+    // and the list re-mounts the element it already built rather than
+    // re-rendering it, so a class written only to what is in the document now
+    // is a class those messages never get: the reader scrolls back to a
+    // message the toolbar counts as selected and sees it unselected, in a chat
+    // that does not look like it is in selection mode at all.
+    this._getSections = typeof getSections === 'function'
+      ? getSections
+      : () => Array.from(document.querySelectorAll('.message-section'));
     this._selectionMode = false;
     this._selectedIds = new Set();
     // Last message the user tapped. The "select everything above / below"
@@ -29,7 +39,7 @@ export class SelectionManager {
       this._selectedIds.clear();
       this._lastTappedId = null;
     }
-    document.querySelectorAll('.message-section').forEach(msgEl => {
+    this._sections().forEach(msgEl => {
       msgEl.classList.toggle('selection-mode', this._selectionMode);
       msgEl.classList.toggle('selected', this._selectedIds.has(msgEl.dataset.messageId));
     });
@@ -93,10 +103,19 @@ export class SelectionManager {
 
   selectBelow() { this._selectSide(true); }
 
-  // Sync the `selected` class for sections currently in the DOM. Sections that
-  // scroll into view later pick it up via applyClassesToSection().
+  // Every message element the chat has, not only the ones the virtual list
+  // currently mounts. A section built before this ran picks the classes up
+  // through applyClassesToSection(); one already built and merely unmounted
+  // never renders again, so it has to be written to here.
+  _sections() {
+    return this._getSections().filter(
+      el => el && el.classList && el.classList.contains('message-section'),
+    );
+  }
+
+  // Sync the `selected` class across the whole chat.
   _applySelectionClasses() {
-    document.querySelectorAll('.message-section').forEach(msgEl => {
+    this._sections().forEach(msgEl => {
       msgEl.classList.toggle('selected', this._selectedIds.has(msgEl.dataset.messageId));
     });
   }
