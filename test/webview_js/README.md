@@ -34,6 +34,8 @@ imports the assets by their real paths, and ES modules do not load over
 | `specs/streaming.spec.js` | every prefix of a card body renders as a card |
 | `specs/document_contract.spec.js` | what a card may rely on inside the shadow root (INV-MR1…MR8) |
 | `specs/virtual_window.spec.js` | the render window of the virtualised list — the chat must never go blank |
+| `specs/search_navigation.spec.js` | walking the search hits — every arrow press lands on its own match |
+| `specs/selection_window.spec.js` | selecting messages the render window does not hold |
 
 ## The rule
 

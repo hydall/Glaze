@@ -41,6 +41,10 @@ export class Renderer {
     this.searchQuery = null;
     this.activeSearchIndex = -1;
     this.searchMatches = [];
+    // How many highlights the last full pass numbered. The arrow keys only
+    // move which one is active, and that is only safe to do in place while the
+    // highlights still in the DOM are the ones that pass counted.
+    this.searchTotal = 0;
     this._lastTimestamps = { date: null, idx: -1 };
     this.selectionManager = null;
     this.allowMessageScripts = false;
@@ -1113,6 +1117,19 @@ if (messageData.isEditing) classes.push('editing');
       this.searchQuery = query;
       this.activeSearchIndex = -1;
       this.searchMatches = [];
+      this.searchTotal = 0;
+      return;
+    }
+
+    // Walking the hits with the prev/next arrows changes exactly one thing
+    // about the page: which highlight is the active one. The full pass below
+    // re-formats and re-writes the shadow body of *every message in the chat*
+    // to arrive at that — hundreds of milliseconds on a long chat, once per
+    // press, while the presses arrive faster than the passes finish. That is
+    // what made the arrows feel dead and the list feel unable to reach the
+    // hit. Move the class instead, and let the scroll be the only work.
+    if (query && query === this.searchQuery && !_retried &&
+        this._moveActiveMatch(activeIndex, scroll)) {
       return;
     }
 
@@ -1128,8 +1145,6 @@ if (messageData.isEditing) classes.push('editing');
       ? window.bridge.virtualList.items.map(it => it.el)
       : document.querySelectorAll('.message-section');
 
-    let activeMessageId = null;
-
     items.forEach(section => {
       if (!section) return;
       const isUser = section.classList.contains('user');
@@ -1139,7 +1154,6 @@ if (messageData.isEditing) classes.push('editing');
           const root = host.shadowRoot.querySelector('.glaze-message');
           if (root) {
             const formatted = this.formatter.format(rawText, isUser, isReasoning);
-            const prevMatchIndex = globalState.matchIndex;
             const highlighted = this._applySearchHighlight(formatted, globalState);
             // Same policy as a normal render (see writeShadowContent), so a
             // search pass renders the message exactly like the pass before it:
@@ -1159,10 +1173,6 @@ if (messageData.isEditing) classes.push('editing');
             // The rewrite dropped the CSS report with the rest of the body;
             // put it back so searching does not hide a broken stylesheet.
             if (!window.bridge?.isGenerating) reportCssErrors(root);
-            
-            if (activeIndex >= prevMatchIndex && activeIndex < globalState.matchIndex) {
-              activeMessageId = section.dataset.messageId || section.dataset.vlId;
-            }
           }
         }
       };
@@ -1179,6 +1189,7 @@ if (messageData.isEditing) classes.push('editing');
     });
 
     const total = globalState.matchIndex;
+    this.searchTotal = total;
 
     // Flutter counts matches over the raw message text while this pass counts
     // them over the formatted HTML, so the two can drift apart (markdown
@@ -1191,15 +1202,132 @@ if (messageData.isEditing) classes.push('editing');
 
     if (!scroll) return;
 
-    if (activeMessageId && window.bridge) {
-      // The match may live in a message the virtual list has not mounted:
-      // scrollToMessage renders the window around it first, so only then can
-      // the highlight itself be brought into view.
-      window.bridge.scrollToMessage(activeMessageId);
-      setTimeout(() => this._scrollToActiveMatch(), 250);
-    } else {
-      this._scrollToActiveMatch();
+    // Same reveal the arrows use — this pass just rebuilt the highlights, so
+    // the nodes it numbered are the ones in the page right now.
+    if (this.activeSearchIndex >= 0 && this._moveActiveMatch(this.activeSearchIndex, true)) {
+      return;
     }
+    // The numbering found nothing to reveal at that index. A highlight may
+    // still be marked active in the page from an earlier pass; take that.
+    this._scrollToActiveMatch();
+  }
+
+  /* The sections the highlight numbering runs over: every message, not only
+   * the ones the virtual list currently mounts. `items` keeps the (possibly
+   * detached) element of each message, and a detached element keeps its shadow
+   * root — so a match in an unmounted message is still countable and still
+   * findable. */
+  _searchSections() {
+    return (window.bridge && window.bridge.virtualList)
+      ? window.bridge.virtualList.items.map(it => it.el)
+      : Array.from(document.querySelectorAll('.message-section'));
+  }
+
+  /* The highlight nodes in the numbering the last pass gave them: message
+   * order, reasoning before body, document order within each. Re-collected on
+   * demand rather than cached — a message re-render (an edit, a swipe, a
+   * scrollback batch) replaces the nodes, and a handful of querySelectorAll
+   * calls over shadow roots is nothing next to re-formatting the chat. */
+  _collectSearchHighlights() {
+    const found = [];
+    for (const section of this._searchSections()) {
+      if (!section) continue;
+      const hosts = [
+        section.querySelector('.msg-reasoning-inner .message-content'),
+        section.querySelector('.msg-body .message-content'),
+      ];
+      for (const host of hosts) {
+        const root = host && host.shadowRoot &&
+          host.shadowRoot.querySelector('.glaze-message');
+        if (!root) continue;
+        for (const node of root.querySelectorAll('.search-highlight-text')) {
+          found.push({ node, section });
+        }
+      }
+    }
+    return found;
+  }
+
+  /* Moves the active highlight without re-rendering anything. Returns false
+   * when the highlights in the DOM are not the set the last pass numbered —
+   * a message was re-rendered with a different number of hits, say — which is
+   * the caller's cue to run the full pass instead of moving a class onto the
+   * wrong word. */
+  _moveActiveMatch(activeIndex, scroll) {
+    if (activeIndex < 0) return false;
+    const found = this._collectSearchHighlights();
+    if (found.length === 0 || found.length !== this.searchTotal) return false;
+
+    // Flutter numbers matches over the raw text and can overshoot what the
+    // formatted HTML holds; clamp rather than leaving the arrow dead.
+    const index = Math.min(activeIndex, found.length - 1);
+    this.activeSearchIndex = index;
+    found.forEach((m, i) => m.node.classList.toggle('active-search-match', i === index));
+    if (scroll) this._revealMatch(found[index]);
+    return true;
+  }
+
+  /* Brings one hit into view — through the virtual list, in one move.
+   *
+   * The match may live in a message the list has not mounted at all, so the row
+   * has to be rendered before anything about it can be measured; and its height
+   * is not final until images and fonts have landed, so where the hit sits
+   * inside it keeps moving for a few hundred milliseconds after that. Handing
+   * the node itself to the jump lets every correction pass aim at the word
+   * rather than at the middle of the message — and keeps the list the only
+   * thing writing scrollTop, which is what a second, independent scroll used to
+   * fight. */
+  _revealMatch(match) {
+    if (!match || !match.node) return;
+    const vl = window.bridge && window.bridge.virtualList;
+    const section = match.section;
+    const id = section && (section.dataset.messageId || section.dataset.vlId);
+    const known = vl && id && typeof vl.scrollToMessage === 'function' &&
+      (typeof vl.hasMessage !== 'function' || vl.hasMessage(id));
+    if (!known) {
+      this._alignHighlight(match.node);
+      return;
+    }
+    vl.scrollToMessage(id, false, { fineTarget: match.node });
+  }
+
+  /* Centres the highlight itself, measured live against the scroll container.
+   *
+   * Not `scrollIntoView`: the node sits in a shadow root inside a virtualised
+   * row, and its smooth animation runs against the list's own scrolling — the
+   * two used to fight, which is how a hit ended up landing anywhere but on the
+   * match. A measured delta on the container is a single, final move. */
+  _alignHighlight(node) {
+    const vl = window.bridge && window.bridge.virtualList;
+    const container = (vl && vl.container) || document.getElementById('chat-container');
+    if (!container || !node || !node.isConnected) return;
+    const apply = () => {
+      const rect = node.getBoundingClientRect();
+      // No box to aim at (a hit inside a collapsed reasoning block, say): the
+      // row is already centred, which is as close as this gets.
+      if (rect.height === 0) return;
+      const cRect = container.getBoundingClientRect();
+      const delta = (rect.top - cRect.top) - (cRect.height / 2) + (rect.height / 2);
+      if (Math.abs(delta) < 2) return;
+      container.scrollTop = Math.max(0, container.scrollTop + delta);
+    };
+    // Claim the scroll for the duration: the list must read these as its own
+    // moves, not as the reader scrolling away. Never while a jump of the list's
+    // own is in flight, though — that one owns the flag, and handing it back
+    // early would let the rest of its corrections read as the reader scrolling.
+    const claimed = !!vl && !vl._settleActive;
+    if (claimed) vl.isProgrammaticScrolling = true;
+    apply();
+    clearTimeout(this._matchAlignTimer);
+    // One late correction — the row's own height can still be settling
+    // (images, fonts) after the list reports it landed.
+    this._matchAlignTimer = setTimeout(() => {
+      apply();
+      if (claimed) {
+        vl.isProgrammaticScrolling = false;
+        vl._lastScrollTop = container.scrollTop;
+      }
+    }, 120);
   }
 
   _scrollToActiveMatch() {
@@ -1208,7 +1336,7 @@ if (messageData.isEditing) classes.push('editing');
       if (!host.shadowRoot) continue;
       const active = host.shadowRoot.querySelector('.search-highlight-text.active-search-match');
       if (!active) continue;
-      active.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      this._revealMatch({ node: active, section: host.closest('.message-section') });
       return;
     }
   }

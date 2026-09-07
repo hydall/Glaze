@@ -62,6 +62,7 @@ export class Bridge {
     this._selectionManager = new SelectionManager(
       (name, args) => this._sendToFlutter(name, args),
       () => this._orderedMessageIds(),
+      () => this._allMessageSections(),
     );
     this._editController = new EditController((name, args) => this._sendToFlutter(name, args));
     this._interaction = new InteractionDispatch(this);
@@ -1652,6 +1653,18 @@ export class Bridge {
   selectMessagesAbove() { this._selectionManager.selectAbove(); }
 
   selectMessagesBelow() { this._selectionManager.selectBelow(); }
+
+  /* Every message element the chat holds, mounted or not. `items` keeps the
+   * (possibly detached) element of each message, and the list re-mounts that
+   * same element instead of re-rendering it — so anything that has to reach the
+   * whole chat has to come through here rather than through the document. */
+  _allMessageSections() {
+    const list = this.virtualList;
+    if (Array.isArray(list?.items)) {
+      return list.items.map(item => item.el).filter(Boolean);
+    }
+    return Array.from(document.querySelectorAll('.message-section'));
+  }
 
   // Ordered list of real message ids (top → bottom), excluding date separators.
   // Range selection needs the full order even for messages currently outside

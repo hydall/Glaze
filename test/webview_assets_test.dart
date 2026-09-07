@@ -192,6 +192,55 @@ void main() {
       );
     });
 
+    test('a jump measures the row instead of summing the height cache', () {
+      final body = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf('_alignToIndex(index, behavior'),
+      );
+      expect(body, contains('getBoundingClientRect()'));
+      expect(
+        body,
+        contains('this.container.scrollTop + delta'),
+        reason:
+            'The landing is a delta on the live rect. An absolute offset summed '
+            'out of the height cache is wrong by however wrong the estimates '
+            'for the never-mounted rows were — screens, in a chat of long '
+            'messages.',
+      );
+      expect(
+        virtualScrollJs,
+        isNot(contains('this.cache.computeTargetTop(this.renderStart, index')),
+      );
+    });
+
+    test('a settling jump owns the scroll position alone', () {
+      final recovery = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf('_recoverIfViewportIsBlank() {'),
+      );
+      // The weaker of the two recoveries stands down: it maps a scroll position
+      // through a cache that has not caught up yet, which unmounts the row
+      // being landed on. The settle re-mounts its target on every pass and runs
+      // the blank check itself when it finishes.
+      expect(recovery, contains('if (this._settleActive) return false;'));
+      final settle = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf('_settleOn(index, afterAnimation = false)'),
+      );
+      expect(settle, contains('this._recoverIfViewportIsBlank()'));
+      // Everything else that scrolls retires the jump first, and so does the
+      // reader's first wheel notch or touch.
+      expect(
+        virtualScrollJs,
+        contains("addEventListener('wheel', this._onUserScrollIntent"),
+      );
+      final bottom = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf("scrollToBottom(behavior = 'auto')"),
+      );
+      expect(bottom, contains('this._cancelSettle()'));
+    });
+
     test('scroll-to-bottom resolves after its correction pass', () {
       final body = _extractBlockBody(
         virtualScrollJs,
@@ -324,6 +373,43 @@ void main() {
       expect(
         bridgeControllerJs,
         contains('setSearch(query, activeIndex, scroll = true)'),
+      );
+    });
+
+    test('walking the search hits moves a class, not the chat', () {
+      final searchBlock = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('setSearch(query, activeIndex = -1'),
+      );
+      // The prev/next arrows change one thing — which highlight is active. The
+      // full pass re-formats and rewrites the shadow body of every message in
+      // the chat to arrive at that, which on a long chat takes longer than the
+      // gap between two presses.
+      expect(
+        searchBlock,
+        contains('this._moveActiveMatch(activeIndex, scroll)'),
+      );
+      final move = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('_moveActiveMatch(activeIndex, scroll) {'),
+      );
+      expect(move, isNot(contains('this.formatter.format')));
+      // …but only while the highlights in the page are the set the last pass
+      // numbered; otherwise the class lands on the wrong word.
+      expect(move, contains('found.length !== this.searchTotal'));
+    });
+
+    test('the active hit is revealed through the virtual list', () {
+      // One thing writes scrollTop per landing: the node is handed to the jump
+      // so its correction passes aim at the hit, instead of a second scroll of
+      // our own racing them.
+      expect(rendererMessageJs, contains('fineTarget: match.node'));
+      expect(
+        rendererMessageJs,
+        isNot(contains('.scrollIntoView(')),
+        reason:
+            'scrollIntoView on the highlight animates against the scrolling '
+            'of the list itself, and the hit lands anywhere but in view.',
       );
     });
 
@@ -2533,6 +2619,35 @@ void main() {
         contains('get selectionMode()'),
         reason: 'SelectionManager must expose selectionMode as public getter',
       );
+    });
+
+    test('selection classes reach messages outside the render window', () {
+      // Selection is held by id and covers the whole chat, but what the reader
+      // sees was written to the document — which in a virtualised list is the
+      // rows mounted right now. The list re-mounts the element it already
+      // built rather than re-rendering it, so a row outside the window at the
+      // time of the click never learned it had been selected.
+      final apply = _extractBlockBody(
+        selectionManagerJs,
+        selectionManagerJs.indexOf('_applySelectionClasses() {'),
+      );
+      expect(apply, contains('this._sections()'));
+      expect(
+        apply,
+        isNot(contains("document.querySelectorAll('.message-section')")),
+      );
+      final mode = _extractBlockBody(
+        selectionManagerJs,
+        selectionManagerJs.indexOf('setSelectionMode(enabled) {'),
+      );
+      expect(mode, contains('this._sections()'));
+      expect(
+        mode,
+        isNot(contains("document.querySelectorAll('.message-section')")),
+      );
+      // The whole-chat element list comes from the virtual list's items, the
+      // same place range selection reads its id order from.
+      expect(bridgeControllerJs, contains('_allMessageSections()'));
     });
 
     test('bridge.js does not access _selectionMode directly', () {

@@ -203,6 +203,10 @@ class ChatWebViewInitializer {
       activeIndex: (input.searchQuery?.isNotEmpty ?? false)
           ? input.searchCurrentIndex
           : -1,
+      // Numbering only: there is nothing to scroll to yet, and the highlights
+      // still in the page belong to the chat being replaced — revealing one of
+      // those would jump to a match in a message this chat does not have.
+      scroll: false,
     );
     // Memory membership is mapper input, not a post-render decoration. Seed it
     // before mapping so the first layout already includes MEM/PENDING/DRAFT
@@ -245,14 +249,18 @@ class ChatWebViewInitializer {
     if (input.blurRegions.isNotEmpty) {
       await bridge.setOverlayBlurRegions(input.blurRegions);
     }
+    await bridge.setSelectionMode(input.isSelectionMode);
+    await bridge.scrollToBottom();
+    // After the opening jump to the bottom, not before it: revealing the active
+    // match is a scroll of its own, and the two land in the order they are
+    // issued. Opening a chat whose search is still open should leave the reader
+    // on the match, not at the end of the chat.
     if (input.searchQuery != null && input.searchQuery!.isNotEmpty) {
       await bridge.setSearch(
         query: input.searchQuery!,
         activeIndex: input.searchCurrentIndex,
       );
     }
-    await bridge.setSelectionMode(input.isSelectionMode);
-    await bridge.scrollToBottom();
     unawaited(
       bridge.evalJs(
         'if (window.bridge) { '
