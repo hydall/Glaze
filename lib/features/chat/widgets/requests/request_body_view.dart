@@ -312,6 +312,10 @@ class _BudgetPlaque extends StatelessWidget {
 }
 
 /// The request's parameters, two tiles per row.
+///
+/// Rows, not a `Wrap`: a `Wrap` sizes each tile to its own content, so a
+/// two-line value (an endpoint URL) left its neighbour a stub half its height.
+/// An `IntrinsicHeight` row stretches both tiles to the taller one.
 class _ParamsGrid extends StatelessWidget {
   const _ParamsGrid({required this.params});
 
@@ -319,21 +323,30 @@ class _ParamsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final itemWidth = (constraints.maxWidth - 8) / 2;
-        return Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final param in params)
-              SizedBox(
-                width: itemWidth,
-                child: _ParamTile(param: param),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < params.length; i += 2)
+          Padding(
+            padding: EdgeInsets.only(bottom: i + 2 < params.length ? 8 : 0),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: _ParamTile(param: params[i])),
+                  const SizedBox(width: 8),
+                  // An odd count leaves the last tile at half width rather
+                  // than stretching it across the row.
+                  Expanded(
+                    child: i + 1 < params.length
+                        ? _ParamTile(param: params[i + 1])
+                        : const SizedBox.shrink(),
+                  ),
+                ],
               ),
-          ],
-        );
-      },
+            ),
+          ),
+      ],
     );
   }
 }
@@ -343,18 +356,35 @@ class _ParamTile extends StatelessWidget {
 
   final InspectorParam param;
 
+  /// The parameter's own name, never words run together.
+  ///
+  /// The keys arrive in whatever shape their source writes them — camelCase
+  /// from a capture (`protocolEndpoint`), snake_case from an OpenAI body
+  /// (`max_tokens`), a translated phrase from the preview's own tiles.
+  /// Upper-casing a camelCase key on its own produced `PROTOCOLENDPOINT`, so
+  /// the word boundaries are turned into underscores first.
+  static String formatLabel(String label) => label
+      .replaceAllMapped(
+        RegExp(r'([a-z0-9])([A-Z])'),
+        (m) => '${m[1]}_${m[2]}',
+      )
+      .replaceAllMapped(
+        RegExp(r'([A-Z]+)([A-Z][a-z])'),
+        (m) => '${m[1]}_${m[2]}',
+      )
+      .toUpperCase();
+
   @override
   Widget build(BuildContext context) {
     return InspectorPlaque(
       padding: const EdgeInsets.all(10),
-      radius: 12,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            param.label.toUpperCase(),
-            maxLines: 1,
+            formatLabel(param.label),
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 10,

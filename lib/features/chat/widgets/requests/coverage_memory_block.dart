@@ -40,7 +40,6 @@ class _CoverageMemoryBlockState extends State<CoverageMemoryBlock> {
         : MemoryActivitySummary.of(activity);
 
     return InspectorPlaque(
-      radius: 12,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
