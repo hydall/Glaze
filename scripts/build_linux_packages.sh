@@ -164,4 +164,101 @@ else
     echo "makepkg not found. Skipping pacman package creation."
 fi
 
+# 3. Build AppImage (Arch Linux compatible, distro-agnostic)
+# Uses linuxdeploy with the appimage plugin to turn the Flutter bundle into a
+# portable AppImage. Guarded the same way as the formats above, so a failure
+# here doesn't abort the script and lose packages that already built.
+APPIMAGE_DIR="build/linux/appimage"
+mkdir -p "$APPIMAGE_DIR"
+
+# The desktop file and icon are needed by linuxdeploy; reuse the same content
+# the other packages ship so all formats stay in sync.
+cat <<DESKTOP > "$APPIMAGE_DIR/$APP_NAME.desktop"
+[Desktop Entry]
+Name=Glaze
+Comment=Native LLM frontend for AI roleplay
+Exec=$APP_NAME
+Icon=$APP_NAME
+Terminal=false
+Type=Application
+Categories=Utility;Chat;Network;
+DESKTOP
+cp assets/logos/glaze.png "$APPIMAGE_DIR/$APP_NAME.png"
+
+APPIMAGE_TOOL=""
+if [ -n "${APPIMAGE_LINUXDEPLOY:-}" ]; then
+    APPIMAGE_TOOL="$APPIMAGE_LINUXDEPLOY"
+elif command -v linuxdeploy &> /dev/null; then
+    APPIMAGE_TOOL="linuxdeploy"
+else
+    # linuxdeploy is a single portable binary; download the official
+    # AppImage-building tool when the runner doesn't provide one.
+    case "$ARCH" in
+        x86_64)  LINUXDEPLOY_ARCH="x86_64" ;;
+        aarch64) LINUXDEPLOY_ARCH="aarch64" ;;
+        *)       LINUXDEPLOY_ARCH="" ;;
+    esac
+    if [ -n "$LINUXDEPLOY_ARCH" ]; then
+        curl -fsSL -o "$APPIMAGE_DIR/linuxdeploy.AppImage" \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$LINUXDEPLOY_ARCH.AppImage" \
+        && chmod +x "$APPIMAGE_DIR/linuxdeploy.AppImage" \
+        && APPIMAGE_TOOL="$APPIMAGE_DIR/linuxdeploy.AppImage"
+    fi
+fi
+
+if [ -n "$APPIMAGE_TOOL" ]; then
+    echo "Building AppImage..."
+    # linuxdeploy wants an AppDir with usr/ layout. The bundle binary is
+    # renamed to match the Exec= name in the desktop file.
+    APPDIR="$APPIMAGE_DIR/AppDir"
+    rm -rf "$APPDIR"
+    mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/512x512/apps"
+    cp -r "$BUNDLE_DIR"/* "$APPDIR/usr/bin/"
+    if [ -f "$APPDIR/usr/bin/glaze_flutter" ]; then
+        mv "$APPDIR/usr/bin/glaze_flutter" "$APPDIR/usr/bin/$APP_NAME"
+    elif [ -f "$APPDIR/usr/bin/Glaze" ]; then
+        mv "$APPDIR/usr/bin/Glaze" "$APPDIR/usr/bin/$APP_NAME"
+    fi
+    cp "$APPIMAGE_DIR/$APP_NAME.desktop" "$APPDIR/usr/share/applications/"
+    cp "$APPIMAGE_DIR/$APP_NAME.png" "$APPDIR/usr/share/icons/hicolor/512x512/apps/"
+
+    # GitHub runners set ARCH to something linuxdeploy does not know, and it
+    # needs to be a documented self-hosted value for the AppImage runtime too.
+    export ARCH=${LINUXDEPLOY_ARCH:-x86_64}
+    export APPIMAGE_EXTRACT_AND_RUN=1
+    if "$APPIMAGE_TOOL" --appdir "$APPDIR" --desktop-file "$APPDIR/usr/share/applications/$APP_NAME.desktop" \
+        --icon-file "$APPDIR/usr/share/icons/hicolor/512x512/apps/$APP_NAME.png" \
+        --output appimage; then
+        # linuxdeploy writes Glaze-<ARCH>.AppImage next to the AppDir; normalise
+        # the name to match the other package artifacts.
+        APPIMAGE_OUT=$(ls "$APPIMAGE_DIR"/Glaze-*.AppImage 2>/dev/null | head -1)
+        if [ -n "$APPIMAGE_OUT" ]; then
+            mv "$APPIMAGE_OUT" "$APPIMAGE_DIR/Glaze-${VERSION}-${ARCH}.AppImage"
+            echo "AppImage created at $APPIMAGE_DIR/Glaze-${VERSION}-${ARCH}.AppImage"
+        else
+            echo "::warning::linuxdeploy reported success but no AppImage was found in $APPIMAGE_DIR."
+        fi
+    else
+        echo "::warning::linuxdeploy failed — no AppImage was produced."
+    fi
+else
+    echo "::warning::linuxdeploy unavailable — no AppImage was produced."
+fi
+
+# 4. Build portable .tar.zst (Arch Linux native compression)
+# A plain tarball of the bundle for users who want no package manager at all.
+# zstd is in the CI dependency list; guarded anyway so a missing tool doesn't
+# abort the script and lose packages that already built.
+if command -v tar &> /dev/null && tar --help | grep -q zstd 2>/dev/null; then
+    echo "Building .tar.zst archive..."
+    TARZST_DIR="build/linux/tarzst"
+    mkdir -p "$TARZST_DIR/glaze-${VERSION}"
+    cp -r "$BUNDLE_DIR"/* "$TARZST_DIR/glaze-${VERSION}/"
+    tar --zstd -cf "$TARZST_DIR/glaze-${VERSION}-linux-${ARCH}.tar.zst" -C "$TARZST_DIR" "glaze-${VERSION}"
+    rm -rf "$TARZST_DIR/glaze-${VERSION}"
+    echo "Tar.zst created at $TARZST_DIR/glaze-${VERSION}-linux-${ARCH}.tar.zst"
+else
+    echo "::warning::tar with zstd support not found — no .tar.zst archive was produced."
+fi
+
 echo "Packaging complete!"
