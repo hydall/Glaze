@@ -332,8 +332,10 @@ class _PersonaEditorScreenState extends ConsumerState<_PersonaEditorScreen> {
 
     final imageStorage = await ref.read(imageStorageProvider.future);
     final bytes = await File(filePath).readAsBytes();
+    // Reusing persona_<id>.png leaves the WebView on its cached image and the
+    // persona roster cannot observe a change because avatarPath stays equal.
     final savedPath = await imageStorage.saveAvatar(
-      'persona_$_personaId',
+      'persona_${_personaId}_${DateTime.now().microsecondsSinceEpoch}',
       bytes,
     );
     await FileImage(File(savedPath)).evict();
