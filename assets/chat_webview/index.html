@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Glaze Chat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: transparent;
+      color: var(--text-color, #e0e0e0);
+      font-family: var(--font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif);
+      font-size: var(--font-size, 15px);
+      letter-spacing: var(--letter-spacing, 0);
+      overflow: hidden;
+      height: 100%;
+    }
+    #chat-container {
+      width: 100%; height: 100vh;
+      overflow-y: auto; overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding: 0;
+      background: transparent;
+    }
+    #chat-container::-webkit-scrollbar {
+      display: none;
+      width: 0;
+    }
+    #chat-container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #chat-container::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.15);
+      border-radius: 3px;
+    }
+    #loading-screen {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: transparent; z-index: 9999;
+      transition: opacity 0.2s;
+      pointer-events: none;
+    }
+    #loading-screen .app-loader-spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: var(--primary-color, #7996ce);
+      border-radius: 50%;
+      animation: loaderSpin 0.8s linear infinite;
+    }
+    @keyframes loaderSpin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="loading-screen"><div class="app-loader-spinner"></div></div>
+  <div id="chat-container" class="layout-default"></div>
+
+  <script type="module" src="formatter/index.js"></script>
+  <script src="RollingNumber.js"></script>
+  <script type="module" src="renderer/index.js"></script>
+  <script src="useVirtualScroll.js"></script>
+  <script src="glaze_sdk.js"></script>
+  <script type="module" src="bridge/index.js"></script>
+</body>
+</html>

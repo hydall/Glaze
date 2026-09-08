@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Glaze Headless Engine</title>
+  <style>
+    html, body {
+      background: transparent;
+      color: transparent;
+      margin: 0;
+      padding: 0;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <div id="glaze-headless-host"></div>
+  <script src="glaze_sdk.js"></script>
+  <script>
+    (function() {
+      function makeSandboxFrame() {
+        var frame = document.createElement('iframe');
+        frame.setAttribute('sandbox', 'allow-scripts');
+        frame.style.display = 'none';
+        frame.style.width = '1px';
+        frame.style.height = '1px';
+        frame.style.border = '0';
+        document.body.appendChild(frame);
+        return frame;
+      }
+
+      function runSandboxedScript(script, contextJson, runId) {
+        return new Promise(function(resolve, reject) {
+          try {
+            var context = contextJson;
+            if (typeof contextJson === 'string') {
+              try { context = JSON.parse(contextJson); } catch (_) { context = {}; }
+            }
+            if (!context || typeof context !== 'object') context = {};
+            context.__glazeContext = context.__glazeContext || context;
+
+            var frame = makeSandboxFrame();
+            var settled = false;
+            var timer = setTimeout(function() {
+              if (settled) return;
+              settled = true;
+              try { document.body.removeChild(frame); } catch (_) {}
+              reject(new Error('Headless sandbox timed out'));
+            }, 30000);
+
+            function onMessage(event) {
+              if (settled) return;
+              if (event.source !== frame.contentWindow) return;
+              if (event.data && event.data.type === 'glaze:request') {
+                window.flutter_inappwebview.callHandler(
+                  'glazeBridge',
+                  {
+                    method: event.data.method,
+                    params: event.data.params,
+                    context: event.data.context
+                  },
+                  runId
+                ).then(function(response) {
+                  if (settled) return;
+                  event.source.postMessage(Object.assign({
+                    type: 'glaze:response',
+                    id: event.data.id
+                  }, response), '*');
+                }, function(error) {
+                  if (settled) return;
+                  event.source.postMessage({
+                    type: 'glaze:response',
+                    id: event.data.id,
+                    ok: false,
+                    error: {
+                      code: 'bridge_error',
+                      message: error && error.message ? error.message : String(error)
+                    }
+                  }, '*');
+                });
+                return;
+              }
+              if (!event || !event.data || event.data.type !== 'glaze:headless-result') return;
+              if (event.data.scriptId !== currentScriptId) return;
+              settled = true;
+              clearTimeout(timer);
+              window.removeEventListener('message', onMessage);
+              try { document.body.removeChild(frame); } catch (_) {}
+              if (event.data.error) {
+                reject(new Error(event.data.error));
+              } else {
+                resolve(event.data.result == null ? '' : String(event.data.result));
+              }
+            }
+
+            window.addEventListener('message', onMessage);
+
+            var currentScriptId = 'hs_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+            var sdkBootstrap = window.__glazeSdkSource || '';
+
+            var html = ''
+              + '<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body>'
+              + '<script>' + sdkBootstrap + '<\/script>'
+              + '<script>'
+              + 'window.__glazeContext = ' + JSON.stringify(context.__glazeContext || {}) + ';'
+              + 'window.addEventListener("message", function(ev) {'
+              + '  if (!ev.data || ev.data.type !== "glaze:headless-run" || ev.data.scriptId !== ' + JSON.stringify(currentScriptId) + ') return;'
+              + '  var script = ev.data.script;'
+              + '  try {'
+              + '    var fn = new Function("context", "glaze", script);'
+              + '    var result = fn(context, window.glaze);'
+              + '    if (result && typeof result.then === "function") {'
+              + '      result.then(function(value) {'
+              + '        parent.postMessage({ type: "glaze:headless-result", scriptId: ' + JSON.stringify(currentScriptId) + ', result: value == null ? "" : value }, "*");'
+              + '      }, function(err) {'
+              + '        parent.postMessage({ type: "glaze:headless-result", scriptId: ' + JSON.stringify(currentScriptId) + ', error: (err && err.message) ? err.message : String(err) }, "*");'
+              + '      });'
+              + '    } else {'
+              + '      parent.postMessage({ type: "glaze:headless-result", scriptId: ' + JSON.stringify(currentScriptId) + ', result: result == null ? "" : result }, "*");'
+              + '    }'
+              + '  } catch (err) {'
+              + '    parent.postMessage({ type: "glaze:headless-result", scriptId: ' + JSON.stringify(currentScriptId) + ', error: (err && err.message) ? err.message : String(err) }, "*");'
+              + '  }'
+              + '});'
+              + '<\/script>'
+              + '</body></html>';
+
+            frame.addEventListener('load', function() {
+              frame.contentWindow.postMessage({
+                type: 'glaze:headless-run',
+                scriptId: currentScriptId,
+                script: script
+              }, '*');
+            });
+
+            frame.srcdoc = html;
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+
+      window.headlessBridge = Object.freeze({
+        runSandboxedScript: runSandboxedScript
+      });
+    })();
+  </script>
+</body>
+</html>

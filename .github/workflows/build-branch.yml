@@ -1,0 +1,747 @@
+name: Build (Branch)
+
+on:
+  workflow_dispatch:
+    # The branch to build is chosen with GitHub's native "Use workflow from"
+    # branch selector (a dropdown of all available branches). Its value is
+    # exposed as github.ref_name and used for checkout, the in-app build label
+    # and the Telegram message.
+    inputs:
+      # Platform selection. Each toggle gates both the build job and the upload,
+      # so an unchecked platform costs no runner time and simply does not appear
+      # in the Telegram post. Unchecking every platform leaves nothing to post.
+      build_android:
+        description: 'Android (APK)'
+        required: false
+        default: true
+        type: boolean
+      build_windows:
+        description: 'Windows (ZIP)'
+        required: false
+        default: true
+        type: boolean
+      build_ios:
+        description: 'iOS (IPA)'
+        required: false
+        default: true
+        type: boolean
+      build_linux:
+        description: 'Linux (DEB + pacman + AppImage + tar.zst)'
+        required: false
+        default: true
+        type: boolean
+      post_to_telegram:
+        description: 'Post build to Telegram'
+        required: false
+        default: true
+        type: boolean
+      notify_people:
+        # NOTE: GitHub's workflow_dispatch form cannot show/hide an input based
+        # on another one, so this toggle is always visible. It only has an
+        # effect when "Post build to Telegram" above is enabled.
+        description: 'Mention people in Telegram (only if posting is enabled)'
+        required: false
+        default: false
+        type: boolean
+      dm_developers:
+        # Sends the selected builds straight to each developer's private Telegram
+        # chat (@frostake, @All_Systems_Go). Independent of "Post build to Telegram":
+        # it can be used on its own for an internal test share. Requires the
+        # TG_DEV_CHAT_IDS secret (numeric chat IDs) — see the "Send build to
+        # developers (DM)" step below for why @usernames can't be used.
+        description: 'Отправить в ЛС разработчикам (@frostake, @All_Systems_Go)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  # ── shared metadata ────────────────────────────────────────────────────────
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      version:      ${{ steps.meta.outputs.version }}
+      build_date:   ${{ steps.meta.outputs.build_date }}
+      build_branch: ${{ steps.meta.outputs.build_branch }}
+      build_channel: ${{ steps.meta.outputs.build_channel }}
+      file_slug:    ${{ steps.meta.outputs.file_slug }}
+      commits:      ${{ steps.meta.outputs.commits }}
+      git_sha:      ${{ steps.meta.outputs.git_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Compute metadata
+        id: meta
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | sed 's/+.*//')
+          BUILD_DATE=$(date -u '+%d/%m/%Y %H:%M')
+          BUILD_BRANCH="${{ github.ref_name }}"
+          # Branch names may contain "/" or spaces which are unsafe in file
+          # names, so build a sanitised slug for the artifact file name.
+          SAFE_BRANCH=$(echo "$BUILD_BRANCH" | sed 's#[/ ]#-#g')
+          FILE_SLUG="G-$(date -u '+%d%m%Y-%H%M')-$SAFE_BRANCH"
+
+          # Release channel drives the in-app dev-tooling defaults (developer
+          # mode + build watermark) via --dart-define=BUILD_CHANNEL. Only the
+          # two release branches get a non-nightly channel; every other branch
+          # builds as nightly, i.e. with dev tooling on.
+          case "$BUILD_BRANCH" in
+            stable)  BUILD_CHANNEL=stable  ;;
+            staging) BUILD_CHANNEL=staging ;;
+            *)       BUILD_CHANNEL=nightly ;;
+          esac
+
+          echo "version=$VERSION"           >> $GITHUB_OUTPUT
+          echo "build_date=$BUILD_DATE"      >> $GITHUB_OUTPUT
+          echo "build_branch=$BUILD_BRANCH"  >> $GITHUB_OUTPUT
+          echo "build_channel=$BUILD_CHANNEL" >> $GITHUB_OUTPUT
+          echo "file_slug=$FILE_SLUG"        >> $GITHUB_OUTPUT
+          echo "git_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+          # Commits since last build tag
+          git fetch --tags --force
+          if git rev-parse refs/tags/build/last >/dev/null 2>&1; then
+            COMMIT_LOG=$(git log build/last..HEAD --oneline --no-merges 2>/dev/null || true)
+          else
+            COMMIT_LOG=$(git log -10 --oneline --no-merges 2>/dev/null || true)
+          fi
+
+          COUNT=$(echo "$COMMIT_LOG" | grep -c '[^[:space:]]' || true)
+
+          if [ "$COUNT" -eq 0 ]; then
+            COMMITS_TEXT=""
+          else
+            FORMATTED=$(echo "$COMMIT_LOG" | head -10 \
+              | sed 's/^[a-f0-9]\{7,\} //' \
+              | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' \
+              | sed 's/^/• /')
+            if [ "$COUNT" -gt 10 ]; then
+              EXTRA=$((COUNT - 10))
+              COMMITS_TEXT=$(printf '%s\n+%d коммитов' "$FORMATTED" "$EXTRA")
+            else
+              COMMITS_TEXT="$FORMATTED"
+            fi
+          fi
+
+          echo "commits<<DELIM" >> $GITHUB_OUTPUT
+          echo "$COMMITS_TEXT"  >> $GITHUB_OUTPUT
+          echo "DELIM"          >> $GITHUB_OUTPUT
+
+  # ── android ────────────────────────────────────────────────────────────────
+  build-android:
+    needs: metadata
+    if: ${{ github.event.inputs.build_android == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Create .env from secrets
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
+          DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
+          DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          # A channel can be given its own Dropbox app, which gets it its own
+          # App folder in the user's Dropbox. While the channel secret is unset
+          # the build falls back to the shared key, and the channels are kept
+          # apart by a sub-folder inside that one App folder instead — see
+          # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
+          case "$BUILD_CHANNEL" in
+            stable)  CHANNEL_DROPBOX_KEY="" ;;
+            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
+            *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
+          esac
+          {
+            echo "DROPBOX_APP_KEY=${CHANNEL_DROPBOX_KEY:-$DROPBOX_APP_KEY}"
+            echo "DROPBOX_REDIRECT_NATIVE=$DROPBOX_REDIRECT_NATIVE"
+            echo "GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID"
+            echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive"
+          } >> .env
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            .android/build-cache
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Verify signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(printf '%s' "${KEYSTORE_BASE64:-}" | tr -d '[:space:]')" ]; then
+            echo "::error::Secret ANDROID_KEYSTORE_BASE64 is empty or not set in this repository — the APK cannot be signed."
+            echo "Add it in Settings -> Secrets and variables -> Actions. Value = base64 of the raw keystore file:"
+            echo '  [Convert]::ToBase64String([IO.File]::ReadAllBytes("upload-key.keystore")) | Set-Clipboard   # PowerShell'
+            echo '  base64 -w0 upload-key.keystore                                                              # bash'
+            echo "If the keystore itself was lost, generate a new one (this changes the APK signature, so existing"
+            echo "installs have to be reinstalled) and update all four ANDROID_* secrets to match:"
+            echo '  keytool -genkeypair -v -keystore upload-key.keystore -storetype PKCS12 -alias <ANDROID_KEY_ALIAS> \'
+            echo '    -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Glaze"'
+            exit 1
+          fi
+          for required in KEYSTORE_PASSWORD KEY_ALIAS; do
+            if [ -z "${!required:-}" ]; then
+              case "$required" in
+                KEYSTORE_PASSWORD) secret=ANDROID_STORE_PASSWORD ;;
+                KEY_ALIAS)         secret=ANDROID_KEY_ALIAS ;;
+              esac
+              echo "::error::Secret $secret is empty or not set — it is required to read the keystore."
+              exit 1
+            fi
+          done
+          if ! printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > android/ci-signing.keystore; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not valid base64 — re-create the secret from the raw keystore bytes."
+            exit 1
+          fi
+          echo "Decoded keystore: $(stat -c%s android/ci-signing.keystore) bytes," \
+               "header $(od -An -tx1 -N4 android/ci-signing.keystore | tr -d ' ')," \
+               "sha256 $(sha256sum android/ci-signing.keystore | cut -c1-16)..."
+          if ! keytool -list -keystore android/ci-signing.keystore -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" > keytool.log 2>&1; then
+            echo "::error::Keystore decoded from ANDROID_KEYSTORE_BASE64 is unreadable or has no \"$KEY_ALIAS\" alias."
+            echo "A 0-byte or text-mangled keystore shows up later as 'Tag number over 30 is not supported'."
+            cat keytool.log
+            rm -f keytool.log
+            exit 1
+          fi
+          rm -f keytool.log
+          echo "Keystore OK - alias \"$KEY_ALIAS\" is readable."
+
+      - name: Build APK (arm64 only)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Read by android/app/build.gradle.kts to derive the applicationId
+          # suffix and the launcher label, so the three channels co-install.
+          # Signing is unaffected — all channels use the same keystore above.
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+        run: >
+          flutter build apk --release --no-pub --target-platform android-arm64
+          "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
+          "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}"
+          "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
+          "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
+          "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+
+      - name: Rename APK
+        run: mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.file_slug }}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-APK
+          path: "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.file_slug }}.apk"
+
+  # ── windows ────────────────────────────────────────────────────────────────
+  build-windows:
+    needs: metadata
+    if: ${{ github.event.inputs.build_windows == 'true' }}
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Create .env from secrets
+        shell: bash
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
+          DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
+          DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          # A channel can be given its own Dropbox app, which gets it its own
+          # App folder in the user's Dropbox. While the channel secret is unset
+          # the build falls back to the shared key, and the channels are kept
+          # apart by a sub-folder inside that one App folder instead — see
+          # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
+          case "$BUILD_CHANNEL" in
+            stable)  CHANNEL_DROPBOX_KEY="" ;;
+            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
+            *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
+          esac
+          {
+            echo "DROPBOX_APP_KEY=${CHANNEL_DROPBOX_KEY:-$DROPBOX_APP_KEY}"
+            echo "DROPBOX_REDIRECT_NATIVE=$DROPBOX_REDIRECT_NATIVE"
+            echo "GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID"
+            echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive"
+          } >> .env
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build Windows (release)
+        run: >
+          flutter build windows --release --no-pub
+          "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
+          "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}"
+          "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
+          "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
+          "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+
+      - name: Zip Windows build
+        # The Release directory has to become one file before it can be sent to
+        # Telegram, so the zip is built here and uploaded as the artifact.
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build/windows/x64/runner/Release/* `
+            -DestinationPath "${{ needs.metadata.outputs.file_slug }}-windows.zip"
+
+      - name: Upload Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-Windows
+          path: "${{ needs.metadata.outputs.file_slug }}-windows.zip"
+
+  # ── ios ────────────────────────────────────────────────────────────────────
+  build-ios:
+    needs: metadata
+    if: ${{ github.event.inputs.build_ios == 'true' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Create .env from secrets
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
+          DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
+          DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          # A channel can be given its own Dropbox app, which gets it its own
+          # App folder in the user's Dropbox. While the channel secret is unset
+          # the build falls back to the shared key, and the channels are kept
+          # apart by a sub-folder inside that one App folder instead — see
+          # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
+          case "$BUILD_CHANNEL" in
+            stable)  CHANNEL_DROPBOX_KEY="" ;;
+            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
+            *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
+          esac
+          {
+            echo "DROPBOX_APP_KEY=${CHANNEL_DROPBOX_KEY:-$DROPBOX_APP_KEY}"
+            echo "DROPBOX_REDIRECT_NATIVE=$DROPBOX_REDIRECT_NATIVE"
+            echo "GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID"
+            echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive"
+          } >> .env
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: ios/Pods
+          key: pods-${{ runner.os }}-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: pods-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Install CocoaPods
+        run: cd ios && pod install && cd ..
+
+      - name: Configure iOS channel identity
+        # Overwrites the checked-in defaults in ios/Flutter/Channel.xcconfig so
+        # the bundle identifier and the home-screen name match the channel being
+        # built and the three IPAs can live on one device.
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+        run: |
+          set -euo pipefail
+          case "$BUILD_CHANNEL" in
+            stable)  SUFFIX="";         NAME="Glaze" ;;
+            staging) SUFFIX=".staging"; NAME="Glaze Staging" ;;
+            *)       SUFFIX=".nightly"; NAME="Glaze Nightly" ;;
+          esac
+          printf 'BUNDLE_ID_SUFFIX = %s\nAPP_DISPLAY_NAME = %s\n' \
+            "$SUFFIX" "$NAME" > ios/Flutter/Channel.xcconfig
+          cat ios/Flutter/Channel.xcconfig
+
+      # === Reverted iOS IPA creation (the version that produced working sideload builds before PR 96) ===
+      # We are reverting the "flutter build ipa" change introduced in 195b260 because it regressed the build
+      # between good build ~43 and the failing 46/47. Adding heavy diagnostics to find the real cause.
+      - name: Build iOS (release, no signing) — DIAGNOSTIC
+        run: |
+          set -x
+          flutter build ios --release --no-codesign --no-pub \
+            "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}" \
+            "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}" \
+            "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}" \
+            "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}" \
+            "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+          echo "=== AFTER flutter build ios ==="
+          find build/ios -type f -name "*.app" -o -name "*.ipa" 2>/dev/null | head -20 || true
+          ls -laR build/ios/iphoneos 2>/dev/null | tail -30 || true
+          echo "=== END DIAGNOSTIC ==="
+
+      - name: Create IPA (manual Payload method — last known good for sideloading)
+        run: |
+          set -x
+          mkdir -p Payload
+          if [ -d "build/ios/iphoneos" ]; then
+            cp -r build/ios/iphoneos/*.app Payload/ 2>/dev/null || true
+          fi
+          find build -type d -name "*.app" 2>/dev/null | head -5 | while read app; do
+            echo "Found app at: $app"
+            cp -r "$app" Payload/ 2>/dev/null || true
+          done
+          echo "=== Payload contents before zip ==="
+          find Payload -type f | head -30
+          ls -la Payload
+          zip -r "${{ needs.metadata.outputs.file_slug }}.ipa" Payload || (echo "zip failed, contents:"; find . -name "*.app" 2>/dev/null | head -10)
+          echo "=== Final artifact check ==="
+          ls -la *.ipa 2>/dev/null || true
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-iOS
+          path: "${{ needs.metadata.outputs.file_slug }}.ipa"
+
+  # ── linux ──────────────────────────────────────────────────────────────────
+  build-linux:
+    needs: metadata
+    if: ${{ github.event.inputs.build_linux == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Create .env from secrets
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
+          DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
+          DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          case "$BUILD_CHANNEL" in
+            stable)  CHANNEL_DROPBOX_KEY="" ;;
+            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
+            *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
+          esac
+          {
+            echo "DROPBOX_APP_KEY=${CHANNEL_DROPBOX_KEY:-$DROPBOX_APP_KEY}"
+            echo "DROPBOX_REDIRECT_NATIVE=$DROPBOX_REDIRECT_NATIVE"
+            echo "GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID"
+            echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive"
+          } >> .env
+
+      - name: Install Linux dependencies
+        # pacman-package-manager brings makepkg, which the packaging script uses
+        # for the Arch/CachyOS package. libgstreamer1.0-dev and
+        # libgstreamer-plugins-base1.0-dev provide the gstreamer-1.0 /
+        # gstreamer-audio-1.0 pkg-config modules that audioplayers_linux's
+        # CMakeLists requires — without them CMake configure fails before
+        # Flutter even starts compiling. The rest is the standard Flutter Linux
+        # desktop toolchain.
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang cmake git ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev pacman-package-manager libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+          # pacman-package-manager on Ubuntu ships no alpm database at its
+          # dbpath (/var/lib/pacman/), so makepkg's dependency check fails with
+          # "could not create database" on a fresh runner. makepkg refuses to
+          # run as root, so the directory has to be created and owned by the
+          # runner user here, ahead of time.
+          sudo mkdir -p /var/lib/pacman
+          sudo chown -R "$(id -u):$(id -g)" /var/lib/pacman
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build Linux packages (release)
+        run: >
+          ./scripts/build_linux_packages.sh
+          "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
+          "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}"
+          "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
+          "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
+          "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+
+      - name: Rename Linux packages
+        # The script skips a format whose tooling is missing instead of failing,
+        # so the rename reports what actually came out and only fails when
+        # neither package was produced.
+        env:
+          SLUG: ${{ needs.metadata.outputs.file_slug }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          DEB=(build/linux/deb/*.deb)
+          PKG=(build/linux/arch/*.pkg.tar.zst)
+          APPIMG=(build/linux/appimage/*.AppImage)
+          TARZST=(build/linux/tarzst/*.tar.zst)
+
+          if [ ${#DEB[@]} -gt 0 ]; then
+            mv "${DEB[0]}" "build/linux/deb/${SLUG}-linux.deb"
+          else
+            echo "::warning::No .deb was produced — dpkg-deb missing or the build failed."
+          fi
+
+          if [ ${#PKG[@]} -gt 0 ]; then
+            mv "${PKG[0]}" "build/linux/arch/${SLUG}-linux.pkg.tar.zst"
+          else
+            echo "::warning::No pacman package was produced — makepkg missing or the build failed."
+          fi
+
+          if [ ${#APPIMG[@]} -gt 0 ]; then
+            mv "${APPIMG[0]}" "build/linux/appimage/${SLUG}-linux.AppImage"
+          else
+            echo "::warning::No AppImage was produced — linuxdeploy missing or the build failed."
+          fi
+
+          if [ ${#TARZST[@]} -gt 0 ]; then
+            mv "${TARZST[0]}" "build/linux/tarzst/${SLUG}-linux.tar.zst"
+          else
+            echo "::warning::No .tar.zst was produced — zstd missing or the build failed."
+          fi
+
+          if [ ${#DEB[@]} -eq 0 ] && [ ${#PKG[@]} -eq 0 ] && [ ${#APPIMG[@]} -eq 0 ] && [ ${#TARZST[@]} -eq 0 ]; then
+            echo "::error::build_linux_packages.sh produced no package at all."
+            exit 1
+          fi
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-DEB
+          path: "build/linux/deb/${{ needs.metadata.outputs.file_slug }}-linux.deb"
+
+      - name: Upload Pacman artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-Pacman
+          path: "build/linux/arch/${{ needs.metadata.outputs.file_slug }}-linux.pkg.tar.zst"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-AppImage
+          path: "build/linux/appimage/${{ needs.metadata.outputs.file_slug }}-linux.AppImage"
+
+      - name: Upload tar.zst artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-TarZst
+          path: "build/linux/tarzst/${{ needs.metadata.outputs.file_slug }}-linux.tar.zst"
+
+  # ── telegram notify ────────────────────────────────────────────────────────
+  notify:
+    needs: [metadata, build-android, build-windows, build-ios, build-linux]
+    runs-on: ubuntu-latest
+    # Run when either delivery toggle is on: the group post and/or the direct
+    # messages to developers. Each individual step is gated on its own toggle.
+    #
+    # An unselected platform leaves its build job "skipped", which would block a
+    # plain success() gate, so the results are checked explicitly instead: no
+    # failure among the needs, and at least one platform actually built.
+    if: >-
+      ${{ !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      (github.event.inputs.build_android == 'true' ||
+       github.event.inputs.build_windows == 'true' ||
+       github.event.inputs.build_ios == 'true' ||
+       github.event.inputs.build_linux == 'true') &&
+      (github.event.inputs.post_to_telegram == 'true' ||
+       github.event.inputs.dm_developers == 'true') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download built artifacts
+        # Picks up whichever of the three platform artifacts exist, so the
+        # platform toggles alone decide what gets posted.
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Glaze-release-*
+          merge-multiple: true
+          path: artifacts/
+
+      - name: Compose announcement
+        id: text
+        env:
+          TG_MENTIONS:  ${{ secrets.TG_MENTIONS }}
+          NOTIFY_PEOPLE: ${{ github.event.inputs.notify_people || 'true' }}
+          VERSION:      ${{ needs.metadata.outputs.version }}
+          BUILD_DATE:   ${{ needs.metadata.outputs.build_date }}
+          BUILD_BRANCH: ${{ needs.metadata.outputs.build_branch }}
+          COMMITS:      ${{ needs.metadata.outputs.commits }}
+        run: |
+          COMMITS_SECTION=""
+          if [ -n "$COMMITS" ]; then
+            COMMITS_SECTION=$(printf '\n\n%s' "$COMMITS")
+          fi
+
+          MENTIONS_SECTION=""
+          if [ "$NOTIFY_PEOPLE" = "true" ] && [ -n "$TG_MENTIONS" ]; then
+            MENTIONS_SECTION=$(printf '\n\n<tg-spoiler>%s</tg-spoiler>' "$TG_MENTIONS")
+          fi
+
+          # The group post carries the mentions; the DM version does not, since
+          # its only reader is already the person being notified.
+          {
+            echo "group<<DELIM"
+            printf 'Новый дев-билд:\n\n%s\n%s\n%s%s%s\n' \
+              "$VERSION" "$BUILD_DATE" "$BUILD_BRANCH" \
+              "$COMMITS_SECTION" "$MENTIONS_SECTION"
+            echo "DELIM"
+            echo "dm<<DELIM"
+            printf 'Новый дев-билд (в ЛС):\n\n%s\n%s\n%s%s\n' \
+              "$VERSION" "$BUILD_DATE" "$BUILD_BRANCH" "$COMMITS_SECTION"
+            echo "DELIM"
+          } >> $GITHUB_OUTPUT
+
+      - name: Send to Telegram
+        # Group post — only when the "Post build to Telegram" toggle is on.
+        if: ${{ github.event.inputs.post_to_telegram == 'true' }}
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          # Chat id of the public group the builds are announced in.
+          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
+          # Message thread id of the topic inside that group. Leave the secret
+          # unset for a group without topics — the post then goes to the chat
+          # itself, which is the pre-topic behaviour.
+          TG_TOPIC_ID:  ${{ secrets.TG_TOPIC_ID }}
+          TEXT:         ${{ steps.text.outputs.group }}
+          PIN:          'true'
+          RUN_URL:      ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/telegram_post.sh "$TG_CHAT_ID" "$TG_TOPIC_ID"
+
+      - name: Send build to developers (DM)
+        # Direct-message the selected builds to each developer's private chat
+        # when the "Отправить в ЛС разработчикам" toggle is on.
+        if: ${{ github.event.inputs.dm_developers == 'true' }}
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          # Numeric Telegram chat IDs of the developers (@frostake,
+          # @All_Systems_Go), whitespace- or comma-separated. The Bot API cannot
+          # start a private chat by @username, so each developer must have sent
+          # /start to the bot once and their numeric id stored in this secret.
+          TG_DEV_CHAT_IDS: ${{ secrets.TG_DEV_CHAT_IDS }}
+          TEXT:         ${{ steps.text.outputs.dm }}
+          RUN_URL:      ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$TG_DEV_CHAT_IDS" ]; then
+            echo "::warning::TG_DEV_CHAT_IDS secret is empty — skipping developer DMs."
+            exit 0
+          fi
+
+          # Accept commas or whitespace as separators between chat IDs. A private
+          # chat has no topics, so no thread id is passed.
+          IDS=$(printf '%s' "$TG_DEV_CHAT_IDS" | tr ',' ' ')
+          for CID in $IDS; do
+            [ -z "$CID" ] && continue
+            bash .github/scripts/telegram_post.sh "$CID"
+          done
+
+      - name: Advance build/last tag
+        # Tied to the official group announcement — an internal dev-only DM share
+        # must not advance the changelog baseline.
+        if: ${{ github.event.inputs.post_to_telegram == 'true' }}
+        run: |
+          git tag -f build/last
+          git push origin refs/tags/build/last --force

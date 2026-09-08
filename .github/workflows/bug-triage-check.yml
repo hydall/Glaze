@@ -1,0 +1,50 @@
+name: Bug triage — connection check
+
+# Read-only smoke test: verifies Discord / Trello / DeepSeek creds + IDs work.
+# Creates nothing, comments nothing. Runs on pushes to the feature branch while
+# we're wiring it up, and can be dispatched manually once merged.
+on:
+  push:
+    branches: [feat/bug-triage-agent]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps (check only needs requests)
+        run: pip install requests
+
+      - name: Connection check
+        working-directory: tools/bug_triage
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
+          DEEPSEEK_VISION_MODEL: ${{ vars.DEEPSEEK_VISION_MODEL }}
+          VISION_ENABLED: ${{ vars.VISION_ENABLED }}
+          TRELLO_KEY: ${{ secrets.TRELLO_KEY }}
+          TRELLO_TOKEN: ${{ secrets.TRELLO_TOKEN }}
+          TRELLO_BOARD_ID: ${{ vars.TRELLO_BOARD_ID }}
+          TRELLO_NEW_BUG_LIST_ID: ${{ vars.TRELLO_NEW_BUG_LIST_ID }}
+          TRELLO_AUDITED_LABEL_ID: ${{ vars.TRELLO_AUDITED_LABEL_ID }}
+          TRELLO_AUDIT_LIST_IDS: ${{ vars.TRELLO_AUDIT_LIST_IDS }}
+          TRELLO_SKIP_LIST_IDS: ${{ vars.TRELLO_SKIP_LIST_IDS }}
+          REAUDIT_IMAGE_BLOCKED: ${{ vars.REAUDIT_IMAGE_BLOCKED }}
+          MAX_REAUDITS_PER_RUN: ${{ vars.MAX_REAUDITS_PER_RUN }}
+          AUDIT_BOARD_CARDS: ${{ vars.AUDIT_BOARD_CARDS }}
+          MAX_BOARD_AUDITS_PER_RUN: ${{ vars.MAX_BOARD_AUDITS_PER_RUN }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
+          DISCORD_FORUM_CHANNEL_ID: ${{ vars.DISCORD_FORUM_CHANNEL_ID }}
+          DISCORD_IGNORED_TAG_IDS: ${{ vars.DISCORD_IGNORED_TAG_IDS }}
+          DISCORD_SKIP_ARCHIVED: ${{ vars.DISCORD_SKIP_ARCHIVED }}
+        run: python -u check_connections.py

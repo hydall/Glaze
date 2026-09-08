@@ -1,0 +1,108 @@
+{
+  "folders": [
+    {
+      "id": "hydall",
+      "name": "Hydall",
+      "description": "Hydall's curated picks",
+      "imageUrl": "https://raw.githubusercontent.com/hydall/Glaze/master/picks/hydall/ipuxiv.jpg",
+      "subfolders": [],
+      "characters": [
+        {
+          "id": "walter-simmons-private-investigator",
+          "name": "Walter",
+          "fileName": "Walter_Simmons_Private_Investigator.png",
+          "hash": "2ee001a8da14b3f140aa2fd10925a43645238ad24e9e8cb00d663996ec2da83e",
+          "description": "A hard-boiled private investigator.",
+          "tags": [
+            "Male",
+            "OC",
+            "Detective",
+            "AnyPOV",
+            "Dead Dove",
+            "Switch",
+            "#2025"
+          ],
+          "creator": "https://janitorai.com/profiles/4036183c-8154-4dce-9255-3dc61768f82e"
+        }
+      ]
+    },
+    {
+      "id": "danvi",
+      "name": "Danvi",
+      "description": "Danvi's curated picks",
+      "imageUrl": "https://raw.githubusercontent.com/hydall/Glaze/master/picks/danvi/fox.jpg",
+      "subfolders": [
+        {
+          "id": "crafted",
+          "name": "Crafted",
+          "description": "Hand-crafted characters made from scratch with care and attention to detail",
+          "subfolders": [],
+          "characters": [
+            {
+              "id": "blood-of-vanquished-north",
+              "name": "Blood of Vanquished North",
+              "fileName": "Blood of Vanquished North.png",
+              "hash": "e6fdb885e1699c263f4e45366cbfa8fa7ec3d4a1a5256ca88d39f7acd32f30fd"
+            },
+            {
+              "id": "hotel-petersburg",
+              "name": "Hotel Petersburg",
+              "fileName": "Hotel Petersburg  Westwood is not neutral ground.png",
+              "hash": "514d51fb16f29c4d13f48133d90bc24f33ab31ffefe16ef779d4c788d701be07"
+            },
+            {
+              "id": "project-tokyo",
+              "name": "Project Tokyo",
+              "fileName": "Project Tokyo.png",
+              "hash": "f96f7a3f47fa20858a626317a514eba3b623979b8d7c5039752dd2b1b3f80d2f"
+            },
+            {
+              "id": "vareti",
+              "name": "Vareti",
+              "fileName": "Vareti.png",
+              "hash": "e6f1bdd4f457cf3d398239a12b4d741a2eb3fbfac99cb9b042b52ac3dce4b1de"
+            },
+            {
+              "id": "lucyna-kushinada-afterlife",
+              "name": "Lucyna Kushinada | Afterlife",
+              "fileName": "Lucyna Kushinada - Afterlife.png",
+              "hash": "6a6bd40883ee80164cf2e4b527dd9e03de0a5bba895d752adf4a80dcc3d044d4"
+            },
+            {
+              "id": "rise-and-shine-candidate-choo-choo-mazafusker",
+              "name": "Rise and Shine, Candidate.|CHOO-CHOO MAZAFUSKER",
+              "fileName": "Rise and Shine, Candidate - CHOO-CHOO MAZAFUSKER.png",
+              "hash": "264f5c80ad86326395bff265d4bf3cf8931c09366058bc308db703d8fb9e3468",
+              "tags": [
+                "OC",
+                "Magical",
+                "Multiple",
+                "AnyPOV",
+                "Smut",
+                "Fluff",
+                "isekai",
+                "marblesideacademy"
+              ],
+              "creator": "https://janitorai.com/profiles/979329d1-6f23-4339-b248-65f35392a31b"
+            }
+          ]
+        },
+        {
+          "id": "rebuilded",
+          "name": "Rebuilded",
+          "description": "Characters with great ideas but poor execution — rebuilt with proper craft, structure, and depth",
+          "subfolders": [],
+          "characters": [
+            {
+              "id": "maisie-dee-hollis-channing-paul",
+              "name": "Maisie, Dee, Hollis, Channing, Paul",
+              "fileName": "Maisie, Dee, Hollis, Channing, Paul.png",
+              "hash": "235a88acbf441515976ef56076946a89ea67977fe7254dd3680efa7c18591b02"
+            }
+          ]
+        }
+      ],
+      "characters": []
+    }
+  ]
+}

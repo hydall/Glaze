@@ -1,0 +1,85 @@
+name: Bug triage (Discord + Trello)
+
+on:
+  schedule:
+    # Once a day, 18:00 UTC. Cron is UTC-only.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run without creating cards / posting comments"
+        type: boolean
+        default: false
+
+# Read-only on the repo: the agent physically cannot push code or open a PR.
+permissions:
+  contents: read
+
+concurrency:
+  group: bug-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    # A thinking model auditing a dozen reports takes minutes, not seconds —
+    # but it must never sit on a runner for hours if a call hangs.
+    timeout-minutes: 60
+    steps:
+      # The tooling comes from the branch this run was started on, so a fix
+      # can be dispatched from its own branch before it is merged.
+      - name: Checkout (triage tooling)
+        uses: actions/checkout@v4
+
+      # The audited source is always nightly, whatever branch started the run.
+      # Scheduled runs only fire from the default branch (stable), which trails
+      # nightly by hundreds of commits — auditing that would judge reports
+      # against code the fix has long since left.
+      - name: Checkout nightly (the source the agent reads)
+        uses: actions/checkout@v4
+        with:
+          ref: nightly
+          path: audit-src
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install -r tools/bug_triage/requirements.txt
+
+      - name: Run triage
+        working-directory: tools/bug_triage
+        env:
+          AUDIT_REPO_ROOT: ${{ github.workspace }}/audit-src
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
+          DEEPSEEK_VISION_MODEL: ${{ vars.DEEPSEEK_VISION_MODEL }}
+          TRELLO_KEY: ${{ secrets.TRELLO_KEY }}
+          TRELLO_TOKEN: ${{ secrets.TRELLO_TOKEN }}
+          TRELLO_BOARD_ID: ${{ vars.TRELLO_BOARD_ID }}
+          TRELLO_NEW_BUG_LIST_ID: ${{ vars.TRELLO_NEW_BUG_LIST_ID }}
+          TRELLO_AUDITED_LABEL_ID: ${{ vars.TRELLO_AUDITED_LABEL_ID }}
+          TRELLO_AUDIT_LIST_IDS: ${{ vars.TRELLO_AUDIT_LIST_IDS }}
+          TRELLO_SKIP_LIST_IDS: ${{ vars.TRELLO_SKIP_LIST_IDS }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
+          DISCORD_FORUM_CHANNEL_ID: ${{ vars.DISCORD_FORUM_CHANNEL_ID }}
+          DISCORD_IGNORED_TAG_IDS: ${{ vars.DISCORD_IGNORED_TAG_IDS }}
+          DISCORD_SKIP_ARCHIVED: ${{ vars.DISCORD_SKIP_ARCHIVED }}
+          MATCH_EXISTING_CARDS: ${{ vars.MATCH_EXISTING_CARDS }}
+          MAX_MATCH_CANDIDATES: ${{ vars.MAX_MATCH_CANDIDATES }}
+          MAX_NEW_CARDS_PER_RUN: ${{ vars.MAX_NEW_CARDS_PER_RUN }}
+          MAX_AUDITS_PER_RUN: ${{ vars.MAX_AUDITS_PER_RUN }}
+          VISION_ENABLED: ${{ vars.VISION_ENABLED }}
+          MAX_IMAGES_PER_AUDIT: ${{ vars.MAX_IMAGES_PER_AUDIT }}
+          MAX_IMAGE_BYTES: ${{ vars.MAX_IMAGE_BYTES }}
+          REAUDIT_IMAGE_BLOCKED: ${{ vars.REAUDIT_IMAGE_BLOCKED }}
+          MAX_REAUDITS_PER_RUN: ${{ vars.MAX_REAUDITS_PER_RUN }}
+          AUDIT_BOARD_CARDS: ${{ vars.AUDIT_BOARD_CARDS }}
+          MAX_BOARD_AUDITS_PER_RUN: ${{ vars.MAX_BOARD_AUDITS_PER_RUN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        # -u: unbuffered, so progress shows up in the Actions log live
+        # instead of arriving in one block when the process exits.
+        run: python -u triage.py
