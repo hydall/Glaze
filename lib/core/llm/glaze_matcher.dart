@@ -155,7 +155,7 @@ bool glazeCheckMatch(
 
   var pattern = key;
   if (wholeWords == WholeWordMode.yes) {
-    pattern = '\\b$pattern\\b';
+    pattern = _unicodeWholeWordPattern(pattern);
   }
 
   // Tavern-compatible keys may be regular expressions. Dart's RegExp engine
@@ -163,7 +163,11 @@ bool glazeCheckMatch(
   // pattern can otherwise block the prompt worker until its hard 60s kill.
   // Keep regex compatibility for ordinary keys, but fall back to literal
   // matching for patterns with known catastrophic-backtracking structure.
-  final regex = _safeRegex(pattern, caseSensitive);
+  final regex = _safeRegex(
+    pattern,
+    caseSensitive,
+    unicode: wholeWords == WholeWordMode.yes,
+  );
   if (regex != null) return regex.hasMatch(text);
 
   final haystack = caseSensitive ? text : text.toLowerCase();
@@ -172,8 +176,9 @@ bool glazeCheckMatch(
 
   if (wholeWords == WholeWordMode.yes) {
     final wordRegex = _tryCreateRegex(
-      '\\b${RegExp.escape(needle)}\\b',
+      _unicodeWholeWordPattern(RegExp.escape(needle)),
       caseSensitive,
+      unicode: true,
     );
     return wordRegex?.hasMatch(haystack) ?? false;
   }
@@ -181,11 +186,17 @@ bool glazeCheckMatch(
   return haystack.contains(needle);
 }
 
+String _unicodeWholeWordPattern(String pattern) {
+  const wordCharacter = r'\p{L}\p{M}\p{N}_';
+  return '(?:^|[^$wordCharacter])(?:$pattern)(?=\$|[^$wordCharacter])';
+}
+
 RegExp? _safeRegex(
   String pattern,
   bool caseSensitive, {
   bool multiLine = false,
   bool dotAll = false,
+  bool unicode = false,
 }) {
   if (classifyRegexSafety(pattern) == RegexSafety.pathological) return null;
   return _tryCreateRegex(
@@ -193,6 +204,7 @@ RegExp? _safeRegex(
     caseSensitive,
     multiLine: multiLine,
     dotAll: dotAll,
+    unicode: unicode,
   );
 }
 
@@ -201,6 +213,7 @@ RegExp? _tryCreateRegex(
   bool caseSensitive, {
   bool multiLine = false,
   bool dotAll = false,
+  bool unicode = false,
 }) {
   try {
     return RegExp(
@@ -208,6 +221,7 @@ RegExp? _tryCreateRegex(
       caseSensitive: caseSensitive,
       multiLine: multiLine,
       dotAll: dotAll,
+      unicode: unicode,
     );
   } catch (_) {
     return null;
