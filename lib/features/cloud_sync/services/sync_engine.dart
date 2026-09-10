@@ -135,6 +135,7 @@ class SyncEngine {
     await _adapter.ensureFolder('$cloudBase/reconciliation_state');
 
     onProgress(const SyncProgress(message: 'Building sync manifest...'));
+    final previousManifest = await _manifestBuilder.readLocalManifest();
     SyncManifest? cloudManifest;
     try {
       final raw = await _adapter.download(cloudPath('manifest', 'manifest'));
@@ -147,7 +148,7 @@ class SyncEngine {
       debugPrint('[sync] cloud manifest download failed: $e\n$st');
       rethrow;
     }
-    await _mergeCloudReconciliationState(cloudManifest);
+    await _mergeCloudReconciliationState(cloudManifest, previousManifest);
     final localManifest = await _manifestBuilder.buildLocalManifest(
       cloudManifest: cloudManifest,
     );
@@ -1431,11 +1432,18 @@ class SyncEngine {
 
   Future<void> _mergeCloudReconciliationState(
     SyncManifest? cloudManifest,
+    SyncManifest previousManifest,
   ) async {
     final store = _reconciliationStateStore;
     if (store == null || cloudManifest == null) return;
     for (final entry in cloudManifest.entries.values) {
       if (entry.type != 'reconciliation_state' || entry.deleted) continue;
+      final previouslyAccepted = previousManifest.entries[entry.key];
+      if (previouslyAccepted != null &&
+          !previouslyAccepted.deleted &&
+          previouslyAccepted.hash == entry.hash) {
+        continue;
+      }
       if (await _manifestBuilder.isDeleted(entry.type, entry.id) ||
           await _manifestBuilder.isDeleted('chat', entry.id)) {
         continue;

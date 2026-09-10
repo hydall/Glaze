@@ -455,6 +455,7 @@ class FakeSessionLorebookOverlayStore
 
 class FakeCloudAdapter implements CloudAdapter {
   final Map<String, String> files = {};
+  final List<String> downloadCalls = [];
   final List<String> listFolderCalls = [];
   final Set<String> ensuredFolders = {};
   final Set<String> downloadFailures = {};
@@ -502,6 +503,7 @@ class FakeCloudAdapter implements CloudAdapter {
 
   @override
   Future<String> download(String path) async {
+    downloadCalls.add(path);
     if (downloadFailures.contains(path)) {
       throw Exception('Download failed: $path');
     }
@@ -1324,6 +1326,41 @@ void main() {
       }
     },
   );
+
+  test('push skips reconciliation state already accepted by hash', () async {
+    const sessionId = 'accepted-session';
+    final reconciliationStates = FakeReconciliationStateStore();
+    final world = SyncWorld(reconciliationStateStore: reconciliationStates);
+    final payload = <String, dynamic>{
+      '__reconciliationState': true,
+      'schemaVersion': 2,
+      'sessionId': sessionId,
+      'runs': const <Map<String, dynamic>>[],
+    };
+    final stateEntry = SyncManifestEntry(
+      type: 'reconciliation_state',
+      id: sessionId,
+      path: cloudPath('reconciliation_state', sessionId),
+      updatedAt: 1000,
+      hash: SyncSerialization.computeSyncHash(payload),
+    );
+    final cloudManifest = SyncManifest(
+      deviceId: 'cloud-device',
+      createdAt: 1,
+      lastSync: 1000,
+      entries: {stateEntry.key: stateEntry},
+    );
+    await world.manifestProvider.writeLocalManifest(cloudManifest);
+    world.cloud.files[stateEntry.path] = jsonEncode(payload);
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      cloudManifest.toJson(),
+    );
+
+    await world.engine.pushEntities(onProgress: (_) {});
+
+    expect(world.cloud.downloadCalls, [cloudPath('manifest', 'manifest')]);
+    expect(reconciliationStates.data[sessionId], isNull);
+  });
 
   test('Full sync lifecycle: push → pull → conflict → resolve', () async {
     // ── SCENE 1: Device A pushes to empty cloud ──
