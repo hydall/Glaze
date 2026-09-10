@@ -4,12 +4,15 @@ import 'package:dio/dio.dart';
 
 import '../../db/repositories/character_repo.dart';
 import '../../db/repositories/chat_repo.dart';
+import '../../db/repositories/tracker_repo.dart';
 import '../../db/repositories/tracker_snapshot_repo.dart';
 import '../../models/character.dart';
 import '../../models/character_knowledge_fact.dart';
 import '../../models/chat_message.dart';
 import '../../models/tracker.dart';
+import '../../models/tracker_snapshot.dart';
 import '../../services/card_rewriter/effective_canon_context_loader.dart';
+import '../game_time.dart';
 
 class LedgerCanonAuthority {
   const LedgerCanonAuthority({
@@ -17,37 +20,47 @@ class LedgerCanonAuthority {
     required this.chatRepo,
     required this.canonContextLoader,
     required this.snapshotRepo,
+    required this.trackerRepo,
   });
 
   final CharacterRepo characterRepo;
   final ChatRepo chatRepo;
   final EffectiveCanonContextLoader canonContextLoader;
   final TrackerSnapshotRepo snapshotRepo;
+  final TrackerRepo trackerRepo;
 
-  Future<LedgerCanonContext> load(String sessionId) async {
-    final source = await _loadSourceCharacter(sessionId);
-    final context = await canonContextLoader.load(
-      sessionId: sessionId,
-      sourceCharacter: source,
-    );
-    return LedgerCanonContext(source, context);
-  }
+  Future<LedgerCanonContext> load(String sessionId) =>
+      trackerRepo.db.transaction(() async {
+        final source = await _loadSourceCharacter(sessionId);
+        final context = await canonContextLoader.load(
+          sessionId: sessionId,
+          sourceCharacter: source,
+        );
+        final revision = await trackerRepo.getLedgerManualMutationRevision(
+          sessionId,
+        );
+        return LedgerCanonContext(source, context, revision);
+      });
 
-  Future<LedgerCanonContext> loadReadOnly(String sessionId) async {
-    final source = await _loadSourceCharacter(sessionId);
-    final context = await canonContextLoader.loadReadOnly(
-      sessionId: sessionId,
-      sourceCharacter: source,
-    );
-    return LedgerCanonContext(source, context);
-  }
+  Future<LedgerCanonContext> loadReadOnly(String sessionId) =>
+      trackerRepo.db.transaction(() async {
+        final source = await _loadSourceCharacter(sessionId);
+        final context = await canonContextLoader.loadReadOnly(
+          sessionId: sessionId,
+          sourceCharacter: source,
+        );
+        final revision = await trackerRepo.getLedgerManualMutationRevision(
+          sessionId,
+        );
+        return LedgerCanonContext(source, context, revision);
+      });
 
   Future<LedgerCanonContext> loadReadOnlyFromReconciliationState({
     required String sessionId,
     required Character sourceCharacter,
     required List<Tracker> ledgerTrackers,
     required List<CharacterKnowledgeFact> knowledgeFacts,
-  }) async {
+  }) => trackerRepo.db.transaction(() async {
     final context = await canonContextLoader
         .loadReadOnlyFromReconciliationState(
           sessionId: sessionId,
@@ -55,13 +68,20 @@ class LedgerCanonAuthority {
           ledgerTrackers: ledgerTrackers,
           knowledgeFacts: knowledgeFacts,
         );
-    return LedgerCanonContext(sourceCharacter, context);
-  }
+    final revision = await trackerRepo.getLedgerManualMutationRevision(
+      sessionId,
+    );
+    return LedgerCanonContext(sourceCharacter, context, revision);
+  });
 
   Future<bool> isStillCurrent(
     String sessionId,
     LedgerCanonContext canon,
   ) async {
+    if (await trackerRepo.getLedgerManualMutationRevision(sessionId) !=
+        canon.manualMutationRevision) {
+      return false;
+    }
     final currentSource = await characterRepo.getById(canon.source.id);
     if (currentSource == null) return false;
     return canonContextLoader.isStillCurrentReadOnly(
@@ -146,28 +166,55 @@ class LedgerCanonAuthority {
     String sessionId, {
     int limit = 5,
   }) async {
-    final snaps = await snapshotRepo.getBySessionId(sessionId);
-    final committed = snaps.where((s) => s.committed).toList().reversed;
-    final out = <String>[];
-    for (final s in committed) {
-      String? date;
-      String? day;
-      String? time;
-      for (final t in s.trackers) {
-        if (t.name == 'world:date') {
-          date = t.value;
-        } else if (t.name == 'world:day') {
-          day = t.value;
-        } else if (t.name == 'world:time') {
-          time = t.value;
-        }
+    final snapshotsFuture = snapshotRepo.getBySessionId(sessionId);
+    final sessionFuture = chatRepo.getById(sessionId);
+    final snapshots = await snapshotsFuture;
+    final session = await sessionFuture;
+    if (session == null || limit <= 0) return const [];
+    return recentActiveGameClock(session.messages, snapshots, limit: limit);
+  }
+
+  static List<String> recentActiveGameClock(
+    Iterable<ChatMessage> messages,
+    Iterable<TrackerSnapshot> snapshots, {
+    int limit = 5,
+  }) {
+    if (limit <= 0) return const [];
+    final byAnchor = {
+      for (final snapshot in snapshots)
+        (snapshot.messageId, snapshot.swipeId, snapshot.agentSwipeId): snapshot,
+    };
+    final activeNewestFirst = <TrackerSnapshot>[];
+    for (final message in messages.toList(growable: false).reversed) {
+      if (message.role != 'assistant' ||
+          message.isHidden ||
+          message.isError ||
+          message.isTyping) {
+        continue;
       }
-      if (date != null && time != null) {
-        out.add('$date · day ${day ?? '?'} · $time');
+      final snapshot =
+          byAnchor[(message.id, message.swipeId, message.agentSwipeId)];
+      if (snapshot?.committed == true) activeNewestFirst.add(snapshot!);
+    }
+    return recentGameClockFromSnapshots(activeNewestFirst, limit: limit);
+  }
+
+  static List<String> recentGameClockFromSnapshots(
+    Iterable<TrackerSnapshot> snapshots, {
+    int limit = 5,
+  }) {
+    final out = <String>[];
+    if (limit <= 0) return out;
+    // Repository order is newest-first. Select the recent valid window first,
+    // then reverse only that window for prompt chronology.
+    for (final snapshot in snapshots.where((item) => item.committed)) {
+      final clock = GameTimeState.fromTrackers(snapshot.trackers);
+      if (clock.format() != null) {
+        out.add('${clock.date} · day ${clock.day} · ${clock.time}');
       }
       if (out.length >= limit) break;
     }
-    return out;
+    return out.reversed.toList(growable: false);
   }
 
   Future<Character> _loadSourceCharacter(String sessionId) async {
@@ -186,10 +233,15 @@ class LedgerCanonAuthority {
 }
 
 class LedgerCanonContext {
-  const LedgerCanonContext(this.source, this.context);
+  const LedgerCanonContext(
+    this.source,
+    this.context,
+    this.manualMutationRevision,
+  );
 
   final Character source;
   final EffectiveCanonContext context;
+  final int manualMutationRevision;
 }
 
 class LedgerCommitStale implements Exception {

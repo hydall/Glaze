@@ -141,6 +141,7 @@ class StudioLedgerService {
              chatRepo: chatRepo,
              canonContextLoader: canonContextLoader,
              snapshotRepo: _snapshotRepo,
+             trackerRepo: _trackerRepo,
            ) {
     _replacementBasisResolver =
         replacementBasisResolver ??

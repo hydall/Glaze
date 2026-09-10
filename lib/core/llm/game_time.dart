@@ -30,6 +30,28 @@ class GameTimeState {
 
   bool get isEmpty => time == null && date == null && day == null;
 
+  static GameTimeState parse({
+    required String time,
+    required String date,
+    required String day,
+  }) {
+    final rawTime = time.trim();
+    final rawDate = date.trim();
+    final rawDay = day.trim();
+    final parsedDay = RegExp(r'^\d+$').hasMatch(rawDay)
+        ? int.tryParse(rawDay)
+        : null;
+    return GameTimeState(
+      time: RegExp(r'^\d{1,2}:\d{1,2}$').hasMatch(rawTime)
+          ? _normalizeTime(rawTime)
+          : null,
+      date: RegExp(r'^\d{2}[.-]\d{2}[.-]\d{4}$').hasMatch(rawDate)
+          ? _normalizeDate(rawDate)
+          : null,
+      day: parsedDay != null && parsedDay >= 0 ? parsedDay : null,
+    );
+  }
+
   static GameTimeState fromTrackers(Iterable<Tracker> trackers) {
     String? time;
     String? date;
