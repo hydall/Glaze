@@ -740,6 +740,8 @@ class SyncWorld {
     reconciliationStates,
     sessionLorebookOverlays,
     _reconcilePulledSessions,
+    0,
+    Duration.zero,
   );
 }
 
@@ -799,6 +801,9 @@ SyncEngine _realStoreEngine({
     (_) async {},
     reconciliationStore,
     null,
+    null,
+    0,
+    Duration.zero,
   );
 }
 

@@ -66,6 +66,8 @@ class SyncEngine {
   final CharacterDeletionStore _characterDeletionStore;
   final Future<void> Function(LorebookActivations) _saveLorebookActivations;
   final Future<void> Function(Set<String>)? _reconcilePulledSessions;
+  final int _operationDelayMs;
+  final Duration _wipePollInterval;
   final SyncQueue _queue = SyncQueue();
   late final SyncBinaryAssetSyncer _binarySyncer;
   bool _includeApiKeys = false;
@@ -100,6 +102,8 @@ class SyncEngine {
     this._reconciliationStateStore,
     this._sessionLorebookOverlayStore,
     this._reconcilePulledSessions,
+    this._operationDelayMs = 300,
+    this._wipePollInterval = const Duration(seconds: 2),
   ]) {
     _binarySyncer = SyncBinaryAssetSyncer(
       _adapter,
@@ -263,7 +267,7 @@ class SyncEngine {
       final result = await _queue.enqueueAll(
         tasks,
         concurrency: 3,
-        delayMs: 300,
+        delayMs: _operationDelayMs,
       );
       taskErrors = result.errors;
     }
@@ -564,7 +568,7 @@ class SyncEngine {
       final result = await _queue.enqueueAll(
         tasks,
         concurrency: 3,
-        delayMs: 300,
+        delayMs: _operationDelayMs,
       );
       return result.errors;
     }
@@ -738,7 +742,7 @@ class SyncEngine {
 
     onProgress(const SyncProgress(message: 'Waiting for cloud to finalize...'));
     for (var i = 0; i < 10; i++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
+      await Future<void>.delayed(_wipePollInterval);
       try {
         final files = await _adapter.listFolder(cloudBase);
         if (files.isEmpty) break;

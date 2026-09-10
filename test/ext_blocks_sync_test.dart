@@ -528,6 +528,11 @@ class SyncWorld {
     sessionDeletions,
     characterDeletions,
     (_) async {},
+    null,
+    null,
+    null,
+    0,
+    Duration.zero,
   );
 }
 

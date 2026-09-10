@@ -3,8 +3,7 @@ import 'dart:io';
 
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
-import 'package:flutter_test/flutter_test.dart' hide test;
-import 'package:flutter_test/flutter_test.dart' as flutter_test show test;
+import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/services/backup/js_backup_importer.dart';
@@ -12,17 +11,6 @@ import 'package:glaze_flutter/core/services/image_storage_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 AppDatabase _testDb() => AppDatabase.forTesting(NativeDatabase.memory());
-
-var _shardIndex = 0;
-var _testIndex = 0;
-const _shardCount = 4;
-
-void test(String description, dynamic Function() body) {
-  final index = _testIndex++;
-  if (index % _shardCount == _shardIndex) {
-    flutter_test.test(description, body);
-  }
-}
 
 class _TestImageStorage extends ImageStorageService {
   _TestImageStorage(Directory directory) : super(directory.path);
@@ -41,11 +29,7 @@ class _TestImageStorage extends ImageStorageService {
   }
 }
 
-void runDbMigrationTests(int shardIndex) {
-  assert(shardIndex >= 0 && shardIndex < _shardCount);
-  _shardIndex = shardIndex;
-  _testIndex = 0;
-
+void runDbMigrationTests() {
   group('Backup importer schema safety', () {
     late AppDatabase db;
     late Directory imageDirectory;
