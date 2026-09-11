@@ -1,50 +1,66 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../../../../core/state/lorebook_embedding_provider.dart';
 import '../../../../../shared/theme/app_colors.dart';
 import '../../../../../shared/widgets/list_controls.dart';
 import '../../../../../shared/widgets/menu_group.dart';
 import '../../../../settings/api_settings_screen.dart';
 import 'memory_settings_draft.dart';
 
-/// "Retrieval" — how a memory is matched and where it is injected.
+/// Retrieval — how a memory is matched and where it is injected, plus the link
+/// to where its generation API now lives.
 ///
-/// This is also where the generation API *used* to be configured, with a
-/// connection dropdown and a model dropdown that wrote straight through to
+/// Returned as two lists: [apiSections], which belongs in the always-visible
+/// part of the form because it is the one row people come here looking for,
+/// and [matchingSections], which is tuning and sits behind a disclosure.
+///
+/// The generation API *used* to be configured right here, with a connection
+/// dropdown and a model dropdown that wrote straight through to
 /// `PipelineSettings` on change while every other control on the sheet waited
 /// for Save — so Cancel silently kept the new model. Both rows now live with
-/// the app's other pipeline slots in API settings, and what is left here is a
-/// link to them.
-class MemoryRetrievalTab extends ConsumerWidget {
+/// the app's other pipeline slots in API settings.
+class MemoryRetrievalSections {
   final MemorySettingsDraft draft;
 
   /// Called after any mutation of [draft] so the host can rebuild.
   final VoidCallback onChanged;
 
-  final ScrollController? controller;
+  /// Whether the active API preset has semantic search on. The whole vector
+  /// block is meaningless without it; the stored values are left untouched, so
+  /// flipping the API toggle back on brings the previous choices back.
+  final bool vectorAvailable;
 
-  const MemoryRetrievalTab({
-    super.key,
+  const MemoryRetrievalSections({
     required this.draft,
     required this.onChanged,
-    this.controller,
+    required this.vectorAvailable,
   });
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // The whole vector section is meaningless while semantic search is off for
-    // the active API preset. The stored values are left untouched — flipping
-    // the API toggle back on brings the previous choices back.
-    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
-    return ListView(
-      controller: controller,
-      padding: EdgeInsets.only(
-        top: MediaQuery.paddingOf(context).top + 12,
-        bottom: MediaQuery.paddingOf(context).bottom + 24,
+  List<Widget> apiSections(BuildContext context) {
+    return [
+      MenuGroup(
+        header: 'tab_api'.tr(),
+        description: 'memory_books_api_moved_desc'.tr(),
+        items: [
+          MenuItem(
+            icon: Icons.hub_outlined,
+            label: 'memory_books_generation_connection'.tr(),
+            trailing: Icon(
+              Icons.chevron_right,
+              size: 22,
+              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+            onTap: () => showApiSettingsSheet(
+              context,
+              focusSection: ApiSettingsSection.memoryBook,
+            ),
+          ),
+        ],
       ),
-      children: [
+    ];
+  }
+
+  List<Widget> matchingSections(BuildContext context) {
+    return [
         MenuGroup(
           header: 'label_embedding_target'.tr(),
           items: [
@@ -59,7 +75,7 @@ class MemoryRetrievalTab extends ConsumerWidget {
         ),
         if (vectorAvailable)
           MenuGroup(
-            header: 'search'.tr(),
+            header: 'memory_section_search'.tr(),
             items: [
               MenuSwitchItem(
                 label: 'label_vector_search'.tr(),
@@ -89,27 +105,7 @@ class MemoryRetrievalTab extends ConsumerWidget {
               ],
             ],
           ),
-        MenuGroup(
-          header: 'tab_api'.tr(),
-          description: 'memory_books_api_moved_desc'.tr(),
-          items: [
-            MenuItem(
-              icon: Icons.hub_outlined,
-              label: 'memory_books_generation_connection'.tr(),
-              trailing: Icon(
-                Icons.chevron_right,
-                size: 22,
-                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-              ),
-              onTap: () => showApiSettingsSheet(
-                context,
-                focusSection: ApiSettingsSection.memoryBook,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
+    ];
   }
 
   void _pickInjectionTarget(BuildContext context) {
@@ -135,10 +131,13 @@ class MemoryRetrievalTab extends ConsumerWidget {
     );
   }
 
+  /// Key-match modes had been labelled with the *packing* strings, so the row
+  /// read "Glaze" / "Plain" — words about how memories are packed, not about
+  /// what a query is matched against.
   static String _keyMatchLabel(String mode) => switch (mode) {
-    'glaze' => 'memory_packing_glaze'.tr(),
-    'both' => 'memory_packing_both'.tr(),
-    _ => 'memory_packing_plain'.tr(),
+    'glaze' => 'memory_keymatch_glaze'.tr(),
+    'both' => 'memory_keymatch_both'.tr(),
+    _ => 'memory_keymatch_plain'.tr(),
   };
 
   void _pickKeyMatchMode(BuildContext context) {

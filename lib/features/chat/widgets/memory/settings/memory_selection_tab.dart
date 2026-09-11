@@ -7,15 +7,14 @@ import '../../../../../shared/widgets/list_controls.dart';
 import '../../../../../shared/widgets/menu_group.dart';
 import 'memory_settings_draft.dart';
 
-/// "Selection" — how many memories are chosen, how they are packed, and how
-/// the retrieval query is built.
+/// Selection — how many memories are chosen, how they are packed, and how the
+/// retrieval query is built.
 ///
-/// This is the section that used to hide behind an `ExpansionTile` which
-/// defaulted to *open*, so the sheet's own "advanced" disclosure never
-/// actually deferred anything. It is a tab now: the ordinary case never has to
-/// scroll past it, and the sliders are `MenuRangeItem`s instead of bare
-/// `Slider`s with a hand-built label row.
-class MemorySelectionTab extends StatelessWidget {
+/// Returned as two lists: [budgetSections] and [selectorSections]. Both are
+/// tuning knobs rather than things to read on the way in, so the host puts
+/// each behind its own disclosure — which is what the old `ExpansionTile`
+/// was for before it was left defaulting to *open*.
+class MemorySelectionSections {
   final MemorySettingsDraft draft;
 
   /// Called after any mutation of [draft] so the host can rebuild.
@@ -25,25 +24,14 @@ class MemorySelectionTab extends StatelessWidget {
   /// injection budget, the other being the absolute cap set here.
   final double budgetPercent;
 
-  final ScrollController? controller;
-
-  const MemorySelectionTab({
-    super.key,
+  const MemorySelectionSections({
     required this.draft,
     required this.onChanged,
     required this.budgetPercent,
-    this.controller,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      controller: controller,
-      padding: EdgeInsets.only(
-        top: MediaQuery.paddingOf(context).top + 12,
-        bottom: MediaQuery.paddingOf(context).bottom + 24,
-      ),
-      children: [
+  List<Widget> budgetSections(BuildContext context) {
+    return [
         MenuGroup(
           header: 'memory_budget'.tr(),
           items: [
@@ -165,9 +153,12 @@ class MemorySelectionTab extends StatelessWidget {
             ],
           ],
         ),
+    ];
+  }
+
+  List<Widget> selectorSections(BuildContext context) {
+    return [
         MenuGroup(
-          header: 'memory_selector_settings'.tr(),
-          description: 'memory_selector_advanced_desc'.tr(),
           items: [
             MenuSwitchItem(
               label: 'memory_selector_diversity'.tr(),
@@ -296,8 +287,7 @@ class MemorySelectionTab extends StatelessWidget {
             ),
           ],
         ),
-      ],
-    );
+    ];
   }
 
   // ── Budget ───────────────────────────────────────────────────────

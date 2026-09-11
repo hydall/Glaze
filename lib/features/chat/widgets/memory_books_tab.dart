@@ -20,8 +20,6 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/swipe_tab_switcher.dart';
 import '../../../shared/widgets/tab_slide_switcher.dart';
 import '../../memory/controllers/memory_book_controller.dart';
-import 'memory/memory_books_config_section.dart';
-import 'memory/memory_books_controls.dart';
 import 'memory/memory_books_toolbar.dart';
 import 'memory/memory_draft_card.dart';
 import 'memory/memory_entry_card.dart';
@@ -29,15 +27,39 @@ import 'memory/memory_tab_store.dart';
 import 'memory_entry_editor_sheet.dart';
 import 'memory_generation_settings_sheet.dart';
 
-const Color _kDanger = Color(0xFFFF5252);
-
 /// What an approved entry can be narrowed to. The counters that used to be
 /// three read-only tiles are these chips: the number is still on screen, and
 /// it now does something.
-enum _EntryFilter { all, active, needsRebuild, indexed }
+enum _EntryFilter { all, active, needsRebuild }
 
 /// The same for drafts — the three states a draft is actually triaged by.
 enum _DraftFilter { all, ready, needsGeneration, failed }
+
+/// What the host sheet drives from its own chrome: the settings button in the
+/// header and the extended FAB over the list. The tab owns the controller, so
+/// it hands these out once it is mounted rather than the sheet reaching into
+/// it.
+class MemoryBooksActions {
+  final VoidCallback openSettings;
+  final VoidCallback scanChat;
+  final VoidCallback addEntry;
+  final VoidCallback reindex;
+  final VoidCallback deleteIndexes;
+  final VoidCallback? deleteAllDrafts;
+  final bool isReindexing;
+  final bool showIndexActions;
+
+  const MemoryBooksActions({
+    required this.openSettings,
+    required this.scanChat,
+    required this.addEntry,
+    required this.reindex,
+    required this.deleteIndexes,
+    required this.deleteAllDrafts,
+    required this.isReindexing,
+    required this.showIndexActions,
+  });
+}
 
 /// Memory Books tab of the Memory sheet — "Shelf" layout.
 ///
@@ -50,11 +72,16 @@ class MemoryBooksTab extends ConsumerStatefulWidget {
   final String charId;
   final List<ChatMessage> messages;
 
+  /// Published whenever the set changes, so the host sheet can render the
+  /// header button and the FAB from it.
+  final ValueChanged<MemoryBooksActions>? onActions;
+
   const MemoryBooksTab({
     super.key,
     required this.sessionId,
     required this.charId,
     this.messages = const [],
+    this.onActions,
   });
 
   @override
@@ -140,20 +167,10 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     return keys.any((key) => key.toLowerCase().contains(needle));
   }
 
-  /// The "Indexed" chip disappears when the API turns semantic search off.
-  /// Falling back to "All" keeps the list from going silently empty under a
-  /// filter that is no longer on screen to clear.
-  _EntryFilter _effectiveEntryFilter(bool vectorAvailable) =>
-      !vectorAvailable && _entryFilter == _EntryFilter.indexed
-      ? _EntryFilter.all
-      : _entryFilter;
-
-  bool _passesEntryFilter(MemoryEntry entry, bool vectorAvailable) =>
-      switch (_effectiveEntryFilter(vectorAvailable)) {
+  bool _passesEntryFilter(MemoryEntry entry) => switch (_entryFilter) {
     _EntryFilter.all => true,
     _EntryFilter.active => entry.status == 'active',
     _EntryFilter.needsRebuild => entry.status == 'needs_rebuild',
-    _EntryFilter.indexed => _embeddingStatuses[entry.id] == 'indexed',
   };
 
   bool _passesDraftFilter(MemoryDraft draft) => switch (_draftFilter) {
@@ -171,15 +188,11 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
       _EntryFilter.needsRebuild => entries
           .where((e) => e.status == 'needs_rebuild')
           .length,
-      _EntryFilter.indexed => entries
-          .where((e) => _embeddingStatuses[e.id] == 'indexed')
-          .length,
     };
     final label = switch (filter) {
       _EntryFilter.all => 'memory_books_filter_all'.tr(),
-      _EntryFilter.active => 'memory_books_status_active'.tr(),
-      _EntryFilter.needsRebuild => 'memory_books_entry_needs_rebuild'.tr(),
-      _EntryFilter.indexed => 'memory_books_filter_indexed'.tr(),
+      _EntryFilter.active => 'memory_books_filter_active'.tr(),
+      _EntryFilter.needsRebuild => 'memory_books_filter_rebuild'.tr(),
     };
     return '$label $count';
   }
@@ -200,13 +213,32 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     final label = switch (filter) {
       _DraftFilter.all => 'memory_books_filter_all'.tr(),
       _DraftFilter.ready => 'memory_books_filter_ready'.tr(),
-      _DraftFilter.needsGeneration => 'memory_books_badge_needs_gen'.tr(),
-      _DraftFilter.failed => 'memory_books_badge_needs_regen'.tr(),
+      _DraftFilter.needsGeneration => 'memory_books_filter_drafts'.tr(),
+      _DraftFilter.failed => 'memory_books_filter_failed'.tr(),
     };
     return '$label $count';
   }
 
   // ─── Build ───────────────────────────────────────────────────────
+
+  /// Published after the frame, never during build: the host rebuilds on it.
+  void _publishActions(int draftCount, bool vectorAvailable) {
+    final publish = widget.onActions;
+    if (publish == null) return;
+    final actions = MemoryBooksActions(
+      openSettings: _openSettings,
+      scanChat: _scanChat,
+      addEntry: _addEntry,
+      reindex: _reindexAll,
+      deleteIndexes: _deleteAllMemoryIndexes,
+      deleteAllDrafts: draftCount > 1 ? _deleteAllDrafts : null,
+      isReindexing: _ctrl.isReindexing,
+      showIndexActions: vectorAvailable,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) publish(actions);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -228,6 +260,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     // Vector affordances (reindex, index badges, the index filter) only make
     // sense while the active API preset has semantic search switched on.
     final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
+    _publishActions(scanDrafts.length, vectorAvailable);
 
     return Column(
       children: [
@@ -235,7 +268,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
         // the pinned controls start below it so they do not sit under the
         // blurred strip the sheet paints over the top of its body.
         SizedBox(height: MediaQuery.paddingOf(context).top + 8),
-        _buildPinnedControls(curatedEntries, scanDrafts, vectorAvailable),
+        _buildPinnedControls(curatedEntries, scanDrafts),
         Expanded(
           child: SwipeTabSwitcher(
             index: _tabIndex,
@@ -244,32 +277,25 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             child: ListView(
               padding: EdgeInsets.fromLTRB(
                 0,
-                12,
+                4,
                 0,
-                MediaQuery.paddingOf(context).bottom + 24,
+                // Clears the nav bar and the extended FAB the host floats
+                // over the bottom of this list.
+                MediaQuery.paddingOf(context).bottom + 88,
               ),
               children: [
-                MemoryBooksConfigSection(
-                  rows: _ctrl.configRows,
-                  onOpenSettings: _openSettings,
-                  modeLabel: _ctrl.modeLabel,
-                  modelLabel: _ctrl.searchModelLabel,
-                ),
-                MemoryBooksToolbar(
-                  onOpenSettings: _openSettings,
-                  onScanChat: _scanChat,
-                  onAddEntry: _addEntry,
-                  isReindexing: _ctrl.isReindexing,
-                  onReindex: _reindexAll,
-                  onDeleteIndexes: _deleteAllMemoryIndexes,
-                  showIndexActions: vectorAvailable,
-                ),
-                if (draftsNeedingGen.isNotEmpty || isGenerating)
+                // Drafts only. On the approved tab there is nothing to
+                // generate, so this was a panel about the other list.
+                if (_tabIndex != _tabApproved &&
+                    (draftsNeedingGen.isNotEmpty || isGenerating))
                   MemoryBatchPanel(
                     pendingCount: draftsNeedingGen.length,
                     isGenerating: isGenerating,
                     onGenerateBatch: _batchGenerate,
                   ),
+                // Under the batch panel, not above it: the filter narrows the
+                // list it sits on top of, and the panel is about the queue.
+                _buildFilters(curatedEntries, scanDrafts),
                 TabSlideSwitcher(
                   index: _tabIndex,
                   child: Padding(
@@ -297,15 +323,16 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   Widget _buildPinnedControls(
     List<MemoryEntry> entries,
     List<MemoryDraft> drafts,
-    bool vectorAvailable,
   ) {
-    final entryFilters = [
-      _EntryFilter.all,
-      _EntryFilter.active,
-      _EntryFilter.needsRebuild,
-      if (vectorAvailable) _EntryFilter.indexed,
-    ];
+    // Search earns its row only once the list is long enough to need it;
+    // below that it is a tall empty field above four rows you can already see.
+    final showSearch =
+        (_tabIndex == _tabApproved ? entries.length : drafts.length) > 6 ||
+        _query.isNotEmpty;
     return Column(
+      // The chip bar sizes to its content; a centring Column would inset it
+      // from the left while every other row here is full width.
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -329,29 +356,37 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             onChanged: _setTab,
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: GlazeTextField(
-            controller: _searchCtrl,
-            hint: 'memory_books_search_hint'.tr(),
-            onChanged: (value) => setState(() => _query = value.trim()),
-          ),
-        ),
-        if (_tabIndex == _tabApproved)
-          GlazeFilterChipBar<_EntryFilter>(
-            current: _effectiveEntryFilter(vectorAvailable),
-            options: entryFilters,
-            labelBuilder: (filter) => _entryFilterLabel(filter, entries),
-            onSelected: (filter) => setState(() => _entryFilter = filter),
-          )
-        else
-          GlazeFilterChipBar<_DraftFilter>(
-            current: _draftFilter,
-            options: _DraftFilter.values,
-            labelBuilder: (filter) => _draftFilterLabel(filter, drafts),
-            onSelected: (filter) => setState(() => _draftFilter = filter),
+        if (showSearch)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: GlazeTextField(
+              controller: _searchCtrl,
+              hint: 'memory_books_search_hint'.tr(),
+              onChanged: (value) => setState(() => _query = value.trim()),
+            ),
           ),
       ],
+    );
+  }
+
+  /// The status filter, scrolling with the list rather than pinned: it belongs
+  /// to the list it narrows, and under the batch panel rather than above it.
+  Widget _buildFilters(List<MemoryEntry> entries, List<MemoryDraft> drafts) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: _tabIndex == _tabApproved
+          ? GlazeFilterChipBar<_EntryFilter>(
+              current: _entryFilter,
+              options: _EntryFilter.values,
+              labelBuilder: (filter) => _entryFilterLabel(filter, entries),
+              onSelected: (filter) => setState(() => _entryFilter = filter),
+            )
+          : GlazeFilterChipBar<_DraftFilter>(
+              current: _draftFilter,
+              options: _DraftFilter.values,
+              labelBuilder: (filter) => _draftFilterLabel(filter, drafts),
+              onSelected: (filter) => setState(() => _draftFilter = filter),
+            ),
     );
   }
 
@@ -360,17 +395,13 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     final visible = entries
         .where(
           (entry) =>
-              _passesEntryFilter(entry, vectorAvailable) &&
+              _passesEntryFilter(entry) &&
               _matchesQuery(entry.title, entry.content, entry.keys),
         )
         .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        MemorySectionHeader(
-          title: 'memory_books_section_approved'.tr(),
-          count: visible.length,
-        ),
         if (visible.isEmpty)
           _buildEmpty(
             entries.isEmpty
@@ -406,17 +437,6 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        MemorySectionHeader(
-          title: 'memory_books_section_pending'.tr(),
-          count: visible.length,
-          action: drafts.length > 1
-              ? MemoryActionChip(
-                  label: 'memory_books_delete_all_pending'.tr(),
-                  color: _kDanger,
-                  onTap: _deleteAllDrafts,
-                )
-              : null,
-        ),
         if (visible.isEmpty)
           _buildEmpty(
             drafts.isEmpty

@@ -1875,7 +1875,7 @@
   "memory_provider_custom": "Свой провайдер",
   "memory_select_current_api": "Текущий API",
   "memory_select_custom": "Свой",
-  "memory_size_auto": "Auto",
+  "memory_size_auto": "Авто",
   "memory_size_small": "Малый",
   "memory_size_medium": "Средний",
   "memory_size_large": "Большой",
@@ -2905,18 +2905,30 @@
     "one": "{} токен",
     "few": "{} токена",
     "many": "{} токенов",
-    "other": "{} токена"
+    "other": "{} токенов"
   },
   "memory_messages_n": {
     "one": "{} сообщение",
     "few": "{} сообщения",
     "many": "{} сообщений",
-    "other": "{} сообщения"
+    "other": "{} сообщений"
   },
   "memory_books_needs_generation_n": {
     "one": "{} черновик требует генерации",
     "few": "{} черновика требуют генерации",
     "many": "{} черновиков требуют генерации",
-    "other": "{} черновика требуют генерации"
-  }
+    "other": "{} черновиков требуют генерации"
+  },
+  "memory_books_filter_active": "Активные",
+  "memory_books_filter_rebuild": "Пересборка",
+  "memory_books_filter_drafts": "Черновики",
+  "memory_books_filter_failed": "С ошибкой",
+  "memory_section_search": "Поиск и совпадения",
+  "memory_keymatch_plain": "Только текст",
+  "memory_keymatch_glaze": "Ключи Glaze",
+  "memory_keymatch_both": "Текст и ключи",
+  "memory_section_budget": "Бюджет и упаковка",
+  "memory_books_fab": "Добавить память",
+  "memory_books_add_manual": "Написать вручную",
+  "memory_books_scan_chat_hint": "Найти в чате участки, которые ещё не покрыты памятью, и создать черновики."
 }

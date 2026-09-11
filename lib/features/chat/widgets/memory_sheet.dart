@@ -9,6 +9,8 @@ import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../chat_provider.dart';
+import 'memory/memory_books_controls.dart';
+import 'memory/memory_books_toolbar.dart';
 import 'memory/memory_tab_store.dart';
 import 'memory_books_tab.dart';
 import 'summary_tab.dart';
@@ -45,6 +47,12 @@ class _MemorySheetState extends ConsumerState<MemorySheet> {
   /// never built — the books tab queries an embedding status per entry on
   /// first build.
   final Set<MemoryTab> _visited = {};
+
+  /// Published by [MemoryBooksTab] once it is mounted. The books tab owns the
+  /// controller, so the sheet's own chrome — the header settings button and
+  /// the FAB — is driven from what the tab hands out rather than from the
+  /// sheet reaching into it.
+  MemoryBooksActions? _booksActions;
 
   @override
   void initState() {
@@ -104,7 +112,30 @@ class _MemorySheetState extends ConsumerState<MemorySheet> {
       actions: [
         if (tab == MemoryTab.summary && session != null)
           _summaryToggle(session.id),
+        if (tab == MemoryTab.books && _booksActions != null)
+          SheetViewAction(
+            // The chat input bar's round glass button, not a bare icon: this
+            // is the one control the books tab keeps in the chrome, and it
+            // should read as a button.
+            icon: MemoryCircleButton(
+              icon: Icons.tune_rounded,
+              label: 'memory_books_settings_title'.tr(),
+              onTap: _booksActions!.openSettings,
+            ),
+            onPressed: _booksActions!.openSettings,
+          ),
       ],
+      floatingActionButton: tab == MemoryTab.books && _booksActions != null
+          ? MemoryBooksActionsFab(
+              onScanChat: _booksActions!.scanChat,
+              onAddEntry: _booksActions!.addEntry,
+              isReindexing: _booksActions!.isReindexing,
+              onReindex: _booksActions!.reindex,
+              onDeleteIndexes: _booksActions!.deleteIndexes,
+              showIndexActions: _booksActions!.showIndexActions,
+              onDeleteAllDrafts: _booksActions!.deleteAllDrafts,
+            )
+          : null,
       body: session == null || tab == null
           ? const Center(child: GlazeSpinner())
           : IndexedStack(
@@ -120,6 +151,10 @@ class _MemorySheetState extends ConsumerState<MemorySheet> {
                         sessionId: session.id,
                         charId: widget.charId,
                         messages: session.messages,
+                        onActions: (actions) {
+                          if (!mounted) return;
+                          setState(() => _booksActions = actions);
+                        },
                       )
                     : const SizedBox.shrink(),
               ],

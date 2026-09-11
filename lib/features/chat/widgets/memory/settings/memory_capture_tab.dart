@@ -7,13 +7,19 @@ import '../../../../../shared/widgets/list_controls.dart';
 import '../../../../../shared/widgets/menu_group.dart';
 import 'memory_settings_draft.dart';
 
-/// "Capture" — when a draft is created and what prompt writes it.
+/// Capture — when a draft is created and what prompt writes it. The part of
+/// the form that is worth reading on the way in, so it is never behind a
+/// disclosure.
+///
+/// A section list rather than a screen: the settings sheet is one scroll, not
+/// a tab set. Three tabs put a third of the form behind a strip that scrolls
+/// past ~2.35 tabs, which on a phone meant the last tab was simply off-screen.
 ///
 /// Every row here was a Material control: `SwitchListTile`, a
 /// `SegmentedButton` for the mode, a `DropdownButton<int>` that built one
 /// item per step (two hundred of them for the interval), and a
 /// `GestureDetector` over a translucent `Container` for the prompt picker.
-class MemoryCaptureTab extends StatelessWidget {
+class MemoryCaptureSections {
   final MemorySettingsDraft draft;
   final List<MemoryPromptPreset> customPrompts;
 
@@ -22,27 +28,17 @@ class MemoryCaptureTab extends StatelessWidget {
 
   final VoidCallback onViewPrompt;
   final VoidCallback onManagePrompts;
-  final ScrollController? controller;
 
-  const MemoryCaptureTab({
-    super.key,
+  const MemoryCaptureSections({
     required this.draft,
     required this.customPrompts,
     required this.onChanged,
     required this.onViewPrompt,
     required this.onManagePrompts,
-    this.controller,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      controller: controller,
-      padding: EdgeInsets.only(
-        top: MediaQuery.paddingOf(context).top + 12,
-        bottom: MediaQuery.paddingOf(context).bottom + 24,
-      ),
-      children: [
+  List<Widget> build(BuildContext context) {
+    return [
         MenuGroup(
           items: [
             MenuSwitchItem(
@@ -166,8 +162,7 @@ class MemoryCaptureTab extends StatelessWidget {
             ),
           ],
         ),
-      ],
-    );
+    ];
   }
 
   // ── Pickers ──────────────────────────────────────────────────────

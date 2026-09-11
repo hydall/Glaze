@@ -2883,5 +2883,17 @@
   "memory_books_needs_generation_n": {
     "one": "{} draft needs generation",
     "other": "{} drafts need generation"
-  }
+  },
+  "memory_books_filter_active": "Active",
+  "memory_books_filter_rebuild": "Rebuild",
+  "memory_books_filter_drafts": "Drafts",
+  "memory_books_filter_failed": "Failed",
+  "memory_section_search": "Search and matching",
+  "memory_keymatch_plain": "Plain text",
+  "memory_keymatch_glaze": "Glaze keys",
+  "memory_keymatch_both": "Text and keys",
+  "memory_section_budget": "Budget and packing",
+  "memory_books_fab": "Add memory",
+  "memory_books_add_manual": "Write one myself",
+  "memory_books_scan_chat_hint": "Find chat stretches that no memory covers yet and draft them."
 }

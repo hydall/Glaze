@@ -5,12 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/services/memory_prompt_presets.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/memory_settings_provider.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../../shared/widgets/glaze_tab_bar.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
-import '../../../shared/widgets/swipe_tab_switcher.dart';
-import '../../../shared/widgets/tab_slide_switcher.dart';
 import 'custom_prompt_manager_sheet.dart';
 import 'memory/settings/memory_capture_tab.dart';
 import 'memory/settings/memory_retrieval_tab.dart';
@@ -21,13 +20,19 @@ import 'memory/settings/memory_settings_draft.dart';
 ///
 /// Was a single 1223-line class of Material controls inside a
 /// `GlazeBottomSheet` body — which lays its child out unbounded, so a form
-/// this size never had a viewport of its own. It is a [SheetView] now, with
-/// the form split across three tabs and every row from the kit's menu set:
-/// the `SegmentedButton`s became [MenuSelectorItem] pickers, the
-/// `SwitchListTile`s [MenuSwitchItem], the bare `Slider`s and the
+/// this size never had a viewport of its own. It is a [SheetView] now, built
+/// from the kit's menu rows: the `SegmentedButton`s became [MenuSelectorItem]
+/// pickers, the `SwitchListTile`s [MenuSwitchItem], the bare `Slider`s and the
 /// `DropdownButton<int>`s (which built one entry per step — two hundred of
 /// them for the auto-create interval) [MenuRangeItem], and the `AlertDialog`
 /// help popups became the rows' own descriptions.
+///
+/// One scroll, not a tab set. Splitting the form across three tabs read as
+/// tidier on paper and was worse in the hand: [GlazeTabBar] scrolls past ~2.35
+/// tabs, so at phone width the third tab sat off-screen with no affordance
+/// saying it existed. What the form actually needed was for the two thirds
+/// nobody tunes daily to be *collapsed*, which is what
+/// [MenuCollapsibleSection] is for.
 class MemoryGenerationSettingsSheet extends ConsumerStatefulWidget {
   final MemoryBookSettings settings;
   final String? sessionId;
@@ -67,18 +72,8 @@ class MemoryGenerationSettingsSheet extends ConsumerStatefulWidget {
 
 class _MemoryGenerationSettingsSheetState
     extends ConsumerState<MemoryGenerationSettingsSheet> {
-  static const int _tabCount = 3;
-
   late final MemorySettingsDraft _draft;
-  int _tab = 0;
-
-  /// One per tab. `SheetView` coordinates its drag-to-expand with the body's
-  /// scroll position, and during a slide both tab bodies are alive — sharing
-  /// one controller would attach it to two scroll views at once.
-  final List<ScrollController> _scrollControllers = List.generate(
-    _tabCount,
-    (_) => ScrollController(),
-  );
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -91,9 +86,7 @@ class _MemoryGenerationSettingsSheetState
 
   @override
   void dispose() {
-    for (final controller in _scrollControllers) {
-      controller.dispose();
-    }
+    _scrollController.dispose();
     _draft.dispose();
     super.dispose();
   }
@@ -117,11 +110,28 @@ class _MemoryGenerationSettingsSheetState
 
   @override
   Widget build(BuildContext context) {
-    final custom = _customPrompts;
+    final capture = MemoryCaptureSections(
+      draft: _draft,
+      customPrompts: _customPrompts,
+      onChanged: _onChanged,
+      onViewPrompt: _viewCurrentPrompt,
+      onManagePrompts: _openPromptManager,
+    );
+    final selection = MemorySelectionSections(
+      draft: _draft,
+      onChanged: _onChanged,
+      budgetPercent: widget.settings.maxInjectionBudgetPercent,
+    );
+    final retrieval = MemoryRetrievalSections(
+      draft: _draft,
+      onChanged: _onChanged,
+      vectorAvailable: ref.watch(vectorSearchAvailableProvider),
+    );
+
     return SheetView(
       title: 'memory_books_settings_title'.tr(),
       showBack: true,
-      scrollController: _scrollControllers[_tab],
+      scrollController: _scrollController,
       actions: [
         SheetViewAction(
           icon: const Icon(Icons.check_rounded),
@@ -129,51 +139,33 @@ class _MemoryGenerationSettingsSheetState
           onPressed: _save,
         ),
       ],
-      headerBottom: GlazeTabBar(
-        tabs: [
-          GlazeTabItem(
-            label: 'memory_tab_capture'.tr(),
-            icon: Icons.auto_awesome_motion_outlined,
+      // Builder, not this build's `context`: SheetView reports its measured
+      // header height as MediaQuery padding *to its body subtree*, so reading
+      // it from the context that creates the SheetView returns zero and the
+      // first row lays out underneath the header.
+      body: Builder(
+        builder: (bodyContext) => ListView(
+          controller: _scrollController,
+          padding: EdgeInsets.only(
+            top: MediaQuery.paddingOf(bodyContext).top + 12,
+            bottom: MediaQuery.paddingOf(bodyContext).bottom + 24,
           ),
-          GlazeTabItem(
-            label: 'memory_tab_selection'.tr(),
-            icon: Icons.filter_alt_outlined,
-          ),
-          GlazeTabItem(
-            label: 'memory_tab_retrieval'.tr(),
-            icon: Icons.travel_explore_outlined,
-          ),
-        ],
-        activeIndex: _tab,
-        onChanged: (index) => setState(() => _tab = index),
-      ),
-      body: SwipeTabSwitcher(
-        index: _tab,
-        length: _tabCount,
-        onChanged: (index) => setState(() => _tab = index),
-        child: TabSlideSwitcher(
-          index: _tab,
-          child: switch (_tab) {
-            0 => MemoryCaptureTab(
-              controller: _scrollControllers[0],
-              draft: _draft,
-              customPrompts: custom,
-              onChanged: _onChanged,
-              onViewPrompt: _viewCurrentPrompt,
-              onManagePrompts: _openPromptManager,
+          children: [
+            ...capture.build(context),
+            ...retrieval.apiSections(context),
+            MenuCollapsibleSection(
+              label: 'memory_section_budget'.tr(),
+              children: selection.budgetSections(context),
             ),
-            1 => MemorySelectionTab(
-              controller: _scrollControllers[1],
-              draft: _draft,
-              onChanged: _onChanged,
-              budgetPercent: widget.settings.maxInjectionBudgetPercent,
+            MenuCollapsibleSection(
+              label: 'memory_selector_settings'.tr(),
+              children: selection.selectorSections(context),
             ),
-            _ => MemoryRetrievalTab(
-              controller: _scrollControllers[2],
-              draft: _draft,
-              onChanged: _onChanged,
+            MenuCollapsibleSection(
+              label: 'memory_section_search'.tr(),
+              children: retrieval.matchingSections(context),
             ),
-          },
+          ],
         ),
       ),
     );

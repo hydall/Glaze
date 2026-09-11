@@ -127,7 +127,7 @@ class _MemoryDraftCardState extends State<MemoryDraftCard> {
                         color: context.cs.onSurface,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       _statusLabel(),
                       style: TextStyle(
@@ -139,7 +139,16 @@ class _MemoryDraftCardState extends State<MemoryDraftCard> {
                 ),
               ),
               const SizedBox(width: 8),
-              MemoryPill(label: _badgeLabel(), color: _badgeColor()),
+              MemoryPill(
+                label: _badgeLabel(),
+                icon: _badgeIcon(),
+                color: _badgeColor(),
+                fontSize: 10,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 3,
+                ),
+              ),
             ],
           ),
           if (hasContent) ...[
@@ -165,42 +174,49 @@ class _MemoryDraftCardState extends State<MemoryDraftCard> {
             ),
           ],
           const SizedBox(height: 8),
-          Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 6,
-            runSpacing: 6,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
               if (widget.isGenerating)
-                MemoryActionChip(
+                MemoryCircleButton(
+                  icon: Icons.stop_rounded,
                   label: 'memory_books_btn_stop'.tr(),
                   color: _kAmber,
                   onTap: widget.onCancel,
                 )
               else if (_needsGeneration)
-                MemoryActionChip(
+                MemoryCircleButton(
+                  icon: Icons.auto_awesome_rounded,
                   label: 'memory_books_btn_generate'.tr(),
                   color: _kAmber,
                   onTap: widget.onGenerate,
                 )
               else if (hasContent)
-                MemoryActionChip(
+                MemoryCircleButton(
+                  icon: Icons.check_rounded,
                   label: 'memory_books_btn_approve'.tr(),
                   color: _kGreen,
                   onTap: widget.onApprove,
                 ),
-              if (hasContent && !widget.isGenerating)
-                MemoryActionChip(
+              if (hasContent && !widget.isGenerating) ...[
+                const SizedBox(width: 4),
+                MemoryCircleButton(
+                  icon: Icons.refresh_rounded,
                   label: 'memory_books_btn_regenerate'.tr(),
                   color: _kAmber,
                   onTap: widget.onRegenerate,
                 ),
-              if (hasContent && !widget.isGenerating)
-                MemoryActionChip(
+                const SizedBox(width: 4),
+                MemoryCircleButton(
+                  icon: Icons.edit_outlined,
                   label: 'action_edit'.tr(),
                   color: context.cs.primary,
                   onTap: widget.onEdit,
                 ),
-              MemoryActionChip(
+              ],
+              const SizedBox(width: 4),
+              MemoryCircleButton(
+                icon: Icons.delete_outline,
                 label: 'btn_delete'.tr(),
                 color: _kDanger,
                 onTap: widget.onDelete,
@@ -237,6 +253,15 @@ class _MemoryDraftCardState extends State<MemoryDraftCard> {
     if (_needsRegen) return _kDanger;
     if (_draft.content.isEmpty) return _kAmber;
     return context.cs.onSurfaceVariant;
+  }
+
+  IconData _badgeIcon() {
+    if (widget.isGenerating) return Icons.autorenew_rounded;
+    if (_needsRegen) return Icons.error_outline_rounded;
+    if (_draft.content.isEmpty && _draft.status == 'pending_generation') {
+      return Icons.pending_outlined;
+    }
+    return Icons.drafts_outlined;
   }
 
   String _badgeLabel() {
