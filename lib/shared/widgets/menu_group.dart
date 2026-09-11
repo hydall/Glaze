@@ -65,16 +65,24 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
                 ),
                 child: Row(
                   children: [
-                    Text(
-                      widget.label,
-                      style: TextStyle(
-                        color: context.cs.onSurfaceVariant,
-                        fontSize: 16,
+                    // Expanded, not bare: a long or localized label used to
+                    // push the chevron off the row and overflow it. It takes
+                    // the free space itself rather than leaving it to a
+                    // Spacer, which would compete with it and ellipsise a
+                    // label that had room.
+                    Expanded(
+                      child: Text(
+                        widget.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: context.cs.onSurfaceVariant,
+                          fontSize: 16,
+                        ),
                       ),
                     ),
                     if (widget.helpTerm != null)
                       HelpTip(term: widget.helpTerm!),
-                    const Spacer(),
                     AnimatedRotation(
                       turns: _expanded ? 0.5 : 0,
                       duration: const Duration(milliseconds: 150),

@@ -190,6 +190,8 @@ void main() {
         'lib/features/lorebooks/lorebook_per_book_settings_screen.dart',
         'lib/features/lorebooks/lorebook_editor_screen.dart',
         'lib/features/chat/widgets/memory_books_tab.dart',
+        // The memory settings sheet reads the gate once and hands it to its
+        // section builders, so the sheet is what has to carry it now.
         'lib/features/chat/widgets/memory_generation_settings_sheet.dart',
       ];
       for (final path in gated) {

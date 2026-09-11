@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../../../core/platform/haptics.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/widgets/glass_surface.dart';
+import '../../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../requests/inspector_surface.dart';
 
 /// Shared Glaze-styled building blocks for the memory-books sheet.
 ///
@@ -14,6 +16,11 @@ import '../../../../shared/widgets/glass_surface.dart';
 class MemoryPill extends StatelessWidget {
   final String label;
   final Color color;
+
+  /// Leading glyph. A state pill reads at a glance from its shape as much as
+  /// from its word, and the glyph is what survives when the word is long.
+  final IconData? icon;
+
   final double fontSize;
   final EdgeInsetsGeometry padding;
 
@@ -21,12 +28,14 @@ class MemoryPill extends StatelessWidget {
     super.key,
     required this.label,
     required this.color,
+    this.icon,
     this.fontSize = 11,
     this.padding = const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
   });
 
   @override
   Widget build(BuildContext context) {
+    final glyph = icon;
     return Container(
       padding: padding,
       decoration: BoxDecoration(
@@ -34,67 +43,26 @@ class MemoryPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withValues(alpha: 0.28)),
       ),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: fontSize,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
-    );
-  }
-}
-
-/// Tappable text chip used for the per-card action row (Generate / Approve /
-/// Edit / Delete). Glaze's flat, colour-tinted equivalent of a `TextButton`.
-///
-/// Deliberately a `Material` + `InkWell` rather than a [GlassSurface]: a chat
-/// can carry dozens of memory cards, and a backdrop-blurred surface per chip
-/// would put a blur pass on every one of them.
-class MemoryActionChip extends StatelessWidget {
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  const MemoryActionChip({
-    super.key,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(10);
-    return Material(
-      color: color.withValues(alpha: 0.12),
-      borderRadius: radius,
-      child: InkWell(
-        onTap: () {
-          Haptics.selectionClick();
-          onTap();
-        },
-        borderRadius: radius,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: radius,
-            border: Border.all(color: color.withValues(alpha: 0.3)),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: color,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (glyph != null) ...[
+            Icon(glyph, size: fontSize + 2, color: color),
+            const SizedBox(width: 4),
+          ],
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: fontSize,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -172,125 +140,159 @@ class MemoryActionTile extends StatelessWidget {
   }
 }
 
-/// Big-number counter tile used by the sheet's status row.
-class MemoryStatTile extends StatelessWidget {
-  final String value;
+/// The shared shell for one entry or draft in the list.
+///
+/// The Prompt Inspector's plaque, so a memory reads as the same kind of object
+/// as a prompt message or a coverage row: a faint ink wash, a hairline of the
+/// same ink, 12 px radius, no shadow. [accent] tints the hairline by state, the
+/// way the inspector tints a message card by role.
+///
+/// It paints no `BackdropFilter`, so unlike a [GlassSurface] it is safe once
+/// per row of a long list (`docs/UI_KIT.md` § Performance notes).
+class MemoryRow extends StatelessWidget {
+  final Widget child;
+  final Color? accent;
+  final VoidCallback? onTap;
+
+  const MemoryRow({super.key, required this.child, this.accent, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InspectorPlaque(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
+      accent: accent,
+      onTap: onTap == null
+          ? null
+          : () {
+              Haptics.selectionClick();
+              onTap!();
+            },
+      child: child,
+    );
+  }
+}
+
+/// A status glyph on a row — what a one-word pill used to say.
+///
+/// `idx` was a three-letter token no screen reader and no non-English speaker
+/// could resolve. The glyph carries a tooltip and a semantics label instead.
+class MemoryStatusIcon extends StatelessWidget {
+  final IconData icon;
   final String label;
   final Color color;
 
-  const MemoryStatTile({
+  const MemoryStatusIcon({
     super.key,
-    required this.value,
+    required this.icon,
     required this.label,
     required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GlassSurface(
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: color.withValues(alpha: 0.3)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-        child: Column(
-          children: [
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
-              ),
-            ),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11,
-                color: context.cs.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        label: label,
+        child: Icon(icon, size: 15, color: color),
       ),
     );
   }
 }
 
-/// Card shell shared by the entry and draft cards: the same rounded, bordered
-/// surface the rest of Glaze's list rows use, with an optional accent border
-/// and fill for "generating" / "needs rebuild" states.
-class MemoryCard extends StatelessWidget {
-  final Widget child;
-  final Color? accent;
+/// The round glass button the chat input bar uses — every icon action in the
+/// memory sheet, from the header's settings button to a draft row's Approve.
+///
+/// Was a tinted rounded square per action, which read as its own small widget
+/// family sitting next to the app's actual buttons. Same 40 px circle, surface
+/// tint and hairline as the composer's controls; only the glyph carries the
+/// semantic colour.
+class MemoryCircleButton extends StatelessWidget {
+  final IconData icon;
 
-  const MemoryCard({super.key, required this.child, this.accent});
+  /// Tooltip and semantics label — what a text chip used to spell out.
+  final String label;
 
-  @override
-  Widget build(BuildContext context) {
-    final accentColor = accent;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: accentColor == null
-            ? Colors.white.withValues(alpha: 0.05)
-            : accentColor.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: accentColor == null
-              ? context.cs.outlineVariant
-              : accentColor.withValues(alpha: 0.4),
-        ),
-      ),
-      child: child,
-    );
-  }
-}
+  final VoidCallback onTap;
 
-/// Section title with a trailing count pill, used above the entry / draft
-/// lists inside each tab.
-class MemorySectionHeader extends StatelessWidget {
-  final String title;
-  final int count;
-  final Widget? action;
+  /// Glyph colour. Defaults to the theme's primary, the way the composer's
+  /// buttons are; a destructive or state-bearing action passes its own.
+  final Color? color;
 
-  const MemorySectionHeader({
+  const MemoryCircleButton({
     super.key,
-    required this.title,
-    required this.count,
-    this.action,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
-              ),
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        label: label,
+        button: true,
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: GlassSurface(
+            borderRadius: BorderRadius.circular(20),
+            tint: context.cs.surface,
+            border: Border.all(color: context.cs.outlineVariant),
+            onTap: () {
+              Haptics.selectionClick();
+              onTap();
+            },
+            glowColor: context.cs.primary,
+            child: Center(
+              child: Icon(icon, size: 20, color: color ?? context.cs.primary),
             ),
           ),
-          if (action != null) Flexible(child: action!),
-          const SizedBox(width: 8),
-          MemoryPill(
-            label: '$count',
-            color: context.cs.primary,
-            fontSize: 12,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          ),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+/// The trailing "⋯" of a row: the actions that are not the row's primary tap.
+///
+/// Keeping Edit/Delete here instead of as permanent chips takes two tinted
+/// chips out of the tree per entry, which is what made the old list expensive
+/// to build.
+class MemoryRowMenuButton extends StatelessWidget {
+  final List<BottomSheetItem> Function(BuildContext context) itemsBuilder;
+  final String title;
+
+  const MemoryRowMenuButton({
+    super.key,
+    required this.itemsBuilder,
+    required this.title,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      // No padding of its own: the plaque already insets its right edge, and
+      // stacking both pushed the glyph a third of the way off the optical
+      // margin the left edge sets.
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+      iconSize: 18,
+      color: context.cs.onSurfaceVariant,
+      tooltip: title,
+      icon: const Icon(Icons.more_horiz_rounded),
+      onPressed: () {
+        Haptics.selectionClick();
+        GlazeBottomSheet.show<void>(
+          context,
+          title: title,
+          items: itemsBuilder(context),
+        );
+      },
     );
   }
 }
