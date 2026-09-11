@@ -35,13 +35,21 @@ void main() {
     test('matches a Cyrillic ST regex key against lowercased scan text', () {
       const key = r'/(?:^|[^а-яА-ЯёЁ])Кент(?:а|ой|у)(?:[^а-яА-ЯёЁ]|)/g';
       expect(
-        glazeCheckMatch(key, 'привет, кента, как дела?', false,
-            WholeWordMode.no),
+        glazeCheckMatch(
+          key,
+          'привет, кента, как дела?',
+          false,
+          WholeWordMode.no,
+        ),
         isTrue,
       );
       expect(
-        glazeCheckMatch(key, 'ничего похожего тут нет', false,
-            WholeWordMode.no),
+        glazeCheckMatch(
+          key,
+          'ничего похожего тут нет',
+          false,
+          WholeWordMode.no,
+        ),
         isFalse,
       );
     });
@@ -58,23 +66,35 @@ void main() {
     });
 
     test('the i flag overrides a case-sensitive entry', () {
-      expect(glazeCheckMatch('/kenta/i', 'Kenta', true, WholeWordMode.no),
-          isTrue);
-      expect(glazeCheckMatch('/kenta/g', 'Kenta', true, WholeWordMode.no),
-          isFalse);
+      expect(
+        glazeCheckMatch('/kenta/i', 'Kenta', true, WholeWordMode.no),
+        isTrue,
+      );
+      expect(
+        glazeCheckMatch('/kenta/g', 'Kenta', true, WholeWordMode.no),
+        isFalse,
+      );
     });
 
     test('the s flag lets . cross newlines', () {
-      expect(glazeCheckMatch('/a.b/s', 'a\nb', false, WholeWordMode.no),
-          isTrue);
-      expect(glazeCheckMatch('/a.b/g', 'a\nb', false, WholeWordMode.no),
-          isFalse);
+      expect(
+        glazeCheckMatch('/a.b/s', 'a\nb', false, WholeWordMode.no),
+        isTrue,
+      );
+      expect(
+        glazeCheckMatch('/a.b/g', 'a\nb', false, WholeWordMode.no),
+        isFalse,
+      );
     });
 
     test('an uncompilable regex key falls back to a literal match', () {
       expect(
-        glazeCheckMatch('/(unclosed/g', 'text with /(unclosed/g inside', false,
-            WholeWordMode.no),
+        glazeCheckMatch(
+          '/(unclosed/g',
+          'text with /(unclosed/g inside',
+          false,
+          WholeWordMode.no,
+        ),
         isTrue,
       );
     });
@@ -89,12 +109,55 @@ void main() {
     });
 
     test('bare patterns keep working as before', () {
-      expect(glazeCheckMatch('Kenta', 'meeting kenta today', false,
-          WholeWordMode.no),
-          isTrue);
+      expect(
+        glazeCheckMatch(
+          'Kenta',
+          'meeting kenta today',
+          false,
+          WholeWordMode.no,
+        ),
+        isTrue,
+      );
       expect(
         glazeCheckMatch('(cat|dog)', 'a dog barks', false, WholeWordMode.no),
         isTrue,
+      );
+    });
+  });
+
+  group('glazeCheckMatch whole words', () {
+    test('matches a standalone Cyrillic literal', () {
+      expect(
+        glazeCheckMatch(
+          'Стеллу',
+          'Я встретил Стеллу.',
+          false,
+          WholeWordMode.yes,
+        ),
+        isTrue,
+      );
+    });
+
+    test('does not match a Cyrillic literal inside another word', () {
+      expect(
+        glazeCheckMatch(
+          'Вера',
+          'Проверка завершена.',
+          false,
+          WholeWordMode.yes,
+        ),
+        isFalse,
+      );
+    });
+
+    test('preserves whole-word matching for Latin literals', () {
+      expect(
+        glazeCheckMatch('Vera', 'Vera arrived.', false, WholeWordMode.yes),
+        isTrue,
+      );
+      expect(
+        glazeCheckMatch('Vera', 'Several arrived.', false, WholeWordMode.yes),
+        isFalse,
       );
     });
   });
@@ -105,10 +168,10 @@ void main() {
     });
 
     test('keeps a comma inside a regex key intact', () {
-      expect(
-        splitLorebookKeys(r'/Кент(?:а|у){1,2}/g, Kenta'),
-        [r'/Кент(?:а|у){1,2}/g', 'Kenta'],
-      );
+      expect(splitLorebookKeys(r'/Кент(?:а|у){1,2}/g, Kenta'), [
+        r'/Кент(?:а|у){1,2}/g',
+        'Kenta',
+      ]);
     });
 
     test('keeps a comma inside a character class intact', () {

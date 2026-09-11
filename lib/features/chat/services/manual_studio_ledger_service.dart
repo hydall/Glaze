@@ -11,6 +11,7 @@ import '../../../core/db/repositories/studio_preset_repo.dart';
 import '../../../core/db/repositories/tracker_repo.dart';
 import '../../../core/db/repositories/tracker_snapshot_repo.dart';
 import '../../../core/llm/aux_llm_client.dart';
+import '../../../core/llm/game_time.dart';
 import '../../../core/llm/macro_engine.dart';
 import '../../../core/llm/studio_ledger_reconciliation.dart';
 import '../../../core/llm/studio_ledger_service.dart';
@@ -23,7 +24,10 @@ import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
+import '../../../core/utils/time_helpers.dart';
 import '../../settings/api_list_provider.dart';
+import '../chat_session_service.dart';
+import 'game_time_message_stamp.dart';
 
 final manualStudioLedgerServiceProvider = Provider<ManualStudioLedgerService>((
   ref,
@@ -263,6 +267,13 @@ class ManualStudioLedgerService {
     if (!await isTargetCurrent()) {
       return _abortedManualResult(target, startedAt);
     }
+    if (result.status == 'ok') {
+      try {
+        await _syncGameTimeToMessage(sessionId, target);
+      } catch (error) {
+        debugPrint('[StudioLedger] rerun timestamp sync skipped: $error');
+      }
+    }
     await trackerRepo.upsertValue(
       sessionId,
       '_ledger_diag:studio_ledger',
@@ -279,6 +290,60 @@ class ManualStudioLedgerService {
       result: result,
       startedAtMs: startedAt,
     );
+  }
+
+  Future<void> _syncGameTimeToMessage(
+    String sessionId,
+    ChatMessage target,
+  ) async {
+    final snapshot = await snapshotRepo.getByAnchor(
+      sessionId: sessionId,
+      messageId: target.id,
+      swipeId: target.swipeId,
+      agentSwipeId: target.agentSwipeId,
+    );
+    final stamp = snapshot == null
+        ? null
+        : GameTimeState.fromTrackers(snapshot.trackers).format();
+    final durable = await chatRepo.mutateMessagesWithBeforeWrite(
+      sessionId: sessionId,
+      updatedAt: currentTimestampSeconds(),
+      mutate: (messages) {
+        final index = messages.indexWhere((message) => message.id == target.id);
+        if (index < 0) {
+          throw StateError('Ledger rerun timestamp target changed');
+        }
+        final message = messages[index];
+        if (message.swipeId != target.swipeId ||
+            message.agentSwipeId != target.agentSwipeId ||
+            message.content != target.content) {
+          throw StateError('Ledger rerun timestamp target changed');
+        }
+        messages[index] = stampGameTimeForVariation(
+          message,
+          swipeId: target.swipeId,
+          agentSwipeId: target.agentSwipeId,
+          time: stamp,
+        );
+        return messages;
+      },
+      beforeWrite: (_, _) async {
+        final current = await snapshotRepo.getByAnchor(
+          sessionId: sessionId,
+          messageId: target.id,
+          swipeId: target.swipeId,
+          agentSwipeId: target.agentSwipeId,
+        );
+        if (current == null ||
+            GameTimeState.fromTrackers(current.trackers).format() != stamp) {
+          throw StateError('Ledger rerun timestamp snapshot changed');
+        }
+      },
+    );
+    if (durable == null) {
+      throw StateError('Ledger rerun timestamp target changed');
+    }
+    ChatSessionService.updateCache(durable);
   }
 
   Future<ManualStudioLedgerResult> rerunMissingForReconciliation(

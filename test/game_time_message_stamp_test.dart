@@ -55,4 +55,35 @@ void main() {
     final nested = stamped.swipesMeta[1]['agentSwipes'] as List<dynamic>;
     expect((nested.single as Map<String, dynamic>)['time'], contains('14:15'));
   });
+
+  test('clears the addressed active variation clock', () {
+    const stamp = '12.05.2027 · RP_Day 2 · 14:15';
+    const message = ChatMessage(
+      id: 'a1',
+      role: 'assistant',
+      content: 'first',
+      time: stamp,
+      swipes: ['first'],
+      agentSwipes: [AgentSwipe(content: 'first', time: stamp)],
+      swipesMeta: [
+        {
+          'time': stamp,
+          'agentSwipes': [
+            {'content': 'first', 'kind': 'final', 'time': stamp},
+          ],
+        },
+      ],
+    );
+
+    final cleared = stampGameTimeForVariation(
+      message,
+      swipeId: 0,
+      agentSwipeId: 0,
+      time: null,
+    );
+
+    expect(cleared.time, isNull);
+    expect(cleared.agentSwipes.single.time, isNull);
+    expect(cleared.swipesMeta.single.containsKey('time'), isFalse);
+  });
 }

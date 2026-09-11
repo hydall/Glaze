@@ -96,10 +96,25 @@ class ChatRepo implements SyncChatStore {
 
   @override
   Future<List<SessionMetadata>> getAllSessionMetadata() async {
-    final rows = await (_db.select(
-      _db.chatSessions,
-    )..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])).get();
-    return rows.map(_toMetadata).toList();
+    final rows = await _db
+        .customSelect(
+          '''
+SELECT
+  session_id,
+  character_id,
+  session_index,
+  updated_at,
+  session_vars_json,
+  json_array_length(messages_json) AS message_count,
+  json_extract(messages_json, '\$[0].timestamp') AS first_timestamp,
+  json_extract(messages_json, '\$[#-1]') AS last_message_json
+FROM chat_sessions
+ORDER BY updated_at DESC
+''',
+          readsFrom: {_db.chatSessions},
+        )
+        .get();
+    return rows.map(_projectedMetadata).toList();
   }
 
   Stream<List<SessionMetadata>> watchAllSessionMetadata() {
@@ -1233,6 +1248,62 @@ class ChatRepo implements SyncChatStore {
       sessionName: sessionName,
       originTimestamp: originTimestamp,
       originKind: originKind,
+    );
+  }
+
+  SessionMetadata _projectedMetadata(QueryRow row) {
+    final lastMessageJson = row.readNullable<String>('last_message_json');
+    var lastContent = '';
+    var lastTimestamp = 0;
+    if (lastMessageJson != null) {
+      try {
+        final lastMessage = jsonDecode(lastMessageJson) as Map<String, dynamic>;
+        final rawContent = lastMessage['content'];
+        if (rawContent is String) {
+          lastContent = rawContent;
+        } else if (rawContent is List) {
+          lastContent = rawContent
+              .whereType<Map<Object?, Object?>>()
+              .where((part) => part['type'] == 'text' && part['text'] is String)
+              .map((part) => part['text'] as String)
+              .join(' ');
+        }
+        if (lastContent.length > 250) {
+          lastContent = lastContent.substring(0, 250);
+        }
+        lastTimestamp = (lastMessage['timestamp'] as int?) ?? 0;
+      } catch (_) {}
+    }
+
+    String? sessionName;
+    int? branchedAt;
+    final sessionVarsJson = row.readNullable<String>('session_vars_json');
+    if (sessionVarsJson != null && sessionVarsJson.isNotEmpty) {
+      try {
+        final vars = jsonDecode(sessionVarsJson) as Map;
+        sessionName = vars['sessionName'] as String?;
+        final rawBranchedAt = vars['branchedAt'];
+        if (rawBranchedAt is String) branchedAt = int.tryParse(rawBranchedAt);
+      } catch (_) {}
+    }
+
+    final firstTimestamp = row.readNullable<int>('first_timestamp') ?? 0;
+    final hasBranchTimestamp = branchedAt != null && branchedAt > 0;
+    return SessionMetadata(
+      sessionId: row.read<String>('session_id'),
+      characterId: row.read<String>('character_id'),
+      sessionIndex: row.read<int>('session_index'),
+      updatedAt: row.read<int>('updated_at'),
+      messageCount: row.readNullable<int>('message_count') ?? 0,
+      lastMessageContent: lastContent,
+      lastMessageTimestamp: lastTimestamp,
+      sessionName: sessionName,
+      originTimestamp: hasBranchTimestamp ? branchedAt : firstTimestamp,
+      originKind: hasBranchTimestamp
+          ? 'branched'
+          : firstTimestamp > 0
+          ? 'created'
+          : null,
     );
   }
 

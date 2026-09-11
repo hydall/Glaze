@@ -7,7 +7,7 @@ ChatMessage stampGameTimeForVariation(
   ChatMessage message, {
   required int swipeId,
   required int agentSwipeId,
-  required String time,
+  required String? time,
 }) {
   if (swipeId < 0) return message;
 
@@ -41,9 +41,23 @@ ChatMessage stampGameTimeForVariation(
   }
   if (agentSwipeId < 0 || agentSwipeId >= agentSwipes.length) return message;
 
-  agentSwipes[agentSwipeId] = agentSwipes[agentSwipeId].copyWith(time: time);
+  final target = agentSwipes[agentSwipeId];
+  agentSwipes[agentSwipeId] = AgentSwipe(
+    content: target.content,
+    kind: target.kind,
+    reasoning: target.reasoning,
+    genTime: target.genTime,
+    tokens: target.tokens,
+    time: time,
+    studioOutputs: target.studioOutputs,
+    parentSwipeId: target.parentSwipeId,
+  );
+  if (time == null) {
+    targetMeta.remove('time');
+  } else {
+    targetMeta['time'] = time;
+  }
   targetMeta
-    ..['time'] = time
     ..['agentSwipes'] = agentSwipes.map((swipe) => swipe.toJson()).toList()
     ..['agentSwipeId'] = agentSwipeId;
 

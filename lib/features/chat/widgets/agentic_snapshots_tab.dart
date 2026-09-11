@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/tracker.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../services/agentic_snapshots_service.dart';
 import 'agentic_operations_log_dialog.dart' show AgenticSessionScope;
+import 'manual_ledger_clock_sheet.dart';
 
 class AgenticSnapshotsTab extends ConsumerStatefulWidget {
   const AgenticSnapshotsTab({super.key});
@@ -47,6 +49,16 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
 
   Future<void> _reload() => _load();
 
+  Future<void> _editClock() async {
+    final sessionId = _sessionIdOf(context);
+    if (sessionId == null) return;
+    await GlazeBottomSheet.show<bool>(
+      context,
+      title: 'agent_ops_clock_title'.tr(),
+      child: ManualLedgerClockSheet(sessionId: sessionId, onSaved: _reload),
+    );
+  }
+
   String? _sessionIdOf(BuildContext context) {
     final scope = context
         .dependOnInheritedWidgetOfExactType<AgenticSessionScope>();
@@ -76,6 +88,12 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                   ),
                 ),
                 const Spacer(),
+                IconButton(
+                  onPressed: _editClock,
+                  icon: const Icon(Icons.schedule_outlined, size: 18),
+                  tooltip: 'agent_ops_clock_title'.tr(),
+                  visualDensity: VisualDensity.compact,
+                ),
                 IconButton(
                   onPressed: _reload,
                   icon: const Icon(Icons.refresh, size: 18),

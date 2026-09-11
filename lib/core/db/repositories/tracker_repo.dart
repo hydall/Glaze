@@ -9,6 +9,8 @@ import 'reconciliation_state_codec.dart';
 
 class TrackerRepo {
   static const initialGameTimeSeedName = '__game_time_initial_seed_v1';
+  static const ledgerManualMutationRevisionName =
+      '__ledger_manual_mutation_revision_v1';
 
   final AppDatabase db;
 
@@ -45,6 +47,25 @@ class TrackerRepo {
               ..where((t) => t.name.equals(name)))
             .getSingleOrNull();
     return row == null ? null : _rowToModel(row);
+  }
+
+  Future<int> getLedgerManualMutationRevision(String sessionId) async {
+    final tracker = await get(sessionId, ledgerManualMutationRevisionName);
+    return int.tryParse(tracker?.value ?? '') ?? 0;
+  }
+
+  /// Advances the fence used to invalidate Ledger work started before a
+  /// manual canon mutation. The caller should include this in its transaction.
+  Future<int> bumpLedgerManualMutationRevision(String sessionId) async {
+    final next = await getLedgerManualMutationRevision(sessionId) + 1;
+    await upsertValue(
+      sessionId,
+      ledgerManualMutationRevisionName,
+      '$next',
+      scope: 'system',
+      provenance: 'manual_ledger_mutation',
+    );
+    return next;
   }
 
   /// Returns live user-owned override and lock rows only.
@@ -233,9 +254,10 @@ class TrackerRepo {
   }
 
   Future<void> clearForSession(String sessionId) {
-    return (db.delete(
-      db.trackerRows,
-    )..where((t) => t.sessionId.equals(sessionId))).go();
+    return (db.delete(db.trackerRows)
+          ..where((t) => t.sessionId.equals(sessionId))
+          ..where((t) => t.name.equals(ledgerManualMutationRevisionName).not()))
+        .go();
   }
 
   /// Atomically replaces all trackers for [sessionId] with [trackers].
@@ -245,6 +267,7 @@ class TrackerRepo {
     return db.transaction(() async {
       await clearForSession(sessionId);
       for (final t in trackers) {
+        if (t.name == ledgerManualMutationRevisionName) continue;
         await upsert(t);
       }
     });

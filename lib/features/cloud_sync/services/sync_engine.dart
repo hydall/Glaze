@@ -66,6 +66,8 @@ class SyncEngine {
   final CharacterDeletionStore _characterDeletionStore;
   final Future<void> Function(LorebookActivations) _saveLorebookActivations;
   final Future<void> Function(Set<String>)? _reconcilePulledSessions;
+  final int _operationDelayMs;
+  final Duration _wipePollInterval;
   final SyncQueue _queue = SyncQueue();
   late final SyncBinaryAssetSyncer _binarySyncer;
   bool _includeApiKeys = false;
@@ -100,6 +102,8 @@ class SyncEngine {
     this._reconciliationStateStore,
     this._sessionLorebookOverlayStore,
     this._reconcilePulledSessions,
+    this._operationDelayMs = 300,
+    this._wipePollInterval = const Duration(seconds: 2),
   ]) {
     _binarySyncer = SyncBinaryAssetSyncer(
       _adapter,
@@ -135,6 +139,7 @@ class SyncEngine {
     await _adapter.ensureFolder('$cloudBase/reconciliation_state');
 
     onProgress(const SyncProgress(message: 'Building sync manifest...'));
+    final previousManifest = await _manifestBuilder.readLocalManifest();
     SyncManifest? cloudManifest;
     try {
       final raw = await _adapter.download(cloudPath('manifest', 'manifest'));
@@ -147,7 +152,7 @@ class SyncEngine {
       debugPrint('[sync] cloud manifest download failed: $e\n$st');
       rethrow;
     }
-    await _mergeCloudReconciliationState(cloudManifest);
+    await _mergeCloudReconciliationState(cloudManifest, previousManifest);
     final localManifest = await _manifestBuilder.buildLocalManifest(
       cloudManifest: cloudManifest,
     );
@@ -262,7 +267,7 @@ class SyncEngine {
       final result = await _queue.enqueueAll(
         tasks,
         concurrency: 3,
-        delayMs: 300,
+        delayMs: _operationDelayMs,
       );
       taskErrors = result.errors;
     }
@@ -563,7 +568,7 @@ class SyncEngine {
       final result = await _queue.enqueueAll(
         tasks,
         concurrency: 3,
-        delayMs: 300,
+        delayMs: _operationDelayMs,
       );
       return result.errors;
     }
@@ -737,7 +742,7 @@ class SyncEngine {
 
     onProgress(const SyncProgress(message: 'Waiting for cloud to finalize...'));
     for (var i = 0; i < 10; i++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
+      await Future<void>.delayed(_wipePollInterval);
       try {
         final files = await _adapter.listFolder(cloudBase);
         if (files.isEmpty) break;
@@ -1431,11 +1436,18 @@ class SyncEngine {
 
   Future<void> _mergeCloudReconciliationState(
     SyncManifest? cloudManifest,
+    SyncManifest previousManifest,
   ) async {
     final store = _reconciliationStateStore;
     if (store == null || cloudManifest == null) return;
     for (final entry in cloudManifest.entries.values) {
       if (entry.type != 'reconciliation_state' || entry.deleted) continue;
+      final previouslyAccepted = previousManifest.entries[entry.key];
+      if (previouslyAccepted != null &&
+          !previouslyAccepted.deleted &&
+          previouslyAccepted.hash == entry.hash) {
+        continue;
+      }
       if (await _manifestBuilder.isDeleted(entry.type, entry.id) ||
           await _manifestBuilder.isDeleted('chat', entry.id)) {
         continue;
