@@ -32,7 +32,7 @@ on:
         default: true
         type: boolean
       build_linux:
-        description: 'Linux (DEB + pacman)'
+        description: 'Linux (DEB + pacman + AppImage + tar.zst)'
         required: false
         default: true
         type: boolean
@@ -177,7 +177,6 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
           channel: 'stable'
           cache: true
 
@@ -317,7 +316,6 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
           channel: 'stable'
           cache: true
 
@@ -397,7 +395,6 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
           channel: 'stable'
           cache: true
 
@@ -522,7 +519,6 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
           channel: 'stable'
           cache: true
 
@@ -559,6 +555,8 @@ jobs:
           shopt -s nullglob
           DEB=(build/linux/deb/*.deb)
           PKG=(build/linux/arch/*.pkg.tar.zst)
+          APPIMG=(build/linux/appimage/*.AppImage)
+          TARZST=(build/linux/tarzst/*.tar.zst)
 
           if [ ${#DEB[@]} -gt 0 ]; then
             mv "${DEB[0]}" "build/linux/deb/${SLUG}-linux.deb"
@@ -572,7 +570,19 @@ jobs:
             echo "::warning::No pacman package was produced — makepkg missing or the build failed."
           fi
 
-          if [ ${#DEB[@]} -eq 0 ] && [ ${#PKG[@]} -eq 0 ]; then
+          if [ ${#APPIMG[@]} -gt 0 ]; then
+            mv "${APPIMG[0]}" "build/linux/appimage/${SLUG}-linux.AppImage"
+          else
+            echo "::warning::No AppImage was produced — linuxdeploy missing or the build failed."
+          fi
+
+          if [ ${#TARZST[@]} -gt 0 ]; then
+            mv "${TARZST[0]}" "build/linux/tarzst/${SLUG}-linux.tar.zst"
+          else
+            echo "::warning::No .tar.zst was produced — zstd missing or the build failed."
+          fi
+
+          if [ ${#DEB[@]} -eq 0 ] && [ ${#PKG[@]} -eq 0 ] && [ ${#APPIMG[@]} -eq 0 ] && [ ${#TARZST[@]} -eq 0 ]; then
             echo "::error::build_linux_packages.sh produced no package at all."
             exit 1
           fi
@@ -588,6 +598,18 @@ jobs:
         with:
           name: Glaze-release-Pacman
           path: "build/linux/arch/${{ needs.metadata.outputs.tag_name }}-linux.pkg.tar.zst"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-AppImage
+          path: "build/linux/appimage/${{ needs.metadata.outputs.tag_name }}-linux.AppImage"
+
+      - name: Upload tar.zst artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-TarZst
+          path: "build/linux/tarzst/${{ needs.metadata.outputs.tag_name }}-linux.tar.zst"
 
   # ── github release ─────────────────────────────────────────────────────────
   release:

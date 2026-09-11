@@ -26,7 +26,7 @@ on:
         default: true
         type: boolean
       build_linux:
-        description: 'Linux (DEB + pacman)'
+        description: 'Linux (DEB + pacman + AppImage + tar.zst)'
         required: false
         default: true
         type: boolean
@@ -86,11 +86,10 @@ jobs:
           SAFE_BRANCH=$(echo "$BUILD_BRANCH" | sed 's#[/ ]#-#g')
           FILE_SLUG="G-$(date -u '+%d%m%Y-%H%M')-$SAFE_BRANCH"
 
-          # Release channel drives the app identity, data folder, cloud root,
-          # update source and the build-watermark default via
-          # --dart-define=BUILD_CHANNEL. Developer mode is off on every channel
-          # and only unlocks via the About easter egg. Only the two release
-          # branches get a non-nightly channel; every other branch is nightly.
+          # Release channel drives the in-app dev-tooling defaults (developer
+          # mode + build watermark) via --dart-define=BUILD_CHANNEL. Only the
+          # two release branches get a non-nightly channel; every other branch
+          # builds as nightly, i.e. with dev tooling on.
           case "$BUILD_BRANCH" in
             stable)  BUILD_CHANNEL=stable  ;;
             staging) BUILD_CHANNEL=staging ;;
@@ -179,7 +178,6 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
           channel: 'stable'
           cache: true
 
@@ -319,7 +317,6 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
           channel: 'stable'
           cache: true
 
@@ -399,7 +396,6 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
           channel: 'stable'
           cache: true
 
@@ -539,7 +535,6 @@ jobs:
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
           channel: 'stable'
           cache: true
 
@@ -576,6 +571,8 @@ jobs:
           shopt -s nullglob
           DEB=(build/linux/deb/*.deb)
           PKG=(build/linux/arch/*.pkg.tar.zst)
+          APPIMG=(build/linux/appimage/*.AppImage)
+          TARZST=(build/linux/tarzst/*.tar.zst)
 
           if [ ${#DEB[@]} -gt 0 ]; then
             mv "${DEB[0]}" "build/linux/deb/${SLUG}-linux.deb"
@@ -589,7 +586,19 @@ jobs:
             echo "::warning::No pacman package was produced — makepkg missing or the build failed."
           fi
 
-          if [ ${#DEB[@]} -eq 0 ] && [ ${#PKG[@]} -eq 0 ]; then
+          if [ ${#APPIMG[@]} -gt 0 ]; then
+            mv "${APPIMG[0]}" "build/linux/appimage/${SLUG}-linux.AppImage"
+          else
+            echo "::warning::No AppImage was produced — linuxdeploy missing or the build failed."
+          fi
+
+          if [ ${#TARZST[@]} -gt 0 ]; then
+            mv "${TARZST[0]}" "build/linux/tarzst/${SLUG}-linux.tar.zst"
+          else
+            echo "::warning::No .tar.zst was produced — zstd missing or the build failed."
+          fi
+
+          if [ ${#DEB[@]} -eq 0 ] && [ ${#PKG[@]} -eq 0 ] && [ ${#APPIMG[@]} -eq 0 ] && [ ${#TARZST[@]} -eq 0 ]; then
             echo "::error::build_linux_packages.sh produced no package at all."
             exit 1
           fi
@@ -605,6 +614,18 @@ jobs:
         with:
           name: Glaze-release-Pacman
           path: "build/linux/arch/${{ needs.metadata.outputs.file_slug }}-linux.pkg.tar.zst"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-AppImage
+          path: "build/linux/appimage/${{ needs.metadata.outputs.file_slug }}-linux.AppImage"
+
+      - name: Upload tar.zst artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-TarZst
+          path: "build/linux/tarzst/${{ needs.metadata.outputs.file_slug }}-linux.tar.zst"
 
   # ── telegram notify ────────────────────────────────────────────────────────
   notify:
