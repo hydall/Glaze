@@ -40,7 +40,14 @@ import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/extra_request_parameters_editor.dart';
 
 /// A section of the API screen a caller can open it *on*.
-enum ApiSettingsSection { context }
+enum ApiSettingsSection {
+  /// The context-window form on the LLM tab.
+  context,
+
+  /// The MemoryBook generation slot on the Agents tab. Memory settings link
+  /// here since the connection and the model moved out of that sheet.
+  memoryBook,
+}
 
 class ApiSettingsScreen extends ConsumerStatefulWidget {
   final bool startExpanded;
@@ -61,7 +68,7 @@ class ApiSettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
-  int _tab = 0; // 0 = LLM, 1 = Embeddings, 2 = Studio agents
+  late int _tab; // 0 = LLM, 1 = Embeddings, 2 = Studio agents
 
   bool _showApiKey = false;
   bool _showEmbApiKey = false;
@@ -131,12 +138,20 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   /// settings — the Prompt Inspector's cutoff notice links here.
   final GlobalKey _contextGroupKey = GlobalKey();
 
+  /// The same, for the MemoryBook generation slot on the Agents tab.
+  final GlobalKey _memoryBookSlotKey = GlobalKey();
+
   /// Runs once: a deep link names a section, and the form it lives in is only
   /// measurable after the first layout pass.
   void _scrollToFocusSection() {
-    if (widget.focusSection != ApiSettingsSection.context) return;
+    final key = switch (widget.focusSection) {
+      ApiSettingsSection.context => _contextGroupKey,
+      ApiSettingsSection.memoryBook => _memoryBookSlotKey,
+      null => null,
+    };
+    if (key == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final target = _contextGroupKey.currentContext;
+      final target = key.currentContext;
       if (target == null || !mounted) return;
       Scrollable.ensureVisible(
         target,
@@ -197,6 +212,9 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   @override
   void initState() {
     super.initState();
+    // A deep link at the MemoryBook slot opens straight on the tab that holds
+    // it rather than on LLM and then jumping.
+    _tab = widget.focusSection == ApiSettingsSection.memoryBook ? 2 : 0;
     _ref = ref;
     for (final c in _ctrls) {
       c.addListener(_scheduleSave);
@@ -621,7 +639,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                               list,
                               embeddingName,
                             ),
-                    _ => StudioSlotsTab(controller: _agentsScrollController),
+                    _ => StudioSlotsTab(
+                      controller: _agentsScrollController,
+                      memoryBookSlotKey: _memoryBookSlotKey,
+                    ),
                   },
                 ),
               ),

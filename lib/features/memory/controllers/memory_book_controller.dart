@@ -77,48 +77,97 @@ class MemoryBookController {
   MemoryBookSettings globalSettingsAsBookSettings() =>
       _settingsMapper.globalToBook(globalSettings);
 
-  String get settingsSummary {
-    if (_book == null) return '';
+  /// The active retrieval mode, as shown on the collapsed configuration row.
+  String get modeLabel => switch (globalSettings.memoryMode) {
+    'balanced' => 'memory_mode_balanced'.tr(),
+    'deep' => 'memory_mode_deep'.tr(),
+    'legacy' => 'memory_mode_legacy'.tr(),
+    // `agentic` was removed in Phase 4 — migrate to `deep` for display.
+    'agentic' => 'memory_mode_deep'.tr(),
+    _ => 'memory_mode_fast'.tr(),
+  };
+
+  /// The configuration shown above the list, as label/value rows.
+  ///
+  /// Was a single `•`-joined string of 13 fields: it did not fit the 12 px
+  /// subtitle it rendered into, and it glued translated fragments to English
+  /// literals (`msgs`, `Batch`, `th=`, `entries`, `chunks`), which no locale
+  /// could repair. Each row now carries its own key on both halves.
+  List<MemoryConfigRow> get configRows {
+    if (_book == null) return const [];
     final s = globalSettings;
-    final mode = switch (s.memoryMode) {
-      'balanced' => 'memory_mode_balanced'.tr(),
-      'deep' => 'memory_mode_deep'.tr(),
-      'legacy' => 'memory_mode_legacy'.tr(),
-      // `agentic` was removed in Phase 4 — migrate to `deep` for display.
-      'agentic' => 'memory_mode_deep'.tr(),
-      _ => 'memory_mode_fast'.tr(),
-    };
-    final interval = s.autoCreateInterval;
-    final autoCreate = s.autoCreateEnabled
-        ? 'memory_books_summary_auto_on'.tr()
-        : 'memory_books_summary_auto_off'.tr();
-    final autoGen = s.autoGenerateEnabled
-        ? 'memory_books_summary_auto_text'.tr()
-        : 'memory_books_summary_manual_text'.tr();
-    final delayed = s.useDelayedAutomation
-        ? 'memory_books_summary_delayed'.tr()
-        : 'memory_books_summary_immediate'.tr();
-    final target = s.injectionTarget == 'macro'
-        ? 'memory_injection_macro'.tr()
-        : 'memory_injection_hard_block'.tr();
-    final vectorThreshold = s.vectorThreshold.toStringAsFixed(2);
-    final maxEntries = s.maxInjectedEntries;
+    final pg = pipelineSettings;
+
     final packing = switch (s.memoryPackingMode) {
       'full' => 'memory_packing_full'.tr(),
       'chunk_first' => 'memory_packing_chunk_first'.tr(),
       _ => 'memory_packing_hybrid'.tr(),
     };
-    final memoryBudget = s.maxInjectedTokens == null
+    final maxTokens = pg.memoryBookApi.generationMaxTokens;
+    final budget = s.maxInjectedTokens == null
         ? 'memory_books_summary_auto_out'.tr()
-        : '${s.maxInjectedTokens} memory tokens';
-    final batchSize = s.batchSize;
-    final pg = pipelineSettings;
-    final outTokens =
-        (pg.memoryBookApi.generationMaxTokens != null &&
-            pg.memoryBookApi.generationMaxTokens! > 0)
-        ? '${pg.memoryBookApi.generationMaxTokens} out'
-        : 'memory_books_summary_auto_out'.tr();
-    return '$mode • $interval msgs • Batch $batchSize • $outTokens • $autoCreate • $autoGen • $delayed • $target • th=$vectorThreshold • $maxEntries entries • $memoryBudget • $packing • ${s.memoryExcerptChunksPerEntry}x${s.memoryExcerptTokensPerChunk} chunks';
+        : 'memory_tokens_n'.plural(s.maxInjectedTokens!);
+
+    return [
+      MemoryConfigRow('memory_mode'.tr(), modeLabel),
+      MemoryConfigRow(
+        'memory_books_auto_create'.tr(),
+        s.autoCreateEnabled
+            ? 'memory_books_summary_auto_on'.tr()
+            : 'memory_books_summary_auto_off'.tr(),
+      ),
+      MemoryConfigRow(
+        'memory_books_auto_generate'.tr(),
+        s.autoGenerateEnabled
+            ? 'memory_books_summary_auto_text'.tr()
+            : 'memory_books_summary_manual_text'.tr(),
+      ),
+      MemoryConfigRow(
+        'memory_books_auto_create_interval'.tr(),
+        'memory_messages_n'.plural(s.autoCreateInterval),
+      ),
+      MemoryConfigRow('memory_books_batch_size'.tr(), '${s.batchSize}'),
+      MemoryConfigRow(
+        'memory_books_delayed_automation'.tr(),
+        s.useDelayedAutomation
+            ? 'memory_books_summary_delayed'.tr()
+            : 'memory_books_summary_immediate'.tr(),
+      ),
+      MemoryConfigRow(
+        'label_embedding_target'.tr(),
+        s.injectionTarget == 'macro'
+            ? 'memory_injection_macro'.tr()
+            : 'memory_injection_hard_block'.tr(),
+      ),
+      MemoryConfigRow('label_search_type'.tr(), searchTypeLabel),
+      if (s.vectorSearchEnabled)
+        MemoryConfigRow(
+          'label_similarity_threshold'.tr(),
+          s.vectorThreshold.toStringAsFixed(2),
+        ),
+      MemoryConfigRow(
+        'memory_books_max_entries_prompt'.tr(),
+        '${s.maxInjectedEntries}',
+      ),
+      MemoryConfigRow('memory_budget'.tr(), budget),
+      MemoryConfigRow('memory_packing_mode'.tr(), packing),
+      MemoryConfigRow(
+        'memory_excerpt_chunks_per_entry'.tr(),
+        'memory_chunks_shape'.tr(
+          namedArgs: {
+            'chunks': '${s.memoryExcerptChunksPerEntry}',
+            'tokens': '${s.memoryExcerptTokensPerChunk}',
+          },
+        ),
+      ),
+      MemoryConfigRow('label_model'.tr(), searchModelLabel),
+      MemoryConfigRow(
+        'memory_books_generation_max_tokens'.tr(),
+        maxTokens != null && maxTokens > 0
+            ? 'memory_tokens_n'.plural(maxTokens)
+            : 'memory_books_summary_auto_out'.tr(),
+      ),
+    ];
   }
 
   String get searchModelLabel {
@@ -292,14 +341,17 @@ class MemoryBookController {
     return newGlobal;
   }
 
-  /// Reindexes all memory entries. Returns a result message.
-  Future<String?> reindexAll() async {
-    if (_book == null) return null;
+  /// Reindexes all memory entries.
+  ///
+  /// Returns a typed outcome rather than a display string: the caller used to
+  /// decide between an error dialog and a toast by matching the English
+  /// prefixes of an already-translated message, so in any non-English locale
+  /// both branches missed and a failure degraded to a toast.
+  Future<ReindexOutcome> reindexAll() async {
+    if (_book == null) return const ReindexNotReady();
     await _ref.read(apiListProvider.future);
     final config = _ref.read(embeddingConfigProvider);
-    if (config.endpoint.isEmpty) {
-      return 'memory_books_setup_embedding_first'.tr();
-    }
+    if (config.endpoint.isEmpty) return const ReindexNeedsEmbeddingApi();
 
     _isReindexing = true;
     try {
@@ -311,15 +363,13 @@ class MemoryBookController {
         config: config,
         embeddingTarget: 'content',
       );
-      return 'memory_books_reindex_result'.tr(
-        namedArgs: {
-          'indexed': '${result.indexed}',
-          'skipped': '${result.skipped}',
-          'failed': '${result.failed}',
-        },
+      return ReindexDone(
+        indexed: result.indexed,
+        skipped: result.skipped,
+        failed: result.failed,
       );
     } catch (e) {
-      return 'memory_books_reindex_failed'.tr(args: ['$e']);
+      return ReindexFailed(e);
     } finally {
       _isReindexing = false;
     }
@@ -440,4 +490,52 @@ class MemoryBookController {
       _book?.entries.where((e) => e.status == 'active').length ?? 0;
   int get needsRebuildCount =>
       _book?.entries.where((e) => e.status == 'needs_rebuild').length ?? 0;
+}
+
+/// One label/value line of [MemoryBookController.configRows].
+class MemoryConfigRow {
+  final String label;
+  final String value;
+
+  const MemoryConfigRow(this.label, this.value);
+}
+
+/// Result of [MemoryBookController.reindexAll].
+///
+/// The UI maps each case to its own copy and its own presentation — a dialog
+/// for the two failures, a toast for the summary — instead of pattern-matching
+/// a localized sentence.
+sealed class ReindexOutcome {
+  const ReindexOutcome();
+}
+
+/// No book loaded yet; nothing was attempted and nothing is reported.
+class ReindexNotReady extends ReindexOutcome {
+  const ReindexNotReady();
+}
+
+/// No embedding endpoint is configured, so there is nothing to index against.
+class ReindexNeedsEmbeddingApi extends ReindexOutcome {
+  const ReindexNeedsEmbeddingApi();
+}
+
+/// The run finished; the three counters are what the summary reports.
+class ReindexDone extends ReindexOutcome {
+  final int indexed;
+  final int skipped;
+  final int failed;
+
+  const ReindexDone({
+    required this.indexed,
+    required this.skipped,
+    required this.failed,
+  });
+}
+
+/// The run threw. [error] is surfaced through `GlazeErrorDialog`, which
+/// formats it, so it is kept as the original object.
+class ReindexFailed extends ReindexOutcome {
+  final Object error;
+
+  const ReindexFailed(this.error);
 }

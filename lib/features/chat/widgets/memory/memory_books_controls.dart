@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/platform/haptics.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/widgets/glass_surface.dart';
+import '../../../../shared/widgets/glaze_bottom_sheet.dart';
 
 /// Shared Glaze-styled building blocks for the memory-books sheet.
 ///
@@ -172,79 +173,93 @@ class MemoryActionTile extends StatelessWidget {
   }
 }
 
-/// Big-number counter tile used by the sheet's status row.
-class MemoryStatTile extends StatelessWidget {
-  final String value;
-  final String label;
-  final Color color;
+/// The shared shell for one entry or draft in the list.
+///
+/// A hairline-separated row rather than a bordered card: a chat can carry
+/// dozens of memories, and a card each turned the list into a stack of boxes
+/// that read as equally important. Deliberately `Material` + `InkWell` over a
+/// `DecoratedBox` — the same treatment `GlazeSessionRow` uses — because a
+/// [GlassSurface] per row would put a backdrop-blur pass on every one of them.
+///
+/// [accent] tints the left edge for a state that needs to be findable while
+/// scrolling ("needs rebuild", "generating"); it does not fill the row.
+class MemoryRow extends StatelessWidget {
+  final Widget child;
+  final Color? accent;
+  final VoidCallback? onTap;
 
-  const MemoryStatTile({
-    super.key,
-    required this.value,
-    required this.label,
-    required this.color,
-  });
+  const MemoryRow({super.key, required this.child, this.accent, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return GlassSurface(
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: color.withValues(alpha: 0.3)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-        child: Column(
-          children: [
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
+    final accentColor = accent;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap == null
+            ? null
+            : () {
+                Haptics.selectionClick();
+                onTap!();
+              },
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: context.cs.outlineVariant),
+              left: BorderSide(
+                color: accentColor ?? Colors.transparent,
+                width: accentColor == null ? 0 : 2,
               ),
             ),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11,
-                color: context.cs.onSurfaceVariant,
-              ),
+          ),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              accentColor == null ? 4 : 10,
+              12,
+              4,
+              12,
             ),
-          ],
+            child: child,
+          ),
         ),
       ),
     );
   }
 }
 
-/// Card shell shared by the entry and draft cards: the same rounded, bordered
-/// surface the rest of Glaze's list rows use, with an optional accent border
-/// and fill for "generating" / "needs rebuild" states.
-class MemoryCard extends StatelessWidget {
-  final Widget child;
-  final Color? accent;
+/// The trailing "⋯" of a row: the actions that are not the row's primary tap.
+///
+/// Keeping Edit/Delete here instead of as permanent chips takes two tinted
+/// chips out of the tree per entry, which is what made the old list expensive
+/// to build.
+class MemoryRowMenuButton extends StatelessWidget {
+  final List<BottomSheetItem> Function(BuildContext context) itemsBuilder;
+  final String title;
 
-  const MemoryCard({super.key, required this.child, this.accent});
+  const MemoryRowMenuButton({
+    super.key,
+    required this.itemsBuilder,
+    required this.title,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final accentColor = accent;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: accentColor == null
-            ? Colors.white.withValues(alpha: 0.05)
-            : accentColor.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: accentColor == null
-              ? context.cs.outlineVariant
-              : accentColor.withValues(alpha: 0.4),
-        ),
-      ),
-      child: child,
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.all(4),
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      iconSize: 18,
+      color: context.cs.onSurfaceVariant,
+      tooltip: title,
+      icon: const Icon(Icons.more_horiz_rounded),
+      onPressed: () {
+        Haptics.selectionClick();
+        GlazeBottomSheet.show<void>(
+          context,
+          title: title,
+          items: itemsBuilder(context),
+        );
+      },
     );
   }
 }

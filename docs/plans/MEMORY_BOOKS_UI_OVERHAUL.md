@@ -1,10 +1,12 @@
 # Memory Books UI Overhaul — аудит и два концепта
 
-**Статус:** design proposal. Код не менялся — документ описывает аудит текущего
-состояния и два варианта переработки.
+**Статус:** концепт A реализован. Разделы «Сводка», «Нарушения UI-кита» и
+«i18n» фиксируют исходный аудит и описывают состояние **до** переработки;
+что из них закрыто — в §«Что сделано». Концепт B остаётся нереализованной
+альтернативой.
 **Область:** UI вкладки Memory Books внутри `MemorySheet`, sheet настроек
 генерации, редактор записи, панель графа, i18n всего этого.
-**Ревизия:** v1.
+**Ревизия:** v2 — добавлен §«Что сделано».
 
 **Карта кода:**
 
@@ -313,3 +315,70 @@ Memory Books — это конвейер `scan → draft → generate → approv
 | 3 | `memory_entry_editor_sheet.dart` → `GenericEditor` | 1 |
 | 4 | `memory_graph_panel.dart` → `SheetView` + i18n | 1 |
 | 5 | Выбранный концепт (A или B) для самой вкладки | 2–4 |
+
+---
+
+## Что сделано
+
+Реализован **концепт A** плюс весь общий фундамент, кроме панели графа.
+
+### Вкладка
+
+- `MemoryBooksTab` перестроена: полоса вкладок (`GlazeTabBarStyle.underline`,
+  чтобы не дублировать pill-полосу хост-sheet'а) и поиск закреплены над
+  списком, конфигурация/тулбар/строки скроллятся под ними.
+- Hero и строка-простыня заменены на `MemoryBooksConfigSection` —
+  `MenuCollapsibleSection` со списком `MenuItem` label/value. В контроллере
+  `settingsSummary` заменён на `List<MemoryConfigRow> get configRows`.
+- Три счётчика стали `GlazeFilterChipBar`; добавлен поиск по названию, тексту
+  и ключам, и фильтры по состоянию для обеих вкладок.
+- Тулбар: две плитки + overflow (`GlazeBottomSheet`), где удаление индексов
+  помечено `isDestructive`.
+- `MemoryEntryCard` и `MemoryDraftCard` переехали на общий `MemoryRow`
+  (`Material` + `InkWell` над `DecoratedBox`). У записи два постоянных чипа
+  заменены тапом по строке и overflow-меню.
+- Таймер elapsed переехал внутрь `MemoryDraftCard` и тикает только пока
+  генерируется именно этот черновик.
+
+### API уехал в настройки
+
+- Слот MemoryBook добавлен на вкладку «Агенты» экрана API
+  (`StudioSlotsTab`) — там же, где слоты Post Clean и Трекера.
+  `_slot()` получил необязательный `studioSlot`, чтобы слот без своих
+  параметров переиспользовал ту же машинерию выбора модели.
+- Из sheet'а настроек памяти убраны `_buildConnectionSelector`,
+  `_buildModelSelector` и фетч моделей; вместо них строка-ссылка в API.
+  Это же снимает расхождение семантики сохранения: раньше модель и
+  подключение писались сразу в `onChanged`, а «Отмена» их не откатывала.
+- `ApiSettingsSection.memoryBook` открывает экран API сразу на вкладке
+  «Агенты» и скроллит к слоту.
+
+### Sheet настроек (подэкран на Material — после редизайна)
+
+- `MemoryGenerationSettingsSheet`: 1223 строки одного класса → `SheetView` с
+  `GlazeTabBar` и четыре файла по ~150–300 строк
+  (`memory_settings_draft.dart`, `memory_capture_tab.dart`,
+  `memory_selection_tab.dart`, `memory_retrieval_tab.dart`).
+- Все контролы — из кита: `SegmentedButton` → `MenuSelectorItem` +
+  `showGlazePickerSheet`, `SwitchListTile` → `MenuSwitchItem`, `Slider` и
+  `DropdownButton<int>` → `MenuRangeItem`, `TextField` → `MenuFieldItem`,
+  `ExpansionTile` → вкладка.
+- Справка из `AlertDialog` стала `description` у самих строк.
+- Редактор записи переведён на `GenericEditor`; ключи — поле `tags`,
+  так что ручной парсинг запятых и продублированная подпись ушли.
+
+### i18n
+
+- `reindexAll()` возвращает `sealed class ReindexOutcome` вместо строки —
+  ветвление по английскому префиксу снято.
+- Удаление индексов получило свой ключ вместо `export_success`.
+- Заголовок sheet'а, подсказка бюджета и форма «N сообщений / N токенов /
+  N черновиков» переведены; для последних добавлены `.plural()`-ключи.
+- 16 русских строк, совпадавших с английскими, переведены.
+
+### Что осталось
+
+- `memory_graph_panel.dart` — фаза 4: голый `Dialog` + `TabBar` с одной
+  вкладкой + `ListTile`, без единого `.tr()`.
+- `_loadEmbeddingStatuses` по-прежнему делает запрос на запись.
+- Концепт B не реализован.

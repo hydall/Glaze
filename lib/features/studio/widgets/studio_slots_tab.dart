@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/model_fetcher.dart';
 import '../../../core/llm/transport/llm_protocol.dart';
 import '../../../core/models/api_config.dart';
+import '../../../core/models/memory_book_api_settings.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
@@ -32,7 +33,17 @@ import 'studio_slot_settings_dialog.dart';
 class StudioSlotsTab extends ConsumerStatefulWidget {
   final ScrollController controller;
 
-  const StudioSlotsTab({super.key, required this.controller});
+  /// Scroll target for a deep link that opens the API screen *on* the
+  /// MemoryBook slot — the memory settings sheet links here. Owned by the
+  /// hosting screen, which is what runs the scroll, and passed in rather than
+  /// held here so two mounted screens cannot collide on one [GlobalKey].
+  final Key? memoryBookSlotKey;
+
+  const StudioSlotsTab({
+    super.key,
+    required this.controller,
+    this.memoryBookSlotKey,
+  });
 
   @override
   ConsumerState<StudioSlotsTab> createState() => _StudioSlotsTabState();
@@ -157,8 +168,46 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
                 p.copyWith(ledger: p.ledger.copyWith(studioLedgerModel: value)),
           ),
         ),
+        // MemoryBook draft generation is an auxiliary LLM call like the ones
+        // above, so its connection and model belong here rather than inside
+        // the memory sheet — where they were the only two controls that wrote
+        // through on change while the rest of that form waited for Save.
+        _slot(
+          context,
+          key: widget.memoryBookSlotKey,
+          configs: configs,
+          slotName: 'memory_book',
+          studioSlot: null,
+          title: 'magic_memory_books'.tr(),
+          description: 'memory_books_slot_desc'.tr(),
+          apiConfigId: pipeline.memoryBookApi.apiConfigId,
+          onApiConfigChanged: (id) => _saveMemoryBookApi(
+            (api) => api.copyWith(
+              apiConfigId: id,
+              // Endpoint and key always come from the selected connection;
+              // a model chosen against the previous one would not resolve.
+              generationSource: 'current',
+              generationModel: '',
+            ),
+          ),
+          model: pipeline.memoryBookApi.generationModel,
+          onModelChanged: (value) => _saveMemoryBookApi(
+            (api) => api.copyWith(generationModel: value),
+          ),
+        ),
       ],
     );
+  }
+
+  /// Writes the MemoryBook slot and drops the cached model list, which is
+  /// keyed by the connection it was fetched from.
+  Future<void> _saveMemoryBookApi(
+    MemoryBookApiSettings Function(MemoryBookApiSettings) mutate,
+  ) async {
+    await _savePipeline(
+      (p) => p.copyWith(memoryBookApi: mutate(p.memoryBookApi)),
+    );
+    if (mounted) setState(() => _clearSlotModelCache('memory_book'));
   }
 
   // ── Persistence ────────────────────────────────────────────────────────────
@@ -205,9 +254,12 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
   /// to this stage's parameter overrides.
   Widget _slot(
     BuildContext context, {
+    Key? key,
     required List<ApiConfig> configs,
     required String slotName,
-    required StudioSlot studioSlot,
+    // Null for a slot that has no Studio parameter overrides of its own —
+    // MemoryBook generation runs on the connection and the model alone.
+    required StudioSlot? studioSlot,
     required String title,
     required String description,
     required String apiConfigId,
@@ -220,6 +272,7 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
     ValueChanged<String>? onExtraChanged,
   }) {
     return MenuGroup(
+      key: key,
       header: title,
       description: description,
       items: [
@@ -248,17 +301,18 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
             label: extraLabel,
             description: extraDescription,
           ),
-        MenuItem(
-          icon: Icons.tune,
-          label: 'studio_slot_parameters'.tr(),
-          subtitle: 'studio_slot_parameters_desc'.tr(),
-          trailing: Icon(
-            Icons.chevron_right,
-            size: 22,
-            color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+        if (studioSlot != null)
+          MenuItem(
+            icon: Icons.tune,
+            label: 'studio_slot_parameters'.tr(),
+            subtitle: 'studio_slot_parameters_desc'.tr(),
+            trailing: Icon(
+              Icons.chevron_right,
+              size: 22,
+              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+            onTap: () => _openSlotSettings(studioSlot, apiConfigId, configs),
           ),
-          onTap: () => _openSlotSettings(studioSlot, apiConfigId, configs),
-        ),
       ],
     );
   }

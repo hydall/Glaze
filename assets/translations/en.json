@@ -2847,5 +2847,41 @@
   "label_history_trim_threshold": "Step threshold",
   "desc_history_trim_threshold": "Move the anchor once the held history fills this % of its budget",
   "label_history_trim_step": "Step size",
-  "desc_history_trim_step": "How much of the history budget a step gives back"
+  "desc_history_trim_step": "How much of the history budget a step gives back",
+  "memory_sheet_title": "Memory",
+  "memory_books_config_title": "Configuration",
+  "memory_books_search_hint": "Search titles, text, keys",
+  "memory_books_filter_all": "All",
+  "memory_books_filter_indexed": "Indexed",
+  "memory_books_filter_ready": "Ready",
+  "memory_books_empty_filtered": "Nothing matches the current search and filter.",
+  "memory_books_more_actions": "More actions",
+  "memory_books_badge_index_error": "err",
+  "memory_books_indexes_deleted": "Indexes deleted",
+  "memory_books_reindex_failed_prefix": "Reindex failed: ",
+  "memory_books_content_required": "Add some content before saving.",
+  "memory_tab_capture": "Capture",
+  "memory_tab_selection": "Selection",
+  "memory_tab_retrieval": "Retrieval",
+  "memory_books_section_automation": "Automation",
+  "memory_selector_query_section": "Retrieval query",
+  "memory_books_generation_max_tokens": "Generation output limit",
+  "memory_books_api_moved_desc": "The connection and the model for draft generation live with the other pipeline slots in API settings.",
+  "memory_books_slot_desc": "Connection and model used to write MemoryBook drafts.",
+  "memory_budget_hint_percent": "At 32k context: {percent} from the percent budget.",
+  "memory_budget_hint_min": "At 32k context: min({percent}, {absolute}) = {effective}. Entry cap stays {entries}.",
+  "memory_chunks_shape": "{chunks} × {tokens} tokens",
+  "memory_books_generating_elapsed_n": "Generating… {seconds}s",
+  "memory_tokens_n": {
+    "one": "{} token",
+    "other": "{} tokens"
+  },
+  "memory_messages_n": {
+    "one": "{} message",
+    "other": "{} messages"
+  },
+  "memory_books_needs_generation_n": {
+    "one": "{} draft needs generation",
+    "other": "{} drafts need generation"
+  }
 }

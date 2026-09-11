@@ -83,7 +83,7 @@ class _MemorySheetState extends ConsumerState<MemorySheet> {
     final tab = _tab;
 
     return SheetView(
-      title: 'Memory',
+      title: 'memory_sheet_title'.tr(),
       showBack: true,
       headerBottom: GlazeTabBar(
         tabs: [

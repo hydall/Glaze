@@ -1,12 +1,18 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/platform/haptics.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/widgets/glass_surface.dart';
+import '../../../../shared/widgets/glaze_bottom_sheet.dart';
 import 'memory_books_controls.dart';
 
-/// Toolbar of maintenance actions shown above the tabs of the memory-books
-/// sheet, laid out as Glaze action tiles instead of Material buttons.
+/// The two actions used day to day, plus an overflow for maintenance.
+///
+/// Was a row of three tiles and a second row of two, all of one weight — so
+/// "Delete indexes" sat next to "Settings" and read as an equally ordinary
+/// thing to tap. Settings, reindex and drop-indexes now live behind the
+/// overflow, where the destructive one can be marked as such.
 class MemoryBooksToolbar extends StatelessWidget {
   final VoidCallback onOpenSettings;
   final VoidCallback onScanChat;
@@ -16,7 +22,7 @@ class MemoryBooksToolbar extends StatelessWidget {
   final VoidCallback onDeleteIndexes;
 
   /// False when the active API preset has vector search switched off — the
-  /// reindex / drop-indexes row is hidden rather than shown as a dead end.
+  /// reindex / drop-indexes entries are hidden rather than shown as dead ends.
   final bool showIndexActions;
 
   const MemoryBooksToolbar({
@@ -32,65 +38,102 @@ class MemoryBooksToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const danger = Color(0xFFFF5252);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: MemoryActionTile(
-                  icon: Icons.settings_outlined,
-                  label: 'title_settings'.tr(),
-                  onTap: onOpenSettings,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: MemoryActionTile(
-                  icon: Icons.search_rounded,
-                  label: 'memory_books_btn_scan_chat'.tr(),
-                  onTap: onScanChat,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: MemoryActionTile(
-                  icon: Icons.add_rounded,
-                  label: 'action_add'.tr(),
-                  onTap: onAddEntry,
-                  emphasised: true,
-                ),
-              ),
-            ],
-          ),
-          if (showIndexActions) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: MemoryActionTile(
-                    icon: Icons.storage_rounded,
-                    label: isReindexing
-                        ? 'btn_indexing'.tr()
-                        : 'memory_books_btn_reindex'.tr(),
-                    onTap: isReindexing ? null : onReindex,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: MemoryActionTile(
-                    icon: Icons.delete_sweep_outlined,
-                    label: 'action_delete_indexes'.tr(),
-                    onTap: isReindexing ? null : onDeleteIndexes,
-                    accent: danger,
-                  ),
-                ),
-              ],
+          Expanded(
+            child: MemoryActionTile(
+              icon: Icons.search_rounded,
+              label: 'memory_books_btn_scan_chat'.tr(),
+              onTap: onScanChat,
             ),
-          ],
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: MemoryActionTile(
+              icon: Icons.add_rounded,
+              label: 'action_add'.tr(),
+              onTap: onAddEntry,
+              emphasised: true,
+            ),
+          ),
+          const SizedBox(width: 8),
+          _OverflowTile(
+            onTap: () => _openOverflow(context),
+          ),
         ],
+      ),
+    );
+  }
+
+  void _openOverflow(BuildContext context) {
+    Haptics.selectionClick();
+    void close() => Navigator.of(context, rootNavigator: true).pop();
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'memory_books_more_actions'.tr(),
+      items: [
+        BottomSheetItem(
+          icon: Icons.tune_rounded,
+          label: 'memory_books_settings_title'.tr(),
+          onTap: () {
+            close();
+            onOpenSettings();
+          },
+        ),
+        if (showIndexActions) ...[
+          BottomSheetItem(
+            icon: Icons.storage_rounded,
+            label: isReindexing
+                ? 'btn_indexing'.tr()
+                : 'memory_books_btn_reindex'.tr(),
+            onTap: isReindexing
+                ? () {}
+                : () {
+                    close();
+                    onReindex();
+                  },
+          ),
+          BottomSheetItem(
+            icon: Icons.delete_sweep_outlined,
+            label: 'action_delete_indexes'.tr(),
+            isDestructive: true,
+            onTap: isReindexing
+                ? () {}
+                : () {
+                    close();
+                    onDeleteIndexes();
+                  },
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Square companion to [MemoryActionTile] — same surface, icon only, so the
+/// two real actions keep the width.
+class _OverflowTile extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _OverflowTile({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(14);
+    return GlassSurface(
+      borderRadius: radius,
+      border: Border.all(color: context.cs.outlineVariant),
+      onTap: onTap,
+      glowColor: context.cs.primary,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Icon(
+          Icons.more_horiz_rounded,
+          size: 18,
+          color: context.cs.onSurfaceVariant,
+        ),
       ),
     );
   }
@@ -125,7 +168,7 @@ class MemoryBatchPanel extends StatelessWidget {
               Text(
                 isGenerating
                     ? 'memory_books_badge_generating'.tr()
-                    : '$pendingCount ${'memory_books_needs_generation'.tr()}',
+                    : 'memory_books_needs_generation_n'.plural(pendingCount),
                 style: TextStyle(
                   fontSize: 14,
                   color: context.cs.onSurfaceVariant,
