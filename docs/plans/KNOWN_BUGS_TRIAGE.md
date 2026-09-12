@@ -126,8 +126,28 @@ and pagination paths do not. One retry-after-reauth wrapper around every catalog
 - **#24** The backup *export* button shows the *import* label (`backup_progress_preparing` is shared between both flows)
 - **#111** The onboarding "Import Data" sheet also offers **Export** on a fresh install
 
-### G8 — `fix/lorebook-activation-scope` (1 card, sev high)
-- **#99** Importing a character with lorebooks enables them **globally** — `activeLorebooksFor` short-circuits on `enabled` before checking `activationScope`, and `convertJanitorScript` writes `enabled: true` even for character-scoped books
+### G8 — `fix/lorebook-activation-scope` — **PR [#413](https://github.com/hydall/Glaze/pull/413)**
+- **#99** Importing a character with lorebooks enables them **globally** — **fixed on the write side**. `convertJanitorScript` now stamps `enabled: characterId == null` (the contract the capture sheet already documents), and `JsLorebookImporter.importCharacterBooks` stops copying the card's own `character_book.enabled` into Glaze's Global switch. Both keep working where they should: `LorebooksNotifier.put` registers a character-scoped book in the activation map.
+
+**Rejected the audit's read-side fix.** It wanted `activeLorebooksFor` to gate
+`enabled` on the scope fields. But those fields are a *denormalised mirror* of the
+activation maps — `_applyActivations` in the Connections sheet writes the first
+linked id into them — so a book the user made global **and** pinned to a character
+carries `enabled: true` + `activationScope: 'character'`, byte-identical to a bad
+import. Gating would silently un-globalize every one of those. Left a comment where
+the branch lives so the next reader does not try it again.
+
+**Known limitation, raised in the PR:** a book imported *before* this change stays
+global, and no migration can tell it apart from a deliberately global+pinned book.
+One tap on Global in its Connections sheet clears it. Asked whether to migrate
+anyway and accept the false positives.
+
+Also found: all three cases in `lorebook_activation_test.dart` were passing through
+the `enabled` branch — the fixture left it at its default `true`, so none of them
+exercised the scope it was named after. Fixed the fixtures; all three still pass,
+now for the stated reason.
+
+The thread's "this character comes with a lorebook" notice is a feature → feature list.
 
 ### G9 — `fix/janitor-greetings` (1 card)
 - **#98** Local JanitorAI extraction keeps only the first greeting (`alternateGreetings` is never populated although the fetched meta carries `first_messages`); the DataCat path drops the primary greeting on some cards
@@ -323,7 +343,7 @@ doing them apart.
 | 1 | G1 continue-overhaul | `fix/continue-overhaul` | 118, 150 (119, 110 already fixed) | **in review** | [#410](https://github.com/hydall/Glaze/pull/410) | 118+150 In Progress · 119+110 Fixed |
 | 1 | G2 reasoning-render | `fix/reasoning-render` | 45 (123 covered, not reproduced) | **in review** | [#411](https://github.com/hydall/Glaze/pull/411) | both In Progress |
 | 1 | G3 streaming-bubble-state | `fix/streaming-bubble-state` | 141, 131 | **in review** | [#412](https://github.com/hydall/Glaze/pull/412) | both In Progress |
-| 2 | G8 lorebook-activation-scope | `fix/lorebook-activation-scope` | 99 | not started | — | — |
+| 2 | G8 lorebook-activation-scope | `fix/lorebook-activation-scope` | 99 | **in review** | [#413](https://github.com/hydall/Glaze/pull/413) | In Progress |
 | 2 | G10 vision-capability | `fix/vision-capability` | 95 | not started | — | — |
 | 2 | G17 draft-clear-on-send | `fix/draft-clear-on-send` | 121 | not started | — | — |
 | 3 | G4 catalog-auth-resilience | `fix/catalog-auth-resilience` | 104, 113, 152, 89 | not started | — | — |
