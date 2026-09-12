@@ -500,12 +500,27 @@ export class Bridge {
   _viewportShrinkPx() {
     const full = this._viewportFullH || 0;
     if (full <= 0) return 0;
-    const shrink = full - this.virtualList.container.clientHeight;
+    const shrink = full - this._visibleViewportH();
     // CSS px and Flutter logical px agree (initial-scale=1), but rounding on
     // either side can leave a pixel or two of slack — ignore that as noise so a
     // non-shrinking embedder never loses real padding to it.
     if (shrink < 8) return 0;
     return Math.min(shrink, this._bottomInsetPx);
+  }
+
+  // The height the reader can actually see, in CSS px.
+  //
+  // Two different things can shrink when the keyboard comes up and the
+  // element only knows about one of them: the *layout* viewport (which sizes
+  // this element, and which an overlaying keyboard leaves alone - that is what
+  // `100dvh` fixes) and the *visual* viewport (which an overlaying keyboard
+  // always shrinks). Whichever is smaller is what is left on screen. Zooming
+  // would also shrink the visual viewport, but the page is pinned at
+  // `initial-scale=1, user-scalable=no`.
+  _visibleViewportH() {
+    const client = this.virtualList.container.clientHeight;
+    const visual = window.visualViewport ? window.visualViewport.height : 0;
+    return visual > 0 ? Math.min(client, visual) : client;
   }
 
   /* ---------- Interaction dispatch ---------- */
