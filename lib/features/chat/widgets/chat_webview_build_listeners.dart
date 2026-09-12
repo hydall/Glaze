@@ -94,9 +94,18 @@ class ChatWebViewBuildListeners {
       next,
     ) {
       final b = bridge;
-      if (b == null || !ready()) return;
       final oldList = prev?.value ?? const <PresetRegex>[];
       final newList = next.value ?? const <PresetRegex>[];
+      if (b == null || !ready()) {
+        // Not a drop. The initializer has already read the list it paints the
+        // chat with, so a change that lands in this window used to be lost for
+        // the rest of the session: the controller was updated on the next
+        // build, but nothing re-rendered the messages it had already written.
+        if (_regexListChanged(oldList, newList)) {
+          syncState.regexContextStale = true;
+        }
+        return;
+      }
       if (_regexListChanged(oldList, newList)) {
         final character = ref.read(characterByIdProvider(charId));
         final effectivePersona = ref.read(

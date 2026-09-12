@@ -50,6 +50,13 @@ class ChatWebViewSyncState {
     return operation;
   }
 
+  /// Set when the display-regex list changed while the bridge was still
+  /// initializing, i.e. after the initializer read the list it painted with.
+  /// The messages on screen were rewritten with the older list, and only a
+  /// re-render fixes that — pushing the new list to the controller does not
+  /// touch what is already in the DOM.
+  bool regexContextStale = false;
+
   /// Invalidates async streaming work when generation or session ownership
   /// changes. Callers capture the value and re-check it after every await.
   int streamEpoch = 0;

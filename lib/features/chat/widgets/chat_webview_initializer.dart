@@ -1,9 +1,10 @@
 import 'dart:async';
-import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
+import '../../../core/models/preset.dart';
 import '../../../core/state/active_regex_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
@@ -149,9 +150,8 @@ class ChatWebViewInitializer {
     // `personaId` against this roster, and one that arrives late would render
     // the whole chat with letter avatars first.
     bridge.setPersonaRoster(ref.read(personaListProvider).value ?? const []);
-    final displayRegexes = ref.read(displayRegexesProvider).value ?? const [];
     bridge.setRegexContext(
-      displayRegexes,
+      await _displayRegexes(),
       character,
       effectivePersona,
       sessionVars:
@@ -274,6 +274,26 @@ class ChatWebViewInitializer {
 
     // Push initial ext-block panels on first load.
     unawaited(onSyncExtBlockPanels());
+  }
+
+  /// The display scripts the first paint has to carry.
+  ///
+  /// Awaited, not read. `displayRegexesProvider` loads the active preset from
+  /// the database and the global scripts from SharedPreferences, and on the
+  /// first open of a chat after launch neither has resolved yet — so reading
+  /// `.value` handed this sequence an empty list, `setMessages` below baked the
+  /// un-rewritten text into every message, and nothing re-rendered it. That is
+  /// the whole of "Alter Display scripts do not work on the first chat open":
+  /// the list arrived a few hundred milliseconds after the only moment anyone
+  /// asked for it.
+  Future<List<PresetRegex>> _displayRegexes() async {
+    try {
+      return await ref.read(displayRegexesProvider.future);
+    } catch (e) {
+      // A script list that cannot load must not stop the chat from opening.
+      debugPrint('[ChatWebView] display regexes failed to load: $e');
+      return const [];
+    }
   }
 
   Future<void> _setIdentity() {

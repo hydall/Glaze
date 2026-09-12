@@ -54,6 +54,8 @@ class ChatWebViewSurface extends ConsumerStatefulWidget {
     required this.bottomInset,
     required this.onBridgeReady,
     required this.onInitWebView,
+    required this.onPageProcessGone,
+    this.rebuildGeneration = 0,
   });
 
   final ChatWebViewBridgeHost bridgeHost;
@@ -88,6 +90,17 @@ class ChatWebViewSurface extends ConsumerStatefulWidget {
   /// Starts the parent's idempotent WebView initialization.
   final Future<void> Function() onInitWebView;
 
+  /// The page behind this surface died — Android killed the render process,
+  /// or iOS terminated the web content process. The parent owns what happens
+  /// next; the surface only reports it.
+  final VoidCallback onPageProcessGone;
+
+  /// Bumped by the parent to demand a brand new native WebView. The keep-alive
+  /// instance is shared by every chat, so a dead one has to be disposed before
+  /// the replacement is attached — otherwise the new widget re-attaches the
+  /// same corpse.
+  final int rebuildGeneration;
+
   @override
   ConsumerState<ChatWebViewSurface> createState() => _ChatWebViewSurfaceState();
 }
@@ -109,6 +122,39 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
         if (mounted) setState(() => _mountNativeView = true);
       });
     }
+  }
+
+  @override
+  void didUpdateWidget(ChatWebViewSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.rebuildGeneration != oldWidget.rebuildGeneration) {
+      unawaited(_rebuildNativeView());
+    }
+  }
+
+  /// Replaces the native WebView after its page died.
+  ///
+  /// The view is unmounted for a frame first, and the keep-alive instance
+  /// disposed while nothing is attached to it: on mobile every chat shares one
+  /// preloaded WebView, so remounting without disposing hands the replacement
+  /// widget the same dead native view and nothing changes. Disposing frees the
+  /// keep-alive id, and the remount below creates a fresh WebView under it.
+  Future<void> _rebuildNativeView() async {
+    if (!mounted) return;
+    setState(() => _mountNativeView = false);
+    final keepAlive = chatWebViewKeepAliveForPlatform();
+    if (keepAlive != null) {
+      try {
+        await InAppWebViewController.disposeKeepAlive(keepAlive);
+      } catch (e) {
+        debugPrint('[ChatWebView] disposing the keep-alive failed: $e');
+      }
+    }
+    // One frame with nothing attached, so the platform view is really gone
+    // before its replacement asks to be created.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    setState(() => _mountNativeView = true);
   }
 
   Widget _background(BuildContext context) {
@@ -249,6 +295,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
                 ? ChatWebViewTrackpadScroll(
                     charId: widget.charId,
                     child: InAppWebView(
+                      key: ValueKey<int>(widget.rebuildGeneration),
                       webViewEnvironment: chatWebViewEnvironment,
                       keepAlive: chatWebViewKeepAliveForPlatform(),
                       initialFile: chatWebViewInitialFile(),
@@ -256,6 +303,25 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
                       initialSettings: _webViewSettings,
                       onWebViewCreated: _onWebViewCreated,
                       onLoadStop: _onLoadStop,
+                      // Android 26+. Until this was handled, a killed render
+                      // process left a blank page the app kept talking to.
+                      onRenderProcessGone: (controller, detail) {
+                        debugPrint(
+                          '[ChatWebView] render process gone '
+                          '(didCrash: ${detail.didCrash})',
+                        );
+                        if (_callbackIsActive(widget.lifecycleEpoch)) {
+                          widget.onPageProcessGone();
+                        }
+                      },
+                      onWebContentProcessDidTerminate: (controller) {
+                        debugPrint(
+                          '[ChatWebView] web content process terminated',
+                        );
+                        if (_callbackIsActive(widget.lifecycleEpoch)) {
+                          widget.onPageProcessGone();
+                        }
+                      },
                       shouldOverrideUrlLoading: (controller, request) async {
                         return chatWebViewNavigationPolicy(request.request.url);
                       },
