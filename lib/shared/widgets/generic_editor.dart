@@ -304,8 +304,12 @@ class _GenericEditorState extends State<GenericEditor> {
       hintText: field.placeholder,
       onChanged: (value) {
         if (!mounted) return;
+        // No setState: the field below the overlay is driven by this
+        // controller and repaints from it on its own. The rebuild this used to
+        // force ran the whole form again on every character typed in the
+        // expanded editor, on top of the parent rebuild the change already
+        // causes.
         ctrl.text = value;
-        setState(() {});
       },
     );
   }
