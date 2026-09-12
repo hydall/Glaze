@@ -83,12 +83,24 @@ Files: `chat_provider.dart`, `continuation_message_merger.dart`,
 
 Documented in `docs/rules/message-rendering.md` rather than as an INV — INV-MR1–8 are all about message scripts, which is a different subject.
 
-### G3 — `fix/streaming-bubble-state` — typing-bubble lifecycle (2 cards)
-- **#141** The previous reply briefly renders as the currently-streaming bubble; duplicate messages (a regression that came back)
-- **#131** The "Generating" bubble never returns when you leave and re-enter a chat mid-generation — the rising edge is consumed while the bridge is still initializing
+### G3 — `fix/streaming-bubble-state` — typing-bubble lifecycle — **PR [#412](https://github.com/hydall/Glaze/pull/412)**
+- **#141** The previous reply briefly renders as the currently-streaming bubble; duplicate messages (a regression that came back) — **duplicate half fixed, ghost half does not reproduce**.
+  - The duplicate is the typing bubble of a run that ended while its chat was closed. The page is a keep-alive singleton, so it outlives the widget that holds the bubble's only record; close the chat mid-run and the widget is disposed before the falling edge that would remove it. `setMessages` carries a bubble across a re-render *on purpose* (a live run streams into that node), so the leftover is handed to the reopened chat and to every re-render after it. Reproduced in the harness first: reopening rendered `["a1","u1","a2","__streaming__"]`.
+  - The ghost (previous reply re-appearing under a new send) is already closed on nightly: `_sendMessage` clears the streaming state synchronously before the bubble is painted, `closeStreamPublishing` shuts the deferred frame publish, and the reconcile is epoch-keyed. `send_window_streaming_reset_test.dart` guards it.
+  - The **persisted** duplicate the audit flagged as "worth verifying on the writer/commit path" is not reachable: `commitGenerationResult` rejects a second commit on its tail anchor, and `SavedMessageWriter` rebuilds from the base session rather than appending to its own output. Said so in the PR rather than claiming a fix for it.
+- **#131** The "Generating" bubble never returns when you leave and re-enter a chat mid-generation — **mostly stale; the clock half fixed**. The audit's proposed fix is already in nightly (`_resetStreamingPresentationState()` at the top of `_initWebViewOnce` plus a level-triggered `_reconcileActiveGenerationPresentation` after it). What was still broken was the elapsed clock: the page never received `setSendPending` at init, only its Dart-side mirror, so a chat reopened inside the send window showed a bubble that did not tick.
 
-Same class of defect in both: the streaming placeholder is **edge-triggered and
-multi-owner**. The fix is to make it level-triggered and single-owner.
+The ledger's guess at the shared root held up: the placeholder was **edge-triggered
+and multi-owner**, and the fix is both halves of making it level-triggered —
+`retireTypingPlaceholder()` before the paint that reopens a chat, and an idle
+reconcile that retires rather than only clearing its flags. Documented as
+**INV-C8**.
+
+Deliberately left alone: the falling edge's `if (!state.regenStreamingSent)` guard,
+which the audit wanted made unconditional. I could not construct a state where both
+streaming flags are true at once, and the level-triggered half now covers a missed
+edge from any direction — so making it unconditional would add a bridge call on
+every regen falling edge to guard a case that does not exist.
 
 ### G4 — `fix/catalog-auth-resilience` — 401/403 on catalog providers (4 cards)
 - **#104** DataCat card detail → `HTTP 403: Forbidden`, no session refresh, no retry
@@ -310,7 +322,7 @@ doing them apart.
 |---|---|---|---|---|---|---|
 | 1 | G1 continue-overhaul | `fix/continue-overhaul` | 118, 150 (119, 110 already fixed) | **in review** | [#410](https://github.com/hydall/Glaze/pull/410) | 118+150 In Progress · 119+110 Fixed |
 | 1 | G2 reasoning-render | `fix/reasoning-render` | 45 (123 covered, not reproduced) | **in review** | [#411](https://github.com/hydall/Glaze/pull/411) | both In Progress |
-| 1 | G3 streaming-bubble-state | `fix/streaming-bubble-state` | 141, 131 | not started | — | — |
+| 1 | G3 streaming-bubble-state | `fix/streaming-bubble-state` | 141, 131 | **in review** | [#412](https://github.com/hydall/Glaze/pull/412) | both In Progress |
 | 2 | G8 lorebook-activation-scope | `fix/lorebook-activation-scope` | 99 | not started | — | — |
 | 2 | G10 vision-capability | `fix/vision-capability` | 95 | not started | — | — |
 | 2 | G17 draft-clear-on-send | `fix/draft-clear-on-send` | 121 | not started | — | — |
