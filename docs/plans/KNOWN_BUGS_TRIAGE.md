@@ -402,16 +402,66 @@ plan rather than pre-empt it.
 
 ## Part 1b — groups added in step 2 (from your answers)
 
-### G25 — `fix/chat-first-open` (2 cards, Android) — highest value of the new set
-- **#87** On Android the chat opens with **no messages rendered** and has to be reopened. Sometimes the **bridge connection is lost** on top of that, and then the edit / regenerate buttons under a message do nothing.
-- **#154** merged here: display regexes are "not always" applied when a chat opens — the WebView initializer reads the async display-regex provider with `valueOrNull`, so an empty list gets baked into that first render.
+### G25 — `fix/chat-first-open` — **PR [#421](https://github.com/hydall/Glaze/pull/421)**
+- **#154** display scripts not applied on the first open — **fixed**, and the audit was
+  right in kind: the initializer read `displayRegexesProvider.value` synchronously. On
+  the first open after launch neither half of that list has resolved (the preset comes
+  from the DB, the global scripts from SharedPreferences), so the sequence got an empty
+  list, `setMessages` baked the un-rewritten text into every message, and nothing
+  re-rendered it. Two further holes on the same path: `activeRegexesProvider` awaited
+  the preset repo but *read* `globalRegexProvider.value`, so even a resolved list could
+  come back without a single global script; and the `displayRegexesProvider` listener
+  returned early while the bridge was not ready — precisely the window the list
+  resolves in — which lost the change for the whole session. Now awaited, awaited, and
+  recorded (`regexContextStale`) for the post-init re-render.
+- **#87** blank chat, bridge lost, dead buttons — **mechanism fixed, needs a device to
+  confirm.** The page behind the chat can die while the app still believes in it:
+  Android kills the render process under memory pressure (the keep-alive WebView every
+  chat shares, backgrounded while another app runs, is the ordinary case) and iOS can
+  terminate the web content process. Neither event was handled anywhere, and that one
+  state explains both halves of the report — nothing renders, `window.bridge` is gone,
+  every call into the page returns having done nothing, and reopening the chat was the
+  only cure. `onRenderProcessGone` / `onWebContentProcessDidTerminate` now report it;
+  the Dart side stops believing in the page and the native view is replaced (disposing
+  the shared keep-alive first, or the replacement re-attaches the same corpse). The two
+  failure paths that used to end at a dialog — an init that could not reach the page,
+  and a bridge that never appeared — take the same recovery first, because waiting out
+  the 30s handshake against a dead page buys nothing. `ChatWebViewRecovery` rations it:
+  three rebuilds in two minutes, then the reader is told, and a completed init clears
+  the budget.
+
+6 new tests (2 provider-level, both fail on nightly; 4 on the rebuild budget with a
+fake clock). The renderer-death wiring itself has no test seam — `ChatBridgeController`
+wraps a real `InAppWebViewController` — which is why the decision logic was extracted
+into a class that does. Confirm with `adb shell am send-trim-memory <pid> COMPLETE`.
 
 Both are the same subsystem as G3 (bridge/WebView init), but a different failure: G3 is
 the streaming placeholder, G25 is the initial `setMessages` + bridge handshake. #129 and
 #155 were archived as duplicates of #87.
 
-### G26 — `fix/keyboard-inset` (1 card, iOS + Android)
-- **#7** Opening the keyboard adds the keyboard padding **into the chat container**, so you can scroll that padding and see a block of empty space, and the WebView scrolls as well. On iOS it is worse: editing a message gives a scroll with **no inertia**. (#15 "editing padding" was the duplicate and is archived.)
+### G26 — `fix/keyboard-inset` — **PR [#423](https://github.com/hydall/Glaze/pull/423)**
+- **#7** keyboard padding scrollable inside the chat container — **fixed a false
+  premise.** The bridge already splits Flutter's inset the right way (padding = inset
+  minus the *measured* viewport shrink, because whether a keyboard resizes the WebView
+  or overlays it is up to the embedder). But its premise, stated in its own comment, was
+  that a shrink of the visible viewport shows up in `#chat-container.clientHeight` —
+  and the element was `height: 100vh`. `100vh` is by definition the viewport with every
+  retractable UI retracted: it never shrinks for a keyboard. So the measured shrink was
+  always zero, the whole inset always became padding, and on an embedder that does not
+  resize the layout viewport (iOS WKWebView, Android edge-to-edge) the keyboard was
+  counted twice — once as screen the reader cannot see, once as padding. Now
+  `height: 100vh; height: 100dvh`, and `_visibleViewportH()` takes the smaller of the
+  element's client height and `visualViewport.height`, which an overlaying keyboard does
+  shrink. `visualViewport` was already listened to for resizes — it was just never
+  read. No change to the reconciliation itself: it consumes the same two numbers and was
+  already correct given an honest shrink.
+
+  The asset guard that pinned the old measurement is updated and now records why, plus a
+  new guard on `100dvh`. **Needs a device**: desktop Chromium has `dvh == vh` and no
+  soft keyboard, so nothing here is exercisable in the harness beyond the shape of the
+  code. **Not fixed, same card:** the iOS "no inertia while editing" half — momentum
+  loss in a `-webkit-overflow-scrolling: touch` scroller holding a focused input, a
+  different mechanism that needs a device to work on at all.
 
 ### G27 — `fix/protocols-pipeline` (2 cards)
 - **#71** Make Summary generation run through the **common generation pipeline with protocols**, the same one the chat uses
@@ -446,11 +496,49 @@ the streaming placeholder, G25 is the initial `setMessages` + bridge handshake. 
 ### G34 — `fix/android-file-picker` (1 card)
 - **#32** On Android, newly written files are missing from the system file picker when the Glaze directory is reached through the **Downloads shortcut**; it has to be opened from the device root
 
-### G35 — `fix/message-delete-race` (1 card)
-- **#78** Deleted messages sometimes come back after certain actions. Needs reproducing first — the deletion path is the suspect, not the session path (#2 and #75 are already off the board)
+### G35 — `fix/message-delete-race` — **PR [#424](https://github.com/hydall/Glaze/pull/424)**
+- **#78** deleted messages come back — **the reported cause was already fixed; its
+  mirror was not.** `ChatSessionWriteQueue` exists for exactly this symptom and its own
+  doc says so ("deleted messages come back the moment you flip a variation"): one queue
+  for every durable session write, plus publication tokens so an older commit still
+  writes but no longer repaints. What was left is the same race from the delete's side:
+  `commitDeleteMessages` wrote the shortened list **the plan carried**, wholesale. The
+  plan is computed on the frame of the tap (that is the point — the bubbles have to go
+  immediately) and the transaction behind it is long on a big chat, so anything that
+  reached the row in that window was written back out by the delete: a reply that
+  finished streaming was erased, a variation switch that had committed was undone, and
+  the row disagreed with the screen until the chat was reopened. The deletion is now
+  re-applied by message id *inside* the transaction against the row as it is, and the
+  deleted counter is read from the row so two deletions in flight each add their own.
+  Messages predating ids fall back to the planned list — an index-based delete is only
+  correct against the snapshot it came from.
 
-### G36 — `fix/sheet-flicker` (1 card)
-- **#148** Editing the summary makes the **whole sheet flash white**; `SheetView` is the suspect
+  2 new tests; the race one fails on nightly, the legacy-id one is a negative control.
+
+### G36 — `fix/sheet-flicker` — **PR [#422](https://github.com/hydall/Glaze/pull/422)** — partial
+- **#148** the whole sheet flashes white while editing the summary — **two real sources
+  of churn fixed; the flash itself not reproduced.** The Memory sheet watched
+  `summaryEnabledProvider` from `build`, and every summary write bumps the revision that
+  provider keys on — the debounced save while the reader types, and every auto-summary
+  during a chat — so each write rebuilt the chrome, re-measured the header and rebuilt
+  both tab bodies to move one switch. And the expanded field editor pushed every
+  keystroke into the underlying field's controller *and* called `setState` on the form
+  holding it, which that controller already repaints on its own.
+
+  **Leading hypothesis for the white, written down so nobody has to find it twice:** the
+  expanded editor is a `MaterialPageRoute(fullscreenDialog: true)` on the root
+  navigator, i.e. over the sheet, and Flutter's Android page transitions paint a
+  full-screen `ColoredBox` of `ColorScheme.surface` behind the transition
+  (`page_transitions_theme.dart:115` and `:547`). In the **light** theme that surface is
+  near-white, so opening or closing that editor would paint the screen near-white for
+  the length of the transition. If that is it, the fix is a `PageTransitionsTheme`
+  decision affecting every route in the app — not something to change on a guess.
+  **Ask the reporter:** platform, light or dark theme, and whether the flash comes with
+  the expand button (and again on close) or while typing in the small field.
+
+  No new test: the only harness that mounts this sheet is the opt-in golden one, and a
+  widget test around it hung on the sheet's post-layout header measurement. The change
+  is scope-of-rebuild only — nothing on screen differs.
 
 ### G37 — `fix/guided-ui` (1 card)
 - **#6** Port the Vue Guided Generation UI **1:1** — the current one is rough, and the preset editor still has no way to edit the guided prompts
@@ -523,10 +611,10 @@ doing them apart.
 | 4 | G13 audio-embed-overflow | `fix/audio-embed-overflow` | 100 | **in review** | [#418](https://github.com/hydall/Glaze/pull/418) | In Progress |
 | 4 | G21 docs-and-readme | `fix/docs-and-readme` | 116, 33, 23, 146 | **in review** | [#419](https://github.com/hydall/Glaze/pull/419) | all four In Progress |
 | 4 | G22 tab-scroll-position | — | 61 | **already fixed** (PR #358) | — | Done, not tested |
-| 5 | G25 chat-first-open | `fix/chat-first-open` | 87, 154 | not started | — | — |
-| 5 | G26 keyboard-inset | `fix/keyboard-inset` | 7 | not started | — | — |
-| 5 | G35 message-delete-race | `fix/message-delete-race` | 78 | not started | — | — |
-| 5 | G36 sheet-flicker | `fix/sheet-flicker` | 148 | not started | — | — |
+| 5 | G25 chat-first-open | `fix/chat-first-open` | 87, 154 | **in review** | [#421](https://github.com/hydall/Glaze/pull/421) | both In Progress |
+| 5 | G26 keyboard-inset | `fix/keyboard-inset` | 7 | **in review** | [#423](https://github.com/hydall/Glaze/pull/423) | In Progress |
+| 5 | G35 message-delete-race | `fix/message-delete-race` | 78 | **in review** | [#424](https://github.com/hydall/Glaze/pull/424) | In Progress |
+| 5 | G36 sheet-flicker | `fix/sheet-flicker` | 148 | **partial, in review** | [#422](https://github.com/hydall/Glaze/pull/422) | In Progress |
 | 6 | G27 protocols-pipeline | `fix/protocols-pipeline` | 71, 133 | not started | — | — |
 | 6 | G28 permissions-and-battery | `fix/permissions-and-battery` | 29, 30, 53, 52 | not started | — | — |
 | 6 | G29 presets | `fix/presets` | 47, 79, 25 | not started | — | — |
