@@ -102,14 +102,44 @@ streaming flags are true at once, and the level-triggered half now covers a miss
 edge from any direction — so making it unconditional would add a bridge call on
 every regen falling edge to guard a case that does not exist.
 
-### G4 — `fix/catalog-auth-resilience` — 401/403 on catalog providers (4 cards)
-- **#104** DataCat card detail → `HTTP 403: Forbidden`, no session refresh, no retry
-- **#113** DataCat 403 → the whole Turnstile JSON blob lands in the dialog
-- **#152** JanitorAI browse: search and next-page → `session expired (401)`, dead end
-- **#89** (item 1) Janny search → 400 "bad syntax"; a 400 is never retried, so it is fatal
+### G4 — `fix/catalog-auth-resilience` — **PR [#416](https://github.com/hydall/Glaze/pull/416)**
 
-Shared shape: only `401/403` on *some* endpoints clear the cached token; detail, search
-and pagination paths do not. One retry-after-reauth wrapper around every catalog fetch.
+Shared shape confirmed: each provider holds a credential its server can stop honouring,
+and exactly one code path per provider knew how to replace one. Every other path
+reported the rejection verbatim behind a Retry that re-sent the same dead credential.
+
+- **#104** DataCat card detail → `HTTP 403: Forbidden` — **fixed**. Every authenticated
+  DataCat call now runs through one wrapper that drops the stored session token on a
+  401/403, re-identifies and asks again once. The browse path's throwaway probe
+  (`datacatEnsureSession` / `datacatValidate`) went with its only caller, so browsing
+  costs one request per page instead of two.
+- **#113** raw Turnstile JSON in the dialog — **half fixed here**. The DataCat side (a
+  card read that 403s and cannot recover) is this PR; the raw blob itself is
+  `_extractApiMessage` returning a whole string body, which is G5.
+- **#152** JanitorAI browse/search/pagination → `session expired (401)` — **fixed**, and
+  **the audit was stale**: it asked for a page reload + retry on 401, which
+  `_fetchLocked` already does (`janitor_webview_proxy.dart`). What was missing was an
+  answer for a 401 that survives the refresh. A public read now retries with the
+  refused token left off, gated by `janitorReadIsPublic` — an allowlist, default-deny,
+  GET only. The stored session is left alone: a JWT the server would not take is not
+  evidence the login is finished.
+- **#89** (item 1) Janny search → 400 "bad syntax" — **fixed as far as code can go
+  without the backend**. The request was asking for `facets`, `attributesToHighlight`,
+  `attributesToCrop` and `cropMarker` — all four land in Meilisearch's `_formatted`
+  block or its facet distribution, **neither of which the provider reads**, and each is
+  a clause the backend can reject. Sending only what is read removes four ways for
+  search to die. A 400 now also retries without the `sort`, then without the optional
+  filter clauses; `isNsfw = false` is never dropped, because a degraded search that
+  answers with what somebody asked to be spared is worse than no answer. Items 2 and 3
+  of that card stand as the audit found them: 2 is already fixed in nightly
+  (per-swipe `isError` in `swipesMeta`), 3 is a feature request and the WebView login
+  exists for a real reason (CF binds `cf_clearance` to the solving client's JA3).
+
+Deliberately not done: the catalog grid still renders `state.error` as a bare centered
+`Text`. A retry/login affordance there is UI work, and with a public read no longer
+dead-ending there is no dead end left to act on. Janny's `/hampter/script/*` reads are
+not on the anonymous allowlist either — they may well be public, but nothing
+demonstrates it.
 
 ### G5 — `fix/error-surface-normalization` — raw exception text shown to users (3 cards)
 - **#113** (client half) `_extractApiMessage` returns the entire server body when it is a plain string
@@ -398,7 +428,7 @@ doing them apart.
 | 2 | G8 lorebook-activation-scope | `fix/lorebook-activation-scope` | 99 | **in review** | [#413](https://github.com/hydall/Glaze/pull/413) | In Progress |
 | 2 | G10 vision-capability | `fix/vision-capability` | 95 | **in review** | [#415](https://github.com/hydall/Glaze/pull/415) | In Progress |
 | 2 | G17 draft-clear-on-send | `fix/draft-clear-on-send` | 121 | **in review** | [#414](https://github.com/hydall/Glaze/pull/414) | In Progress |
-| 3 | G4 catalog-auth-resilience | `fix/catalog-auth-resilience` | 104, 113, 152, 89 | not started | — | — |
+| 3 | G4 catalog-auth-resilience | `fix/catalog-auth-resilience` | 104, 113, 152, 89 | **in review** | [#416](https://github.com/hydall/Glaze/pull/416) | all four In Progress |
 | 3 | G5 error-surface-normalization | `fix/error-surface-normalization` | 113, 120, 105 | not started | — | — |
 | 4 | G12 ol-start | `fix/ol-start` | 136 | not started | — | — |
 | 4 | G13 audio-embed-overflow | `fix/audio-embed-overflow` | 100 | not started | — | — |
