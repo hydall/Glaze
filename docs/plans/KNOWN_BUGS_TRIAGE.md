@@ -239,11 +239,31 @@ maintainer said in-thread he would "figure something out" for.
 ### G11 — `fix/imggen-timer-cache` (1 card)
 - **#97** The image-gen timer does not reset on retry — the formatter memoizes `[IMG:GEN]` output *including* its `data-start` timestamp
 
-### G12 — `fix/ol-start` (1 card, tiny)
-- **#136** `0. test` renders as `1. test` — the ordered-list branch discards the number and emits `<ol>` with no `start`
+### G12 — `fix/ol-start` — **already fixed on nightly**
+- **#136** `0. test` renders as `1. test` — **no longer reproduces.** PR #350 already
+  captures the first item's number and emits `<ol start="N">`
+  (`block_syntax.js:143-157`), the case is in the corpus as `ordered-list-zero`, and
+  `cards.spec.js` asserts `start === 0` for it. Ran that spec against nightly: passes.
+  The thread's "on chat preview it still shows 0" is correct behaviour — the preview
+  shows the raw text the user typed. No branch; card moved to Done, not tested.
 
-### G13 — `fix/audio-embed-overflow` (1 card)
-- **#100** The audio embed is wider than the bubble and paints outside its rounded border
+### G13 — `fix/audio-embed-overflow` — **PR [#418](https://github.com/hydall/Glaze/pull/418)**
+- **#100** audio embed overhangs the bubble — **fixed.** The player in the screenshot
+  is Chromium's own `<audio>` control, which it lays out at a fixed 300px; a bubble on
+  a phone gets 88% of the screen less its padding, about 260px on a 360px device, so
+  the control kept its intrinsic width and painted through the rounded border. Browser-
+  sized media is now capped at the width of the message it sits in, in `SHADOW_STYLE`
+  next to the `img` rule that has always done this. `<video>`, `<iframe>`, `<canvas>`,
+  `<embed>` and `<object>` get the same cap — all six default to a fixed intrinsic
+  width, and the bug is the width, not the tag.
+
+  **Declined the audit's second suggestion**, `overflow: hidden` on `.msg-body`. That
+  clips the symptom and breaks a documented feature: a card is allowed to paint outside
+  its bubble, and every CSS-only overlay card (`#toggle:checked ~ .overlay`) depends on
+  it.
+
+  Corpus entry `audio-embed` plus a spec that squeezes a message to a phone-bubble
+  width: 40px of overhang on nightly, none with the rule. Full suite 98 passed.
 
 ### G14 — `fix/prompt-inspector` (3 cards)
 - **#106** The bottom action row sits under the Android nav bar — the sheet is shown without `useSafeArea: true`
@@ -307,14 +327,50 @@ Same worker, same 60 s hard cap, same single-request isolate. Sizing work, not a
 ### G20 — `fix/memory-auto-generate` (1 card)
 - **#122** Memory-book drafts are auto-*created* but never auto-*generated*; `autoGenerateEnabled` has no consumer, yet the toggle is shown. Either wire it up or stop advertising it
 
-### G21 — `fix/docs-and-readme` (4 cards, docs only)
+### G21 — `fix/docs-and-readme` — **PR [#419](https://github.com/hydall/Glaze/pull/419)**
 - **#116** The README Discord badge renders "invalid server" — guild id and invite do not match
 - **#33** The README "Download the latest release from Releases" link is `../../releases`, which resolves above the repository
 - **#23** (nightsyr mention) — credit nightsyr in the README as an honorary tester, alongside the testers listed in the app
 - **#146** — glossary entry stating that Glaze's local tokenizer is an estimate and can differ from the provider's count; all languages (`glossary_en.json` + `glossary_ru.json`)
 
-### G22 — `fix/tab-scroll-position` (1 card)
-- **#61** Discover ⇄ My Characters loses the scroll position (`TabSlideSwitcher` disposes the outgoing child)
+All four **fixed**, with one finding worth keeping:
+
+- **#116** the badge's guild id really is wrong — the invite resolves to
+  `1484662788394582016`, the id every Discord report link in the tracker carries, not
+  the `1355184294868484196` in the badge. But **correcting it does not fix the badge**:
+  shields.io's Discord source reads the guild *widget* API, and with the widget off it
+  answers `chat: widget disabled` instead of `chat: invalid server`. Verified both by
+  fetching the two badge URLs. So the badge is now a static **Discord · Join** badge,
+  which cannot report on a server at all. Enabling Server Settings → Widget in Discord
+  would allow the live count back — that is the maintainer's call, and it is in the PR.
+- **#33** absolute Releases URL, plus a version badge linking to `releases/latest` —
+  the "download button" the card names. `../../releases` resolves correctly only
+  because GitHub happens to render a README two path segments deep.
+- **#23** a Testers subsection in both READMEs, nightsyr first, from the app's own Hall
+  of Fame list.
+- **#146** a *Why token counts differ* article in both glossaries, filed next to
+  `token`: `o200k_base` locally vs the provider's own tokenizer, and the ~4-chars-per-
+  token fallback before the vocabulary has downloaded.
+
+The glossary had **no test at all**; it has one now (`test/glossary_content_test.dart`):
+term ids in step across both languages, every `[[link]]` resolving, and a term
+cross-listed under two categories saying the same thing in both places. That last one
+exists because EN files `chat-session` and `connections` under two categories each —
+identical copies today, which the test now holds in place.
+
+Also noticed, not part of these cards: the EN and RU glossaries agree on all 73 term
+ids but not on which category a term sits in (EN cross-lists two, RU does not).
+
+### G22 — `fix/tab-scroll-position` — **already fixed on nightly**
+- **#61** Discover ⇄ My Characters loses the scroll position — **no longer
+  reproduces.** PR #358 added `TabScrollMemory`
+  (`lib/shared/widgets/tab_scroll_memory.dart`): one `ScrollController` per tab,
+  provided *inside* each tab body so the outgoing body keeps scrolling while it
+  animates out, and the offset restored as the incoming position is created, before its
+  first frame. `test/tab_scroll_memory_test.dart` covers both directions; ran it on
+  nightly, passes. The card's second half — a floating jump-to-top button — is a
+  feature, and the re-tap-jumps-to-top behaviour is intentional per the maintainer's
+  own reply. No branch; card moved to Done, not tested.
 
 ### G23 — `fix/spoiler-reveal` (1 card)
 - **#112** Spoiler text in the character Info box renders as a blank white block, and tapping does not reveal it
@@ -339,6 +395,8 @@ plan rather than pre-empt it.
 | 108 | Can't view previous gens while regenerating | Intended, reframed as a feature request |
 | 93 | Tavo backup import | Feature disabled in code (`tavoImportEnabled = false`) |
 | 90 | Can't switch between quick access panels | The controller already implements switch-in-place; needs a re-test, not a fix |
+| 136 | `0. test` renders as `1. test` | Fixed by PR #350 — `<ol start="N">`, corpus card `ordered-list-zero`, spec passes on nightly |
+| 61 | Tab scroll position lost | Fixed by PR #358 — `TabScrollMemory`, `test/tab_scroll_memory_test.dart` passes on nightly |
 
 ---
 
@@ -461,10 +519,10 @@ doing them apart.
 | 2 | G17 draft-clear-on-send | `fix/draft-clear-on-send` | 121 | **in review** | [#414](https://github.com/hydall/Glaze/pull/414) | In Progress |
 | 3 | G4 catalog-auth-resilience | `fix/catalog-auth-resilience` | 104, 113, 152, 89 | **in review** | [#416](https://github.com/hydall/Glaze/pull/416) | all four In Progress |
 | 3 | G5 error-surface-normalization | `fix/error-surface-normalization` | 113, 120, 105 | **in review** | [#417](https://github.com/hydall/Glaze/pull/417) | all three In Progress |
-| 4 | G12 ol-start | `fix/ol-start` | 136 | not started | — | — |
-| 4 | G13 audio-embed-overflow | `fix/audio-embed-overflow` | 100 | not started | — | — |
-| 4 | G21 docs-and-readme | `fix/docs-and-readme` | 116, 33, 23, 146 | not started | — | — |
-| 4 | G22 tab-scroll-position | `fix/tab-scroll-position` | 61 | not started | — | — |
+| 4 | G12 ol-start | — | 136 | **already fixed** (PR #350) | — | Done, not tested |
+| 4 | G13 audio-embed-overflow | `fix/audio-embed-overflow` | 100 | **in review** | [#418](https://github.com/hydall/Glaze/pull/418) | In Progress |
+| 4 | G21 docs-and-readme | `fix/docs-and-readme` | 116, 33, 23, 146 | **in review** | [#419](https://github.com/hydall/Glaze/pull/419) | all four In Progress |
+| 4 | G22 tab-scroll-position | — | 61 | **already fixed** (PR #358) | — | Done, not tested |
 | 5 | G25 chat-first-open | `fix/chat-first-open` | 87, 154 | not started | — | — |
 | 5 | G26 keyboard-inset | `fix/keyboard-inset` | 7 | not started | — | — |
 | 5 | G35 message-delete-race | `fix/message-delete-race` | 78 | not started | — | — |
