@@ -7,6 +7,12 @@ import 'global_regex_provider.dart';
 
 final activeRegexesProvider = FutureProvider<List<PresetRegex>>((ref) async {
   final repo = ref.watch(presetRepoProvider);
+  // Awaited, not read. The global scripts load from SharedPreferences, and on a
+  // cold start that has not finished by the time anything asks for this list:
+  // reading `.value` then yielded null and dropped every global script from a
+  // list whose whole promise is that it has resolved. The chat's first paint
+  // asks exactly once, so what it gets here is what the reader sees.
+  final globalScripts = ref.watch(globalRegexProvider.future);
   final presets = await repo.getAll();
   final activeId = ref.watch(activePresetIdProvider);
   final preset = activeId != null
@@ -14,13 +20,9 @@ final activeRegexesProvider = FutureProvider<List<PresetRegex>>((ref) async {
       : (presets.isNotEmpty ? presets.first : null);
   final presetRegexes =
       preset?.regexes.where((r) => !r.disabled).toList() ?? <PresetRegex>[];
-  final globalRegexes =
-      ref
-          .watch(globalRegexProvider)
-          .value
-          ?.where((r) => !r.disabled)
-          .toList() ??
-      <PresetRegex>[];
+  final globalRegexes = (await globalScripts)
+      .where((r) => !r.disabled)
+      .toList();
   return [...presetRegexes, ...globalRegexes];
 });
 

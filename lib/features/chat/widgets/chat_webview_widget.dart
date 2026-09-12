@@ -29,6 +29,7 @@ import 'chat_webview_callbacks.dart';
 import 'chat_webview_ext_block_callbacks.dart';
 import 'chat_webview_initializer.dart';
 import 'chat_webview_panel_refresher.dart';
+import 'chat_webview_recovery.dart';
 import 'chat_webview_surface.dart';
 import 'chat_webview_sync_dispatcher.dart';
 import 'message_scripts_prompt_sheet.dart';
@@ -220,6 +221,12 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   Future<void>? _initFuture;
   ChatWebViewWidget? _deferredSwitchFrom;
   bool _bridgeFailureNotified = false;
+
+  /// Rations rebuilds of the native view: see [ChatWebViewRecovery].
+  final ChatWebViewRecovery _recovery = ChatWebViewRecovery();
+
+  /// Bumped to hand the surface a brand new WebView after the old page died.
+  int _rebuildGeneration = 0;
   bool _lifecycleActive = true;
   int _lifecycleEpoch = 0;
   VoidCallback? _clearBridgeRegistry;
@@ -274,17 +281,19 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     // Bridge never appeared after 5 seconds of polling. This can be an actual
     // platform failure, but can also be a native-view lifecycle race during a
     // rapid route change, so do not claim a missing runtime without evidence.
-    if (!mounted || _bridgeFailureNotified) return;
-    _bridgeFailureNotified = true;
+    if (!mounted) return;
     debugPrint(
       '[ChatWebView] bridge was not created after 5s — '
       'native WebView did not finish initializing',
     );
-    GlazeErrorDialog.show(
-      context,
+    if (_recovery.requestRebuild()) {
+      setState(() => _rebuildGeneration++);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _kickInitWhenReady());
+      return;
+    }
+    _notifyWebViewFailure(
       'Chat view is still initializing. Please return to the chat once more. '
       'If this keeps happening, restart Glaze and check the diagnostic log.',
-      prefix: 'Chat view failed to load',
     );
   }
 
@@ -472,6 +481,9 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         onReady: () {
           if (!mounted || !identical(_bridge, bridge)) return;
           _ready = true;
+          // The page is alive and painted: whatever it took to get here is no
+          // longer evidence of a rebuild storm.
+          _recovery.noteHealthy();
           // Do not expose the controller to background services or the Windows
           // trackpad sink until the page bridge and its DOM are initialized.
           ref.read(chatBridgeRegistryProvider(widget.charId).notifier).state =
@@ -482,10 +494,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       ).run().timeout(_kWebViewInitTimeout);
       PerfDebug.chatWebViewInitCompleted();
     } on TimeoutException catch (e, st) {
-      _handleWebViewFailure(e, st, phase: 'init');
+      _handleWebViewFailure(e, st, phase: 'init', rebuildable: true);
       return;
     } catch (e, st) {
-      _handleWebViewFailure(e, st, phase: 'init');
+      _handleWebViewFailure(e, st, phase: 'init', rebuildable: true);
       return;
     } finally {
       if (!_ready) _initFuture = null;
@@ -508,6 +520,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     await _bridgeOp(_syncExtBlockPanels(), label: 'syncExtBlockPanels');
     final deferred = _deferredSwitchFrom;
     _deferredSwitchFrom = null;
+    // Consumed here whichever branch runs below: the other two re-push every
+    // message anyway, so the re-render this flag asks for happens regardless.
+    final regexContextStale = _syncState.regexContextStale;
+    _syncState.regexContextStale = false;
     if (deferred != null) {
       unawaited(_applySessionSwitch(deferred, epoch: _sessionSwitchEpoch));
     } else if (initSessionId != widget.sessionId) {
@@ -518,24 +534,83 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       // dispatcher skips them because _ready is false. Re-sync only when data
       // changed since the initializer captured it; an unconditional second
       // setMessages causes a visible duplicate first-chat render on Windows.
-      if (initVisibleStartIndex != widget.visibleStartIndex ||
+      // `regexContextStale`: the display-script list resolved while init was
+      // running, after the initializer read the list it painted with. The
+      // messages are in the DOM rewritten by the older list, and only a
+      // re-render replaces them.
+      if (regexContextStale ||
+          initVisibleStartIndex != widget.visibleStartIndex ||
           !chatMessageListsIdentical(initMessages, widget.messages)) {
         unawaited(_resyncMessagesAfterInit());
       }
     }
   }
 
+  /// The page behind the chat died. Nothing on screen is real any more: the
+  /// DOM is gone, `window.bridge` with it, and every call the app makes into
+  /// the page from here on returns without doing anything — which is why the
+  /// symptom was a chat with no messages whose edit and regenerate buttons did
+  /// nothing until it was reopened.
+  ///
+  /// So the Dart side stops believing in it (nothing is pushed into a dead
+  /// page, and no background service gets the controller out of the registry),
+  /// and the native view is replaced. [ChatWebViewRecovery] decides when to
+  /// stop trying and tell the reader instead.
+  void _handlePageProcessGone() {
+    if (!mounted) return;
+    _ready = false;
+    _initFuture = null;
+    _resetStreamingPresentationState();
+    _clearBridgeRegistry?.call();
+    _bridge = null;
+    if (!_recovery.requestRebuild()) {
+      debugPrint('[ChatWebView] page died too often; not rebuilding again');
+      _notifyWebViewFailure(
+        'The chat view keeps being closed by the system, usually because the '
+        'device is low on memory. Reopen the chat, and restart Glaze if it '
+        'happens again.',
+      );
+      return;
+    }
+    setState(() => _rebuildGeneration++);
+    // The replacement view normally reports itself through
+    // `onWebViewCreated`; this is the same safety net used at startup for the
+    // case where it does not.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _kickInitWhenReady());
+  }
+
+  /// Tells the reader the chat view could not be brought up, once per widget.
+  void _notifyWebViewFailure(Object message) {
+    if (!mounted || _bridgeFailureNotified) return;
+    _bridgeFailureNotified = true;
+    GlazeErrorDialog.show(context, message, prefix: 'Chat view failed to load');
+  }
+
   void _handleWebViewFailure(
     Object e,
     StackTrace? st, {
     required String phase,
+    bool rebuildable = false,
   }) {
     debugPrint('[ChatWebView] $phase failed: $e\n$st');
     _setSessionSwitching(false);
     if (!mounted) return;
-    if (_bridgeFailureNotified) return;
-    _bridgeFailureNotified = true;
-    GlazeErrorDialog.show(context, e, prefix: 'Chat view failed to load');
+    // An init that could not reach the page is the same situation as a page
+    // that died under it: the JS bridge handshake it waited 30s for will not
+    // answer a second attempt against that same page either. So the view is
+    // replaced and init runs again on a live one, and the reader hears about
+    // it only once the rebuild budget is spent.
+    if (rebuildable && _recovery.requestRebuild()) {
+      debugPrint('[ChatWebView] rebuilding the view after a failed $phase');
+      _ready = false;
+      _initFuture = null;
+      _bridge = null;
+      _clearBridgeRegistry?.call();
+      setState(() => _rebuildGeneration++);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _kickInitWhenReady());
+      return;
+    }
+    _notifyWebViewFailure(e);
   }
 
   /// Re-shows the chat header and re-baselines the JS hide-on-scroll tracker.
@@ -1264,6 +1339,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       bottomInset: widget.bottomInset,
       onBridgeReady: (ChatBridgeController b) => _bridge = b,
       onInitWebView: _initWebView,
+      onPageProcessGone: _handlePageProcessGone,
+      rebuildGeneration: _rebuildGeneration,
     );
   }
 
