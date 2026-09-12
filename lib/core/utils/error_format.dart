@@ -86,14 +86,71 @@ String _formatHttpError(Response<dynamic> response) {
       ? 'HTTP $status - $description'
       : 'HTTP $status';
 
+  final hint = _rejectedImagesHint(code, response.requestOptions);
   final apiMsg = _extractApiMessage(response.data);
-  if (apiMsg == null) return header;
+  if (apiMsg == null) return '$header$hint';
   // Providers that just echo the status text add nothing to the header.
   if (description != null &&
       apiMsg.toLowerCase() == description.toLowerCase()) {
-    return header;
+    return '$header$hint';
   }
-  return '$header\n$apiMsg';
+  return '$header\n$apiMsg$hint';
+}
+
+/// The line that turns a bare `HTTP 400 - Bad Request` into something the
+/// user can act on when the request carried a picture.
+///
+/// Nothing tells Glaze whether the selected model is multimodal, so the
+/// attachments in a chat's history are serialized for whatever model is
+/// active — switch to one that does not take images and the provider rejects
+/// the whole request, naming nothing the reader recognises. The rejection is
+/// the only evidence there is, so the hint is offered as a possibility, and
+/// only when the request that failed actually held an image.
+String _rejectedImagesHint(int? code, RequestOptions options) {
+  if (code != 400 && code != 415 && code != 422) return '';
+  if (!_carriesImagePart(options.data)) return '';
+  return '\n${'error_images_maybe_unsupported'.tr()}';
+}
+
+/// Whether a request body holds an image part, in any of the shapes the
+/// transports build: OpenAI `image_url`, the Responses API's `input_image`,
+/// Anthropic's `image`, or Gemini's `inline_data`.
+///
+/// Depth-limited because this runs on the error path of a body that may be
+/// megabytes of base64, and must not become the reason an error is slow.
+bool _carriesImagePart(Object? data, [int depth = 0]) {
+  if (depth > 6) return false;
+  if (data is Map) {
+    final type = data['type'];
+    if (type == 'image_url' || type == 'input_image' || type == 'image') {
+      return true;
+    }
+    if (data.containsKey('inline_data') || data.containsKey('inlineData')) {
+      return true;
+    }
+    for (final value in data.values) {
+      if (_carriesImagePart(value, depth + 1)) return true;
+    }
+    return false;
+  }
+  if (data is List) {
+    for (final value in data) {
+      if (_carriesImagePart(value, depth + 1)) return true;
+    }
+    return false;
+  }
+  // A body handed to Dio already encoded. Searching the text is cruder than
+  // walking the structure, but the markers are distinctive enough and the
+  // alternative is decoding the whole thing to answer one question.
+  if (data is String) {
+    return data.contains('"image_url"') ||
+        data.contains('"input_image"') ||
+        data.contains('"inline_data"') ||
+        data.contains('"inlineData"') ||
+        data.contains('"type":"image"') ||
+        data.contains('"type": "image"');
+  }
+  return false;
 }
 
 /// The server-supplied reason phrase, when it is not blank.
