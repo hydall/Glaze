@@ -233,6 +233,33 @@ class ChatWebViewInitializer {
     await bridge.setGenerationPhase(
       generationPhaseLabel(ref.read(generationPhaseProvider(input.charId))),
     );
+    // Before the first paint, and before the retire below can read them: the
+    // page starts the elapsed clock off these two, and a chat reopened mid-run
+    // should find it already running rather than a bubble with no clock until
+    // the next dispatch. `setSendPending` also has to be mirrored into
+    // `isSendPendingInPage`, which is what the dispatcher level-reconciles
+    // against — left at its default it would push the same value again.
+    bridge.isSendPendingInPage = input.isSendPending;
+    await bridge.evalJs(
+      'if (window.bridge) { '
+      'window.bridge.setGenerating(${input.isGenerating}); '
+      // Guarded and last: a page from before this flag existed (a cached
+      // asset, the legacy bridge snapshot) would throw here.
+      'if (window.bridge.setSendPending) '
+      'window.bridge.setSendPending(${input.isSendPending}); '
+      '}',
+    );
+    // The page is kept alive across chats, so it may still hold the typing
+    // bubble of a run that finished while this chat was closed — nothing
+    // dispatched that run's falling edge, because the widget that would have
+    // was disposed. `setMessages` carries a bubble across on purpose, so left
+    // here it reopens the chat with a reply on its way that landed minutes
+    // ago, and no later re-render of the same session takes it back down.
+    // Retire it unless a run really is in flight; the page ignores the call
+    // when it has already stopped believing in the bubble itself.
+    if (!input.isGenerating && !input.isSendPending) {
+      await bridge.retireTypingPlaceholder();
+    }
     await bridge.setMessages(
       input.messages,
       visibleStartIndex: input.visibleStartIndex,
@@ -261,10 +288,11 @@ class ChatWebViewInitializer {
         activeIndex: input.searchCurrentIndex,
       );
     }
+    // The two flags that decorate already-painted nodes, so they run after the
+    // paint. The run flags are pushed before `setMessages` above instead.
     unawaited(
       bridge.evalJs(
         'if (window.bridge) { '
-        'window.bridge.setGenerating(${input.isGenerating}); '
         'window.bridge.setPostGenRunning(${input.isPostGenRunning}); '
         'window.bridge.setImageGenerating(${input.isGeneratingImage}); '
         '}',

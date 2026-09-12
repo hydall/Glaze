@@ -2794,6 +2794,26 @@ void main() {
       expect(setBody, contains('_reattachStreamingPlaceholder(carriedPlaceholder)'));
     });
 
+    test('a leftover bubble can be retired without an exit animation', () {
+      // The carry above is only sound because Flutter retires a leftover
+      // before the setMessages that reopens a chat. `removeMessage` cannot do
+      // that job: it hands the node to a ~340ms exit animation, and the
+      // setMessages that follows would still find it at the tail and carry it.
+      final idx = bridgeControllerJs.indexOf('retireTypingPlaceholder() {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      // Level-triggered on the page's own belief: a node still on screen with
+      // the flag already cleared is playing the animation Flutter started.
+      expect(
+        body,
+        contains('!this._placeholderActive && !this._parkedPlaceholder'),
+      );
+      expect(body, contains('this._placeholderActive = false'));
+      expect(body, contains('this._parkedPlaceholder = null'));
+      expect(body, contains('this.virtualList.remove(STREAMING_ID)'));
+      expect(body, isNot(contains('animateRemoveSection')));
+    });
+
     test('replacing the chat drops the placeholder instead of parking it', () {
       // The bubble belongs to the session being left. Carried into the chat
       // being opened it claims a reply is on its way there, and it then rides
