@@ -153,7 +153,27 @@ The thread's "this character comes with a lorebook" notice is a feature → feat
 - **#98** Local JanitorAI extraction keeps only the first greeting (`alternateGreetings` is never populated although the fetched meta carries `first_messages`); the DataCat path drops the primary greeting on some cards
 
 ### G10 — `fix/vision-capability` (1 card)
-- **#95** Switching to a non-vision model after sending an image → `HTTP 400`, because historical images are always serialized. Needs a per-config "supports images" flag plus history filtering
+- **#95** Switching to a non-vision model after sending an image → `HTTP 400` — **fixed as what it is: an illegible failure.**
+
+Two things checked first. Glaze really cannot know whether the active model is
+multimodal: `ApiConfig` carries no capability field, and the only model-listing
+helper (`EndpointNormalizer.modelsUrl`) is used by image-gen alone. And the remedy
+already exists and works — `imageHidden` drops the attachment in all three prompt
+builders (`history_assembler.dart`, `fallback_prompt_builder.dart`,
+`studio/studio_stream_interceptor.dart`). Verified all three.
+
+So what was actually broken was the message: a bare `HTTP 400 - Bad Request` naming
+nothing the reader can connect to a picture they attached three messages ago.
+`formatError` now appends a hint when a 400/415/422 came back from a request that
+really did carry an image part, in any of the four shapes the transports build
+(OpenAI `image_url`, Responses `input_image`, Anthropic `image`, Gemini
+`inline_data`) plus a pre-encoded body. Depth-limited walk, so an error over
+megabytes of base64 stays fast.
+
+**Routed to the feature list:** the audit's per-config "supports images" flag with
+model-catalog auto-detection, composer blocking and history filtering. That is new
+configuration surface, a migration and settings UI — and it is exactly what the
+maintainer said in-thread he would "figure something out" for.
 
 ### G11 — `fix/imggen-timer-cache` (1 card)
 - **#97** The image-gen timer does not reset on retry — the formatter memoizes `[IMG:GEN]` output *including* its `data-start` timestamp
@@ -376,7 +396,7 @@ doing them apart.
 | 1 | G2 reasoning-render | `fix/reasoning-render` | 45 (123 covered, not reproduced) | **in review** | [#411](https://github.com/hydall/Glaze/pull/411) | both In Progress |
 | 1 | G3 streaming-bubble-state | `fix/streaming-bubble-state` | 141, 131 | **in review** | [#412](https://github.com/hydall/Glaze/pull/412) | both In Progress |
 | 2 | G8 lorebook-activation-scope | `fix/lorebook-activation-scope` | 99 | **in review** | [#413](https://github.com/hydall/Glaze/pull/413) | In Progress |
-| 2 | G10 vision-capability | `fix/vision-capability` | 95 | not started | — | — |
+| 2 | G10 vision-capability | `fix/vision-capability` | 95 | **in review** | [#415](https://github.com/hydall/Glaze/pull/415) | In Progress |
 | 2 | G17 draft-clear-on-send | `fix/draft-clear-on-send` | 121 | **in review** | [#414](https://github.com/hydall/Glaze/pull/414) | In Progress |
 | 3 | G4 catalog-auth-resilience | `fix/catalog-auth-resilience` | 104, 113, 152, 89 | not started | — | — |
 | 3 | G5 error-surface-normalization | `fix/error-surface-normalization` | 113, 120, 105 | not started | — | — |
