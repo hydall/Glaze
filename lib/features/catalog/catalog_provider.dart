@@ -326,7 +326,9 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
           filters: state.filters,
         );
       case CatalogProvider.datacat:
-        await datacatEnsureSession();
+        // No session probe first: every DataCat call now re-establishes the
+        // session itself when the server rejects the token, so the extra
+        // round-trip this used to make before each page bought nothing.
         if (state.query.isNotEmpty) {
           return datacatSearch(
             query: state.query,
