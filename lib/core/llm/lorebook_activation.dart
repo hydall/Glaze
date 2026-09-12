@@ -25,6 +25,19 @@ List<Lorebook> activeLorebooksFor({
     if (charGroupId?.isNotEmpty == true) charGroupId!,
   };
   return lorebooks.where((lb) {
+    // `enabled` is the Global switch and it stands on its own, deliberately —
+    // it is not gated on the scope fields below. Those are a *denormalised
+    // mirror* of the activation maps (`_applyActivations` in
+    // `lorebook_connections_sheet.dart` writes the first linked id into them),
+    // so a global book that is also pinned to a character carries
+    // `enabled: true` *and* `activationScope: 'character'`. Gating one on the
+    // other would silently un-globalize every one of those.
+    //
+    // Which means an imported book must never be written with `enabled: true`
+    // in the first place: the read side cannot tell that apart from a book the
+    // user made global on purpose. See `convertJanitorScript` and
+    // `convertCharacterBook`, which both stamp `enabled: false` and let the
+    // character scope do the activating.
     if (lb.enabled) return true;
     if (characterTargets.any(
       (id) => activations?.character[id]?.contains(lb.id) == true,
