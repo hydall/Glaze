@@ -23,6 +23,7 @@ void main() {
   group('ChatInputBar', () {
     late List<String> sentMessages;
     late List<List<String>> sentAttachments;
+    late List<String> draftWrites;
 
     Widget buildChatInputBar({
       FocusNode? focusNode,
@@ -39,6 +40,7 @@ void main() {
     }) {
       sentMessages = [];
       sentAttachments = [];
+      draftWrites = [];
       return ProviderScope(
         child: MaterialApp(
           home: Scaffold(
@@ -61,6 +63,7 @@ void main() {
               enterToSend: enterToSend,
               isEditingMessage: isEditingMessage,
               initialDraft: initialDraft,
+              onDraftChanged: draftWrites.add,
               onImpersonate: onImpersonate,
               onStop: onStop,
             ),
@@ -401,6 +404,31 @@ void main() {
 
         expect(find.byType(Image), findsOneWidget);
       });
+    });
+
+    testWidgets('sending clears the stored draft on the tap', (tester) async {
+      await tester.pumpWidget(buildChatInputBar(initialDraft: 'sent text'));
+
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump();
+
+      // No debounce wait: the row must not be left holding the text of a
+      // message that is already on its way, because leaving the chat inside
+      // that window cancels the timer that would have cleared it.
+      expect(draftWrites, ['']);
+      expect(sentMessages, ['sent text']);
+    });
+
+    testWidgets('a rejected send puts its draft back', (tester) async {
+      await tester.pumpWidget(
+        buildChatInputBar(initialDraft: 'keep me', acceptSend: false),
+      );
+
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+
+      expect(draftWrites, ['', 'keep me']);
     });
 
     testWidgets('rejected send keeps the composed text', (tester) async {
