@@ -1955,14 +1955,36 @@ void main() {
       );
     });
 
-    test('the shrink is measured against the Flutter-reported box height', () {
+    test('the shrink is measured against what the reader can see', () {
       expect(
         bridgeControllerJs,
-        contains('full - this.virtualList.container.clientHeight'),
+        contains('full - this._visibleViewportH()'),
         reason:
             'The shrink must be measured, not assumed — that is what keeps the '
             'same code correct on embedders that resize the WebView and on '
             'those that do not.',
+      );
+      expect(
+        bridgeControllerJs,
+        contains('Math.min(client, visual)'),
+        reason:
+            'A keyboard that overlays the page shrinks the visual viewport and '
+            'leaves the layout viewport alone, so the element measures full '
+            'height while half of it is behind the keyboard. Whichever of the '
+            'two is smaller is what is on screen.',
+      );
+    });
+
+    test('the chat container is sized by the dynamic viewport', () {
+      expect(
+        indexHtml,
+        contains('height: 100vh; height: 100dvh;'),
+        reason:
+            '`100vh` is the viewport with every retractable UI retracted — by '
+            'definition it does not shrink for a keyboard, so the shrink the '
+            'bridge measures was always zero and the keyboard was counted '
+            'twice: once as screen the reader cannot see, once as padding. '
+            '`vh` stays first as the fallback for engines without `dvh`.',
       );
     });
 
