@@ -113,6 +113,79 @@ void main() {
     expect(persisted?.deletedMessageCount, 2);
   });
 
+  test('a reply that lands while the delete commits survives it', () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [appDbProvider.overrideWithValue(db)],
+    );
+    addTearDown(() async {
+      container.dispose();
+      await db.close();
+    });
+
+    final session = _session(3);
+    final chatRepo = container.read(chatRepoProvider);
+    await chatRepo.put(session);
+
+    final service = container.read(_messageServiceProvider);
+    final plan = service.planDeleteMessages(session, {1})!;
+
+    // What the delete's own transaction is slow enough to race with on a long
+    // chat: a reply finishing its stream, landing on the durable row through
+    // the atomic append path while the plan is already in flight.
+    await chatRepo.mutateMessages(
+      sessionId: 's1',
+      updatedAt: 2,
+      mutate: (messages) => [
+        ...messages,
+        const ChatMessage(id: 'm-new', role: 'assistant', content: 'landed'),
+      ],
+    );
+
+    final committed = await service.commitDeleteMessages(session, plan);
+
+    final persisted = await chatRepo.getById('s1');
+    expect(
+      persisted?.messages.map((m) => m.id),
+      ['m0', 'm2', 'm-new'],
+      reason: 'the delete wrote its pre-computed list over the new message',
+    );
+    expect(committed.messages.map((m) => m.id), ['m0', 'm2', 'm-new']);
+    expect(persisted?.deletedMessageCount, 1);
+  });
+
+  test('a message with no id is still deleted', () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [appDbProvider.overrideWithValue(db)],
+    );
+    addTearDown(() async {
+      container.dispose();
+      await db.close();
+    });
+
+    // Written before messages carried ids. Deleting by id cannot address it,
+    // so the commit falls back to writing the planned list.
+    const session = ChatSession(
+      id: 's1',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: [
+        ChatMessage(id: 'm0', role: 'user', content: 'first'),
+        ChatMessage(id: '', role: 'assistant', content: 'legacy'),
+        ChatMessage(id: 'm2', role: 'user', content: 'third'),
+      ],
+    );
+    await container.read(chatRepoProvider).put(session);
+
+    final service = container.read(_messageServiceProvider);
+    final plan = service.planDeleteMessages(session, {1})!;
+    await service.commitDeleteMessages(session, plan);
+
+    final persisted = await container.read(chatRepoProvider).getById('s1');
+    expect(persisted?.messages.map((m) => m.content), ['first', 'third']);
+  });
+
   test(
     'tail deletion preserves completed reconciliation range and checkpoint',
     () async {

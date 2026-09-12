@@ -275,12 +275,12 @@ class ChatMessageService {
         }
       }
       await trackerRepo.replaceLedgerState(session.id, committedBase);
-      await chatRepo.put(updated);
+      final survivors = await _writeDeletion(session, plan);
       final canonRollback = await _ref
           .read(sessionCanonRollbackRepoProvider)
           .reconcileInTransaction(
             sessionId: session.id,
-            survivingMessages: updated.messages,
+            survivingMessages: survivors,
           );
       wakeLoreEmbeddingWorker = canonRollback.shouldWakeLoreEmbeddingWorker;
     });
@@ -302,6 +302,53 @@ class ChatMessageService {
     final durable = await chatRepo.getById(session.id) ?? updated;
     ChatSessionService.updateCache(durable);
     return durable;
+  }
+
+  /// Applies [plan] to the durable row and returns the surviving messages.
+  ///
+  /// The deletion is re-applied by message id against the row as it is *now*,
+  /// rather than writing the shortened list the plan carries. The plan was
+  /// computed on the frame of the tap, and the transaction around this can run
+  /// for a while on a long chat — long enough for a reply to finish streaming
+  /// into the row, or for a variation switch to commit. Writing the plan
+  /// wholesale wrote those back out again: the delete undid work it had nothing
+  /// to do with, and the row disagreed with the screen until the chat was
+  /// reopened.
+  ///
+  /// The deleted count is read from the durable row for the same reason — two
+  /// deletions in flight each add their own, instead of the later one
+  /// overwriting the earlier one's total.
+  ///
+  /// Messages written before ids existed carry an empty one and cannot be
+  /// addressed this way. When the plan holds any of those, the shortened list
+  /// is written as before: an index-based delete is only correct against the
+  /// snapshot it was computed from, so nothing is gained by being clever here.
+  Future<List<ChatMessage>> _writeDeletion(
+    ChatSession session,
+    MessageDeletionPlan plan,
+  ) async {
+    final chatRepo = _ref.read(chatRepoProvider);
+    if (plan.deletedMessageIds.length != plan.deletedIndices.length) {
+      await chatRepo.put(plan.session);
+      return plan.session.messages;
+    }
+    final durable = await chatRepo.mutateSession(
+      sessionId: session.id,
+      updatedAt: plan.session.updatedAt,
+      mutate: (current) {
+        final remaining = current.messages
+            .where((message) => !plan.deletedMessageIds.contains(message.id))
+            .toList();
+        final vars = Map<String, String>.from(current.sessionVars)
+          ..[ChatSessionX.deletedMessagesVarKey] =
+              (current.deletedMessageCount + plan.deletedIndices.length)
+                  .toString();
+        return current.copyWith(messages: remaining, sessionVars: vars);
+      },
+    );
+    // No row: the session was deleted from under the delete. Nothing survives,
+    // and the rollback below has nothing to reconcile against.
+    return durable?.messages ?? const [];
   }
 
   ChatSession toggleMessageHidden(ChatSession session, int index) {
