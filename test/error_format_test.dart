@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/utils/error_format.dart';
 
@@ -143,11 +144,133 @@ void main() {
     expect(formatError(error), 'HTTP 599\nupstream exploded');
   });
 
-  test('every mapped HTTP status has an EN and RU description', () {
+  group('a rejected request that carried an image', () {
+    /// Nothing tells Glaze whether the active model is multimodal, so the only
+    /// evidence is the rejection itself plus the body that was sent.
+    String formatRejection({
+      required int status,
+      required Object? body,
+    }) {
+      final options = RequestOptions(path: '/chat/completions', data: body);
+      return formatError(
+        DioException.badResponse(
+          statusCode: status,
+          requestOptions: options,
+          response: Response<dynamic>(
+            requestOptions: options,
+            statusCode: status,
+            data: const {
+              'error': {'message': 'Invalid content type'},
+            },
+          ),
+        ),
+      );
+    }
+
+    Object openAiBody() => {
+      'messages': [
+        {
+          'role': 'user',
+          'content': [
+            {'type': 'text', 'text': 'look'},
+            {
+              'type': 'image_url',
+              'image_url': {'url': 'data:image/png;base64,AAAA'},
+            },
+          ],
+        },
+      ],
+    };
+
+    test('names images as a possible cause', () {
+      final lines = formatRejection(status: 400, body: openAiBody()).split('\n');
+
+      expect(lines, hasLength(3));
+      expectStatusLine(lines.first, 400);
+      expect(lines[1], 'Invalid content type');
+      expect(lines.last, 'error_images_maybe_unsupported'.tr());
+      expect(lines.last, isNotEmpty);
+    });
+
+    test('says nothing when the request carried no image', () {
+      final lines = formatRejection(
+        status: 400,
+        body: {
+          'messages': [
+            {'role': 'user', 'content': 'look'},
+          ],
+        },
+      ).split('\n');
+
+      expect(lines, hasLength(2));
+    });
+
+    test('says nothing about a failure that is not about the payload', () {
+      final lines = formatRejection(
+        status: 500,
+        body: openAiBody(),
+      ).split('\n');
+
+      expect(lines, hasLength(2));
+    });
+
+    test('reads every shape the transports build', () {
+      // Anthropic, Gemini, the Responses API, and a body Dio was handed
+      // already encoded.
+      final bodies = <Object>[
+        {
+          'messages': [
+            {
+              'role': 'user',
+              'content': [
+                {
+                  'type': 'image',
+                  'source': {'type': 'base64', 'data': 'AAAA'},
+                },
+              ],
+            },
+          ],
+        },
+        {
+          'contents': [
+            {
+              'parts': [
+                {
+                  'inline_data': {'mime_type': 'image/png', 'data': 'AAAA'},
+                },
+              ],
+            },
+          ],
+        },
+        {
+          'input': [
+            {
+              'content': [
+                {'type': 'input_image', 'image_url': 'data:image/png;base64,A'},
+              ],
+            },
+          ],
+        },
+        '{"messages":[{"content":[{"type":"image_url"}]}]}',
+      ];
+
+      for (final body in bodies) {
+        expect(
+          formatRejection(status: 400, body: body).split('\n'),
+          hasLength(3),
+          reason: 'no hint for $body',
+        );
+      }
+    });
+  });
+
+  test('every message key this file names has an EN and RU string', () {
     final source = File(
       'lib/core/utils/error_format.dart',
     ).readAsStringSync();
-    final keys = RegExp(r"'(error_http_\d+)'")
+    // Every key, not just the status descriptions: a hint added to the status
+    // line is as visible to the reader as the line itself.
+    final keys = RegExp(r"'(error_[a-z0-9_]+)'")
         .allMatches(source)
         .map((match) => match.group(1)!)
         .toSet();
