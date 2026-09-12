@@ -77,9 +77,11 @@ Files: `chat_provider.dart`, `continuation_message_merger.dart`,
 `stream_generation_service.dart`, `saved_message_writer.dart`, `message_preview.dart`,
 `sync_notification_stage.dart`, `renderer/message_renderer.js`.
 
-### G2 — `fix/reasoning-render` — reasoning block rendering (2 cards)
-- **#123** Reasoning box vanishes for good after regenerating with a non-reasoning model and never returns on swipe-back (`updateMessageContent` removes `.msg-reasoning`; the fast path never re-creates it)
-- **#45** Swipe drags only `.msg-body` — the reasoning block and game-time stay pinned, so the message visually tears apart mid-swipe
+### G2 — `fix/reasoning-render` — reasoning block rendering — **PR [#411](https://github.com/hydall/Glaze/pull/411)**
+- **#45** Swipe drags only `.msg-body` — the reasoning block and game-time stay pinned, so the message tears apart mid-swipe — **fixed**. `SWIPE_TARGET_SELECTORS` now names the whole moving set and both paths (touch gesture, `animateVariantSwap`) use it; the footer deliberately stays put; each target locks its own height. Took the multi-element route rather than the audit's wrapper element, which would have changed the documented DOM contract that the bubble-layout CSS depends on.
+- **#123** Reasoning box vanishes after regenerating with a non-reasoning model — **does not reproduce**. `updateMessageContent` already re-creates a missing `.msg-reasoning`; the audit was reading older code. Locked in with `specs/reasoning_block_lifecycle.spec.js` (including the swipe-back case the report was actually about) instead of being closed on my word.
+
+Documented in `docs/rules/message-rendering.md` rather than as an INV — INV-MR1–8 are all about message scripts, which is a different subject.
 
 ### G3 — `fix/streaming-bubble-state` — typing-bubble lifecycle (2 cards)
 - **#141** The previous reply briefly renders as the currently-streaming bubble; duplicate messages (a regression that came back)
@@ -307,7 +309,7 @@ doing them apart.
 | Wave | Group | Branch | Cards | Status | PR | Trello |
 |---|---|---|---|---|---|---|
 | 1 | G1 continue-overhaul | `fix/continue-overhaul` | 118, 150 (119, 110 already fixed) | **in review** | [#410](https://github.com/hydall/Glaze/pull/410) | 118+150 In Progress · 119+110 Fixed |
-| 1 | G2 reasoning-render | `fix/reasoning-render` | 123, 45 | not started | — | — |
+| 1 | G2 reasoning-render | `fix/reasoning-render` | 45 (123 covered, not reproduced) | **in review** | [#411](https://github.com/hydall/Glaze/pull/411) | both In Progress |
 | 1 | G3 streaming-bubble-state | `fix/streaming-bubble-state` | 141, 131 | not started | — | — |
 | 2 | G8 lorebook-activation-scope | `fix/lorebook-activation-scope` | 99 | not started | — | — |
 | 2 | G10 vision-capability | `fix/vision-capability` | 95 | not started | — | — |
