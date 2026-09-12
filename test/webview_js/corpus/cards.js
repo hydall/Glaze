@@ -113,6 +113,13 @@ function jscToggle() {
     text: `0. test`,
   },
   {
+    id: 'audio-embed',
+    title: 'An audio embed inside a message',
+    origin: 'Discord #1531795415253385277 - the player overhung the bubble',
+    text: `Listen to this:
+<audio controls src="https://cdn.discordapp.com/attachments/1/2/voice-message.ogg"></audio>`,
+  },
+  {
     id: 'prose-angle-brackets',
     title: 'Prose that contains angle brackets',
     origin: 'the orphan heuristic existed for this case',

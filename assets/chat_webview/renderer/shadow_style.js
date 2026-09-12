@@ -44,6 +44,21 @@ export const SHADOW_STYLE = `
   }
   .glaze-message a { color: var(--primary-color, #7996CE); text-decoration: underline; }
   .glaze-message img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; }
+  /* Media Chromium lays out at a fixed intrinsic width. An audio element is
+     300px wide by default, which is wider than a bubble gets on a phone (88%
+     of the screen, less its padding) - so the player painted straight through
+     the bubble's rounded border. Constraining the element is the fix rather
+     than clipping the bubble: a card is allowed to paint outside it, which is
+     what the CSS-only overlay cards are built on. */
+  .glaze-message audio,
+  .glaze-message video,
+  .glaze-message iframe,
+  .glaze-message canvas,
+  .glaze-message embed,
+  .glaze-message object {
+    max-width: 100%;
+    min-width: 0;
+  }
   .glaze-message .chat-quote-unclosed {
     color: var(--current-quote-color, var(--quote-color, #7996CE));
     opacity: 0.7;
