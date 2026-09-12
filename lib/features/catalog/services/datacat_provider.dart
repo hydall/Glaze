@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'catalog_http.dart';
@@ -71,29 +72,43 @@ Future<String> _getToken() async {
   return token;
 }
 
-Future<bool> datacatValidate() async {
-  final token = await _getSessionToken();
-  if (token == null) return false;
+/// Runs an authenticated DataCat call, re-establishing the session once when
+/// the server rejects the token it was made with.
+///
+/// The anonymous session token comes from `/api/liberator/identify` and is kept
+/// in SharedPreferences with no expiry, so it outlives whatever the server is
+/// still willing to honour. A token DataCat has forgotten answers 401/403 to
+/// every call carrying it, and the browse path used to be the only one that
+/// knew how to replace one — it ran a throwaway probe request before each
+/// search purely to find out. Every other endpoint dead-ended: the card detail
+/// showed `HTTP 403: Forbidden` behind a Retry button that re-sent the same
+/// dead token, which is why retrying never helped.
+///
+/// A 403 can also be DataCat's bot protection, which no amount of fresh
+/// sessions will cure. One retry is what tells the two apart — and the wasted
+/// request only happens on a failure that was already fatal.
+Future<T> _datacatAuthed<T>(Future<T> Function(String token) call) async {
+  final token = await _getToken();
   try {
-    await catalogGet(
-      '$_base/api/characters/recent-public?limit=1&summary=1',
-      _authHeaders(token),
-    );
-    return true;
-  } catch (e) {
-    if (e.toString().contains('401') || e.toString().contains('403')) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_keyToken);
-      return false;
-    }
-    return true;
+    return await call(token);
+  } on DioException catch (e) {
+    final status = catalogErrorStatus(e);
+    if (status != 401 && status != 403) rethrow;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyToken);
+    return await call(await datacatInit());
   }
 }
 
-Future<void> datacatEnsureSession() async {
-  final valid = await datacatValidate();
-  if (!valid) await datacatInit();
-}
+Future<Map<String, dynamic>> _datacatGet(String path) =>
+    _datacatAuthed((token) => catalogGet('$_base$path', _authHeaders(token)));
+
+Future<Map<String, dynamic>> _datacatPost(
+  String path,
+  Map<String, dynamic> body,
+) => _datacatAuthed(
+  (token) => catalogPost('$_base$path', body, _authHeaders(token)),
+);
 
 String? _pickAvatarSource(Map<String, dynamic> raw, Map<String, dynamic> meta) {
   return (raw['avatar'] ?? raw['image'] ?? raw['image_url'] ??
@@ -171,7 +186,6 @@ Future<CatalogSearchResult> datacatBrowse({
     return CatalogSearchResult(characters: res, total: res.length, hasMore: false);
   }
 
-  final token = await _getToken();
   final offset = (page - 1) * limit;
   final minTok = filters.minTokens > 0 ? filters.minTokens : _minTokens;
 
@@ -180,10 +194,7 @@ Future<CatalogSearchResult> datacatBrowse({
   if (filters.tagIds.isNotEmpty) params.write('&tagIds=${filters.tagIds.join(',')}');
   if (!filters.nsfw) params.write('&blockedTagIds=2');
 
-  final data = await catalogGet(
-    '$_base/api/characters/recent-public?$params',
-    _authHeaders(token),
-  );
+  final data = await _datacatGet('/api/characters/recent-public?$params');
   final chars = ((data['characters'] as List?) ?? []).cast<Map<String, dynamic>>();
   return CatalogSearchResult(
     characters: chars.map(_normalizeListItem).toList(),
@@ -198,11 +209,10 @@ Future<List<CatalogItem>> _datacatFresh({
   int limitWeek = 40,
   bool nsfw = true,
 }) async {
-  final token = await _getToken();
-  var url = '$_base/api/characters/fresh?summary=1&sortBy=$sortBy&limit24=$limit24&limitWeek=$limitWeek';
-  if (!nsfw) url += '&blockedTagIds=2';
+  var path = '/api/characters/fresh?summary=1&sortBy=$sortBy&limit24=$limit24&limitWeek=$limitWeek';
+  if (!nsfw) path += '&blockedTagIds=2';
 
-  final data = await catalogGet(url, _authHeaders(token));
+  final data = await _datacatGet(path);
   final windows = data['windows'] as Map<String, dynamic>? ?? {};
   final last24h = ((windows['last24h']?['characters'] as List?) ?? []).cast<Map<String, dynamic>>();
   final thisWeek = ((windows['thisWeek']?['characters'] as List?) ?? []).cast<Map<String, dynamic>>();
@@ -228,7 +238,6 @@ Future<CatalogSearchResult> datacatSearch({
   int limit = 24,
   CatalogFilters filters = const CatalogFilters(),
 }) async {
-  final token = await _getToken();
   final offset = (page - 1) * limit;
   final minTok = filters.minTokens > 0 ? filters.minTokens : _minTokens;
 
@@ -238,10 +247,7 @@ Future<CatalogSearchResult> datacatSearch({
   if (filters.tagIds.isNotEmpty) params.write('&tagIds=${filters.tagIds.join(',')}');
   if (query.isNotEmpty) params.write('&search=${Uri.encodeComponent(query)}');
 
-  final data = await catalogGet(
-    '$_base/api/characters/recent-public?$params',
-    _authHeaders(token),
-  );
+  final data = await _datacatGet('/api/characters/recent-public?$params');
   final chars = ((data['characters'] as List?) ?? []).cast<Map<String, dynamic>>();
   return CatalogSearchResult(
     characters: chars.map(_normalizeListItem).toList(),
@@ -351,7 +357,6 @@ CharacterData _datacatCharacterData(Map<String, dynamic> char) {
 }
 
 Future<DownloadedCharacter> datacatGetCharacter(String uuid) async {
-  final token = await _getToken();
   final ts = DateTime.now().millisecondsSinceEpoch;
   // Read the plain character endpoint, NOT `/download`: since DataCat added bot
   // protection, `/download` is gated behind a Cloudflare Turnstile "download
@@ -359,10 +364,7 @@ Future<DownloadedCharacter> datacatGetCharacter(String uuid) async {
   // `lease.leaseValid = false`). `/api/characters/{id}` returns the full
   // definition ungated — the same endpoint the site's card modal and the
   // SillyTavern-CharacterLibrary reference use.
-  final data = await catalogGet(
-    '$_base/api/characters/$uuid?t=$ts&sourceKind=janitor',
-    _authHeaders(token),
-  );
+  final data = await _datacatGet('/api/characters/$uuid?t=$ts&sourceKind=janitor');
   final char = (data['character'] ?? data) as Map<String, dynamic>;
   return DownloadedCharacter(
     charData: _datacatCharacterData(char),
@@ -378,13 +380,12 @@ String _detectExtractionSource(String url) {
 }
 
 Future<Map<String, dynamic>> _datacatExtract(String url, {bool publicFeed = true}) async {
-  final token = await _getToken();
   final idempotencyKey = _uuid();
   final source = _detectExtractionSource(url);
 
   if (source == 'saucepan') {
-    return catalogPost(
-      '$_base/api/saucepan-extract/run',
+    return _datacatPost(
+      '/api/saucepan-extract/run',
       {
         'companion': url,
         'extractHidden': false,
@@ -396,12 +397,11 @@ Future<Map<String, dynamic>> _datacatExtract(String url, {bool publicFeed = true
         'vpnNamespace': 'general_scraper',
         'idempotencyKey': idempotencyKey,
       },
-      _authHeaders(token),
     );
   }
 
-  return catalogPost(
-    '$_base/api/character/smart-extract-v2',
+  return _datacatPost(
+    '/api/character/smart-extract-v2',
     {
       'url': url,
       'appearOnPublicFeed': publicFeed,
@@ -409,25 +409,15 @@ Future<Map<String, dynamic>> _datacatExtract(String url, {bool publicFeed = true
       'inlinePostExtractCreatorProfile': true,
       'idempotencyKey': idempotencyKey,
     },
-    _authHeaders(token),
   );
 }
 
-Future<Map<String, dynamic>> _datacatExtractionStatus() async {
-  final token = await _getToken();
-  return catalogGet(
-    '$_base/api/extraction/status?t=${DateTime.now().millisecondsSinceEpoch}',
-    _authHeaders(token),
-  );
-}
+Future<Map<String, dynamic>> _datacatExtractionStatus() =>
+    _datacatGet('/api/extraction/status?t=${DateTime.now().millisecondsSinceEpoch}');
 
 Future<String?> datacatGetCharacterAvatar(String uuid) async {
-  final token = await _getToken();
   final ts = DateTime.now().millisecondsSinceEpoch;
-  final data = await catalogGet(
-    '$_base/api/characters/$uuid?t=$ts',
-    _authHeaders(token),
-  );
+  final data = await _datacatGet('/api/characters/$uuid?t=$ts');
   final char = (data['character'] ?? data) as Map<String, dynamic>;
   final meta = (data['metadata'] ?? <String, dynamic>{}) as Map<String, dynamic>;
   return _resolveAvatarUrl(_pickAvatarSource(char, meta));
@@ -546,10 +536,8 @@ List<CatalogTag> getCachedDatacatTags() => _cachedDatacatTags;
 Future<List<CatalogTag>> fetchDatacatTags() async {
   if (_datacatTagsFetched) return _cachedDatacatTags;
   try {
-    final token = await _getToken();
-    final data = await catalogGet(
-      '$_base/api/tags/faceted?mode=recent&blockedTagIds=2&limit=250&offset=0&sort=count&includeTagIds=2',
-      _authHeaders(token),
+    final data = await _datacatGet(
+      '/api/tags/faceted?mode=recent&blockedTagIds=2&limit=250&offset=0&sort=count&includeTagIds=2',
     );
     final tags = (data['tags'] as List?) ?? [];
     _cachedDatacatTags = tags

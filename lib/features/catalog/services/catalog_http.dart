@@ -24,6 +24,26 @@ final _dio = Dio(BaseOptions(
   validateStatus: (_) => true,
 ));
 
+/// Replaces the transport under the shared catalog client.
+///
+/// The client is a file-private singleton on purpose — every provider must
+/// carry the same browser UA — so this is the seam the provider tests use to
+/// answer a request without a network round-trip.
+@visibleForTesting
+void setCatalogHttpAdapter(HttpClientAdapter adapter) {
+  _dio.httpClientAdapter = adapter;
+}
+
+/// The HTTP status a catalog failure reported, or null when the request never
+/// reached a server that answered.
+///
+/// Providers used to decide whether to re-authenticate by searching
+/// `e.toString()` for `'401'`, which matches a 401 that merely appears
+/// somewhere in the server's *body* just as readily as a real one — and reads
+/// as a 401 for a request whose status was something else entirely.
+int? catalogErrorStatus(Object error) =>
+    error is DioException ? error.response?.statusCode : null;
+
 /// Raises a [DioException] carrying the response, so callers can run it through
 /// the shared `formatError()` (same friendly, localized handling as LLM
 /// requests) instead of showing a raw dump. The full body is logged in debug

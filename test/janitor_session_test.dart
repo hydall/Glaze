@@ -124,4 +124,90 @@ void main() {
       expect(isJanitorTokenExpired('not-a-token', now: now), isFalse);
     });
   });
+
+  group('janitorReadIsPublic', () {
+    test('the browse surface a reader needs no account for', () {
+      expect(
+        janitorReadIsPublic(
+          'https://janitorai.com/hampter/characters?page=2&mode=all&sort=latest',
+        ),
+        isTrue,
+      );
+      expect(
+        janitorReadIsPublic('https://janitorai.com/hampter/characters/abc123'),
+        isTrue,
+      );
+      expect(
+        janitorReadIsPublic(
+          'https://janitorai.com/hampter/characters/tags/suggest?prefix=ro',
+        ),
+        isTrue,
+      );
+      expect(
+        janitorReadIsPublic('https://janitorai.com/hampter/tags'),
+        isTrue,
+      );
+      expect(
+        janitorReadIsPublic('https://janitorai.com/hampter/reviews/abc123?page=1'),
+        isTrue,
+      );
+    });
+
+    test('an account-bound read is never retried without the account', () {
+      // Each of these answers an anonymous reader with somebody else's data or
+      // with nothing — and the block list is then written back.
+      expect(
+        janitorReadIsPublic(
+          'https://janitorai.com/hampter/profiles/mine/blocked-content',
+        ),
+        isFalse,
+      );
+      expect(
+        janitorReadIsPublic('https://janitorai.com/hampter/profiles/mine'),
+        isFalse,
+      );
+      expect(
+        janitorReadIsPublic('https://janitorai.com/hampter/chats/c1'),
+        isFalse,
+      );
+      expect(
+        janitorReadIsPublic('https://janitorai.com/hampter/personas'),
+        isFalse,
+      );
+      expect(
+        janitorReadIsPublic('https://janitorai.com/hampter/api-settings'),
+        isFalse,
+      );
+      expect(
+        janitorReadIsPublic('https://janitorai.com/hampter/script/s1'),
+        isFalse,
+      );
+    });
+
+    test('only a read is ever repeated — a write is not', () {
+      expect(
+        janitorReadIsPublic(
+          'https://janitorai.com/hampter/characters',
+          method: 'PATCH',
+        ),
+        isFalse,
+      );
+      expect(
+        janitorReadIsPublic(
+          'https://janitorai.com/hampter/characters',
+          method: 'POST',
+        ),
+        isFalse,
+      );
+    });
+
+    test('anything that is not a hampter path is refused outright', () {
+      expect(janitorReadIsPublic('https://janitorai.com/'), isFalse);
+      expect(janitorReadIsPublic('https://janitorai.com/hampter'), isFalse);
+      expect(
+        janitorReadIsPublic('https://ella.janitorai.com/bot-avatars/x.webp'),
+        isFalse,
+      );
+    });
+  });
 }
