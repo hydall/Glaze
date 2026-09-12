@@ -166,16 +166,28 @@ class _MemorySheetState extends ConsumerState<MemorySheet> {
   /// [syncSummaryEnabled], which also flips the `summary` block in every
   /// preset so the toggle is not silently overridden by the active preset.
   SheetViewAction _summaryToggle(String sessionId) {
-    final enabled = ref.watch(summaryEnabledProvider(sessionId)).value ?? true;
     void setEnabled(bool value) =>
         syncSummaryEnabled(ref, charId: widget.charId, enabled: value);
+    bool isEnabled() =>
+        ref.read(summaryEnabledProvider(sessionId)).value ?? true;
     return SheetViewAction(
-      icon: Switch(
-        value: enabled,
-        onChanged: setEnabled,
-        activeThumbColor: Theme.of(context).colorScheme.primary,
+      // The switch watches for itself. Watched from `build`, every write to
+      // the summary rebuilt this whole sheet — the chrome, the header
+      // measurement and both tab bodies — to move one switch. And the summary
+      // is written often: the Summary tab saves on a debounce as the reader
+      // types, and every auto-summary during a chat bumps the same revision.
+      icon: Consumer(
+        builder: (context, ref, _) {
+          final enabled =
+              ref.watch(summaryEnabledProvider(sessionId)).value ?? true;
+          return Switch(
+            value: enabled,
+            onChanged: setEnabled,
+            activeThumbColor: Theme.of(context).colorScheme.primary,
+          );
+        },
       ),
-      onPressed: () => setEnabled(!enabled),
+      onPressed: () => setEnabled(!isEnabled()),
     );
   }
 }
