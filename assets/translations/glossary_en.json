@@ -47,6 +47,12 @@
                     "desc": "The smallest piece of text the AI reads and writes — roughly 3/4 of a word. Every message you type and every reply you get is counted in tokens. There's also a limit: once the conversation is too long, the oldest messages get cut off. More tokens = higher cost and slower replies."
                 },
                 {
+                    "id": "token-estimate",
+                    "name": "Why token counts differ",
+                    "alt": "Token estimate, Tokenizer",
+                    "desc": "Glaze counts [[token]]s locally with OpenAI's o200k_base tokenizer — the one GPT-4o uses. Every other model family splits text its own way (Claude, Gemini, Llama and DeepSeek all have their own tokenizers), so the same message is worth a different number of tokens to them. The counts Glaze shows — the context indicator, the numbers in the preset, lorebook and memory editors — are an estimate for planning, not a bill. Expect a few percent of difference on English prose, and more on other languages, emoji, code and unusual formatting. On the very first launch the estimate is rougher still: until the tokenizer's vocabulary finishes downloading, Glaze falls back to counting about four characters per token. For what you are actually charged, check your provider's own usage page."
+                },
+                {
                     "id": "context",
                     "name": "Context",
                     "alt": "Context Window, Context Size",

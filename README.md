@@ -4,7 +4,8 @@
 
 # Glaze
 
-[![Discord](https://img.shields.io/discord/1355184294868484196?color=5865F2&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
+[![Download](https://img.shields.io/github/v/release/hydall/Glaze?include_prereleases&label=download&color=7996CE)](https://github.com/hydall/Glaze/releases/latest)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/hydall)
 
 [Русский](README.ru.md)
@@ -52,12 +53,12 @@ See `docs/ARCHITECTURE.md` section 9 and `docs/INVARIANTS.md` for the bridge arc
 
 ## 📥 Installation
 
-Download the latest release from the [Releases](../../releases) page.
+Download the latest release from the [Releases](https://github.com/hydall/Glaze/releases/latest) page.
 
 - **Android** — Install the APK directly on your device.
 - **iOS** — Sideload the IPA using [AltStore](https://altstore.io/) or a similar tool. App Store distribution is not yet available.
 - **Windows** — Download the Windows build and run it directly on your PC.
-- **Linux** — Download the published DEB or pacman package when available for the release.
+- **Linux** — Download the published AppImage, the `.tar.zst` archive, or the DEB or pacman package when available for the release.
 - **macOS** — Buildable from source, but not currently published as a prebuilt release.
 
 Backups from **SillyTavern** (`.zip`) can be imported via **Menu → Backups**.
@@ -148,6 +149,13 @@ Primary technical references: `docs/ARCHITECTURE.md`, `docs/INVARIANTS.md`, `doc
 - [SillyTavern-CharacterLibrary](https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary) — reference for JanitorAI extraction through a browser.
 - [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine) — inspiration for the agentic workflow.
 - [Lumiverse](https://github.com/prolix-oc/Lumiverse) — inspiration for the agentic workflow.
+
+### 🧪 Testers
+
+The people who find the bugs before the release does — the app's own Hall of Fame
+(**Menu → About Glaze → Hall of Fame**):
+
+**nightsyr** *(honorary tester)*, Саша Белый, múrx, lina, ShikiN, N K, Сатаник1155.
 
 ## 📜 License
 
