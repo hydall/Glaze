@@ -26,6 +26,15 @@ ChatMessage mergeContinuationMessage(
     original.reasoning,
     generated.reasoning,
   );
+  // The badge counts everything generated for this one message, so the
+  // continuation's cost is added to the original turn's rather than replacing
+  // it (INV-CM7). A run that produced no text adds nothing and leaves the
+  // previous boundary alone.
+  final tokens = sumContinuationTokens(original.tokens, generated.tokens);
+  final genTime = sumContinuationGenTime(original.genTime, generated.genTime);
+  final continuationOffset = generated.content.isEmpty
+      ? original.continuationOffset
+      : continuationOffsetFor(original.content, generated.content);
 
   final swipes = original.swipes.isEmpty
       ? [content]
@@ -41,8 +50,8 @@ ChatMessage mergeContinuationMessage(
             content: content,
             kind: 'final',
             reasoning: reasoning,
-            genTime: generated.genTime,
-            tokens: generated.tokens,
+            genTime: genTime,
+            tokens: tokens,
             time: original.time,
             studioOutputs: generated.studioOutputs,
             parentSwipeId: swipeId,
@@ -55,6 +64,8 @@ ChatMessage mergeContinuationMessage(
   agentSwipes[agentSwipeId] = agentSwipes[agentSwipeId].copyWith(
     content: content,
     reasoning: reasoning,
+    genTime: genTime,
+    tokens: tokens,
   );
 
   final swipesMeta = List<Map<String, dynamic>>.from(original.swipesMeta);
@@ -64,6 +75,9 @@ ChatMessage mergeContinuationMessage(
   swipesMeta[swipeId] = {
     ...swipesMeta[swipeId],
     'reasoning': reasoning,
+    'genTime': genTime,
+    'tokens': tokens,
+    'continuationOffset': continuationOffset,
     'agentSwipes': agentSwipes.map((swipe) => swipe.toJson()).toList(),
     'agentSwipeId': agentSwipeId,
   };
@@ -71,6 +85,9 @@ ChatMessage mergeContinuationMessage(
   return original.copyWith(
     content: content,
     reasoning: reasoning,
+    genTime: genTime,
+    tokens: tokens,
+    continuationOffset: continuationOffset,
     swipes: swipes,
     swipeId: swipeId,
     swipesMeta: swipesMeta,
@@ -86,6 +103,47 @@ String joinContinuation(String original, String continuation) {
   if (original.isEmpty) return continuation;
   if (continuation.isEmpty) return original;
   return '$original\n\n$continuation';
+}
+
+/// Index in the merged content where the continuation's text begins — that is,
+/// how much of [joinContinuation]'s output belongs to the original turn. Used
+/// by preview surfaces that would otherwise show the head of a message the
+/// user has already read (INV-CM7). Zero when the whole message *is* the
+/// continuation.
+int continuationOffsetFor(String original, String continuation) {
+  if (original.isEmpty || continuation.isEmpty) return 0;
+  // joinContinuation glues the two halves with a blank line.
+  return original.length + 2;
+}
+
+/// Sums the token counts of a message and the continuation that extended it,
+/// so the badge reflects everything generated for that one message rather
+/// than only the last run. A missing count on either side falls through to the
+/// other instead of zeroing the total.
+int? sumContinuationTokens(int? original, int? continuation) {
+  if (original == null) return continuation;
+  if (continuation == null) return original;
+  return original + continuation;
+}
+
+/// Sums two `"12.3s"` generation times the same way, keeping one decimal. A
+/// value that does not parse counts as absent, so a malformed string can never
+/// wipe out a good one.
+String? sumContinuationGenTime(String? original, String? continuation) {
+  final first = _parseGenSeconds(original);
+  final second = _parseGenSeconds(continuation);
+  if (first == null && second == null) return original ?? continuation;
+  final total = (first ?? 0) + (second ?? 0);
+  return '${total.toStringAsFixed(1)}s';
+}
+
+double? _parseGenSeconds(String? value) {
+  final trimmed = value?.trim() ?? '';
+  if (trimmed.isEmpty) return null;
+  final digits = trimmed.endsWith('s')
+      ? trimmed.substring(0, trimmed.length - 1)
+      : trimmed;
+  return double.tryParse(digits);
 }
 
 /// Header the continuation's reasoning is filed under inside the message's
