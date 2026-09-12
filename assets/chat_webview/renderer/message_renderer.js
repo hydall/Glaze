@@ -458,34 +458,73 @@ if (messageData.isEditing) classes.push('editing');
     stat.className = 'gen-stat';
     const hasGen = genTime && genTime !== '0s';
     const hasTokens = tokenCount && tokenCount > 0;
-    if (hasGen) {
-      const clock = document.createElement('span');
-      clock.innerHTML = ICON.clock;
-      clock.firstChild.style.cssText = `width:12px;height:12px;fill:currentColor;margin-right:${clockMargin};`;
-      stat.appendChild(clock.firstChild);
-      const gw = document.createElement('span');
-      gw.className = 'gen-time-wrapper';
-      const rn = new RollingNumber(genTime);
-      rn.el.classList.add('gen-time');
-      rn.el.classList.add('gen-time-badge');
-      gw.rollingNumber = rn;
-      gw.appendChild(rn.el);
-      stat.appendChild(gw);
-    }
-    if (hasTokens) {
-      const tc = document.createElement('div');
-      tc.className = 'token-count-inline';
-      if (hasGen) tc.style.marginLeft = '6px';
-      const doc = document.createElement('span');
-      doc.innerHTML = ICON.doc;
-      doc.firstChild.style.cssText = 'width:12px;height:12px;fill:currentColor;margin-right:2px;';
-      tc.appendChild(doc.firstChild);
-      const t = document.createElement('span');
-      t.textContent = `${tokenCount}t`;
-      tc.appendChild(t);
-      stat.appendChild(tc);
-    }
+    if (hasGen) stat.appendChild(this._buildGenTime(genTime, clockMargin));
+    if (hasTokens) stat.appendChild(this._createTokenCount(tokenCount, hasGen));
     return stat;
+  }
+
+  /* Clock icon + rolling elapsed-time badge as one fragment. The clock leads
+     the gen-stat, so callers insert this at the front rather than append. */
+  _buildGenTime(genTime, clockMargin = '2px') {
+    const frag = document.createDocumentFragment();
+    const clock = document.createElement('span');
+    clock.innerHTML = ICON.clock;
+    clock.firstChild.style.cssText = `width:12px;height:12px;fill:currentColor;margin-right:${clockMargin};`;
+    frag.appendChild(clock.firstChild);
+    const gw = document.createElement('span');
+    gw.className = 'gen-time-wrapper';
+    const rn = new RollingNumber(genTime);
+    rn.el.classList.add('gen-time');
+    rn.el.classList.add('gen-time-badge');
+    gw.rollingNumber = rn;
+    gw.appendChild(rn.el);
+    frag.appendChild(gw);
+    return frag;
+  }
+
+  /* Doc icon + `Nt` token count. Built standalone so `updateMessageMeta` can
+     put it back into a gen-stat the streaming window stripped it out of. */
+  _createTokenCount(tokenCount, hasGen) {
+    const tc = document.createElement('div');
+    tc.className = 'token-count-inline';
+    if (hasGen) tc.style.marginLeft = '6px';
+    const doc = document.createElement('span');
+    doc.innerHTML = ICON.doc;
+    doc.firstChild.style.cssText = 'width:12px;height:12px;fill:currentColor;margin-right:2px;';
+    tc.appendChild(doc.firstChild);
+    const t = document.createElement('span');
+    t.textContent = `${tokenCount}t`;
+    tc.appendChild(t);
+    return tc;
+  }
+
+  /* Make `stat` show `tokenCount`, whether or not it still has the element:
+     retext when present, re-create when the streaming window removed it. */
+  _reconcileTokenCount(stat, tokenCount, hasGen) {
+    if (!stat) return;
+    const existing = stat.querySelector('.token-count-inline span:last-child');
+    if (existing) {
+      existing.textContent = `${tokenCount}t`;
+      return;
+    }
+    stat.appendChild(this._createTokenCount(tokenCount, hasGen));
+  }
+
+  /* Same contract for the elapsed-time badge: a gen-stat that was built from
+     a token count alone has no clock to retext, so build one. */
+  _reconcileGenTime(stat, genTime, clockMargin) {
+    if (!stat) return;
+    const wrapper = stat.querySelector('.gen-time-wrapper');
+    if (wrapper && wrapper.rollingNumber) {
+      wrapper.rollingNumber.setValue(genTime);
+      return;
+    }
+    const badge = stat.querySelector('.gen-time-badge');
+    if (badge) {
+      badge.textContent = genTime;
+      return;
+    }
+    stat.insertBefore(this._buildGenTime(genTime, clockMargin), stat.firstChild);
   }
 
   /* ----- Bubble meta (inside body) ----- */
@@ -877,37 +916,18 @@ if (messageData.isEditing) classes.push('editing');
       let genStatFooter = footerMeta?.querySelector('.gen-stat');
 
       if (hasGen) {
-        const timeStr = msg.genTime;
-        if (genStatBubble) {
-          const wrapper = genStatBubble.querySelector('.gen-time-wrapper');
-          if (wrapper && wrapper.rollingNumber) {
-            wrapper.rollingNumber.setValue(timeStr);
-          } else {
-            const badge = genStatBubble.querySelector('.gen-time-badge');
-            if (badge) badge.textContent = timeStr;
-          }
-        }
-        if (genStatFooter) {
-          const wrapper = genStatFooter.querySelector('.gen-time-wrapper');
-          if (wrapper && wrapper.rollingNumber) {
-            wrapper.rollingNumber.setValue(timeStr);
-          } else {
-            const badge = genStatFooter.querySelector('.gen-time-badge');
-            if (badge) badge.textContent = timeStr;
-          }
-        }
+        this._reconcileGenTime(genStatBubble, msg.genTime, '2px');
+        this._reconcileGenTime(genStatFooter, msg.genTime, '4px');
       }
 
       if (hasTokens) {
-        const tokenStr = `${msg.tokens}t`;
-        if (genStatBubble) {
-          const tc = genStatBubble.querySelector('.token-count-inline span:last-child');
-          if (tc) tc.textContent = tokenStr;
-        }
-        if (genStatFooter) {
-          const tc = genStatFooter.querySelector('.token-count-inline span:last-child');
-          if (tc) tc.textContent = tokenStr;
-        }
+        // Level-reconcile, don't just retext: the streaming window strips
+        // `.token-count-inline` out of a gen-stat that survives (the clock
+        // keeps `hasGen` true), so after a Continue or Regenerate the element
+        // is gone while its parent is not. Updating text in place would then
+        // find nothing and the badge would never come back.
+        this._reconcileTokenCount(genStatBubble, msg.tokens, hasGen);
+        this._reconcileTokenCount(genStatFooter, msg.tokens, hasGen);
       }
 
       if (!genStatBubble && bubbleMeta && (hasGen || hasTokens)) {

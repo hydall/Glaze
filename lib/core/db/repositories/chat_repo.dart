@@ -1201,6 +1201,12 @@ ORDER BY updated_at DESC
               }
               lastContent = parts.join(' ');
             }
+            // A continued message grew at its tail, so the row must preview
+            // from the continuation boundary rather than the head (INV-CM7).
+            lastContent = previewSource(
+              lastContent,
+              lastMsg['continuationOffset'] as int?,
+            );
             if (lastContent.length > 250) {
               lastContent = lastContent.substring(0, 250);
             }
@@ -1268,6 +1274,10 @@ ORDER BY updated_at DESC
               .map((part) => part['text'] as String)
               .join(' ');
         }
+        lastContent = previewSource(
+          lastContent,
+          lastMessage['continuationOffset'] as int?,
+        );
         if (lastContent.length > 250) {
           lastContent = lastContent.substring(0, 250);
         }
