@@ -239,6 +239,35 @@ wrong word.
 
 ---
 
+## A variation moves as one piece, and the footer does not move at all
+
+The reply body is not the variation. `.msg-content-stack` holds the reasoning
+box, the in-game clock, `.msg-transition-wrapper > .msg-body` and the footer as
+**siblings**, so a transform on `.msg-body` alone slides the reply out from
+under everything stacked above it — the message tears in half mid-swipe, and a
+finger that started on the reasoning box drags a bubble it is not touching.
+
+`SWIPE_TARGET_SELECTORS` in `bridge/swipe_gesture_handler.js` is the list of
+what moves: `.msg-reasoning`, `.msg-game-time`, `.msg-body`. Both paths use it —
+the touch gesture (`onStart` resolves it once and `onMove`/`onEnd` style the
+whole set) and `animateVariantSwap`, which the prev/next arrows and the guided
+swipe call. Adding another element to the stack means adding it here too.
+
+Two consequences worth keeping:
+
+* **The footer stays put.** Its switcher and actions button have to remain
+  under the thumb while the content moves, so it is deliberately not a target.
+* **Each target locks its own height.** Variations differ in length, and one
+  may have reasoning where the next has none, so the swap measures and animates
+  per element; the sum is what keeps the page from jumping. The run guard
+  (`section._variantSwap`) lives on the **section**, not on the body, because
+  the set of moving elements changes between variations — the body is not a
+  stable place to find the run that has to be aborted.
+
+Covered by `specs/variant_swap_targets.spec.js`.
+
+---
+
 ## A user message wears the persona it was sent as, not the active one
 
 Every user message stores the persona it was sent under — `personaId` and
