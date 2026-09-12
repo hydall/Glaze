@@ -82,9 +82,9 @@ String _formatHttpError(Response<dynamic> response) {
   final known = code != null ? _defaultHttpMessage(code) : null;
   final description = known ?? _statusMessage(response);
   final status = code?.toString() ?? '?';
-  final header = description != null
-      ? 'HTTP $status - $description'
-      : 'HTTP $status';
+  final header =
+      (description != null ? 'HTTP $status - $description' : 'HTTP $status') +
+      _redirectHint(code, response);
 
   final apiMsg = _extractApiMessage(response.data);
   if (apiMsg == null) return header;
@@ -96,6 +96,28 @@ String _formatHttpError(Response<dynamic> response) {
   return '$header\n$apiMsg';
 }
 
+/// Names the endpoint as the thing to fix when the server answered with a
+/// redirect, and quotes where it points.
+///
+/// A redirect is not an error, but it reaches this function as one: dart:io
+/// follows 301/302/307/308 for a GET and refuses to for a POST, which every
+/// completion request is. So a base URL that is missing the provider's API
+/// path — `https://llm.chutes.ai` where the server wants
+/// `https://llm.chutes.ai/v1` — surfaced as a bare `HTTP 308` naming nothing,
+/// and the reporter had no way to tell it from the server being down.
+///
+/// The `Location` header is the answer the server actually gave, so it is
+/// quoted rather than guessed at. Following it automatically is the one thing
+/// not done here: the request carries the account's API key, and a redirect may
+/// point at another host.
+String _redirectHint(int? code, Response<dynamic> response) {
+  if (code != 301 && code != 302 && code != 307 && code != 308) return '';
+  final hint = '\n${'error_endpoint_redirect'.tr()}';
+  final location = response.headers.value('location')?.trim();
+  if (location == null || location.isEmpty) return hint;
+  return '$hint\n→ $location';
+}
+
 /// The server-supplied reason phrase, when it is not blank.
 String? _statusMessage(Response<dynamic> response) {
   final message = response.statusMessage?.trim();
@@ -104,6 +126,10 @@ String? _statusMessage(Response<dynamic> response) {
 
 String? _defaultHttpMessage(int code) {
   final key = switch (code) {
+    301 => 'error_http_301',
+    302 => 'error_http_302',
+    307 => 'error_http_307',
+    308 => 'error_http_308',
     400 => 'error_http_400',
     401 => 'error_http_401',
     402 => 'error_http_402',
@@ -128,22 +154,83 @@ String? _defaultHttpMessage(int code) {
   return key?.tr();
 }
 
+/// The longest provider message worth showing. The string lands in a modal
+/// dialog, in a toast, and on one line of a memory card; past this length it
+/// stops being a message and starts being a document.
+const _maxApiMessageChars = 300;
+
 /// Tries to pull a human-readable message out of common API error shapes.
 /// Returns null if nothing useful is found.
+///
+/// A body that arrived as text is decoded before the shapes below are tried.
+/// Dio parses JSON only when the request asked for it, and the catalog client
+/// asks for `ResponseType.plain` (its hosts answer HTML as readily as JSON) —
+/// so a server's `{"error":{"message":...}}` reached here as a String, none of
+/// the shape-aware branches ever ran, and the whole body went to the reader
+/// verbatim. That is how a DataCat 403 came out as `HTTP 403:` followed by its
+/// entire Turnstile blob, over a dialog the size of the screen.
 String? _extractApiMessage(dynamic data) {
-  if (data is String && data.trim().isNotEmpty) return data.trim();
-  if (data is! Map<String, dynamic>) return null;
+  if (data is String) {
+    final decoded = _jsonBody(data);
+    return decoded == null ? _proseMessage(data) : _extractApiMessage(decoded);
+  }
+  // Gemini and several proxies wrap the error object in a single-element array.
+  if (data is List) {
+    for (final entry in data) {
+      final message = _extractApiMessage(entry);
+      if (message != null) return message;
+    }
+    return null;
+  }
+  if (data is! Map) return null;
   // OpenAI / Anthropic / Gemini: {"error": {"message": "..."}}
   final error = data['error'];
-  if (error is String && error.trim().isNotEmpty) return error.trim();
+  if (error is String && error.trim().isNotEmpty) return _clamp(error);
   if (error is Map) {
     final msg = error['message'];
-    if (msg is String && msg.isNotEmpty) return msg;
+    if (msg is String && msg.trim().isNotEmpty) return _clamp(msg);
   }
-  // Fallback: top-level {"message": "..."}
+  // Fallback: top-level {"message": "..."} — Meilisearch, Janny and most
+  // OpenAI-compatible proxies answer in this shape.
   final msg = data['message'];
-  if (msg is String && msg.isNotEmpty) return msg;
+  if (msg is String && msg.trim().isNotEmpty) return _clamp(msg);
   final detail = data['detail'];
-  if (detail is String && detail.isNotEmpty) return detail;
+  if (detail is String && detail.trim().isNotEmpty) return _clamp(detail);
+  // A JSON object in none of the known shapes describes the failure to a
+  // machine, not to a person — server instance ids, challenge configs, lease
+  // flags. The localized status description says more than any of it, so
+  // nothing is added to it.
   return null;
+}
+
+/// [body] decoded, when it is a JSON object or array.
+///
+/// Returns null for anything else, including a bare JSON string, so the
+/// caller's recursion is one level deep at most.
+Object? _jsonBody(String body) {
+  final text = body.trimLeft();
+  if (!text.startsWith('{') && !text.startsWith('[')) return null;
+  try {
+    final decoded = jsonDecode(text);
+    return (decoded is Map || decoded is List) ? decoded : null;
+  } on FormatException {
+    return null;
+  }
+}
+
+/// A plain-text body, when it reads like something a person wrote.
+///
+/// Bare prose is worth showing: several OpenAI-compatible providers answer
+/// with nothing else. A block page is not — Cloudflare and friends answer with
+/// kilobytes of markup, and the first 300 characters of it are a `<head>`.
+String? _proseMessage(String body) {
+  final text = body.trim();
+  if (text.isEmpty || text.startsWith('<')) return null;
+  return _clamp(text);
+}
+
+String _clamp(String message) {
+  final text = message.trim();
+  if (text.length <= _maxApiMessageChars) return text;
+  return '${text.substring(0, _maxApiMessageChars).trimRight()}…';
 }

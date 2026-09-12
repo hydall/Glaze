@@ -164,7 +164,11 @@ class _MemoryDraftCardState extends State<MemoryDraftCard> {
               ),
             ),
           ],
-          if (_draft.error != null && _needsRegen) ...[
+          // Not while a retry is running: the draft keeps
+          // `needs_regeneration` until the new attempt lands, so the card used
+          // to read "Generating... 21.6s" and show the previous failure in red
+          // underneath it at the same time.
+          if (_draft.error != null && _needsRegen && !widget.isGenerating) ...[
             const SizedBox(height: 4),
             Text(
               _draft.error!,
