@@ -153,4 +153,41 @@ void main() {
       expect(find.byTooltip('btn_delete'), findsOneWidget);
     },
   );
+  testWidgets('a retry in flight does not show the failure it is retrying', (
+    tester,
+  ) async {
+    // The draft stays `needs_regeneration` until the new attempt lands, so the
+    // card used to carry "Generating..." and the previous failure at once.
+    await tester.pumpWidget(
+      ProviderScope(
+        // The row's buttons are GlassSurface, which reads the active theme
+        // preset.
+        child: MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: Scaffold(
+            body: MemoryDraftCard(
+              draft: const MemoryDraft(
+                id: 'draft-1',
+                content: 'safe old content',
+                status: 'needs_regeneration',
+                error: 'HTTP 400 - Bad Request',
+              ),
+              isGenerating: true,
+              generatingSince: null,
+              onGenerate: () {},
+              onRegenerate: () {},
+              onCancel: () {},
+              onApprove: () {},
+              onEdit: () {},
+              onDelete: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('safe old content'), findsOneWidget);
+    expect(find.text('HTTP 400 - Bad Request'), findsNothing);
+    expect(find.byTooltip('memory_books_btn_stop'), findsOneWidget);
+  });
 }

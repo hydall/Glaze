@@ -143,6 +143,158 @@ void main() {
     expect(formatError(error), 'HTTP 599\nupstream exploded');
   });
 
+  group('a body that arrived as text is decoded before it is shown', () {
+    /// The shape the catalog client produces: `ResponseType.plain`, so the
+    /// server's JSON reaches `formatError` as a String.
+    DioException plainError(int status, String body, {Headers? headers}) {
+      final options = RequestOptions(path: '/api/characters/uuid-1');
+      return DioException.badResponse(
+        statusCode: status,
+        requestOptions: options,
+        response: Response<dynamic>(
+          requestOptions: options,
+          statusCode: status,
+          data: body,
+          headers: headers,
+        ),
+      );
+    }
+
+    test('a challenge blob is not the error message', () {
+      // Verbatim from the report: DataCat answers a refused download with its
+      // Turnstile configuration, and the dialog showed all of it.
+      final message = formatError(
+        plainError(
+          403,
+          '{"success":false,"serverInstanceId":"main-4330-v26b",'
+          '"hostname":"datacat.run",'
+          '"turnstile":{"action":"character-card-download"},'
+          '"lease":{"leaseValid":false}}',
+        ),
+      );
+
+      expectStatusLine(message, 403);
+      expect(message, isNot(contains('\n')));
+      expect(message, isNot(contains('turnstile')));
+    });
+
+    test('a provider message in a plain body is found, not dumped', () {
+      final message = formatError(
+        plainError(400, '{"error":{"message":"Model is overloaded"}}'),
+      );
+
+      expectStatusLine(message, 400);
+      expect(message.split('\n').last, 'Model is overloaded');
+    });
+
+    test("Meilisearch's own reason survives the normalization", () {
+      // Janny's search runs on Meilisearch, whose 400 names the clause it
+      // refused. That sentence is the whole diagnosis, so it is never dropped.
+      final message = formatError(
+        plainError(
+          400,
+          '{"message":"Attribute `totalToken` is not filterable.",'
+          '"code":"invalid_search_filter","type":"invalid_request"}',
+        ),
+      );
+
+      expect(
+        message.split('\n').last,
+        'Attribute `totalToken` is not filterable.',
+      );
+    });
+
+    test('an error object wrapped in an array is still read', () {
+      final message = formatError(
+        plainError(404, '[{"error":{"message":"models/x is not found"}}]'),
+      );
+
+      expect(message.split('\n').last, 'models/x is not found');
+    });
+
+    test('a block page is left out entirely', () {
+      final message = formatError(
+        plainError(
+          403,
+          '<!DOCTYPE html><html><head><title>Attention Required!</title>'
+          '</head><body>${'cloudflare ' * 200}</body></html>',
+        ),
+      );
+
+      expectStatusLine(message, 403);
+      expect(message, isNot(contains('\n')));
+    });
+
+    test('a message too long to read is cut, not passed on whole', () {
+      final message = formatError(
+        plainError(400, '{"error":{"message":"${'over budget. ' * 100}"}}'),
+      );
+
+      final body = message.split('\n').last;
+      expect(body.length, lessThan(320));
+      expect(body, endsWith('…'));
+      expect(body, startsWith('over budget.'));
+    });
+
+    test('prose a provider answers with is still worth showing', () {
+      final message = formatError(plainError(400, 'Model is not available'));
+
+      expect(message.split('\n').last, 'Model is not available');
+    });
+  });
+
+  group('a redirect names the endpoint as the thing to fix', () {
+    DioException redirect(int status, {String? location}) {
+      final options = RequestOptions(path: '/chat/completions');
+      return DioException.badResponse(
+        statusCode: status,
+        requestOptions: options,
+        response: Response<dynamic>(
+          requestOptions: options,
+          statusCode: status,
+          headers: Headers.fromMap({
+            if (location != null) 'location': [location],
+          }),
+        ),
+      );
+    }
+
+    test('HTTP 308 is described and quotes where the server points', () {
+      // The reported case: a Chutes base URL with the API path left off.
+      final message = formatError(
+        redirect(308, location: 'https://llm.chutes.ai/v1/chat/completions'),
+      );
+
+      final lines = message.split('\n');
+      expectStatusLine(message, 308);
+      expect(lines, hasLength(3));
+      expect(lines[1], 'error_endpoint_redirect');
+      expect(lines.last, '→ https://llm.chutes.ai/v1/chat/completions');
+    });
+
+    test('the hint stands alone when the server names no target', () {
+      final message = formatError(redirect(307));
+
+      expect(message.split('\n'), hasLength(2));
+      expect(message.split('\n').last, 'error_endpoint_redirect');
+    });
+
+    test('a status that is not a redirect gains no hint', () {
+      final message = formatError(redirect(404, location: '/elsewhere'));
+
+      expect(message, isNot(contains('error_endpoint_redirect')));
+      expect(message, isNot(contains('elsewhere')));
+    });
+
+    test('the redirect hint is translated in both locales', () {
+      final en = loadTranslations('assets/translations/en.json');
+      final ru = loadTranslations('assets/translations/ru.json');
+
+      expect(en, contains('error_endpoint_redirect'));
+      expect(ru, contains('error_endpoint_redirect'));
+    });
+  });
+
   test('every mapped HTTP status has an EN and RU description', () {
     final source = File(
       'lib/core/utils/error_format.dart',

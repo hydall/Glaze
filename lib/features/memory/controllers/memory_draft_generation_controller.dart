@@ -12,6 +12,7 @@ import '../../../core/models/memory_book.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/state/memory_settings_provider.dart';
 import '../../../core/state/pipeline_settings_provider.dart';
+import '../../../core/utils/error_format.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/memory_draft_generator.dart';
 import '../state/memory_active_drafts_provider.dart';
@@ -196,6 +197,14 @@ class MemoryDraftGenerationController {
       onComplete();
     } catch (e) {
       if (!_ownsOperation(draftId, cancelToken)) return;
+      // Normalized here, once, because both surfaces show the same string: the
+      // toast, and the draft card, which keeps it until the draft is generated
+      // again. `e.toString()` on a provider rejection is
+      // `DioException [bad response]: This exception was thrown because the
+      // response has a status code of 400…`, a sentence about Dio's own
+      // internals that the card then truncated after two lines — so the one
+      // part worth reading, the provider's reason, never made it to the reader.
+      final message = formatError(e);
       // Keep the previous content and keys on failure. If even persisting the
       // error state fails, still settle and report the generation error.
       try {
@@ -204,13 +213,13 @@ class MemoryDraftGenerationController {
           return applyFailedMemoryDraftGeneration(
             currentBook,
             draftId: draftId,
-            error: e.toString(),
+            error: message,
             updatedAt: DateTime.now().millisecondsSinceEpoch,
           );
         });
       } catch (_) {}
       if (!_ownsOperation(draftId, cancelToken)) return;
-      onError(e.toString());
+      onError(message);
     } finally {
       if (identical(_cancelTokens[draftId], cancelToken)) {
         _cancelTokens.remove(draftId);
