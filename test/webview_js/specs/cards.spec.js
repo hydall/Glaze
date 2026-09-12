@@ -507,3 +507,26 @@ test('an image tag inside a reasoning panel stays text', async ({ page }) => {
   expect(shape.placeholders).toBe(0);
   expect(shape.text).toContain('[IMG:GEN:лес]');
 });
+
+test('an audio embed shrinks to the message instead of overhanging it', async ({ page }) => {
+  await render(page, card('audio-embed').text);
+  const shape = await page.evaluate(() => {
+    const host = document.querySelector('#chat-container .message-content');
+    // What a bubble gives a message on a phone: 88% of a 360px screen, less
+    // the bubble's own padding. Narrower than the 300px Chromium gives an
+    // `<audio>` element by default, which is the whole bug.
+    host.style.width = '260px';
+    const audio = host.shadowRoot.querySelector('audio');
+    const box = host.getBoundingClientRect();
+    const player = audio ? audio.getBoundingClientRect() : null;
+    return {
+      rendered: !!audio,
+      width: player ? player.width : -1,
+      overhang: player ? player.right - box.right : -1,
+      host: box.width,
+    };
+  });
+  expect(shape.rendered, 'the embed itself still renders').toBe(true);
+  expect(shape.overhang, 'the player paints outside the message').toBeLessThanOrEqual(0);
+  expect(shape.width).toBeLessThanOrEqual(shape.host);
+});
