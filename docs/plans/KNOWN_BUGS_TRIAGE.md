@@ -60,14 +60,18 @@ Archived cards are recoverable from the board's archive, nothing was deleted.
 
 One branch per group, all cut from `nightly`. `#N` is the card index in the appendix table.
 
-### G1 — `fix/continue-overhaul` — the Continue feature (4 cards) — highest value
-All four share one root: `continueMessage()` treats a continuation like a normal reply,
-and `mergeContinuationMessage` copies nothing but `content`.
+### G1 — `fix/continue-overhaul` — the Continue feature — **PR [#410](https://github.com/hydall/Glaze/pull/410)**
+The audit read all four as one root cause: `continueMessage()` treating a continuation
+like a normal reply, and `mergeContinuationMessage` copying nothing but `content`. Half
+of that was already repaired on nightly *after* the audit ran, which the audit could not
+know. What was actually left:
 
-- **#119** Timeout error on Continue **replaces the whole message** (sev high) — the error result is merged into the target and persisted
-- **#110** Continue re-generates the same reply / reasoning leaks into the body — no continuation instruction is ever sent
-- **#118** Token-count badge disappears after Continue (and after Regenerate)
-- **#150** Notification and chat-list preview show the *head* of the message, not the continuation
+- **#118** Token-count badge disappears after Continue (and after Regenerate) — **fixed**. The streaming window strips `.token-count-inline` out of a `.gen-stat` that survives, and the finishing update only retexted an element it assumed was still there. Also: the merge now sums both runs' `tokens`/`genTime` instead of dropping them.
+- **#150** Notification and chat-list preview show the *head* of the message, not the continuation — **fixed** via a recorded `continuationOffset` that both preview surfaces slice at.
+- **#110** Continue re-generates the same reply / reasoning leaks into the body — **already fixed**: INV-CM3 injects `kContinueInstruction` as a system turn, INV-CM5 files the reasoning. Verified in code, not just in the docs.
+- **#119** Timeout error on Continue replaces the whole message (sev high) — **already fixed**: INV-CM4, `_continueFailure` never writes to the message.
+
+New invariant: **INV-CM7** (a continued message keeps its stats and knows where it grew).
 
 Files: `chat_provider.dart`, `continuation_message_merger.dart`,
 `stream_generation_service.dart`, `saved_message_writer.dart`, `message_preview.dart`,
@@ -302,7 +306,7 @@ doing them apart.
 
 | Wave | Group | Branch | Cards | Status | PR | Trello |
 |---|---|---|---|---|---|---|
-| 1 | G1 continue-overhaul | `fix/continue-overhaul` | 119, 110, 118, 150 | not started | — | — |
+| 1 | G1 continue-overhaul | `fix/continue-overhaul` | 118, 150 (119, 110 already fixed) | **in review** | [#410](https://github.com/hydall/Glaze/pull/410) | 118+150 In Progress · 119+110 Fixed |
 | 1 | G2 reasoning-render | `fix/reasoning-render` | 123, 45 | not started | — | — |
 | 1 | G3 streaming-bubble-state | `fix/streaming-bubble-state` | 141, 131 | not started | — | — |
 | 2 | G8 lorebook-activation-scope | `fix/lorebook-activation-scope` | 99 | not started | — | — |
