@@ -30,6 +30,15 @@ Future<void> reconcileActiveGenerationBridge({
   if (!isBusy || isImpersonating || !isCurrent()) {
     syncState.streamingSent = false;
     syncState.regenStreamingSent = false;
+    // Idle means the page holds no typing bubble — a level-triggered
+    // guarantee, not just the falling edge's word. Clearing the flags without
+    // it is what let a bubble outlive its run: the flags belong to this widget
+    // and a fresh one starts with them false, while the node lives in a page
+    // that is kept alive across chats. `isCurrent()` re-reads the busy state,
+    // so this only fires when the chat is still idle now; the page ignores the
+    // call unless it also still believes the bubble is live, which is what
+    // keeps it from cutting short the exit animation the falling edge started.
+    if (!isBusy && isCurrent()) await bridge.retireTypingPlaceholder();
     return;
   }
 

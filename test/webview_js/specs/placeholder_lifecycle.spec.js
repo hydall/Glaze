@@ -193,3 +193,77 @@ test('a placeholder the list lost mid-run is still re-created', async ({
 
   expect(await renderedIds(page)).toEqual(['a1', 'u1', STREAMING_ID]);
 });
+
+test('a chat reopened after its run ended does not reopen with the bubble', async ({
+  page,
+}) => {
+  await boot(page);
+  await generating(page);
+
+  // The reader leaves the chat mid-run. On mobile the page is a keep-alive
+  // singleton, so this bubble stays in its DOM while the Flutter widget that
+  // owned it is disposed — and the run then finishes with nobody left to
+  // dispatch the falling edge that would have taken it away.
+  //
+  // Re-opening the chat is a plain `setMessages` (no `clearAll`), and the
+  // carry-across exists for exactly that call. Carried here it is a reply on
+  // its way that landed minutes ago, standing under itself, in a chat where
+  // nothing is running — and no later re-render takes it back down.
+  await page.evaluate(async () => {
+    await window.bridge.retireTypingPlaceholder();
+    await window.bridge.setMessages(
+      JSON.stringify([
+        JSON.parse(window.__M('a1', 'assistant', 'greeting')),
+        JSON.parse(window.__M('u1', 'user', 'hi')),
+        JSON.parse(window.__M('a2', 'assistant', 'the reply')),
+      ]),
+    );
+  });
+  await page.waitForTimeout(200);
+
+  expect(await renderedIds(page)).toEqual(['a1', 'u1', 'a2']);
+});
+
+test('a retired bubble cannot be brought back by a leftover delta', async ({
+  page,
+}) => {
+  await boot(page);
+  await generating(page);
+
+  // Retiring is what makes the orphan stay gone. The re-create branch in
+  // `_executeUpdateMessage` exists for a node the list lost mid-run, and it
+  // reads the same belief this call clears — so once retired, the last delta
+  // of the run that left the bubble behind cannot stand it back up.
+  await page.evaluate(() => window.bridge.retireTypingPlaceholder());
+  await page.waitForTimeout(60);
+  expect(await renderedIds(page)).toEqual(['a1', 'u1']);
+
+  await page.evaluate(() =>
+    window.bridge.updateMessage(
+      window.__M('__streaming__', 'assistant', 'the reply', { isTyping: true }),
+    ),
+  );
+  await page.waitForTimeout(300);
+  expect(await renderedIds(page)).toEqual(['a1', 'u1']);
+});
+
+test('retiring does not cut short an exit animation already running', async ({
+  page,
+}) => {
+  await boot(page);
+  await generating(page);
+
+  // The falling edge and the message sync land in the same frame: the
+  // dispatcher removes the bubble (a ~340ms exit animation) and the reconcile
+  // that follows retires it. The page has already stopped believing in it, so
+  // there is nothing to retire and the animation is left to finish.
+  await page.evaluate(() => {
+    window.bridge.removeMessage('__streaming__');
+    window.bridge.retireTypingPlaceholder();
+  });
+  await page.waitForTimeout(80);
+  expect(await renderedIds(page)).toContain(STREAMING_ID);
+
+  await page.waitForTimeout(500);
+  expect(await renderedIds(page)).toEqual(['a1', 'u1']);
+});

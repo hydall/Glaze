@@ -69,6 +69,47 @@ Guard: `AbortHandler.isCurrentGen(genId)` — exposed to the stream as
 → `StreamGenerationService.run()`. `AbortHandler.nextGenId()` increments `_activeGenId`
 on abort and on each new generation start.
 
+### INV-C8: The typing bubble lives exactly as long as a reply is on its way
+
+The "Generating…" bubble is not a message. It is a virtual one — a single
+constant id (`__streaming__`) that Flutter puts up, streams text into and takes
+away, while the page draws it. Nothing persists it, so the *only* record that
+it exists is `ChatWebViewSyncState.streamingSent` in the widget that put it up,
+and on mobile the page outlives that widget: `chatWebViewKeepAlive` makes it a
+singleton, so a bubble stays in its DOM across a chat being closed and
+reopened. Two halves follow, and neither is sufficient alone.
+
+**The presence of the bubble is level-triggered, not edge-triggered.** The
+rising and falling edges in `ChatWebViewSyncDispatcher.dispatch` are an
+optimisation, not the authority: an edge is consumed by the `!ready` early
+return during init, by a session switch, and by the widget being disposed
+mid-run. So `reconcileActiveGenerationBridge`
+(`chat_streaming_bridge_sync.dart`) re-derives the whole presentation from the
+current state — a run in flight gets its bubble appended or updated, an idle
+chat gets any bubble retired — and it runs after init, after a session switch,
+and after every message-list sync. Clearing the flags without retiring the node
+is what let a bubble outlive its run: the flags are the widget's, the node is
+the page's.
+
+**A bubble is carried across a re-render only while some run is streaming into
+it.** `setMessages` deliberately carries it (`_detachStreamingPlaceholder` →
+`_reattachStreamingPlaceholder`), because dropping it mid-run leaves every
+following delta updating a node that is gone. The page cannot tell a live
+bubble from a leftover, so Flutter decides: `ChatWebViewInitializer.run()` calls
+`bridge.retireTypingPlaceholder()` before its `setMessages` whenever
+`isGenerating` and `isSendPending` are both false. That call is itself
+level-triggered on the page's own belief (`_placeholderActive`), which is what
+keeps it from cutting short the exit animation `removeMessage` started.
+
+Without both halves, leaving a chat mid-run and returning after the reply
+landed reopened it with the finished reply *and* a typing bubble standing under
+itself — the "duplicate message" that did not go away on a reload, because
+every re-render of that session carried it forward again.
+
+Covered by `specs/placeholder_lifecycle.spec.js` (page side),
+`chat_webview_sync_dispatcher_test.dart` (the reconcile) and
+`chat_webview_initializer_placeholder_test.dart` (the call order at init).
+
 ---
 
 ## 2. Image Generation Invariants
@@ -1516,6 +1557,10 @@ Before merging any structural PR:
 - [ ] Stop generation (abort) preserves partial text when available
 - [ ] Regenerate while generating aborts the current generation first
 - [ ] Switching characters during generation continues background generation
+- [ ] Leaving a chat mid-generation and returning shows the typing bubble again,
+      still with its elapsed clock running (INV-C8)
+- [ ] Leaving a chat mid-generation and returning *after* the reply landed shows
+      the reply once, with no typing bubble under it (INV-C8)
 - [ ] Prompt block order matches preset definition
 - [ ] Vector scan runs before keyword scan; results deduplicated
 - [x] Memory injection respects token budget (PR-B C13 / INV-PS4)
