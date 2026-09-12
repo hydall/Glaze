@@ -141,10 +141,41 @@ dead-ending there is no dead end left to act on. Janny's `/hampter/script/*` rea
 not on the anonymous allowlist either — they may well be public, but nothing
 demonstrates it.
 
-### G5 — `fix/error-surface-normalization` — raw exception text shown to users (3 cards)
-- **#113** (client half) `_extractApiMessage` returns the entire server body when it is a plain string
-- **#120** Memory-draft failure stores `e.toString()` → `DioException [bad response]: …` rendered inside the memory card
-- **#105** `HTTP 308` is unmapped and shows as a bare code, with no hint that the endpoint is wrong
+### G5 — `fix/error-surface-normalization` — **PR [#417](https://github.com/hydall/Glaze/pull/417)**
+
+Shared shape: the string a failure produced was shown without anyone deciding it was
+worth reading.
+
+- **#113** (client half) raw server body in the dialog — **fixed**, and the cause is
+  narrower than the audit guessed. Dio parses JSON only when the request asked for it,
+  and `catalog_http.dart` asks for `ResponseType.plain` (its hosts answer HTML as
+  readily as JSON). So `{"error":{"message":…}}` reached `_extractApiMessage` as a
+  **String**, every shape-aware branch below was skipped, and the String branch
+  returned the whole body. A text body is now decoded first and read through the same
+  shapes; an unrecognized JSON object adds nothing to the localized status line; a
+  block page is dropped; every message is capped at 300 chars (the same string lands
+  in a modal, a toast, and one line of a memory card); an error wrapped in a
+  single-element array is read too. Meilisearch's top-level `message` is deliberately
+  preserved — it names the refused clause, which is the whole diagnosis for the Janny
+  400 G4 added a retry for.
+- **#105** bare `HTTP 308` — **fixed**. A redirect reaches `formatError` as an error
+  because dart:io follows 301/302/307/308 for a GET and refuses to for a POST, which
+  every completion request is. The four codes now carry a description, a line naming
+  the endpoint as the thing to fix, and the `Location` the server pointed at — the
+  answer the server actually gave, instead of the maintainer having to say "check your
+  url endpoint" by hand. Following it automatically is deliberately **not** done: the
+  request carries the API key and a redirect may point at another host. The 401 half of
+  that card stands as misconfiguration; it is already mapped and already reads.
+- **#120** memory draft shows the Dio dump — **fixed**. The failure goes through
+  `formatError` once before it is persisted, so the card and the toast say the same
+  thing. Also fixed from the same screenshot: the card kept showing the failure it was
+  *currently retrying*, because a draft stays `needs_regeneration` until the new
+  attempt lands — "Generating… 21.6s" with the previous error in red underneath.
+
+13 new tests; 10 fail with `lib/` reverted to nightly, and the three that pass either
+way are the negative controls. `error_format.dart` is also edited by open PR #415, so
+this branch keeps `_formatHttpError`'s four return lines byte-identical and builds the
+redirect line into the `header` expression above them — noted in the PR.
 
 ### G6 — `fix/cloud-sync` — cloud sync (4 cards)
 - **#107** Google Drive: `401 invalid_client` for every user — the shipped OAuth client is revoked. **Needs a fresh Google Cloud OAuth client (PKCE, no secret); this is an ops task as much as a code one.**
@@ -302,7 +333,7 @@ plan rather than pre-empt it.
 | 89 (item 2) | Error warning on all generations of a message | Fixed — error state is per-swipe in `swipesMeta` |
 | 96 | Image gen error (404) | Verbose Dio text already replaced by PR #357; the 404 is provider config |
 | 103 | Summary generation not working | Provider-side HTTP 500; reporter confirmed it works elsewhere |
-| 105 | HTTP 401 | User misconfiguration — only the 308 hint survives, in G5 |
+| 105 | HTTP 401 | User misconfiguration — the 308 half is fixed in G5 ([#417](https://github.com/hydall/Glaze/pull/417)) |
 | 102 | Buttons look different outside settings | Your call in-thread: "Left as is for now" |
 | 94 | `**` greying out `""` | Works as intended; parsing order via Themes is research |
 | 108 | Can't view previous gens while regenerating | Intended, reframed as a feature request |
@@ -429,7 +460,7 @@ doing them apart.
 | 2 | G10 vision-capability | `fix/vision-capability` | 95 | **in review** | [#415](https://github.com/hydall/Glaze/pull/415) | In Progress |
 | 2 | G17 draft-clear-on-send | `fix/draft-clear-on-send` | 121 | **in review** | [#414](https://github.com/hydall/Glaze/pull/414) | In Progress |
 | 3 | G4 catalog-auth-resilience | `fix/catalog-auth-resilience` | 104, 113, 152, 89 | **in review** | [#416](https://github.com/hydall/Glaze/pull/416) | all four In Progress |
-| 3 | G5 error-surface-normalization | `fix/error-surface-normalization` | 113, 120, 105 | not started | — | — |
+| 3 | G5 error-surface-normalization | `fix/error-surface-normalization` | 113, 120, 105 | **in review** | [#417](https://github.com/hydall/Glaze/pull/417) | all three In Progress |
 | 4 | G12 ol-start | `fix/ol-start` | 136 | not started | — | — |
 | 4 | G13 audio-embed-overflow | `fix/audio-embed-overflow` | 100 | not started | — | — |
 | 4 | G21 docs-and-readme | `fix/docs-and-readme` | 116, 33, 23, 146 | not started | — | — |
