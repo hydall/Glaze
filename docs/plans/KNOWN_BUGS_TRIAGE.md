@@ -180,7 +180,39 @@ The thread's "this character comes with a lorebook" notice is a feature → feat
 - **#9** (notifications) — everything else in that card works; what is left is exactly this: the new-message small icon must be an envelope, not the generation spinner. Same fix, same file — merged here.
 
 ### G17 — `fix/draft-clear-on-send` (1 card)
-- **#121** The last sent message reappears in the composer after a reload — the debounced draft save fires mid-send
+- **#121** The last sent message reappears in the composer after a reload — **fixed**, three holes, not one.
+
+The draft lives in `chat_sessions.draft`, is re-seeded into the input from
+`state.session.draft` on every chat open (the notifier is `keepAlive`, so that value
+outlives the screen), and was cleared as a *side effect* of whichever append variant
+the send happened to take:
+
+1. `appendUserMessageAndAcceptCurrentVariation`'s idempotent (`didAppend == false`)
+   branch reports the send as accepted **without** clearing the draft, and the
+   session it returns is published into `ChatState` and the session cache. The one
+   branch that leaks the sent text specifically.
+2. `ChatDraftController.saveDraft` skipped a write whose text matched the in-memory
+   draft. `ChatState`'s copy is not evidence about the column — the controller's own
+   count guard abandons the publish when the message list moves under the write, so
+   state can believe the draft is empty while the row still holds text, and the empty
+   write that would clear it was the one being skipped.
+3. The clear was left to the 500 ms input debounce, which `dispose` cancels outright.
+   Leave the chat right after sending and nothing ever cleared the row.
+
+Draft writes now go through `ChatSessionWriteQueue` — the queue every other durable
+session write already uses — so a draft write and the send's append are ordered
+instead of racing, and `expectedMessageCount` is read when the write's turn comes up
+instead of before the wait. A draft typed *during* a slow send used to carry the
+pre-append count and be rejected outright, which lost the user's next message.
+
+No migration needed: `_handleSend` now pushes the empty draft through on the tap, so
+the next send in an affected chat clears whatever an older build left behind.
+
+**The audit's interleaving no longer exists.** It describes `_handleSend` clearing the
+composer only after the durable append; `nightly` clears it on the tap, which cancels
+and re-arms the debounce with an empty controller. Could not construct the reporter's
+exact repro from the current code, and the card carries no repro steps — said so in
+the PR.
 
 ### G18 — `fix/promptworker-throughput` (2 cards)
 - **#126** An ST-imported character → `PromptWorker request timed out after 60000ms`
@@ -345,7 +377,7 @@ doing them apart.
 | 1 | G3 streaming-bubble-state | `fix/streaming-bubble-state` | 141, 131 | **in review** | [#412](https://github.com/hydall/Glaze/pull/412) | both In Progress |
 | 2 | G8 lorebook-activation-scope | `fix/lorebook-activation-scope` | 99 | **in review** | [#413](https://github.com/hydall/Glaze/pull/413) | In Progress |
 | 2 | G10 vision-capability | `fix/vision-capability` | 95 | not started | — | — |
-| 2 | G17 draft-clear-on-send | `fix/draft-clear-on-send` | 121 | not started | — | — |
+| 2 | G17 draft-clear-on-send | `fix/draft-clear-on-send` | 121 | **in review** | [#414](https://github.com/hydall/Glaze/pull/414) | In Progress |
 | 3 | G4 catalog-auth-resilience | `fix/catalog-auth-resilience` | 104, 113, 152, 89 | not started | — | — |
 | 3 | G5 error-surface-normalization | `fix/error-surface-normalization` | 113, 120, 105 | not started | — | — |
 | 4 | G12 ol-start | `fix/ol-start` | 136 | not started | — | — |
