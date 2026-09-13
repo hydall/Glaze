@@ -559,10 +559,57 @@ succeeds, so the Kotlin compiles. **Not verified:** the Swift half cannot be
 compiled on Windows, and the permission dialogs and OS power-save transitions
 need a device — worth a check before promotion.
 
-### G29 — `fix/presets` (3 cards)
-- **#47** Studio presets stay invisible until a restart (`StudioPresetWorkflowService.importPreset` does not invalidate `studioPresetListProvider`). Also: they must **sort normally** instead of sticking to the bottom of the list after the regular ones
-- **#79** When the active preset lives in a folder, opening the preset list should open **that folder** straight away
-- **#25** User-set preset images are not displayed
+### G29 — `fix/presets` — **PR [#427](https://github.com/hydall/Glaze/pull/427)**
+- **#47** imported presets invisible until a reboot — **the reported cause was
+  already fixed; the other entry point was not.** The audit blamed
+  `StudioPresetWorkflowService.importPreset` for writing without invalidating
+  `studioPresetListProvider`; on `nightly` the preset list's import path already
+  invalidates it, with a comment saying exactly why. What the audit *also* listed
+  and what was still open is the cloud sync pull:
+  `refreshDataProvidersAfterPull` invalidates fifteen providers and neither
+  preset library. Both are read-once caches (`presetListProvider` an
+  `AsyncNotifier` over `getAll()`, `studioPresetListProvider` a `FutureProvider`
+  over the same) where the folder providers beside them are Drift streams that
+  refresh themselves — and the pull writes presets straight through the repos
+  (`case 'theme_presets'`, `case 'studio_preset'`). Nothing ever told either list
+  it was stale.
+- **#47** (second half) Studio presets sticking to the bottom — **fixed.** The
+  list concatenated the two stores, and that grouping survived sorting: manual is
+  the default mode and it ranks only the rows the user has actually dragged,
+  leaving the rest in the incoming order. `mergePresetItems` interleaves them by
+  age instead — a merge, not a sort, so each store's own order (the plain list
+  carries a legacy manual order that is not in timestamp order) survives
+  untouched and only where the Studio presets slot in changes. One related data
+  bug fell out: `PresetItem.createdAt` read `StudioPreset.updatedAt` for an id
+  without a `studio_<seconds>` stamp — in practice only the seeded built-in
+  `default`, whose `updatedAt` the repo re-stamps on every save. Its "date added"
+  was really "date last edited", floating it to the top of newest-first whenever
+  it was touched and sinking it to the bottom of the merged list. A built-in
+  arrives with the install, like the featured plain presets, so it sorts as the
+  oldest entry now.
+- **#25** user-set preset images not displayed — **same root cause, one step
+  further along.** Covers travel with the preset (`pullPresetImages` drops the
+  file next to the path the preset already carries), but whether a cover exists
+  is a plain `File.existsSync()` taken during build. With nothing invalidating
+  the list, the frame that decided "no file" was the last one drawn and the cover
+  that landed a moment later never appeared — again until a restart. The
+  invalidation above is what repaints it. **Worth knowing:** the local pick →
+  store → display path is sound and already covered by
+  `preset_cover_image_test.dart`; the symptom does not reproduce from the code on
+  that path. If it persists, which screen and whether the preset came from this
+  device would settle it.
+- **#79** open the list on the active preset's folder — **done.** A preset filed
+  into a folder is not listed at the top level (it lives in the folder, and only
+  there), so the screen opened on a list that did not contain the preset in
+  effect, with no hint of where it went. The choice is made once per screen and
+  only once both the folder list and the membership stream have a value, so a
+  mid-load read cannot settle on "no folder" first; a preset in several folders
+  always opens the same one. The existing auto-reveal scroll, previously confined
+  to the top level, now also runs inside that folder.
+
+13 new tests (11 list composition, 2 sync refresh); negative control confirmed on
+both halves. Full `flutter test` green. **Not verified:** the folder the list
+opens on and the sync refresh both want a device (or a second account) to watch.
 
 ### G30 — `fix/editor-ui` (4 cards)
 - **#88** The stash button Danvi put in the prompt-block row moves **into the open prompt-block editor**, next to Delete; both buttons go to the header on the right, styled like the chat-input buttons (icon only, no text)
@@ -703,7 +750,7 @@ doing them apart.
 | 5 | G36 sheet-flicker | `fix/sheet-flicker` | 148 | **partial, in review** | [#422](https://github.com/hydall/Glaze/pull/422) | In Progress |
 | 6 | G27 protocols-pipeline | `fix/protocols-pipeline` | 71, 133 | PR open | [#425](https://github.com/hydall/Glaze/pull/425) | In Progress |
 | 6 | G28 permissions-and-battery | `fix/permissions-and-battery` | 29, 30, 53, 52 | PR open | [#426](https://github.com/hydall/Glaze/pull/426) | In Progress |
-| 6 | G29 presets | `fix/presets` | 47, 79, 25 | not started | — | — |
+| 6 | G29 presets | `fix/presets` | 47, 79, 25 | PR open | [#427](https://github.com/hydall/Glaze/pull/427) | In Progress |
 | 6 | G30 editor-ui | `fix/editor-ui` | 88, 57, 59, 143 | not started | — | — |
 | 6 | G16 notification-icon | `fix/notification-icon` | 149, 9 | not started | — | — |
 | 6 | G34 android-file-picker | `fix/android-file-picker` | 32 | not started | — | — |
