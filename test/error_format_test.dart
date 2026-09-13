@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/utils/error_format.dart';
 
