@@ -468,6 +468,7 @@
   "error_http_307": "Temporary Redirect",
   "error_http_308": "Permanent Redirect",
   "error_endpoint_redirect": "Wrong API endpoint — the server redirects this request instead of answering it. Check the base URL, including its API path.",
+  "error_images_maybe_unsupported": "This request included an image. The selected model may not accept images — hide them with the eye button on those messages, or switch to a model that does.",
   "error_http_400": "Bad Request",
   "error_http_401": "Unauthorized",
   "error_http_402": "Payment Required",

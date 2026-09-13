@@ -156,6 +156,13 @@ abstract class ChatMessage with _$ChatMessage {
     @Default(false) bool isError,
     String? genTime,
     int? tokens,
+
+    /// Index in [content] where the newest continuation segment begins, set
+    /// when a Continue run folds its output into this message. Preview
+    /// surfaces slice from here so a notification or a chat-list row shows the
+    /// text that was just generated rather than the head the user has already
+    /// read (INV-CM7). Null on a message that was never continued.
+    int? continuationOffset,
     int? greetingIndex,
     @Default([]) List<String> contextRefs,
     @Default('none') String swipeDirection,
@@ -189,6 +196,26 @@ extension ChatMessageAttachments on ChatMessage {
   ];
 
   bool get hasAttachments => attachments.isNotEmpty;
+}
+
+/// The slice of a message's text a preview should show.
+///
+/// Continuations append to the end of the message they extend
+/// ([ChatMessage.continuationOffset] records where the newest segment starts),
+/// so every surface that truncates from the *front* — the OS notification
+/// body, the chat-list row — would otherwise keep showing the opening the user
+/// has already read. Slicing from the boundary makes those previews follow the
+/// text that was just generated (INV-CM7).
+///
+/// Lives here rather than in the chat feature because both the notification
+/// path and `ChatRepo`'s session metadata projection need it. An offset that
+/// does not address the current text is ignored, so a stale or corrupt value
+/// degrades to the whole message instead of an empty preview.
+String previewSource(String content, int? continuationOffset) {
+  final offset = continuationOffset ?? 0;
+  if (offset <= 0 || offset >= content.length) return content;
+  final tail = content.substring(offset).trim();
+  return tail.isEmpty ? content : tail;
 }
 
 /// Splits [paths] across the two storage fields of [ChatMessage].

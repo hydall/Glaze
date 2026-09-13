@@ -561,6 +561,28 @@ export class Bridge {
     this.virtualList.append(STREAMING_ID, el);
   }
 
+  /* Retires the typing bubble for good, without an exit animation, so a
+   * `setMessages` issued right after this call has nothing left to carry
+   * across. Flutter makes the call when it opens a chat with no run in
+   * flight: the page is a keep-alive singleton, so a run that ended while
+   * the chat was closed left its bubble here with no falling edge to take it
+   * away, and the carry below would read that leftover as proof a reply is
+   * still on its way.
+   *
+   * Level-triggered on the page's own belief: `removeMessage` clears
+   * `_placeholderActive` the moment Flutter stops believing in the bubble, so
+   * a node still on screen under that flag is playing its exit animation and
+   * is left alone to finish it. */
+  retireTypingPlaceholder() {
+    if (!this._placeholderActive && !this._parkedPlaceholder) return;
+    this.flush();
+    this._placeholderActive = false;
+    this._parkedPlaceholder = null;
+    this.virtualList.remove(STREAMING_ID);
+    this._pruneOrphanSeparators();
+    this._ensureHeaderReachable();
+  }
+
   /* Runs [fn] with the placeholder lifted out, then puts it back at the tail.
    * Every batch append goes through here: `virtualList.append` lands after
    * whatever is currently last, so a persisted message arriving mid-generation
@@ -587,8 +609,11 @@ export class Bridge {
     this._parkedPlaceholder = null;
     // Carrying one across says it is still live. Not carrying one says
     // nothing: the node may simply have been lost, which is the case the
-    // re-create branch in _executeUpdateMessage exists for. Only removeMessage
-    // and a chat-replacing clearAll retire the placeholder.
+    // re-create branch in _executeUpdateMessage exists for. Only removeMessage,
+    // retireTypingPlaceholder and a chat-replacing clearAll retire the
+    // placeholder — and the first inference only holds because Flutter retires
+    // a leftover before the setMessages that reopens a chat, so what is
+    // carried here is always a bubble some run is still streaming into.
     if (carriedPlaceholder) this._placeholderActive = true;
     this._suppressLoadMore = true;
     // When re-rendering in place (e.g. a preset switch changes display regexes),

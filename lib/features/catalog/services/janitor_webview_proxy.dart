@@ -1677,6 +1677,17 @@ class JanitorWebViewProxy {
         result = await _rawFetch(url, method: method, body: body);
       }
     }
+    // Refused again, and the session could not be saved — the refresh token
+    // beside the JWT is gone too. Browsing needs no account, so a public read
+    // is asked once more with the dead token left off instead of being
+    // reported as "log in again": that sentence names a fix that does not
+    // apply, and the feed and the search box both stopped there. The stored
+    // session is deliberately left alone; a JWT the server would not take is
+    // not evidence that the login is finished.
+    if (result.status == 401 && janitorReadIsPublic(url, method: method)) {
+      _log('401 persists — retrying the read without the account token');
+      result = await _rawFetch(url, method: method, anonymous: true);
+    }
     if (result.status == 401) {
       throw const JanitorAuthException();
     }
@@ -1807,6 +1818,7 @@ class JanitorWebViewProxy {
     String url, {
     String method = 'GET',
     String? body,
+    bool anonymous = false,
   }) async {
     final controller = _controller;
     if (controller == null) return (status: -1, body: '');
@@ -1819,7 +1831,7 @@ class JanitorWebViewProxy {
           .callAsyncJavaScript(
             functionBody: '''
               $_findTokenJs
-              const token = __glazeFindToken();
+              const token = ${anonymous ? 'null' : '__glazeFindToken()'};
               const headers = { "Accept": "application/json, text/plain, */*" };
               if (token) headers["authorization"] = "Bearer " + token;
               const opts = {

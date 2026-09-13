@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'catalog_http.dart';
@@ -137,69 +138,123 @@ CatalogItem _normalizeJannyHit(Map<String, dynamic> hit) {
   );
 }
 
+/// The multi-search body for one attempt.
+///
+/// Only the fields whose answers are actually read are sent. The request used
+/// to also ask for `facets`, `attributesToHighlight`, `attributesToCrop` and a
+/// `cropMarker`; all four land in Meilisearch's `_formatted` block or its facet
+/// distribution, neither of which this file ever looks at — and each one is a
+/// clause the backend can reject with a 400 the moment its index configuration
+/// changes. Asking for nothing we do not read removes four ways for search to
+/// die outright.
+Map<String, dynamic> _jannyBody({
+  required String query,
+  required int page,
+  required List<String> filters,
+  required List<String> sort,
+}) => {
+      'queries': [
+        {
+          'indexUid': 'janny-characters',
+          'q': query,
+          if (filters.isNotEmpty) 'filter': filters.join(' AND '),
+          'hitsPerPage': 40,
+          'page': page,
+          if (sort.isNotEmpty) 'sort': sort,
+        }
+      ],
+    };
+
+CatalogSearchResult _jannyResult(Map<String, dynamic> data) {
+  final result = (data['results'] as List?)?.firstOrNull as Map<String, dynamic>? ?? {};
+  return CatalogSearchResult(
+    characters: ((result['hits'] as List?) ?? [])
+        .cast<Map<String, dynamic>>()
+        .map(_normalizeJannyHit)
+        .toList(),
+    total: (result['totalHits'] as int?) ?? 0,
+  );
+}
+
+/// POSTs one search body, re-fetching the search token once if the current one
+/// is refused.
+///
+/// The token is scraped out of Janny's own page bundle and cached; when the
+/// site rotates it the cached copy starts answering 401/403, and the shipped
+/// fallback is the only thing left to try.
+Future<Map<String, dynamic>> _jannyMultiSearch(Map<String, dynamic> body) async {
+  final token = await _getSearchToken();
+  try {
+    return await catalogPost(_searchUrl, body, _jannyHeaders(token));
+  } on DioException catch (e) {
+    final status = catalogErrorStatus(e);
+    if (status != 401 && status != 403) rethrow;
+    await _clearSearchToken();
+    return catalogPost(_searchUrl, body, _jannyHeaders(_fallbackToken));
+  }
+}
+
 Future<CatalogSearchResult> jannySearch({
   String query = '',
   int page = 1,
   CatalogFilters filters = const CatalogFilters(),
 }) async {
-  var token = await _getSearchToken();
-
-  final meiliFilters = <String>[];
+  // Split in two on purpose. The NSFW clause is the user's own setting about
+  // what they are willing to see, so it is never dropped to make a search
+  // work: a degraded search that answers with what somebody asked to be
+  // spared is worse than no answer. Everything else is a preference.
+  final mandatory = <String>[
+    if (!filters.nsfw) 'isNsfw = false',
+  ];
   final minTok = filters.minTokens > 0 ? filters.minTokens : 29;
-  meiliFilters.add('totalToken >= $minTok');
-  if (filters.maxTokens < 100000) meiliFilters.add('totalToken <= ${filters.maxTokens}');
-  if (!filters.nsfw) meiliFilters.add('isNsfw = false');
-  if (filters.tagIds.isNotEmpty) {
-    meiliFilters.addAll(filters.tagIds.map((id) => 'tagIds = $id'));
-  }
+  final preferred = <String>[
+    'totalToken >= $minTok',
+    if (filters.maxTokens < 100000) 'totalToken <= ${filters.maxTokens}',
+    ...filters.tagIds.map((id) => 'tagIds = $id'),
+  ];
 
-  final activeSort = filters.sort;
-  final sortMap = <String, List<String>>{
+  const sortMap = <String, List<String>>{
     'newest': ['createdAtStamp:desc'],
     'oldest': ['createdAtStamp:asc'],
     'tokens_desc': ['totalToken:desc'],
     'tokens_asc': ['totalToken:asc'],
     'relevant': [],
   };
-  final sortArr = sortMap[activeSort] ?? sortMap['newest']!;
+  final sortArr = sortMap[filters.sort] ?? sortMap['newest']!;
 
-  final body = {
-    'queries': [
-      {
-        'indexUid': 'janny-characters',
-        'q': query,
-        'facets': ['isLowQuality', 'isNsfw', 'tagIds', 'totalToken'],
-        'attributesToCrop': ['description:300'],
-        'cropMarker': '...',
-        if (meiliFilters.isNotEmpty) 'filter': meiliFilters.join(' AND '),
-        'attributesToHighlight': ['name', 'description'],
-        'hitsPerPage': 40,
-        'page': page,
-        if (sortArr.isNotEmpty) 'sort': sortArr,
-      }
-    ],
-  };
+  // Janny's search is a Meilisearch instance whose index configuration is
+  // theirs to change, and it answers a clause it no longer supports with a 400
+  // naming the syntax — which is fatal where a 401 is not, because nothing
+  // retried it. The report is exactly that: search stopped working outright.
+  // So a rejected search is asked again more plainly, sortable and filterable
+  // attributes being the two that stop being either.
+  final attempts = <Map<String, dynamic>>[
+    _jannyBody(
+      query: query,
+      page: page,
+      filters: [...mandatory, ...preferred],
+      sort: sortArr,
+    ),
+    if (sortArr.isNotEmpty)
+      _jannyBody(
+        query: query,
+        page: page,
+        filters: [...mandatory, ...preferred],
+        sort: const [],
+      ),
+    if (preferred.isNotEmpty)
+      _jannyBody(query: query, page: page, filters: mandatory, sort: const []),
+  ];
 
-  try {
-    final data = await catalogPost(_searchUrl, body, _jannyHeaders(token));
-    final result = (data['results'] as List?)?.firstOrNull as Map<String, dynamic>? ?? {};
-    return CatalogSearchResult(
-      characters: ((result['hits'] as List?) ?? []).cast<Map<String, dynamic>>().map(_normalizeJannyHit).toList(),
-      total: (result['totalHits'] as int?) ?? 0,
-    );
-  } catch (e) {
-    if (e.toString().contains('401') || e.toString().contains('403')) {
-      await _clearSearchToken();
-      token = _fallbackToken;
-      final data = await catalogPost(_searchUrl, body, _jannyHeaders(token));
-      final result = (data['results'] as List?)?.firstOrNull as Map<String, dynamic>? ?? {};
-      return CatalogSearchResult(
-        characters: ((result['hits'] as List?) ?? []).cast<Map<String, dynamic>>().map(_normalizeJannyHit).toList(),
-        total: (result['totalHits'] as int?) ?? 0,
-      );
+  for (var i = 0; i < attempts.length; i++) {
+    try {
+      return _jannyResult(await _jannyMultiSearch(attempts[i]));
+    } on DioException catch (e) {
+      final isLast = i == attempts.length - 1;
+      if (isLast || catalogErrorStatus(e) != 400) rethrow;
     }
-    rethrow;
   }
+  throw StateError('unreachable: the last attempt either returns or throws');
 }
 
 Future<DownloadedCharacter> jannyFetchCharacter(String characterId, String? slug) async {

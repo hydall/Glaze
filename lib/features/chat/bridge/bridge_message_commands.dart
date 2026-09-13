@@ -207,6 +207,28 @@ class MessageBridgeCommands {
     return _host.callJs('removeMessage', messageId);
   }
 
+  /// Retires a typing bubble the page is still holding for a run that is over,
+  /// without the exit animation [removeMessage] plays.
+  ///
+  /// The page is kept alive across chats, and its `setMessages` carries a
+  /// typing bubble across a re-render on purpose — a live run streams into
+  /// that node. A run that ended while its chat was closed never got the
+  /// falling edge that would have removed it, so the bubble is still there and
+  /// the carry hands it to the reopened chat: the reply, standing a second
+  /// time under itself, in a chat where nothing is running.
+  ///
+  /// The page no-ops unless it still believes the bubble is live, so this is
+  /// safe to call whenever nothing is in flight and never cuts short an exit
+  /// animation Flutter has already started.
+  Future<void> retireTypingPlaceholder() {
+    return _host.evalJs(
+      // Guarded: a page from before this method existed (a cached asset, the
+      // legacy bridge snapshot) must not throw here.
+      'if (window.bridge?.retireTypingPlaceholder) '
+      'window.bridge.retireTypingPlaceholder();',
+    );
+  }
+
   void _resolveMappedFileUrls(Map<String, dynamic> map) {
     final paths = map['imagePaths'];
     if (paths is List) {

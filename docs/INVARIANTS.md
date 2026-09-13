@@ -69,6 +69,47 @@ Guard: `AbortHandler.isCurrentGen(genId)` — exposed to the stream as
 → `StreamGenerationService.run()`. `AbortHandler.nextGenId()` increments `_activeGenId`
 on abort and on each new generation start.
 
+### INV-C8: The typing bubble lives exactly as long as a reply is on its way
+
+The "Generating…" bubble is not a message. It is a virtual one — a single
+constant id (`__streaming__`) that Flutter puts up, streams text into and takes
+away, while the page draws it. Nothing persists it, so the *only* record that
+it exists is `ChatWebViewSyncState.streamingSent` in the widget that put it up,
+and on mobile the page outlives that widget: `chatWebViewKeepAlive` makes it a
+singleton, so a bubble stays in its DOM across a chat being closed and
+reopened. Two halves follow, and neither is sufficient alone.
+
+**The presence of the bubble is level-triggered, not edge-triggered.** The
+rising and falling edges in `ChatWebViewSyncDispatcher.dispatch` are an
+optimisation, not the authority: an edge is consumed by the `!ready` early
+return during init, by a session switch, and by the widget being disposed
+mid-run. So `reconcileActiveGenerationBridge`
+(`chat_streaming_bridge_sync.dart`) re-derives the whole presentation from the
+current state — a run in flight gets its bubble appended or updated, an idle
+chat gets any bubble retired — and it runs after init, after a session switch,
+and after every message-list sync. Clearing the flags without retiring the node
+is what let a bubble outlive its run: the flags are the widget's, the node is
+the page's.
+
+**A bubble is carried across a re-render only while some run is streaming into
+it.** `setMessages` deliberately carries it (`_detachStreamingPlaceholder` →
+`_reattachStreamingPlaceholder`), because dropping it mid-run leaves every
+following delta updating a node that is gone. The page cannot tell a live
+bubble from a leftover, so Flutter decides: `ChatWebViewInitializer.run()` calls
+`bridge.retireTypingPlaceholder()` before its `setMessages` whenever
+`isGenerating` and `isSendPending` are both false. That call is itself
+level-triggered on the page's own belief (`_placeholderActive`), which is what
+keeps it from cutting short the exit animation `removeMessage` started.
+
+Without both halves, leaving a chat mid-run and returning after the reply
+landed reopened it with the finished reply *and* a typing bubble standing under
+itself — the "duplicate message" that did not go away on a reload, because
+every re-render of that session carried it forward again.
+
+Covered by `specs/placeholder_lifecycle.spec.js` (page side),
+`chat_webview_sync_dispatcher_test.dart` (the reconcile) and
+`chat_webview_initializer_placeholder_test.dart` (the call order at init).
+
 ---
 
 ## 2. Image Generation Invariants
@@ -1132,6 +1173,44 @@ content updates) carry no `role` and leave it alone. When the run settles the
 dispatcher pushes one update with the flag cleared — the only thing that drops
 the badge on the failure path, where no message changed.
 
+### INV-CM7: A continued message keeps its stats and knows where it grew
+
+A continuation folds into the message it extends, so everything derived from
+that message has to account for two runs instead of one.
+
+**Generation stats accumulate.** `mergeContinuationMessage` writes
+`sumContinuationTokens(original, generated)` and
+`sumContinuationGenTime(original, generated)` — the badge reports what was spent
+on that one message, not just on the last run. A stat missing on either side
+falls through to the other, and a `genTime` that does not parse counts as
+absent, so a malformed value can never wipe out a good one. The sums are
+written to the message, to `swipesMeta[swipeId]` and to the active nested swipe,
+because a swipe round-trip restores from the meta
+(`ChatMessageService.setSwipe`).
+
+**The WebView reconciles the stat row, it never assumes it.** During the
+streaming window `updateMessageMeta` removes `.token-count-inline` (the count
+belongs to the finished text) while the surrounding `.gen-stat` survives on the
+clock. The update that brings the merged message back therefore finds the parent
+but not the child: `_reconcileTokenCount` / `_reconcileGenTime` retext when the
+element is there and rebuild it when it is not. The clock is inserted at the
+front of the row, so a rebuilt badge keeps the clock-then-count order.
+
+**The boundary is recorded.** `ChatMessage.continuationOffset` is the index in
+`content` where the newest segment starts (`continuationOffsetFor` — past the
+blank line `joinContinuation` inserts). Preview surfaces truncate from the
+front, so without it they keep quoting the opening the user has already read:
+`previewSource(content, continuationOffset)` is what the notification body
+(`buildMessagePreview`) and both of `ChatRepo`'s session-metadata projections
+slice with. An offset that does not address the current text is ignored, so a
+stale value degrades to the whole message rather than an empty preview.
+
+The boundary is per-green-swipe and dies with the text it described: it is
+stored in `swipesMeta[swipeId]`, restored on swipe navigation, cleared when the
+user hand-edits the message (`ChatMessageService.editMessage`), and left alone
+by nested (blue) swipe switching, which does not change the green swipe's text.
+A continuation that produced no text keeps the previous boundary.
+
 ---
 
 ## 9. Extension Post-Generation Invariants
@@ -1516,6 +1595,10 @@ Before merging any structural PR:
 - [ ] Stop generation (abort) preserves partial text when available
 - [ ] Regenerate while generating aborts the current generation first
 - [ ] Switching characters during generation continues background generation
+- [ ] Leaving a chat mid-generation and returning shows the typing bubble again,
+      still with its elapsed clock running (INV-C8)
+- [ ] Leaving a chat mid-generation and returning *after* the reply landed shows
+      the reply once, with no typing bubble under it (INV-C8)
 - [ ] Prompt block order matches preset definition
 - [ ] Vector scan runs before keyword scan; results deduplicated
 - [x] Memory injection respects token budget (PR-B C13 / INV-PS4)
@@ -1527,6 +1610,8 @@ Before merging any structural PR:
   - [ ] Continue injects one system turn after the extended reply (INV-CM3)
   - [ ] A failed continue leaves the message untouched and toasts (INV-CM4)
   - [ ] Continue reasoning lands in the reasoning block, not the reply (INV-CM5)
+  - [ ] After Continue the token/time badge is back and counts both runs (INV-CM7)
+  - [ ] The notification and chat-list row quote the continuation (INV-CM7)
   - [ ] Block chain does not start on aborted or errored generation (INV-EG4)
   - [ ] Extension cancel token is separate from chat cancel token (INV-EG5)
   - [ ] `dependsOnPrevious` blocks await the preceding block; output is chained (INV-EG6)

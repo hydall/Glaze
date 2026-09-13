@@ -256,9 +256,24 @@ ORDER BY updated_at DESC
       if (prepared == null) return null;
 
       // A retry after a completed transaction must not append the same user
-      // message or a second acceptance event.
+      // message or a second acceptance event. The draft still has to go: this
+      // branch reports the send as accepted, and the session it returns is
+      // published into `ChatState` and the session cache, so a draft left on
+      // it is the text of the message that was just sent — sitting in the
+      // composer again the next time the chat is opened.
       if (!prepared.didAppend) {
-        return _toModel(snapshot, messages: prepared.messages);
+        if ((snapshot.draft ?? '').isEmpty) {
+          return _toModel(snapshot, messages: prepared.messages);
+        }
+        await (_db.update(
+          _db.chatSessions,
+        )..where((t) => t.sessionId.equals(sessionId))).write(
+          const ChatSessionsCompanion(draft: Value('')),
+        );
+        return _toModel(
+          snapshot.copyWith(draft: const Value('')),
+          messages: prepared.messages,
+        );
       }
 
       final result = await _db.transaction<({bool retry, ChatSession? value})>(
@@ -1201,6 +1216,12 @@ ORDER BY updated_at DESC
               }
               lastContent = parts.join(' ');
             }
+            // A continued message grew at its tail, so the row must preview
+            // from the continuation boundary rather than the head (INV-CM7).
+            lastContent = previewSource(
+              lastContent,
+              lastMsg['continuationOffset'] as int?,
+            );
             if (lastContent.length > 250) {
               lastContent = lastContent.substring(0, 250);
             }
@@ -1268,6 +1289,10 @@ ORDER BY updated_at DESC
               .map((part) => part['text'] as String)
               .join(' ');
         }
+        lastContent = previewSource(
+          lastContent,
+          lastMessage['continuationOffset'] as int?,
+        );
         if (lastContent.length > 250) {
           lastContent = lastContent.substring(0, 250);
         }

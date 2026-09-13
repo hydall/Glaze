@@ -294,6 +294,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       state = s;
     },
     getState: () => state,
+    writes: _sessionWrites,
   );
 
   void _invalidateHistory() => ref.invalidate(chatHistoryProvider);

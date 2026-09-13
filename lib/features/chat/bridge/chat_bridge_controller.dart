@@ -705,6 +705,8 @@ class ChatBridgeController {
   Future<void> updateMessageContent(String id, String text, bool isUser) =>
       messages.updateMessageContent(id, text, isUser);
   Future<void> removeMessage(String id) => messages.removeMessage(id);
+  Future<void> retireTypingPlaceholder() =>
+      messages.retireTypingPlaceholder();
   Future<void> setLastMessage(String? id) => messages.setLastMessage(id);
   Future<void> setContextWindowStart(String? id) =>
       messages.setContextWindowStart(id);

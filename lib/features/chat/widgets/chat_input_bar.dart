@@ -553,6 +553,15 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // reading as a send that never registered. The payload is captured above,
     // so the rare rejection puts it straight back.
     _clearComposedPayload();
+    // The stored draft is spent the moment its text becomes a message, so
+    // clear it on the tap instead of leaving it to the debounce the clear
+    // above just re-armed. That timer is 500ms in which nothing has cleared
+    // the row yet and `dispose` cancels it outright — leave the chat right
+    // after sending and it never fires. It is also the only writer that can
+    // clear a row which is *already* holding a sent message's text, so
+    // pushing the empty draft through here is what cleans one up.
+    _debounce?.cancel();
+    widget.onDraftChanged?.call('');
     bool accepted;
     try {
       if (attachments.isNotEmpty) {

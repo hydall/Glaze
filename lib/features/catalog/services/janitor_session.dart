@@ -80,3 +80,44 @@ bool isJanitorTokenExpired(
   final at = (now ?? DateTime.now().toUtc()).add(skew);
   return !expiry.isAfter(at);
 }
+
+/// Whether a request to [url] may be retried without the account's access
+/// token after janitorai.com refused the one it carried.
+///
+/// Browsing JanitorAI needs no account — the feed, a card's metadata, the tag
+/// list and a card's reviews all answer an anonymous reader. Glaze sends the
+/// bearer token anyway, because one WebView session serves everything, so a
+/// spent JWT that cannot be refreshed took the whole Discover tab down with
+/// it: search and the next page of the feed both ended at "session expired
+/// (401)", which names a fix ("log in again") that does not apply and offers
+/// no way back. Dropping the refused token and asking again is what turns that
+/// into an answer.
+///
+/// The list is an allowlist, not a filter on the account paths, and it covers
+/// GET only. An account-bound call retried anonymously does not fail — it
+/// succeeds and describes somebody else, or nobody: a block list read without
+/// a session is an empty block list, which would then be written back over the
+/// real one. So anything not known to be public is refused here, including the
+/// capture flow's reads of chats, personas, scripts and API settings.
+bool janitorReadIsPublic(String url, {String method = 'GET'}) {
+  if (method.toUpperCase() != 'GET') return false;
+  final Uri uri;
+  try {
+    uri = Uri.parse(url);
+  } on FormatException {
+    return false;
+  }
+  final segments = uri.pathSegments;
+  if (segments.length < 2 || segments.first != 'hampter') return false;
+  final path = segments.skip(1).toList();
+  return switch (path.first) {
+    // The feed and a search (`/characters?...`), one card's metadata
+    // (`/characters/{id}`), and the tag autocomplete.
+    'characters' =>
+      path.length <= 2 ||
+          (path.length == 3 && path[1] == 'tags' && path[2] == 'suggest'),
+    'tags' => path.length == 1,
+    'reviews' => path.length == 2,
+    _ => false,
+  };
+}

@@ -260,6 +260,101 @@ void main() {
       expect(state.streamingSent, isFalse);
     });
 
+    test('an idle reconcile retires a bubble left over from a run', () async {
+      // The page is kept alive across chats, so leaving one mid-run and coming
+      // back after the reply landed finds the bubble still in its DOM: the
+      // widget that would have dispatched the falling edge was disposed before
+      // the run ended. These flags belong to the widget and a fresh one starts
+      // with them false, so clearing them is not enough — the node outlives
+      // them, and `setMessages` carries it into the reopened chat.
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState()
+        ..wasBusy = true
+        ..streamingSent = true;
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isBusy: false,
+        isImpersonating: false,
+        regenTargetId: null,
+        continuationTargetId: null,
+        streaming: const StreamingState(),
+        messages: [_user('u1'), _assistant('a1')],
+        streamingId: '__streaming__',
+        isCurrent: () => true,
+      );
+
+      expect(bridge.retireTypingPlaceholderCalls, 1);
+      expect(state.streamingSent, isFalse);
+      expect(state.wasBusy, isFalse);
+    });
+
+    test('a live run keeps its bubble through a reconcile', () async {
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState()..wasBusy = true;
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isBusy: true,
+        isImpersonating: false,
+        regenTargetId: null,
+        continuationTargetId: null,
+        streaming: const StreamingState(text: 'partial reply'),
+        messages: [_user('u1')],
+        streamingId: '__streaming__',
+        isCurrent: () => true,
+      );
+
+      expect(bridge.retireTypingPlaceholderCalls, 0);
+    });
+
+    test('a reconcile overtaken by a new run retires nothing', () async {
+      // Captured idle, ran after a send started. Retiring here would take away
+      // the bubble the newer dispatch has just put up, which is why the busy
+      // state is re-read through `isCurrent` instead of trusted as captured.
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState();
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isBusy: false,
+        isImpersonating: false,
+        regenTargetId: null,
+        continuationTargetId: null,
+        streaming: const StreamingState(),
+        messages: [_user('u1')],
+        streamingId: '__streaming__',
+        isCurrent: () => false,
+      );
+
+      expect(bridge.retireTypingPlaceholderCalls, 0);
+    });
+
+    test('impersonation streams into the composer and retires nothing', () async {
+      // Impersonation reuses the generating flag, so it reaches the reconcile
+      // as busy — and it never had a chat bubble to retire.
+      final bridge = _FakeBridge();
+      final state = ChatWebViewSyncState()..wasBusy = true;
+
+      await reconcileActiveGenerationBridge(
+        bridge: bridge,
+        syncState: state,
+        isBusy: true,
+        isImpersonating: true,
+        regenTargetId: null,
+        continuationTargetId: null,
+        streaming: const StreamingState(text: 'composer text'),
+        messages: const [],
+        streamingId: '__streaming__',
+        isCurrent: () => true,
+      );
+
+      expect(bridge.retireTypingPlaceholderCalls, 0);
+    });
+
     test('serializes persisted and streaming message mutations', () async {
       final state = ChatWebViewSyncState();
       final firstMutation = Completer<void>();
@@ -990,6 +1085,7 @@ class _FakeBridge implements ChatBridgeController {
   final List<bool> updatedIsLast = [];
   final List<String?> lastMessageIds = [];
   final List<String> removedMessages = [];
+  int retireTypingPlaceholderCalls = 0;
   int scrollToBottomOnAppendCalls = 0;
   final List<(List<Map<String, dynamic>>, List<Map<String, dynamic>>, bool)>
   memoryUpdates = [];
@@ -1059,6 +1155,11 @@ class _FakeBridge implements ChatBridgeController {
   @override
   Future<void> removeMessage(String id) async {
     removedMessages.add(id);
+  }
+
+  @override
+  Future<void> retireTypingPlaceholder() async {
+    retireTypingPlaceholderCalls++;
   }
 
   @override

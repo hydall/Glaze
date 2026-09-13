@@ -93,6 +93,26 @@ void main() {
       expect(book.activationScope, 'character');
       expect(book.activationTargetId, 'char-1');
     });
+
+    test('a book attached to a character is not globally enabled', () {
+      // `enabled` is the Global switch: the book fires in every chat whatever
+      // else it is bound to, and `activeLorebooksFor` honours it on its own
+      // (it has to — a global book pinned to a character carries both flags).
+      // So importing a character *with* its lorebooks used to put that book in
+      // every other character's prompt too.
+      final book = convertJanitorScript(_entries(),
+          name: 'World Lore', characterId: 'char-1');
+      expect(book.enabled, isFalse);
+    });
+
+    test('a book imported on its own is globally enabled', () {
+      // The Lorebooks tab's own import has nothing to scope to, so the Global
+      // switch is the only thing that can make it fire at all.
+      final book = convertJanitorScript(_entries(), name: 'World Lore');
+      expect(book.enabled, isTrue);
+      expect(book.activationScope, 'global');
+      expect(book.activationTargetId, isNull);
+    });
   });
 
   group('book partitioning', () {

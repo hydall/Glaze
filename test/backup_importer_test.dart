@@ -827,6 +827,39 @@ void main() {
       expect(rows.first.activationTargetId, equals('char1'));
     });
 
+    test("a card's own book is never imported as globally enabled", () async {
+      // `character_book.enabled` on a card means "this card's book is on for
+      // this card". Glaze's `enabled` is the Global switch, and
+      // `activeLorebooksFor` honours it on its own — so copying one into the
+      // other put an imported character's lorebook in every other chat.
+      final importer = JsLorebookImporter(db, imageStorage);
+
+      await importer.importCharacterBooks([
+        {
+          'id': 'char1',
+          'name': 'Test Character',
+          'character_book': {
+            'name': 'Char1 Book',
+            'enabled': true,
+            'entries': [
+              {
+                'keys': ['sword'],
+                'content': 'A legendary sword.',
+                'enabled': true,
+                'position': 0,
+              },
+            ],
+          },
+        },
+      ]);
+
+      final rows = await db.select(db.lorebooks).get();
+      expect(rows.single.enabled, isFalse);
+      // Still active where it belongs — through the character scope.
+      expect(rows.single.activationScope, equals('character'));
+      expect(rows.single.activationTargetId, equals('char1'));
+    });
+
     test('does not duplicate character books on re-import', () async {
       final importer = JsLorebookImporter(db, imageStorage);
 

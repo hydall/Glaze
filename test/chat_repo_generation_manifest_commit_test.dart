@@ -263,6 +263,38 @@ void main() {
     expect(await manifestRepo.getVariationAcceptances('session'), hasLength(1));
   });
 
+  test('an idempotent retry still clears the draft', () async {
+    final base = _session();
+    final generated = base.copyWith(messages: [_assistant('assistant', 'reply')]);
+    await chatRepo.put(base);
+    await chatRepo.commitGenerationResult(
+      baseSession: base, generatedSession: generated, regenTargetId: null, manifest: _manifest(),
+    );
+    final message = _user('user', 'next');
+    await chatRepo.appendUserMessageAndAcceptCurrentVariation(
+      sessionId: 'session', message: message,
+      expectedPrecedingAssistant: _identity('assistant', 0, 0), updatedAt: 11,
+    );
+    // A draft debounce that landed after the append: the row is holding the
+    // text of a message that has already been sent.
+    await chatRepo.updateDraftIfMessageCount(
+      sessionId: 'session', draft: 'next', expectedMessageCount: 2,
+    );
+
+    // This branch reports the send as accepted and its session is published
+    // into `ChatState` and the session cache, so it owes the same draft clear
+    // the appending branch does — otherwise the sent text is back in the
+    // composer the next time the chat opens.
+    final retry = await chatRepo.appendUserMessageAndAcceptCurrentVariation(
+      sessionId: 'session', message: message,
+      expectedPrecedingAssistant: _identity('assistant', 0, 0), updatedAt: 11,
+    );
+
+    expect(retry?.messages, hasLength(2));
+    expect(retry?.draft, '');
+    expect((await chatRepo.getById('session'))?.draft, '');
+  });
+
 }
 
 Future<List<LorebookUseManifestRow>> _manifestRows(AppDatabase db) =>

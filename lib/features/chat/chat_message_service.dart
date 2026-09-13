@@ -89,6 +89,10 @@ class ChatMessageService {
         ...updatedSwipesMeta[swipeIdx],
         'reasoning': newReasoning,
         'tokens': updatedTokens,
+        // A hand-edit rewrites the text, so an index into the pre-edit string
+        // no longer points at the continuation. Drop it rather than slice the
+        // new text at a stale offset (INV-CM7).
+        'continuationOffset': null,
         if (updatedAgentSwipes.isNotEmpty) ...{
           'agentSwipes': updatedAgentSwipes
               .map((swipe) => swipe.toJson())
@@ -105,6 +109,7 @@ class ChatMessageService {
       swipesMeta: updatedSwipesMeta,
       agentSwipes: updatedAgentSwipes,
       tokens: updatedTokens,
+      continuationOffset: null,
     );
     return _persist(session, newMessages);
   }
@@ -454,6 +459,10 @@ class ChatMessageService {
                 )]
                 .tokens
           : meta?['tokens'] as int?,
+      // Per-swipe, like the counts above: only the variation a Continue run
+      // extended carries a boundary, so swiping to a sibling must clear it
+      // rather than slice that sibling at a stale offset (INV-CM7).
+      continuationOffset: meta?['continuationOffset'] as int?,
       time: activeAgentSwipe?.time,
       triggeredLorebooks: _triggeredFromMeta(meta, 'triggeredLorebooks'),
       triggeredMemories: _triggeredFromMeta(meta, 'triggeredMemories'),
@@ -862,6 +871,8 @@ class ChatMessageService {
           active.content.isEmpty && (active.reasoning?.isNotEmpty ?? false),
       genTime: active.genTime,
       tokens: active.tokens,
+      // The surviving swipe owns its own boundary — or none (INV-CM7).
+      continuationOffset: nextMeta['continuationOffset'] as int?,
       time: active.time,
       studioOutputs: active.studioOutputs,
       isError: nextMeta['isError'] == true,
