@@ -785,8 +785,46 @@ making only once we know a scan is not enough.
 ### G37 — `fix/guided-ui` (1 card)
 - **#6** Port the Vue Guided Generation UI **1:1** — the current one is rough, and the preset editor still has no way to edit the guided prompts
 
-### G38 — `fix/shino-default` (1 card)
-- **#28** Ship Shino (`default_shino`) as the default preset for **fresh installs** and drop `Default Chat`
+### G38 — `fix/shino-default` — **PR [#431](https://github.com/hydall/Glaze/pull/431)**
+- **#28** Shino as the default for fresh installs, drop `Default Chat` —
+  **done, with one half deliberately left undone.** "Default Chat" was a bare
+  skeleton — a main prompt, an NSFW block, a one-line jailbreak — assembled
+  inline in `preset_seeder.dart` and written before anything else; nobody chose
+  it, it simply sorted first, and `getEffectivePreset` falls back to "first
+  available preset" when no active one is set. It is no longer created, and a
+  first run is pointed at `default_shino`, which `seedFeaturedPresets` already
+  builds from `assets/presets/shino.json`. The decision is a pure function so
+  the cases that must *not* be touched are stated rather than implied: an
+  install past its first run, and any install that already has an active preset
+  — a restored backup and a Vue migration both write one and can both leave the
+  first-run flag clear (`js_backup_importer` clears it on purpose).
+- **Where it runs is the interesting part.** The obvious version — a startup
+  task that writes `activePresetIdProvider` once SharedPreferences is open —
+  **fails `navigation_smoke_test` deterministically** on two back-navigation
+  cases. Writing the provider a couple of `await` hops later than
+  `loadActiveSelections` does leaves it dirty while the router builds its first
+  routes; a `ConsumerStatefulWidget`'s ticker mode flips during an overlay
+  build, Riverpod resumes the suspended subscription and flushes there, and the
+  resulting `scheduleRefresh` calls `setState` during build. Checked that it is
+  the *timing* and not the value: seeding `activePresetId` into the smoke
+  test's preferences on `nightly`, so startup publishes a non-null preset the
+  ordinary way, leaves all 23 cases green. `applyFirstRunPresetChoice` therefore
+  runs from `main()`, beside the other one-shot preference migrations — by the
+  time startup reads the preference the value is simply there, and it is
+  published exactly as it is for any install that already had one.
+  `loadActiveSelections` is untouched.
+- **Not done on purpose:** existing installs keep their Default Chat. Deleting
+  it would destroy whatever the user edited into it and break any chat or
+  character bound to it through `presetConnections` — irreversible, and not what
+  "для свежих" asks for. Removing it by hand is one action in the Presets list.
+  Asked in the PR whether a migration that deletes it for everyone is wanted.
+
+7 new tests (the decision in isolation, the same through
+`applyFirstRunPresetChoice` against mock preferences, and a contract test that
+`defaultPresetId` is an id `featuredPresets` actually ships). Full
+`flutter test` green. **Not verified:** what a genuinely fresh install lands on
+— wiping an install and watching the first chat pick Shino is the check that
+would close it.
 
 ### New functionality with a spec — not a bug, kept separate
 - **#60** Add prompt editing for JAR (how lorebook keys get built, etc.) under **Third Party Providers**; during lorebook extraction a settings button appears in the header that leads there. You gave a full spec, so it is not going into `features` blind — but it is new functionality, so it queues after the bug groups.
@@ -863,7 +901,7 @@ doing them apart.
 | 6 | G30 editor-ui | `fix/editor-ui` | 88, 57, 59, 143 | PR open | [#428](https://github.com/hydall/Glaze/pull/428) | In Progress |
 | 6 | G16 notification-icon | `fix/notification-icon` | 149, 9 | PR open | [#429](https://github.com/hydall/Glaze/pull/429) | In Progress |
 | 6 | G34 android-file-picker | `fix/android-file-picker` | 32 | PR open | [#430](https://github.com/hydall/Glaze/pull/430) | In Progress |
-| 6 | G38 shino-default | `fix/shino-default` | 28 | not started | — | — |
+| 6 | G38 shino-default | `fix/shino-default` | 28 | PR open | [#431](https://github.com/hydall/Glaze/pull/431) | In Progress |
 | 7 | G6 cloud-sync | `fix/cloud-sync` | 107, 115, 124, 134 | not started | — | — |
 | 7 | G7 backup-onboarding-polish | `fix/backup-onboarding-polish` | 24, 111 | not started | — | — |
 | 7 | G9 janitor-greetings | `fix/janitor-greetings` | 98 | not started | — | — |
