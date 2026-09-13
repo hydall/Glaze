@@ -8,6 +8,7 @@ import 'core/app_runtime.dart';
 import 'core/debug/perf_debug.dart';
 import 'core/platform/desktop_window.dart';
 import 'core/services/dev_mode_flag_migration.dart';
+import 'core/services/preset_seeder.dart';
 import 'core/services/windows_preferences_migration.dart';
 
 final appRestartKey = GlobalKey();
@@ -39,6 +40,21 @@ Future<void> main() async {
         stack: stackTrace,
         library: 'startup',
         context: ErrorDescription('dev mode flag reset failed'),
+      ),
+    );
+  }
+  // Before the app opens: it reads `activePresetId` during startup, and a
+  // first run has to find the choice already made rather than watch it change
+  // underneath the first frames.
+  try {
+    await applyFirstRunPresetChoice();
+  } catch (error, stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'startup',
+        context: ErrorDescription('first-run preset choice failed'),
       ),
     );
   }

@@ -90,7 +90,6 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     _initInBackground(loadActiveSelections(ref), 'active selections');
     _initInBackground(loadLorebookActivations(ref), 'lorebook activations');
     _initInBackground(loadLorebookSettings(ref), 'lorebook settings');
-    _initInBackground(seedDefaultPresets(ref), 'default preset seeding');
     _initInBackground(seedFeaturedPresets(ref), 'featured preset seeding');
     final notificationForTesting = widget.notificationForTesting;
     if (notificationForTesting != null) {
