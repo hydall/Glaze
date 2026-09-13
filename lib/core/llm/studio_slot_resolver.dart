@@ -54,6 +54,7 @@ class StudioSlotResolver {
           model: model,
           protocol: fallback.protocol,
           useResponsesApi: useResponsesApi ?? fallback.useResponsesApi,
+          omitTemperature: fallback.omitTemperature,
           extraRequestParameters: mergeExtraRequestParameters(
             fallback.extraRequestParameters,
             extraRequestParameterOverrides,
@@ -92,6 +93,7 @@ class StudioSlotResolver {
       model: model,
       protocol: selected.protocol,
       useResponsesApi: useResponsesApi ?? selected.useResponsesApi,
+      omitTemperature: selected.omitTemperature,
       extraRequestParameters: mergeExtraRequestParameters(
         selected.extraRequestParameters,
         extraRequestParameterOverrides,

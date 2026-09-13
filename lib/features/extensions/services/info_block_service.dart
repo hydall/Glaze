@@ -4,9 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/llm_capture_context.dart';
-import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/chat_message.dart';
@@ -20,6 +18,7 @@ import '../../settings/api_list_provider.dart';
 import '../models/block_config.dart';
 import '../models/info_block.dart';
 import '../models/extension_context_policy.dart';
+import 'blocks/block_llm_runner.dart';
 import 'block_content_extractor.dart';
 import 'block_context_builder.dart';
 import 'ext_blocks_prompt_injection.dart';
@@ -41,9 +40,11 @@ String _withoutImagePaths(String content) =>
     ImageTagMarkup.reduceBlocksToInstructions(content);
 
 class InfoBlockService {
-  InfoBlockService(this._ref);
+  InfoBlockService(this._ref, {BlockLlmRunner? llmRunner})
+    : _llmRunner = llmRunner ?? const BlockLlmRunner();
 
   final Ref _ref;
+  final BlockLlmRunner _llmRunner;
 
   /// Generates the text content for a single infoblock block.
   /// Returns `(content, error)` — on success `error` is null; on failure
@@ -508,53 +509,19 @@ class InfoBlockService {
     CancelToken? cancelToken,
     void Function(String accumulated)? onStreamUpdate,
     LlmCaptureContext? captureContext,
-  }) async {
-    final useStream = onStreamUpdate != null;
-
-    try {
-      final transport = pickChatTransport(apiConfig.protocol);
-      final completer = Completer<String>();
-      final buffer = StringBuffer();
-
-      await transport.stream(
-        request: ChatTransportRequest.fromApiConfig(
-          apiConfig,
-          model: blockConfig.model.isNotEmpty
-              ? blockConfig.model
-              : apiConfig.model,
-          messages: requestMessages,
-          stream: useStream,
-          charName: charName,
-          userName: userName,
-          captureContext: captureContext,
-        ),
-        cancelToken: cancelToken,
-        onUpdate: useStream
-            ? (delta, _) {
-                if (delta.isEmpty) return;
-                buffer.write(delta);
-                onStreamUpdate(buffer.toString());
-              }
-            : null,
-        onComplete: (text, reasoning, {rawResponseJson}) {
-          if (!completer.isCompleted) completer.complete(text);
-        },
-        onError: (error) {
-          if (!completer.isCompleted) completer.completeError(error);
-        },
-      );
-
-      return await completer.future;
-    } on DioException catch (e) {
-      if (cancelToken?.isCancelled == true || CancelToken.isCancel(e)) {
-        return null;
-      }
-      debugPrint('[InfoBlockService] LLM call failed: $e');
-      rethrow;
-    } catch (e) {
-      if (cancelToken?.isCancelled == true) return null;
-      debugPrint('[InfoBlockService] LLM call failed: $e');
-      rethrow;
-    }
+  }) {
+    return _llmRunner.run(
+      apiConfig: apiConfig,
+      messages: requestMessages,
+      model: blockConfig.model.isNotEmpty ? blockConfig.model : null,
+      // A block only streams when it streams into the panel; otherwise the
+      // whole answer is wanted in one piece.
+      stream: onStreamUpdate != null,
+      charName: charName,
+      userName: userName,
+      cancelToken: cancelToken,
+      onStreamUpdate: onStreamUpdate,
+      captureContext: captureContext,
+    );
   }
 }

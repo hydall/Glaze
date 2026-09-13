@@ -131,6 +131,10 @@ class SummaryService {
         model: apiConfig.model,
         protocol: apiConfig.protocol,
         useResponsesApi: apiConfig.useResponsesApi,
+        // The connection's own "no temperature" flag travels with it: the
+        // summary pins temperature 0.3, but a provider that rejects the
+        // parameter rejects it here too.
+        omitTemperature: apiConfig.omitTemperature,
         extraRequestParameters: apiConfig.extraRequestParameters,
       ),
       prompt: prompt,

@@ -147,6 +147,29 @@ void main() {
     },
   );
 
+  test('carries the connection no-temperature flag', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.generateSummary(
+      sessionId: 'session',
+      history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
+      apiConfig: const ApiConfig(
+        id: 'api',
+        endpoint: 'https://api.openai.com',
+        apiKey: 'secret',
+        model: 'o3',
+        // A reasoning model rejects `temperature` outright. The chat sends
+        // this config no temperature at all; the summary pins 0.3, so without
+        // the flag the same connection answered it with HTTP 400.
+        omitTemperature: true,
+      ),
+    );
+
+    expect(llm.config?.omitTemperature, isTrue);
+    expect(llm.temperature, 0.3);
+  });
+
   test('expands macros in the prompt but never in the transcript', () async {
     final llm = _RecordingAuxLlmClient();
     final service = SummaryService(repo, llm: llm);

@@ -320,6 +320,7 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
         model: config.model,
         protocol: config.protocol,
         useResponsesApi: config.useResponsesApi,
+        omitTemperature: config.omitTemperature,
         extraRequestParameters: config.extraRequestParameters,
       ),
       messages: messages,

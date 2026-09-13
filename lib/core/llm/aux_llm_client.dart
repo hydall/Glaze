@@ -29,6 +29,14 @@ class AuxApiConfig {
   final String model;
   final String protocol;
   final bool useResponsesApi;
+
+  /// Whether the connection forbids a `temperature` field. Aux calls pin their
+  /// own temperature, but a provider that rejects the parameter outright
+  /// (OpenAI reasoning models, several proxies) rejects it here too — so a
+  /// connection the chat can talk to would answer an aux call with HTTP 400
+  /// unless this travels with it.
+  final bool omitTemperature;
+
   final List<ExtraRequestParameter> extraRequestParameters;
 
   const AuxApiConfig({
@@ -37,6 +45,7 @@ class AuxApiConfig {
     required this.model,
     required this.protocol,
     this.useResponsesApi = false,
+    this.omitTemperature = false,
     this.extraRequestParameters = const [],
   });
 }
@@ -360,6 +369,7 @@ class AuxLlmClient {
               ],
           maxTokens: maxTokens,
           temperature: temperature,
+          omitTemperature: config.omitTemperature,
           topP: 1.0,
           // Aux calls pin their own temperature and deliberately don't steer
           // top_p. Say so explicitly — the transports no longer treat 1.0 as
@@ -464,6 +474,7 @@ class AuxLlmClient {
           ],
           maxTokens: maxTokens,
           temperature: temperature,
+          omitTemperature: config.omitTemperature,
           topP: 1.0,
           // See `_callOnce` — top_p is intentionally not steered here.
           omitTopP: true,
