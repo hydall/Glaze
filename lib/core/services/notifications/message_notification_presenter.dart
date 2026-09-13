@@ -6,6 +6,31 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../constants/build_channel.dart';
 import '../../utils/platform_paths.dart';
 
+/// The image a message notification should carry for a stored avatar path, or
+/// null when there is nothing on disk to show.
+///
+/// The 512px thumbnail comes first. The platform decodes this file into a
+/// bitmap before it will draw the notification, and a character card is a
+/// multi-megabyte PNG — large enough that the system can refuse it, which is
+/// what turned the card image into a first-letter circle for some characters
+/// and not others. The thumbnail is the same picture at a size nothing objects
+/// to; the full-resolution avatar remains the fallback for a character whose
+/// thumbnail was never written.
+String? notificationAvatarPath(String? avatarPath) {
+  for (final candidate in <String?>[
+    resolveGlazeThumbnailPath(avatarPath),
+    resolveGlazeFilePath(avatarPath),
+  ]) {
+    if (candidate == null || candidate.isEmpty) continue;
+    try {
+      if (File(candidate).existsSync()) return candidate;
+    } catch (_) {
+      // Unreadable path (a URL, a name the platform rejects): try the next.
+    }
+  }
+  return null;
+}
+
 /// Platform half of the "new message from <character>" notification.
 ///
 /// Owns the `flutter_local_notifications` plugin: per-platform initialization,
@@ -42,13 +67,16 @@ class MessageNotificationPresenter {
   /// abort `initialize()` outright. Trying several names means one broken
   /// resource costs the icon, not the notification.
   ///
-  /// `ic_stat_icon_config_sample` is the generation spinner the foreground
-  /// service uses; it sits here only as a fallback that is known to exist, and
-  /// must never be the first choice — a new message showing a refresh arrow is
-  /// exactly the confusion this ordering avoids.
-  static const _androidIconCandidates = <String>[
+  /// Every fallback has to be something a *new message* can plausibly wear, so
+  /// the Glaze mark comes next and `ic_stat_icon_config_sample` — the circular
+  /// retry arrow left over from the Capacitor build — is not on the list at
+  /// all. It used to be second, which meant one failed lookup put a refresh
+  /// arrow on every message notification for the rest of the process: the exact
+  /// confusion the envelope exists to avoid.
+  static const androidIconCandidates = <String>[
     _androidMessageIcon,
-    'ic_stat_icon_config_sample',
+    'ic_launcher_monochrome',
+    'ic_launcher_foreground',
     'transparent_splash_icon',
     'launch_background',
   ];
@@ -116,7 +144,7 @@ class MessageNotificationPresenter {
     if (!kIsWeb && Platform.isAndroid) {
       // Try each icon in turn: `initialize()` throws `invalid_icon` for a name
       // the Android resource table cannot resolve.
-      for (final icon in _androidIconCandidates) {
+      for (final icon in androidIconCandidates) {
         if (await _tryInitialize(onTap: onTap, androidIcon: icon)) break;
       }
     } else {
@@ -273,6 +301,17 @@ class MessageNotificationPresenter {
           avatar: null,
         ),
       ),
+      // Reaching this rung means the messaging style itself was refused, not
+      // the avatar — the step above carries no avatar and still failed. The
+      // card image can survive that: a plain Android notification takes it as
+      // the large icon. Without this the step-down went straight from "the OEM
+      // does not do MessagingStyle" to a notification with no picture at all,
+      // which is the "sometimes nothing" end of the reported inconsistency.
+      if (avatar != null && !kIsWeb && Platform.isAndroid)
+        (
+          'plain with avatar',
+          () => _plainDetails(groupKey: groupKey, avatar: avatar),
+        ),
       ('plain', () => _plainDetails(groupKey: groupKey)),
     ];
 
@@ -379,28 +418,31 @@ class MessageNotificationPresenter {
     );
   }
 
-  NotificationDetails _plainDetails({required String groupKey}) =>
-      NotificationDetails(
-        android: (!kIsWeb && Platform.isAndroid)
-            ? AndroidNotificationDetails(
-                channelId,
-                channelName,
-                channelDescription: channelDescription,
-                importance: Importance.high,
-                priority: Priority.high,
-                icon: _androidMessageIconRejected ? null : _androidMessageIcon,
-                autoCancel: true,
-                groupKey: groupKey,
-                category: AndroidNotificationCategory.message,
-                visibility: NotificationVisibility.public,
-                enableVibration: true,
-              )
-            : null,
-        iOS: _darwinDetails(null),
-        macOS: _darwinDetails(null),
-        linux: const LinuxNotificationDetails(),
-        windows: const WindowsNotificationDetails(),
-      );
+  NotificationDetails _plainDetails({
+    required String groupKey,
+    String? avatar,
+  }) => NotificationDetails(
+    android: (!kIsWeb && Platform.isAndroid)
+        ? AndroidNotificationDetails(
+            channelId,
+            channelName,
+            channelDescription: channelDescription,
+            importance: Importance.high,
+            priority: Priority.high,
+            icon: _androidMessageIconRejected ? null : _androidMessageIcon,
+            largeIcon: avatar == null ? null : FilePathAndroidBitmap(avatar),
+            autoCancel: true,
+            groupKey: groupKey,
+            category: AndroidNotificationCategory.message,
+            visibility: NotificationVisibility.public,
+            enableVibration: true,
+          )
+        : null,
+    iOS: _darwinDetails(avatar),
+    macOS: _darwinDetails(avatar),
+    linux: const LinuxNotificationDetails(),
+    windows: const WindowsNotificationDetails(),
+  );
 
   DarwinNotificationDetails? _darwinDetails(String? avatar) {
     if (!_isDarwin) return null;
@@ -414,15 +456,8 @@ class MessageNotificationPresenter {
     );
   }
 
-  String? _existingAvatarPath(String? avatarPath) {
-    final resolved = resolveGlazeFilePath(avatarPath);
-    if (resolved == null || resolved.isEmpty) return null;
-    try {
-      return File(resolved).existsSync() ? resolved : null;
-    } catch (_) {
-      return null;
-    }
-  }
+  String? _existingAvatarPath(String? avatarPath) =>
+      notificationAvatarPath(avatarPath);
 
   Future<void> cancel(int id) async {
     if (!isSupported) return;

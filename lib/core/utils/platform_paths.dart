@@ -37,6 +37,12 @@ Future<String> getAppDataDir() async {
 /// base is cached yet (very early startup) the input is returned unchanged.
 String? resolveGlazeFilePath(String? path) {
   if (path == null || path.isEmpty) return path;
+  // A stored path can also be a URL (`data:`, `https:`) — a catalog card whose
+  // picture was never downloaded. It is not absolute, so without this it would
+  // be joined onto the data root and come back as a path no file lives at.
+  // [relativeGlazeFilePath], this function's inverse, has always left URLs
+  // alone; this is the other half of that symmetry.
+  if (_urlSchemeRegex.hasMatch(path)) return path;
   final base = _cachedAppDataDir;
   if (base == null) return path;
 
