@@ -500,11 +500,64 @@ callback-less transport, and `InfoBlockService` takes it by constructor — the 
 seam tactic as `ChatWebViewRecovery` in G25. 9 new tests (2 aux flag, 6 runner,
 1 summary), negative control confirmed; full `flutter test` green (3907/3907).
 
-### G28 — `fix/permissions-and-battery` (4 cards)
-- **#29** The system notification prompt fires immediately on app open. It must become an **onboarding step** with Allow / Skip buttons, explaining that notifications are what enable background generation
-- **#30** Remove the battery-optimization dialog entirely
-- **#53** Battery Saver becomes a **three-state setting** — System / On / Off — defaulting to System (follow the OS power-save mode)
-- **#52** In Battery Saver the generation placeholder must show `0s` immediately instead of waiting a full tick
+### G28 — `fix/permissions-and-battery` — **PR [#426](https://github.com/hydall/Glaze/pull/426)**
+- **#29** notification prompt on app open → onboarding step — **done.** The
+  dialog fired at startup because that is where the request lived:
+  `_configurePlatform()` called `requestNotificationsPermission()` from
+  `ensureInitialized`, which runs on launch. On Darwin it was worse than a call
+  — `DarwinInitializationSettings(requestAlertPermission: true)` made
+  `initialize()` itself put the dialog up. Both are gone from startup (the
+  Android channel is still created there — a channel the reader has tuned must
+  not be lost), and `requestPermission()` performs the ask on demand. The new
+  slide sits between Chat Layout and All Set and reuses the action-row shape the
+  API and Persona slides already have: an Allow tile, and the flow button
+  reading **Skip** until it is granted. It exists only where there is something
+  to ask for — Windows and Linux post without asking — which is why
+  `buildOnboardingSlides()` is computed rather than `const`.
+- **#30** battery-optimization dialog — **removed**, along with the
+  `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission from our manifest. Nothing
+  declares it now that the only caller is gone, and the plugin's own manifest
+  does not re-add it, so it really drops out of the merged manifest rather than
+  sitting there as an unused Play-restricted permission.
+- **#53** three-state Battery Saver — **done.** `BatterySaverMode
+  {system, on, off}` is the choice; `AppSettings.batterySaver` survives as the
+  *resolved* answer, so all ~40 read sites are untouched, and stays persisted as
+  the last known value so a cold start paints the right thing before the
+  platform answers. `SystemSettings.isPowerSaveMode()` plus a new event channel
+  extend the existing `app.glaze.flutter/system_settings` channel: Android reads
+  `PowerManager.isPowerSaveMode` and listens for
+  `ACTION_POWER_SAVE_MODE_CHANGED`, iOS reads `isLowPowerModeEnabled` and
+  observes `NSProcessInfoPowerStateDidChange` — polling cannot see the moment
+  the phone flips, which is the only thing "follow the system" is about. System
+  resolves to **off** where there is no signal (Windows, Linux, macOS).
+
+  **The migration is a judgement call, recorded here so nobody has to re-derive
+  it.** A stored bool cannot say whether it was chosen or inherited. The old
+  default was `true`, so a stored `true` is indistinguishable from never having
+  touched the setting — those installs take the new default, System. A stored
+  `false` could only be reached deliberately, so it is kept as Off; under System
+  it would have flipped itself on the next time the phone started saving power.
+  Consequence, stated plainly: **most existing users come out of this update
+  with the richer UI**, because they were on the old default and their device is
+  not saving power.
+- **#52** `0s` immediately in Battery Saver — **done, and it was three bugs, not
+  one.** (1) `start()` only installed a `setInterval`, which does not fire until
+  a whole period has passed — 1000ms in battery saver. (2) An immediate paint
+  alone would not have helped: the clock is started by the send window and the
+  typing bubble is appended *after* `dispatch()` returns, so at `start()` the
+  chat is still empty. A priming interval now runs at the fast cadence until the
+  bubble lands, capped at 3s. (3) The badge was built through `_createGenStat`,
+  which **drops a clock reading `'0s'`** — a finished message with no recorded
+  time has none, and `'0s'` is exactly what a clock reads on the tick that
+  creates it. Going through it would have left an empty gen-stat behind and
+  appended a second, populated one a tick later; it is assembled from
+  `_buildGenTime` directly now.
+
+10 new Dart tests (7 migration, 3 slide composition) and 5 new playwright specs;
+the battery-saver clock spec fails on nightly. `flutter build apk --debug`
+succeeds, so the Kotlin compiles. **Not verified:** the Swift half cannot be
+compiled on Windows, and the permission dialogs and OS power-save transitions
+need a device — worth a check before promotion.
 
 ### G29 — `fix/presets` (3 cards)
 - **#47** Studio presets stay invisible until a restart (`StudioPresetWorkflowService.importPreset` does not invalidate `studioPresetListProvider`). Also: they must **sort normally** instead of sticking to the bottom of the list after the regular ones
@@ -649,7 +702,7 @@ doing them apart.
 | 5 | G35 message-delete-race | `fix/message-delete-race` | 78 | **in review** | [#424](https://github.com/hydall/Glaze/pull/424) | In Progress |
 | 5 | G36 sheet-flicker | `fix/sheet-flicker` | 148 | **partial, in review** | [#422](https://github.com/hydall/Glaze/pull/422) | In Progress |
 | 6 | G27 protocols-pipeline | `fix/protocols-pipeline` | 71, 133 | PR open | [#425](https://github.com/hydall/Glaze/pull/425) | In Progress |
-| 6 | G28 permissions-and-battery | `fix/permissions-and-battery` | 29, 30, 53, 52 | not started | — | — |
+| 6 | G28 permissions-and-battery | `fix/permissions-and-battery` | 29, 30, 53, 52 | PR open | [#426](https://github.com/hydall/Glaze/pull/426) | In Progress |
 | 6 | G29 presets | `fix/presets` | 47, 79, 25 | not started | — | — |
 | 6 | G30 editor-ui | `fix/editor-ui` | 88, 57, 59, 143 | not started | — | — |
 | 6 | G16 notification-icon | `fix/notification-icon` | 149, 9 | not started | — | — |
