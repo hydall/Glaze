@@ -83,6 +83,18 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
   /// Folder currently being browsed, or null at the top level.
   String? _currentFolderId;
+
+  /// Set once the screen has decided which folder to open on (see
+  /// [_resolveInitialFolder]). Guards the decision to a single frame — the one
+  /// where both the folder list and its membership stream have arrived — so it
+  /// can never fight the user's own navigation afterwards.
+  bool _didResolveInitialFolder = false;
+
+  /// The folder [_resolveInitialFolder] opened, if it opened one. The auto
+  /// reveal is normally confined to the top-level list; inside this one folder
+  /// it still runs, because the row it would scroll to is exactly why the
+  /// folder was opened.
+  String? _autoOpenedFolderId;
   PresetListFilters _filters = const PresetListFilters();
 
   /// Preset kind picked in the control-row dropdown; null = every kind.
@@ -191,6 +203,36 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     }
   }
 
+  /// Opens the list on the folder the active preset lives in — see
+  /// [initialPresetFolderId] for which folder that is.
+  ///
+  /// Runs at most once per screen, and only once both the folder list and the
+  /// membership stream have a value: reading them mid-load would settle on "no
+  /// folder" before the answer had arrived. Assigning [_currentFolderId] during
+  /// the build that consumes it is deliberate — the decision is a property of
+  /// the first frame, so deferring it to a post-frame `setState` would flash the
+  /// top-level list first.
+  void _resolveInitialFolder({
+    required String? activeId,
+    required PresetKind kind,
+  }) {
+    if (_didResolveInitialFolder || _currentFolderId != null) return;
+    final folders = ref.watch(presetFoldersProvider).value;
+    final memberships = ref.watch(presetFolderMembershipsProvider).value;
+    if (folders == null || memberships == null) return;
+
+    _didResolveInitialFolder = true;
+    final target = initialPresetFolderId(
+      activeId: activeId,
+      kind: kind,
+      folders: folders,
+      memberships: memberships,
+    );
+    if (target == null) return;
+    _currentFolderId = target;
+    _autoOpenedFolderId = target;
+  }
+
   void _openFolder(String id) {
     ref.read(presetSelectionProvider.notifier).clear();
     // The auto-scroll is done with once the user navigates, and its key must be
@@ -222,6 +264,11 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     // one card is ever highlighted.
     final studioEnabled = ref.watch(studioFeatureEnabledProvider);
     final selection = ref.watch(presetSelectionProvider);
+
+    _resolveInitialFolder(
+      activeId: studioEnabled ? activeStudioId : activeId,
+      kind: studioEnabled ? PresetKind.agentic : PresetKind.normal,
+    );
     final folderId = _currentFolderId;
 
     final String title;
@@ -333,10 +380,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     final hasFolders =
         (ref.watch(presetFoldersProvider).value ?? const []).isNotEmpty;
 
-    final all = <PresetItem>[
-      for (final p in presets) PresetItem(preset: p),
-      for (final sp in studioList) PresetItem(studioPreset: sp),
-    ];
+    final all = mergePresetItems(presets, studioList);
     var items = all;
     if (folderId != null) {
       final keys = memberships.presetsIn(folderId);
@@ -364,9 +408,13 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
     final activeIndex = items.indexWhere(isActive);
 
-    // Auto-reveal the active preset the first time the plain (unfiltered,
-    // top-level) list is shown.
-    if (folderId == null && !_filters.isActive && _typeFilter == null) {
+    // Auto-reveal the active preset the first time the unfiltered list is
+    // shown — at the top level, or inside the folder the screen opened on its
+    // behalf.
+    if (_didResolveInitialFolder &&
+        (folderId == null || folderId == _autoOpenedFolderId) &&
+        !_filters.isActive &&
+        _typeFilter == null) {
       _scheduleAutoScroll(activeIndex);
     }
 
@@ -1106,10 +1154,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     final presets = ref.read(presetListProvider).value ?? const <Preset>[];
     final studio =
         ref.read(studioPresetListProvider).value ?? const <StudioPreset>[];
-    return <PresetItem>[
-      for (final p in presets) PresetItem(preset: p),
-      for (final sp in studio) PresetItem(studioPreset: sp),
-    ].where((e) => selection.keys.contains(e.memberKey)).toList();
+    return mergePresetItems(
+      presets,
+      studio,
+    ).where((e) => selection.keys.contains(e.memberKey)).toList();
   }
 
   void _showSelectionActions(

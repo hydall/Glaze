@@ -8,14 +8,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/chat_session_ops_provider.dart';
+import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/global_regex_provider.dart';
-import '../../../core/state/pipeline_settings_provider.dart';
 import '../../../core/state/shared_prefs_provider.dart';
 import '../../../core/state/studio_regex_provider.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../personas/persona_list_provider.dart';
+import '../../presets/preset_list_provider.dart';
 import '../../settings/api_list_provider.dart';
 import '../../settings/app_settings_provider.dart';
 import '../../card_rewrite/card_rewriter_recovery_view_service.dart';
@@ -375,6 +376,14 @@ class SyncController {
     _ref.invalidate(chatHistoryProvider);
     _ref.invalidate(activeStudioPresetProvider);
     _ref.invalidate(studioPresetProvider);
+    // Both preset libraries are read once and cached — neither is a Drift
+    // stream — and the pull writes straight through their repositories. Without
+    // these two the Presets screen kept showing the list it had read at
+    // startup: a preset synced from another device was invisible until the app
+    // was restarted, and so was a cover image, whose file the pull drops next
+    // to the path the preset already points at.
+    _ref.invalidate(presetListProvider);
+    _ref.invalidate(studioPresetListProvider);
     _ref.invalidate(globalRegexProvider);
     _ref.invalidate(studioRegexProvider);
     unawaited(_ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
