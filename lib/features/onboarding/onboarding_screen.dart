@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/theme/theme_provider.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../core/services/generation_notification_service.dart';
 import '../../core/services/onboarding_service.dart';
 import '../backup/backup_screen.dart';
 import '../../core/state/active_selection_provider.dart';
@@ -32,11 +35,23 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   int _currentSlide = 0;
   int _direction = 1;
 
-  bool get _isLastSlide => _currentSlide == onboardingSlides.length - 1;
+  /// Resolved once: which slides exist depends on the platform, and a list
+  /// that changed length under an index would move the reader mid-flow.
+  late final List<OnboardingSlideData> _slides = buildOnboardingSlides(
+    includeNotifications:
+        GenerationNotificationService.instance.notificationsNeedPermission,
+  );
+
+  /// Whether the reader has granted notifications on this slide. `null` until
+  /// they have answered — the button reads Skip until then, the way the API
+  /// and Persona slides do.
+  bool? _notificationsGranted;
+
+  bool get _isLastSlide => _currentSlide == _slides.length - 1;
 
   String get _buttonLabel {
     if (_isLastSlide) return 'onboarding_btn_start'.tr();
-    switch (onboardingSlides[_currentSlide].type) {
+    switch (_slides[_currentSlide].type) {
       case OnboardingSlideType.dataImport:
         return 'onboarding_btn_skip'.tr();
       case OnboardingSlideType.persona:
@@ -53,6 +68,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         return 'onboarding_btn_skip'.tr();
       case OnboardingSlideType.layout:
         return 'onboarding_btn_next'.tr();
+      case OnboardingSlideType.notifications:
+        return _notificationsGranted == true
+            ? 'onboarding_btn_next'.tr()
+            : 'onboarding_btn_skip'.tr();
       default:
         return 'onboarding_btn_next'.tr();
     }
@@ -96,6 +115,34 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         },
       ),
     );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // A reader who already granted notifications (a reinstall over granted
+    // permissions, or onboarding replayed from settings) should see the slide
+    // settled rather than be asked again.
+    if (_slides.any((s) => s.type == OnboardingSlideType.notifications)) {
+      unawaited(_loadNotificationState());
+    }
+  }
+
+  Future<void> _loadNotificationState() async {
+    final enabled = await GenerationNotificationService.instance
+        .areNotificationsEnabled();
+    if (!mounted || enabled != true) return;
+    setState(() => _notificationsGranted = true);
+  }
+
+  /// Shows the OS permission dialog. Declining is a normal outcome — the slide
+  /// says so and the flow moves on either way.
+  Future<void> _requestNotifications() async {
+    if (_notificationsGranted == true) return;
+    final granted = await GenerationNotificationService.instance
+        .requestNotificationPermission();
+    if (!mounted) return;
+    setState(() => _notificationsGranted = granted);
   }
 
   void _openSheet(Widget sheet) {
@@ -162,7 +209,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 },
                 child: KeyedSubtree(
                   key: ValueKey(_currentSlide),
-                  child: _buildSlide(onboardingSlides[_currentSlide]),
+                  child: _buildSlide(_slides[_currentSlide]),
                 ),
               ),
             ),
@@ -193,7 +240,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             left: 20,
             right: 20,
             child: OnboardingStoriesBar(
-              total: onboardingSlides.length,
+              total: _slides.length,
               current: _currentSlide,
             ),
           ),
@@ -256,7 +303,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   /// The wide-window flow: the same slides, laid out as the Vue wizard.
   Widget _buildDesktop(BuildContext context) {
-    final slide = onboardingSlides[_currentSlide];
+    final slide = _slides[_currentSlide];
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D0E),
       body: AnimatedSwitcher(
@@ -282,7 +329,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           key: ValueKey(_currentSlide),
           child: OnboardingDesktopWizard(
             slideIndex: _currentSlide,
-            slideCount: onboardingSlides.length,
+            slideCount: _slides.length,
             icon: _slideIcon(slide),
             title: slide.title,
             description: slide.desc,
@@ -326,6 +373,17 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           sub: 'onboarding_action_setup_sub'.tr(),
           onTap: () => _openSheet(const PersonaListScreen()),
         );
+      case OnboardingSlideType.notifications:
+        return (
+          icon: Icons.notifications_active_outlined,
+          title: _notificationsGranted == true
+              ? 'onboarding_action_notifications_granted'.tr()
+              : 'onboarding_action_allow_notifications'.tr(),
+          sub: _notificationsGranted == false
+              ? 'onboarding_action_notifications_denied_sub'.tr()
+              : 'onboarding_action_allow_notifications_sub'.tr(),
+          onTap: _requestNotifications,
+        );
       default:
         return null;
     }
@@ -348,6 +406,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       case OnboardingSlideType.dataImport:
       case OnboardingSlideType.api:
       case OnboardingSlideType.persona:
+      case OnboardingSlideType.notifications:
         final action = _slideAction(slide)!;
         return _buildActionSlide(
           slide: slide,

@@ -95,7 +95,12 @@ void main() {
     WidgetTester tester, {
     required bool batterySaver,
   }) async {
-    SharedPreferences.setMockInitialValues({'batterySaver': batterySaver});
+    // Pinned as a mode, not just the resolved bool: under the `system` default
+    // the notifier asks the platform and overwrites whatever was seeded here.
+    SharedPreferences.setMockInitialValues({
+      'batterySaver': batterySaver,
+      'batterySaverMode': batterySaver ? 'on' : 'off',
+    });
     late BuildContext sheetContext;
     final items = [
       BottomSheetItem(label: 'gpt-4o-mini', onTap: () {}),

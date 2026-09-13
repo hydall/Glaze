@@ -96,7 +96,10 @@ void main() {
   ) async {
     // Battery saver is on by default (AppSettings.batterySaver), and that is
     // what switches the blur off — so turn it off to have a blur to watch.
-    SharedPreferences.setMockInitialValues({'batterySaver': false});
+    SharedPreferences.setMockInitialValues({
+      'batterySaver': false,
+      'batterySaverMode': 'off',
+    });
     await pumpSheet(tester);
     bool blurOn() =>
         tester.widget<TopEdgeBlur>(find.byType(TopEdgeBlur)).enabled;

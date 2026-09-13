@@ -14,6 +14,7 @@ void main() {
       'hideTokenCount': bool,
       'dialogGrouping': bool,
       'batterySaver': bool,
+      'batterySaverMode': String,
       'hideTooltips': bool,
       'disableSwipeRegeneration': bool,
       'allowMessageScripts': bool,
@@ -46,9 +47,11 @@ void main() {
           case bool:
             // gz_force_mobile_layout defaults to FALSE: wide windows get the
             // desktop three-column layout unless the user opts back out.
+            // `batterySaver` used to default to true; it is the *resolved*
+            // value of `batterySaverMode` now, and under the System default it
+            // starts off until the platform says otherwise.
             if (entry.key == 'enterToSend' ||
                 entry.key == 'showOurPicks' ||
-                entry.key == 'batterySaver' ||
                 entry.key == 'openCardAfterImport' ||
                 entry.key == 'hapticFeedback' ||
                 entry.key == 'messageVibration') {
@@ -76,6 +79,8 @@ void main() {
               expect(defaults.janitorCardSource, ExtractionSource.local);
             } else if (entry.key == 'janitorCharacterSource') {
               expect(defaults.janitorCharacterSource, ExtractionSource.datacat);
+            } else if (entry.key == 'batterySaverMode') {
+              expect(defaults.batterySaverMode, BatterySaverMode.system);
             }
           // ignore: type_literal_in_constant_pattern
           case double:
@@ -225,6 +230,7 @@ void main() {
         'hideTokenCount',
         'dialogGrouping',
         'batterySaver',
+        'batterySaverMode',
         'hideTooltips',
         'disableSwipeRegeneration',
         'language',

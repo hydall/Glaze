@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart'
     show NotificationResponse;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../platform/haptics.dart';
 import 'notifications/message_notification_presenter.dart';
@@ -170,37 +169,8 @@ class GenerationNotificationService {
         ),
       );
 
-      await _maybeRequestBatteryExemption();
     } catch (e, st) {
       debugPrint('NOTIF: foreground task init failed: $e\n$st');
-    }
-  }
-
-  /// Asks the user (once) to exempt Glaze from battery optimization / Doze.
-  /// Without the exemption Android may freeze the process while the screen is
-  /// off, stalling a background generation even though a foreground service +
-  /// wake lock are held. Gated by a SharedPreferences flag so the system
-  /// dialog is offered a single time.
-  Future<void> _maybeRequestBatteryExemption() async {
-    if (kIsWeb || !Platform.isAndroid) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      const promptedKey = 'battery_optimization_prompted';
-      if (prefs.getBool(promptedKey) ?? false) return;
-
-      final alreadyIgnoring =
-          await FlutterForegroundTask.isIgnoringBatteryOptimizations;
-      if (alreadyIgnoring) {
-        await prefs.setBool(promptedKey, true);
-        return;
-      }
-
-      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-      // Mark prompted regardless of the user's choice — the dialog is only
-      // meant to appear once; the user can still change it in system settings.
-      await prefs.setBool(promptedKey, true);
-    } catch (e) {
-      debugPrint('NOTIF: battery optimization request failed: $e');
     }
   }
 
@@ -405,6 +375,20 @@ class GenerationNotificationService {
   /// app apart from a broken notification.
   Future<bool?> areNotificationsEnabled() =>
       _presenter.areNotificationsEnabled();
+
+  /// Whether this platform asks the user before it will post notifications —
+  /// i.e. whether onboarding has anything to offer on the subject.
+  bool get notificationsNeedPermission =>
+      _presenter.isSupported && MessageNotificationPresenter.promptsForPermission;
+
+  /// Shows the OS permission dialog. Called from the onboarding slide that
+  /// explains what notifications are for — never at startup (see
+  /// [MessageNotificationPresenter.requestPermission]).
+  Future<bool> requestNotificationPermission() async {
+    if (!_presenter.isSupported) return false;
+    await _presenter.ensureInitialized(onTap: _onNotificationTapped);
+    return _presenter.requestPermission();
+  }
 
   /// Cancels delivered notifications for a character (e.g. when the user
   /// opens that chat). Mirrors Vue.js clearMessageNotifications.

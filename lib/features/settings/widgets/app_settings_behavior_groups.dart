@@ -5,7 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/platform/haptics.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../chat/widgets/message_scripts_prompt_sheet.dart';
+import '../app_settings_provider.dart';
 import 'settings_group_base.dart';
+import 'settings_highlight.dart';
+import 'settings_pickers.dart';
 
 /// The behaviour half of the settings screen: what the app does, as opposed to
 /// how it looks. Assembled by `appSettingsGroups` in `app_settings_groups.dart`.
@@ -257,13 +260,26 @@ class PerformanceGroup extends SettingsGroup {
       header: 'settings_group_performance'.tr(),
       headerIcon: Icons.speed_rounded,
       items: [
-        toggle(
-          id: 'battery_saver_ui',
-          label: 'menu_battery_saver_ui'.tr(),
-          description: 'desc_battery_saver_ui'.tr(),
-          value: settings.batterySaver,
-          onChanged: (v) =>
-              notifierOf(ref).save(settings.copyWith(batterySaver: v)),
+        highlightIf(
+          'battery_saver_ui',
+          highlightId,
+          MenuItem(
+            icon: Icons.battery_saver_outlined,
+            label: 'menu_battery_saver_ui'.tr(),
+            subtitle: 'desc_battery_saver_ui'.tr(),
+            // The mode is what was chosen; under `system` the reader still
+            // wants to know what it currently works out to.
+            value: settings.batterySaverMode == BatterySaverMode.system
+                ? 'battery_saver_system_value'.tr(
+                    namedArgs: {
+                      'state': settings.batterySaver
+                          ? 'battery_saver_on'.tr()
+                          : 'battery_saver_off'.tr(),
+                    },
+                  )
+                : batterySaverModeLabel(settings.batterySaverMode),
+            onTap: () => showBatterySaverModePicker(context, ref, settings),
+          ),
         ),
       ],
     );

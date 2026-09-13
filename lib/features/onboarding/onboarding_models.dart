@@ -12,6 +12,7 @@ enum OnboardingSlideType {
   api,
   persona,
   layout,
+  notifications,
   allSet,
 }
 
@@ -39,7 +40,26 @@ class OnboardingInfoBlock {
   });
 }
 
-const onboardingSlides = <OnboardingSlideData>[
+/// The flow, in order.
+///
+/// Computed rather than `const` because the notification slide only exists on
+/// the platforms that put a permission dialog in front of the user. Asking for
+/// it used to happen at startup, unannounced (see
+/// `MessageNotificationPresenter.requestPermission`); it is a slide now so the
+/// dialog arrives with its reason next to it and a way past it.
+///
+/// [includeNotifications] is passed in rather than read here — the caller owns
+/// the platform question, and this file stays content.
+List<OnboardingSlideData> buildOnboardingSlides({
+  required bool includeNotifications,
+}) => <OnboardingSlideData>[
+  for (final slide in _allOnboardingSlides)
+    if (slide.type != OnboardingSlideType.notifications ||
+        includeNotifications)
+      slide,
+];
+
+const _allOnboardingSlides = <OnboardingSlideData>[
   OnboardingSlideData(
     type: OnboardingSlideType.welcome,
     title: 'onboarding_welcome_title',
@@ -71,6 +91,12 @@ const onboardingSlides = <OnboardingSlideData>[
     title: 'onboarding_layout_title',
     desc: 'onboarding_layout_slide_desc',
     icon: Icons.view_quilt_outlined,
+  ),
+  OnboardingSlideData(
+    type: OnboardingSlideType.notifications,
+    title: 'onboarding_notifications_title',
+    desc: 'onboarding_notifications_slide_desc',
+    icon: Icons.notifications_active_outlined,
   ),
   OnboardingSlideData(
     type: OnboardingSlideType.allSet,

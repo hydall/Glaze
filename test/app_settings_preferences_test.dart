@@ -14,6 +14,7 @@ void main() {
       hideTokenCount: true,
       groupDialogs: true,
       batterySaver: false,
+      batterySaverMode: BatterySaverMode.off,
       hideTooltips: true,
       disableSwipeRegeneration: true,
       allowMessageScripts: true,

@@ -2,7 +2,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'dart:async';
+
 import '../../core/platform/haptics.dart';
+import '../../core/platform/system_settings.dart';
 import '../../core/state/shared_prefs_provider.dart';
 
 part 'app_settings_provider.freezed.dart';
@@ -30,6 +33,29 @@ enum ExtractionSource {
     final normalized = value.trim().toLowerCase();
     for (final s in ExtractionSource.values) {
       if (s.name == normalized) return s;
+    }
+    return null;
+  }
+}
+
+/// What drives the reduced-motion, reduced-blur "Battery Saver UI".
+///
+/// [system] follows the OS power-save mode, which is the default: a phone that
+/// has decided to save power should not be asked to paint blurs and rolling
+/// digits. It resolves to off wherever the platform cannot answer — Windows,
+/// Linux and macOS have no signal to follow, so nothing is being followed.
+/// [on] and [off] pin it regardless of what the OS is doing.
+enum BatterySaverMode {
+  system,
+  on,
+  off;
+
+  static BatterySaverMode? parse(Object? value) {
+    if (value is BatterySaverMode) return value;
+    if (value is! String) return null;
+    final normalized = value.trim().toLowerCase();
+    for (final m in BatterySaverMode.values) {
+      if (m.name == normalized) return m;
     }
     return null;
   }
@@ -63,6 +89,23 @@ ExtractionSource? _legacyExtractionSource(SharedPreferences prefs) {
   return legacy ? ExtractionSource.local : ExtractionSource.datacat;
 }
 
+/// Reads the Battery Saver choice, migrating the install that only ever stored
+/// a bool.
+///
+/// The old setting defaulted to **on**, so a stored `true` is indistinguishable
+/// from never having touched it — those installs take the new default,
+/// [BatterySaverMode.system]. A stored `false` is a choice the old UI could
+/// only reach deliberately, so it is kept as [BatterySaverMode.off]; under
+/// `system` it would have flipped itself on the next time the phone started
+/// saving power, which is not what that reader asked for.
+BatterySaverMode _batterySaverMode(SharedPreferences prefs) {
+  final stored = BatterySaverMode.parse(prefs.get('batterySaverMode'));
+  if (stored != null) return stored;
+  return _coerceBool(prefs.get('batterySaver')) == false
+      ? BatterySaverMode.off
+      : BatterySaverMode.system;
+}
+
 final appSettingsProvider =
     AsyncNotifierProvider<AppSettingsNotifier, AppSettings>(
       AppSettingsNotifier.new,
@@ -76,7 +119,16 @@ abstract class AppSettings with _$AppSettings {
     @Default(false) bool hideGenerationTime,
     @Default(false) bool hideTokenCount,
     @Default(false) bool groupDialogs,
-    @Default(true) bool batterySaver,
+    /// The resolved answer the whole app reads: whether the reduced UI is on
+    /// right now. Derived from [batterySaverMode] — under [BatterySaverMode
+    /// .system] it tracks the OS, so it changes without anyone touching a
+    /// setting. Persisted as the last known value so a cold start paints the
+    /// right thing before the platform has answered.
+    @Default(false) bool batterySaver,
+
+    /// What the reader actually chose. [batterySaver] is what that choice
+    /// currently works out to.
+    @Default(BatterySaverMode.system) BatterySaverMode batterySaverMode,
     @Default(false) bool hideTooltips,
     @Default(false) bool disableSwipeRegeneration,
     @Default(false) bool allowMessageScripts,
@@ -147,6 +199,7 @@ abstract final class AppSettingsPreferences {
     'hideTokenCount',
     'dialogGrouping',
     'batterySaver',
+    'batterySaverMode',
     'hideTooltips',
     'disableSwipeRegeneration',
     'allowMessageScripts',
@@ -183,6 +236,7 @@ abstract final class AppSettingsPreferences {
           _coerceBool(prefs.get('hideTokenCount')) ?? defaults.hideTokenCount,
       groupDialogs:
           _coerceBool(prefs.get('dialogGrouping')) ?? defaults.groupDialogs,
+      batterySaverMode: _batterySaverMode(prefs),
       batterySaver:
           _coerceBool(prefs.get('batterySaver')) ?? defaults.batterySaver,
       hideTooltips:
@@ -251,6 +305,7 @@ abstract final class AppSettingsPreferences {
       'hideTokenCount': normalized.hideTokenCount,
       'dialogGrouping': normalized.groupDialogs,
       'batterySaver': normalized.batterySaver,
+      'batterySaverMode': normalized.batterySaverMode.name,
       'hideTooltips': normalized.hideTooltips,
       'disableSwipeRegeneration': normalized.disableSwipeRegeneration,
       'allowMessageScripts': normalized.allowMessageScripts,
@@ -313,6 +368,9 @@ abstract final class AppSettingsPreferences {
           // local value rather than silently resetting it to the default.
           final parsed = ExtractionSource.parse(incoming);
           if (parsed != null) merged[key] = parsed.name;
+        } else if (key == 'batterySaverMode') {
+          final parsed = BatterySaverMode.parse(incoming);
+          if (parsed != null) merged[key] = parsed.name;
         } else {
           merged[key] =
               key == 'language' && !supportedAppLanguages.contains(incoming)
@@ -353,6 +411,9 @@ abstract final class AppSettingsPreferences {
     hideTokenCount: values['hideTokenCount'] as bool,
     groupDialogs: values['dialogGrouping'] as bool,
     batterySaver: values['batterySaver'] as bool,
+    batterySaverMode:
+        BatterySaverMode.parse(values['batterySaverMode']) ??
+        const AppSettings().batterySaverMode,
     hideTooltips: values['hideTooltips'] as bool,
     disableSwipeRegeneration: values['disableSwipeRegeneration'] as bool,
     allowMessageScripts: values['allowMessageScripts'] as bool,
@@ -382,15 +443,63 @@ abstract final class AppSettingsPreferences {
 }
 
 class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
+  StreamSubscription<bool>? _powerSaveSub;
+
   @override
   Future<AppSettings> build() async {
     final prefs = await ref.read(sharedPreferencesProvider.future);
-    final settings = AppSettingsPreferences.read(prefs);
+    var settings = AppSettingsPreferences.read(prefs);
     // Cache the toggles so the central [Haptics] gate can decide synchronously
     // in tap handlers and on message completion.
     Haptics.configure(enabled: settings.hapticFeedback);
     Haptics.configureMessageVibration(enabled: settings.messageVibration);
+
+    // Under `system` the persisted flag is only the last known answer; ask the
+    // OS for the current one before anything paints from it.
+    if (settings.batterySaverMode == BatterySaverMode.system) {
+      settings = settings.copyWith(
+        batterySaver: await SystemSettings.isPowerSaveMode(),
+      );
+    }
+    _listenForPowerSaveChanges();
     return settings;
+  }
+
+  /// Follows the OS while `system` is selected. The subscription is kept open
+  /// under the other two modes as well — they are a user's answer, not a
+  /// platform one, and switching back to `system` must not need a restart to
+  /// start hearing again.
+  void _listenForPowerSaveChanges() {
+    _powerSaveSub?.cancel();
+    _powerSaveSub = SystemSettings.powerSaveModeChanges().listen(
+      _onPowerSaveChanged,
+    );
+    ref.onDispose(() {
+      _powerSaveSub?.cancel();
+      _powerSaveSub = null;
+    });
+  }
+
+  Future<void> _onPowerSaveChanged(bool powerSaving) async {
+    final current = state.value;
+    if (current == null) return;
+    if (current.batterySaverMode != BatterySaverMode.system) return;
+    if (current.batterySaver == powerSaving) return;
+    await save(current.copyWith(batterySaver: powerSaving));
+  }
+
+  /// Sets what drives Battery Saver UI and resolves it in the same write, so
+  /// the screen never shows a mode and an effect that disagree.
+  Future<void> setBatterySaverMode(BatterySaverMode mode) async {
+    final current = state.value ?? const AppSettings();
+    final resolved = switch (mode) {
+      BatterySaverMode.on => true,
+      BatterySaverMode.off => false,
+      BatterySaverMode.system => await SystemSettings.isPowerSaveMode(),
+    };
+    await save(
+      current.copyWith(batterySaverMode: mode, batterySaver: resolved),
+    );
   }
 
   Future<void> save(AppSettings settings) async {

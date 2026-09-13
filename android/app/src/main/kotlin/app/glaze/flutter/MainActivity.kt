@@ -2,7 +2,10 @@ package app.glaze.flutter
 
 import android.Manifest
 import android.app.WallpaperManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -10,16 +13,19 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 
 class MainActivity : FlutterActivity() {
     private var pendingPermissionResult: MethodChannel.Result? = null
     private val wallpaperPermissionCode = 9911
+    private var powerSaveReceiver: BroadcastReceiver? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -33,9 +39,15 @@ class MainActivity : FlutterActivity() {
                     openNotificationSettings()
                     result.success(null)
                 }
+                "isPowerSaveMode" -> result.success(isPowerSaveMode())
                 else -> result.notImplemented()
             }
         }
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "app.glaze.flutter/power_save_events"
+        ).setStreamHandler(powerSaveStreamHandler())
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -47,6 +59,44 @@ class MainActivity : FlutterActivity() {
                 "requestPermission" -> handleRequestPermission(result)
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun powerManager(): PowerManager? =
+        getSystemService(Context.POWER_SERVICE) as? PowerManager
+
+    private fun isPowerSaveMode(): Boolean = powerManager()?.isPowerSaveMode == true
+
+    /// Pushes the power-save flag on every change. Polling cannot see the
+    /// moment the phone flips, which is the only thing "follow the system" is
+    /// about; ACTION_POWER_SAVE_MODE_CHANGED is the broadcast that can.
+    private fun powerSaveStreamHandler() = object : EventChannel.StreamHandler {
+        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+            if (events == null) return
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    events.success(isPowerSaveMode())
+                }
+            }
+            powerSaveReceiver = receiver
+            registerReceiver(
+                receiver,
+                IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+            )
+            // Seed the stream so a listener that attached after a change still
+            // starts from the truth rather than from its own default.
+            events.success(isPowerSaveMode())
+        }
+
+        override fun onCancel(arguments: Any?) {
+            powerSaveReceiver?.let {
+                try {
+                    unregisterReceiver(it)
+                } catch (e: IllegalArgumentException) {
+                    // Already gone with the activity.
+                }
+            }
+            powerSaveReceiver = null
         }
     }
 

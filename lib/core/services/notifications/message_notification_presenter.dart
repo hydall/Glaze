@@ -102,6 +102,12 @@ class MessageNotificationPresenter {
 
   static bool get _isDarwin => !kIsWeb && (Platform.isIOS || Platform.isMacOS);
 
+  /// Whether this platform puts a runtime permission dialog in front of the
+  /// user before it will post anything. Windows and Linux do not — there is
+  /// nothing to ask for there, so nothing to put in onboarding either.
+  static bool get promptsForPermission =>
+      !kIsWeb && (Platform.isAndroid || _isDarwin);
+
   /// Initializes the plugin and, on Android, the message channel. Safe to call
   /// repeatedly: it no-ops once initialization has succeeded and retries when
   /// it has not.
@@ -123,9 +129,9 @@ class MessageNotificationPresenter {
       await _tryInitialize(onTap: onTap, androidIcon: null);
     }
 
-    // The channel and the permission prompt are independent of the plugin's
-    // own initialization, so they are configured even when that failed — a
-    // channel the user has already tuned must not be lost to an icon problem.
+    // The channel is independent of the plugin's own initialization, so it is
+    // created even when that failed — a channel the user has already tuned
+    // must not be lost to an icon problem.
     await _configurePlatform();
     return _initialized;
   }
@@ -140,15 +146,20 @@ class MessageNotificationPresenter {
           android: androidIcon == null
               ? null
               : AndroidInitializationSettings(androidIcon),
+          // Every request flag is off on purpose. Darwin shows the system
+          // permission dialog from inside `initialize()`, which runs at
+          // startup — so asking here is the same "prompt on app open" that
+          // [requestPermission] exists to replace. Onboarding asks, with a
+          // reason on screen and a Skip.
           iOS: const DarwinInitializationSettings(
-            requestAlertPermission: true,
-            requestBadgePermission: true,
-            requestSoundPermission: true,
+            requestAlertPermission: false,
+            requestBadgePermission: false,
+            requestSoundPermission: false,
           ),
           macOS: const DarwinInitializationSettings(
-            requestAlertPermission: true,
-            requestBadgePermission: true,
-            requestSoundPermission: true,
+            requestAlertPermission: false,
+            requestBadgePermission: false,
+            requestSoundPermission: false,
           ),
           linux: const LinuxInitializationSettings(defaultActionName: 'Open'),
           windows: const WindowsInitializationSettings(
@@ -188,21 +199,10 @@ class MessageNotificationPresenter {
             enableVibration: true,
           ),
         );
-        await android.requestNotificationsPermission();
         _platformConfigured = true;
-      } else if (!kIsWeb && Platform.isIOS) {
-        await _plugin
-            .resolvePlatformSpecificImplementation<
-              IOSFlutterLocalNotificationsPlugin
-            >()
-            ?.requestPermissions(alert: true, badge: true, sound: true);
-        _platformConfigured = true;
-      } else if (!kIsWeb && Platform.isMacOS) {
-        await _plugin
-            .resolvePlatformSpecificImplementation<
-              MacOSFlutterLocalNotificationsPlugin
-            >()
-            ?.requestPermissions(alert: true, badge: true, sound: true);
+      } else if (!kIsWeb && (Platform.isIOS || Platform.isMacOS)) {
+        // Nothing to configure: the channel is an Android concept and the
+        // permission is asked for by [requestPermission], not here.
         _platformConfigured = true;
       } else {
         // Linux and Windows have nothing to configure up front.
@@ -210,6 +210,51 @@ class MessageNotificationPresenter {
       }
     } catch (e) {
       debugPrint('NOTIF: platform configuration failed: $e');
+    }
+  }
+
+  /// Asks the OS for permission to post notifications, showing its dialog.
+  ///
+  /// Deliberately not called from [ensureInitialized]: that runs at startup, so
+  /// asking there put the system dialog in front of a reader who had not been
+  /// told what it was for. Onboarding calls this instead, from a slide that
+  /// explains that notifications are what let a generation finish in the
+  /// background — and that offers Skip.
+  ///
+  /// Returns whether permission is granted afterwards. A platform that cannot
+  /// answer (Linux, Windows, an older Android that grants it at install) is
+  /// reported as granted, because nothing is standing in the way there.
+  Future<bool> requestPermission() async {
+    if (!isSupported) return false;
+    try {
+      if (Platform.isAndroid) {
+        final android = _plugin
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >();
+        if (android == null) return false;
+        return await android.requestNotificationsPermission() ?? true;
+      }
+      if (Platform.isIOS) {
+        return await _plugin
+                .resolvePlatformSpecificImplementation<
+                  IOSFlutterLocalNotificationsPlugin
+                >()
+                ?.requestPermissions(alert: true, badge: true, sound: true) ??
+            false;
+      }
+      if (Platform.isMacOS) {
+        return await _plugin
+                .resolvePlatformSpecificImplementation<
+                  MacOSFlutterLocalNotificationsPlugin
+                >()
+                ?.requestPermissions(alert: true, badge: true, sound: true) ??
+            false;
+      }
+      return true;
+    } catch (e) {
+      debugPrint('NOTIF: permission request failed: $e');
+      return false;
     }
   }
 

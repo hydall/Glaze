@@ -42,6 +42,42 @@ void showThemeModePicker(BuildContext context, WidgetRef ref) {
   );
 }
 
+String batterySaverModeLabel(BatterySaverMode mode) => switch (mode) {
+  BatterySaverMode.system => 'battery_saver_system'.tr(),
+  BatterySaverMode.on => 'battery_saver_on'.tr(),
+  BatterySaverMode.off => 'battery_saver_off'.tr(),
+};
+
+void showBatterySaverModePicker(
+  BuildContext context,
+  WidgetRef ref,
+  AppSettings s,
+) {
+  GlazeBottomSheet.show<void>(
+    context,
+    title: 'menu_battery_saver_ui'.tr(),
+    items: BatterySaverMode.values
+        .map(
+          (mode) => BottomSheetItem(
+            label: batterySaverModeLabel(mode),
+            icon: mode == s.batterySaverMode
+                ? Icons.radio_button_checked
+                : Icons.radio_button_off,
+            iconColor: mode == s.batterySaverMode
+                ? context.cs.primary
+                : context.cs.onSurfaceVariant,
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              ref
+                  .read(appSettingsProvider.notifier)
+                  .setBatterySaverMode(mode);
+            },
+          ),
+        )
+        .toList(),
+  );
+}
+
 void showLanguagePicker(BuildContext context, WidgetRef ref, AppSettings s) {
   BottomSheetItem languageItem(String code, String label) => BottomSheetItem(
     label: label,
