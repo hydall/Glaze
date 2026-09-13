@@ -711,8 +711,32 @@ separate change — so the numbering is tested and the layout is not.
 ### G33 — `fix/st-lorebook-settings` (1 card)
 - **#135** Per-book lorebook settings do not survive an ST import or a Glaze→ST→Glaze round trip (`settings: null`, entry `caseSensitive`/`matchWholeWords` pinned false, exporter never serializes `Lorebook.settings`). Cross-check the real semantics against the SillyTavern repo before writing the mapping
 
-### G34 — `fix/android-file-picker` (1 card)
-- **#32** On Android, newly written files are missing from the system file picker when the Glaze directory is reached through the **Downloads shortcut**; it has to be opened from the device root
+### G34 — `fix/android-file-picker` — **PR [#430](https://github.com/hydall/Glaze/pull/430)**
+- **#32** a fresh export is missing from the picker under the Downloads
+  shortcut — **cause found, fix is Android-runtime and untestable here.** The
+  picker reaches the Glaze folder two ways and only one walks the filesystem:
+  from the device root through `ExternalStorageProvider`, which lists real
+  directories and sees everything, and through the Downloads shortcut through
+  `DownloadsProvider`, which lists `MediaStore` rows. `FileExportService` writes
+  every Android export with plain file IO (`writeAsString` / `writeAsBytes` /
+  `copy`) into `/storage/emulated/0/Download/Glaze/<subfolder>`, which puts the
+  bytes on disk and leaves the media database none the wiser — real, reachable
+  from the root, invisible under the shortcut, exactly as reported. A new
+  `app.glaze.flutter/media_store` channel over `MediaScannerConnection.scanFile`
+  registers the file, and all three export paths call it after the write lands.
+  Fire-and-forget (the Kotlin side answers when the scan is handed off, never
+  leaving an export awaiting a callback that may not come) and it can never fail
+  the export — the file is already written by then, and every non-Android
+  platform answers `notImplemented`. Safe where Android 11+ already indexed the
+  file through MediaProvider's FUSE layer: a scan of an indexed file is a no-op.
+
+3 new tests over the channel. `flutter build apk --debug` run to compile the
+Kotlin — CI runs `analyze` and `test` only, so nothing in the pipeline would
+catch a mistake in `MainActivity.kt`. Full `flutter test` green. **Not
+verified:** whether the shortcut then lists the file is an Android-runtime
+question no test here can answer. If it survives this, the next step is writing
+through `MediaStore.Downloads` instead of raw file IO — a bigger change, worth
+making only once we know a scan is not enough.
 
 ### G35 — `fix/message-delete-race` — **PR [#424](https://github.com/hydall/Glaze/pull/424)**
 - **#78** deleted messages come back — **the reported cause was already fixed; its
@@ -838,7 +862,7 @@ doing them apart.
 | 6 | G29 presets | `fix/presets` | 47, 79, 25 | PR open | [#427](https://github.com/hydall/Glaze/pull/427) | In Progress |
 | 6 | G30 editor-ui | `fix/editor-ui` | 88, 57, 59, 143 | PR open | [#428](https://github.com/hydall/Glaze/pull/428) | In Progress |
 | 6 | G16 notification-icon | `fix/notification-icon` | 149, 9 | PR open | [#429](https://github.com/hydall/Glaze/pull/429) | In Progress |
-| 6 | G34 android-file-picker | `fix/android-file-picker` | 32 | not started | — | — |
+| 6 | G34 android-file-picker | `fix/android-file-picker` | 32 | PR open | [#430](https://github.com/hydall/Glaze/pull/430) | In Progress |
 | 6 | G38 shino-default | `fix/shino-default` | 28 | not started | — | — |
 | 7 | G6 cloud-sync | `fix/cloud-sync` | 107, 115, 124, 134 | not started | — | — |
 | 7 | G7 backup-onboarding-polish | `fix/backup-onboarding-polish` | 24, 111 | not started | — | — |
