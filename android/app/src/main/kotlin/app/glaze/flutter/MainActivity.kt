@@ -11,6 +11,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -48,6 +49,16 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             "app.glaze.flutter/power_save_events"
         ).setStreamHandler(powerSaveStreamHandler())
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "app.glaze.flutter/media_store"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "scanFile" -> scanFile(call.argument<String>("path"), result)
+                else -> result.notImplemented()
+            }
+        }
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -98,6 +109,39 @@ class MainActivity : FlutterActivity() {
             }
             powerSaveReceiver = null
         }
+    }
+
+    /// Puts a file Glaze wrote into public Downloads in front of the media
+    /// scanner, so it lands in MediaStore.
+    ///
+    /// The system file picker reaches the Glaze folder two ways: from the
+    /// device root, through `ExternalStorageProvider`, which walks the real
+    /// directory and sees every file; and through the "Downloads" shortcut,
+    /// through `DownloadsProvider`, which lists MediaStore rows. A file created
+    /// with plain file IO may have no such row, which is why a fresh backup was
+    /// invisible under the shortcut and had to be reached from the root.
+    ///
+    /// Answers as soon as the scan is handed off, not when it finishes: the
+    /// export is already written and complete, and the caller must never be
+    /// left awaiting a scanner callback that may not come. A path the scanner
+    /// will not take is not an error the export should hear about either, so
+    /// every outcome is a success.
+    private fun scanFile(path: String?, result: MethodChannel.Result) {
+        if (!path.isNullOrEmpty()) {
+            try {
+                // Trailing no-op listener rather than a null one: the scan
+                // is fire-and-forget, and a lambda leaves no doubt about which
+                // overload this is.
+                MediaScannerConnection.scanFile(
+                    applicationContext,
+                    arrayOf(path),
+                    null
+                ) { _, _ -> }
+            } catch (e: Exception) {
+                // No MediaProvider, or a path it refuses. The file is written.
+            }
+        }
+        result.success(null)
     }
 
     private fun openNotificationSettings() {

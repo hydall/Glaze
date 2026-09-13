@@ -7,6 +7,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'media_store_scanner.dart';
+
 class FileExportService {
   static const _shareOrigin = Rect.fromLTWH(0, 0, 1, 1);
 
@@ -102,6 +104,11 @@ class FileExportService {
   /// folder visible to the user. Apps targeting Android 10+ can write to a
   /// subdirectory of public Downloads without permission, so we use the
   /// well-known path directly.
+  ///
+  /// A file written here is on disk but not necessarily in Android's media
+  /// database, and the system file picker's "Downloads" shortcut lists the
+  /// database rather than the directory — hence the
+  /// [registerWithMediaStore] call after every write below.
   static Future<Directory?> _androidGlazeDir(String subfolder) async {
     try {
       final dir = Directory('/storage/emulated/0/Download/Glaze/$subfolder');
@@ -121,6 +128,7 @@ class FileExportService {
       try {
         final file = File('${dir.path}/$filename');
         await file.writeAsString(data);
+        await registerWithMediaStore(file.path);
         return file.path;
       } catch (_) {}
     }
@@ -134,6 +142,7 @@ class FileExportService {
       try {
         final file = File('${dir.path}/$filename');
         await file.writeAsBytes(bytes);
+        await registerWithMediaStore(file.path);
         return file.path;
       } catch (_) {}
     }
@@ -207,6 +216,7 @@ class FileExportService {
       try {
         final destPath = '${dir.path}/$filename';
         await File(sourcePath).copy(destPath);
+        await registerWithMediaStore(destPath);
         return destPath;
       } catch (_) {}
     }
