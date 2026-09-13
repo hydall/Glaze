@@ -611,11 +611,58 @@ need a device — worth a check before promotion.
 both halves. Full `flutter test` green. **Not verified:** the folder the list
 opens on and the sync refresh both want a device (or a second account) to watch.
 
-### G30 — `fix/editor-ui` (4 cards)
-- **#88** The stash button Danvi put in the prompt-block row moves **into the open prompt-block editor**, next to Delete; both buttons go to the header on the right, styled like the chat-input buttons (icon only, no text)
-- **#57** First messages render badly in the character sheet's Prompt Blocks: make them **one block with sub-blocks**, labelled `First message #1`, `First message #2`, …
-- **#59** A long character name in the character-sheet header rides upward — make it scroll top-to-bottom and loop
-- **#143** Remove the depth-prompt block from Edit Character → Additional settings entirely (it is not needed, which also disposes of the untranslated placeholder)
+### G30 — `fix/editor-ui` — **PR [#428](https://github.com/hydall/Glaze/pull/428)**
+- **#88** the stash button in the prompt-block row — **done.** Stash was a third
+  control competing with the drag handle, the pencil and the switch on a 44px
+  line; Delete was a full-width red bar at the foot of the open editor, and the
+  two buttons that act on one block lived on two different screens. Both are now
+  icon-only buttons in the header of whichever chrome hosts the editor — the
+  standalone Edit Preset screen (`GlazeScaffold.actions`) and the Presets sheet
+  (`SheetView.actions`) each draw the same payload the editor body hands up,
+  `PresetBlockEditorActions`. The one button points the other way for a block
+  opened out of the stash (restore, not stash), and both return to the block list
+  once they have acted so the editor never sits open on a block the list below it
+  no longer holds. Author's Note and Summary are static — not stashable, not
+  deletable — so their editors carry no header buttons. `PresetBlockRow.onStash`
+  is deleted rather than left unused; Studio presets have no stash and are
+  untouched.
+- **#57** first messages named and laid out badly — **done.** The sheet gave
+  `firstMes` a card labelled "First Message" and then one loose card per alternate
+  greeting, each labelled with the *placeholder* string, ellipsis and all
+  ("Greeting... 2"). They are one card now, `First Messages`, with a count and a
+  numbered sub-block per line. The numbering is the character editor's — slot 1
+  is `firstMes`, the alternates follow, and an empty slot is dropped without
+  renumbering the ones after it — so the message the sheet shows as "#3" is the
+  one the editor opens as "#3". Sub-blocks collapse individually (a dozen
+  greetings is a wall of text otherwise) except when there is only one, which
+  stays open. **Drive-by on the same path:** `generic_editor_greeting_title` read
+  `Greeting #{arg0}` in both locales and easy_localization's `args:` only ever
+  substitutes `{}` (`_replaceArgRegex`), so the fullscreen greeting editor showed
+  the placeholder literally. Fixed to `{}`. ~26 other keys carry `{argN}`; not
+  audited — only this one is on the path #57 is about.
+- **#59** long name rides upward in the character-sheet header — **done.** The
+  hero caption is pinned to the *bottom* of a fixed-height image, so every line a
+  long name wraps onto pushed it upward, past the top of the hero and under the
+  back button. Capped at two lines now, and a name that needs more scrolls
+  top-to-bottom, holds, and starts over. Reduce-motion turns the scroll off and
+  leaves it clipped. **Battery Saver deliberately does not gate it:** it defaults
+  to `true`, so honouring it here would leave the overflowing name unreadable for
+  almost everyone, and the ticker only runs while a sheet whose name actually
+  overflows is on screen.
+- **#143** depth prompt in Edit Character → Advanced settings — **removed.** The
+  three controls (prompt, role, depth) and the untranslated `Injected at a
+  specific depth in the prompt` placeholder are gone. The values stay on the
+  `Character` — they are part of the SillyTavern V2 card — and are still seeded
+  into the editor's item map and written back on save, so an imported card keeps
+  its depth prompt and survives a round trip through this editor. Only the
+  controls are gone.
+
+13 new tests (7 on the numbering and the scroll phase, 6 widget tests mounting
+`PresetEditorBody`). Full `flutter test` green. **Not verified:** the marquee's
+speed and hold, and how the two header buttons sit next to the sheet's title,
+both want eyes on a phone. The first-messages card has no widget test — the
+accordion widgets are private to a 1900-line screen and splitting that file is a
+separate change — so the numbering is tested and the layout is not.
 
 ### G31 — `fix/jar-background` (1 card)
 - **#58** JAR extraction dies when the app is backgrounded. Backgrounding must not kill it — the same foreground-service treatment generation already gets
@@ -751,7 +798,7 @@ doing them apart.
 | 6 | G27 protocols-pipeline | `fix/protocols-pipeline` | 71, 133 | PR open | [#425](https://github.com/hydall/Glaze/pull/425) | In Progress |
 | 6 | G28 permissions-and-battery | `fix/permissions-and-battery` | 29, 30, 53, 52 | PR open | [#426](https://github.com/hydall/Glaze/pull/426) | In Progress |
 | 6 | G29 presets | `fix/presets` | 47, 79, 25 | PR open | [#427](https://github.com/hydall/Glaze/pull/427) | In Progress |
-| 6 | G30 editor-ui | `fix/editor-ui` | 88, 57, 59, 143 | not started | — | — |
+| 6 | G30 editor-ui | `fix/editor-ui` | 88, 57, 59, 143 | PR open | [#428](https://github.com/hydall/Glaze/pull/428) | In Progress |
 | 6 | G16 notification-icon | `fix/notification-icon` | 149, 9 | not started | — | — |
 | 6 | G34 android-file-picker | `fix/android-file-picker` | 32 | not started | — | — |
 | 6 | G38 shino-default | `fix/shino-default` | 28 | not started | — | — |
