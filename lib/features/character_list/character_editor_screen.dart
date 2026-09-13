@@ -284,7 +284,6 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
         'system_prompt' => 'label_char_prompt'.tr().replaceAll(RegExp(r'Character|персонажа', caseSensitive: false), 'role_system'.tr()),
         'post_history_instructions' => "${'block_chat_history'.tr()} ${'guidance_placeholder'.tr().replaceAll('...', '')}",
         'creator_notes' => '${'onboarding_placeholder_desc'.tr().split(' ')[0]} ${'label_description'.tr()}',
-        'depth_prompt' => '${'label_depth'.tr()} ${'placeholder_prompt_text'.tr().replaceAll('...', '')}',
         _ => field.replaceAll('_', ' ').replaceFirstMapped(RegExp(r'[a-z]'), (m) => m.group(0)!.toUpperCase()),
       };
 
@@ -331,25 +330,14 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
         ],
       ),
       GenericEditorSection(
+        // No depth-prompt fields here: a character-scoped prompt at a fixed
+        // depth is what the preset's own blocks are for, and the three controls
+        // only ever sat in the way. The character still carries the values —
+        // they are part of the SillyTavern V2 card and are seeded, saved and
+        // exported untouched — so an imported card keeps its depth prompt and
+        // survives a round trip through this editor.
         title: 'section_advanced_settings'.tr(),
         fields: [
-          GenericEditorField(key: 'depth_prompt', label: _getFieldLabel('depth_prompt'), type: 'textarea', rows: 4, placeholder: 'Injected at a specific depth in the prompt'),
-          GenericEditorField(
-            key: 'depth_prompt_role',
-            label: "${'label_depth'.tr()} ${'label_role'.tr()}",
-            type: 'select',
-            options: [
-              {'label': 'role_system'.tr(), 'value': 'system'},
-              {'label': 'role_user'.tr(), 'value': 'user'},
-              {'label': 'role_assistant'.tr(), 'value': 'assistant'},
-            ],
-          ),
-          GenericEditorField(
-            key: 'depth_prompt_depth',
-            label: 'label_depth'.tr(),
-            type: 'select',
-            options: List.generate(20, (i) => {'label': '${i + 1}', 'value': i + 1}),
-          ),
           GenericEditorField(
             key: 'world',
             label: 'menu_lorebooks'.tr(),

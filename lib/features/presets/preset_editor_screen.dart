@@ -17,6 +17,7 @@ import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_toast.dart';
+import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/generic_editor.dart';
 import '../../shared/widgets/help_tip.dart';
 import 'preset_cover_service.dart';
@@ -34,6 +35,77 @@ import '../chat/widgets/authors_note_sheet.dart';
 import '../chat/widgets/memory_sheet.dart';
 import '../regex/regex_sheet.dart';
 
+/// The two buttons that act on the prompt block whose editor is open, handed
+/// to whichever chrome is hosting [PresetEditorBody] so it can draw them in its
+/// header. Stash used to sit in the block's row on the dashboard — one more
+/// control in a row that already carries a drag handle, an edit pencil and a
+/// switch — and Delete was a full-width red bar pinned under the editor. Both
+/// act on the one block being edited, so both belong to that editor's header.
+class PresetBlockEditorActions {
+  /// Puts the block away (or takes it back out, when it was opened from the
+  /// stash) and returns to the block list, the way [onDelete] does.
+  final VoidCallback onStash;
+  final VoidCallback onDelete;
+
+  /// Whether the open block is currently stashed — decides which way the
+  /// button points.
+  final bool stashed;
+
+  const PresetBlockEditorActions({
+    required this.onStash,
+    required this.onDelete,
+    required this.stashed,
+  });
+
+  IconData get stashIcon =>
+      stashed ? Icons.unarchive_outlined : Icons.archive_outlined;
+
+  String get stashTooltip =>
+      stashed ? 'action_unstash'.tr() : 'action_stash'.tr();
+}
+
+/// [PresetBlockEditorActions] as [GlazeScaffold] takes them.
+List<Widget> presetBlockEditorHeaderActions(
+  BuildContext context,
+  PresetBlockEditorActions actions,
+) {
+  return [
+    IconButton(
+      icon: Icon(actions.stashIcon, size: 20),
+      tooltip: actions.stashTooltip,
+      color: context.cs.onSurfaceVariant,
+      onPressed: actions.onStash,
+    ),
+    IconButton(
+      icon: const Icon(Icons.delete_outline, size: 20),
+      tooltip: 'action_delete'.tr(),
+      color: context.cs.error,
+      onPressed: actions.onDelete,
+    ),
+  ];
+}
+
+/// The same two buttons as [SheetView] takes them.
+List<SheetViewAction> presetBlockEditorSheetActions(
+  BuildContext context,
+  PresetBlockEditorActions actions,
+) {
+  return [
+    SheetViewAction(
+      icon: Icon(actions.stashIcon, size: 20),
+      tooltip: actions.stashTooltip,
+      color: context.cs.onSurfaceVariant,
+      onPressed: actions.onStash,
+    ),
+    SheetViewAction(
+      icon: const Icon(Icons.delete_outline, size: 20),
+      tooltip: 'action_delete'.tr(),
+      color: context.cs.error,
+      onPressed: actions.onDelete,
+    ),
+  ];
+}
+
 /// Standalone screen wrapper around [PresetEditorBody].
 class PresetEditorScreen extends StatefulWidget {
   final Preset? preset;
@@ -46,6 +118,9 @@ class PresetEditorScreen extends StatefulWidget {
 
 class _PresetEditorScreenState extends State<PresetEditorScreen> {
   final _editorKey = GlobalKey<PresetEditorBodyState>();
+
+  /// Header buttons for the block editor, while one is open.
+  PresetBlockEditorActions? _blockActions;
 
   void _onBack() {
     final handled = _editorKey.currentState?.handleBack() ?? false;
@@ -65,6 +140,9 @@ class _PresetEditorScreenState extends State<PresetEditorScreen> {
       child: GlazeScaffold(
         title: widget.preset != null ? 'Edit Preset' : 'New Preset',
         onBack: _onBack,
+        actions: _blockActions == null
+            ? null
+            : presetBlockEditorHeaderActions(context, _blockActions!),
         body: MediaQuery.removePadding(
           context: context,
           removeTop: true,
@@ -73,6 +151,8 @@ class _PresetEditorScreenState extends State<PresetEditorScreen> {
             preset: widget.preset,
             charId: widget.charId,
             onDeleted: () => Navigator.of(context).pop(),
+            onBlockEditorChanged: (actions) =>
+                setState(() => _blockActions = actions),
           ),
         ),
       ),
@@ -90,14 +170,18 @@ class PresetEditorBody extends ConsumerStatefulWidget {
   /// the editor is opened outside a chat (the note editor then shows a hint).
   final String? charId;
   final VoidCallback? onDeleted;
-  final ValueChanged<bool>? onEditingBlockChanged;
+
+  /// Fires with the header buttons for the block whose editor just opened, and
+  /// with null when it closes. A host that draws its own chrome renders them;
+  /// one that ignores this simply shows no block actions.
+  final ValueChanged<PresetBlockEditorActions?>? onBlockEditorChanged;
 
   const PresetEditorBody({
     super.key,
     this.preset,
     this.charId,
     this.onDeleted,
-    this.onEditingBlockChanged,
+    this.onBlockEditorChanged,
   });
 
   @override
@@ -209,13 +293,64 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
 
   bool handleBack() {
     if (_expandedBlockIndex != null) {
-      _saveScrollOffset();
-      setState(() => _expandedBlockIndex = null);
-      widget.onEditingBlockChanged?.call(false);
-      _restoreScrollAfterFrame();
+      _closeBlockEditor();
       return true;
     }
     return false;
+  }
+
+  void _openBlockEditor(int index) {
+    _saveScrollOffset();
+    setState(() => _expandedBlockIndex = index);
+    _publishBlockEditorActions();
+  }
+
+  void _closeBlockEditor() {
+    _saveScrollOffset();
+    setState(() => _expandedBlockIndex = null);
+    _publishBlockEditorActions();
+    _restoreScrollAfterFrame();
+  }
+
+  /// Hand the host the header buttons for the block being edited, or null once
+  /// the editor is closed. Author's Note and Summary are static blocks — they
+  /// cannot be stashed or deleted — so their editors carry no actions.
+  void _publishBlockEditorActions() {
+    final notify = widget.onBlockEditorChanged;
+    if (notify == null) return;
+    final index = _expandedBlockIndex;
+    if (index == null || _blocks[index].isStatic) {
+      notify(null);
+      return;
+    }
+    final block = _blocks[index];
+    notify(
+      PresetBlockEditorActions(
+        stashed: block.isStashed,
+        onStash: () {
+          _closeBlockEditor();
+          if (block.isStashed) {
+            _unstashBlock(block.id);
+          } else {
+            _stashBlock(block.id);
+          }
+        },
+        onDelete: _deleteExpandedBlock,
+      ),
+    );
+  }
+
+  void _deleteExpandedBlock() {
+    final index = _expandedBlockIndex;
+    if (index == null) return;
+    _saveScrollOffset();
+    setState(() {
+      _blocks.removeAt(index);
+      _expandedBlockIndex = null;
+    });
+    _publishBlockEditorActions();
+    _restoreScrollAfterFrame();
+    _scheduleSave();
   }
 
   void _saveScrollOffset() {
@@ -275,16 +410,6 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         block: expanded,
         onSave: (updated) {
           setState(() => _blocks[_expandedBlockIndex!] = updated);
-          _scheduleSave();
-        },
-        onDelete: () {
-          _saveScrollOffset();
-          setState(() {
-            _blocks.removeAt(_expandedBlockIndex!);
-            _expandedBlockIndex = null;
-          });
-          widget.onEditingBlockChanged?.call(false);
-          _restoreScrollAfterFrame();
           _scheduleSave();
         },
       );
@@ -399,13 +524,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           block: block,
           index: i,
           isLast: i == activeBlocks.length - 1,
-          onEdit: () {
-            _saveScrollOffset();
-            setState(() {
-              _expandedBlockIndex = sourceIndex;
-            });
-            widget.onEditingBlockChanged?.call(true);
-          },
+          onEdit: () => _openBlockEditor(sourceIndex),
           onToggle: (v) {
             setState(() {
               _blocks[sourceIndex] = _blocks[sourceIndex].copyWith(enabled: v);
@@ -419,7 +538,6 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
               syncSummaryEnabled(ref, charId: widget.charId, enabled: v);
             }
           },
-          onStash: block.isStatic ? null : () => _stashBlock(block.id),
         );
       },
     );
@@ -617,8 +735,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
                     Navigator.of(context, rootNavigator: true).pop();
                     final index = _blocks.indexWhere((b) => b.id == block.id);
                     if (index == -1) return;
-                    setState(() => _expandedBlockIndex = index);
-                    widget.onEditingBlockChanged?.call(true);
+                    _openBlockEditor(index);
                   },
                   actions: [
                     BottomSheetAction(
@@ -1044,16 +1161,16 @@ class _SettingsToggle extends StatelessWidget {
 
 // ─── _BlockEditorInline ─────────────────────────────────────────────────────────
 
+/// Editor for one prompt block. Stash and Delete are not here: they are handed
+/// to the host's header via [PresetBlockEditorActions].
 class _BlockEditorInline extends StatelessWidget {
   final PresetBlock block;
   final ValueChanged<PresetBlock> onSave;
-  final VoidCallback onDelete;
 
   const _BlockEditorInline({
     super.key,
     required this.block,
     required this.onSave,
-    required this.onDelete,
   });
 
   @override
@@ -1122,59 +1239,13 @@ class _BlockEditorInline extends StatelessWidget {
       ),
     ];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: GenericEditor(
-            item: block.toJson(),
-            config: config,
-            scrollable: true,
-            onChanged: (values) {
-              onSave(PresetBlock.fromJson(values));
-            },
-          ),
-        ),
-        // Delete button
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            MediaQuery.paddingOf(context).bottom + 16,
-          ),
-          child: Material(
-            color: const Color(0xFFFF4444).withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12),
-            child: InkWell(
-              onTap: onDelete,
-              borderRadius: BorderRadius.circular(12),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 14),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.delete_outlined,
-                      size: 20,
-                      color: Color(0xFFFF4444),
-                    ),
-                    SizedBox(width: 8),
-                    Text(
-                      'Delete Block',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFFFF4444),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
+    return GenericEditor(
+      item: block.toJson(),
+      config: config,
+      scrollable: true,
+      onChanged: (values) {
+        onSave(PresetBlock.fromJson(values));
+      },
     );
   }
 }

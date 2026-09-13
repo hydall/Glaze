@@ -1146,17 +1146,7 @@ class _HeroSection extends StatelessWidget {
                     VariationChip(name: variationLabel!, maxWidth: 180),
                     const SizedBox(height: 6),
                   ],
-                  Text(
-                    _displayName,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      shadows: [
-                        Shadow(blurRadius: 6, color: Color(0xCC000000)),
-                      ],
-                    ),
-                  ),
+                  _HeroName(name: _displayName),
                   if (character.creator != null &&
                       character.creator!.isNotEmpty)
                     _buildAuthorLabel(context),
@@ -1208,6 +1198,148 @@ class _HeroSection extends StatelessWidget {
       );
     }
     return _HeroPlaceholder(name: _displayName);
+  }
+}
+
+/// The character's name over the hero image.
+///
+/// The caption column is pinned to the *bottom* of a fixed-height image, so
+/// every extra line a long name wraps onto pushes the name upward — past the
+/// top of the hero and under the back button. This caps it at
+/// [_kHeroNameMaxLines] and, when the name needs more room than that, scrolls
+/// it from the top to the bottom and starts over instead of growing.
+class _HeroName extends StatefulWidget {
+  final String name;
+
+  const _HeroName({required this.name});
+
+  @override
+  State<_HeroName> createState() => _HeroNameState();
+}
+
+const _kHeroNameMaxLines = 2;
+const _kHeroNameStyle = TextStyle(
+  fontSize: 22,
+  fontWeight: FontWeight.w700,
+  color: Colors.white,
+  shadows: [Shadow(blurRadius: 6, color: Color(0xCC000000))],
+);
+
+/// How long the name rests at each end before the next leg of the loop.
+const _kHeroNameHold = Duration(milliseconds: 1600);
+
+/// Scroll speed, in logical pixels per second. Slow enough to read.
+const _kHeroNameSpeed = 26.0;
+
+/// Where the name sits in its loop after [elapsedMs]: held at the top for
+/// [holdMs], scrolled down over [scrollMs], held at the bottom for another
+/// [holdMs], then back to the top. Returns the distance scrolled, from 0 to
+/// [overflow].
+double heroNameScrollOffset({
+  required double elapsedMs,
+  required double overflow,
+  required double holdMs,
+  required double scrollMs,
+}) {
+  if (overflow <= 0 || scrollMs <= 0) return 0;
+  final t = elapsedMs % (holdMs * 2 + scrollMs);
+  if (t < holdMs) return 0;
+  if (t >= holdMs + scrollMs) return overflow;
+  return overflow * ((t - holdMs) / scrollMs);
+}
+
+class _HeroNameState extends State<_HeroName>
+    with SingleTickerProviderStateMixin {
+  late final _ticker = createTicker(_onTick);
+
+  /// Milliseconds since the ticker started. A plain notifier rather than
+  /// setState: the offset changes every frame and nothing else in the hero
+  /// needs to rebuild for it.
+  final ValueNotifier<double> _elapsedMs = ValueNotifier(0);
+
+  void _onTick(Duration elapsed) {
+    _elapsedMs.value = elapsed.inMicroseconds / 1000.0;
+  }
+
+  /// Whether the name is long enough to scroll is known only once it has been
+  /// laid out, so the ticker is started (and stopped again) after the frame
+  /// that measured it rather than from [initState].
+  void _setTicking(bool ticking) {
+    if (ticking == _ticker.isActive) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || ticking == _ticker.isActive) return;
+      if (ticking) {
+        _ticker.start();
+      } else {
+        _ticker.stop();
+        _elapsedMs.value = 0;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _elapsedMs.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // A reader who has asked the platform to reduce motion gets the name
+    // clipped to the same height instead — still better than a name climbing
+    // off the top of the image. Battery Saver is deliberately *not* consulted:
+    // it defaults to on, so honouring it here would leave the overflowing name
+    // unreadable for almost everyone, and this ticker only runs while a sheet
+    // whose name actually overflows is on screen.
+    final animate = !MediaQuery.disableAnimationsOf(context);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: widget.name, style: _kHeroNameStyle),
+          textDirection: Directionality.of(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        final viewport = painter.preferredLineHeight * _kHeroNameMaxLines;
+        final overflow = painter.height - viewport;
+        painter.dispose();
+
+        final text = Text(widget.name, style: _kHeroNameStyle);
+        if (overflow <= 0.5) {
+          _setTicking(false);
+          return text;
+        }
+
+        final clipped = SizedBox(height: viewport, child: text);
+        if (!animate) {
+          _setTicking(false);
+          return ClipRect(child: clipped);
+        }
+
+        _setTicking(true);
+        final scrollMs = overflow / _kHeroNameSpeed * 1000.0;
+        final holdMs = _kHeroNameHold.inMilliseconds.toDouble();
+
+        return ClipRect(
+          child: ValueListenableBuilder<double>(
+            valueListenable: _elapsedMs,
+            child: clipped,
+            builder: (context, elapsed, child) => Transform.translate(
+              offset: Offset(
+                0,
+                -heroNameScrollOffset(
+                  elapsedMs: elapsed,
+                  overflow: overflow,
+                  holdMs: holdMs,
+                  scrollMs: scrollMs,
+                ),
+              ),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -1542,8 +1674,7 @@ class _PromptsTabState extends State<_PromptsTab> {
   @override
   Widget build(BuildContext context) {
     final sections = _sections;
-    final firstMes = widget.character.firstMes ?? '';
-    final altGreetings = widget.character.alternateGreetings;
+    final firstMessages = characterFirstMessages(widget.character);
 
     return Column(
       children: [
@@ -1557,29 +1688,159 @@ class _PromptsTabState extends State<_PromptsTab> {
                 setState(() => _expanded[s.key] = !(_expanded[s.key] ?? false)),
           ),
         ),
-        if (firstMes.isNotEmpty)
-          _AccordionCard(
-            key: const ValueKey('firstMes'),
-            label: 'label_first_mes'.tr(),
-            text: firstMes,
-            expanded: _expanded['firstMes'] ?? false,
+        if (firstMessages.isNotEmpty)
+          _FirstMessagesCard(
+            key: const ValueKey('firstMessages'),
+            messages: firstMessages,
+            expanded: _expanded['firstMessages'] ?? false,
             onToggle: () => setState(
-              () => _expanded['firstMes'] = !(_expanded['firstMes'] ?? false),
+              () => _expanded['firstMessages'] =
+                  !(_expanded['firstMessages'] ?? false),
+            ),
+            isMessageExpanded: (n) => _expanded['firstMessage_$n'] ?? false,
+            onToggleMessage: (n) => setState(
+              () => _expanded['firstMessage_$n'] =
+                  !(_expanded['firstMessage_$n'] ?? false),
             ),
           ),
-        for (int i = 0; i < altGreetings.length; i++)
-          if (altGreetings[i].isNotEmpty)
-            _AccordionCard(
-              key: ValueKey('altGreeting_$i'),
-              label: '${'placeholder_greeting'.tr()} ${i + 2}',
-              text: altGreetings[i],
-              expanded: _expanded['altGreeting_$i'] ?? false,
-              onToggle: () => setState(
-                () => _expanded['altGreeting_$i'] =
-                    !(_expanded['altGreeting_$i'] ?? false),
-              ),
-            ),
         const SizedBox(height: 16),
+      ],
+    );
+  }
+}
+
+/// The opening lines a character carries, numbered the way the character
+/// editor numbers them: slot 1 is `firstMes`, the alternate greetings follow.
+/// Empty slots are dropped but do not renumber the ones after them, so the
+/// message shown as "#3" in the sheet is the one the editor opens as "#3".
+List<({int number, String text})> characterFirstMessages(Character c) {
+  final all = [c.firstMes ?? '', ...c.alternateGreetings];
+  return [
+    for (var i = 0; i < all.length; i++)
+      if (all[i].isNotEmpty) (number: i + 1, text: all[i]),
+  ];
+}
+
+/// Every opening line in one card instead of one loose card per greeting, each
+/// numbered `First message #N`. The old layout gave the character's own first
+/// message a different label from the alternates that follow it, and labelled
+/// those with the *placeholder* string, ellipsis and all ("Greeting... 2").
+class _FirstMessagesCard extends StatelessWidget {
+  final List<({int number, String text})> messages;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final bool Function(int number) isMessageExpanded;
+  final ValueChanged<int> onToggleMessage;
+
+  const _FirstMessagesCard({
+    super.key,
+    required this.messages,
+    required this.expanded,
+    required this.onToggle,
+    required this.isMessageExpanded,
+    required this.onToggleMessage,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // A character with a single opening line has nothing to choose between, so
+    // opening the card shows it rather than asking for a second tap.
+    final single = messages.length == 1;
+    return _AccordionShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccordionHeader(
+            label: 'label_first_messages'.tr(),
+            expanded: expanded,
+            onToggle: onToggle,
+            badge: messages.length > 1 ? '${messages.length}' : null,
+          ),
+          AnimatedCrossFade(
+            crossFadeState: expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 280),
+            sizeCurve: Curves.easeOutCubic,
+            firstChild: const SizedBox(width: double.infinity),
+            secondChild: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final m in messages)
+                  _FirstMessageRow(
+                    key: ValueKey(m.number),
+                    number: m.number,
+                    text: m.text,
+                    expanded: single || isMessageExpanded(m.number),
+                    onToggle: single ? null : () => onToggleMessage(m.number),
+                  ),
+                const SizedBox(height: 4),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One opening line inside [_FirstMessagesCard]. Collapsible in its own right —
+/// a character with a dozen greetings is a wall of text otherwise — unless it
+/// is the only one, in which case [onToggle] is null and it stays open.
+class _FirstMessageRow extends StatelessWidget {
+  final int number;
+  final String text;
+  final bool expanded;
+  final VoidCallback? onToggle;
+
+  const _FirstMessageRow({
+    super.key,
+    required this.number,
+    required this.text,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 1, thickness: 1, color: _kBorderLine),
+        GestureDetector(
+          onTap: onToggle,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 12, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'label_first_message_n'.tr(args: ['$number']),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                      color: _kText50,
+                    ),
+                  ),
+                ),
+                if (onToggle != null)
+                  AnimatedRotation(
+                    turns: expanded ? 0.0 : 0.5,
+                    duration: const Duration(milliseconds: 280),
+                    curve: Curves.easeOutCubic,
+                    child: const Icon(
+                      Icons.keyboard_arrow_up_rounded,
+                      color: _kText35,
+                      size: 20,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        _CollapsibleText(text: text, expanded: expanded),
       ],
     );
   }
@@ -1601,6 +1862,30 @@ class _AccordionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return _AccordionShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccordionHeader(
+            label: label,
+            expanded: expanded,
+            onToggle: onToggle,
+          ),
+          _CollapsibleText(text: text, expanded: expanded),
+        ],
+      ),
+    );
+  }
+}
+
+/// The card the prompt accordions are drawn on.
+class _AccordionShell extends StatelessWidget {
+  final Widget child;
+
+  const _AccordionShell({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       decoration: BoxDecoration(
@@ -1608,82 +1893,133 @@ class _AccordionCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _kBorderLine),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            onTap: onToggle,
-            behavior: HitTestBehavior.opaque,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      label.toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.65,
-                        color: context.cs.primary,
-                      ),
-                    ),
-                  ),
-                  AnimatedRotation(
-                    turns: expanded ? 0.0 : 0.5,
-                    duration: const Duration(milliseconds: 280),
-                    curve: Curves.easeOutCubic,
-                    child: const Icon(
-                      Icons.keyboard_arrow_up_rounded,
-                      color: _kText50,
-                      size: 24,
-                    ),
-                  ),
-                ],
+      child: child,
+    );
+  }
+}
+
+/// Title row of a prompt accordion: the label, an optional count, and the
+/// chevron that turns as the card opens.
+class _AccordionHeader extends StatelessWidget {
+  final String label;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final String? badge;
+
+  const _AccordionHeader({
+    required this.label,
+    required this.expanded,
+    required this.onToggle,
+    this.badge,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onToggle,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label.toUpperCase(),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.65,
+                  color: context.cs.primary,
+                ),
               ),
             ),
-          ),
-          AnimatedCrossFade(
-            crossFadeState: expanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 280),
-            sizeCurve: Curves.easeOutCubic,
-            firstChild: ShaderMask(
-              shaderCallback: (bounds) => const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: [0.45, 1.0],
-                colors: [Colors.white, Colors.transparent],
-              ).createShader(bounds),
-              blendMode: BlendMode.dstIn,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+            if (badge != null) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: _kAccentDim,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _kAccentBorder),
+                ),
                 child: Text(
-                  text,
-                  maxLines: 3,
-                  overflow: TextOverflow.clip,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    height: 1.55,
-                    color: _kText75,
+                  badge!,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: context.cs.primary,
                   ),
                 ),
               ),
-            ),
-            secondChild: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SelectableText(
-                text,
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  height: 1.55,
-                  color: _kText75,
-                ),
+              const SizedBox(width: 8),
+            ],
+            AnimatedRotation(
+              turns: expanded ? 0.0 : 0.5,
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
+              child: const Icon(
+                Icons.keyboard_arrow_up_rounded,
+                color: _kText50,
+                size: 24,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Body of a prompt accordion: a faded three-line taste when closed, the whole
+/// selectable text when open.
+class _CollapsibleText extends StatelessWidget {
+  final String text;
+  final bool expanded;
+
+  const _CollapsibleText({required this.text, required this.expanded});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedCrossFade(
+      crossFadeState: expanded
+          ? CrossFadeState.showSecond
+          : CrossFadeState.showFirst,
+      duration: const Duration(milliseconds: 280),
+      sizeCurve: Curves.easeOutCubic,
+      firstChild: ShaderMask(
+        shaderCallback: (bounds) => const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: [0.45, 1.0],
+          colors: [Colors.white, Colors.transparent],
+        ).createShader(bounds),
+        blendMode: BlendMode.dstIn,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          child: Text(
+            text,
+            maxLines: 3,
+            overflow: TextOverflow.clip,
+            style: const TextStyle(
+              fontSize: 13.5,
+              height: 1.55,
+              color: _kText75,
+            ),
           ),
-        ],
+        ),
+      ),
+      secondChild: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: SelectableText(
+          text,
+          style: const TextStyle(
+            fontSize: 13.5,
+            height: 1.55,
+            color: _kText75,
+          ),
+        ),
       ),
     );
   }

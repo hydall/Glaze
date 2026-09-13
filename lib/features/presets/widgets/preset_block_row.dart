@@ -19,7 +19,6 @@ class PresetBlockRow extends StatelessWidget {
   final bool isLast;
   final VoidCallback onEdit;
   final ValueChanged<bool> onToggle;
-  final VoidCallback? onStash;
   final bool draggable;
 
   const PresetBlockRow({
@@ -29,7 +28,6 @@ class PresetBlockRow extends StatelessWidget {
     required this.isLast,
     required this.onEdit,
     required this.onToggle,
-    this.onStash,
     this.draggable = true,
   });
 
@@ -144,24 +142,6 @@ class PresetBlockRow extends StatelessWidget {
               )
             else
               const SizedBox(width: 36),
-            if (onStash != null)
-              SizedBox(
-                width: 36,
-                height: 44,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: onStash,
-                    child: Icon(
-                      block.isStashed
-                          ? Icons.unarchive_outlined
-                          : Icons.archive_outlined,
-                      size: 20,
-                      color: context.cs.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ),
             Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Transform.scale(

@@ -81,6 +81,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   GlobalKey<StudioPresetEditorBodyState> _studioEditorKey =
       GlobalKey<StudioPresetEditorBodyState>();
 
+  /// Header buttons for the prompt block whose editor is open inside the
+  /// preset editor, or null when none is.
+  PresetBlockEditorActions? _blockActions;
+
   /// Folder currently being browsed, or null at the top level.
   String? _currentFolderId;
   PresetListFilters _filters = const PresetListFilters();
@@ -141,6 +145,9 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     setState(() {
       _editingPreset = preset;
       _isCreating = preset == null;
+      // A fresh body starts on the block list; anything left over from the last
+      // editor would point the header buttons at a block that is gone.
+      _blockActions = null;
       // Recreate the editor key so PresetEditorBody's initState fires
       // and picks up the new preset's blocks instead of the old ones.
       _editorKey = GlobalKey<PresetEditorBodyState>();
@@ -160,6 +167,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       _editingPreset = null;
       _isCreating = false;
       _editingStudioId = null;
+      _blockActions = null;
     });
   }
 
@@ -250,6 +258,9 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       // The type dropdown, the filter button and the sort chip belong to the
       // header, not to the scroll content: pinned there they stay reachable at
       // any scroll offset, in the modal sheet and as a fullscreen route alike.
+      actions: _blockActions == null
+          ? const []
+          : presetBlockEditorSheetActions(context, _blockActions!),
       headerBottom: _inAnyEditor ? null : _buildControlsRow(context),
       floating: _inAnyEditor || !selection.active
           ? null
@@ -277,6 +288,8 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               preset: _editingPreset,
               charId: widget.charId,
               onDeleted: _closeEditor,
+              onBlockEditorChanged: (actions) =>
+                  setState(() => _blockActions = actions),
             )
           : presets.when(
               // A save from the editor invalidates the list; keep the rows on
