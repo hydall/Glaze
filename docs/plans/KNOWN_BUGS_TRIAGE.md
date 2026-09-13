@@ -463,9 +463,42 @@ the streaming placeholder, G25 is the initial `setMessages` + bridge handshake. 
   loss in a `-webkit-overflow-scrolling: touch` scroller holding a focused input, a
   different mechanism that needs a device to work on at all.
 
-### G27 — `fix/protocols-pipeline` (2 cards)
-- **#71** Make Summary generation run through the **common generation pipeline with protocols**, the same one the chat uses
-- **#133** Same check for extblocks — verify they go through that pipeline and inherit its error handling
+### G27 — `fix/protocols-pipeline` — **PR [#425](https://github.com/hydall/Glaze/pull/425)**
+Both cards asked for a check, and for both the answer was **already yes**: summary
+generation runs on `AuxLlmClient`, which resolves its transport through
+`pickChatTransport`; ext blocks call `pickChatTransport` directly and surface
+failures through the shared `formatError` → `formatBlockErrorContent` path added in
+PR #347. So nothing was re-plumbed. What was fixed is the two things those paths
+still failed to inherit from the chat pipeline.
+- **#71** summary on the common pipeline — **already true; one real leak fixed.**
+  `ApiConfig.omitTemperature` marks a connection whose provider rejects a
+  `temperature` field outright (OpenAI reasoning models, several proxies answer HTTP
+  400 when it is present). `AuxApiConfig` — the narrowed config every aux caller
+  builds — had no such field, so the flag died at the boundary: a connection the chat
+  could talk to would fail on a summary, a Studio slot, a card rewrite or a Janitor
+  lorebook rebuild. Aux calls pin their own temperature (0.3 for summaries), which is
+  exactly why the omission hid so well — the parameter is always sent, so it never
+  looked like something was missing. Now on `AuxApiConfig`, through both
+  `ChatTransportRequest` constructions in `AuxLlmClient`, and threaded from the
+  connection at all five construction sites.
+- **#133** ext blocks on the pipeline with its error handling — **already true;
+  the missing piece was the deadline.** The call passed no `receiveTimeoutMs`, so it
+  inherited the transport's Dio ceiling (120s OpenAI-shaped, 180s Anthropic/Gemini)
+  — the wrong instrument twice over: far too long for a provider that accepted the
+  connection and then said nothing, and on a stream it can fire *mid-answer* when a
+  model pauses to think. Worse, the call awaited a completer only the transport's
+  callbacks complete, so a transport that returned without invoking one left the
+  block awaiting forever. The chat solved this long ago with `IdleTimeoutGuard` — a
+  deadline on the *first* chunk (text or reasoning), cancelled the moment the stream
+  shows life. Ext blocks now use the same guard with the connection's own
+  `firstChunkTimeoutMs` (60s fallback) and hand it the deadline via
+  `receiveTimeoutMs: 0`.
+
+The call was untestable where it stood, so it moved: `BlockLlmRunner` holds the
+guard, the cancel-token bridging, the buffering and the `StateError` for a
+callback-less transport, and `InfoBlockService` takes it by constructor — the same
+seam tactic as `ChatWebViewRecovery` in G25. 9 new tests (2 aux flag, 6 runner,
+1 summary), negative control confirmed; full `flutter test` green (3907/3907).
 
 ### G28 — `fix/permissions-and-battery` (4 cards)
 - **#29** The system notification prompt fires immediately on app open. It must become an **onboarding step** with Allow / Skip buttons, explaining that notifications are what enable background generation
@@ -615,7 +648,7 @@ doing them apart.
 | 5 | G26 keyboard-inset | `fix/keyboard-inset` | 7 | **in review** | [#423](https://github.com/hydall/Glaze/pull/423) | In Progress |
 | 5 | G35 message-delete-race | `fix/message-delete-race` | 78 | **in review** | [#424](https://github.com/hydall/Glaze/pull/424) | In Progress |
 | 5 | G36 sheet-flicker | `fix/sheet-flicker` | 148 | **partial, in review** | [#422](https://github.com/hydall/Glaze/pull/422) | In Progress |
-| 6 | G27 protocols-pipeline | `fix/protocols-pipeline` | 71, 133 | not started | — | — |
+| 6 | G27 protocols-pipeline | `fix/protocols-pipeline` | 71, 133 | PR open | [#425](https://github.com/hydall/Glaze/pull/425) | In Progress |
 | 6 | G28 permissions-and-battery | `fix/permissions-and-battery` | 29, 30, 53, 52 | not started | — | — |
 | 6 | G29 presets | `fix/presets` | 47, 79, 25 | not started | — | — |
 | 6 | G30 editor-ui | `fix/editor-ui` | 88, 57, 59, 143 | not started | — | — |
