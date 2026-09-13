@@ -276,9 +276,47 @@ maintainer said in-thread he would "figure something out" for.
 - **#132** The update sheet offers a build **14 days older** than the installed one — availability is decided on SHA inequality alone
 - **#137** The update popup only appears at launch; nothing re-checks on resume
 
-### G16 — `fix/notification-icon` (2 cards)
-- **#149** The notification icon randomly shows the card image / a first letter / nothing, and the small icon is the generation spinner
-- **#9** (notifications) — everything else in that card works; what is left is exactly this: the new-message small icon must be an envelope, not the generation spinner. Same fix, same file — merged here.
+### G16 — `fix/notification-icon` — **PR [#%s](https://github.com/hydall/Glaze/pull/%s)**
+- **#149** the notification icon shows the card image / a first letter / nothing
+  — **the avatar half is fixed; the small-icon half was already fixed and is now
+  hardened.** The presenter handed the platform the character's
+  full-resolution `avatars/<id>.png`. Android decodes that into a bitmap before
+  it will draw the notification and a card is routinely several megabytes — big
+  enough to be refused, at which point the step-down drops the avatar, the
+  `Person` goes icon-less and Android draws its own first-letter circle. Whether
+  a character got its picture came down to how heavy its card happened to be,
+  which is the "sometimes the image, sometimes a letter" exactly.
+  `notificationAvatarPath` prefers `thumbnails/<id>.jpg` — the same picture at a
+  size nothing objects to, already written for every card — and keeps the
+  full-resolution avatar as the fallback. For the "nothing at all" end there is
+  a new rung between the messaging style and the plain notification: reaching
+  the plain step means the *style* was refused, not the avatar (the step above
+  carries none and still failed), and a plain Android notification can still
+  show the card as its large icon.
+- **#9** the small icon must be an envelope, not the retry arrow — **already
+  fixed on `nightly`, path removed.** `824e4ef1` (2026-09-04) made `new_message`
+  the icon; #9 is from 2026-08-28 and #149 from 2026-09-07, so the reporter was
+  plausibly on a build from before it. What was left is that
+  `ic_stat_icon_config_sample` — the circular retry arrow left over from the
+  Capacitor build, referenced now only by a dead `com.hydall.glaze.ic_generation`
+  manifest entry — sat *second* on `androidIconCandidates`, so one failed
+  drawable lookup put a refresh arrow on every message notification for the rest
+  of the process. It is off the list; the Glaze mark takes its place, so every
+  fallback is something a new message can plausibly wear.
+- Adjacent, same file: `resolveGlazeFilePath` joined a `data:`/`https:` path
+  onto the data root and returned a path no file lives at.
+  `relativeGlazeFilePath`, its inverse, has always guarded against that; both
+  halves are symmetric now.
+
+8 new tests; negative control confirmed (with `notificationAvatarPath`, the icon
+list and the URL guard reverted to their `nightly` shapes, exactly those 4
+fail). Full `flutter test` green. **Not verified, and it matters here:**
+everything the report is about is Android-only and none of the Android
+`NotificationDetails` can be exercised from a test — `Platform.isAndroid` is
+false on every host the suite runs on. Tested is the path resolution and the
+icon ordering that feed them. A phone would settle whether the thumbnail really
+stops the letter fallback and whether the new rung shows the card on a device
+that refuses `MessagingStyle`.
 
 ### G17 — `fix/draft-clear-on-send` (1 card)
 - **#121** The last sent message reappears in the composer after a reload — **fixed**, three holes, not one.
@@ -799,7 +837,7 @@ doing them apart.
 | 6 | G28 permissions-and-battery | `fix/permissions-and-battery` | 29, 30, 53, 52 | PR open | [#426](https://github.com/hydall/Glaze/pull/426) | In Progress |
 | 6 | G29 presets | `fix/presets` | 47, 79, 25 | PR open | [#427](https://github.com/hydall/Glaze/pull/427) | In Progress |
 | 6 | G30 editor-ui | `fix/editor-ui` | 88, 57, 59, 143 | PR open | [#428](https://github.com/hydall/Glaze/pull/428) | In Progress |
-| 6 | G16 notification-icon | `fix/notification-icon` | 149, 9 | not started | — | — |
+| 6 | G16 notification-icon | `fix/notification-icon` | 149, 9 | PR open | [#429](https://github.com/hydall/Glaze/pull/429) | In Progress |
 | 6 | G34 android-file-picker | `fix/android-file-picker` | 32 | not started | — | — |
 | 6 | G38 shino-default | `fix/shino-default` | 28 | not started | — | — |
 | 7 | G6 cloud-sync | `fix/cloud-sync` | 107, 115, 124, 134 | not started | — | — |
