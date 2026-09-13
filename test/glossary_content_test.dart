@@ -39,6 +39,15 @@ void main() {
     }
   });
 
+  test('a term sits under the same categories in both languages', () {
+    // The two files had drifted: EN cross-listed `chat-session` and
+    // `connections` under Characters as well as Chat, and filed
+    // `character-hiding` under Characters, where RU had all three under Chat
+    // alone. A reader browsing by category therefore found a different glossary
+    // depending on their language, even though every article existed in both.
+    expect(ru.placements, en.placements);
+  });
+
   test('a term listed under two categories says the same thing twice', () {
     // Cross-listing a term is allowed — `chat-session` is filed under both
     // Characters and Chat in EN. Two articles under one id that have *drifted*
@@ -65,7 +74,9 @@ class _Glossary {
       final map = category as Map<String, dynamic>;
       categoryIds.add('${map['id']}');
       for (final term in map['terms'] as List) {
-        _terms.add((term as Map).cast<String, dynamic>());
+        final cast = (term as Map).cast<String, dynamic>();
+        _terms.add(cast);
+        _placements.add((category: '${map['id']}', term: '${cast['id']}'));
       }
     }
   }
@@ -73,6 +84,7 @@ class _Glossary {
   final String path;
   final Set<String> categoryIds = <String>{};
   final List<Map<String, dynamic>> _terms = [];
+  final List<({String category, String term})> _placements = [];
 
   Set<String> get termIds => _terms.map((term) => '${term['id']}').toSet();
 
@@ -80,6 +92,16 @@ class _Glossary {
       _terms.where((term) => term['id'] == id).map((term) => '${term['desc']}');
 
   String descOf(String id) => copiesOf(id).first;
+
+  /// Term id → the categories it is filed under, in file order. Cross-listing
+  /// is deliberate, so this is a list of categories per term rather than one.
+  Map<String, List<String>> get placements {
+    final map = <String, List<String>>{};
+    for (final entry in _placements) {
+      map.putIfAbsent(entry.term, () => []).add(entry.category);
+    }
+    return map;
+  }
 
   /// Term id → the ids its article links to. `[[target]]` and
   /// `[[target|label]]` are the two forms the glossary renderer accepts.
