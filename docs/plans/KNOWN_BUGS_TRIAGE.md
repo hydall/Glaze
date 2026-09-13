@@ -265,8 +265,14 @@ maintainer said in-thread he would "figure something out" for.
   Corpus entry `audio-embed` plus a spec that squeezes a message to a phone-bubble
   width: 40px of overhang on nightly, none with the rule. Full suite 98 passed.
 
-### G14 — `fix/prompt-inspector` (3 cards)
+### G14 — `fix/prompt-inspector` (4 cards)
 - **#106** The bottom action row sits under the Android nav bar — the sheet is shown without `useSafeArea: true`
+- **#49** prompt inspector "sab" (safe bottom area) — **moved here from
+  verify-only, where the check said it is *not* fixed.** `SheetView` publishes
+  the nav-bar inset through `MediaQuery.padding.bottom` for the body to consume;
+  `RequestTimelineView._timeline` and `TokenizerSheet._buildMainView` both pass
+  an explicit `ListView` padding, which replaces it, so the inset is dropped.
+  Same defect as #106 and the same fix belongs with it.
 - **#153** The Response tab always shows "no captured" — the main request carries no `callId`, so no call event is ever joined to it
 - **#101** The `Images` tab label is not centred in its pill (`GlazeTabBar`)
 
@@ -829,18 +835,80 @@ would close it.
 ### New functionality with a spec — not a bug, kept separate
 - **#60** Add prompt editing for JAR (how lorebook keys get built, etc.) under **Third Party Providers**; during lorebook extraction a settings button appears in the header that leads there. You gave a full spec, so it is not going into `features` blind — but it is new functionality, so it queues after the bug groups.
 
-### Verify-only — check the code, then close or reopen
-You answered "seems fixed, but check" on these. No branch until the check says otherwise.
+### Verify-only — **done.** Six closed, one reopened
+You answered "seems fixed, but check" on these. Checked against `nightly` on
+2026-09-14; six moved to **Fixed**, #49 stays on the board and folds into G14.
 
-| # | Card | What to verify |
+| # | Card | Verdict |
 |---|---|---|
-| 12 | no proxy for jar | Can local extraction switch between JLLM and a proxy and back? |
-| 43 | separate advanced/simple closed lorebooks | Do advanced and simple books already take different extraction pipelines? |
-| 49 | prompt inspector sab | "sab" = safe bottom area — overlaps G14 #106; confirm it is covered |
-| 73 | search on pc | Desktop search |
-| 128 | 405 Naistera | Believed fixed by the sillyimages port |
-| 130 | decouple embedding settings | Believed already decoupled |
-| 138 | trigger type dropdown in memory books | Believed fixed by the Memory Books redesign (#408) |
+| 12 | no proxy for jar | **fixed** → Fixed |
+| 43 | separate advanced/simple closed lorebooks | **fixed** → Fixed |
+| 49 | prompt inspector sab | **NOT fixed** — reopened, folded into G14 |
+| 73 | search on pc | **fixed** → Fixed |
+| 128 | 405 Naistera | **fixed** → Fixed |
+| 130 | decouple embedding settings | **fixed** → Fixed |
+| 138 | trigger type dropdown in memory books | **fixed** (the control is gone) → Fixed |
+
+- **#12** — the capture does exactly what the card asked for and undoes it.
+  `JanitorWebViewProxy` forces the account into proxy mode against a throwaway
+  unreachable preset (`_enterExtractionMode`), because an account on JLLM
+  (`"janitor"`) never assembles a proxy prompt and `generateAlpha` is what the
+  capture reads. The snapshot is restored in the `finally`
+  (`_restoreProfile`), and a mutex guards the whole run — two overlapping
+  captures would restore each other's snapshots and leave the account
+  misconfigured.
+- **#43** — the two kinds are separated all the way through. `publicJsonBooks`,
+  `publicJsBooks` and `closedLorebooks` partition what the character carries;
+  the Public section splits into "Lorebooks" and "Scripts" sub-groups when both
+  are attached (flat when only one kind is, since there is then nothing to tell
+  apart), and the two carry *different actions on different pipelines* — JSON
+  downloads 1:1 with no LLM, a JS/Nine-API book opens an explanation and is
+  rebuilt by the model (`_downloadJs` → `_buildJs`).
+- **#49** — **the audit's "already fixed" was wrong, and this is a real bug.**
+  The inspector is built on `SheetView`, which publishes the nav-bar/gesture
+  inset through `MediaQuery.padding.bottom` and *relies on the body to consume
+  it* — the comment in `sheet_view.dart` says so, and the point is that a
+  scrollable body treats the inset as scroll content padding so rows stay
+  visible behind the nav bar while the last row rests above it. Both inspector
+  bodies break that contract by passing an explicit `padding` to their
+  `ListView`, which replaces the MediaQuery-derived one outright:
+  `RequestTimelineView._timeline` passes
+  `const EdgeInsets.fromLTRB(12, 12, 12, 24)`, and
+  `TokenizerSheet._buildMainView` passes `EdgeInsets.all(16)` plus the *top*
+  inset only. The published bottom inset is discarded in both, so the last row
+  sits under the nav bar. Same defect family as **G14 #106** (the bottom action
+  row under the nav bar), which is why it belongs there rather than in a branch
+  of its own.
+- **#73** — fixed by the desktop parity work (PR #352, 2026-08-31): "Search
+  lives permanently in the desktop header and follows the query." Desktop now
+  carries the sidebar's dialog search (`DesktopLeftSidebar._buildSearchField`
+  into `ChatHistoryList`), and screen-published header actions bring the
+  settings search into the window title bar. **Caveat:** the card never said
+  *which* search, so this closes the three that exist; a specific one still
+  misbehaving needs a fresh report.
+- **#128** — fixed by the sillyimages port, and the 405 is named in the code:
+  the retired `/prompt/api/img` route answers 405 Method Not Allowed, and
+  `NaisteraImageProvider` now posts `{base}/api/generate` with `job_id`
+  polling. `normalizeModel` maps retired model labels onto ids the API still
+  accepts, so a settings blob written by an older build keeps generating.
+- **#130** — decoupled. Embedding presets have their own list
+  (`embeddingPresetListProvider`), their own active id
+  (`activeEmbeddingPresetIdProvider`), their own seeding key and their own tab;
+  the shared `api_configs` table is partitioned by `mode == 'embedding'`. The
+  last implicit coupling — "Use LLM API" borrowing *whatever the LLM tab
+  happened to be on* — is gone too: the borrow now names which LLM preset it
+  takes the endpoint from.
+- **#138** — closed because the control it names no longer exists. The #408
+  redesign replaced every Material control in the memory settings with kit
+  rows: the `DropdownButton<int>`s (one entry per step — two hundred for the
+  auto-create interval) became `MenuRangeItem`, and every picker became a
+  `MenuSelectorItem` that opens a sheet from `onTap`. There is no
+  `DropdownButton` anywhere under Memory Books now, so nothing there can fail
+  to open. **If it was somewhere else:** the only real `DropdownButtonFormField`s
+  left nearby are the four in the two lorebook settings screens
+  (`label_key_search_mode`, `label_search_type`, `label_injection_position`,
+  `label_lorebook_reserve_mode`) — still bare Material, and a UI-kit violation
+  worth its own card.
 
 ### Stays on the board, not mine to fix
 - **#10** handle idiots on datacat — you are doing this by hand; it stays in Known Bugs
@@ -879,47 +947,88 @@ doing them apart.
 
 | Wave | Group | Branch | Cards | Status | PR | Trello |
 |---|---|---|---|---|---|---|
-| 1 | G1 continue-overhaul | `fix/continue-overhaul` | 118, 150 (119, 110 already fixed) | **in review** | [#410](https://github.com/hydall/Glaze/pull/410) | 118+150 In Progress · 119+110 Fixed |
-| 1 | G2 reasoning-render | `fix/reasoning-render` | 45 (123 covered, not reproduced) | **in review** | [#411](https://github.com/hydall/Glaze/pull/411) | both In Progress |
-| 1 | G3 streaming-bubble-state | `fix/streaming-bubble-state` | 141, 131 | **in review** | [#412](https://github.com/hydall/Glaze/pull/412) | both In Progress |
-| 2 | G8 lorebook-activation-scope | `fix/lorebook-activation-scope` | 99 | **in review** | [#413](https://github.com/hydall/Glaze/pull/413) | In Progress |
-| 2 | G10 vision-capability | `fix/vision-capability` | 95 | **in review** | [#415](https://github.com/hydall/Glaze/pull/415) | In Progress |
-| 2 | G17 draft-clear-on-send | `fix/draft-clear-on-send` | 121 | **in review** | [#414](https://github.com/hydall/Glaze/pull/414) | In Progress |
-| 3 | G4 catalog-auth-resilience | `fix/catalog-auth-resilience` | 104, 113, 152, 89 | **in review** | [#416](https://github.com/hydall/Glaze/pull/416) | all four In Progress |
-| 3 | G5 error-surface-normalization | `fix/error-surface-normalization` | 113, 120, 105 | **in review** | [#417](https://github.com/hydall/Glaze/pull/417) | all three In Progress |
+| 1 | G1 continue-overhaul | `fix/continue-overhaul` | 118, 150 (119, 110 already fixed) | **merged** | [#410](https://github.com/hydall/Glaze/pull/410) | Done, not tested |
+| 1 | G2 reasoning-render | `fix/reasoning-render` | 45 (123 covered, not reproduced) | **merged** | [#411](https://github.com/hydall/Glaze/pull/411) | Done, not tested |
+| 1 | G3 streaming-bubble-state | `fix/streaming-bubble-state` | 141, 131 | **merged** | [#412](https://github.com/hydall/Glaze/pull/412) | Done, not tested |
+| 2 | G8 lorebook-activation-scope | `fix/lorebook-activation-scope` | 99 | **merged** | [#413](https://github.com/hydall/Glaze/pull/413) | Done, not tested |
+| 2 | G10 vision-capability | `fix/vision-capability` | 95 | **merged** | [#415](https://github.com/hydall/Glaze/pull/415) | Done, not tested |
+| 2 | G17 draft-clear-on-send | `fix/draft-clear-on-send` | 121 | **merged** | [#414](https://github.com/hydall/Glaze/pull/414) | Done, not tested |
+| 3 | G4 catalog-auth-resilience | `fix/catalog-auth-resilience` | 104, 113, 152, 89 | **merged** | [#416](https://github.com/hydall/Glaze/pull/416) | Done, not tested |
+| 3 | G5 error-surface-normalization | `fix/error-surface-normalization` | 113, 120, 105 | **merged** | [#417](https://github.com/hydall/Glaze/pull/417) | Done, not tested |
 | 4 | G12 ol-start | — | 136 | **already fixed** (PR #350) | — | Done, not tested |
-| 4 | G13 audio-embed-overflow | `fix/audio-embed-overflow` | 100 | **in review** | [#418](https://github.com/hydall/Glaze/pull/418) | In Progress |
-| 4 | G21 docs-and-readme | `fix/docs-and-readme` | 116, 33, 23, 146 | **in review** | [#419](https://github.com/hydall/Glaze/pull/419) | all four In Progress |
+| 4 | G13 audio-embed-overflow | `fix/audio-embed-overflow` | 100 | **merged** | [#418](https://github.com/hydall/Glaze/pull/418) | Done, not tested |
+| 4 | G21 docs-and-readme | `fix/docs-and-readme` | 116, 33, 23, 146 | **merged** | [#419](https://github.com/hydall/Glaze/pull/419) | Done, not tested |
 | 4 | G22 tab-scroll-position | — | 61 | **already fixed** (PR #358) | — | Done, not tested |
-| 5 | G25 chat-first-open | `fix/chat-first-open` | 87, 154 | **in review** | [#421](https://github.com/hydall/Glaze/pull/421) | both In Progress |
-| 5 | G26 keyboard-inset | `fix/keyboard-inset` | 7 | **in review** | [#423](https://github.com/hydall/Glaze/pull/423) | In Progress |
-| 5 | G35 message-delete-race | `fix/message-delete-race` | 78 | **in review** | [#424](https://github.com/hydall/Glaze/pull/424) | In Progress |
-| 5 | G36 sheet-flicker | `fix/sheet-flicker` | 148 | **partial, in review** | [#422](https://github.com/hydall/Glaze/pull/422) | In Progress |
-| 6 | G27 protocols-pipeline | `fix/protocols-pipeline` | 71, 133 | PR open | [#425](https://github.com/hydall/Glaze/pull/425) | In Progress |
-| 6 | G28 permissions-and-battery | `fix/permissions-and-battery` | 29, 30, 53, 52 | PR open | [#426](https://github.com/hydall/Glaze/pull/426) | In Progress |
-| 6 | G29 presets | `fix/presets` | 47, 79, 25 | PR open | [#427](https://github.com/hydall/Glaze/pull/427) | In Progress |
-| 6 | G30 editor-ui | `fix/editor-ui` | 88, 57, 59, 143 | PR open | [#428](https://github.com/hydall/Glaze/pull/428) | In Progress |
-| 6 | G16 notification-icon | `fix/notification-icon` | 149, 9 | PR open | [#429](https://github.com/hydall/Glaze/pull/429) | In Progress |
-| 6 | G34 android-file-picker | `fix/android-file-picker` | 32 | PR open | [#430](https://github.com/hydall/Glaze/pull/430) | In Progress |
-| 6 | G38 shino-default | `fix/shino-default` | 28 | PR open | [#431](https://github.com/hydall/Glaze/pull/431) | In Progress |
-| 7 | G6 cloud-sync | `fix/cloud-sync` | 107, 115, 124, 134 | not started | — | — |
+| 5 | G25 chat-first-open | `fix/chat-first-open` | 87, 154 | **merged** | [#421](https://github.com/hydall/Glaze/pull/421) | Done, not tested |
+| 5 | G26 keyboard-inset | `fix/keyboard-inset` | 7 | **merged** | [#423](https://github.com/hydall/Glaze/pull/423) | Done, not tested |
+| 5 | G35 message-delete-race | `fix/message-delete-race` | 78 | **merged** | [#424](https://github.com/hydall/Glaze/pull/424) | Done, not tested |
+| 5 | G36 sheet-flicker | `fix/sheet-flicker` | 148 | **merged** | [#422](https://github.com/hydall/Glaze/pull/422) | Done, not tested |
+| 6 | G27 protocols-pipeline | `fix/protocols-pipeline` | 71, 133 | **merged** | [#425](https://github.com/hydall/Glaze/pull/425) | Done, not tested |
+| 6 | G28 permissions-and-battery | `fix/permissions-and-battery` | 29, 30, 53, 52 | **merged** | [#426](https://github.com/hydall/Glaze/pull/426) | Done, not tested |
+| 6 | G29 presets | `fix/presets` | 47, 79, 25 | **merged** | [#427](https://github.com/hydall/Glaze/pull/427) | Done, not tested |
+| 6 | G30 editor-ui | `fix/editor-ui` | 88, 57, 59, 143 | **merged** | [#428](https://github.com/hydall/Glaze/pull/428) | Done, not tested |
+| 6 | G16 notification-icon | `fix/notification-icon` | 149, 9 | **merged** | [#429](https://github.com/hydall/Glaze/pull/429) | Done, not tested |
+| 6 | G34 android-file-picker | `fix/android-file-picker` | 32 | **merged** | [#430](https://github.com/hydall/Glaze/pull/430) | Done, not tested |
+| 6 | G38 shino-default | `fix/shino-default` | 28 | **merged** | [#431](https://github.com/hydall/Glaze/pull/431) | Done, not tested |
+| 7 | G11 imggen-timer-cache | `fix/imggen-timer-cache` | 97 | not started | — | — |
+| 7 | G14 prompt-inspector | `fix/prompt-inspector` | 106, 153, 101, 49 | not started | — | — |
+| 7 | G15 update-checker | `fix/update-checker` | 132, 137 | not started | — | — |
+| 7 | G23 spoiler-reveal | `fix/spoiler-reveal` | 112 | not started | — | — |
+| 7 | G33 st-lorebook-settings | `fix/st-lorebook-settings` | 135 | not started | — | — |
 | 7 | G7 backup-onboarding-polish | `fix/backup-onboarding-polish` | 24, 111 | not started | — | — |
 | 7 | G9 janitor-greetings | `fix/janitor-greetings` | 98 | not started | — | — |
-| 7 | G11 imggen-timer-cache | `fix/imggen-timer-cache` | 97 | not started | — | — |
-| 7 | G14 prompt-inspector | `fix/prompt-inspector` | 106, 153, 101 | not started | — | — |
-| 7 | G15 update-checker | `fix/update-checker` | 132, 137 | not started | — | — |
-| 7 | G18 promptworker-throughput | `fix/promptworker-throughput` | 126, 127 | not started | — | — |
-| 7 | G19 saucepan-import-phase | `fix/saucepan-import-phase` | 117 | not started | — | — |
-| 7 | G20 memory-auto-generate | `fix/memory-auto-generate` | 122 | not started | — | — |
-| 7 | G23 spoiler-reveal | `fix/spoiler-reveal` | 112 | not started | — | — |
-| 7 | G31 jar-background | `fix/jar-background` | 58 | not started | — | — |
-| 7 | G32 janitor-custom-tags | `fix/janitor-custom-tags` | 69 | not started | — | — |
-| 7 | G33 st-lorebook-settings | `fix/st-lorebook-settings` | 135 | not started | — | — |
-| 7 | G37 guided-ui | `fix/guided-ui` | 6 | not started | — | — |
+| 8 | G18 promptworker-throughput | `fix/promptworker-throughput` | 126, 127 | not started | — | — |
+| 8 | G19 saucepan-import-phase | `fix/saucepan-import-phase` | 117 | not started | — | — |
+| 8 | G20 memory-auto-generate | `fix/memory-auto-generate` | 122 | not started | — | — |
+| 8 | G31 jar-background | `fix/jar-background` | 58 | not started | — | — |
+| 8 | G32 janitor-custom-tags | `fix/janitor-custom-tags` | 69 | not started | — | — |
+| 8 | G37 guided-ui | `fix/guided-ui` | 6 | not started | — | — |
+| 8 | G6 cloud-sync | `fix/cloud-sync` | 107, 115, 124, 134 | not started | — | — |
 | — | G24 chat-perf | `fix/chat-perf` | 91, 92 | deferred to the 0.7.1 overhaul | — | — |
 | — | JAR prompt settings | — | 60 | new functionality, queued after the bugs | — | — |
-| — | verify-only | — | 12, 43, 49, 73, 128, 130, 138 | pending code check | — | — |
+| — | verify-only | — | 12, 43, 73, 128, 130, 138 | **done** — six closed, #49 folded into G14 | — | Fixed |
+| — | glossary categories | `fix/glossary-categories` | — (no card) | **merged** | [#432](https://github.com/hydall/Glaze/pull/432) | — |
 
+**Waves 1–6 are merged.** All 21 PRs (#410–#432) are on `nightly` and every card
+they carry is in **Done, not tested**. The cards await a build on a device, not
+more code.
+
+**Wave 7 split in two.** Fourteen groups is twice wave 6, so it runs as two:
+
+- **Wave 7 — self-contained.** G7, G9, G11, G14, G15, G23, G33. Each is one
+  screen or one service with a mechanism the audit already names; none touches a
+  subsystem another group is in. G14 is the largest at four cards now that #49
+  joined it.
+- **Wave 8 — heavy or blocked.** G6, G18, G19, G20, G31, G32, G37. G37 is a 1:1
+  port of the Vue Guided Generation UI plus new preset-editor surface, G18 is
+  throughput work in the prompt worker, and the JAR pair (G31, G32) both sit in
+  the capture flow, so they are cheaper together than apart. **G6 carries a
+  blocker that is not code:** #107 needs a fresh Google Cloud OAuth client (PKCE,
+  no secret) created under the maintainer's account — the shipped one is revoked
+  and answers `401 invalid_client` for every user. Its other three cards (#115,
+  #124, #134) can ship without it.
+
+**Drive-by, no card:** the EN and RU glossaries agreed on all 73 term ids but not
+on where they sat — EN cross-listed `chat-session` and `connections` under
+Characters as well as Chat and filed `character-hiding` under Characters, RU had
+all three under Chat alone. A Russian reader looking for character-hiding under
+Персонажи did not find it. RU follows EN's placement now, text untouched, and
+the parity test — which checked term ids and category ids but never which
+category a term was *in*, which is why this drifted unnoticed — covers placement.
+
+**Decisions taken (2026-09-14), recorded so they are not re-litigated:**
+
+| Question | Answer |
+|---|---|
+| Migration deleting `Default Chat` for existing installs (#28)? | **no** |
+| Migrate legacy character-scoped lorebooks to `enabled: false` (#99)? | **no** |
+| Build the per-config "supports images" flag (#95)? | **no — no heuristics** |
+| Align the RU glossary's categories to EN? | **yes** — done, PR #432 |
+| Enable the Discord Server Widget (#116)? | **no** — the badge stays static |
+| Chase #148's white flash with the reporter? | ignore for now |
+| Google Cloud OAuth client for #107? | ignore for now — G6 ships its other three |
+| `Stale/not confirmed` as its own board? | **no** — stays a list |
+| #60 JAR prompt settings? | **last**, after the bug waves |
 
 ---
 
