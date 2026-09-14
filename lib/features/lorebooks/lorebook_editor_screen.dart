@@ -7,10 +7,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/llm/embedding_error_labels.dart';
 import '../../core/llm/glaze_matcher.dart';
+import '../../core/llm/lorebook_embedding_service.dart';
+import '../../core/llm/lorebook_embedding_text.dart';
 import '../../core/models/lorebook.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/state/lorebook_provider.dart';
+import '../../core/utils/cast_helpers.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../features/settings/api_list_provider.dart';
@@ -133,15 +136,29 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     final statuses = <String, String>{};
     final errorLabels = <String, String>{};
     for (final entry in _entries) {
-      if (!entry.vectorSearch || !entry.enabled || entry.constant) continue;
+      if (!isLorebookEntryIndexable(entry, vectorizeAll: _vectorizeAll)) {
+        continue;
+      }
       final record = recordsByEntryId['${widget.lorebookId}_${entry.id}'];
+      // The search only trusts a row whose fingerprint still matches the
+      // entry, so a row written before the entry — or the book's embedding
+      // target — changed is stale, not indexed. Reporting it as indexed would
+      // leave the entry quietly out of every vector pass with nothing in the
+      // UI asking for a rebuild.
+      final expectedHash = computeHash(
+        LorebookEmbeddingService.buildEmbeddingFingerprint(
+          entry,
+          lorebookEmbeddingText(entry, _settings?.embeddingTarget),
+        ),
+      );
       if (record == null) {
         statuses[entry.id] = 'none';
       } else if (record.errorJson != null) {
         statuses[entry.id] = 'error';
         final error = repo.decodeError(record);
         errorLabels[entry.id] = EmbeddingErrorLabel.classify(error).label;
-      } else if (repo.hasUsableVectors(record)) {
+      } else if (record.textHash == expectedHash &&
+          repo.hasUsableVectors(record)) {
         statuses[entry.id] = 'indexed';
       } else {
         statuses[entry.id] = 'none';
@@ -198,22 +215,21 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     }).toList();
   }
 
-  bool get _needsReindex => _entries.any(
-    (e) =>
-        e.vectorSearch &&
-        e.enabled &&
-        !e.constant &&
-        _embeddingStatuses[e.id] != 'indexed',
-  );
+  /// The book's opt-in to embedding every entry, not just the ones that ask
+  /// for vector search (SillyTavern's `enabled_for_all`).
+  bool get _vectorizeAll => _settings?.vectorizeAllEntries ?? false;
 
-  int get _missingVectorCount => _entries
-      .where(
-        (e) =>
-            e.vectorSearch &&
-            e.enabled &&
-            !e.constant &&
-            _embeddingStatuses[e.id] != 'indexed',
-      )
+  /// The entries the indexer would embed — both pools, so a book made only of
+  /// keyless entries still counts as having something to index.
+  List<LorebookEntry> get _indexableEntries => _entries
+      .where((e) => isLorebookEntryIndexable(e, vectorizeAll: _vectorizeAll))
+      .toList();
+
+  bool get _needsReindex =>
+      _indexableEntries.any((e) => _embeddingStatuses[e.id] != 'indexed');
+
+  int get _missingVectorCount => _indexableEntries
+      .where((e) => _embeddingStatuses[e.id] != 'indexed')
       .length;
 
   List<LorebookEntry> get _failedEntries =>
@@ -530,9 +546,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
       GlazeToast.show(context, 'vector_error_config_endpoint'.tr());
       return;
     }
-    final vectorEntries = _entries
-        .where((e) => e.vectorSearch && e.enabled && !e.constant)
-        .toList();
+    final vectorEntries = _indexableEntries;
     if (vectorEntries.isEmpty) {
       GlazeToast.show(context, 'no_entries_found'.tr());
       return;
@@ -552,7 +566,9 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         widget.lorebookId,
         _entries,
         config,
-        embeddingTarget: _settings?.embeddingTarget ?? 'content',
+        embeddingTarget:
+            _settings?.embeddingTarget ?? LorebookEmbeddingTarget.content,
+        vectorizeAll: _vectorizeAll,
         onProgress: (current, total, name) {
           if (!mounted) return;
           setState(
@@ -617,7 +633,9 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         _entries,
         config,
         retryFailedOnly: true,
-        embeddingTarget: _settings?.embeddingTarget ?? 'content',
+        embeddingTarget:
+            _settings?.embeddingTarget ?? LorebookEmbeddingTarget.content,
+        vectorizeAll: _vectorizeAll,
         onProgress: (current, total, name) {
           if (!mounted) return;
           setState(
@@ -691,9 +709,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
       GlazeToast.show(context, 'vector_error_config_endpoint'.tr());
       return;
     }
-    final vectorEntries = _entries
-        .where((e) => e.vectorSearch && e.enabled && !e.constant)
-        .toList();
+    final vectorEntries = _indexableEntries;
     if (vectorEntries.isEmpty) {
       GlazeToast.show(context, 'no_entries_found'.tr());
       return;
@@ -713,7 +729,9 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         _entries,
         config,
         forceReindex: true,
-        embeddingTarget: _settings?.embeddingTarget ?? 'content',
+        embeddingTarget:
+            _settings?.embeddingTarget ?? LorebookEmbeddingTarget.content,
+        vectorizeAll: _vectorizeAll,
         onProgress: (current, total, name) {
           if (!mounted) return;
           setState(
@@ -842,7 +860,9 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         widget.lorebookId,
         [entry],
         config,
-        embeddingTarget: _settings?.embeddingTarget ?? 'content',
+        embeddingTarget:
+            _settings?.embeddingTarget ?? LorebookEmbeddingTarget.content,
+        vectorizeAll: _vectorizeAll,
       );
       if (mounted) {
         setState(() {
@@ -904,6 +924,10 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         }
       });
       unawaited(_save());
+      // The embedding target and the vectorize-all switch decide which entries
+      // are indexed and what text was hashed for them, so the per-entry status
+      // the screen is showing is about the old settings until this re-runs.
+      unawaited(_loadEmbeddingStatuses());
     }
   }
 
@@ -1253,6 +1277,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
                       entry: entry,
                       status: _embeddingStatuses[entry.id],
                       showVectorBadges: vectorAvailable,
+                      vectorizeAll: _vectorizeAll,
                       onTap: () => _openEntry(_entries.indexOf(entry)),
                       onToggle: () => _toggleEntry(_entries.indexOf(entry)),
                       onMore: () => _entryMenu(_entries.indexOf(entry)),
@@ -1829,6 +1854,10 @@ class _EntryRow extends StatelessWidget {
   /// False while the API has semantic search off — the `vec` / `idx` / `err`
   /// badges describe an index that cannot exist, so they are left out.
   final bool showVectorBadges;
+
+  /// The book embeds every entry, so the `vec` badge is earned without the
+  /// entry's own flag.
+  final bool vectorizeAll;
   final VoidCallback onTap;
   final VoidCallback onToggle;
   final VoidCallback onMore;
@@ -1837,6 +1866,7 @@ class _EntryRow extends StatelessWidget {
     required this.entry,
     required this.status,
     required this.showVectorBadges,
+    required this.vectorizeAll,
     required this.onTap,
     required this.onToggle,
     required this.onMore,
@@ -1879,7 +1909,8 @@ class _EntryRow extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (showVectorBadges && entry.vectorSearch) ...[
+                        if (showVectorBadges &&
+                            (entry.vectorSearch || vectorizeAll)) ...[
                           const SizedBox(width: 6),
                           const LorebookEntryBadge(
                             label: 'vec',

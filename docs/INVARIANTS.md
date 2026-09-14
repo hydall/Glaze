@@ -791,6 +791,25 @@ connection / sampling / reasoning half to the chat preset, `applyEmbeddingTo`
 the embedding half (plus its own name) to the embedding preset, and either half
 saves on its own when the other tab has no preset.
 
+### INV-PS2d: One definition of what a lorebook entry embeds, and of which pool it is in
+
+`lorebook_embedding_text.dart` is the only place that answers either question.
+`lorebookEmbeddingText` resolves the book's `embeddingTarget` to the text that
+represents an entry — `content` (the default, and SillyTavern's only
+behaviour), `comment`, `keys` or `both`, falling back to the body when the
+chosen field is empty on that entry — and `lorebookVectorPoolFor` sorts the
+entry into the main pool (its own `vectorSearch` flag, or every entry when the
+book sets `vectorizeAllEntries`), the keyless fallback pool, or neither.
+
+`LorebookEmbeddingService`, `SessionLorebookEmbeddingWorker`,
+`LorebookVectorSearch`, `VectorRebuildService` and the lorebook editor all go
+through those two functions. They cannot each carry their own copy: the indexer
+stores a hash of the embedded text and the search recomputes it to decide
+whether the stored vector still describes the entry, so any disagreement drops
+the entry out of every vector pass with no error anywhere to show for it — and
+an entry the search expects a vector for but the indexer never embedded is the
+same silent miss.
+
 ### INV-PS3: History cutoff is oldest-first
 
 When context overflows, history is trimmed from the **oldest** end.

@@ -902,10 +902,38 @@ INV-C5.
 - `lorebook_provider.dart` — CRUD + activations + settings (SharedPreferences)
 
 ### Search Type System
-- `searchType`: `'keys'` | `'vector'` | `'both'`
-- `'keys'` — keyword-only (default)
+- `searchType`: `'keyword'` | `'vector'` | `'both'`
+- `'keyword'` — keyword-only (default)
 - `'vector'` — vector-only semantic search
 - `'both'` — combined (keyword results deduplicated from vector budget)
+
+### What is embedded
+
+`lorebook_embedding_text.dart` owns both halves of this and every caller goes
+through it — the indexer, the session-overlay worker and the search-time
+fingerprint check. A second implementation of either half makes the stored hash
+disagree with the recomputed one, and the entry drops out of the vector pass
+with no error to show for it.
+
+- **Text.** The book's `embeddingTarget` picks the field: `content` (the entry
+  body, the default), `comment` (the title), `keys` (primary keys joined), or
+  `both` (title and body). A target whose field is empty on a given entry falls
+  back to the body, so one book-wide setting cannot make an untitled or keyless
+  entry unindexable. SillyTavern only ever embeds `content`
+  (`activateWorldInfo` inserts `{ text: x.content }`), so the default matches it
+  and the other targets are Glaze additions.
+- **Pools.** `lorebookVectorPoolFor` sorts each entry into the *main* pool
+  (its own `vectorSearch` flag, or every entry when the book sets
+  `vectorizeAllEntries` — SillyTavern's `enabled_for_all`), the *keyless
+  fallback* pool (no keys and no secondaryKeys, so the keyword scan can never
+  reach it), or neither. Disabled, `constant` and `excludeFromVectorization`
+  entries are in no pool, and the indexer purges any embedding an excluded
+  entry still carries.
+- **Query.** The chat text, never the keys: a focused query (current text plus
+  the recent *user* messages within `vectorScanDepth`) and a wider one (the
+  same window, both roles), each stripped of HTML tags, `(OOC: …)` and base64
+  images. Keys re-enter only as the hybrid boost on top of the cosine score —
+  entry title in the query, key overlap, retrieval-hint token overlap.
 
 ### Recursive Scan Bounds
 - Max iterations: 5 when `recursiveScan == true`, else 1

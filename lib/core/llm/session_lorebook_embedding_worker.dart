@@ -9,6 +9,7 @@ import '../models/lorebook.dart';
 import '../utils/cast_helpers.dart';
 import 'embedding_service.dart';
 import 'lorebook_embedding_service.dart';
+import 'lorebook_embedding_text.dart';
 
 class SessionLorebookEmbeddingWorker {
   SessionLorebookEmbeddingWorker({
@@ -110,7 +111,7 @@ class SessionLorebookEmbeddingWorker {
       return;
     }
     final entry = sourceEntry.copyWith(content: overlay.content);
-    if (!_isIndexable(entry)) {
+    if (!_isIndexable(entry, book)) {
       await _db.transaction(() async {
         if (!await _isCurrent(job)) return;
         await _embeddingRepo.deleteByEntryId(_embeddingId(job));
@@ -124,9 +125,7 @@ class SessionLorebookEmbeddingWorker {
       return;
     }
 
-    final text = book.settings?.embeddingTarget == 'keys'
-        ? entry.keys.join(', ')
-        : entry.content;
+    final text = lorebookEmbeddingText(entry, book.settings?.embeddingTarget);
     final hints = LorebookEmbeddingService.extractRetrievalHints(entry);
     final textHash = computeHash(
       LorebookEmbeddingService.buildEmbeddingFingerprint(entry, text),
@@ -204,12 +203,11 @@ class SessionLorebookEmbeddingWorker {
     );
   }
 
-  bool _isIndexable(LorebookEntry entry) =>
-      entry.enabled &&
-      !entry.constant &&
-      !entry.excludeFromVectorization &&
-      (entry.vectorSearch ||
-          (entry.keys.isEmpty && entry.secondaryKeys.isEmpty));
+  bool _isIndexable(LorebookEntry entry, Lorebook book) =>
+      isLorebookEntryIndexable(
+        entry,
+        vectorizeAll: book.settings?.vectorizeAllEntries ?? false,
+      );
 
   String _embeddingId(SessionLorebookEmbeddingJobRow job) =>
       '${job.chatSessionId}:${job.lorebookId}:${job.entryId}';

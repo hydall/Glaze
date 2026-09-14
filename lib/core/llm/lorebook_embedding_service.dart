@@ -4,6 +4,7 @@ import '../models/lorebook.dart';
 import '../db/repositories/embedding_repo.dart';
 import '../utils/cast_helpers.dart';
 import 'embedding_service.dart';
+import 'lorebook_embedding_text.dart';
 import 'retrieval_hints.dart';
 
 class LorebookEmbeddingService {
@@ -22,7 +23,8 @@ class LorebookEmbeddingService {
     void Function(int current, int total, String entryName)? onProgress,
     bool retryFailedOnly = false,
     bool forceReindex = false,
-    String embeddingTarget = 'content',
+    String embeddingTarget = LorebookEmbeddingTarget.content,
+    bool vectorizeAll = false,
   }) async {
     int indexed = 0;
     int skipped = 0;
@@ -30,18 +32,14 @@ class LorebookEmbeddingService {
     bool rateLimited = false;
     int retryAfter = 0;
 
-    // Index two pools of entries (Marinara analog for semantic fallback):
-    // (1) entries with vectorSearch=true — explicit opt-in to vector search.
-    // (2) keyless entries (no keys AND no secondaryKeys) — these cannot
-    //     activate via keyword scan, so we index them so the semantic-
-    //     fallback path in LorebookVectorSearch can activate them via
-    //     cosine similarity. Excluded entries (excludeFromVectorization)
-    //     are dropped from both pools and their existing embeddings are
-    //     purged. Rationale: excludeFromVectorization is a user opt-out for
-    //     spoiler entries or entries that should only activate via keyword,
-    //     never via semantic similarity (Marinara analog). Semantic fallback
-    //     for keyless entries was added so they can activate via cosine
-    //     instead of being dead weight.
+    // Both embedding pools are indexed here — the main one (entries that opt
+    // into vector search, or every entry when the book sets vectorizeAll) and
+    // the keyless fallback pool, whose entries cannot activate by keyword at
+    // all and would otherwise be dead weight. lorebookVectorPoolFor decides;
+    // the search asks the same function, so the two cannot disagree about
+    // what is supposed to be in the index. Entries opted out of embedding
+    // (excludeFromVectorization — spoilers, keyword-only entries) are dropped
+    // from both pools and any embedding they still carry is purged.
     final excluded = entries
         .where((e) => e.excludeFromVectorization && e.enabled && !e.constant)
         .toList();
@@ -50,13 +48,7 @@ class LorebookEmbeddingService {
       await _repo.deleteByEntryId(namespacedId);
     }
     final indexable = entries
-        .where(
-          (e) =>
-              e.enabled &&
-              !e.constant &&
-              !e.excludeFromVectorization &&
-              (e.vectorSearch || (e.keys.isEmpty && e.secondaryKeys.isEmpty)),
-        )
+        .where((e) => isLorebookEntryIndexable(e, vectorizeAll: vectorizeAll))
         .toList();
 
     for (int i = 0; i < indexable.length; i++) {
@@ -67,7 +59,7 @@ class LorebookEmbeddingService {
         entry.comment.isNotEmpty ? entry.comment : entry.id,
       );
 
-      final text = _getEmbeddingText(entry, embeddingTarget);
+      final text = lorebookEmbeddingText(entry, embeddingTarget);
       final hints = extractRetrievalHints(entry);
       final fingerprint = buildEmbeddingFingerprint(entry, text);
       final textHash = computeHash(fingerprint);
@@ -140,7 +132,7 @@ class LorebookEmbeddingService {
 
         for (int j = i + 1; j < indexable.length; j++) {
           final laterEntry = indexable[j];
-          final laterText = _getEmbeddingText(laterEntry, embeddingTarget);
+          final laterText = lorebookEmbeddingText(laterEntry, embeddingTarget);
           final laterHash = computeHash(
             buildEmbeddingFingerprint(laterEntry, laterText),
           );
@@ -192,13 +184,6 @@ class LorebookEmbeddingService {
       rateLimited: rateLimited,
       retryAfter: retryAfter,
     );
-  }
-
-  String _getEmbeddingText(LorebookEntry entry, String embeddingTarget) {
-    if (embeddingTarget == 'keys') {
-      return entry.keys.join(', ');
-    }
-    return entry.content;
   }
 
   static String buildEmbeddingFingerprint(LorebookEntry entry, String text) {

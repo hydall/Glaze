@@ -1195,6 +1195,8 @@
   "target_content": "Содержимое записи",
   "target_comment": "Комментарий",
   "target_keys": "Ключи записи",
+  "target_comment_and_content": "Комментарий + содержимое",
+  "label_vectorize_all_entries": "Векторизовать все записи",
   "label_vector_scan_depth": "Глубина сканирования",
   "label_similarity_threshold": "Порог сходства",
   "label_top_k": "Макс. число векторных результатов",

@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/llm/lorebook_embedding_text.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../shared/theme/app_colors.dart';
@@ -39,7 +40,7 @@ class _LorebookPerBookSettingsScreenState
       caseSensitive: g.caseSensitive,
       matchWholeWords: g.matchWholeWords ? 'true' : 'false',
       vectorSearchEnabled: true,
-      embeddingTarget: 'content',
+      embeddingTarget: LorebookEmbeddingTarget.content,
       vectorThreshold: g.vectorThreshold,
       vectorTopK: g.vectorTopK,
     );
@@ -171,16 +172,38 @@ class _LorebookPerBookSettingsScreenState
                   ),
                   if (_settings.vectorSearchEnabled) ...[
                     const SizedBox(height: 8),
+                    _SwitchField(
+                      label: 'label_vectorize_all_entries'.tr(),
+                      value: _settings.vectorizeAllEntries,
+                      onChanged: (v) =>
+                          _update(_settings.copyWith(vectorizeAllEntries: v)),
+                    ),
+                    const SizedBox(height: 8),
                     _DropdownField<String>(
                       label: 'label_embedding_target'.tr(),
-                      value: _settings.embeddingTarget,
+                      value:
+                          LorebookEmbeddingTarget.values.contains(
+                            _settings.embeddingTarget,
+                          )
+                          ? _settings.embeddingTarget
+                          : LorebookEmbeddingTarget.content,
                       items: [
                         DropdownMenuItem(
-                            value: 'content', child: Text('target_content'.tr())),
+                          value: LorebookEmbeddingTarget.content,
+                          child: Text('target_content'.tr()),
+                        ),
                         DropdownMenuItem(
-                            value: 'comment', child: Text('target_comment'.tr())),
+                          value: LorebookEmbeddingTarget.comment,
+                          child: Text('target_comment'.tr()),
+                        ),
                         DropdownMenuItem(
-                            value: 'both', child: Text('search_type_both'.tr())),
+                          value: LorebookEmbeddingTarget.keys,
+                          child: Text('target_keys'.tr()),
+                        ),
+                        DropdownMenuItem(
+                          value: LorebookEmbeddingTarget.both,
+                          child: Text('target_comment_and_content'.tr()),
+                        ),
                       ],
                       onChanged: (v) =>
                           _update(_settings.copyWith(embeddingTarget: v)),

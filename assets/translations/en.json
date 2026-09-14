@@ -1188,6 +1188,8 @@
   "target_content": "Entry Content",
   "target_comment": "Comment",
   "target_keys": "Entry Keys",
+  "target_comment_and_content": "Comment + Content",
+  "label_vectorize_all_entries": "Vectorize All Entries",
   "label_vector_scan_depth": "Scan Depth",
   "label_similarity_threshold": "Similarity Threshold",
   "label_top_k": "Max Vector Results",

@@ -10,6 +10,7 @@ import 'transport/llm_capture_context.dart';
 import 'embedding_types.dart';
 import 'lorebook_activation.dart';
 import 'lorebook_embedding_service.dart';
+import 'lorebook_embedding_text.dart';
 import 'vector_math.dart';
 
 class VectorSearchResult {
@@ -81,27 +82,25 @@ class LorebookVectorSearch {
     final effectiveScanDepth = configuredScanDepth ?? 5;
 
     final vectorEntries = <(LorebookEntry, String)>[];
-    // NEW (patch #4 follow-up — Marinara analog): semantic fallback pool
-    // for keyless entries. Entries with no keys AND no secondaryKeys cannot
-    // activate via keyword scan; this fallback activates them via cosine
-    // similarity against the current chat text. Threshold is lower (default
-    // 0.3) and topK is smaller (default 3) to avoid flooding the prompt.
-    // Rationale: keyless entries cannot activate via keyword scan; this
-    // semantic fallback activates them via cosine similarity (Marinara
-    // supplementary system 4 analog).
+    // Semantic fallback pool for keyless entries (Marinara analog). Entries
+    // with no keys AND no secondaryKeys cannot activate via keyword scan; this
+    // fallback activates them via cosine similarity against the current chat
+    // text, with a lower threshold (default 0.3) and a smaller topK (default
+    // 3) so they cannot flood the prompt. lorebookVectorPoolFor splits the
+    // two pools — the indexer asks the same function, so an entry the search
+    // expects a vector for is one the indexer actually embedded.
     final fallbackEntries = <(LorebookEntry, String)>[];
     for (final lb in activeLorebooks) {
+      final vectorizeAll = lb.settings?.vectorizeAllEntries ?? false;
       for (final entry in lb.entries) {
-        if (!entry.enabled || entry.constant) continue;
-        if (entry.excludeFromVectorization) continue;
         if (_isFilteredByCharacter(entry, character)) continue;
-        if (entry.vectorSearch) {
-          vectorEntries.add((entry, lb.id));
-        } else if (entry.keys.isEmpty && entry.secondaryKeys.isEmpty) {
-          // Keyless + vectorSearch=false → eligible for semantic fallback.
-          // These are indexed by LorebookEmbeddingService (which now
-          // extends its indexable pool to include keyless entries).
-          fallbackEntries.add((entry, lb.id));
+        switch (lorebookVectorPoolFor(entry, vectorizeAll: vectorizeAll)) {
+          case LorebookVectorPool.main:
+            vectorEntries.add((entry, lb.id));
+          case LorebookVectorPool.fallback:
+            fallbackEntries.add((entry, lb.id));
+          case LorebookVectorPool.none:
+            break;
         }
       }
     }
@@ -465,17 +464,15 @@ class LorebookVectorSearch {
         .toList();
   }
 
+  /// The text the indexer would have embedded for [entry], rebuilt so the
+  /// stored fingerprint can be checked against the entry as it stands now.
   String _getEmbeddingText(
     LorebookEntry entry,
     List<Lorebook> lorebooks,
     String lbId,
   ) {
     final lb = lorebooks.where((l) => l.id == lbId).firstOrNull;
-    final target = lb?.settings?.embeddingTarget ?? 'content';
-    if (target == 'keys') {
-      return entry.keys.join(', ');
-    }
-    return entry.content;
+    return lorebookEmbeddingText(entry, lb?.settings?.embeddingTarget);
   }
 
   String _embeddingId({
