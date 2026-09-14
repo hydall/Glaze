@@ -627,7 +627,6 @@ class _GlobalSettingsSection extends ConsumerStatefulWidget {
 
 class _GlobalSettingsSectionState
     extends ConsumerState<_GlobalSettingsSection> {
-  bool _expanded = false;
   late final TextEditingController _scanDepthCtrl;
   late final TextEditingController _maxEntriesCtrl;
   late final TextEditingController _reserveCtrl;
@@ -663,219 +662,183 @@ class _GlobalSettingsSectionState
   Widget build(BuildContext context) {
     final s = ref.watch(lorebookSettingsProvider);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: GlassSurface(
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: context.cs.outlineVariant),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            InkWell(
-              onTap: () => setState(() => _expanded = !_expanded),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'section_global_settings'.tr(),
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: context.cs.onSurface,
-                        ),
-                      ),
-                    ),
-                    AnimatedRotation(
-                      turns: _expanded ? 0.5 : 0,
-                      duration: const Duration(milliseconds: 250),
-                      child: Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeOutCubic,
-              alignment: Alignment.topCenter,
-              child: _expanded
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: _buildItems(s),
-                    )
-                  : const SizedBox(width: double.infinity),
-            ),
-            const SizedBox(height: 6),
-          ],
-        ),
-      ),
+    return MenuCollapsibleSection(
+      label: 'section_global_settings'.tr(),
+      children: _buildGroups(s),
     );
   }
 
-  List<Widget> _buildItems(LorebookGlobalSettings s) {
+  /// The global knobs, grouped the way the scan actually runs: what matches
+  /// first, then what the semantic pass adds, then how the survivors are
+  /// placed in the prompt. They used to be one flat run of rows in which the
+  /// two matching switches sat below the reserve fields, three screens away
+  /// from the scan depth they belong with.
+  List<Widget> _buildGroups(LorebookGlobalSettings s) {
     // With semantic search off in the API there is nothing to search against,
-    // so the search-type picker and every vector-only knob below it are
-    // dropped and the screen behaves as keyword-only.
+    // so the search-type picker and the whole vector group below are dropped
+    // and the section behaves as keyword-only.
     final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
     final isVector = vectorAvailable && s.searchType != 'keyword';
+
     return [
-      if (vectorAvailable)
-        MenuSelectorItem(
-          label: 'label_search_type'.tr(),
-          currentValue: switch (s.searchType) {
-            'vector' => 'search_type_vector'.tr(),
-            'both' => 'search_type_both'.tr(),
-            _ => 'search_type_keys'.tr(),
-          },
-          onTap: () => showLorebookOptionSheet<String>(
-            context,
-            title: 'label_search_type'.tr(),
-            current: s.searchType,
-            options: [
-              LorebookOption('keyword', 'search_type_keys'.tr()),
-              LorebookOption('vector', 'search_type_vector'.tr()),
-              LorebookOption('both', 'search_type_both'.tr()),
-            ],
-            onSelect: (v) => _update(s.copyWith(searchType: v)),
+      MenuGroup(
+        header: 'lorebook_matching'.tr(),
+        helpTerm: 'lorebook-keys',
+        items: [
+          if (vectorAvailable)
+            MenuSelectorItem(
+              label: 'label_search_type'.tr(),
+              currentValue: switch (s.searchType) {
+                'vector' => 'search_type_vector'.tr(),
+                'both' => 'search_type_both'.tr(),
+                _ => 'search_type_keys'.tr(),
+              },
+              onTap: () => showLorebookOptionSheet<String>(
+                context,
+                title: 'label_search_type'.tr(),
+                current: s.searchType,
+                options: [
+                  LorebookOption('keyword', 'search_type_keys'.tr()),
+                  LorebookOption('vector', 'search_type_vector'.tr()),
+                  LorebookOption('both', 'search_type_both'.tr()),
+                ],
+                onSelect: (v) => _update(s.copyWith(searchType: v)),
+              ),
+            ),
+          MenuSelectorItem(
+            label: 'label_key_search_mode'.tr(),
+            currentValue: s.keySearchMode == 'glaze'
+                ? 'match_whole_words_glaze'.tr()
+                : 'match_whole_words_st'.tr(),
+            onTap: () => showLorebookOptionSheet<String>(
+              context,
+              title: 'label_key_search_mode'.tr(),
+              current: s.keySearchMode,
+              options: [
+                LorebookOption('tavern', 'match_whole_words_st'.tr()),
+                LorebookOption('glaze', 'match_whole_words_glaze'.tr()),
+              ],
+              onSelect: (v) => _update(s.copyWith(keySearchMode: v)),
+            ),
           ),
-        ),
-      MenuSelectorItem(
-        label: 'label_key_search_mode'.tr(),
-        currentValue: s.keySearchMode == 'glaze'
-            ? 'match_whole_words_glaze'.tr()
-            : 'match_whole_words_st'.tr(),
-        onTap: () => showLorebookOptionSheet<String>(
-          context,
-          title: 'label_key_search_mode'.tr(),
-          current: s.keySearchMode,
-          options: [
-            LorebookOption('tavern', 'match_whole_words_st'.tr()),
-            LorebookOption('glaze', 'match_whole_words_glaze'.tr()),
-          ],
-          onSelect: (v) => _update(s.copyWith(keySearchMode: v)),
-        ),
-      ),
-      _NumberItem(
-        label: isVector
-            ? 'label_vector_scan_depth'.tr()
-            : 'label_scan_depth_lore'.tr(),
-        controller: _scanDepthCtrl,
-        onChanged: (v) {
-          final n = int.tryParse(v);
-          if (n != null && n >= 1 && n <= 100) {
-            _update(s.copyWith(scanDepth: n));
-          }
-        },
-      ),
-      _NumberItem(
-        label: 'label_max_injected_entries'.tr(),
-        controller: _maxEntriesCtrl,
-        onChanged: (v) {
-          final n = int.tryParse(v);
-          if (n != null && n >= 1 && n <= 100) {
-            _update(s.copyWith(maxInjectedEntries: n));
-          }
-        },
-      ),
-      MenuSelectorItem(
-        label: 'label_injection_position'.tr(),
-        currentValue: switch (s.injectionPosition) {
-          'worldInfoAfter' => 'pos_after_char'.tr(),
-          'lorebooksMacro' => 'pos_lorebooks_macro'.tr(),
-          _ => 'pos_before_char'.tr(),
-        },
-        onTap: () => showLorebookOptionSheet<String>(
-          context,
-          title: 'label_injection_position'.tr(),
-          current: s.injectionPosition,
-          options: [
-            LorebookOption('worldInfoBefore', 'pos_before_char'.tr()),
-            LorebookOption('worldInfoAfter', 'pos_after_char'.tr()),
-            LorebookOption('lorebooksMacro', 'pos_lorebooks_macro'.tr()),
-          ],
-          onSelect: (v) => _update(s.copyWith(injectionPosition: v)),
-        ),
-      ),
-      MenuSelectorItem(
-        label: 'label_lorebook_reserve_mode'.tr(),
-        currentValue: s.reserveMode == 'percent'
-            ? 'lorebook_reserve_percent'.tr()
-            : 'lorebook_reserve_absolute'.tr(),
-        onTap: () => showLorebookOptionSheet<String>(
-          context,
-          title: 'label_lorebook_reserve_mode'.tr(),
-          current: s.reserveMode,
-          options: [
-            LorebookOption('percent', 'lorebook_reserve_percent'.tr()),
-            LorebookOption('tokens', 'lorebook_reserve_absolute'.tr()),
-          ],
-          onSelect: (v) => _update(s.copyWith(reserveMode: v)),
-        ),
-      ),
-      _NumberItem(
-        label: s.reserveMode == 'percent'
-            ? 'label_lorebook_reserve_percent'.tr()
-            : 'label_lorebook_reserve_tokens'.tr(),
-        controller: _reserveCtrl,
-        onChanged: (v) {
-          final n = int.tryParse(v);
-          final max = s.reserveMode == 'percent' ? 100 : 2147483647;
-          if (n != null && n >= 0 && n <= max) {
-            _update(s.copyWith(reserveValue: n));
-          }
-        },
-      ),
-      if (isVector) ...[
-        MenuRangeItem(
-          label: 'label_similarity_threshold'.tr(),
-          value: s.vectorThreshold,
-          min: 0,
-          max: 1,
-          divisions: 100,
-          onChanged: (v) => _update(
-            s.copyWith(vectorThreshold: double.parse(v.toStringAsFixed(2))),
+          _NumberItem(
+            label: isVector
+                ? 'label_vector_scan_depth'.tr()
+                : 'label_scan_depth_lore'.tr(),
+            controller: _scanDepthCtrl,
+            onChanged: (v) {
+              final n = int.tryParse(v);
+              if (n != null && n >= 1 && n <= 100) {
+                _update(s.copyWith(scanDepth: n));
+              }
+            },
           ),
-        ),
-        _NumberItem(
-          label: 'label_top_k'.tr(),
-          controller: _topKCtrl,
-          onChanged: (v) {
-            final n = int.tryParse(v);
-            if (n != null && n >= 1 && n <= 50) {
-              _update(s.copyWith(vectorTopK: n));
-            }
-          },
-        ),
-        if (s.searchType == 'both')
-          MenuRangeItem(
-            label: 'label_kw_vector_split'.tr(),
-            value: s.keywordVectorSplit.toDouble(),
-            min: 0,
-            max: 100,
-            divisions: 100,
-            onChanged: (v) =>
-                _update(s.copyWith(keywordVectorSplit: v.round())),
+          MenuSwitchItem(
+            label: 'label_recursive_scan'.tr(),
+            value: s.recursiveScan,
+            onChanged: (v) => _update(s.copyWith(recursiveScan: v)),
           ),
-      ],
-      MenuSwitchItem(
-        label: 'label_recursive_scan'.tr(),
-        value: s.recursiveScan,
-        onChanged: (v) => _update(s.copyWith(recursiveScan: v)),
+          MenuSwitchItem(
+            label: 'label_case_sensitive'.tr(),
+            value: s.caseSensitive,
+            onChanged: (v) => _update(s.copyWith(caseSensitive: v)),
+          ),
+          MenuSwitchItem(
+            label: 'label_match_whole_words'.tr(),
+            value: s.matchWholeWords,
+            onChanged: (v) => _update(s.copyWith(matchWholeWords: v)),
+          ),
+        ],
       ),
-      MenuSwitchItem(
-        label: 'label_case_sensitive'.tr(),
-        value: s.caseSensitive,
-        onChanged: (v) => _update(s.copyWith(caseSensitive: v)),
-      ),
-      MenuSwitchItem(
-        label: 'label_match_whole_words'.tr(),
-        value: s.matchWholeWords,
-        onChanged: (v) => _update(s.copyWith(matchWholeWords: v)),
+      if (isVector)
+        MenuGroup(
+          header: 'section_vector_search'.tr(),
+          items: [
+            MenuRangeItem(
+              label: 'label_similarity_threshold'.tr(),
+              value: s.vectorThreshold,
+              min: 0,
+              max: 1,
+              divisions: 100,
+              onChanged: (v) => _update(
+                s.copyWith(vectorThreshold: double.parse(v.toStringAsFixed(2))),
+              ),
+            ),
+            _NumberItem(
+              label: 'label_top_k'.tr(),
+              controller: _topKCtrl,
+              onChanged: (v) {
+                final n = int.tryParse(v);
+                if (n != null && n >= 1 && n <= 50) {
+                  _update(s.copyWith(vectorTopK: n));
+                }
+              },
+            ),
+          ],
+        ),
+      MenuGroup(
+        header: 'section_injection_rules'.tr(),
+        helpTerm: 'lorebook-budget',
+        items: [
+          _NumberItem(
+            label: 'label_max_injected_entries'.tr(),
+            controller: _maxEntriesCtrl,
+            onChanged: (v) {
+              final n = int.tryParse(v);
+              if (n != null && n >= 1 && n <= 100) {
+                _update(s.copyWith(maxInjectedEntries: n));
+              }
+            },
+          ),
+          MenuSelectorItem(
+            label: 'label_injection_position'.tr(),
+            currentValue: switch (s.injectionPosition) {
+              'worldInfoAfter' => 'pos_after_char'.tr(),
+              'lorebooksMacro' => 'pos_lorebooks_macro'.tr(),
+              _ => 'pos_before_char'.tr(),
+            },
+            onTap: () => showLorebookOptionSheet<String>(
+              context,
+              title: 'label_injection_position'.tr(),
+              current: s.injectionPosition,
+              options: [
+                LorebookOption('worldInfoBefore', 'pos_before_char'.tr()),
+                LorebookOption('worldInfoAfter', 'pos_after_char'.tr()),
+                LorebookOption('lorebooksMacro', 'pos_lorebooks_macro'.tr()),
+              ],
+              onSelect: (v) => _update(s.copyWith(injectionPosition: v)),
+            ),
+          ),
+          MenuSelectorItem(
+            label: 'label_lorebook_reserve_mode'.tr(),
+            currentValue: s.reserveMode == 'percent'
+                ? 'lorebook_reserve_percent'.tr()
+                : 'lorebook_reserve_absolute'.tr(),
+            onTap: () => showLorebookOptionSheet<String>(
+              context,
+              title: 'label_lorebook_reserve_mode'.tr(),
+              current: s.reserveMode,
+              options: [
+                LorebookOption('percent', 'lorebook_reserve_percent'.tr()),
+                LorebookOption('tokens', 'lorebook_reserve_absolute'.tr()),
+              ],
+              onSelect: (v) => _update(s.copyWith(reserveMode: v)),
+            ),
+          ),
+          _NumberItem(
+            label: s.reserveMode == 'percent'
+                ? 'label_lorebook_reserve_percent'.tr()
+                : 'label_lorebook_reserve_tokens'.tr(),
+            controller: _reserveCtrl,
+            onChanged: (v) {
+              final n = int.tryParse(v);
+              final max = s.reserveMode == 'percent' ? 100 : 2147483647;
+              if (n != null && n >= 0 && n <= max) {
+                _update(s.copyWith(reserveValue: n));
+              }
+            },
+          ),
+        ],
       ),
     ];
   }

@@ -221,8 +221,10 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
     final hasCatalog = catalogTerms.isNotEmpty || _isPositive(catalogScore);
     final matchedTerms = candidate['excerptMatchedTerms'];
     final chunkIndexes = candidate['excerptChunkIndexes'];
-    // Every row opens, selected or not: the reason a candidate was left out is
-    // exactly what its expanded record is for.
+    // Every row opens, selected or not: the expanded record carries the full
+    // sentence, the chunk detail and the matched terms. The row itself only
+    // shows the short form, and only when the candidate missed.
+    final shortReason = selected ? null : memoryReasonShortLabel(reason);
     final expanded = _expandedEntryIds.contains(entryId);
 
     return Padding(
@@ -258,11 +260,31 @@ class _MemoryActivitySectionState extends State<MemoryActivitySection> {
                     ),
                     const SizedBox(width: 7),
                     Expanded(
-                      child: Text(
-                        label,
-                        maxLines: expanded ? 4 : 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            label,
+                            maxLines: expanded ? 4 : 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          // Why it was left out, in a couple of words, right on
+                          // the row: a list of skipped candidates used to look
+                          // identical until each one was opened.
+                          if (shortReason != null)
+                            Text(
+                              shortReason,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.orangeAccent,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                     Icon(

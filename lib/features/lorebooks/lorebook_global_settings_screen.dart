@@ -61,7 +61,7 @@ class _LorebookGlobalSettingsScreenState
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                _SectionHeader('search'.tr(), helpTerm: 'lorebook-keys'),
+                _SectionHeader('lorebook_matching'.tr(), helpTerm: 'lorebook-keys'),
                 _DropdownField<String>(
                   label: 'label_key_search_mode'.tr(),
                   value: settings.keySearchMode,
@@ -110,7 +110,49 @@ class _LorebookGlobalSettingsScreenState
                   max: 100,
                   onChanged: (v) => _update(settings.copyWith(scanDepth: v)),
                 ),
+                const SizedBox(height: 12),
+                _SwitchField(
+                  label: 'label_case_sensitive'.tr(),
+                  value: settings.caseSensitive,
+                  onChanged: (v) =>
+                      _update(settings.copyWith(caseSensitive: v)),
+                ),
+                _SwitchField(
+                  label: 'label_recursive_scan'.tr(),
+                  value: settings.recursiveScan,
+                  onChanged: (v) =>
+                      _update(settings.copyWith(recursiveScan: v)),
+                ),
+                _SwitchField(
+                  label: 'label_match_whole_words'.tr(),
+                  value: settings.matchWholeWords,
+                  onChanged: (v) =>
+                      _update(settings.copyWith(matchWholeWords: v)),
+                ),
                 const SizedBox(height: 24),
+
+                if (vectorAvailable && settings.searchType != 'keyword') ...[
+                  _SectionHeader('section_vector_search'.tr()),
+                  _SliderField(
+                    label: 'label_similarity_threshold'.tr(),
+                    value: settings.vectorThreshold,
+                    min: 0.0,
+                    max: 1.0,
+                    divisions: 20,
+                    displayText: settings.vectorThreshold.toStringAsFixed(2),
+                    onChanged: (v) =>
+                        _update(settings.copyWith(vectorThreshold: v)),
+                  ),
+                  const SizedBox(height: 12),
+                  _NumberField(
+                    label: 'label_top_k'.tr(),
+                    value: settings.vectorTopK,
+                    min: 1,
+                    max: 50,
+                    onChanged: (v) => _update(settings.copyWith(vectorTopK: v)),
+                  ),
+                  const SizedBox(height: 24),
+                ],
 
                 _SectionHeader('section_injection_rules'.tr()),
                 _NumberField(
@@ -172,63 +214,6 @@ class _LorebookGlobalSettingsScreenState
                 ),
                 const SizedBox(height: 24),
 
-                if (vectorAvailable && settings.searchType != 'keyword') ...[
-                  _SectionHeader('section_vector_search'.tr()),
-                  _SliderField(
-                    label: 'label_similarity_threshold'.tr(),
-                    value: settings.vectorThreshold,
-                    min: 0.0,
-                    max: 1.0,
-                    divisions: 20,
-                    displayText: settings.vectorThreshold.toStringAsFixed(2),
-                    onChanged: (v) =>
-                        _update(settings.copyWith(vectorThreshold: v)),
-                  ),
-                  const SizedBox(height: 12),
-                  _NumberField(
-                    label: 'label_top_k'.tr(),
-                    value: settings.vectorTopK,
-                    min: 1,
-                    max: 50,
-                    onChanged: (v) => _update(settings.copyWith(vectorTopK: v)),
-                  ),
-                  if (settings.searchType == 'both') ...[
-                    const SizedBox(height: 12),
-                    _SliderField(
-                      label: 'label_kw_vector_split'.tr(),
-                      value: settings.keywordVectorSplit.toDouble(),
-                      min: 0,
-                      max: 100,
-                      divisions: 20,
-                      displayText:
-                          '${settings.keywordVectorSplit}% key / ${100 - settings.keywordVectorSplit}% vec',
-                      onChanged: (v) => _update(
-                        settings.copyWith(keywordVectorSplit: v.round()),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                ],
-
-                _SectionHeader('lorebook_matching'.tr()),
-                _SwitchField(
-                  label: 'label_case_sensitive'.tr(),
-                  value: settings.caseSensitive,
-                  onChanged: (v) =>
-                      _update(settings.copyWith(caseSensitive: v)),
-                ),
-                _SwitchField(
-                  label: 'label_recursive_scan'.tr(),
-                  value: settings.recursiveScan,
-                  onChanged: (v) =>
-                      _update(settings.copyWith(recursiveScan: v)),
-                ),
-                _SwitchField(
-                  label: 'label_match_whole_words'.tr(),
-                  value: settings.matchWholeWords,
-                  onChanged: (v) =>
-                      _update(settings.copyWith(matchWholeWords: v)),
-                ),
               ],
             ),
           ),

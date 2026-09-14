@@ -15,10 +15,13 @@ import 'coverage_tone.dart';
 /// chips. Everything else opens on tap: why the entry did or did not reach the
 /// prompt, which keys fired, where they fired, the body text.
 ///
-/// The verdict is deliberately *not* on the collapsed line. It used to be a row
-/// of abbreviated pills there, which both squeezed the entry's name into an
-/// ellipsis and had no room to say what the abbreviation meant; expanded, the
-/// same verdict is a full sentence that wraps.
+/// The collapsed line carries the verdict only when it is bad news, and only on
+/// the subtitle line: a couple of words naming the cap that cut the entry, so a
+/// list of cut-offs can be read without tapping each one. It is not on the
+/// title line — that was a row of abbreviated pills once, which squeezed the
+/// entry's name into an ellipsis and still had no room to say what the
+/// abbreviation meant. Expanded, the same verdict is a full sentence that
+/// wraps.
 class CoverageEntryTile extends StatefulWidget {
   const CoverageEntryTile({super.key, required this.entry, this.dense = false});
 
@@ -45,6 +48,8 @@ class _CoverageEntryTileState extends State<CoverageEntryTile> {
       if (e.matchMessageIndex != null)
         'lorebook_matched_in_message'.tr(args: ['${e.matchMessageIndex! + 1}']),
     ].join(' · ');
+
+    final shortStatus = lorebookStatusShortLabel(e);
 
     return Padding(
       padding: EdgeInsets.symmetric(vertical: widget.dense ? 1 : 2),
@@ -73,19 +78,52 @@ class _CoverageEntryTileState extends State<CoverageEntryTile> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _titleRow(context, e),
-                        if (subtitle.isNotEmpty)
+                        if (shortStatus != null || subtitle.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
-                            child: Text(
-                              subtitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: context.cs.onSurfaceVariant.withValues(
-                                  alpha: 0.85,
-                                ),
-                              ),
+                            child: Row(
+                              children: [
+                                // The verdict rides the subtitle line, not the
+                                // title line: it answers "why is this one out?"
+                                // without a tap, and without pushing the
+                                // entry's own name into an ellipsis.
+                                if (shortStatus != null) ...[
+                                  Flexible(
+                                    child: Text(
+                                      shortStatus,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: statusColor,
+                                      ),
+                                    ),
+                                  ),
+                                  if (subtitle.isNotEmpty)
+                                    Text(
+                                      ' · ',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: context.cs.onSurfaceVariant
+                                            .withValues(alpha: 0.85),
+                                      ),
+                                    ),
+                                ],
+                                if (subtitle.isNotEmpty)
+                                  Flexible(
+                                    child: Text(
+                                      subtitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: context.cs.onSurfaceVariant
+                                            .withValues(alpha: 0.85),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         if (_expanded) ..._details(context, e, tone),

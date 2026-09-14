@@ -123,6 +123,7 @@ class _LorebookPerBookSettingsScreenState
                   min: 0,
                   max: 100,
                   hint: 'lorebook_global_default_hint'.tr(),
+                  description: 'lorebook_book_entry_cap_hint'.tr(),
                   onChanged: (v) => _update(
                       _settings.copyWith(maxInjectedEntries: v == 0 ? null : v)),
                 ),
@@ -271,6 +272,10 @@ class _NumberField extends StatefulWidget {
   final int min;
   final int max;
   final String? hint;
+
+  /// Muted line under the label, for a legend too long to sit in the field's
+  /// own placeholder (which is only as wide as the 80px input).
+  final String? description;
   final ValueChanged<int> onChanged;
 
   const _NumberField({
@@ -279,6 +284,7 @@ class _NumberField extends StatefulWidget {
     this.min = 0,
     this.max = 2147483647,
     this.hint,
+    this.description,
     required this.onChanged,
   });
 
@@ -333,9 +339,25 @@ class _NumberFieldState extends State<_NumberField> {
     return Row(
       children: [
         Expanded(
-          child: Text(widget.label,
-              style:
-                  TextStyle(color: context.cs.onSurfaceVariant, fontSize: 14)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.label,
+                  style: TextStyle(
+                      color: context.cs.onSurfaceVariant, fontSize: 14)),
+              if (widget.description != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2, right: 8),
+                  child: Text(widget.description!,
+                      style: TextStyle(
+                          fontSize: 11,
+                          height: 1.25,
+                          color: context.cs.onSurfaceVariant
+                              .withValues(alpha: 0.7))),
+                ),
+            ],
+          ),
         ),
         SizedBox(
           width: 80,

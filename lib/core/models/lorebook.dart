@@ -102,6 +102,11 @@ abstract class LorebookGlobalSettings with _$LorebookGlobalSettings {
     @Default('worldInfoBefore') String injectionPosition,
     @Default('tokens') String reserveMode,
     @Default(0) int reserveValue,
+    /// Not read by anything. The prompt build fills keyword slots first and
+    /// gives the remainder to the vector pass, capped by [vectorTopK] — it has
+    /// never split the budget by percentage. The field stays so a backup or a
+    /// sync payload written by an older build still round-trips; its editor
+    /// was removed.
     @Default(50) int keywordVectorSplit,
     @Default(0.45) double vectorThreshold,
     @Default(10) int vectorTopK,
@@ -148,6 +153,11 @@ abstract class LorebookSettings with _$LorebookSettings {
     @Default('content') String embeddingTarget,
     @Default(0.45) double vectorThreshold,
     @Default(10) int vectorTopK,
+    /// Not read by anything. The prompt build fills keyword slots first and
+    /// gives the remainder to the vector pass, capped by [vectorTopK] — it has
+    /// never split the budget by percentage. The field stays so a backup or a
+    /// sync payload written by an older build still round-trips; its editor
+    /// was removed.
     @Default(65) int keywordVectorSplit,
     @Default(5) int vectorScanDepth,
     @Default(true) bool vectorSearchEnabled,

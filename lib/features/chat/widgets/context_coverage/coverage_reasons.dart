@@ -70,6 +70,33 @@ String manifestSourceLabel(String source) => switch (source) {
   _ => source,
 };
 
+/// The same verdict as [memoryReasonLabel], cut to a couple of words so it fits
+/// the collapsed row. Null when there is nothing worth saying there: a selected
+/// candidate, or a code this build does not recognise — the expanded record
+/// still spells those out in full.
+String? memoryReasonShortLabel(String reason) => switch (reason) {
+  'source_visible_in_prompt' => 'coverage_memory_short_source_visible'.tr(),
+  'budget_trimmed' => 'coverage_memory_short_budget'.tr(),
+  'entry_cap' => 'coverage_memory_short_entry_cap'.tr(),
+  'chunk_budget_trimmed' => 'coverage_memory_short_chunk_budget'.tr(),
+  'chunk_rank_trimmed' => 'coverage_memory_short_chunk_rank'.tr(),
+  _ => null,
+};
+
+/// Why a lorebook entry missed the prompt, in a couple of words for the
+/// collapsed row. Null for an entry that made it in, or one that simply never
+/// matched — the row's colour and its greyed title already say that much.
+String? lorebookStatusShortLabel(CoverageEntry entry) {
+  if (!entry.activated) {
+    return entry.onCooldown ? 'coverage_lore_short_cooldown'.tr() : null;
+  }
+  return switch (entry.cutOff) {
+    CoverageCutOff.budget => 'coverage_lore_short_cut_budget'.tr(),
+    CoverageCutOff.bookLimit => 'coverage_lore_short_cut_book_limit'.tr(),
+    null => null,
+  };
+}
+
 /// Every sentence a lorebook coverage entry has earned, in reading order: the
 /// verdict first (in or out, and which cap cut it), then what qualifies it.
 List<String> lorebookCoverageReasons(CoverageEntry entry) => [
