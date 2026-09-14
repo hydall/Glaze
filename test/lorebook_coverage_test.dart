@@ -176,4 +176,103 @@ void main() {
 
     expect(entryNamed(result, 'k').activated, isFalse);
   });
+
+  test('an entry that ignores the budget is never cut off', () {
+    final result = run(
+      const [
+        Lorebook(
+          id: 'b',
+          name: 'Book',
+          entries: [
+            LorebookEntry(id: 'a', keys: ['castle'], order: 1, content: 'A'),
+            LorebookEntry(
+              id: 'free',
+              keys: ['castle'],
+              order: 2,
+              content: 'F',
+              ignoreBudget: true,
+            ),
+          ],
+        ),
+      ],
+      settings: const LorebookGlobalSettings(maxInjectedEntries: 1),
+    );
+
+    expect(entryNamed(result, 'a').cutOff, isNull);
+    expect(entryNamed(result, 'free').cutOff, isNull);
+    expect(result.cutOffCount, 0);
+    expect(result.injectedCount, 2);
+  });
+
+  test('an entry that ignores the budget also escapes a per-book cap', () {
+    final result = run(const [
+      Lorebook(
+        id: 'b',
+        name: 'Book',
+        settings: LorebookSettings(maxInjectedEntries: 1),
+        entries: [
+          LorebookEntry(id: 'a', keys: ['castle'], order: 1, content: 'A'),
+          LorebookEntry(
+            id: 'free',
+            keys: ['castle'],
+            order: 2,
+            content: 'F',
+            ignoreBudget: true,
+          ),
+        ],
+      ),
+    ]);
+
+    expect(entryNamed(result, 'a').cutOff, isNull);
+    expect(entryNamed(result, 'free').cutOff, isNull);
+    expect(result.cutOffCount, 0);
+  });
+
+  test('a per-book cap stored as zero is not a cap', () {
+    final result = run(const [
+      Lorebook(
+        id: 'b',
+        name: 'Book',
+        settings: LorebookSettings(maxInjectedEntries: 0),
+        entries: [
+          LorebookEntry(id: 'a', keys: ['castle'], order: 1, content: 'A'),
+          LorebookEntry(id: 'b', keys: ['castle'], order: 2, content: 'B'),
+        ],
+      ),
+    ]);
+
+    expect(entryNamed(result, 'a').cutOff, isNull);
+    expect(entryNamed(result, 'b').cutOff, isNull);
+    expect(result.injectedCount, 2);
+  });
+
+  test('a keyword entry rescued by the vector pass is reported once', () {
+    const entry = LorebookEntry(
+      id: 'k',
+      keys: ['dragon'],
+      content: 'K',
+      vectorSearch: true,
+      lorebookId: 'b',
+      lorebookName: 'Book',
+    );
+    const message = 'we ride to the castle at dawn';
+
+    final result = computeLorebookCoverage(
+      history: const [ChatMessage(id: 'm1', role: 'user', content: message)],
+      char: null,
+      textToScan: message,
+      chatId: null,
+      lorebooks: const [Lorebook(id: 'b', name: 'Book', entries: [entry])],
+      globalSettings: const LorebookGlobalSettings(searchType: 'both'),
+      activations: const LorebookActivations(),
+      vectorEntries: const [entry],
+    );
+
+    // Its key missed, but the vector pass reached it, so it is activated —
+    // once, not once as a vector hit and again as an inactive candidate.
+    expect(result.entries.where((e) => e.id == 'k').length, 1);
+    expect(entryNamed(result, 'k').activated, isTrue);
+    expect(result.totalCandidates, 1);
+    expect(result.inactiveCount, 0);
+  });
 }

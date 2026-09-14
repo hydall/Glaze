@@ -30,6 +30,10 @@ abstract class LorebookEntry with _$LorebookEntry {
     @Default('') String group,
     @Default(0) int groupProminence,
     LorebookCharacterFilter? characterFilter,
+    /// The entry opts out of the entry caps: neither the book's own
+    /// `maxInjectedEntries` nor the global one can cut it, and it spends no
+    /// slot, so it never pushes another activated entry out. It still has to
+    /// activate first — by key, by being constant, or through the vector pass.
     @Default(false) bool ignoreBudget,
     @Default(false) bool vectorSearch,
     @Default(true) bool useKeywordSearch,

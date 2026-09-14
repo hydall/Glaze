@@ -3,6 +3,7 @@ import '../models/chat_message.dart';
 import '../models/lorebook.dart';
 import 'glaze_matcher.dart';
 import 'lorebook_activation.dart';
+import 'lorebook_limits.dart';
 
 /// Why an activated entry still did not make it into the prompt.
 enum CoverageCutOff {
@@ -164,7 +165,7 @@ CoverageResult computeLorebookCoverage({
 
   if (activeLorebooks.isEmpty) return CoverageResult.empty;
 
-  final maxInjectedEntries = globalSettings.maxInjectedEntries.clamp(1, 100);
+  final maxInjectedEntries = resolveGlobalEntryCap(globalSettings);
   final candidates = <String, _Candidate>{};
 
   for (final lb in activeLorebooks) {
@@ -214,9 +215,7 @@ CoverageResult computeLorebookCoverage({
         wholeWords: effectiveWholeWords,
         scanDepth: effectiveScanDepth,
         recursiveScan: lbRecursiveScan,
-        maxInjectedEntries: (lbMaxInjected != null && lbMaxInjected > 0)
-            ? lbMaxInjected
-            : null,
+        maxInjectedEntries: resolvePerBookEntryCap(lbMaxInjected),
       );
     }
   }
@@ -369,7 +368,7 @@ CoverageResult computeLorebookCoverage({
   }
 
   // Separate constant entries from keyword-triggered ones.
-  // Constants are always injected and never count toward the slot cap.
+  // Constants are always injected and are never cut by the slot cap.
   final constantActivated =
       candidates.values.where((c) => c.activated && c.entry.constant).toList()
         ..sort((a, b) => a.entry.order.compareTo(b.entry.order));
@@ -378,9 +377,6 @@ CoverageResult computeLorebookCoverage({
       candidates.values.where((c) => c.activated && !c.entry.constant).toList()
         ..sort((a, b) => a.entry.order.compareTo(b.entry.order));
 
-  final notActivatedList = candidates.values.where((c) => !c.activated).toList()
-    ..sort((a, b) => a.entry.order.compareTo(b.entry.order));
-
   // Per-book caps come first, before the global budget — the same order as
   // `scanLorebooks` -> `applyLorebookPerBookLimits` -> `mergeKeywordVector`.
   final perBookCounts = <String, int>{};
@@ -388,7 +384,9 @@ CoverageResult computeLorebookCoverage({
   final bookLimitCutOff = <_Candidate>[];
   for (final c in keywordActivatedList) {
     final limit = c.maxInjectedEntries;
-    if (limit != null) {
+    // `ignoreBudget` opts the entry out of the book's cap and out of its
+    // tally, exactly as `applyLorebookPerBookLimits` does.
+    if (limit != null && !c.entry.ignoreBudget) {
       final used = perBookCounts[c.lorebookId] ?? 0;
       if (used >= limit) {
         c.cutOff = CoverageCutOff.bookLimit;
@@ -409,49 +407,85 @@ CoverageResult computeLorebookCoverage({
       .where((e) => !keywordActivatedIds.contains('${e.lorebookId}_${e.id}'))
       .toList();
 
+  // An entry that can match both ways is a candidate here AND a vector hit.
+  // When its keys missed, it is still activated — through the vector pass — so
+  // it must be reported once, as a vector hit, and not a second time as an
+  // inactive candidate.
+  final dedupedVectorIds = dedupedVectorEntries
+      .map((e) => '${e.lorebookId}_${e.id}')
+      .toSet();
+
+  final notActivatedList =
+      candidates.values
+          .where(
+            (c) =>
+                !c.activated &&
+                !dedupedVectorIds.contains('${c.lorebookId}_${c.entry.id}'),
+          )
+          .toList()
+        ..sort((a, b) => a.entry.order.compareTo(b.entry.order));
+
+  // Vector hits that are not candidates at all (vector-only entries) are the
+  // only ones that add to the candidate total; the rest are already counted.
+  final vectorOnlyCandidates = dedupedVectorEntries
+      .where((e) => !candidates.containsKey('${e.lorebookId}_${e.id}'))
+      .length;
+
   final hasVector = dedupedVectorEntries.isNotEmpty;
 
   // Apply the same keyword-first logic as mergeKeywordVector.
-  // Constants bypass this entirely — they are always in-budget.
-  // Keywords fill up to maxInjectedEntries; vectors fill remaining slots
-  // but no more than vectorTopK (hard cap, no carry-over from unused
-  // keyword slots). When constants already exceed `maxInjectedEntries`,
-  // clamp triggered-keyword slots to 0 so `.take()` never receives a
-  // negative count (RangeError).
+  // Constants are never cut, but they do spend slots; keywords fill what is
+  // left; vectors fill what the keyword pass did not use, but no more than
+  // vectorTopK (a hard cap, no carry-over from unused keyword slots).
+  // `ignoreBudget` entries are kept whatever the count says and spend no slot.
+  // When constants already exceed `maxInjectedEntries` the remainder clamps to
+  // 0 rather than going negative.
   final maxVector = globalSettings.vectorTopK;
 
-  final triggeredKeywordSlots =
-      maxInjectedEntries - constantActivated.length < 0
-      ? 0
-      : maxInjectedEntries - constantActivated.length;
-  final usedKeyword = withinBookLimit.take(triggeredKeywordSlots).toList();
+  final budgetedConstants = constantActivated
+      .where((c) => !c.entry.ignoreBudget)
+      .length;
+  var freeSlots = maxInjectedEntries - budgetedConstants;
+  if (freeSlots < 0) freeSlots = 0;
 
-  final keywordSlotCount = constantActivated.length + usedKeyword.length;
-  final remainingSlots = maxInjectedEntries - keywordSlotCount;
-  final vectorSlots = hasVector
-      ? (remainingSlots < maxVector ? remainingSlots : maxVector)
-      : 0;
-  final usableVectorSlots = vectorSlots < 0 ? 0 : vectorSlots;
-
-  final usedVector = dedupedVectorEntries.take(usableVectorSlots).toList();
-
-  // Keyword entries beyond the keyword budget are cut off by the entry cap.
-  final budgetCutOff = withinBookLimit.skip(usedKeyword.length).toList();
-  for (final c in budgetCutOff) {
-    c.cutOff = CoverageCutOff.budget;
+  final usedKeyword = <_Candidate>[];
+  final budgetCutOff = <_Candidate>[];
+  for (final c in withinBookLimit) {
+    if (c.entry.ignoreBudget) {
+      usedKeyword.add(c);
+      continue;
+    }
+    if (freeSlots == 0) {
+      c.cutOff = CoverageCutOff.budget;
+      budgetCutOff.add(c);
+      continue;
+    }
+    freeSlots--;
+    usedKeyword.add(c);
   }
 
-  // Vector entries beyond usableVectorSlots are cut off by the entry cap.
-  final vectorCutOffCount = dedupedVectorEntries.length > usableVectorSlots
-      ? dedupedVectorEntries.length - usableVectorSlots
+  var vectorSlots = hasVector
+      ? (freeSlots < maxVector ? freeSlots : maxVector)
       : 0;
-  final vectorInBudget = usedVector;
-  final vectorOverBudget = dedupedVectorEntries
-      .skip(usableVectorSlots)
-      .toList();
+  if (vectorSlots < 0) vectorSlots = 0;
+
+  final vectorInBudget = <LorebookEntry>[];
+  final vectorOverBudget = <LorebookEntry>[];
+  for (final e in dedupedVectorEntries) {
+    if (e.ignoreBudget) {
+      vectorInBudget.add(e);
+      continue;
+    }
+    if (vectorSlots == 0) {
+      vectorOverBudget.add(e);
+      continue;
+    }
+    vectorSlots--;
+    vectorInBudget.add(e);
+  }
 
   final totalCutOff =
-      budgetCutOff.length + bookLimitCutOff.length + vectorCutOffCount;
+      budgetCutOff.length + bookLimitCutOff.length + vectorOverBudget.length;
   // Constants are always active; keyword/vector cut-offs still count as "activated"
   // for the summary bar (they were triggered, just not injected).
   final totalActivated =
@@ -490,7 +524,7 @@ CoverageResult computeLorebookCoverage({
 
   return CoverageResult(
     entries: allEntries,
-    totalCandidates: candidates.length + dedupedVectorEntries.length,
+    totalCandidates: candidates.length + vectorOnlyCandidates,
     activatedCount: totalActivated + totalCutOff,
     cutOffCount: totalCutOff,
   );

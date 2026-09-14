@@ -5,6 +5,7 @@ import '../models/chat_message.dart';
 import '../models/lorebook.dart';
 import 'glaze_matcher.dart';
 import 'lorebook_activation.dart';
+import 'lorebook_limits.dart';
 
 final _rng = Random();
 
@@ -19,6 +20,10 @@ class ScannedEntry {
   final bool constant;
   final int? maxInjectedEntries;
 
+  /// The entry opts out of the entry caps: it is never cut by the per-book or
+  /// the global budget, and it does not spend a slot other entries could use.
+  final bool ignoreBudget;
+
   const ScannedEntry({
     required this.id,
     required this.comment,
@@ -29,6 +34,7 @@ class ScannedEntry {
     required this.lorebookId,
     required this.constant,
     this.maxInjectedEntries,
+    this.ignoreBudget = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -41,6 +47,7 @@ class ScannedEntry {
     'lorebookId': lorebookId,
     'constant': constant,
     'maxInjectedEntries': maxInjectedEntries,
+    'ignoreBudget': ignoreBudget,
   };
 
   factory ScannedEntry.fromJson(Map<String, dynamic> json) => ScannedEntry(
@@ -53,6 +60,7 @@ class ScannedEntry {
     lorebookId: json['lorebookId'] as String,
     constant: json['constant'] as bool,
     maxInjectedEntries: json['maxInjectedEntries'] as int?,
+    ignoreBudget: json['ignoreBudget'] as bool? ?? false,
   );
 }
 
@@ -134,7 +142,9 @@ List<ScannedEntry> scanLorebooks({
           recursiveScan: lbRecursiveScan,
           caseSensitive: lbCaseSensitive,
           matchWholeWords: lbMatchWholeWords,
-          maxInjectedEntries: lbSettings?.maxInjectedEntries,
+          maxInjectedEntries: resolvePerBookEntryCap(
+            lbSettings?.maxInjectedEntries,
+          ),
         ),
       );
     }
@@ -286,13 +296,6 @@ List<ScannedEntry> scanLorebooks({
   final constantEntries = allRelevantEntries.where((e) => e.constant).toList();
   var triggeredEntries = allRelevantEntries.where((e) => !e.constant).toList();
 
-  final perBookLimits = <String, int>{};
-  for (final c in candidateEntries) {
-    if (c.maxInjectedEntries != null && c.maxInjectedEntries! > 0) {
-      perBookLimits[c.lorebookId] = c.maxInjectedEntries!;
-    }
-  }
-
   if (applyPerBookLimits) {
     triggeredEntries = applyLorebookPerBookLimits(triggeredEntries);
   }
@@ -308,7 +311,9 @@ List<ScannedEntry> applyLorebookPerBookLimits(List<ScannedEntry> entries) {
   final filtered = <ScannedEntry>[];
   for (final entry in entries) {
     final limit = entry.maxInjectedEntries;
-    if (limit != null) {
+    // An entry that ignores the budget is neither cut by the book's cap nor
+    // counted against it, so it cannot push a normal entry out either.
+    if (limit != null && !entry.ignoreBudget) {
       final count = lorebookCounts[entry.lorebookId] ?? 0;
       if (count >= limit) continue;
       lorebookCounts[entry.lorebookId] = count + 1;
@@ -330,6 +335,7 @@ ScannedEntry _toScanned(_CandidateEntry c) => ScannedEntry(
   lorebookId: c.lorebookId,
   constant: c.entry.constant,
   maxInjectedEntries: c.maxInjectedEntries,
+  ignoreBudget: c.entry.ignoreBudget,
 );
 
 String _candidateKey(_CandidateEntry candidate) =>
