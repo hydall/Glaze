@@ -405,6 +405,8 @@
   "stat_messages": "Сообщений",
   "stat_gen_time": "Время генерации",
   "notification_generating": "Генерация ответа...",
+  "notification_extracting": "Извлечение персонажа...",
+  "notification_importing": "Импорт персонажа...",
   "magic_authors_notes": "Заметки автора",
   "label_tokenizer": "Токенайзер",
   "magic_summary": "Саммари чата",

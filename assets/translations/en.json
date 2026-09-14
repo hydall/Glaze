@@ -405,6 +405,8 @@
   "stat_messages": "Messages",
   "stat_gen_time": "Generation Time",
   "notification_generating": "Generating response...",
+  "notification_extracting": "Extracting character...",
+  "notification_importing": "Importing character...",
   "magic_authors_notes": "Author's Notes",
   "label_tokenizer": "Tokenizer",
   "magic_summary": "Chat Summary",

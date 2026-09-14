@@ -1,9 +1,11 @@
 import 'dart:convert';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/lorebook.dart';
+import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
@@ -135,6 +137,16 @@ class JanitorExtractor {
   }) async {
     final characterId = _parseCharacterId(url);
     final proxy = JanitorWebViewProxy.instance;
+    // An extraction is minutes of network round trips and an LLM call, and
+    // Android is free to freeze or kill a process whose activity is not
+    // visible. Generation survives being backgrounded because it holds a
+    // dataSync foreground service for its duration; nothing here did, so
+    // leaving the app part-way through simply lost the work. Same hold, same
+    // ref count, and a no-op on desktop.
+    final hold = await GenerationNotificationService.instance.acquireWorkHold(
+      title: 'Glaze',
+      text: 'notification_extracting'.tr(),
+    );
     proxy.setActive(true);
     try {
       // Catalog meta gives the public name/tags/scenario and first message we
@@ -320,6 +332,7 @@ class JanitorExtractor {
       );
     } finally {
       proxy.setActive(false);
+      await hold.release();
     }
   }
 
@@ -336,6 +349,34 @@ class JanitorExtractor {
   /// download whole and need neither a capture nor an LLM — are still pulled in
   /// and scoped to the new character.
   Future<CommitResult> commit(
+    ExtractionResult result, {
+    void Function(String phase)? onPhase,
+    bool rebuildLorebook = true,
+    bool attachPublicLorebooks = false,
+    Map<String, dynamic>? janitorMeta,
+  }) async {
+    // Held for the same reason as [extract]: the lorebook rebuild is an LLM
+    // call, and losing it after the capture already succeeded is the worst
+    // moment to be killed. A thin wrapper rather than a try/finally around
+    // the body, which returns from four places.
+    final hold = await GenerationNotificationService.instance.acquireWorkHold(
+      title: 'Glaze',
+      text: 'notification_importing'.tr(),
+    );
+    try {
+      return await _commit(
+        result,
+        onPhase: onPhase,
+        rebuildLorebook: rebuildLorebook,
+        attachPublicLorebooks: attachPublicLorebooks,
+        janitorMeta: janitorMeta,
+      );
+    } finally {
+      await hold.release();
+    }
+  }
+
+  Future<CommitResult> _commit(
     ExtractionResult result, {
     void Function(String phase)? onPhase,
     bool rebuildLorebook = true,

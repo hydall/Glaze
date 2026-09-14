@@ -72,6 +72,25 @@ class PostGenerationForegroundLease {
 /// Presentation lives in [MessageNotificationPresenter]; this class owns the
 /// policy around it — app lifecycle, which chat is on screen, and the
 /// foreground/wake-lock leases the generation pipeline takes out.
+/// A foreground hold for long work that is not a chat reply.
+///
+/// Deliberately does not count towards [GenerationNotificationService
+/// .isGenerating]: the process must stay alive, but nothing else should start
+/// treating the app as mid-generation.
+class ForegroundWorkHold {
+  ForegroundWorkHold._(this._service, this._acquired);
+
+  final GenerationNotificationService _service;
+  final bool _acquired;
+  bool _released = false;
+
+  Future<void> release() async {
+    if (_released) return;
+    _released = true;
+    if (_acquired) await _service._releaseForeground();
+  }
+}
+
 class GenerationNotificationService {
   GenerationNotificationService._();
   static final GenerationNotificationService instance =
@@ -288,6 +307,20 @@ class GenerationNotificationService {
       notificationText: 'Processing response...',
     );
     return PostGenerationForegroundLease._(this, acquired);
+  }
+
+  /// Holds the foreground for [title]/[text] until the returned hold is
+  /// released. On desktop this is a no-op that still hands back a hold, so
+  /// callers need no platform branch.
+  Future<ForegroundWorkHold> acquireWorkHold({
+    required String title,
+    required String text,
+  }) async {
+    final acquired = await _acquireForeground(
+      notificationTitle: title,
+      notificationText: text,
+    );
+    return ForegroundWorkHold._(this, acquired);
   }
 
   Future<void> onSyncStarted() async {
