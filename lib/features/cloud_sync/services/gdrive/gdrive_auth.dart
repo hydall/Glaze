@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/services/deep_link_service.dart';
+import '../../../../core/services/oauth_state.dart';
 import '../oauth_local_server.dart';
 import '../../sync_config.dart';
 
@@ -73,14 +74,23 @@ class GDriveAuth {
           '&scope=${Uri.encodeComponent(_scope)}&code_challenge=$codeChallenge&code_challenge_method=S256&state=$state'
           '&access_type=offline&prompt=consent';
       final deepLinkService = DeepLinkService.instance;
-      await launchUrl(Uri.parse(authUrl), mode: LaunchMode.externalApplication);
-      final callbackUri = await deepLinkService.waitForOAuthCallback('gdrive');
-      final code = callbackUri.queryParameters['code'];
-      final returnedState = callbackUri.queryParameters['state'];
-      if (code == null) throw StateError('No authorization code in callback');
-      if (returnedState != state) throw StateError('OAuth state mismatch');
-      await _handleCodeExchange(code, redirectUri);
-      return;
+      deepLinkService.beginOAuth('gdrive', state);
+      try {
+        await launchUrl(
+          Uri.parse(authUrl),
+          mode: LaunchMode.externalApplication,
+        );
+        final callbackUri = await deepLinkService.awaitOAuthCallback('gdrive');
+        final code = callbackUri.queryParameters['code'];
+        final returnedState = callbackUri.queryParameters['state'];
+        if (code == null) throw StateError('No authorization code in callback');
+        final mismatch = oauthStateMismatchMessage(state, returnedState);
+        if (mismatch != null) throw StateError(mismatch);
+        await _handleCodeExchange(code, redirectUri);
+        return;
+      } finally {
+        deepLinkService.endOAuth('gdrive', state);
+      }
     }
 
     final result = await OAuthLocalServer.authenticate(
