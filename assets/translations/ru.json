@@ -2863,7 +2863,7 @@
   "coverage_lore_status_constant": "Включена всегда (постоянная запись)",
   "coverage_lore_status_cut_budget": "Не вставлено: исчерпан лимит записей",
   "coverage_lore_status_cut_book_limit": "Не вставлено: исчерпан лимит записей этой книги",
-  "lorebook_book_entry_cap_hint": "0 — без ограничения на число записей из этой книги",
+  "lorebook_book_entry_cap_hint": "0 — без ограничения на число записей из этой книги; глобальный лимит всё ещё работает",
   "coverage_lore_short_cut_budget": "лимит записей",
   "coverage_lore_short_cut_book_limit": "лимит книги",
   "coverage_lore_short_cooldown": "остывает",

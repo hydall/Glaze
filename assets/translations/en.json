@@ -2836,7 +2836,7 @@
   "coverage_lore_status_constant": "Always on (constant entry)",
   "coverage_lore_status_cut_budget": "Not injected: the entry limit ran out",
   "coverage_lore_status_cut_book_limit": "Not injected: this book's own entry limit ran out",
-  "lorebook_book_entry_cap_hint": "0 means unlimited possible entries for this book",
+  "lorebook_book_entry_cap_hint": "0 means unlimited possible entries for this book — the global cap still applies",
   "coverage_lore_short_cut_budget": "entry cap",
   "coverage_lore_short_cut_book_limit": "book cap",
   "coverage_lore_short_cooldown": "cooling down",
