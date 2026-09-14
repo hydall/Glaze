@@ -17,8 +17,6 @@ import 'card_rewrite_operation_parser.dart';
 import 'card_rewriter_contracts.dart';
 import 'manual_rewrite_service.dart';
 
-const _writerMaxTokens = 40000;
-
 /// Runs one durable Card Evolution writer checkpoint from preparation through
 /// parsing and completion while preserving claim ownership.
 final class DurableWriterCallRunner {
@@ -260,7 +258,7 @@ final class DurableWriterCallRunner {
         (outcome = await executor(
           config: config!,
           prompt: call.prompt,
-          maxTokens: _writerMaxTokens,
+          maxTokens: config.maxTokens,
           temperature: 0.2,
           timeoutMs: timeoutMs,
           cancelToken: token,

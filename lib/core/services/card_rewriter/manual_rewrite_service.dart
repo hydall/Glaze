@@ -92,7 +92,6 @@ class ManualRewriteService {
     required this.canonLoader,
     required this.resolveModel,
     CardRewriteLlmExecutor? executor,
-    this.maxTokens = 4096,
     this.temperature = 0.2,
     this.timeoutMs = 60000,
     @visibleForTesting this.verifyStampRaceHook,
@@ -152,9 +151,7 @@ class ManualRewriteService {
   final Future<void> Function(int verifyAttempt)? verifyStampRaceHook;
   final Future<void> Function()? beforePersistHook;
 
-  /// Writer-lane generation limits. Explicit per the contract; dedicated
-  /// rewrite tuning settings are a later (post-4C) phase.
-  final int maxTokens;
+  /// Writer-lane generation tuning not owned by the selected API preset.
   final double temperature;
   final int timeoutMs;
 
@@ -386,7 +383,7 @@ class ManualRewriteService {
       final outcome = await _executor(
         config: config,
         prompt: prompt,
-        maxTokens: maxTokens,
+        maxTokens: config.maxTokens,
         temperature: temperature,
         timeoutMs: timeoutMs,
         cancelToken: cancelToken,

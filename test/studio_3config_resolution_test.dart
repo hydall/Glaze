@@ -194,6 +194,15 @@ void main() {
 
       expect(resolved.useResponsesApi, isFalse);
     });
+
+    test('auxiliary Studio slot preserves the API response budget', () {
+      final resolved = StudioSlotResolver.resolve(
+        apiConfigs: const [ApiConfig(id: 'api', maxTokens: 21000)],
+        apiConfigId: 'api',
+      );
+
+      expect(resolved.maxTokens, 21000);
+    });
   });
 
   test('Studio slot parameters override API parameters by key', () async {

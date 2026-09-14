@@ -28,6 +28,7 @@ class AuxApiConfig {
   final String apiKey;
   final String model;
   final String protocol;
+  final int maxTokens;
   final bool useResponsesApi;
 
   /// Whether the connection forbids a `temperature` field. Aux calls pin their
@@ -44,6 +45,7 @@ class AuxApiConfig {
     required this.apiKey,
     required this.model,
     required this.protocol,
+    this.maxTokens = 8000,
     this.useResponsesApi = false,
     this.omitTemperature = false,
     this.extraRequestParameters = const [],

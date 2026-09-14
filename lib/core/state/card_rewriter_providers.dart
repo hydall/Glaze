@@ -9,6 +9,7 @@ import '../models/api_config.dart';
 import '../services/card_rewriter/manual_rewrite_service.dart';
 import '../services/card_rewriter/automated_card_evolution_service.dart';
 import 'db_provider.dart';
+import 'studio_turn_config_resolver.dart';
 
 /// Phase-4B writer lane: the manual card-rewrite LLM orchestration service.
 ///
@@ -57,11 +58,19 @@ final automatedCardEvolutionServiceProvider =
         );
       }
 
+      Future<AuxApiConfig> resolveCollectorModel(String sessionId) async {
+        final turnConfig = await ref
+            .read(studioTurnConfigResolverProvider)
+            .resolve(sessionId);
+        return turnConfig.resolveLedgerConfig(errorLabel: 'card-collector');
+      }
+
       final service = AutomatedCardEvolutionService(
         repo: ref.watch(cardEvolutionRepoProvider),
         writerCallRepo: ref.watch(cardEvolutionWriterCallRepoProvider),
         requestCaptureRepo: ref.watch(llmRequestCaptureRepoProvider),
         resolveModel: resolveModel,
+        resolveCollectorModel: resolveCollectorModel,
         isEnabled: () =>
             ref.read(pipelineSettingsProvider).cardRewriter.enabled,
         isLorebookEvolutionEnabled: () => ref

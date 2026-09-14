@@ -84,6 +84,7 @@ class CardRewriteSlotResolver {
       apiKey: selected.apiKey,
       model: model,
       protocol: selected.protocol,
+      maxTokens: selected.maxTokens,
       useResponsesApi: useResponsesApi ?? selected.useResponsesApi,
       omitTemperature: selected.omitTemperature,
       extraRequestParameters: mergeExtraRequestParameters(

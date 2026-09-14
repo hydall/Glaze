@@ -55,6 +55,7 @@ void main() {
     final service = AutomatedCardEvolutionService(
       repo: fixture.repo,
       resolveModel: () async => throw StateError('must not resolve'),
+      resolveCollectorModel: (_) async => throw StateError('must not resolve'),
       isEnabled: () => false,
       executor:
           ({
@@ -105,10 +106,7 @@ void main() {
     // The writer renews the lease right before the model call, so a second
     // boundary tick between claim creation and renewal legitimately extends
     // the observed span beyond the base 600s lease.
-    expect(
-      claim.leaseExpiresAt - claim.createdAt,
-      inInclusiveRange(600, 660),
-    );
+    expect(claim.leaseExpiresAt - claim.createdAt, inInclusiveRange(600, 660));
     final operations = await fixture.db
         .select(fixture.db.rewriteOperations)
         .get();
@@ -655,7 +653,7 @@ void main() {
     expect(receivedTimeout, 180000);
   });
 
-  test('uses a 40k response budget for each writer call', () async {
+  test('uses the Card Rewriter API response budget for writer calls', () async {
     int? receivedMaxTokens;
     final result = await fixture
         .service(
@@ -665,7 +663,7 @@ void main() {
         .runOneBatch('session');
 
     expect(result.kind, 'persisted');
-    expect(receivedMaxTokens, 40000);
+    expect(receivedMaxTokens, 12345);
   });
 
   test('disabled lorebook evolution skips its second model call', () async {
@@ -819,6 +817,14 @@ final class _Fixture {
       apiKey: 'key',
       model: 'model',
       protocol: 'openai',
+      maxTokens: 12345,
+    ),
+    resolveCollectorModel: (_) async => const AuxApiConfig(
+      endpoint: 'https://ledger.example',
+      apiKey: 'ledger-key',
+      model: 'ledger-model',
+      protocol: 'openai',
+      maxTokens: 6789,
     ),
     executor:
         ({

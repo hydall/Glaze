@@ -53,6 +53,7 @@ class StudioSlotResolver {
           apiKey: fallback.apiKey,
           model: model,
           protocol: fallback.protocol,
+          maxTokens: fallback.maxTokens,
           useResponsesApi: useResponsesApi ?? fallback.useResponsesApi,
           omitTemperature: fallback.omitTemperature,
           extraRequestParameters: mergeExtraRequestParameters(
@@ -92,6 +93,7 @@ class StudioSlotResolver {
       apiKey: selected.apiKey,
       model: model,
       protocol: selected.protocol,
+      maxTokens: selected.maxTokens,
       useResponsesApi: useResponsesApi ?? selected.useResponsesApi,
       omitTemperature: selected.omitTemperature,
       extraRequestParameters: mergeExtraRequestParameters(

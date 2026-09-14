@@ -26,6 +26,7 @@ class AutomatedCardEvolutionService {
   AutomatedCardEvolutionService({
     required this.repo,
     required this.resolveModel,
+    required this.resolveCollectorModel,
     required this._executor,
     this.isEnabled,
     this.isLorebookEvolutionEnabled,
@@ -82,7 +83,7 @@ class AutomatedCardEvolutionService {
           observationRepo: this.observationRepo,
           collectorRunRepo: this.collectorRunRepo,
           requestCaptureRepo: this.requestCaptureRepo,
-          resolveModel: resolveModel,
+          resolveModel: resolveCollectorModel,
           executor: _executor,
           diagnostics: _diagnostics,
           timeoutMs: timeoutMs,
@@ -103,6 +104,7 @@ class AutomatedCardEvolutionService {
   late final CardEvolutionWriterCoordinator _writerCoordinator;
   late final CardEvolutionCollectorCoordinator _collectorCoordinator;
   final CardRewriteModelResolver resolveModel;
+  final CardEvolutionCollectorModelResolver resolveCollectorModel;
   final CardRewriteLlmExecutor _executor;
   final bool Function()? isEnabled;
   final bool Function()? isLorebookEvolutionEnabled;

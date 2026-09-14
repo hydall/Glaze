@@ -105,6 +105,7 @@ void main() {
           apiKey: 'rewrite-key',
           model: 'rewrite-model',
           protocol: 'openai',
+          maxTokens: 12345,
         ),
     executor: executor.call,
     verifyStampRaceHook: verifyStampRaceHook,
@@ -317,6 +318,7 @@ void main() {
 
       expect(result.status, 'pending');
       expect(executor.calls, 1);
+      expect(executor.lastMaxTokens, 12345);
       // The prompt was rebuilt from the rebound canon, not the stale load.
       expect(executor.lastPrompt, contains('moved text'));
       expect(executor.lastPrompt, isNot(contains('old text')));
@@ -735,6 +737,7 @@ void main() {
         apiKey: 'slot-key',
         model: 'slot-model',
         protocol: 'openai',
+        maxTokens: 21000,
       ),
       ApiConfig(
         id: 'active-chat',
@@ -753,6 +756,7 @@ void main() {
       expect(config.endpoint, 'https://rewrite.example');
       expect(config.apiKey, 'slot-key');
       expect(config.model, 'override-model');
+      expect(config.maxTokens, 21000);
     });
 
     test('empty or unmatched slot id fails explicit, no chat fallback', () {
@@ -799,6 +803,7 @@ class _FakeExecutor {
   int calls = 0;
   AuxApiConfig? lastConfig;
   String? lastPrompt;
+  int? lastMaxTokens;
   CancelToken? lastCancelToken;
   LlmCaptureContext? lastCaptureContext;
 
@@ -824,6 +829,7 @@ class _FakeExecutor {
     calls++;
     lastConfig = config;
     lastPrompt = prompt;
+    lastMaxTokens = maxTokens;
     lastCancelToken = cancelToken;
     lastCaptureContext = captureContext;
     final handler = impl;

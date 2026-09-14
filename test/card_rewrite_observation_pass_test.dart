@@ -609,6 +609,28 @@ void main() {
     expect(collectors.single.status, 'completed');
   });
 
+  test('Collector uses the Studio Ledger API and response budget', () async {
+    await fixture.seedReconciliationRun(ordinal: 1);
+    await fixture.seedReconciliationRun(ordinal: 2);
+    await fixture.seedReconciliationRun(ordinal: 3);
+    AuxApiConfig? receivedConfig;
+    int? receivedMaxTokens;
+    final service = fixture.service(
+      (_, _) async => _ok('{"observations":[]}'),
+      onRequest: (config, maxTokens) {
+        receivedConfig = config;
+        receivedMaxTokens = maxTokens;
+      },
+    );
+
+    final result = await service.runPendingCollectors('session');
+
+    expect(result.kind, 'collectorCompleted');
+    expect(receivedConfig?.endpoint, 'https://ledger.example');
+    expect(receivedConfig?.model, 'ledger-model');
+    expect(receivedMaxTokens, 6789);
+  });
+
   test(
     'unexpected automatic lane failure leaves durable diagnostics',
     () async {
@@ -1565,6 +1587,7 @@ final class _Fixture {
     executor, {
     int Function()? observationExpiryRuns,
     void Function(LlmCaptureContext context)? onCaptureContext,
+    void Function(AuxApiConfig config, int maxTokens)? onRequest,
   }) => AutomatedCardEvolutionService(
     repo: repo,
     observationRepo: observationRepo,
@@ -1575,6 +1598,14 @@ final class _Fixture {
       apiKey: 'key',
       model: 'model',
       protocol: 'openai',
+      maxTokens: 12345,
+    ),
+    resolveCollectorModel: (_) async => const AuxApiConfig(
+      endpoint: 'https://ledger.example',
+      apiKey: 'ledger-key',
+      model: 'ledger-model',
+      protocol: 'openai',
+      maxTokens: 6789,
     ),
     executor:
         ({
@@ -1587,6 +1618,7 @@ final class _Fixture {
           captureContext,
         }) {
           if (captureContext != null) onCaptureContext?.call(captureContext);
+          onRequest?.call(config, maxTokens);
           return executor(cancelToken, prompt);
         },
     observationPromotionThreshold: () => 3,

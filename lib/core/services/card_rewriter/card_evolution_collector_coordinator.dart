@@ -7,6 +7,7 @@ import '../../db/repositories/card_evolution_collector_run_repo.dart';
 import '../../db/repositories/card_evolution_observation_repo.dart';
 import '../../db/repositories/card_evolution_repo.dart';
 import '../../db/repositories/llm_request_capture_repo.dart';
+import '../../llm/aux_llm_client.dart';
 import '../../llm/transport/llm_capture_context.dart';
 import '../../models/agent_operation_record.dart';
 import '../../models/card_evolution_observation.dart';
@@ -18,10 +19,11 @@ import 'card_rewrite_prompt_builder.dart';
 import 'manual_rewrite_service.dart';
 import 'observation_response_parser.dart';
 
-const _collectorMaxTokens = 40000;
-
 typedef CardEvolutionWriterContinuation =
     Future<CardEvolutionFinalizeOutcome> Function(String sessionId);
+
+typedef CardEvolutionCollectorModelResolver =
+    Future<AuxApiConfig> Function(String sessionId);
 
 /// Owns the automatic Card Evolution collector lane and its observation state.
 class CardEvolutionCollectorCoordinator {
@@ -46,7 +48,7 @@ class CardEvolutionCollectorCoordinator {
   final CardEvolutionObservationRepo observationRepo;
   final CardEvolutionCollectorRunRepo collectorRunRepo;
   final LlmRequestCaptureRepo requestCaptureRepo;
-  final CardRewriteModelResolver resolveModel;
+  final CardEvolutionCollectorModelResolver resolveModel;
   final CardRewriteLlmExecutor _executor;
   final CardEvolutionDiagnostics _diagnostics;
   final ObservationResponseParser parser;
@@ -160,7 +162,7 @@ class CardEvolutionCollectorCoordinator {
     Future<bool> Function(String output, Future<void> Function() applyEffects)?
     finalize,
   }) async {
-    final config = await resolveModel();
+    final config = await resolveModel(sessionId);
     final prompt = _buildObservationPrompt(snapshot);
     final token = CancelToken();
     _observationTokens[sessionId] = token;
@@ -169,7 +171,7 @@ class CardEvolutionCollectorCoordinator {
       final outcome = await _executor(
         config: config,
         prompt: prompt,
-        maxTokens: _collectorMaxTokens,
+        maxTokens: config.maxTokens,
         temperature: 0.2,
         timeoutMs: timeoutMs,
         cancelToken: token,
@@ -316,13 +318,13 @@ class CardEvolutionCollectorCoordinator {
     var completed = false;
     try {
       if (output == null) {
-        final config = await resolveModel();
+        final config = await resolveModel(failed.sessionId);
         final token = CancelToken();
         _observationTokens[failed.sessionId] = token;
         final outcome = await _executor(
           config: config,
           prompt: prompt!,
-          maxTokens: _collectorMaxTokens,
+          maxTokens: config.maxTokens,
           temperature: 0.2,
           timeoutMs: timeoutMs,
           cancelToken: token,
