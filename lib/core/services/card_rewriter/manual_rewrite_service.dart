@@ -185,6 +185,9 @@ class ManualRewriteService {
     required CardRewriteField field,
     required String instruction,
   }) async {
+    if (!CardRewritePolicy.isModelWritable(field)) {
+      throw ArgumentError.value(field, 'field', 'is not available to the LLM');
+    }
     // 1. Idempotent create-or-get.
     final created = await jobRepo.createOrGet(
       requestKey: requestKey,

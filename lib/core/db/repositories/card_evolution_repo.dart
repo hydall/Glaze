@@ -1945,7 +1945,7 @@ String? _fieldValue(Character character, CardRewriteField field) =>
 
 Map<String, Object?> _evolutionCardSnapshot(Character character) {
   final snapshot = Map<String, Object?>.from(
-    CardCanonicalizer.snapshot(character),
+    CardCanonicalizer.promptSnapshot(character),
   );
   final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(character);
   for (final field in CardRewritePolicy.evolutionFields) {

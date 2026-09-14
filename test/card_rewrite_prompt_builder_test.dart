@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewrite_prompt_builder.dart';
@@ -64,16 +66,10 @@ void main() {
     },
   );
 
-  test('prompt names the target field and current field size', () {
-    final prompt = buildPrompt(field: CardRewriteField.creatorNotes);
-    expect(prompt, contains('- field: creatorNotes'));
+  test('creator notes cannot be sent to the rewriter', () {
     expect(
-      prompt,
-      contains('- currentFieldCodeUnits: ${'Keep the tone dry.'.length}'),
-    );
-    expect(
-      prompt,
-      contains('Respond with exactly ONE JSON object and nothing else'),
+      () => buildPrompt(field: CardRewriteField.creatorNotes),
+      throwsArgumentError,
     );
   });
 
@@ -84,7 +80,7 @@ void main() {
       contains(
         'Writable fields across this workflow: '
         'description, personality, scenario, systemPrompt, '
-        'postHistoryInstructions, creatorNotes.',
+        'postHistoryInstructions.',
       ),
     );
     expect(prompt, contains('For THIS operation only "scenario" is writable.'));
@@ -199,9 +195,34 @@ void main() {
 
   test('prompt embeds the canonical snapshot and macros verbatim', () {
     final prompt = buildPrompt();
-    expect(prompt, contains(CardCanonicalizer.serialize(character())));
+    expect(
+      prompt,
+      contains(jsonEncode(CardCanonicalizer.promptSnapshot(character()))),
+    );
     expect(prompt, contains('A {{char}} who assists {{user}}.'));
     expect(prompt, contains('Set in the study of {{description}}.'));
+  });
+
+  test('all automated prompts exclude creator notes', () {
+    const sentinel = 'CREATOR_NOTES_MUST_NOT_REACH_MODEL_7F3A';
+    final card = character().copyWith(creatorNotes: sentinel);
+
+    expect(buildPrompt(card: card), isNot(contains(sentinel)));
+    expect(
+      CardRewriterPromptBuilder.buildEvolution(
+        character: card,
+        instruction: 'Reflect durable changes.',
+      ),
+      isNot(contains(sentinel)),
+    );
+    expect(
+      CardRewriterPromptBuilder.buildObservationPass(
+        character: card,
+        activeObservations: const [],
+        instruction: 'Observe durable changes.',
+      ),
+      isNot(contains(sentinel)),
+    );
   });
 
   test('prompt embeds the user instruction', () {

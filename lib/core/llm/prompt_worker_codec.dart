@@ -1,4 +1,5 @@
 import '../models/character.dart';
+import '../models/character_prompt_sanitizer.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
 import '../models/chat_message.dart';
@@ -19,7 +20,7 @@ import 'prompt/effective_canon_prompt_formatter.dart';
 /// [PromptPayload] / [PromptResult] / [MemorySelection] to and from plain JSON
 /// maps so they can cross the isolate port.
 Map<String, dynamic> serializePayload(PromptPayload p) => {
-  'character': p.character.toJson(),
+  'character': sanitizeCharacterForPrompt(p.character).toJson(),
   'persona': p.persona?.toJson(),
   'preset': p.preset?.toJson(),
   'history': p.history.map((m) => m.toJson()).toList(),

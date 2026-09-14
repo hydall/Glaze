@@ -67,15 +67,44 @@ void main() {
     },
   );
 
-  test(
-    'policy has the exact writable field allowlist',
-    () {
-      expect(
-        CardRewritePolicy.writableFields,
-        unorderedEquals(CardRewriteField.values),
-      );
-    },
-  );
+  test('policy has the exact writable field allowlist', () {
+    expect(
+      CardRewritePolicy.modelWritableFields,
+      unorderedEquals(
+        CardRewriteField.values.where(
+          (field) => field != CardRewriteField.creatorNotes,
+        ),
+      ),
+    );
+    expect(
+      CardRewritePolicy.writableFields,
+      unorderedEquals(CardRewriteField.values),
+    );
+  });
+
+  test('model-facing snapshot excludes creator notes', () {
+    final character = Character(
+      id: 'character',
+      name: 'Ada',
+      creatorNotes: 'CREATOR_NOTES_MUST_NOT_REACH_MODEL_7F3A',
+      extensions: const {
+        'creator_notes': 'CREATOR_NOTES_MUST_NOT_REACH_MODEL_7F3A',
+        'nested': {
+          'creatorNotes': 'CREATOR_NOTES_MUST_NOT_REACH_MODEL_7F3A',
+          'kept': 'value',
+        },
+      },
+    );
+
+    expect(CardCanonicalizer.snapshot(character), contains('creatorNotes'));
+    expect(
+      CardCanonicalizer.promptSnapshot(character),
+      isNot(contains('creatorNotes')),
+    );
+    final promptJson = CardCanonicalizer.promptSnapshot(character).toString();
+    expect(promptJson, isNot(contains('CREATOR_NOTES_MUST_NOT_REACH_MODEL')));
+    expect(promptJson, contains('kept: value'));
+  });
 
   test('scope grammar accepts only the defined semantic mappings', () {
     for (final key in const [
@@ -223,9 +252,7 @@ void main() {
 
   test('does not reject a large replacement by size', () {
     final result = AnchoredScalarPatchValidator.validate(
-      currentCardValues: {
-        CardRewriteField.description: 'anchor text',
-      },
+      currentCardValues: {CardRewriteField.description: 'anchor text'},
       patches: [
         AnchoredScalarPatch(
           scopeKey: 'npc:ada',

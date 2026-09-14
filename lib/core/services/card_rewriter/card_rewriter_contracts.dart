@@ -9,8 +9,9 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:glaze_flutter/core/models/character.dart';
+import 'package:glaze_flutter/core/models/character_prompt_sanitizer.dart';
 
-/// Produces the semantic, prompt-relevant representation of a [Character].
+/// Produces stable durable and model-facing representations of a [Character].
 ///
 /// Nullable text fields are intentionally normalized to an empty string: a
 /// missing card field and an explicitly empty card field have the same prompt
@@ -42,6 +43,34 @@ abstract final class CardCanonicalizer {
     'tags': character.tags.toList(growable: false),
     'world': _text(character.world),
   });
+
+  /// Character data that may be included in an LLM prompt.
+  ///
+  /// Creator notes are user-facing metadata and are deliberately absent. Keep
+  /// this as an allowlist so newly added card metadata does not become model
+  /// context by accident.
+  static Map<String, Object?> promptSnapshot(Character character) {
+    final safe = sanitizeCharacterForPrompt(character);
+    return _stableMap({
+      'alternateGreetings': safe.alternateGreetings.toList(growable: false),
+      'creator': _text(safe.creator),
+      'depthPrompt': safe.depthPrompt,
+      'depthPromptDepth': safe.depthPromptDepth,
+      'depthPromptRole': safe.depthPromptRole,
+      'description': _text(safe.description),
+      'extensions': _normalizeJson(safe.extensions),
+      'firstMes': _text(safe.firstMes),
+      'macroName': _text(safe.macroName),
+      'mesExample': _text(safe.mesExample),
+      'name': safe.name,
+      'personality': _text(safe.personality),
+      'postHistoryInstructions': _text(safe.postHistoryInstructions),
+      'scenario': _text(safe.scenario),
+      'systemPrompt': _text(safe.systemPrompt),
+      'tags': safe.tags.toList(growable: false),
+      'world': _text(safe.world),
+    });
+  }
 
   static String scalarSha256(String? value) =>
       crypto.sha256.convert(utf8.encode(_text(value))).toString();
@@ -111,9 +140,19 @@ abstract final class CardRewritePolicy {
     CardRewriteField.postHistoryInstructions,
     CardRewriteField.creatorNotes,
   };
+  static const Set<CardRewriteField> modelWritableFields = {
+    CardRewriteField.description,
+    CardRewriteField.personality,
+    CardRewriteField.scenario,
+    CardRewriteField.systemPrompt,
+    CardRewriteField.postHistoryInstructions,
+  };
 
   static bool isWritable(CardRewriteField field) =>
       writableFields.contains(field);
+
+  static bool isModelWritable(CardRewriteField field) =>
+      modelWritableFields.contains(field);
 
   static Set<CardRewriteField> nonEmptyEvolutionFields(Character character) => {
     if (character.description?.isNotEmpty == true) CardRewriteField.description,

@@ -1,4 +1,5 @@
 import '../models/character.dart';
+import '../models/character_prompt_sanitizer.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
 import '../models/chat_message.dart';
@@ -124,7 +125,7 @@ class PromptInputs {
   });
 
   Map<String, dynamic> toJson() => {
-    'character': character.toJson(),
+    'character': sanitizeCharacterForPrompt(character).toJson(),
     'persona': persona?.toJson(),
     'preset': preset?.toJson(),
     'history': history.map((m) => m.toJson()).toList(),

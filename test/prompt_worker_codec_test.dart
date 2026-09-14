@@ -35,6 +35,29 @@ void main() {
     expect(restored.effectiveCanonCacheIdentity, 'canon-cache-identity');
   });
 
+  test('prompt isolate codec strips creator notes', () {
+    final source = PromptPayload(
+      character: const Character(
+        id: 'character',
+        name: 'Alison',
+        creatorNotes: 'CREATOR_NOTES_MUST_NOT_REACH_MODEL_7F3A',
+        extensions: {
+          'creator_notes': 'CREATOR_NOTES_MUST_NOT_REACH_MODEL_7F3A',
+        },
+      ),
+      history: const [],
+      apiConfig: const ApiConfig(id: 'api'),
+    );
+
+    final encoded = serializePayload(source);
+    expect((encoded['character'] as Map)['creatorNotes'], isNull);
+    expect(
+      ((encoded['character'] as Map)['extensions'] as Map),
+      isNot(contains('creator_notes')),
+    );
+    expect(deserializePayload(encoded).character.creatorNotes, isNull);
+  });
+
   test('prompt isolate codec preserves the ledger game clock', () {
     final source = PromptPayload(
       character: const Character(id: 'character', name: 'Alison'),

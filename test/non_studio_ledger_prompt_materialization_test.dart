@@ -119,4 +119,25 @@ void main() {
       LedgerPromptInjectionMode.legacy,
     );
   });
+
+  test('raw-input codec strips creator notes', () {
+    final source = PromptInputs(
+      character: const Character(
+        id: 'c',
+        name: 'Character',
+        creatorNotes: 'CREATOR_NOTES_MUST_NOT_REACH_MODEL_7F3A',
+        extensions: {'creatorNotes': 'CREATOR_NOTES_MUST_NOT_REACH_MODEL_7F3A'},
+      ),
+      history: const [],
+      apiConfig: const ApiConfig(id: 'api'),
+    );
+
+    final encoded = source.toJson();
+    expect((encoded['character'] as Map)['creatorNotes'], isNull);
+    expect(
+      ((encoded['character'] as Map)['extensions'] as Map),
+      isNot(contains('creatorNotes')),
+    );
+    expect(PromptInputs.fromJson(encoded).character.creatorNotes, isNull);
+  });
 }

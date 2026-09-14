@@ -19,7 +19,7 @@ abstract final class CardRewriterPromptBuilder {
   }) {
     final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(character);
     final snapshot = Map<String, Object?>.from(
-      CardCanonicalizer.snapshot(character),
+      CardCanonicalizer.promptSnapshot(character),
     );
     for (final field in CardRewritePolicy.evolutionFields) {
       if (!writableFields.contains(field)) snapshot.remove(field.wireName);
@@ -282,7 +282,7 @@ abstract final class CardRewriterPromptBuilder {
       ..writeln(instruction)
       ..writeln()
       ..writeln('# Canonical character card snapshot (read-only)')
-      ..write(jsonEncode(CardCanonicalizer.snapshot(character)));
+      ..write(jsonEncode(CardCanonicalizer.promptSnapshot(character)));
     return buffer.toString();
   }
 
@@ -307,10 +307,13 @@ $instruction''';
     required CardRewriteField field,
     required String instruction,
   }) {
-    final snapshot = CardCanonicalizer.snapshot(character);
+    if (!CardRewritePolicy.isModelWritable(field)) {
+      throw ArgumentError.value(field, 'field', 'is not available to the LLM');
+    }
+    final snapshot = CardCanonicalizer.promptSnapshot(character);
     final canonicalJson = jsonEncode(snapshot);
     final currentValue = snapshot[field.wireName]! as String;
-    final writableFields = CardRewritePolicy.writableFields
+    final writableFields = CardRewritePolicy.modelWritableFields
         .map((candidate) => candidate.wireName)
         .join(', ');
 

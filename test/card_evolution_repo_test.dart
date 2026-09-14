@@ -31,6 +31,7 @@ void main() {
       description: 'Alice is cautious.',
       personality: 'Reserved and observant.',
       scenario: 'A quiet city after midnight.',
+      creatorNotes: 'CREATOR_NOTES_MUST_NOT_REACH_MODEL_7F3A',
     );
     await characters.put(character);
     final hash = CardCanonicalizer.sha256(character);
@@ -87,6 +88,10 @@ void main() {
     expect(claim.claim!.selectedInputJson, contains('assistant development'));
     expect(claim.claim!.selectedInputJson, contains('user response'));
     expect(claim.claim!.selectedInputJson, contains('"effectiveCanon"'));
+    expect(
+      claim.claim!.selectedInputJson,
+      isNot(contains('CREATOR_NOTES_MUST_NOT_REACH_MODEL_7F3A')),
+    );
     expect(claim.claim!.row.selectedInputJson, claim.claim!.selectedInputJson);
     expect(
       await db.select(db.ledgerReconciliationSuccessfulRuns).get(),
