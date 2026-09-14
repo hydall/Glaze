@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+
 import '../models/character.dart';
 import '../models/chat_message.dart';
 import '../models/lorebook.dart';
@@ -56,6 +58,15 @@ class ScannedEntry {
   );
 }
 
+/// How many times a scan source has been built, across all scans.
+///
+/// The fix above is invisible from the outside — the same entries match — so
+/// this is how a test states it: scanning many entries must build the text
+/// once per distinct scan depth, not once per entry. Incremented only; a test
+/// resets it before measuring.
+@visibleForTesting
+int lorebookScanSourceBuilds = 0;
+
 List<ScannedEntry> scanLorebooks({
   required List<ChatMessage> history,
   required Character? char,
@@ -87,6 +98,14 @@ List<ScannedEntry> scanLorebooks({
       .toList(growable: false);
   final historyByDepth = <int, String>{};
   final lowerHistoryByDepth = <int, String>{};
+  // Every candidate entry scans the same text, and the text was rebuilt for
+  // each of them: a fresh lowercase pass over the recursion buffer plus a
+  // fresh concatenation with the history slice. With many entries that is the
+  // whole cost of a scan — the work is proportional to entries x characters
+  // when it only ever needed to be characters. Keyed by the two things it
+  // actually depends on.
+  final scanSourceByDepth = <(int, bool), String>{};
+  String? lowerScanText;
 
   String historyTextFor(int depth, {required bool caseSensitive}) {
     final cache = caseSensitive ? historyByDepth : lowerHistoryByDepth;
@@ -157,6 +176,23 @@ List<ScannedEntry> scanLorebooks({
       : 1;
   var scanText = textToScan;
 
+  String scanSourceFor(int depth, {required bool caseSensitive}) {
+    return scanSourceByDepth.putIfAbsent((depth, caseSensitive), () {
+      lorebookScanSourceBuilds++;
+      final messages = historyTextFor(depth, caseSensitive: caseSensitive);
+      if (caseSensitive) return '$messages$scanText';
+      return '$messages${lowerScanText ??= scanText.toLowerCase()}';
+    });
+  }
+
+  // A matched entry appends its content to the recursion buffer, which every
+  // later entry in the same pass must see. Dropping the cache there is what
+  // keeps this identical to rebuilding it every time.
+  void scanTextChanged() {
+    scanSourceByDepth.clear();
+    lowerScanText = null;
+  }
+
   while (changed && iteration < maxIterations) {
     changed = false;
     iteration++;
@@ -195,13 +231,10 @@ List<ScannedEntry> scanLorebooks({
                 : temporalDepth
           : scanDepth;
 
-      final messagesToScan = historyTextFor(
+      final scanSource = scanSourceFor(
         effectiveScanDepth,
         caseSensitive: caseSensitive,
       );
-      final scanSource = caseSensitive
-          ? '$messagesToScan$scanText'
-          : '$messagesToScan${scanText.toLowerCase()}';
 
       bool isStickyActive = false;
       bool isOnCooldown = false;
@@ -272,6 +305,7 @@ List<ScannedEntry> scanLorebooks({
 
           if (!entry.preventRecursion && iteration < maxIterations) {
             scanText = '$scanText\n${entry.content.toLowerCase()}';
+            scanTextChanged();
             changed = true;
           }
         }

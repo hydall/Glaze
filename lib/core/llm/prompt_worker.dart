@@ -19,6 +19,48 @@ import 'tokenizer.dart';
 
 enum PromptWorkerPriority { foreground, background }
 
+/// Human-readable size of a serialized worker payload.
+String _payloadSize(int bytes) {
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(0)} KB';
+  return '${(kb / 1024).toStringAsFixed(1)} MB';
+}
+
+/// What a worker request was, in terms a reader can act on.
+///
+/// The timeout used to name only the deadline it missed, which is why both
+/// reports of it are unanswerable: "Glaze throws a TimeoutException for
+/// PromptWorker (request timed out after 60000ms) when using a char imported
+/// with ST backup" says nothing about how big that chat was, and neither does
+/// "PromptWorker getting overwhelmed with too many lorebooks/regexes". The
+/// serialized payload carries the history, the lorebooks and the regex
+/// scripts, so its size is the one number that separates "an enormous chat"
+/// from "something is stuck".
+String describeWorkerRequest(String command, Object? data) {
+  if (data is! String) return command;
+  return '$command, ${_payloadSize(data.length)} payload';
+}
+
+/// The deadline for a request of [payloadBytes].
+///
+/// A flat 60 s is not a statement about the work; it is a statement about how
+/// long Glaze is willing to wait for an isolate it cannot interrupt. But a
+/// prompt build scales with the chat it is building from, and a SillyTavern
+/// import arrives with chats far larger than anything Glaze creates itself —
+/// against a fixed cap, such a character never generates at all, which is the
+/// report. So the budget grows with the payload and stops growing at
+/// [maxRequestTimeout]: a genuinely stuck isolate is still detected and
+/// replaced, just later.
+Duration timeoutForPayload(int payloadBytes, {Duration? base, Duration? cap}) {
+  final floor = base ?? PromptWorker.requestTimeout;
+  final ceiling = cap ?? PromptWorker.maxRequestTimeout;
+  if (ceiling <= floor) return floor;
+  final megabytes = payloadBytes / (1024 * 1024);
+  final scaled =
+      floor + Duration(milliseconds: (megabytes * 15000).round());
+  return scaled > ceiling ? ceiling : scaled;
+}
+
 /// Long-lived isolate worker that runs buildPrompt off the main thread.
 ///
 /// The isolate loads its own o200k_base tokenizer once at startup and
@@ -26,6 +68,9 @@ enum PromptWorkerPriority { foreground, background }
 class PromptWorker {
   /// Overridden by queue timeout tests.
   static Duration requestTimeout = const Duration(seconds: 60);
+
+  /// The most [timeoutForPayload] will allow, however large the payload.
+  static Duration maxRequestTimeout = const Duration(seconds: 180);
 
   static PromptWorker? _instance;
   static Completer<PromptWorker>? _initGuard;
@@ -145,7 +190,9 @@ class PromptWorker {
       if (!request.completer.isCompleted) {
         request.completer.completeError(
           TimeoutException(
-            'PromptWorker request timed out after ${request.timeout.inMilliseconds}ms',
+            'PromptWorker request timed out after '
+            '${request.timeout.inMilliseconds}ms '
+            '(${describeWorkerRequest(request.command, request.data)})',
             request.timeout,
           ),
         );
@@ -223,7 +270,13 @@ class PromptWorker {
   }) async {
     final json = jsonEncode(serializePayload(payload));
     final response =
-        await _send('buildPrompt', json, priority: priority) as String;
+        await _send(
+              'buildPrompt',
+              json,
+              priority: priority,
+              timeout: timeoutForPayload(json.length),
+            )
+            as String;
     return deserializeResult(jsonDecode(response) as Map<String, dynamic>);
   }
 
@@ -235,7 +288,13 @@ class PromptWorker {
   }) async {
     final json = jsonEncode(inputs.toJson());
     final response =
-        await _send('buildFromInputs', json, priority: priority) as String;
+        await _send(
+              'buildFromInputs',
+              json,
+              priority: priority,
+              timeout: timeoutForPayload(json.length),
+            )
+            as String;
     return deserializeResult(jsonDecode(response) as Map<String, dynamic>);
   }
 
