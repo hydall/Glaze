@@ -15,6 +15,37 @@ Color? parseHexColor(String hex) {
   return Color(value);
 }
 
+/// Relative luminance contrast ratio, as WCAG defines it.
+double _contrastRatio(double a, double b) {
+  final lighter = a > b ? a : b;
+  final darker = a > b ? b : a;
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/// A foreground colour that can actually be read on [background].
+///
+/// The `==bg:…==` marker exists to **reveal** a spoiler. JanitorAI hides one by
+/// giving the text the same colour as its highlight, and `_convertMark` drops
+/// the hiding colour precisely so the highlight can show with readable text
+/// instead. Painting that text white undid the reveal for every author who hid
+/// their spoiler behind a pale colour — white on near-white is exactly as
+/// unreadable as grey on grey.
+///
+/// Black or white, whichever carries more contrast against the highlight. The
+/// crossover is the contrast ratio rather than a luminance of 0.5, which lands
+/// in the wrong place for mid-tones and would keep the paler half of them
+/// white-on-light.
+///
+/// [fallback] is for a highlight too transparent to be a background at all: the
+/// text is then sitting on the surface and has to read against that instead.
+Color readableOn(Color background, {required Color fallback}) {
+  if (background.a < 0.35) return fallback;
+  final luminance = background.computeLuminance();
+  return _contrastRatio(luminance, 0) >= _contrastRatio(luminance, 1)
+      ? Colors.black
+      : Colors.white;
+}
+
 class HtmlColorMd extends InlineMd {
   @override
   RegExp get exp => RegExp(r'==hc:(#[0-9a-fA-F]{3,8})==(.+?)==', dotAll: true);
@@ -169,7 +200,12 @@ class BackgroundTextMd extends InlineMd {
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
         child: Text(
           content,
-          style: baseStyle.copyWith(color: Colors.white),
+          style: baseStyle.copyWith(
+            color: readableOn(
+              bgColor,
+              fallback: baseStyle.color ?? Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
         ),
       ),
     );
