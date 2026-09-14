@@ -67,8 +67,15 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
     position: resolvePosition(),
     order: (e['order'] as int?) ?? 100,
     scanDepth: e['scanDepth'] as int?,
-    caseSensitive: (e['caseSensitive'] as bool?) ?? false,
-    matchWholeWords: (e['matchWholeWords'] as bool?) ?? false,
+    // Deliberately not `?? false`. Both are three-state on an entry — null
+    // means "follow the book, then the global setting", which is what
+    // `LorebookScanner` resolves (`entry.caseSensitive ?? book ?? global`) and
+    // what SillyTavern means by them too. Defaulting null to false turned
+    // "inherit" into an explicit "never", so an entry imported from ST stopped
+    // following a global the reader had set on purpose — and did it silently,
+    // since the switch reads the same either way.
+    caseSensitive: e['caseSensitive'] as bool?,
+    matchWholeWords: e['matchWholeWords'] as bool?,
     probability: (e['probability'] as int?) ?? 100,
     preventRecursion:
         (e['preventRecursion'] as bool?) ?? (e['excludeRecursion'] as bool?) ?? false,
@@ -126,6 +133,34 @@ Future<STLorebookImportResult> importSTLorebookFromFile(String filePath, {String
   return importSTLorebook(json, nameOverride: nameOverride ?? file.uri.pathSegments.last);
 }
 
+/// The book-level `glazeMetadata` a Glaze export writes, when this file came
+/// from one. Absent for a book written by SillyTavern itself, which is the
+/// point: the settings are restored when they were ours to begin with, and a
+/// foreign book keeps Glaze's defaults rather than inventing values for it.
+LorebookSettings? _bookSettings(Map<String, dynamic> json) {
+  final meta = json['glazeMetadata'];
+  if (meta is! Map) return null;
+  final settings = meta['settings'];
+  if (settings is! Map) return null;
+  try {
+    return LorebookSettings.fromJson(
+      settings.map((key, value) => MapEntry(key.toString(), value)),
+    );
+  } catch (_) {
+    // A book written by an older or newer Glaze, whose settings no longer
+    // parse. The entries are the valuable part and they are already read;
+    // losing the tuning is better than losing the import.
+    return null;
+  }
+}
+
+String _bookDescription(Map<String, dynamic> json) {
+  final meta = json['glazeMetadata'];
+  if (meta is! Map) return '';
+  final description = meta['description'];
+  return description is String ? description : '';
+}
+
 STLorebookImportResult importSTLorebook(Map<String, dynamic> json, {String nameOverride = 'Imported'}) {
   final entriesRaw = json['entries'] ?? <dynamic>[];
 
@@ -150,6 +185,8 @@ STLorebookImportResult importSTLorebook(Map<String, dynamic> json, {String nameO
     enabled: true,
     activationScope: 'global',
     entries: entries,
+    settings: _bookSettings(json),
+    description: _bookDescription(json),
     updatedAt: currentTimestampSeconds(),
   );
 

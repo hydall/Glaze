@@ -72,5 +72,17 @@ Map<String, dynamic> glazeLorebookToSTJson(Lorebook lb) {
       },
     };
   }
-  return {'name': lb.name, 'entries': entries};
+  return {
+    'name': lb.name,
+    'entries': entries,
+    // The per-book settings are a whole screen of tuning — scan depth, the
+    // budget, the insertion strategy, the vector knobs — and none of it was
+    // written out, so a Glaze → ST → Glaze round trip came back with the book
+    // reset to defaults. SillyTavern ignores keys it does not know, so they
+    // ride along here the same way the entry-level Glaze fields already do.
+    'glazeMetadata': {
+      if (lb.settings != null) 'settings': lb.settings!.toJson(),
+      if (lb.description.isNotEmpty) 'description': lb.description,
+    },
+  };
 }
