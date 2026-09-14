@@ -86,6 +86,132 @@ void main() {
     );
   });
 
+  test(
+    'keeps the chat-valid local variation acceptance on collision',
+    () async {
+      await _appendChain(sourceDb, 1);
+      await _appendChain(targetDb, 1);
+      await _insertAcceptance(
+        sourceDb,
+        id: 'cloud',
+        userMessageId: 'stale-user',
+      );
+      await _insertAcceptance(targetDb, id: 'local', userMessageId: 'user-1');
+
+      await targetStore.mergeBySessionId(
+        'session',
+        (await sourceStore.getBySessionId('session'))!,
+      );
+
+      final rows = await targetDb
+          .select(targetDb.lorebookUseAcceptanceRecords)
+          .get();
+      expect(rows, hasLength(1));
+      expect(rows.single.acceptanceId, 'local');
+      expect(rows.single.acceptedByUserMessageId, 'user-1');
+    },
+  );
+
+  test(
+    'replaces a stale local acceptance with the chat-valid incoming row',
+    () async {
+      await _appendChain(sourceDb, 1);
+      await _appendChain(targetDb, 1);
+      await _insertAcceptance(sourceDb, id: 'cloud', userMessageId: 'user-1');
+      await _insertAcceptance(
+        targetDb,
+        id: 'local',
+        userMessageId: 'stale-user',
+      );
+
+      await targetStore.mergeBySessionId(
+        'session',
+        (await sourceStore.getBySessionId('session'))!,
+      );
+
+      final rows = await targetDb
+          .select(targetDb.lorebookUseAcceptanceRecords)
+          .get();
+      expect(rows, hasLength(1));
+      expect(rows.single.acceptanceId, 'cloud');
+      expect(rows.single.acceptedByUserMessageId, 'user-1');
+    },
+  );
+
+  test('retains no unverified variation acceptance on collision', () async {
+    await _appendChain(sourceDb, 1);
+    await _appendChain(targetDb, 1);
+    await _insertAcceptance(sourceDb, id: 'cloud', userMessageId: 'cloud-user');
+    await _insertAcceptance(targetDb, id: 'local', userMessageId: 'local-user');
+
+    await targetStore.mergeBySessionId(
+      'session',
+      (await sourceStore.getBySessionId('session'))!,
+    );
+
+    expect(
+      await targetDb.select(targetDb.lorebookUseAcceptanceRecords).get(),
+      isEmpty,
+    );
+  });
+
+  test('does not import an unverified variation without a collision', () async {
+    await _appendChain(sourceDb, 1);
+    await _appendChain(targetDb, 1);
+    await _insertAcceptance(sourceDb, id: 'cloud', userMessageId: 'stale-user');
+
+    await targetStore.mergeBySessionId(
+      'session',
+      (await sourceStore.getBySessionId('session'))!,
+    );
+
+    expect(
+      await targetDb.select(targetDb.lorebookUseAcceptanceRecords).get(),
+      isEmpty,
+    );
+  });
+
+  test(
+    'rolls back acceptance replacement when a later effect is invalid',
+    () async {
+      final sourceRun = (await _appendChain(sourceDb, 1)).single;
+      await _appendChain(targetDb, 1);
+      await _insertAcceptance(sourceDb, id: 'cloud', userMessageId: 'user-1');
+      await _insertAcceptance(
+        targetDb,
+        id: 'local',
+        userMessageId: 'stale-user',
+      );
+      final repo = LedgerReconciliationRunRepo(sourceDb);
+      final state = await repo.captureState('session');
+      await repo.recordEffect(
+        runId: sourceRun.id,
+        sessionId: 'session',
+        before: state,
+        after: state,
+        createdAt: 1,
+      );
+      final payload = (await sourceStore.getBySessionId('session'))!;
+      payload['effects'] = [
+        {
+          ...((payload['effects'] as List).single as Map<String, dynamic>),
+          'afterStateHash': 'tampered',
+        },
+      ];
+
+      await expectLater(
+        targetStore.mergeBySessionId('session', payload),
+        throwsStateError,
+      );
+
+      final rows = await targetDb
+          .select(targetDb.lorebookUseAcceptanceRecords)
+          .get();
+      expect(rows, hasLength(1));
+      expect(rows.single.acceptanceId, 'local');
+    },
+  );
+
   test('rejects tampered effects atomically', () async {
     final sourceRun = (await _appendChain(sourceDb, 1)).single;
     final repo = LedgerReconciliationRunRepo(sourceDb);
@@ -968,6 +1094,27 @@ Future<void> _insertManifestEvidence(
     '(session_id, message_id, swipe_id, agent_swipe_id, lorebook_id, '
     'entry_id, entry_order, evidence_json) VALUES (?, ?, 0, 0, ?, ?, 0, ?)',
     ['session', 'opening-assistant', 'lorebook', 'entry', evidence],
+  );
+}
+
+Future<void> _insertAcceptance(
+  AppDatabase db, {
+  required String id,
+  required String userMessageId,
+}) async {
+  await db.customStatement(
+    'INSERT OR IGNORE INTO lorebook_use_manifests '
+    '(session_id, message_id, swipe_id, agent_swipe_id, manifest_json, '
+    'manifest_hash, manifest_schema_version, final_prompt_hash, '
+    'preset_snapshot_hash, created_at) VALUES (?, ?, 0, 0, ?, ?, 1, ?, ?, 1)',
+    ['session', 'opening-assistant', '{}', 'manifest', 'prompt', 'preset'],
+  );
+  await db.customStatement(
+    'INSERT INTO lorebook_use_acceptance_records '
+    '(acceptance_id, session_id, message_id, swipe_id, agent_swipe_id, '
+    'acceptance_kind, accepted_by_user_message_id, evidence_json, accepted_at) '
+    "VALUES (?, ?, ?, 0, 0, 'variation', ?, '{}', 1)",
+    [id, 'session', 'opening-assistant', userMessageId],
   );
 }
 

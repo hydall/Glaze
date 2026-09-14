@@ -27,13 +27,13 @@ class CurrentLedgerInjectionPreviewCard extends ConsumerStatefulWidget {
 class _CurrentLedgerInjectionPreviewCardState
     extends ConsumerState<CurrentLedgerInjectionPreviewCard> {
   LedgerPromptInjectionMode _mode = LedgerPromptInjectionMode.legacy;
+  bool _expanded = false;
 
   CurrentLedgerInjectionPreviewKey get _key =>
       (sessionId: widget.sessionId, characterId: widget.characterId);
 
   @override
   Widget build(BuildContext context) {
-    final preview = ref.watch(currentLedgerInjectionPreviewProvider(_key));
     return GlassSurface(
       borderRadius: BorderRadius.circular(14),
       child: Padding(
@@ -50,12 +50,24 @@ class _CurrentLedgerInjectionPreviewCardState
                   ),
                 ),
                 IconButton(
-                  tooltip: 'action_refresh'.tr(),
+                  tooltip: _expanded
+                      ? 'action_refresh'.tr()
+                      : 'agent_ops_build_preview'.tr(),
                   visualDensity: VisualDensity.compact,
-                  onPressed: () => ref.invalidate(
-                    currentLedgerInjectionPreviewProvider(_key),
+                  onPressed: () {
+                    if (_expanded) {
+                      ref.invalidate(
+                        currentLedgerInjectionPreviewProvider(_key),
+                      );
+                    } else {
+                      setState(() => _expanded = true);
+                    }
+                  },
+                  icon: Icon(
+                    _expanded
+                        ? Icons.refresh_rounded
+                        : Icons.visibility_outlined,
                   ),
-                  icon: const Icon(Icons.refresh_rounded),
                 ),
               ],
             ),
@@ -67,19 +79,31 @@ class _CurrentLedgerInjectionPreviewCardState
               ),
             ),
             const SizedBox(height: 8),
-            preview.when(
-              loading: () => const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Center(child: GlazeSpinner()),
-              ),
-              error: (error, _) => Text(
-                'agent_ops_preview_unavailable'.tr(
-                  namedArgs: {'error': '$error'},
+            if (!_expanded)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => setState(() => _expanded = true),
+                  icon: const Icon(Icons.visibility_outlined),
+                  label: Text('agent_ops_build_preview'.tr()),
                 ),
-                style: TextStyle(color: context.cs.error, fontSize: 12),
-              ),
-              data: _buildPreview,
-            ),
+              )
+            else
+              ref
+                  .watch(currentLedgerInjectionPreviewProvider(_key))
+                  .when(
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Center(child: GlazeSpinner()),
+                    ),
+                    error: (error, _) => Text(
+                      'agent_ops_preview_unavailable'.tr(
+                        namedArgs: {'error': '$error'},
+                      ),
+                      style: TextStyle(color: context.cs.error, fontSize: 12),
+                    ),
+                    data: _buildPreview,
+                  ),
           ],
         ),
       ),

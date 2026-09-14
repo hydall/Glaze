@@ -92,27 +92,24 @@ class ReconcilerViewService {
 
   Future<ReconcilerViewSnapshot> load(String sessionId) async {
     final values = await Future.wait<Object?>([
-      _runRepo.readPhysicalSession(sessionId),
-      _runRepo.readSession(sessionId),
-      _runRepo.readInvalidations(sessionId),
-      _runRepo.validateChain(sessionId),
+      _runRepo.readSessionAudit(sessionId),
       _debugRepo.recentForSession(sessionId, limit: 50),
       _checkpointRepo.get(sessionId),
       _chatRepo.getById(sessionId),
       _runRepo.readEffects(sessionId),
     ]);
-    final physical = values[0] as List<LedgerReconciliationSuccessfulRunRow>;
-    final logical = values[1] as List<LedgerReconciliationSuccessfulRunRow>;
-    final invalidations =
-        values[2] as List<LedgerReconciliationRunInvalidationRow>;
-    final integrity = values[3] as ReconciliationRunIntegrity;
-    final debugRows = (values[4] as List<LedgerDebugRunRow>)
+    final audit = values[0] as LedgerReconciliationSessionAudit;
+    final physical = audit.physical;
+    final logical = audit.logical;
+    final invalidations = audit.invalidations;
+    final integrity = audit.integrity;
+    final debugRows = (values[1] as List<LedgerDebugRunRow>)
         .where((row) => row.kind == LedgerDebugRunKind.reconciliation.name)
         .toList(growable: false);
-    final checkpoint = values[5] as LedgerReconciliationCheckpoint?;
-    final session = values[6] as ChatSession?;
+    final checkpoint = values[2] as LedgerReconciliationCheckpoint?;
+    final session = values[3] as ChatSession?;
     final effects = {
-      for (final effect in values[7] as List<LedgerReconciliationEffectRow>)
+      for (final effect in values[4] as List<LedgerReconciliationEffectRow>)
         effect.runId: effect,
     };
     final messageOrdinals = <String, int>{

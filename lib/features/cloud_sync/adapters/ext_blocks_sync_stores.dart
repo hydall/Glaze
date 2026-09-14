@@ -1240,17 +1240,128 @@ class ReconciliationStateSyncStore implements SyncReconciliationStateStore {
         await _db.into(_db.lorebookUseManifestEntries).insert(row);
       }
     }
-    for (final json in _maps(data['acceptances'])) {
+    final acceptances = _maps(data['acceptances'])
+      ..sort((a, b) {
+        final aVariation = a['acceptanceKind'] == 'variation' ? 0 : 1;
+        final bVariation = b['acceptanceKind'] == 'variation' ? 0 : 1;
+        return aVariation.compareTo(bVariation);
+      });
+    for (final json in acceptances) {
       final row = LorebookUseAcceptanceRecordRow.fromJson(json);
       _requireSession(sessionId, row.sessionId);
-      final existing =
+      final existingById =
           await (_db.select(_db.lorebookUseAcceptanceRecords)
                 ..where((table) => table.acceptanceId.equals(row.acceptanceId)))
               .getSingleOrNull();
-      _requireExact(existing, row);
-      if (existing == null) {
-        await _db.into(_db.lorebookUseAcceptanceRecords).insert(row);
+      _requireExact(existingById, row);
+
+      if (row.acceptanceKind == 'variation') {
+        final acceptingUserId = await _acceptingUserMessageId(
+          sessionId,
+          row.messageId,
+        );
+        final incomingValid = row.acceptedByUserMessageId == acceptingUserId;
+        if (existingById != null) {
+          if (incomingValid) continue;
+          await (_db.delete(_db.lorebookUseAcceptanceRecords)
+                ..where((table) => table.acceptanceId.equals(row.acceptanceId)))
+              .go();
+          await _deleteSelectionsAtCoordinate(row);
+          continue;
+        }
+        final existingAtCoordinate =
+            await (_db.select(_db.lorebookUseAcceptanceRecords)..where(
+                  (table) =>
+                      table.sessionId.equals(row.sessionId) &
+                      table.messageId.equals(row.messageId) &
+                      table.swipeId.equals(row.swipeId) &
+                      table.agentSwipeId.equals(row.agentSwipeId) &
+                      table.acceptanceKind.equals('variation'),
+                ))
+                .getSingleOrNull();
+        if (existingAtCoordinate != null) {
+          final localValid =
+              existingAtCoordinate.acceptedByUserMessageId == acceptingUserId;
+          if (localValid && !incomingValid) continue;
+          if (localValid &&
+              incomingValid &&
+              existingAtCoordinate.acceptanceId.compareTo(row.acceptanceId) <=
+                  0) {
+            continue;
+          }
+          await (_db.delete(_db.lorebookUseAcceptanceRecords)..where(
+                (table) => table.acceptanceId.equals(
+                  existingAtCoordinate.acceptanceId,
+                ),
+              ))
+              .go();
+          if (!incomingValid) {
+            await _deleteSelectionsAtCoordinate(row);
+            continue;
+          }
+        } else if (!incomingValid) {
+          await _deleteSelectionsAtCoordinate(row);
+          continue;
+        }
+      } else if (existingById != null) {
+        continue;
+      } else if (!await _hasVariationAtCoordinate(row)) {
+        continue;
       }
+      await _db.into(_db.lorebookUseAcceptanceRecords).insert(row);
+    }
+  }
+
+  Future<bool> _hasVariationAtCoordinate(
+    LorebookUseAcceptanceRecordRow row,
+  ) async =>
+      await (_db.select(_db.lorebookUseAcceptanceRecords)..where(
+            (table) =>
+                table.sessionId.equals(row.sessionId) &
+                table.messageId.equals(row.messageId) &
+                table.swipeId.equals(row.swipeId) &
+                table.agentSwipeId.equals(row.agentSwipeId) &
+                table.acceptanceKind.equals('variation'),
+          ))
+          .getSingleOrNull() !=
+      null;
+
+  Future<void> _deleteSelectionsAtCoordinate(
+    LorebookUseAcceptanceRecordRow row,
+  ) =>
+      (_db.delete(_db.lorebookUseAcceptanceRecords)..where(
+            (table) =>
+                table.sessionId.equals(row.sessionId) &
+                table.messageId.equals(row.messageId) &
+                table.swipeId.equals(row.swipeId) &
+                table.agentSwipeId.equals(row.agentSwipeId) &
+                table.acceptanceKind.equals('selection'),
+          ))
+          .go();
+
+  Future<String?> _acceptingUserMessageId(
+    String sessionId,
+    String assistantMessageId,
+  ) async {
+    final session = await (_db.select(
+      _db.chatSessions,
+    )..where((row) => row.sessionId.equals(sessionId))).getSingleOrNull();
+    if (session == null) return null;
+    try {
+      final messages = jsonDecode(session.messagesJson);
+      if (messages is! List) return null;
+      final assistantIndex = messages.indexWhere(
+        (message) => message is Map && message['id'] == assistantMessageId,
+      );
+      if (assistantIndex < 0 || assistantIndex + 1 >= messages.length) {
+        return null;
+      }
+      final next = messages[assistantIndex + 1];
+      return next is Map && next['role'] == 'user' && next['id'] is String
+          ? next['id'] as String
+          : null;
+    } catch (_) {
+      return null;
     }
   }
 

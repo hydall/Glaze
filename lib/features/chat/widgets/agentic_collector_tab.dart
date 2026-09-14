@@ -226,10 +226,42 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                 ),
               ),
             ),
+            if (data.blockingFailedRun case final failed?) ...[
+              const SizedBox(height: 10),
+              GlassSurface(
+                borderRadius: BorderRadius.circular(14),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.error_outline, color: context.cs.error),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'agent_ops_collector_blocked'.tr(
+                            namedArgs: {
+                              'ordinal': '${failed.row.collectorOrdinal}',
+                              'reason':
+                                  failed.row.failureCode ??
+                                  'agent_ops_unknown'.tr(),
+                              'detail': failed.row.failureDetail ?? '',
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             if (data.unclaimedPairCount > 0) ...[
               const SizedBox(height: 10),
               FilledButton.tonalIcon(
-                onPressed: _runningPending || _recoveringRunId != null
+                onPressed:
+                    _runningPending ||
+                        _recoveringRunId != null ||
+                        data.blockingFailedRun != null
                     ? null
                     : _runPendingCollectors,
                 icon: _runningPending

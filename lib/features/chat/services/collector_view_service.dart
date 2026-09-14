@@ -46,11 +46,13 @@ final class CollectorViewSnapshot {
     required this.runs,
     required this.observations,
     required this.unclaimedPairCount,
+    required this.blockingFailedRun,
   });
 
   final List<CollectorRunView> runs;
   final List<CardEvolutionObservation> observations;
   final int unclaimedPairCount;
+  final CollectorRunView? blockingFailedRun;
 }
 
 class CollectorViewService {
@@ -78,39 +80,45 @@ class CollectorViewService {
       _collectorRepo.readSession(sessionId),
       _observationRepo.getBySessionId(sessionId),
       _reconciliationRepo.readSession(sessionId),
-      _collectorRepo.unclaimedValidPairs(sessionId),
     ]);
     final rows = values[0] as List<CardEvolutionCollectorRunRow>;
     final observations = values[1] as List<CardEvolutionObservation>;
     final reconciliations =
         values[2] as List<LedgerReconciliationSuccessfulRunRow>;
-    final unclaimedBatches = values[3] as List<CardEvolutionCollectorBatch>;
+    final unclaimedBatches = await _collectorRepo.unclaimedValidPairs(
+      sessionId,
+      validatedRuns: reconciliations,
+    );
     final positions = {
       for (final entry in reconciliations.indexed) entry.$2.id: entry.$1,
     };
     final diagnostics = await Future.wait([
       for (final row in rows) _loadDiagnostics(row),
     ]);
+    final runViews = [
+      for (final entry in rows.indexed)
+        CollectorRunView(
+          row: entry.$2,
+          firstReconciliationOrdinal:
+              switch (positions[entry.$2.reconciliationRunId]) {
+                final index?
+                    when index >= collectorReconciliationBatchSize - 1 =>
+                  reconciliations[index - collectorReconciliationBatchSize + 1]
+                      .ordinal,
+                _ => null,
+              },
+          boundaryReconciliationOrdinal: entry.$2.reconciliationRunOrdinal,
+          exactCapture: diagnostics[entry.$1].$1,
+          callEvents: diagnostics[entry.$1].$2,
+        ),
+    ];
     return CollectorViewSnapshot(
       observations: observations,
       unclaimedPairCount: unclaimedBatches.length,
-      runs: [
-        for (final entry in rows.indexed)
-          CollectorRunView(
-            row: entry.$2,
-            firstReconciliationOrdinal: switch (positions[entry
-                .$2
-                .reconciliationRunId]) {
-              final index? when index >= collectorReconciliationBatchSize - 1 =>
-                reconciliations[index - collectorReconciliationBatchSize + 1]
-                    .ordinal,
-              _ => null,
-            },
-            boundaryReconciliationOrdinal: entry.$2.reconciliationRunOrdinal,
-            exactCapture: diagnostics[entry.$1].$1,
-            callEvents: diagnostics[entry.$1].$2,
-          ),
-      ],
+      runs: runViews,
+      blockingFailedRun: runViews
+          .where((run) => run.row.status == 'failed')
+          .firstOrNull,
     );
   }
 

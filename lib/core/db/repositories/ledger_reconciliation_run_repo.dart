@@ -58,6 +58,20 @@ final class AcceptedManifestRef {
   };
 }
 
+final class LedgerReconciliationSessionAudit {
+  const LedgerReconciliationSessionAudit({
+    required this.physical,
+    required this.logical,
+    required this.invalidations,
+    required this.integrity,
+  });
+
+  final List<LedgerReconciliationSuccessfulRunRow> physical;
+  final List<LedgerReconciliationSuccessfulRunRow> logical;
+  final List<LedgerReconciliationRunInvalidationRow> invalidations;
+  final ReconciliationRunIntegrity integrity;
+}
+
 final class LedgerReconciliationRun {
   const LedgerReconciliationRun({
     required this.id,
@@ -786,23 +800,46 @@ class LedgerReconciliationRunRepo {
 
   Future<List<LedgerReconciliationSuccessfulRunRow>> readSession(
     String sessionId,
+  ) async => (await readSessionAudit(sessionId)).logical;
+
+  Future<LedgerReconciliationSessionAudit> readSessionAudit(
+    String sessionId,
   ) async {
     final rows =
         await (_db.select(_db.ledgerReconciliationSuccessfulRuns)
               ..where((r) => r.sessionId.equals(sessionId))
               ..orderBy([(r) => OrderingTerm.asc(r.ordinal)]))
             .get();
-    if ((await validateChain(sessionId)) is! ReconciliationRunValid) {
-      return <LedgerReconciliationSuccessfulRunRow>[];
-    }
+    final integrity = await _validateRows(rows);
     final invalidated = await (_db.select(
       _db.ledgerReconciliationRunInvalidations,
     )..where((row) => row.sessionId.equals(sessionId))).get();
     final runIds = rows.map((row) => row.id).toSet();
-    if (invalidated.any((row) => !runIds.contains(row.runId))) {
-      return <LedgerReconciliationSuccessfulRunRow>[];
+    final validInvalidations = invalidated.every(
+      (row) => runIds.contains(row.runId),
+    );
+    if (integrity is! ReconciliationRunValid || !validInvalidations) {
+      return LedgerReconciliationSessionAudit(
+        physical: rows,
+        logical: const [],
+        invalidations: invalidated,
+        integrity: validInvalidations
+            ? integrity
+            : const ReconciliationRunChainGap(
+                'invalidation references an unknown reconciliation run',
+              ),
+      );
+    }
+    if (rows.isEmpty) {
+      return LedgerReconciliationSessionAudit(
+        physical: rows,
+        logical: const [],
+        invalidations: invalidated,
+        integrity: integrity,
+      );
     }
     final invalidatedIds = invalidated.map((row) => row.runId).toSet();
+    final evidence = await _ReconciliationEvidence.load(_db, sessionId);
     final visible = <LedgerReconciliationSuccessfulRunRow>[];
     for (final row in rows) {
       if (invalidatedIds.contains(row.id)) continue;
@@ -811,10 +848,17 @@ class LedgerReconciliationRunRepo {
       // physical suffix as logically unavailable without corrupting physical
       // hash-chain integrity. A later mutation records explicit suffix
       // invalidations, allowing newly appended valid rows to be visible again.
-      if (!await _storedRowMatchesCurrentEvidence(row)) break;
+      if (!await _storedRowMatchesCurrentEvidence(row, evidence: evidence)) {
+        break;
+      }
       visible.add(row);
     }
-    return visible;
+    return LedgerReconciliationSessionAudit(
+      physical: rows,
+      logical: visible,
+      invalidations: invalidated,
+      integrity: integrity,
+    );
   }
 
   Future<List<LedgerReconciliationCursorRow>> readCursors(
@@ -878,6 +922,12 @@ class LedgerReconciliationRunRepo {
               ..where((r) => r.sessionId.equals(sessionId))
               ..orderBy([(r) => OrderingTerm.asc(r.ordinal)]))
             .get();
+    return _validateRows(rows);
+  }
+
+  Future<ReconciliationRunIntegrity> _validateRows(
+    List<LedgerReconciliationSuccessfulRunRow> rows,
+  ) async {
     var predecessor = '';
     for (var i = 0; i < rows.length; i++) {
       final row = rows[i];
@@ -919,12 +969,13 @@ class LedgerReconciliationRunRepo {
     if (malformedReason != null) {
       return ReconciliationRunMalformed(malformedReason);
     }
-    if (!await _anchorsMatchSession(run)) {
+    final evidence = await _ReconciliationEvidence.load(_db, run.sessionId);
+    if (!_anchorsMatchEvidence(run, evidence)) {
       return const ReconciliationRunMalformed(
         'message anchors do not match the current transcript',
       );
     }
-    if (!await _refsMatchAcceptedManifests(run)) {
+    if (!_refsMatchEvidence(run, evidence)) {
       return const ReconciliationRunMalformed(
         'accepted manifests do not match durable provenance',
       );
@@ -984,8 +1035,9 @@ class LedgerReconciliationRunRepo {
   }
 
   Future<bool> _storedRowMatchesCurrentEvidence(
-    LedgerReconciliationSuccessfulRunRow row,
-  ) async {
+    LedgerReconciliationSuccessfulRunRow row, {
+    required _ReconciliationEvidence evidence,
+  }) async {
     try {
       final anchors = _decodeAnchors(row.anchorsJson);
       final refs = _decodeRefs(row.acceptedManifestRefsJson);
@@ -1007,8 +1059,8 @@ class LedgerReconciliationRunRepo {
         opsApplied: List<String>.from(ops),
         createdAt: row.createdAt,
       );
-      return await _anchorsMatchSession(run) &&
-          await _refsMatchAcceptedManifests(run);
+      return _anchorsMatchEvidence(run, evidence) &&
+          _refsMatchEvidence(run, evidence);
     } catch (_) {
       return false;
     }
@@ -1016,38 +1068,39 @@ class LedgerReconciliationRunRepo {
 
   Future<bool> _anchorsMatchSession(LedgerReconciliationRun run) async {
     try {
-      final session = await (_db.select(
-        _db.chatSessions,
-      )..where((row) => row.sessionId.equals(run.sessionId))).getSingleOrNull();
-      if (session == null) return false;
-      final messages = jsonDecode(session.messagesJson);
-      if (messages is! List) return false;
-      var previousIndex = -1;
-      for (final anchor in run.anchors) {
-        final index = messages.indexWhere(
-          (message) => message is Map && message['id'] == anchor.messageId,
-        );
-        if (index <= previousIndex) return false;
-        previousIndex = index;
-        final message = messages[index];
-        if (message is! Map ||
-            message['role'] != anchor.role ||
-            (anchor.role != 'user' && anchor.role != 'assistant')) {
-          return false;
-        }
-        final content = _anchoredContent(
-          message,
-          anchor.swipeId,
-          anchor.agentSwipeId,
-        );
-        if (content == null || computeHash(content) != anchor.contentHash) {
-          return false;
-        }
-      }
-      return true;
+      return _anchorsMatchEvidence(
+        run,
+        await _ReconciliationEvidence.messagesOnly(_db, run.sessionId),
+      );
     } catch (_) {
       return false;
     }
+  }
+
+  bool _anchorsMatchEvidence(
+    LedgerReconciliationRun run,
+    _ReconciliationEvidence evidence,
+  ) {
+    var previousIndex = -1;
+    for (final anchor in run.anchors) {
+      final indexed = evidence.messages[anchor.messageId];
+      if (indexed == null || indexed.$1 <= previousIndex) return false;
+      previousIndex = indexed.$1;
+      final message = indexed.$2;
+      if (message['role'] != anchor.role ||
+          (anchor.role != 'user' && anchor.role != 'assistant')) {
+        return false;
+      }
+      final content = _anchoredContent(
+        message,
+        anchor.swipeId,
+        anchor.agentSwipeId,
+      );
+      if (content == null || computeHash(content) != anchor.contentHash) {
+        return false;
+      }
+    }
+    return true;
   }
 
   String? _anchoredContent(
@@ -1079,22 +1132,17 @@ class LedgerReconciliationRunRepo {
     return agentSwipeId == 0 ? content : null;
   }
 
-  Future<bool> _refsMatchAcceptedManifests(LedgerReconciliationRun run) async {
+  bool _refsMatchEvidence(
+    LedgerReconciliationRun run,
+    _ReconciliationEvidence evidence,
+  ) {
     for (final ref in run.acceptedManifestRefs) {
       final manifest =
-          await (_db.select(_db.lorebookUseManifests)
-                ..where((row) => row.sessionId.equals(ref.sessionId))
-                ..where((row) => row.messageId.equals(ref.messageId))
-                ..where((row) => row.swipeId.equals(ref.swipeId))
-                ..where((row) => row.agentSwipeId.equals(ref.agentSwipeId)))
-              .getSingleOrNull();
+          evidence.manifests[(ref.messageId, ref.swipeId, ref.agentSwipeId)];
       if (manifest == null || manifest.manifestHash != ref.manifestHash) {
         return false;
       }
-      final accepted =
-          await (_db.select(_db.lorebookUseAcceptanceRecords)
-                ..where((row) => row.acceptanceId.equals(ref.acceptanceId)))
-              .getSingleOrNull();
+      final accepted = evidence.acceptances[ref.acceptanceId];
       if (accepted == null ||
           accepted.acceptanceKind != 'variation' ||
           accepted.sessionId != ref.sessionId ||
@@ -1102,10 +1150,9 @@ class LedgerReconciliationRunRepo {
           accepted.swipeId != ref.swipeId ||
           accepted.agentSwipeId != ref.agentSwipeId ||
           accepted.acceptedByUserMessageId != ref.acceptedByUserMessageId ||
-          !await _isAcceptingUser(
-            sessionId: run.sessionId,
-            assistantMessageId: ref.messageId,
-            userMessageId: ref.acceptedByUserMessageId,
+          !evidence.isAcceptingUser(
+            ref.messageId,
+            ref.acceptedByUserMessageId,
           )) {
         return false;
       }
@@ -1163,6 +1210,88 @@ class LedgerReconciliationRunRepo {
       row.contractVersion == run.contractVersion &&
       row.opsAppliedJson == run.opsJson &&
       row.createdAt == run.createdAt;
+}
+
+final class _ReconciliationEvidence {
+  const _ReconciliationEvidence({
+    required this.messages,
+    required this.manifests,
+    required this.acceptances,
+  });
+
+  final Map<String, (int, Map<Object?, Object?>)> messages;
+  final Map<(String, int, int), LorebookUseManifestRow> manifests;
+  final Map<String, LorebookUseAcceptanceRecordRow> acceptances;
+
+  static Future<_ReconciliationEvidence> load(
+    AppDatabase db,
+    String sessionId,
+  ) async {
+    final values = await Future.wait<Object?>([
+      _loadMessages(db, sessionId),
+      (db.select(
+        db.lorebookUseManifests,
+      )..where((row) => row.sessionId.equals(sessionId))).get(),
+      (db.select(
+        db.lorebookUseAcceptanceRecords,
+      )..where((row) => row.sessionId.equals(sessionId))).get(),
+    ]);
+    final indexedMessages =
+        values[0] as Map<String, (int, Map<Object?, Object?>)>;
+    final manifests = values[1] as List<LorebookUseManifestRow>;
+    final acceptances = values[2] as List<LorebookUseAcceptanceRecordRow>;
+    return _ReconciliationEvidence(
+      messages: indexedMessages,
+      manifests: {
+        for (final row in manifests)
+          (row.messageId, row.swipeId, row.agentSwipeId): row,
+      },
+      acceptances: {for (final row in acceptances) row.acceptanceId: row},
+    );
+  }
+
+  static Future<_ReconciliationEvidence> messagesOnly(
+    AppDatabase db,
+    String sessionId,
+  ) async => _ReconciliationEvidence(
+    messages: await _loadMessages(db, sessionId),
+    manifests: const {},
+    acceptances: const {},
+  );
+
+  static Future<Map<String, (int, Map<Object?, Object?>)>> _loadMessages(
+    AppDatabase db,
+    String sessionId,
+  ) async {
+    final session = await (db.select(
+      db.chatSessions,
+    )..where((row) => row.sessionId.equals(sessionId))).getSingleOrNull();
+    final indexed = <String, (int, Map<Object?, Object?>)>{};
+    if (session == null) return indexed;
+    try {
+      final decoded = jsonDecode(session.messagesJson);
+      if (decoded is! List) return indexed;
+      for (final entry in decoded.indexed) {
+        final message = entry.$2;
+        if (message is Map && message['id'] is String) {
+          indexed.putIfAbsent(
+            message['id'] as String,
+            () => (entry.$1, message),
+          );
+        }
+      }
+    } catch (_) {}
+    return indexed;
+  }
+
+  bool isAcceptingUser(String assistantMessageId, String userMessageId) {
+    final assistant = messages[assistantMessageId];
+    final user = messages[userMessageId];
+    return assistant != null &&
+        user != null &&
+        user.$1 == assistant.$1 + 1 &&
+        user.$2['role'] == 'user';
+  }
 }
 
 bool _validAnchors(List<ReconciliationAnchor> anchors) =>

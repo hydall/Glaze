@@ -397,9 +397,10 @@ class CardEvolutionCollectorRunRepo {
   /// Valid reconciliation batches that can be started from the Collector UI.
   /// Failed and live in-flight rows use their dedicated recovery paths.
   Future<List<CardEvolutionCollectorBatch>> unclaimedValidPairs(
-    String sessionId,
-  ) async {
-    final runs = await _validOrLegacyRuns(sessionId);
+    String sessionId, {
+    List<LedgerReconciliationSuccessfulRunRow>? validatedRuns,
+  }) async {
+    final runs = validatedRuns ?? await _validOrLegacyRuns(sessionId);
     final collectors = await (db.select(
       db.cardEvolutionCollectorRuns,
     )..where((row) => row.sessionId.equals(sessionId))).get();

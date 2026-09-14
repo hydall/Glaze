@@ -110,6 +110,7 @@ void main() {
       expect(snapshot.unclaimedPairCount, 0);
       expect(snapshot.runs.single.firstReconciliationOrdinal, 1);
       expect(snapshot.runs.single.boundaryReconciliationOrdinal, 3);
+      expect(snapshot.blockingFailedRun, isNull);
       expect(snapshot.observations.map((item) => item.status), [
         'expired',
         'active',
@@ -278,11 +279,13 @@ void main() {
       ),
     );
 
-    final run = (await service.load('session')).runs.single;
+    final snapshot = await service.load('session');
+    final run = snapshot.runs.single;
     expect(run.canRetry, isTrue);
     expect(run.canRetryExact, isTrue);
     expect(run.exactCapture?.prompt, 'exact prompt');
     expect(run.latestResponse, 'bad response');
+    expect(snapshot.blockingFailedRun?.row.id, 'collector-failed');
 
     final withoutExactCapture = CollectorRunView(
       row: run.row,
