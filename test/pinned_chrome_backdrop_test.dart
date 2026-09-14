@@ -69,4 +69,26 @@ void main() {
     expect(routeBranch, contains('return TopEdgeBlur('));
     expect(routeBranch, contains('height: extraTop + 8'));
   });
+
+  testWidgets('samples only the top strip, not the full child subtree', (
+    tester,
+  ) async {
+    TopEdgeBlur.debugLastSampleHeight = null;
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: TopEdgeBlur(
+          height: 60,
+          sigma: 24,
+          child: ColoredBox(color: Colors.white),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final sampled = TopEdgeBlur.debugLastSampleHeight;
+    expect(sampled, isNotNull);
+    // strip (60) + blur margin (2 * sigma + 4), never the whole child.
+    expect(sampled!, lessThanOrEqualTo(60 + 24 * 2 + 4 + 0.001));
+  });
 }

@@ -68,12 +68,6 @@ class GlassSurface extends ConsumerWidget {
 
   Widget _build(BuildContext context, ThemePreset preset, bool batterySaver) {
     final alpha = batterySaver ? 1.0 : preset.elementOpacity.clamp(0.0, 1.0);
-    // Over the chat WebView the blur is done by an in-WebView CSS strip, so the
-    // Flutter BackdropFilter is dropped here (it would sample the platform-view
-    // hole, not the WebView content, and cost a blur pass every frame).
-    final blur = (batterySaver || PerfDebug.noGlassBlur || blurViaWebView)
-        ? 0.0
-        : preset.elementBlur;
     final defaultBase = Theme.of(context).colorScheme.surfaceContainerHighest;
     final effectiveTint = tint;
     final fillColor = effectiveTint == null
@@ -81,6 +75,18 @@ class GlassSurface extends ConsumerWidget {
         : effectiveTint.withValues(
             alpha: (effectiveTint.a * alpha).clamp(0.0, 1.0),
           );
+    // Over the chat WebView the blur is done by an in-WebView CSS strip, so the
+    // Flutter BackdropFilter is dropped here (it would sample the platform-view
+    // hole, not the WebView content, and cost a blur pass every frame). A fully
+    // opaque fill hides the backdrop too, so the blur would be invisible and
+    // only cost a saveLayer + blur every frame.
+    final blur =
+        (batterySaver ||
+            PerfDebug.noGlassBlur ||
+            blurViaWebView ||
+            fillColor.a >= 1.0)
+        ? 0.0
+        : preset.elementBlur;
 
     final filled = DecoratedBox(
       decoration: BoxDecoration(

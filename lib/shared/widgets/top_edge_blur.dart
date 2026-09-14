@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
@@ -33,6 +34,12 @@ class TopEdgeBlur extends StatelessWidget {
   /// Fraction of [height] that stays fully blurred before the effect fades
   /// to transparent at the strip's bottom edge.
   final double fadeStart;
+
+  /// Logical height of the region captured for the edge blur in the most recent
+  /// resample. Test-only hook asserting the capture stays bounded to the strip
+  /// instead of spanning the whole child subtree.
+  @visibleForTesting
+  static double? debugLastSampleHeight;
 
   const TopEdgeBlur({
     super.key,
@@ -292,12 +299,34 @@ class _TopEdgeBlurLayer extends OffsetLayer {
       offset.dy,
       oldLayer: engineLayer as ui.OffsetEngineLayer?,
     );
-    builder.addPicture(Offset.zero, _picture!);
+    // Paint the child's own layers normally (the scroll body repaints
+    // independently of the edge effect) and overlay only the sample of the
+    // top strip. Previously this layer replaced the whole child with a
+    // full-body capture, so every body repaint re-rasterised the entire
+    // subtree at device resolution — expensive on a sheet whose body
+    // relayouts on every drag/animation tick.
+    addChildrenToScene(builder);
+    if (_picture != null) {
+      builder.addPicture(Offset.zero, _picture!);
+    }
     builder.pop();
   }
 
   void _resample() {
-    final image = _buildChildScene(_contentSize, _devicePixelRatio);
+    // Only the strip along the top edge is ever blurred, so capture that
+    // region (plus a blur-radius margin) rather than the full child. The
+    // offscreen cost then scales with the (small) strip instead of the whole
+    // (potentially screen-tall) body.
+    final margin = _sigma * 2 + 4;
+    final sampleHeight = math.min(
+      _contentSize.height,
+      _stripHeight + margin,
+    );
+    TopEdgeBlur.debugLastSampleHeight = sampleHeight;
+    final image = _buildChildScene(
+      Size(_contentSize.width, sampleHeight),
+      _devicePixelRatio,
+    );
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
     try {
@@ -321,11 +350,12 @@ class _TopEdgeBlurLayer extends OffsetLayer {
     );
   }
 
-  /// Paints the sampled child plus the blurred/tinted/gradient-masked strip.
-  /// The drawing math mirrors soft_edge_blur 0.1.3 exactly for visual parity.
+  /// Paints the blurred/tinted/gradient-masked strip sampled by
+  /// [_buildChildScene]. The child's own layers are painted separately in
+  /// [addToScene], so only the strip overlay is recorded here. The drawing math
+  /// mirrors soft_edge_blur 0.1.3 exactly for visual parity.
   void _draw(ui.Image image, Canvas canvas) {
     canvas.scale(1 / _devicePixelRatio);
-    canvas.drawImage(image, Offset.zero, Paint());
 
     final strip = _stripHeight.clamp(0.0, _contentSize.height);
     if (strip <= 0) return;
