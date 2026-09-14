@@ -6,6 +6,14 @@ app, which is archived on the `legacy-vue` branch.
 
 Architecture: `docs/ARCHITECTURE.md`. Workflow (git, PRs, Trello): `docs/WORKFLOW.md`.
 
+## Answering
+
+- Write plainly and concisely. Plain language, no buzzwords, no jargon padding.
+- Do not quote code or cite `file:line` references in answers unless the user
+  asks for them. Describe what the code does in words instead.
+- These rules apply to chat replies only, not to commit messages, PR bodies, or
+  code comments.
+
 ## Commands
 
 Flutter and Dart must be available on `PATH`. Alternatively, set
