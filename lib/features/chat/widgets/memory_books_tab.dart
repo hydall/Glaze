@@ -8,6 +8,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
+import '../../../core/state/memory_settings_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -291,6 +292,12 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
                   MemoryBatchPanel(
                     pendingCount: draftsNeedingGen.length,
                     isGenerating: isGenerating,
+                    // The global settings, not the book's snapshot: the
+                    // global copy is what `MemoryDraftStage` actually gates
+                    // auto-generation on.
+                    autoGenerateEnabled: ref
+                        .watch(memoryGlobalSettingsProvider)
+                        .autoGenerateEnabled,
                     onGenerateBatch: _batchGenerate,
                   ),
                 // Under the batch panel, not above it: the filter narrows the

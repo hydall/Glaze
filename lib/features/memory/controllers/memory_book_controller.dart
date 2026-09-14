@@ -128,12 +128,6 @@ class MemoryBookController {
       ),
       MemoryConfigRow('memory_books_batch_size'.tr(), '${s.batchSize}'),
       MemoryConfigRow(
-        'memory_books_delayed_automation'.tr(),
-        s.useDelayedAutomation
-            ? 'memory_books_summary_delayed'.tr()
-            : 'memory_books_summary_immediate'.tr(),
-      ),
-      MemoryConfigRow(
         'label_embedding_target'.tr(),
         s.injectionTarget == 'macro'
             ? 'memory_injection_macro'.tr()

@@ -145,12 +145,20 @@ class MemoryBooksActionsFab extends StatelessWidget {
 class MemoryBatchPanel extends StatelessWidget {
   final int pendingCount;
   final bool isGenerating;
+
+  /// Whether new drafts fill themselves. Auto-*create* is on out of the box
+  /// and auto-*generate* is not, so the ordinary first encounter with this
+  /// panel is a pile of empty drafts and no stated reason for it — which is
+  /// what the report asked about ("am i doing something wrong?"). Nothing is
+  /// wrong; the panel just never said which of the two switches is off.
+  final bool autoGenerateEnabled;
   final VoidCallback onGenerateBatch;
 
   const MemoryBatchPanel({
     super.key,
     required this.pendingCount,
     required this.isGenerating,
+    required this.autoGenerateEnabled,
     required this.onGenerateBatch,
   });
 
@@ -175,6 +183,17 @@ class MemoryBatchPanel extends StatelessWidget {
                   color: context.cs.onSurfaceVariant,
                 ),
               ),
+              if (!autoGenerateEnabled && !isGenerating) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'memory_books_auto_generate_off_hint'.tr(),
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    color: context.cs.onSurfaceVariant.withValues(alpha: 0.75),
+                  ),
+                ),
+              ],
               const SizedBox(height: 10),
               MemoryActionTile(
                 icon: Icons.auto_awesome_rounded,

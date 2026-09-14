@@ -78,16 +78,15 @@ class MemoryCaptureSections {
                 onChanged();
               },
             ),
+            // "Delay until generation ends" used to sit here. It was saved,
+            // synced and summarised, and read by nothing: drafts are created
+            // from the post-generation coordinator, which is to say always
+            // after the reply, so the switch's ON position described what
+            // already happens and its OFF position promised a behaviour that
+            // does not exist (and would compete with the reply for the
+            // model). The field stays on the settings models so an existing
+            // value is not dropped on save or on sync.
             if (draft.autoCreate) ...[
-              MenuSwitchItem(
-                label: 'memory_books_delayed_automation'.tr(),
-                description: 'memory_books_delayed_automation_desc'.tr(),
-                value: draft.useDelayedAutomation,
-                onChanged: (v) {
-                  draft.useDelayedAutomation = v;
-                  onChanged();
-                },
-              ),
               MenuRangeItem(
                 label: 'memory_books_auto_create_interval'.tr(),
                 value: draft.autoCreateInterval.toDouble(),
