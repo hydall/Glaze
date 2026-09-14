@@ -177,11 +177,70 @@ way are the negative controls. `error_format.dart` is also edited by open PR #41
 this branch keeps `_formatHttpError`'s four return lines byte-identical and builds the
 redirect line into the `header` expression above them — noted in the PR.
 
-### G6 — `fix/cloud-sync` — cloud sync (4 cards)
-- **#107** Google Drive: `401 invalid_client` for every user — the shipped OAuth client is revoked. **Needs a fresh Google Cloud OAuth client (PKCE, no secret); this is an ops task as much as a code one.**
-- **#115** Dropbox `OAuth state mismatch` on every retry until the app restarts — callbacks are keyed per provider, not per attempt
-- **#124** After a pull the open chat stays stale — `invalidateDataProviders()` never touches `chatProvider(charId)` or `ChatSessionService`'s static cache
-- **#134** App Settings never sync — no manifest entity covers those SharedPreferences keys
+### G6 — `fix/cloud-sync` — **PR [#441](https://github.com/hydall/Glaze/pull/441)**
+
+**One of the four was the live bug; two were already fixed and one is an ops
+task.** The audit named `invalidateDataProviders()` for #124 — a symbol that
+does not exist on nightly, which is what sent me looking for what actually runs
+after a pull.
+
+- **#504 — Dropbox `OAuth state mismatch` on every retry until restart — fixed,
+  and the `got` value in the report is what gave it away.** It is the *first*
+  attempt's state. `DeepLinkService` tracked callbacks per provider, never per
+  attempt: a redirect arriving with nothing waiting for it was stored in
+  `_earlyCallbacks[provider]` **forever**, and the next `connect()` was handed it
+  immediately against a brand-new state. Nothing cleared it, which is exactly
+  why only killing the process helped.
+
+  Every attempt now registers with its `state` **before** the browser launches,
+  so a callback can never arrive with nothing to match it against, and is
+  delivered only to the attempt whose state it carries. Three cases decided on
+  purpose: a callback carrying **no** state is still delivered (a denial or a
+  malformed redirect — the caller reports it far sooner than a five-minute
+  timeout would); a second Connect tap **supersedes** the first rather than
+  leaving two waiters, with the loser's cleanup keyed by state because it runs
+  *after* its replacement registered; and an answered attempt stays registered,
+  so a callback landing between `beginOAuth` and the `await` still resolves it.
+  That last one was my own bug — the first cut dropped the attempt on
+  completion, and the test written for that window caught it.
+
+- **#504's other half, found in the same pass: the desktop loopback flow never
+  checked the state it sent.** `OAuthLocalServer` put a `state` in the
+  authorization URL and then accepted any `?code=` that reached the port, so
+  anything that could get a request to the loopback port while it was open could
+  hand Glaze an authorization code and bind the reader's app to the account that
+  issued it. The expected value is read back out of the request being made, so
+  it cannot drift from what the provider was asked. Its three response branches
+  collapsed into one `oauthCodeFromRedirect`, which is also what made the check
+  testable without a browser.
+
+- **One vocabulary for the mismatch.** Dropbox reported both values, Drive said a
+  bare `OAuth state mismatch`, the loopback server said nothing. All three use
+  `oauthStateMismatchMessage` now.
+
+- **Also found: the iOS Drive redirect was never routed at all.** Routing matched
+  `uri.host.contains('googleusercontent')`, but the iOS redirect is a reversed
+  client id with a *single* slash (`com.googleusercontent.apps.123:/…`), which
+  parses to an empty host. Matched by scheme as well now. Not verifiable end to
+  end while the shipped Drive client is revoked, but wrong either way.
+
+- **#513 — the open chat stays stale after a pull — already fixed**, by PR #336
+  on 2026-08-28, ten days after the report: `refreshDataProvidersAfterPull`
+  drops `ChatSessionService`'s static cache and reloads `chatProvider`, and both
+  manual pull paths reach it. It had no test, so it has three now.
+
+- **#523 — App Settings never sync — already fixed**, by PR #349 on 2026-08-31,
+  three days after the report. The manifest carries the whole
+  `AppSettingsPreferences` key set and `sync_lifecycle_test.dart` already
+  round-trips it. Nothing to add.
+
+- **#496 — Drive `401 invalid_client` — still blocked.** Needs a fresh Google
+  Cloud OAuth client (PKCE, no secret) created under the maintainer's account;
+  an ops task, not a code one. Deferred by the maintainer; the card stays open.
+
+25 + 3 new tests; negative control fails exactly five cases and passes the other
+twenty. **Not verified on a device** — the Dropbox flow wants a real phone, a
+real browser and a failed first attempt.
 
 ### G7 — `fix/backup-onboarding-polish` — **PR [#434](https://github.com/hydall/Glaze/pull/434)**
 - **#24** the export button showed the import label — **fixed.**
@@ -491,17 +550,126 @@ and re-arms the debounce with an empty controller. Could not construct the repor
 exact repro from the current code, and the card carries no repro steps — said so in
 the PR.
 
-### G18 — `fix/promptworker-throughput` (2 cards)
-- **#126** An ST-imported character → `PromptWorker request timed out after 60000ms`
-- **#127** PromptWorker overwhelmed by many lorebooks / regexes
+### G18 — `fix/promptworker-throughput` — **PR [#448](https://github.com/hydall/Glaze/pull/448)**
+- **#515** an ST-imported character → `PromptWorker request timed out after 60000ms`
+- **#516** PromptWorker overwhelmed by many lorebooks / regexes
 
-Same worker, same 60 s hard cap, same single-request isolate. Sizing work, not a one-liner.
+**Neither reproduced, and the measurements say the obvious explanation is
+wrong.** Extending the existing baseline harness to import scale, with the scan
+depth unbounded so every entry scans the whole chat:
 
-### G19 — `fix/saucepan-import-phase` (1 card)
-- **#117** A failed vetted-provider extraction keeps showing "Importing…" for ~3 minutes; the poll loop only looks for a `characterId` and never treats a terminal-without-card run as an error
+| history | chars | lorebook entries | build |
+|---|---|---|---|
+| 500 | 137 KB | 690 | 252 ms |
+| 2000 | 551 KB | 690 | 915 ms |
+| 4000 | 1.1 MB | 690 | 1717 ms |
 
-### G20 — `fix/memory-auto-generate` (1 card)
-- **#122** Memory-book drafts are auto-*created* but never auto-*generated*; `autoGenerateEnabled` has no consumer, yet the toggle is shown. Either wire it up or stop advertising it
+Roughly linear, and 35× short of the deadline on this desktop. The memory
+keyword scan separately: 600 keys over 2 MB costs 480 ms in the default `glaze`
+key mode, 2.8 s in the `contains` modes. Real, not a minute.
+
+**Where the time plausibly goes instead, and why it is not fixed here.**
+`RegexSafety.risky` — patterns the classifier itself describes as *"likely slow
+(quadratic) on long input with no match"* — are **allowed to run**, because
+`regex_validator.dart` says *"the isolate-timeout is the safety net"*. Regex
+scripts are applied per message, so a quadratic pattern costs
+quadratic-in-message-length × number-of-messages: linear in a chat Glaze made,
+catastrophic in an imported one. The classifier's own comment says these
+signatures are what *"SillyTavern preset imports have been observed to carry"*,
+and #515 is specifically an ST-imported character. The trouble with that safety
+net is what it catches: the timeout kills the **whole prompt build**, so one bad
+script makes the character unusable instead of being skipped the way a
+`pathological` one already is. Bounding a `risky` pattern changes what a
+reader's scripts output, and I cannot confirm it is the cause — so it is a
+question in the PR, not a change.
+
+**What did ship:**
+- The timeout **names the command and the serialized payload size**. That payload
+  carries the history, the lorebooks and the regex scripts, so it is the one
+  number separating "an enormous chat" from "something is stuck" — and it is
+  exactly what both cards are missing.
+- The deadline **scales with the payload**: 60 s + 15 s/MB, capped at 180 s. The
+  flat minute is a statement about how long Glaze will wait for an isolate it
+  cannot interrupt, not about the work; against a flat cap a legitimately large
+  chat can never generate at all. The cap keeps a stuck isolate detectable.
+- **`scanLorebooks` builds the text to scan once per depth, not once per entry.**
+  It was doing a fresh lowercase pass over the recursion buffer plus a fresh
+  concatenation with the history slice *for every candidate entry*, making the
+  cost entries × characters. Measured by counter: 200 entries went from **200
+  builds to 1**. The cache is dropped whenever a match appends to the buffer,
+  which is what keeps the result byte-identical. Honest size of the win: 1917 ms
+  → 1717 ms at 4000 messages, about 10%.
+
+16 new tests. **Both cards still need** a report from a build carrying the new
+message, plus two answers: does it reproduce with all regex scripts disabled,
+and does it reproduce on the same character with a *short* chat?
+
+### G19 — `fix/saucepan-import-phase` — **PR [#442](https://github.com/hydall/Glaze/pull/442)**
+- **#506** — **confirmed exactly as reported.** A companion whose definition only
+  vetted providers can read produces a run that *completes without a character*,
+  and the poll loop asked one question — is there a character id yet? — which
+  made that indistinguishable from a run still working. So the dialog kept its
+  spinner, its `Phase:` label and its disabled "Importing…" button for the full
+  sixty attempts, about three minutes, then reported `Extraction timed out`,
+  which is not what happened.
+- `readExtractionStatus` is the loop's decision as a pure function: `running`,
+  `produced`, `finishedEmpty`. All five existing ways a character is recognised
+  are preserved unchanged; only the third state is new.
+- **A failure is only ever claimed for a run this request can prove is its own.**
+  The id-less fallbacks exist because the server does not always echo the
+  request id back, and they are how most successful imports are actually
+  recognised — but a run Glaze cannot identify must not fail this import.
+- **Finished-empty must be seen twice.** The status endpoint composes the run and
+  the character it produced from different places, so one poll can catch the
+  moment in between.
+- **Found on the way:** `ImportUrlDialog` handled `result.error != null` but had
+  no branch for a result with **neither** a character nor an error — that path
+  left the spinner turning with no timeout behind it at all, strictly worse than
+  the three minutes and the same symptom the card reports.
+- **Declined:** pre-checking whether a definition is open (a second round trip on
+  every import to predict what the extraction now reports in seconds). **Routed
+  to its own card:** a cancel affordance while an extraction runs.
+
+15 new tests; negative control fails exactly the two cases that assert the new
+state. **Not verified against a live vetted-only companion** — the server's
+response shape for that case is not observable from the repo, so a different
+shape still times out as before rather than misfiring.
+
+### G20 — `fix/memory-auto-generate` — **PR [#446](https://github.com/hydall/Glaze/pull/446)**
+- **#511 — the audit's central claim is wrong.** It said `autoGenerateEnabled`
+  *"has no consumer in the post-generation pipeline — i.e. even with the toggle
+  on, nothing auto-generates pending drafts."* It has two:
+  `MemoryDraftStage.reserveAutoGeneration` gates on it before taking the
+  session's exclusive lease and `run` gates on it again before calling the
+  generator, with `PostGenCoordinator` reserving that lease on both paths. And
+  `memory_draft_stage_test.dart` already covers all of it end to end — the fill,
+  the disabled case, and a failure leaving the draft retryable.
+- **What the reporter actually hit:** `autoCreateEnabled` defaults **true** and
+  `autoGenerateEnabled` defaults **false**, so out of the box Glaze creates a
+  draft every 15 messages and leaves it empty. That is a supported workflow —
+  the Drafts tab has always shown "N drafts need generation" with a Generate
+  Batch button, and each card carries an amber *Needs generation* badge — but
+  nothing said **which** of the two switches is off. A pile of empty drafts with
+  no explanation reads as broken. The panel says so now, once, and not while a
+  batch is running.
+- **The default was not flipped.** Turning auto-generate on by default would make
+  unrequested LLM calls on a schedule at the reader's expense on every install:
+  a product decision with a bill attached, not a bug fix. Asked in the PR.
+- **The genuinely dead flag is `useDelayedAutomation`** — written to
+  SharedPreferences, carried in the sync payload, mirrored by
+  `MemorySettingsMapper` both ways, rendered as a switch and reported in the
+  settings summary, and read by nothing. Its copy is *"Wait for the assistant
+  reply before creating memory drafts"*, which is what the code already does
+  unconditionally, so its ON position described reality and its OFF position
+  promised drafts built during generation — unimplemented, and it would compete
+  with the reply. Switch and summary row removed; the field stays on both
+  settings models so a stored value is not dropped on save or wiped for the
+  devices it syncs to, pinned by a round-trip test.
+
+8 new tests; negative control fails the one case that asserts the hint. **Worth
+asking the reporter** (the two screenshots are unreadable here): were the drafts
+badged *Needs generation*, or *Needs regeneration* with an error? The second is
+a configured-but-failing memory model, a different bug.
 
 ### G21 — `fix/docs-and-readme` — **PR [#419](https://github.com/hydall/Glaze/pull/419)**
 - **#116** The README Discord badge renders "invalid server" — guild id and invite do not match
@@ -861,11 +1029,61 @@ both want eyes on a phone. The first-messages card has no widget test — the
 accordion widgets are private to a 1900-line screen and splitting that file is a
 separate change — so the numbering is tested and the layout is not.
 
-### G31 — `fix/jar-background` (1 card)
-- **#58** JAR extraction dies when the app is backgrounded. Backgrounding must not kill it — the same foreground-service treatment generation already gets
+### G31 — `fix/jar-background` — **PR [#449](https://github.com/hydall/Glaze/pull/449)**
+- **#447** — done as specified. Generation survives being backgrounded because
+  `GenerationPipeline` holds a dataSync foreground service (plus silent audio on
+  iOS) for its whole duration. A JanitorAI extraction is minutes of network
+  round trips through a headless WebView followed by an LLM call, and held
+  nothing — so Android was free to freeze or reclaim the process.
+- **Both phases take a hold**, `extract` and `commit`: the lorebook rebuild is an
+  LLM call, and being killed *after* the capture already succeeded is the worst
+  possible moment. Released from a `finally` in both, so a failed extraction
+  cannot leave a foreground service running for the rest of the session.
+- **`ForegroundWorkHold` does not count towards `isGenerating`.** The existing
+  lease bumps a counter other code reads as "a chat reply is in flight"; an
+  extraction needs the process kept alive and nothing more.
+- No platform branch at the call sites: the hold is handed out everywhere and the
+  underlying acquire is already mobile-only.
+- `commit` became a thin wrapper around `_commit` rather than a try/finally
+  around a body that returns from four places.
 
-### G32 — `fix/janitor-custom-tags` (1 card)
-- **#69** Catalog filters must offer JanitorAI's live popular custom tags: read `top_custom_tags` from `https://janitorai.com/hampter/characters` and append them **after** the standard tags. Search already works
+7 new tests; negative control fails the one case that asserts the release.
+**`flutter build apk --debug` run locally**, since CI does not build Android and
+this group's whole point is Android behaviour. **Not verified on a device:**
+whether a *headless WebView* keeps making requests while the activity is not
+visible is a device-and-OEM question a foreground service only partly answers —
+it stops the process being reclaimed, and Android can still throttle background
+timers. If extraction still dies with this build, the WebView is the next thing
+to look at, not the service.
+
+### G32 — `fix/janitor-custom-tags` — **PR [#447](https://github.com/hydall/Glaze/pull/447)**
+- **#457** — built to the maintainer's own spec. Searching *by* a custom tag
+  already worked (`janitorSearch` sends `&custom_tags[]=`, and the sheet accepts
+  them through `/tags/suggest` autocomplete or verbatim typing); what was missing
+  was **discovery**, since both routes need the reader to already know a name.
+  JanitorAI's own answer to that — the `top_custom_tags` array it returns with
+  every character listing — was parsed away with the rest of the response.
+- **Harvested from the listing a search already makes**, so no extra request and
+  the list reflects the mode and sort being browsed. A standalone fetch covers a
+  sheet opened before any search has run.
+- `parseTopCustomTags` accepts bare strings *or* objects carrying
+  `name`/`tag`/`slug`, because the exact shape is not observable from the repo
+  and guessing wrong would be a crash inside every search's response parsing.
+- **JanitorAI's ranking is preserved** — the whole value of the field is that it
+  is ordered by popularity.
+- **Appended after the curated tags, never mixed in**, which matches the
+  mechanics as well as the spec: a curated tag is selected by id, a custom one
+  by text, and the absent `id` is what routes the selection into `custom_tags[]`.
+  A duplicate of a curated tag is not listed twice, which also stops the
+  autocomplete offering a second way to pick the same thing.
+
+11 new tests; negative control fails exactly four cases — **and caught a weak
+assertion of mine**: the harvest test originally matched the whole file, where
+the standalone fetch mentions the same call, so deleting the harvest would have
+gone unnoticed. It now reads `janitorSearch`'s own body. **Not verified against
+the live endpoint**; if the payload nests the field elsewhere the grid simply
+shows the curated tags, as today. One judgement call flagged in the PR: curated
+and custom chips look identical, distinguished only by position.
 
 ### G33 — `fix/st-lorebook-settings` — **PR [#440](https://github.com/hydall/Glaze/pull/440)**
 - **#135**, two separate losses, both confirmed. **The book's own settings were
@@ -968,8 +1186,45 @@ making only once we know a scan is not enough.
   widget test around it hung on the sheet's post-layout header measurement. The change
   is scope-of-rebuild only — nothing on screen differs.
 
-### G37 — `fix/guided-ui` (1 card)
-- **#6** Port the Vue Guided Generation UI **1:1** — the current one is rough, and the preset editor still has no way to edit the guided prompts
+### G37 — `fix/guided-ui` — **PR [#450](https://github.com/hydall/Glaze/pull/450)**
+- **#345 — both halves were the same omission.** Every string this feature needs
+  is already in `en.json` **and** `ru.json`, and both preset fields are already
+  on the model and already carried through save, import and sync. What came over
+  from the Vue app was the data and the copy; the widgets never did. Ported off
+  `zzarchive/legacy-vue`.
+- **The preset editor.** `guidedGenerationPrompt` and
+  `guidedImpersonationPrompt` are *preset* fields, not `block.content`, and no
+  screen offered a field for either — both save paths read them straight off the
+  stored preset, which is the same thing as being uneditable: a future editor's
+  work would be overwritten on the next save. The Vue editor special-cased this
+  block (info line + the two prompts instead of a content field), and Glaze
+  already has that pattern twice, for Author's Note and Summary, so the port
+  slots in beside them with the same role/insertion/depth the others carry. Two
+  details: an empty prompt shows the **shipped default** rather than an empty
+  box, because a preset that never set one still sends it; and the two prompts
+  are **lifted back out** before the remainder is read as a block, since
+  `PresetBlock.fromJson` would drop them and the preset would keep its old text
+  while the editor showed the new one.
+- **The composer.** Vue had *two* guidance modes, each with its own header and
+  placeholder. Glaze folds them into one field and decides the destination by
+  whether a message is waiting — the send button has always switched between
+  send and a checkmark on exactly that question — but the panel never said
+  which, so a reader could not tell what pressing it would do. The panel names
+  the mode, the placeholder follows it, and `_guidanceImpersonates` is
+  deliberately the *same* expression the send button uses (pinned by a test: a
+  header that disagrees with the button is worse than no header). Guidance can
+  also be dismissed from the panel, as in Vue — it was previously dismissable
+  only from whichever button had opened it, a composer action that may be pinned
+  anywhere, or the drawer.
+- **Kept Glaze's folded single-field design** rather than splitting it back into
+  two modes: the send button's behaviour is built on it, and making it legible
+  costs a label where un-folding it would be a rewrite.
+
+12 new tests; negative control fails **9 of 12** — the 3 that pass are the
+preconditions (the strings exist in both languages, the defaults carry
+`{{guidance}}`, the block is static and enabled), which is the point.
+**Pixel-level 1:1 is not claimed:** the comparison was feature by feature, and
+whether the result *looks* like the Vue panel needs the maintainer's eyes.
 
 ### G38 — `fix/shino-default` — **PR [#431](https://github.com/hydall/Glaze/pull/431)**
 - **#28** Shino as the default for fresh installs, drop `Default Chat` —
@@ -1173,6 +1428,29 @@ doing them apart.
 they carry is in **Done, not tested**. The cards await a build on a device, not
 more code.
 
+**Wave 8 is done** — all seven groups shipped (#441–#450), and it was the wave
+where checking the audit against the repo paid for itself most: **four of its
+thirteen cards were already fixed or not what the audit said**, and one report
+does not reproduce at the scale it was blamed on.
+
+| Card | What the check actually found |
+|---|---|
+| #513 | already fixed by PR #336, ten days after the report; had no test |
+| #523 | already fixed by PR #349, three days after the report; already covered |
+| #511 | the audit said `autoGenerateEnabled` has no consumer — it has two, and the path is tested end to end. The dead flag is `useDelayedAutomation` |
+| #515 / #516 | measured: 4000 messages (1.1 MB) with 690 lorebook entries builds in 1.7 s, so "the imported chat is large" is not a 60 s timeout |
+| #345 | both halves were the same omission — every string and both model fields came over from Vue, only the widgets did not |
+
+| Group | Branch | Cards | PR |
+|---|---|---|---|
+| G6 cloud-sync | `fix/cloud-sync` | 504, 513, 523 (+496 blocked) | [#441](https://github.com/hydall/Glaze/pull/441) |
+| G19 saucepan-import-phase | `fix/saucepan-import-phase` | 506 | [#442](https://github.com/hydall/Glaze/pull/442) |
+| G20 memory-auto-generate | `fix/memory-auto-generate` | 511 | [#446](https://github.com/hydall/Glaze/pull/446) |
+| G32 janitor-custom-tags | `fix/janitor-custom-tags` | 457 | [#447](https://github.com/hydall/Glaze/pull/447) |
+| G18 promptworker-throughput | `fix/promptworker-throughput` | 515, 516 | [#448](https://github.com/hydall/Glaze/pull/448) |
+| G31 jar-background | `fix/jar-background` | 447 | [#449](https://github.com/hydall/Glaze/pull/449) |
+| G37 guided-ui | `fix/guided-ui` | 345 | [#450](https://github.com/hydall/Glaze/pull/450) |
+
 **Wave 7 is done** — all seven groups shipped (#433–#440), and three of the
 seven cards in it turned out not to be the bug the card described:
 
@@ -1194,10 +1472,16 @@ seven cards in it turned out not to be the bug the card described:
   port of the Vue Guided Generation UI plus new preset-editor surface, G18 is
   throughput work in the prompt worker, and the JAR pair (G31, G32) both sit in
   the capture flow, so they are cheaper together than apart. **G6 carries a
-  blocker that is not code:** #107 needs a fresh Google Cloud OAuth client (PKCE,
+  blocker that is not code:** #496 needs a fresh Google Cloud OAuth client (PKCE,
   no secret) created under the maintainer's account — the shipped one is revoked
-  and answers `401 invalid_client` for every user. Its other three cards (#115,
-  #124, #134) can ship without it.
+  and answers `401 invalid_client` for every user. Its other three cards (#504,
+  #513, #523) shipped without it.
+
+  Both waves are now done. **What is left on the Known Bugs list is what nobody
+  has been able to reduce to a mechanism yet**, plus the cards deferred by
+  decision: #91/#92 (chat performance, held for the 0.7.1 overhaul), #60 (JAR
+  prompt settings, queued last), #496 (the OAuth client), and #385 (DataCat
+  abuse, handled by hand).
 
 **Drive-by, no card:** the EN and RU glossaries agreed on all 73 term ids but not
 on where they sat — EN cross-listed `chat-session` and `connections` under
