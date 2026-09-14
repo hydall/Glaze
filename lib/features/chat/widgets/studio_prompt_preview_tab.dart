@@ -12,6 +12,7 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/list_controls.dart';
 import '../chat_provider.dart';
 import '../services/studio_prompt_preview_service.dart';
+import 'requests/inspector_insets.dart';
 import 'requests/inspector_surface.dart';
 import 'requests/next_turn_coverage_block.dart';
 
@@ -158,7 +159,10 @@ class _StudioPromptPreviewTabState
 
   Widget _buildSelected(StudioPromptPreviewEntry selected) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      padding: withInspectorBottomInset(
+        context,
+        const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      ),
       children: [
         _InfoCard(
           text: selected.isFuture

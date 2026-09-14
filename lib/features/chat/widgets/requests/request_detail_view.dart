@@ -14,6 +14,7 @@ import '../../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
 import '../../services/prompt_capture_view_service.dart';
 import '../../state/request_timeline.dart';
+import 'inspector_insets.dart';
 import 'inspector_message.dart';
 import 'request_stage_label.dart';
 import 'inspector_toolbar.dart';
@@ -247,7 +248,10 @@ class _RequestDetailViewState extends ConsumerState<RequestDetailView> {
   }
 
   Widget _text(BuildContext context, String text) => ListView(
-    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+    padding: withInspectorBottomInset(
+      context,
+      const EdgeInsets.fromLTRB(16, 12, 16, 24),
+    ),
     children: [
       SelectableText(
         text,

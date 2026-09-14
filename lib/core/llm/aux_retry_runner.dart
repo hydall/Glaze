@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/agent_operation_record.dart';
+import 'transport/call_attempt_outcome.dart';
 import 'transport/llm_capture_context.dart';
 
 /// Outcome of a retried auxiliary LLM call. Carries the final text result (when
@@ -327,43 +328,18 @@ class AuxRetryRunner {
     return AgentOperationStatus.error;
   }
 
+  /// [attempt] is 0-based here, as everywhere in this runner's loop.
   static AgentOperationAttempt _logError(
     int attempt,
     Object e,
     int startedAtMs,
     int elapsedMs,
-  ) {
-    int code = 0;
-    String statusLabel = 'error';
-    if (e is TimeoutException) {
-      statusLabel = 'timeout';
-    } else if (e is HttpException) {
-      statusLabel = 'connection_closed';
-    } else if (e is SocketException) {
-      statusLabel = 'socket_error';
-    } else if (e is DioException) {
-      code = e.response?.statusCode ?? 0;
-      if (CancelToken.isCancel(e)) {
-        statusLabel = 'cancelled';
-      } else if (code >= 500 && code < 600) {
-        statusLabel = 'http_5xx';
-      } else if (code >= 400 && code < 500) {
-        statusLabel = 'http_4xx';
-      }
-    }
-    final errText = e.toString();
-    final trimmed = errText.length > 500
-        ? '${errText.substring(0, 500)}…'
-        : errText;
-    return AgentOperationAttempt(
-      attempt: attempt + 1,
-      statusCode: code,
-      status: statusLabel,
-      error: trimmed,
-      startedAtMs: startedAtMs,
-      elapsedMs: elapsedMs,
-    );
-  }
+  ) => describeCallAttempt(
+    attempt: attempt + 1,
+    startedAtMs: startedAtMs,
+    elapsedMs: elapsedMs,
+    error: e,
+  );
 
   static AgentOperationAttempt _logCancelled(int attempt, int elapsedMs) {
     return AgentOperationAttempt(

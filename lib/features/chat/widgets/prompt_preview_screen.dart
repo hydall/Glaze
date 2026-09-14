@@ -28,6 +28,7 @@ import '../../../shared/widgets/sheet_view.dart';
 import '../../settings/api_list_provider.dart';
 import '../chat_provider.dart';
 import '../state/cached_token_breakdown.dart';
+import 'requests/inspector_insets.dart';
 import 'requests/inspector_message.dart';
 import 'requests/inspector_toolbar.dart';
 import 'requests/next_turn_coverage_block.dart';
@@ -291,7 +292,10 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
 
   Widget _buildRawView(String text, double topPad) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: withInspectorBottomInset(
+        context,
+        const EdgeInsets.only(bottom: 24),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

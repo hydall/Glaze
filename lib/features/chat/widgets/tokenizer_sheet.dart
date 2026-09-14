@@ -16,6 +16,7 @@ import '../../settings/api_settings_screen.dart';
 import '../chat_provider.dart';
 import '../state/cached_token_breakdown.dart';
 import '../state/token_breakdown_cache.dart';
+import 'requests/inspector_insets.dart';
 import 'tokenizer_widgets.dart';
 
 class TokenizerSheet extends ConsumerStatefulWidget {
@@ -290,9 +291,12 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     return Builder(
       builder: (context) => ListView(
         shrinkWrap: true,
-        padding: const EdgeInsets.all(
-          16,
-        ).add(EdgeInsets.only(top: MediaQuery.paddingOf(context).top)),
+        padding: withInspectorBottomInset(
+          context,
+          const EdgeInsets.all(16).copyWith(
+            top: 16 + MediaQuery.paddingOf(context).top,
+          ),
+        ),
         children: [
           HeroCard(
             used: used,

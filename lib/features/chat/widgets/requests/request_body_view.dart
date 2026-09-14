@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/widgets/glaze_filter_chip_bar.dart';
 import 'inspector_message.dart';
+import 'inspector_insets.dart';
 import 'inspector_surface.dart';
 
 /// Budget accents. No token covers "how full is the context window", so the
@@ -157,7 +158,9 @@ class _RequestBodyViewState extends State<RequestBodyView> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             sliver: SliverToBoxAdapter(child: widget.footer!),
           ),
-        const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        SliverToBoxAdapter(
+          child: SizedBox(height: 24 + inspectorBottomInset(context)),
+        ),
       ],
     );
   }

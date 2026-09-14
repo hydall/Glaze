@@ -24,7 +24,9 @@ import '../../../core/llm/stream_accumulator.dart';
 import '../../../core/llm/studio_regex_applicator.dart';
 import '../../../core/llm/beauty_state_parser.dart';
 import '../../../core/llm/idle_timeout_guard.dart';
+import '../../../core/llm/transport/call_attempt_outcome.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
+import '../../../core/llm/transport/llm_call_event.dart';
 import '../../../core/llm/transport/llm_capture_context.dart';
 import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/utils/error_format.dart';
@@ -672,6 +674,41 @@ class StreamGenerationService {
         cancelToken.cancel('First-chunk timeout after ${idleTimeoutMs}ms');
       });
 
+      // What every field of this is for is documented on the factory. The
+      // turn's message id is bound over it once the write lands
+      // (`bindTurnMessageId`), which is why an ordinary turn passes none.
+      final captureContext = mainCaptureContext(
+        sessionId: session.id,
+        genId: _genId,
+        messageId: regenTargetId ?? continueTargetId,
+      );
+
+      // One outcome per call. `onComplete` and `onError` are not exclusive on
+      // every transport — an aborted stream can reach both — and the table is
+      // keyed on `callId + attempt`, so a second write would collide with the
+      // first rather than adding to it.
+      var outcomeRecorded = false;
+      void recordOutcome({String? responseText, Object? error}) {
+        if (outcomeRecorded) return;
+        outcomeRecorded = true;
+        unawaited(
+          LlmCallEventCapture.record(
+            LlmCallEvent.transport(
+              context: captureContext,
+              attempt: describeCallAttempt(
+                attempt: 1,
+                startedAtMs: startGenTime.millisecondsSinceEpoch,
+                elapsedMs: DateTime.now()
+                    .difference(startGenTime)
+                    .inMilliseconds,
+                error: error,
+              ),
+              responseText: responseText,
+            ),
+          ),
+        );
+      }
+
       _phase(GenerationPhase.waiting);
       await transport.stream(
         request: ChatTransportRequest.fromApiConfig(
@@ -681,18 +718,7 @@ class StreamGenerationService {
           previousMessages: previousApiMessages,
           charName: inputs.character.name,
           userName: inputs.persona?.name ?? 'User',
-          // Without this the main request — the one that writes the reply —
-          // was the only call in the app captured with no session and no
-          // stage, so it landed in the session-less bucket and no per-chat
-          // view could ever show it. The assistant message does not exist
-          // yet, so the turn is identified by the generation id and bound to
-          // its message id once the write lands (`bindTurnMessageId`).
-          captureContext: LlmCaptureContext(
-            stage: 'main',
-            sessionId: session.id,
-            messageId: regenTargetId ?? continueTargetId,
-            pipelineRunId: turnRunId(session.id, _genId),
-          ),
+          captureContext: captureContext,
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
@@ -717,6 +743,10 @@ class StreamGenerationService {
           if (_isAborted()) return;
           closeStreamPublishing();
           idleGuard.dispose();
+          // The raw body when the transport kept one: the Response tab
+          // pretty-prints it and reads the assistant text back out of it, so
+          // the payload is worth more there than the assembled text alone.
+          recordOutcome(responseText: rawResponseJson ?? text);
           if (!apiConfig.stream &&
               accumulator.text.isEmpty &&
               accumulator.reasoning.isEmpty &&
@@ -836,6 +866,15 @@ class StreamGenerationService {
             final msg = 'error_first_chunk_timeout'.tr(
               namedArgs: {'seconds': '${idleTimeoutMs ~/ 1000}'},
             );
+            // A first-chunk timeout reaches here as the cancel it was
+            // implemented as. Record it as the timeout the reader saw, so the
+            // inspector does not file it under "you stopped it".
+            recordOutcome(
+              error: TimeoutException(
+                msg,
+                Duration(milliseconds: idleTimeoutMs),
+              ),
+            );
             if (continueTargetId != null) {
               finalState = _continueFailure(msg, session, vsi);
             } else if (regenTargetId != null && saveSession != null) {
@@ -854,6 +893,7 @@ class StreamGenerationService {
             }
             return;
           }
+          recordOutcome(error: error);
           final isCancelled =
               (error is DioException &&
                   error.type == DioExceptionType.cancel) ||

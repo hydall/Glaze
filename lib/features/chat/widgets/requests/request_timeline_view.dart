@@ -12,6 +12,7 @@ import '../../state/request_timeline.dart';
 import '../../state/session_requests_provider.dart';
 import '../prompt_preview_screen.dart';
 import '../studio_prompt_preview_tab.dart';
+import 'inspector_insets.dart';
 import 'inspector_surface.dart';
 import 'request_detail_view.dart';
 import 'request_group_card.dart';
@@ -187,7 +188,10 @@ class _RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
         const <ChatMessage>[];
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+      padding: withInspectorBottomInset(
+        context,
+        const EdgeInsets.fromLTRB(12, 12, 12, 24),
+      ),
       children: [
         RequestPreviewRow(onTap: () => _open(preview: true)),
         InspectorSectionTitle(
