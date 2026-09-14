@@ -962,6 +962,16 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     });
   }
 
+  /// Whether the instruction will guide an impersonation rather than a reply.
+  ///
+  /// The Vue composer had two separate guidance modes, each with its own
+  /// header and placeholder. Glaze folds them into one field and decides by
+  /// whether a message is waiting to be sent — the send button has always
+  /// worked this way, switching between the send glyph and a checkmark. The
+  /// panel just never said which one it was, so the reader could not tell
+  /// what pressing it would do.
+  bool get _guidanceImpersonates => _controller.text.trim().isEmpty;
+
   /// Sends a quick reply pinned to the row, on the same terms the drawer's
   /// Actions tab sends it: the host's pre-generation guard first, then either
   /// the built-in continue or the reply's text.
@@ -1194,43 +1204,88 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                   ),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: TextField(
-                  controller: _guidanceController,
-                  readOnly: widget.isEditingMessage,
-                  canRequestFocus: !widget.isEditingMessage,
-                  enableInteractiveSelection: !widget.isEditingMessage,
-                  showCursor: !widget.isEditingMessage,
-                  maxLines: 3,
-                  minLines: 1,
-                  textCapitalization: TextCapitalization.sentences,
-                  keyboardType: TextInputType.multiline,
-                  textInputAction: TextInputAction.newline,
-                  style: TextStyle(
-                    fontSize: 14 * scale,
-                    color: Colors.orange,
-                    letterSpacing: letterSpacing,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'guidance_placeholder'.tr(),
-                    hintStyle: TextStyle(
-                      color: Colors.orange.withValues(alpha: 0.5),
-                      fontSize: 14 * scale,
-                      letterSpacing: letterSpacing,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _guidanceImpersonates
+                                  ? 'guided_impersonation'.tr()
+                                  : 'guided_generation'.tr(),
+                              style: TextStyle(
+                                fontSize: 10 * scale,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.8,
+                                color: Colors.orange.withValues(alpha: 0.8),
+                              ),
+                            ),
+                          ),
+                          // Guidance was only dismissable from whichever
+                          // button had opened it — a composer action that may
+                          // be pinned anywhere, or the drawer.
+                          GestureDetector(
+                            onTap: widget.isEditingMessage
+                                ? null
+                                : _toggleGuidance,
+                            behavior: HitTestBehavior.opaque,
+                            child: Padding(
+                              padding: const EdgeInsets.all(6),
+                              child: Icon(
+                                Icons.close_rounded,
+                                size: 16,
+                                color: Colors.orange.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    prefixIcon: Icon(
-                      Icons.tips_and_updates_outlined,
-                      color: Colors.orange.withValues(alpha: 0.7),
-                      size: 20,
+                    TextField(
+                      controller: _guidanceController,
+                      readOnly: widget.isEditingMessage,
+                      canRequestFocus: !widget.isEditingMessage,
+                      enableInteractiveSelection: !widget.isEditingMessage,
+                      showCursor: !widget.isEditingMessage,
+                      maxLines: 3,
+                      minLines: 1,
+                      textCapitalization: TextCapitalization.sentences,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      style: TextStyle(
+                        fontSize: 14 * scale,
+                        color: Colors.orange,
+                        letterSpacing: letterSpacing,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: _guidanceImpersonates
+                            ? 'impersonate_guidance_placeholder'.tr()
+                            : 'guidance_placeholder'.tr(),
+                        hintStyle: TextStyle(
+                          color: Colors.orange.withValues(alpha: 0.5),
+                          fontSize: 14 * scale,
+                          letterSpacing: letterSpacing,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.tips_and_updates_outlined,
+                          color: Colors.orange.withValues(alpha: 0.7),
+                          size: 20,
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        filled: false,
+                      ),
                     ),
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    filled: false,
-                  ),
+                  ],
                 ),
               ),
               const SizedBox(height: 6),

@@ -195,6 +195,14 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   late List<PresetBlock> _blocks;
   late List<PresetRegex> _regexes;
   late bool _parseInlineReasoning = widget.preset?.reasoningEnabled ?? false;
+  // Read from the preset on every save before, which is the same thing as
+  // being uneditable: the Guided Generation block is the one mandatory block
+  // whose prompt lives on the preset rather than in `block.content`, and no
+  // screen offered a field for it. Held here so the block's editor can change
+  // it, the way the Vue editor always could.
+  late String? _guidedGenerationPrompt = widget.preset?.guidedGenerationPrompt;
+  late String? _guidedImpersonationPrompt =
+      widget.preset?.guidedImpersonationPrompt;
   late final _reasoningStartCtrl = TextEditingController(
     text: widget.preset?.reasoningStart ?? '',
   );
@@ -280,8 +288,8 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       reasoningEnabled: _parseInlineReasoning,
       reasoningStart: _parseInlineReasoning ? _reasoningStartCtrl.text : null,
       reasoningEnd: _parseInlineReasoning ? _reasoningEndCtrl.text : null,
-      guidedGenerationPrompt: widget.preset?.guidedGenerationPrompt,
-      guidedImpersonationPrompt: widget.preset?.guidedImpersonationPrompt,
+      guidedGenerationPrompt: _guidedGenerationPrompt,
+      guidedImpersonationPrompt: _guidedImpersonationPrompt,
       impersonationPrompt: _impersonationPromptCtrl.text.trim().isEmpty
           ? null
           : _impersonationPromptCtrl.text,
@@ -388,6 +396,27 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           charId: widget.charId,
           onSave: (updated) {
             setState(() => _blocks[_expandedBlockIndex!] = updated);
+            _scheduleSave();
+          },
+        );
+      }
+      // Guided Generation: the block is always enabled and its text is two
+      // preset-level prompts, so it gets the same treatment as the other
+      // blocks whose content is not in `block.content`.
+      if (expanded.id == 'guided_generation') {
+        return _GuidedGenerationBlockEditor(
+          key: ValueKey(expanded.id),
+          block: expanded,
+          generationPrompt:
+              _guidedGenerationPrompt ?? kDefaultGuidedGenerationPrompt,
+          impersonationPrompt:
+              _guidedImpersonationPrompt ?? kDefaultGuidedImpersonationPrompt,
+          onSave: (updated, generation, impersonation) {
+            setState(() {
+              _blocks[_expandedBlockIndex!] = updated;
+              _guidedGenerationPrompt = generation;
+              _guidedImpersonationPrompt = impersonation;
+            });
             _scheduleSave();
           },
         );
@@ -990,8 +1019,8 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       reasoningEnabled: _parseInlineReasoning,
       reasoningStart: _parseInlineReasoning ? _reasoningStartCtrl.text : null,
       reasoningEnd: _parseInlineReasoning ? _reasoningEndCtrl.text : null,
-      guidedGenerationPrompt: widget.preset?.guidedGenerationPrompt,
-      guidedImpersonationPrompt: widget.preset?.guidedImpersonationPrompt,
+      guidedGenerationPrompt: _guidedGenerationPrompt,
+      guidedImpersonationPrompt: _guidedImpersonationPrompt,
       impersonationPrompt: _impersonationPromptCtrl.text.trim().isEmpty
           ? null
           : _impersonationPromptCtrl.text,
@@ -1426,6 +1455,118 @@ class _SummaryBlockEditor extends ConsumerWidget {
             onChanged: (values) => onSave(PresetBlock.fromJson(values)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Editor for the Guided Generation block.
+///
+/// A 1:1 port of the Vue editor's special case for this block: an explanatory
+/// line, the generation prompt, the impersonation prompt, and then the same
+/// role/insertion/depth the other blocks carry. Both prompts belong to the
+/// preset rather than to the block, so they are handed back separately.
+class _GuidedGenerationBlockEditor extends StatelessWidget {
+  final PresetBlock block;
+  final String generationPrompt;
+  final String impersonationPrompt;
+  final void Function(PresetBlock block, String generation, String impersonation)
+  onSave;
+
+  const _GuidedGenerationBlockEditor({
+    super.key,
+    required this.block,
+    required this.generationPrompt,
+    required this.impersonationPrompt,
+    required this.onSave,
+  });
+
+  static const _generationKey = 'guidedGenerationPrompt';
+  static const _impersonationKey = 'guidedImpersonationPrompt';
+
+  @override
+  Widget build(BuildContext context) {
+    final config = [
+      GenericEditorSection(
+        title: 'block_guided_generation'.tr(),
+        fields: [
+          GenericEditorField(
+            key: 'info',
+            label: '',
+            type: 'info',
+            text: 'guided_generation_block_hint'.tr(),
+          ),
+          GenericEditorField(
+            key: _generationKey,
+            label: 'label_guided_generation_prompt'.tr(),
+            type: 'textarea',
+            rows: 2,
+            expandable: true,
+          ),
+          GenericEditorField(
+            key: _impersonationKey,
+            label: 'label_guided_impersonation_prompt'.tr(),
+            type: 'textarea',
+            rows: 2,
+            expandable: true,
+          ),
+          GenericEditorField(
+            key: 'role',
+            label: 'label_role'.tr(),
+            type: 'select',
+            options: [
+              {'label': 'System', 'value': 'system'},
+              {'label': 'User', 'value': 'user'},
+              {'label': 'Assistant', 'value': 'assistant'},
+            ],
+          ),
+          GenericEditorField(
+            key: 'insertionMode',
+            label: 'label_insertion'.tr(),
+            type: 'select',
+            options: [
+              {'label': 'Relative', 'value': 'relative'},
+              {'label': 'Depth', 'value': 'depth'},
+            ],
+          ),
+          GenericEditorField(
+            key: 'depth',
+            label: 'label_depth'.tr(),
+            type: 'select',
+            options: List.generate(
+              20,
+              (i) => {'label': '${i + 1}', 'value': i + 1},
+            ),
+            showIf: (item) => item['insertionMode'] == 'depth',
+          ),
+        ],
+      ),
+    ];
+
+    return Material(
+      type: MaterialType.transparency,
+      child: GenericEditor(
+        item: {
+          ...block.toJson(),
+          _generationKey: generationPrompt,
+          _impersonationKey: impersonationPrompt,
+        },
+        config: config,
+        onChanged: (values) {
+          // The two prompts are not block fields, so they are lifted back out
+          // before the rest is read as a block — `PresetBlock.fromJson` would
+          // drop them, and the preset would silently keep its old text.
+          final generation = (values[_generationKey] ?? '').toString();
+          final impersonation = (values[_impersonationKey] ?? '').toString();
+          final blockJson = Map<String, dynamic>.from(values)
+            ..remove(_generationKey)
+            ..remove(_impersonationKey);
+          onSave(
+            PresetBlock.fromJson(blockJson),
+            generation,
+            impersonation,
+          );
+        },
       ),
     );
   }
