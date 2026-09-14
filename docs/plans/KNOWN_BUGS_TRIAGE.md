@@ -183,9 +183,24 @@ redirect line into the `header` expression above them — noted in the PR.
 - **#124** After a pull the open chat stays stale — `invalidateDataProviders()` never touches `chatProvider(charId)` or `ChatSessionService`'s static cache
 - **#134** App Settings never sync — no manifest entity covers those SharedPreferences keys
 
-### G7 — `fix/backup-onboarding-polish` (2 cards)
-- **#24** The backup *export* button shows the *import* label (`backup_progress_preparing` is shared between both flows)
-- **#111** The onboarding "Import Data" sheet also offers **Export** on a fresh install
+### G7 — `fix/backup-onboarding-polish` — **PR [#434](https://github.com/hydall/Glaze/pull/434)**
+- **#24** the export button showed the import label — **fixed.**
+  `backup_progress_preparing` reads "Preparing import…" and was the export
+  button's busy label as well as the import flow's progress line, so exporting
+  a backup told the reader in as many words that it was importing one. Export
+  has its own string now, in both languages.
+- **#111** onboarding offered Export on a fresh install — **fixed.**
+  `fromOnboarding` reached the screen but was only ever read by `_reloadApp`,
+  so the sheet drew both sections either way. During onboarding it is opened
+  from "Restore from backup", on an install with nothing in it — an offer to
+  write an empty archive. `_NormalView` takes `showExport`, and the separator,
+  the button and the hint go together. The settings sheet is unchanged.
+
+4 new tests; negative control confirmed (exactly the two behavioural cases fail
+on nightly, the two controls pass). The exporting state is reached in the test
+by overriding `backupServiceProvider` with a future that never completes —
+`_performExport` flips its flag before it awaits, so the label settles without
+a database.
 
 ### G8 — `fix/lorebook-activation-scope` — **PR [#413](https://github.com/hydall/Glaze/pull/413)**
 - **#99** Importing a character with lorebooks enables them **globally** — **fixed on the write side**. `convertJanitorScript` now stamps `enabled: characterId == null` (the contract the capture sheet already documents), and `JsLorebookImporter.importCharacterBooks` stops copying the card's own `character_book.enabled` into Glaze's Global switch. Both keep working where they should: `LorebooksNotifier.put` registers a character-scoped book in the activation map.
@@ -210,8 +225,38 @@ now for the stated reason.
 
 The thread's "this character comes with a lorebook" notice is a feature → feature list.
 
-### G9 — `fix/janitor-greetings` (1 card)
-- **#98** Local JanitorAI extraction keeps only the first greeting (`alternateGreetings` is never populated although the fetched meta carries `first_messages`); the DataCat path drops the primary greeting on some cards
+### G9 — `fix/janitor-greetings` — **PR [#436](https://github.com/hydall/Glaze/pull/436)**
+- **#98** — **the card's title is not the bug; the reporter's own thread is.**
+  "using datacat imports all greetings normally … with datacat it skips the 1st
+  greetings … going directly to the datacat site and downloading the card from
+  there includes the first greeting". So the reproducible half is DataCat, and
+  the local half does not reproduce — the extractor already collected every
+  greeting from three sources and deduplicated them, which the reporter also
+  says ("when you extract it locally the first greetings comes").
+- **The DataCat mechanism.** DataCat mirrors JanitorAI rows, and Janitor keeps
+  the opening line in `first_message` **and** the whole set in `first_messages`.
+  On some cards the singular field is empty and only the set arrives.
+  `_datacatCharacterData` read the singular field for `firstMes` and
+  `alternate_greetings` for the rest — and never read `first_messages` at all.
+  Slot one came out blank, every greeting shifted down by one, and the card
+  "skipped" its first. DataCat's own site works because their exporter takes the
+  set's first entry as `first_mes`, which is the rule adopted here.
+- **Found on the way, unreported:** the Janitor *browse* path had the same
+  disagreement the other way — it mapped `first_messages` straight onto the
+  alternates, so the opening line was listed twice.
+- One rule in `normalizeGreetings`, used by all four paths (DataCat, Janitor
+  browse, Chub, the local extractor which had already arrived at it inline).
+  The sentence worth keeping: **a card whose singular field is empty is not a
+  card without a greeting — it is a card whose greeting is first in the list.**
+  Order is preserved rather than sorted; for a card with several greetings the
+  order is the author's.
+
+21 new tests; `_datacatCharacterData` and Chub's `_convertToGlaze` are public so
+the mapping is reachable from a test rather than only through a live request.
+Negative control confirmed. **Not verified:** the card the reporter linked —
+that wants a DataCat request for that id on a device. **Also in that thread and
+not addressed:** "lorebook extraction for that card does not work", which is a
+different subsystem and needs its own card if it still reproduces.
 
 ### G10 — `fix/vision-capability` (1 card)
 - **#95** Switching to a non-vision model after sending an image → `HTTP 400` — **fixed as what it is: an illegible failure.**
@@ -236,8 +281,39 @@ model-catalog auto-detection, composer blocking and history filtering. That is n
 configuration surface, a migration and settings UI — and it is exactly what the
 maintainer said in-thread he would "figure something out" for.
 
-### G11 — `fix/imggen-timer-cache` (1 card)
-- **#97** The image-gen timer does not reset on retry — the formatter memoizes `[IMG:GEN]` output *including* its `data-start` timestamp
+### G11 — `fix/imggen-timer-cache` — **PR [#435](https://github.com/hydall/Glaze/pull/435)**
+- **#97** — **the reported symptom is already fixed; the spec written for it
+  found the inverse, which is worse.** Wrote a browser spec for the retry
+  sequence before changing anything: it passes on nightly. `isolateOne`
+  restamps a live placeholder as it isolates it, so a retried generation does
+  start from zero — PR #338 (2026-08-28), after the card.
+- **What does reproduce:** any re-render during a generation sends the clock
+  back to 0.0s. Every render replaces the message body wholesale, so the
+  placeholder is a new element and the restamp fires again. A new message
+  arriving during a 40-second generation threw away the 40 seconds the reader
+  was watching, every time anything in the chat changed — so the clock never
+  told them how long they had actually waited.
+- **Neither place that held the clock could.** The element is replaced on every
+  render; the formatter's cached HTML is memoized on the message text, so the
+  `data-start` baked into it is whatever the first render of that text stamped
+  (which is the reuse the card was reaching for). The start is held by the
+  placeholder module now, keyed on message id + image index: a re-render
+  resumes, a retry starts from zero (the entry is dropped once the block stops
+  being pending), and a row unmounted by the virtual window keeps its clock,
+  because scrolling away is not finishing.
+- Two things this needed. **The prune runs on the next frame** — it is
+  triggered from a render that is still writing a *detached* section, so the
+  document it would otherwise sweep is the one from a moment ago and the block
+  that just finished is still live in it. And **the message id is threaded
+  through `writeShadowContent`, not walked up to**: a section is built and
+  written before it is appended, so on the render that creates a placeholder
+  there is no `data-message-id` above it to find. The first attempt walked the
+  ancestor chain and silently keyed everything on an empty id.
+
+2 new browser specs; negative control confirmed (on nightly the retry spec
+passes and the re-render spec fails). Three source assertions in
+`webview_assets_test.dart` moved with the code they pin, two were added.
+**Not verified on a device:** the specs run in headless Chromium.
 
 ### G12 — `fix/ol-start` — **already fixed on nightly**
 - **#136** `0. test` renders as `1. test` — **no longer reproduces.** PR #350 already
@@ -265,24 +341,80 @@ maintainer said in-thread he would "figure something out" for.
   Corpus entry `audio-embed` plus a spec that squeezes a message to a phone-bubble
   width: 40px of overhang on nightly, none with the rule. Full suite 98 passed.
 
-### G14 — `fix/prompt-inspector` (4 cards)
-- **#106** The bottom action row sits under the Android nav bar — the sheet is shown without `useSafeArea: true`
-- **#49** prompt inspector "sab" (safe bottom area) — **moved here from
-  verify-only, where the check said it is *not* fixed.** `SheetView` publishes
-  the nav-bar inset through `MediaQuery.padding.bottom` for the body to consume;
-  `RequestTimelineView._timeline` and `TokenizerSheet._buildMainView` both pass
-  an explicit `ListView` padding, which replaces it, so the inset is dropped.
-  Same defect as #106 and the same fix belongs with it.
-- **#153** The Response tab always shows "no captured" — the main request carries no `callId`, so no call event is ever joined to it
-- **#101** The `Images` tab label is not centred in its pill (`GlazeTabBar`)
+### G14 — `fix/prompt-inspector` — **PR [#433](https://github.com/hydall/Glaze/pull/433)**
+- **#106 + #49 are one bug, and the audit's fix for it was wrong.**
+  `SheetView` does **not** pad its body against the nav bar — it publishes the
+  inset through `MediaQuery.padding.bottom` and expects the body to consume it,
+  deliberately, so rows scroll behind the bar while the last one rests above it.
+  A scroll view only gets there when it derives its own padding: passing an
+  explicit `padding` **replaces** the MediaQuery-derived one, so the inset is
+  discarded — and every scroll surface in the inspector passes its own. The
+  Context tab ends with two tappable tiles (API settings, "Unhide all"), and
+  those are the buttons #106 cannot reach. Six surfaces add it back through one
+  documented helper. **Not `useSafeArea: true`**: every other `SheetView` sheet
+  in the app is shown without it on purpose, and adding it here would cut the
+  sheet's own background short of the screen edge and inset the content twice.
+- **#153 was bigger than "no callId".** A captured request is joined to its
+  outcome by `callId + attempt`, and `_recordCallEvent` returns early when the
+  callId is null — but the main chat stream also emitted **no transport event
+  at all**; only `AuxLlmClient` and the ledger paths did. So there was nothing
+  to join even with a key. Both halves fixed: the context comes from a named
+  `mainCaptureContext()` that states what each field is load-bearing for, and
+  the stream records exactly one outcome at whichever terminal it reaches
+  (guarded — `onComplete` and `onError` are not exclusive on every transport,
+  and a second write would collide on `callId + attempt` rather than add). A
+  first-chunk timeout is recorded as a **timeout**, not as the cancel it is
+  implemented as, so a provider that never answered is not filed under "you
+  stopped it". The status vocabulary moved out of `AuxRetryRunner`, where it was
+  private, into `describeCallAttempt`, so the main stream describes itself in
+  the same words as every other call instead of a second set.
+- **#101 measured, not changed.** The card is a screenshot with no text, and
+  images are not readable on this side. The strip measures correctly: every
+  tab's content is centred in its own slot, Images included, and the pill shares
+  its label's centre. What a reader *does* see with three tabs is the third
+  half-cut at the right edge — deliberate, and what `_kVisibleTabs = 2.35` is
+  for. Four tests record the measurements; changing that constant on a guess
+  would move every tab strip in the app. **Asked in the PR** whether the report
+  is the half-cut tab or something else.
+
+20 new tests; negative control confirmed. **Not verified on a device:** that the
+bottom tiles are now reachable. `MediaQuery.padding.bottom` is 0 on the test
+surface unless a test sets it, which is exactly why this went unnoticed.
 
 (#145 was the duplicate of #153 and is already checked off on the board; #35 "prompt inspector i18n" is checked off too, so the hardcoded-English findings there are considered done.)
 
-### G15 — `fix/update-checker` (2 cards)
-- **#132** The update sheet offers a build **14 days older** than the installed one — availability is decided on SHA inequality alone
-- **#137** The update popup only appears at launch; nothing re-checks on resume
+### G15 — `fix/update-checker` — **PR [#438](https://github.com/hydall/Glaze/pull/438)**
+- **#132** — **fixed.** `_checkCiBuild` decided availability on SHA inequality
+  alone. But two different SHAs do not mean the branch is ahead: the installed
+  build can be the newer of the two (the run after it failed, or it came from a
+  branch that has since moved), and then the "update" is a step backwards. The
+  compare endpoint was **already being called** for the release notes and
+  answers this in the same response — `status` is `ahead`, `behind`,
+  `identical` or `diverged` — so it costs no extra request. `behind` and
+  `identical` now resolve to up-to-date. `diverged` still counts as something to
+  offer: it carries commits the installed build does not, and it is the build
+  the channel is publishing.
+- **An unresolved comparison still offers the update, deliberately.** A
+  force-pushed branch leaves an installed SHA that can never be compared again,
+  and treating that as up to date would stop updates for that install
+  permanently — silently, and in a way nobody would report. Offering an
+  unverifiable build is the lesser failure; the reader can decline it.
+- The **stable** channel was already right (`_checkRelease` compares versions,
+  not identity) and is untouched.
+- **#137** — **already fixed**, by PR #350, which added
+  `AutomaticUpdateCheckController`: an hourly timer, paused on background and
+  resumed on foreground, wired in `app.dart`. Nothing covered any of it, so it
+  is covered now.
 
-### G16 — `fix/notification-icon` — **PR [#%s](https://github.com/hydall/Glaze/pull/%s)**
+16 new tests; negative control confirmed. `installedCommit` is injectable on the
+service — `buildCommit` is a `String.fromEnvironment` const, so it is empty
+under `flutter test` and the pre-release path bailed out before reaching
+anything worth asserting on, which is why this code had no tests.
+**Not verified against GitHub:** the tests stub the API; that a real `behind`
+comparison comes back with that literal string is from GitHub's documented
+response rather than an observed call.
+
+### G16 — `fix/notification-icon` — **PR [#429](https://github.com/hydall/Glaze/pull/429)**
 - **#149** the notification icon shows the card image / a first letter / nothing
   — **the avatar half is fixed; the small-icon half was already fixed and is now
   hardened.** The presenter handed the platform the character's
@@ -416,8 +548,29 @@ ids but not on which category a term sits in (EN cross-lists two, RU does not).
   feature, and the re-tap-jumps-to-top behaviour is intentional per the maintainer's
   own reply. No branch; card moved to Done, not tested.
 
-### G23 — `fix/spoiler-reveal` (1 card)
-- **#112** Spoiler text in the character Info box renders as a blank white block, and tapping does not reveal it
+### G23 — `fix/spoiler-reveal` — **PR [#439](https://github.com/hydall/Glaze/pull/439)**
+- **#112** — **the reveal was happening and then undoing itself.** Glaze does
+  not hide spoilers behind a tap and is not meant to. A JanitorAI spoiler is
+  text painted the same colour as its own highlight, and `htmlToMarkdown` drops
+  the *hiding* colour on purpose so the highlight can show with readable text
+  instead — `_convertMark`'s comment says exactly that. Then
+  `BackgroundTextMd` painted that text `Colors.white` whatever the highlight
+  was, so an author who hid their spoiler behind a **pale** colour (white, light
+  grey — the common case) got white on near-white: as unreadable as the
+  grey-on-grey it started as, for the same reason.
+- `readableOn` picks black or white by **contrast ratio** against the highlight.
+  The crossover is the ratio rather than a luminance of 0.5 — that shortcut is
+  the usual one and lands in the wrong place (the ratios meet at ~0.179), so it
+  keeps painting white over everything from mid-grey up, which is most of the
+  range this bug lives in. A highlight too transparent to be a background at
+  all defers to the surrounding text colour, since the text is then on the page
+  rather than on a chip.
+
+10 new tests, covering the three HTML spellings a spoiler arrives in as well as
+the colour rule and both sides of the crossover; negative control confirmed.
+**Not verified:** the screenshot on the card is unreadable from here, so which
+shade that author used is unknown — the fix covers the range rather than one
+colour.
 
 ### G24 — `fix/chat-perf` (2 cards) — large, schedule separately
 - **#91** Opening the character card from inside a chat drops FPS (hybrid-composition WebView blended under a translucent sheet)
@@ -714,8 +867,35 @@ separate change — so the numbering is tested and the layout is not.
 ### G32 — `fix/janitor-custom-tags` (1 card)
 - **#69** Catalog filters must offer JanitorAI's live popular custom tags: read `top_custom_tags` from `https://janitorai.com/hampter/characters` and append them **after** the standard tags. Search already works
 
-### G33 — `fix/st-lorebook-settings` (1 card)
-- **#135** Per-book lorebook settings do not survive an ST import or a Glaze→ST→Glaze round trip (`settings: null`, entry `caseSensitive`/`matchWholeWords` pinned false, exporter never serializes `Lorebook.settings`). Cross-check the real semantics against the SillyTavern repo before writing the mapping
+### G33 — `fix/st-lorebook-settings` — **PR [#440](https://github.com/hydall/Glaze/pull/440)**
+- **#135**, two separate losses, both confirmed. **The book's own settings were
+  never written out:** `glazeLorebookToSTJson` emitted `{name, entries}` and
+  nothing else, so a whole screen of tuning (scan depth, budget cap and reserve,
+  insertion strategy, injection position, the vector knobs) was dropped on
+  export, and the importer never looked for it either. They ride along in a
+  book-level `glazeMetadata` now, the way the entry-level Glaze fields already
+  do; the description travels with them. Two cases on purpose: a book with no
+  `glazeMetadata` — one SillyTavern wrote — keeps Glaze's defaults rather
+  than having values invented for it, and settings that no longer parse cost the
+  *tuning* rather than the import.
+- **The tri-state entry flags were flattened.** `caseSensitive` and
+  `matchWholeWords` are `bool?` on an entry and null means "follow the book,
+  then the global" — `LorebookScanner` resolves
+  `entry.caseSensitive ?? book ?? global`, which is also what SillyTavern means
+  by them, and that resolution order already encoded in Glaze's own scanner is
+  the cross-check the card asked for. The importer's `?? false` turned
+  "inherit" into an explicit "never", so an entry imported from ST silently
+  stopped following a global the reader had set on purpose — silently, because
+  the switch reads the same either way.
+
+10 new tests in `st_lorebook_settings_test.dart` (the existing
+`st_lorebook_roundtrip_test.dart` is untouched), including all three states of
+both flags in both directions; negative control confirmed. **Not verified
+against SillyTavern itself:** the round trip here is Glaze → JSON → Glaze.
+That ST loads a file carrying the extra key follows from its importer ignoring
+unknown keys — the same assumption the existing entry-level `glazeMetadata`
+already rests on — but opening one in a real ST install is what would confirm
+it.
 
 ### G34 — `fix/android-file-picker` — **PR [#430](https://github.com/hydall/Glaze/pull/430)**
 - **#32** a fresh export is missing from the picker under the Downloads
@@ -970,13 +1150,13 @@ doing them apart.
 | 6 | G16 notification-icon | `fix/notification-icon` | 149, 9 | **merged** | [#429](https://github.com/hydall/Glaze/pull/429) | Done, not tested |
 | 6 | G34 android-file-picker | `fix/android-file-picker` | 32 | **merged** | [#430](https://github.com/hydall/Glaze/pull/430) | Done, not tested |
 | 6 | G38 shino-default | `fix/shino-default` | 28 | **merged** | [#431](https://github.com/hydall/Glaze/pull/431) | Done, not tested |
-| 7 | G11 imggen-timer-cache | `fix/imggen-timer-cache` | 97 | not started | — | — |
-| 7 | G14 prompt-inspector | `fix/prompt-inspector` | 106, 153, 101, 49 | not started | — | — |
-| 7 | G15 update-checker | `fix/update-checker` | 132, 137 | not started | — | — |
-| 7 | G23 spoiler-reveal | `fix/spoiler-reveal` | 112 | not started | — | — |
-| 7 | G33 st-lorebook-settings | `fix/st-lorebook-settings` | 135 | not started | — | — |
-| 7 | G7 backup-onboarding-polish | `fix/backup-onboarding-polish` | 24, 111 | not started | — | — |
-| 7 | G9 janitor-greetings | `fix/janitor-greetings` | 98 | not started | — | — |
+| 7 | G11 imggen-timer-cache | `fix/imggen-timer-cache` | 97 | PR open | [#435](https://github.com/hydall/Glaze/pull/435) | In Progress |
+| 7 | G14 prompt-inspector | `fix/prompt-inspector` | 106, 153, 101, 49 | PR open | [#433](https://github.com/hydall/Glaze/pull/433) | In Progress |
+| 7 | G15 update-checker | `fix/update-checker` | 132, 137 | PR open | [#438](https://github.com/hydall/Glaze/pull/438) | In Progress |
+| 7 | G23 spoiler-reveal | `fix/spoiler-reveal` | 112 | PR open | [#439](https://github.com/hydall/Glaze/pull/439) | In Progress |
+| 7 | G33 st-lorebook-settings | `fix/st-lorebook-settings` | 135 | PR open | [#440](https://github.com/hydall/Glaze/pull/440) | In Progress |
+| 7 | G7 backup-onboarding-polish | `fix/backup-onboarding-polish` | 24, 111 | PR open | [#434](https://github.com/hydall/Glaze/pull/434) | In Progress |
+| 7 | G9 janitor-greetings | `fix/janitor-greetings` | 98 | PR open | [#436](https://github.com/hydall/Glaze/pull/436) | In Progress |
 | 8 | G18 promptworker-throughput | `fix/promptworker-throughput` | 126, 127 | not started | — | — |
 | 8 | G19 saucepan-import-phase | `fix/saucepan-import-phase` | 117 | not started | — | — |
 | 8 | G20 memory-auto-generate | `fix/memory-auto-generate` | 122 | not started | — | — |
@@ -992,6 +1172,17 @@ doing them apart.
 **Waves 1–6 are merged.** All 21 PRs (#410–#432) are on `nightly` and every card
 they carry is in **Done, not tested**. The cards await a build on a device, not
 more code.
+
+**Wave 7 is done** — all seven groups shipped (#433–#440), and three of the
+seven cards in it turned out not to be the bug the card described:
+
+| Card | What the check actually found |
+|---|---|
+| #97 | the reported retry reset is already fixed; a *re-render* mid-generation resets the clock, which is worse |
+| #98 | the local-extraction title is wrong; DataCat is the reproducible half, and the Janitor browse path had the inverse bug |
+| #106 | the audit's `useSafeArea: true` would have been wrong; the cause is a discarded `MediaQuery` inset |
+| #137 | already fixed by PR #350; now covered |
+| #101 | measured rather than changed — the strip centres correctly, and the report needs the screenshot read back |
 
 **Wave 7 split in two.** Fourteen groups is twice wave 6, so it runs as two:
 
