@@ -10,6 +10,7 @@ import '../catalog_provider.dart';
 import 'catalog_error_labels.dart';
 import 'janitor_field_diff.dart';
 import 'janitor_lorebook_rebuilder.dart';
+import 'greeting_normalizer.dart';
 import 'janitor_provider.dart';
 import 'janitor_public_lorebook.dart';
 import 'janitor_separate.dart';
@@ -246,23 +247,23 @@ class JanitorExtractor {
       // /hampter/characters), then the catalog metadata, then the assistant turn
       // in the captured prompt — which is the character's opening line and the
       // only place a fully withheld greeting survives.
-      final greetingList = <String>[
-        ...capture.greetings,
-        if (meta?['first_message'] is String)
-          (meta!['first_message'] as String),
-        if (meta?['first_messages'] is List)
-          ...(meta!['first_messages'] as List)
-              .whereType<String>(),
-        extractFirstMessage(payload),
-      ]
-          .map(macro)
-          .map((g) => g.trim())
-          .where((g) => g.isNotEmpty)
-          .toSet()
-          .toList();
-      final firstMes = greetingList.isEmpty ? '' : greetingList.first;
-      final alternateGreetings =
-          greetingList.length > 1 ? greetingList.sublist(1) : const <String>[];
+      final normalized = normalizeGreetings(
+        primary: capture.greetings.isEmpty ? null : macro(capture.greetings.first),
+        others: [
+          ...capture.greetings.skip(1).map(macro),
+          if (meta?['first_message'] is String) macro(meta!['first_message'] as String),
+          ...greetingList(meta?['first_messages']).map(macro),
+          macro(extractFirstMessage(payload)),
+        ],
+      );
+      final firstMes = normalized.firstMes;
+      final alternateGreetings = normalized.alternates;
+      // The same set the card gets, in the same order, for the diff view
+      // below to show the reader what was recovered.
+      final allGreetings = [
+        if (firstMes.isNotEmpty) firstMes,
+        ...alternateGreetings,
+      ];
 
       final tags = (meta?['custom_tags'] is List)
           ? (meta!['custom_tags'] as List).map((e) => e.toString()).toList()
@@ -285,7 +286,7 @@ class JanitorExtractor {
         avatarUrl: avatar,
       );
 
-      final greetings = greetingList.join('\n\n---\n\n');
+      final greetings = allGreetings.join('\n\n---\n\n');
 
       // The card and scenario play two different parts, and the captured text
       // is only right for one of them. For the IMPORT it is the truth (a closed

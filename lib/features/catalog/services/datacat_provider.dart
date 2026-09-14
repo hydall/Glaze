@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'greeting_normalizer.dart';
 import 'catalog_http.dart';
 import '../catalog_models.dart';
 
@@ -291,7 +292,12 @@ String _stripDatacatMarkers(String text) {
 /// (definition into `data.description`, `data.personality` left empty), so
 /// `{{description}}` resolves to the prompt body and the blurb never lands in
 /// it.
-CharacterData _datacatCharacterData(Map<String, dynamic> char) {
+/// Maps one DataCat character row onto a Glaze card.
+///
+/// Public so the field mapping can be tested against a row rather than
+/// only through a live request: which greeting field a row carries is
+/// exactly what #98 turned on.
+CharacterData datacatCharacterData(Map<String, dynamic> char) {
   String s(dynamic v) => v == null ? '' : v.toString();
   String pick(List<String> xs) =>
       xs.firstWhere((e) => e.trim().isNotEmpty, orElse: () => '');
@@ -317,9 +323,6 @@ CharacterData _datacatCharacterData(Map<String, dynamic> char) {
         ]);
   final scenario =
       pick([s(char['scenario']), s(recovered?['scenario']), s(v2Data['scenario'])]);
-  final firstMes = pick([
-    s(char['first_message']), s(recovered?['first_message']), s(v2Data['first_mes']),
-  ]);
   final creatorNotes = isSaucepan
       ? pick([s(companion['full_description']), s(v2Data['creator_notes'])])
       : pick([s(char['description']), s(v2Data['creator_notes'])]);
@@ -335,6 +338,26 @@ CharacterData _datacatCharacterData(Map<String, dynamic> char) {
     (a) => a is List && a.isNotEmpty,
     orElse: () => const <dynamic>[],
   );
+  // Every greeting the row carries, folded into an opening line plus
+  // alternates. `first_messages` is Janitor's plural field and DataCat mirrors
+  // Janitor rows, so a card can arrive with its whole set there and nothing in
+  // the singular field; reading only the singular one left slot one blank and
+  // shifted every greeting down by one, which is the "datacat skips the 1st
+  // greeting" in the report.
+  final greetings = normalizeGreetings(
+    primary: pick([
+      s(char['first_message']),
+      s(recovered?['first_message']),
+      s(v2Data['first_mes']),
+    ]),
+    others: [
+      ...greetingList(char['first_messages']),
+      ...greetingList(recovered?['first_messages']),
+      ...greetingList(v2Data['first_messages']),
+      ...greetingList(altG),
+    ],
+  );
+
   final name = pick([s(char['chat_name']), s(char['chatName']), s(char['name'])]);
 
   return CharacterData(
@@ -342,13 +365,13 @@ CharacterData _datacatCharacterData(Map<String, dynamic> char) {
     description: definition,
     personality: '',
     scenario: scenario,
-    firstMes: firstMes,
+    firstMes: greetings.firstMes,
     mesExample:
         pick([s(char['example_dialogs']), s(char['mes_example']), s(v2Data['mes_example'])]),
     creatorNotes: creatorNotes,
     systemPrompt: s(v2Data['system_prompt']),
     postHistoryInstructions: s(v2Data['post_history_instructions']),
-    alternateGreetings: altG is List ? altG.whereType<String>().toList() : const [],
+    alternateGreetings: greetings.alternates,
     tags: const [],
     creator: pick([s(char['creator_name']), s(char['creatorName'])]),
     creatorId: pick([s(char['creator_id']), s(char['creatorId'])]),
@@ -367,7 +390,7 @@ Future<DownloadedCharacter> datacatGetCharacter(String uuid) async {
   final data = await _datacatGet('/api/characters/$uuid?t=$ts&sourceKind=janitor');
   final char = (data['character'] ?? data) as Map<String, dynamic>;
   return DownloadedCharacter(
-    charData: _datacatCharacterData(char),
+    charData: datacatCharacterData(char),
     avatarUrl: _resolveAvatarUrl(_pickAvatarSource(char, {})),
   );
 }

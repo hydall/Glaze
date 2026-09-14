@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import 'greeting_normalizer.dart';
 import 'janitor_webview_proxy.dart';
 import '../catalog_models.dart';
 
@@ -440,6 +441,13 @@ DownloadedCharacter _convertToGlaze(Map<String, dynamic> m) {
     tags.addAll((m['custom_tags'] as List).map((t) => '#$t'));
   }
 
+  // `first_messages` is the whole set *including* the opening line, so
+  // mapping it straight onto the alternates listed that greeting twice.
+  final greetings = normalizeGreetings(
+    primary: (m['first_message'] ?? m['first_mes'] ?? '') as String?,
+    others: greetingList(m['first_messages']),
+  );
+
   return DownloadedCharacter(
     charData: CharacterData(
       name: (m['name'] ?? m['chat_name'] ?? 'Unknown') as String,
@@ -451,16 +459,14 @@ DownloadedCharacter _convertToGlaze(Map<String, dynamic> m) {
       description: (m['personality'] ?? '') as String,
       personality: '',
       scenario: (m['scenario'] ?? '') as String,
-      firstMes: (m['first_message'] ?? m['first_mes'] ?? '') as String,
+      firstMes: greetings.firstMes,
       mesExample:
           (m['example_dialogs'] ?? m['mes_example'] ?? m['example_dialogs'] ?? '')
               as String,
       creatorNotes: (m['description'] ?? m['creator_notes'] ?? '') as String,
       systemPrompt: '',
       postHistoryInstructions: '',
-      alternateGreetings: m['first_messages'] is List
-          ? (m['first_messages'] as List).whereType<String>().toList()
-          : <String>[],
+      alternateGreetings: greetings.alternates,
       tags: tags.toSet().toList(),
       creator: (m['creator_name'] ?? m['creator'] ?? '') as String,
       creatorId: (m['creator_id'] ?? '') as String,

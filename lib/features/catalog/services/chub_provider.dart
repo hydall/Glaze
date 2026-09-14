@@ -1,4 +1,5 @@
 import 'catalog_http.dart';
+import 'greeting_normalizer.dart';
 import '../catalog_models.dart';
 
 const _apiBase = 'https://api.chub.ai';
@@ -107,7 +108,7 @@ Future<DownloadedCharacter> chubGetCharacter(String fullPath) async {
   );
   final node = (data['node'] ?? data) as Map<String, dynamic>;
   return DownloadedCharacter(
-    charData: _convertToGlaze(node),
+    charData: chubCharacterData(node),
     avatarUrl: '$_avatarBase$fullPath/avatar.webp',
   );
 }
@@ -139,7 +140,9 @@ CatalogItem _normalizeNode(Map<String, dynamic> node) {
   );
 }
 
-CharacterData _convertToGlaze(Map<String, dynamic> node) {
+/// Maps one Chub node onto a Glaze card. Public for the same reason as
+/// [datacatCharacterData].
+CharacterData chubCharacterData(Map<String, dynamic> node) {
   final def = (node['definition'] ?? <String, dynamic>{}) as Map<String, dynamic>;
   final fullPath = (node['fullPath'] ?? node['full_path'] ?? '') as String;
   final creator = fullPath.split('/').first;
@@ -150,6 +153,11 @@ CharacterData _convertToGlaze(Map<String, dynamic> node) {
     return lower != 'nsfw' && lower != 'sfw';
   }).toList();
 
+  final greetings = normalizeGreetings(
+    primary: def['first_message'] as String?,
+    others: greetingList(def['alternate_greetings']),
+  );
+
   return CharacterData(
     name: (def['name'] ?? node['name'] ?? 'Unknown') as String,
     // Chub's `personality` IS the card body, `tavern_personality` is the V2
@@ -158,14 +166,12 @@ CharacterData _convertToGlaze(Map<String, dynamic> node) {
     description: (def['personality'] ?? '') as String,
     personality: (def['tavern_personality'] ?? '') as String,
     scenario: (def['scenario'] ?? '') as String,
-    firstMes: (def['first_message'] ?? '') as String,
+    firstMes: greetings.firstMes,
     mesExample: (def['example_dialogs'] ?? '') as String,
     creatorNotes: (def['description'] ?? node['tagline'] ?? '') as String,
     systemPrompt: (def['system_prompt'] ?? '') as String,
     postHistoryInstructions: (def['post_history_instructions'] ?? '') as String,
-    alternateGreetings: def['alternate_greetings'] is List
-        ? (def['alternate_greetings'] as List).whereType<String>().toList()
-        : <String>[],
+    alternateGreetings: greetings.alternates,
     tags: [isTopicNsfw ? 'NSFW' : 'SFW', ...cleanTopics],
     creator: creator,
     creatorId: creator,
