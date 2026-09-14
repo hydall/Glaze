@@ -69,6 +69,36 @@ enum UpdateStatus {
   unknown,
 }
 
+/// What GitHub's compare endpoint says about two commits, and what landed
+/// between them.
+class CommitComparison {
+  const CommitComparison({required this.status, required this.commits});
+
+  /// The range could not be resolved — a force-push, an unknown SHA, a failed
+  /// request.
+  const CommitComparison.unresolved()
+    : status = '',
+      commits = const [];
+
+  /// `ahead`, `behind`, `identical`, `diverged`, or empty when unresolved.
+  /// `ahead` means the *head* is ahead of the base.
+  final String status;
+
+  /// Non-merge commit subjects between the two, newest first.
+  final List<String> commits;
+
+  /// Whether the installed build (the base) is already at least as new as the
+  /// head, so there is nothing to offer.
+  ///
+  /// An unresolved comparison is deliberately **not** counted here. A branch
+  /// that was force-pushed leaves an installed SHA that can never be compared
+  /// again, and treating that as "up to date" would silence updates for that
+  /// install permanently — a worse failure than the one being fixed, and a
+  /// silent one. Only an explicit `behind` or `identical` suppresses the offer.
+  bool get installedIsAtLeastAsNew =>
+      status == 'behind' || status == 'identical';
+}
+
 class UpdateCheckResult {
   final UpdateStatus status;
   final UpdateInfo? info;
@@ -108,8 +138,17 @@ class UpdateCheckService {
 
   final Dio _dio;
 
-  UpdateCheckService({Dio? dio})
-    : _dio =
+  /// The commit this build was produced from.
+  ///
+  /// Defaults to the embedded [buildCommit]. Injectable so the comparison can
+  /// be tested at all: `buildCommit` is a `String.fromEnvironment` const, so it
+  /// is empty under `flutter test` and the pre-release path would bail out
+  /// before reaching anything worth asserting on.
+  final String _installedCommit;
+
+  UpdateCheckService({Dio? dio, String? installedCommit})
+    : _installedCommit = installedCommit ?? buildCommit,
+      _dio =
           dio ??
           Dio(
             BaseOptions(
@@ -192,14 +231,24 @@ class UpdateCheckService {
     }
 
     // Local/dev build with no embedded SHA — can't compare meaningfully.
-    if (buildCommit.isEmpty) {
+    if (_installedCommit.isEmpty) {
       return const UpdateCheckResult(UpdateStatus.unknown);
     }
-    if (headSha == buildCommit) {
+    if (headSha == _installedCommit) {
       return const UpdateCheckResult(UpdateStatus.upToDate);
     }
 
-    final commits = await _commitsBetween(buildCommit, headSha);
+    // Two different SHAs do not mean the branch is ahead. The installed build
+    // can be *newer* than the branch's last successful run — the run after it
+    // failed, or the build came from a branch that has since moved on — and
+    // offering it then presented a build two weeks older than the one running,
+    // as an update. Ask which way round they are rather than assuming.
+    final comparison = await _compareCommits(_installedCommit, headSha);
+    if (comparison.installedIsAtLeastAsNew) {
+      return const UpdateCheckResult(UpdateStatus.upToDate);
+    }
+
+    final commits = comparison.commits;
     final runNumber = (run['run_number'] as num?)?.toInt() ?? 0;
 
     return UpdateCheckResult(
@@ -237,16 +286,25 @@ class UpdateCheckService {
     return first is Map<String, dynamic> ? first : null;
   }
 
-  /// Non-merge commit subjects in `base..head`, newest first. The GitHub
-  /// compare endpoint returns commits oldest-first, so we reverse. Returns an
-  /// empty list if the range can't be resolved (force-push, unknown SHA, etc.).
-  Future<List<String>> _commitsBetween(String base, String head) async {
+  /// How `head` relates to `base`, and the non-merge commit subjects between
+  /// them — one request, because GitHub answers both in one response.
+  Future<CommitComparison> _compareCommits(String base, String head) async {
     final res = await _dio.get<Map<String, dynamic>>(
       '/repos/$_owner/$_repo/compare/$base...$head',
     );
-    if (res.statusCode != 200 || res.data == null) return const [];
+    if (res.statusCode != 200 || res.data == null) {
+      return const CommitComparison.unresolved();
+    }
+    return CommitComparison(
+      status: res.data!['status'] as String? ?? '',
+      commits: _subjectsOf(res.data!['commits']),
+    );
+  }
 
-    final raw = res.data!['commits'];
+  /// Non-merge commit subjects, newest first. The GitHub compare endpoint
+  /// returns commits oldest-first, so we reverse. Returns an empty list if the
+  /// range can't be resolved (force-push, unknown SHA, etc.).
+  static List<String> _subjectsOf(Object? raw) {
     if (raw is! List) return const [];
 
     final subjects = <String>[];
