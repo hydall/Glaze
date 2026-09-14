@@ -67,6 +67,7 @@ export function writeShadowContent({
   applySearchHighlight,
   allowMessageScripts = false,
   isReasoning = false,
+  messageId,
 }) {
   if (!host || !host.shadowRoot) return;
   const root = host.shadowRoot.querySelector('.glaze-message');
@@ -90,7 +91,7 @@ export function writeShadowContent({
     });
     // Before anything else touches the tree: the placeholder's content moves
     // behind a shadow boundary, out of reach of the message's own CSS.
-    isolateImgGenPlaceholders(root);
+    isolateImgGenPlaceholders(root, messageId);
     syncCodeBlockMetadata(root);
     // A reply still arriving is half a stylesheet, and every unclosed brace in
     // it is on its way to being closed — report only what the message settled

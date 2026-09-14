@@ -194,6 +194,45 @@ const HEAD_CLASSES = [
 /** Marks a block that is waiting its turn rather than generating. */
 const QUEUED_CLASS = 'imggen-queued';
 
+/* Elapsed-clock starts, keyed `<messageId>#<imgIndex>`.
+ *
+ * The clock belongs to the *generation*, not to the DOM node showing it. Every
+ * render replaces the message body wholesale (`root.innerHTML = …`), so the
+ * placeholder is a new element each time and anything stored on it is lost;
+ * and the formatter memoizes its output on the message text, so the
+ * `data-start` baked into the HTML is whatever the first render of that text
+ * happened to stamp. Neither of those is the generation.
+ *
+ * Holding the start here instead means a re-render finds the clock it left
+ * running — a new message arriving mid-generation used to send it back to
+ * 0.0s — while a genuinely new attempt starts from zero, because the entry is
+ * dropped as soon as the block stops being pending. */
+const clockStarts = new Map();
+
+/* The id of the message [node] belongs to, crossing shadow boundaries.
+ *
+ * Only a fallback. A section is built and its content written *before* it is
+ * appended, so during the first render of a message there is no
+ * `data-message-id` above the placeholder to find — which is why every caller
+ * that knows the id passes it in. */
+function messageIdOf(node) {
+  let current = node;
+  while (current) {
+    if (current.nodeType === 1 && current.dataset && current.dataset.messageId) {
+      return current.dataset.messageId;
+    }
+    // A ShadowRoot has no parentNode; its `host` is the way out.
+    current = current.parentNode || current.host || null;
+  }
+  return '';
+}
+
+/** Which generation a placeholder's clock belongs to. */
+function clockKey(block, messageId) {
+  const index = (block.dataset && block.dataset.imgIndex) || '';
+  return `${messageId || messageIdOf(block)}#${index}`;
+}
+
 /**
  * Whether a pending block is waiting rather than generating.
  *
@@ -240,11 +279,58 @@ export function refreshImgGenPlaceholderState() {
 
 /** Starts the elapsed clock from now, so it measures the generation itself. */
 function restartTimer(block) {
+  stampTimer(block, recordClockStart(clockKey(block), Date.now()));
+}
+
+/** Picks up a clock already running for this generation, or starts one. */
+function resumeTimer(block, messageId) {
+  const key = clockKey(block, messageId);
+  const running = clockStarts.get(key);
+  stampTimer(block, running == null
+    ? recordClockStart(key, Date.now())
+    : running);
+}
+
+function recordClockStart(key, at) {
+  clockStarts.set(key, at);
+  return at;
+}
+
+/** Writes [start] onto the placeholder's timer and paints the reading now. */
+function stampTimer(block, start) {
   const root = block.shadowRoot || block;
   const timer = root.querySelector('.imggen-loading-timer');
   if (!timer) return;
-  timer.dataset.start = String(Date.now());
-  timer.textContent = '0.0s';
+  timer.dataset.start = String(start);
+  timer.textContent = `${((Date.now() - start) / 1000).toFixed(1)}s`;
+}
+
+/* Forgets the clocks of generations that are over.
+ *
+ * A key survives only while its placeholder is still on screen: once the
+ * picture lands, or the attempt fails, the block is gone and the next attempt
+ * has to start from zero — which is the whole point of a retry.
+ *
+ * Only messages that are currently mounted are considered. A row the virtual
+ * window unmounted has not finished generating, it has scrolled out of the
+ * window, and it must find its clock again when it comes back. */
+function pruneClocks() {
+  if (clockStarts.size === 0) return;
+  const live = new Set();
+  const mounted = new Set();
+  for (const host of document.querySelectorAll('.message-content')) {
+    mounted.add(messageIdOf(host));
+    const root = host.shadowRoot;
+    if (!root) continue;
+    for (const block of root.querySelectorAll('.imggen-loading')) {
+      live.add(clockKey(block));
+    }
+  }
+  for (const key of Array.from(clockStarts.keys())) {
+    const messageId = key.slice(0, key.lastIndexOf('#'));
+    if (!mounted.has(messageId)) continue;
+    if (!live.has(key)) clockStarts.delete(key);
+  }
 }
 
 /**
@@ -252,21 +338,45 @@ function restartTimer(block) {
  * its own. Idempotent: a placeholder that already has one is left alone, so
  * calling this after every render costs one query on an unchanged message.
  */
-export function isolateImgGenPlaceholders(root) {
+export function isolateImgGenPlaceholders(root, messageId) {
   if (!root || !root.querySelectorAll) return;
   for (const host of root.querySelectorAll('.imggen-loading')) {
     if (host.shadowRoot) continue;
     try {
-      isolateOne(host);
+      isolateOne(host, messageId);
     } catch (_) {
       // attachShadow refuses a host that already has one, and older engines
       // may refuse it outright. The block then renders from SHADOW_STYLE's
       // fallback rules — plainer, but never missing.
     }
   }
+  // Next frame, not now: this runs while the section being rendered is still
+  // detached, so the document still shows the message as it was a moment ago.
+  // A block that just finished is live in that tree and dead in the new one.
+  schedulePrune();
 }
 
-function isolateOne(host) {
+/* Coalesces the prune to one pass per frame.
+ *
+ * A render writes every mounted message, so an un-coalesced prune would sweep
+ * the whole list once per message; and it has to run after the new sections
+ * are attached, which is the frame after this one. */
+let prunePending = false;
+function schedulePrune() {
+  if (prunePending || clockStarts.size === 0) return;
+  prunePending = true;
+  const run = () => {
+    prunePending = false;
+    pruneClocks();
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(run);
+  } else {
+    Promise.resolve().then(run);
+  }
+}
+
+function isolateOne(host, messageId) {
   const shadow = host.attachShadow({ mode: 'open' });
 
   const wrapper = host.ownerDocument.createElement('div');
@@ -301,10 +411,14 @@ function isolateOne(host) {
   pinForeground(host);
   // A freshly rendered block starts in whichever state the flags describe; a
   // render during streaming must not paint a running one for a frame.
+  //
+  // `resumeTimer`, not `restartTimer`: this element is new on every render of
+  // the message, but the generation it stands for may have been running for
+  // half a minute.
   if (isQueued()) {
     host.classList.add(QUEUED_CLASS);
   } else {
-    restartTimer(host);
+    resumeTimer(host, messageId);
   }
 }
 

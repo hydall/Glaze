@@ -189,7 +189,9 @@ if (messageData.isEditing) classes.push('editing');
     } else {
       const content = this._createContentContainer();
       body.appendChild(content);
-      this._writeShadowContent(content, text, this._isUser(role), false);
+      this._writeShadowContent(content, text, this._isUser(role), false, {
+        messageId: id,
+      });
     }
 
     // `imagePaths` is the whole set; `imagePath` is the first one, still sent
@@ -353,7 +355,9 @@ if (messageData.isEditing) classes.push('editing');
 
     const shadowHost = this._createContentContainer();
     inner.appendChild(shadowHost);
-    this._writeShadowContent(shadowHost, reasoning, isUser, false, true);
+    this._writeShadowContent(shadowHost, reasoning, isUser, false, {
+      isReasoning: true,
+    });
 
     wrap.appendChild(inner);
     content.appendChild(wrap);
@@ -414,7 +418,9 @@ if (messageData.isEditing) classes.push('editing');
     content.className = 'error-content';
     const host = this._createContentContainer();
     content.appendChild(host);
-    this._writeShadowContent(host, m.text || '', this._isUser(m.role), false);
+    this._writeShadowContent(host, m.text || '', this._isUser(m.role), false, {
+      messageId: m.id,
+    });
     win.appendChild(content);
     return win;
   }
@@ -739,13 +745,24 @@ if (messageData.isEditing) classes.push('editing');
 
   // [isReasoning] marks the split-out `message.reasoning` panel: the same
   // formatter, but image tags there stay text (INV-IG11).
-  _writeShadowContent(host, text, isUser, isTyping, isReasoning = false) {
+  // [messageId] is passed rather than looked up: a section is built and its
+  // content written before it is appended, so a placeholder inside it has no
+  // `data-message-id` above it yet and its elapsed clock would have nothing to
+  // be keyed on (see renderer/imggen_placeholder.js).
+  _writeShadowContent(
+    host,
+    text,
+    isUser,
+    isTyping,
+    { isReasoning = false, messageId } = {},
+  ) {
     writeShadowContent({
       host,
       text,
       isUser,
       isTyping,
       isReasoning,
+      messageId,
       formatter: this.formatter,
       searchQuery: this.searchQuery,
       applySearchHighlight: (html) => this._applySearchHighlight(html),
@@ -773,12 +790,18 @@ if (messageData.isEditing) classes.push('editing');
       if (existingHost && existingHost.shadowRoot) {
         const glazeMsg = existingHost.shadowRoot.querySelector('.glaze-message');
         if (glazeMsg) {
-          this._writeShadowContent(existingHost, text, isUser, false);
+          this._writeShadowContent(existingHost, text, isUser, false, {
+            messageId: sectionEl.dataset.messageId,
+          });
           if (reasoning && reasoning.trim()) {
             let reasoningEl = sectionEl.querySelector('.msg-reasoning');
             if (reasoningEl) {
               const rHost = reasoningEl.querySelector('.msg-reasoning-inner .message-content');
-              if (rHost) this._writeShadowContent(rHost, reasoning, isUser, false, true);
+              if (rHost) {
+                this._writeShadowContent(rHost, reasoning, isUser, false, {
+                  isReasoning: true,
+                });
+              }
             }
           }
           return;
@@ -801,7 +824,9 @@ if (messageData.isEditing) classes.push('editing');
     } else {
       const host = this._createContentContainer();
       body.appendChild(host);
-      this._writeShadowContent(host, text, isUser, false);
+      this._writeShadowContent(host, text, isUser, false, {
+        messageId: sectionEl.dataset.messageId,
+      });
     }
 
     if (image) body.appendChild(image);
@@ -816,7 +841,11 @@ if (messageData.isEditing) classes.push('editing');
         contentStack.insertBefore(reasoningEl, contentStack.firstChild);
       } else {
         const host = reasoningEl.querySelector('.msg-reasoning-inner .message-content');
-        if (host) this._writeShadowContent(host, reasoning, isUser, false, true);
+        if (host) {
+          this._writeShadowContent(host, reasoning, isUser, false, {
+            isReasoning: true,
+          });
+        }
       }
     } else if (reasoningEl) {
       reasoningEl.remove();
@@ -1101,12 +1130,24 @@ if (messageData.isEditing) classes.push('editing');
 
       const reasoningHost = section.querySelector('.msg-reasoning-inner .message-content');
       if (reasoningHost) {
-        this._writeShadowContent(reasoningHost, section.dataset.reasoning || '', isUser, false, true);
+        this._writeShadowContent(
+          reasoningHost,
+          section.dataset.reasoning || '',
+          isUser,
+          false,
+          { isReasoning: true },
+        );
       }
 
       const bodyHost = section.querySelector('.msg-body .message-content');
       if (bodyHost) {
-        this._writeShadowContent(bodyHost, section.dataset.rawText || '', isUser, false);
+        this._writeShadowContent(
+          bodyHost,
+          section.dataset.rawText || '',
+          isUser,
+          false,
+          { messageId: section.dataset.messageId },
+        );
       }
     });
   }
@@ -1189,7 +1230,7 @@ if (messageData.isEditing) classes.push('editing');
             // The rewrite dropped the placeholders' shadow roots with the rest
             // of the body; re-isolate so a search pass cannot expose them to
             // the message stylesheet.
-            isolateImgGenPlaceholders(root);
+            isolateImgGenPlaceholders(root, section.dataset.messageId);
             // The rewrite dropped the CSS report with the rest of the body;
             // put it back so searching does not hide a broken stylesheet.
             if (!window.bridge?.isGenerating) reportCssErrors(root);

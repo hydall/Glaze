@@ -1356,10 +1356,11 @@ void main() {
       );
       expect(
         rendererMessageJs,
-        contains(
-          "this._writeShadowContent(shadowHost, reasoning, isUser, "
-          "false, true)",
-        ),
+        contains("isReasoning: true"),
+      );
+      expect(
+        rendererMessageJs,
+        contains('this._writeShadowContent(shadowHost, reasoning, isUser, false, {'),
       );
       expect(
         rendererJs,
@@ -1420,7 +1421,29 @@ void main() {
         imgGenPlaceholderJs,
         contains('function restartTimer(block)'),
       );
-      expect(imgGenPlaceholderJs, contains("timer.dataset.start = String(Date.now())"));
+      expect(
+        imgGenPlaceholderJs,
+        contains('timer.dataset.start = String(start)'),
+      );
+      // The start belongs to the generation, not to the element showing
+      // it: every render replaces the placeholder, and the formatter
+      // memoizes the stamp baked into its HTML, so neither can hold it.
+      expect(
+        imgGenPlaceholderJs,
+        contains('const clockStarts = new Map()'),
+      );
+      expect(
+        imgGenPlaceholderJs,
+        contains('function resumeTimer(block, messageId)'),
+        reason: 'a re-render mid-generation must find the clock it left '
+            'running, not start a new one',
+      );
+      expect(
+        imgGenPlaceholderJs,
+        contains('function pruneClocks()'),
+        reason: 'and a retry must start from zero, so the entry has to go '
+            'once the block stops being pending',
+      );
       // The flip carries no re-render of its own, so the bridge drives it.
       expect(
         bridgeControllerJs,
@@ -1453,13 +1476,20 @@ void main() {
         contains("host.style.setProperty(property, value, 'important')"),
       );
       // Both render paths re-isolate: a search pass rewrites innerHTML too.
-      expect(rendererJs, contains('isolateImgGenPlaceholders(root)'));
       expect(
-        RegExp('isolateImgGenPlaceholders\\(root\\)')
+        RegExp(r'isolateImgGenPlaceholders\(root(, [A-Za-z.]+)?\)')
             .allMatches(rendererJs)
             .length,
         greaterThanOrEqualTo(2),
       );
+      // The id is passed, not looked up: a section is built and written
+      // before it is appended, so there is no `data-message-id` above the
+      // placeholder to walk up to on the render that creates it.
+      expect(
+        rendererJs,
+        contains('isolateImgGenPlaceholders(root, messageId)'),
+      );
+      expect(rendererMessageJs, contains('messageId: id,'));
     });
 
     test('the elapsed timer reaches into the placeholder shadow root', () {
