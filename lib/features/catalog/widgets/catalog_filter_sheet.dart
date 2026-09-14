@@ -83,6 +83,17 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
         _allTags = tags;
       });
     }
+
+    // Loaded second, so the sheet is usable with the curated tags while this
+    // is still in flight.
+    if (!_isJanitor) return;
+    final popular = await fetchJanitorTopCustomTags();
+    if (!mounted || popular.isEmpty) return;
+    final merged = withPopularCustomTags(tags, popular);
+    if (merged.length == tags.length) return;
+    setState(() {
+      _allTags = merged;
+    });
   }
 
   Future<void> _loadBlockedTags() async {
