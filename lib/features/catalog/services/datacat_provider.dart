@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'greeting_normalizer.dart';
 import 'catalog_http.dart';
 import '../catalog_models.dart';
+import 'extraction_status.dart';
 
 const _base = 'https://datacat.run';
 const _keyDevice = 'gz_dc_device';
@@ -481,56 +482,27 @@ Future<ExtractionResult> datacatExtractAndPoll(
     final targetUuid = uuidMatch?.group(0);
 
     const maxAttempts = 60;
+    // A run reported as finished-but-empty has to be seen twice before the
+    // import gives up on it. The status endpoint composes the run and the
+    // character it produced from different places, so a single poll can catch
+    // the moment in between; three more seconds is a cheap price for not
+    // calling a successful import a failure.
+    var emptyReadings = 0;
+
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 3));
 
       try {
         final status = await _datacatExtractionStatus();
-        final run = status['run'] as Map<String, dynamic>?;
-        onPhaseChange?.call((status['inProgress']?['phase'] ?? run?['phase'] ?? '') as String);
+        final reading = readExtractionStatus(
+          status,
+          requestId: myRequestId,
+          previousRunId: prevRunId,
+          targetUuid: targetUuid,
+        );
+        onPhaseChange?.call(reading.phase);
 
-        String? characterId;
-
-        if (myRequestId != null) {
-          if (run?['requestId'] == myRequestId && run?['lifecycle'] == 'terminal') {
-            characterId = (run?['characterId'] ?? run?['targetId']) as String?;
-          }
-          if (characterId == null) {
-            final taskHistory = (status['taskHistory'] as List?) ?? [];
-            for (final h in taskHistory) {
-              if (h['id'] == myRequestId && h['status'] == 'terminal') {
-                characterId = h['target']?['id'] as String?;
-                break;
-              }
-            }
-          }
-          if (characterId == null) {
-            final history = (status['history'] as List?) ?? [];
-            for (final h in history) {
-              if (h['requestId'] == myRequestId) {
-                characterId = h['characterId'] as String?;
-                break;
-              }
-            }
-          }
-        }
-
-        if (characterId == null && run?['lifecycle'] == 'terminal' && run?['requestId'] != prevRunId) {
-          if (targetUuid == null || run?['targetId'] == targetUuid) {
-            characterId = (run?['characterId'] ?? run?['targetId']) as String?;
-          }
-        }
-
-        if (characterId == null && targetUuid != null) {
-          final history = (status['history'] as List?) ?? [];
-          for (final h in history) {
-            if ((h['url'] as String?)?.contains(targetUuid) == true && h['characterId'] != null) {
-              characterId = h['characterId'] as String;
-              break;
-            }
-          }
-        }
-
+        final characterId = reading.characterId;
         if (characterId != null) {
           final result = await datacatGetCharacter(characterId);
           String? avatarUrl = result.avatarUrl;
@@ -542,6 +514,18 @@ Future<ExtractionResult> datacatExtractAndPoll(
             avatarUrl: avatarUrl,
             characterId: characterId,
           );
+        }
+
+        if (reading.state == ExtractionRunState.finishedEmpty) {
+          if (++emptyReadings >= 2) {
+            return ExtractionResult(
+              error: extractionFinishedEmptyMessage(
+                isSaucepan: _detectExtractionSource(url) == 'saucepan',
+              ),
+            );
+          }
+        } else {
+          emptyReadings = 0;
         }
       } catch (_) {}
     }

@@ -20,6 +20,7 @@ import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../saucepan_account_provider.dart';
 import '../services/datacat_provider.dart';
+import '../services/extraction_status.dart';
 import '../services/saucepan_extractor.dart';
 import 'catalog_detail_launcher.dart';
 
@@ -185,7 +186,20 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
         return;
       }
 
-      if (result.charData != null && mounted) {
+      if (result.charData == null) {
+        // Neither a character nor an error. Nothing should reach here, and that
+        // is the point: the branch that did not exist is the branch that left
+        // the spinner turning with no timeout behind it at all.
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _error = extractionFinishedEmptyMessage(isSaucepan: false);
+          });
+        }
+        return;
+      }
+
+      if (mounted) {
         final notifier = ref.read(catalogProvider.notifier);
         final downloaded = DownloadedCharacter(
           charData: result.charData!,
