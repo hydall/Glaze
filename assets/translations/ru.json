@@ -925,6 +925,7 @@
   "backup_progress_apis": "Импорт API эндпоинтов...",
   "backup_progress_regex": "Импорт Regex скриптов...",
   "backup_progress_preparing": "Подготовка импорта...",
+  "backup_progress_preparing_export": "Подготовка экспорта...",
   "backup_progress_glaze": "Импорт данных Glaze...",
   "cancel_import_done": "Импорт отменён. База может быть в частичном состоянии — повторите импорт, чтобы продолжить.",
   "legacy_glz_rejected": "Обнаружен старый формат Glaze. Пожалуйста, переэкспортируйте из исходного приложения (SillyTavern или свежей сборки Glaze), чтобы импорт прошёл успешно.",

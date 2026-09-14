@@ -918,6 +918,7 @@
   "backup_progress_apis": "Importing API endpoints...",
   "backup_progress_regex": "Importing Regex scripts...",
   "backup_progress_preparing": "Preparing import...",
+  "backup_progress_preparing_export": "Preparing export...",
   "backup_progress_glaze": "Importing Glaze data...",
   "cancel_import_done": "Import cancelled. The database may be in a partial state — re-import to continue.",
   "legacy_glz_rejected": "Old Glaze backup format detected. Please re-export from the source app (SillyTavern or a recent Glaze build) to import successfully.",

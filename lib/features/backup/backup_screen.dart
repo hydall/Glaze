@@ -109,6 +109,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       isExporting: _isExporting,
       onExport: _performExport,
       onImport: _triggerImport,
+      showExport: !widget.fromOnboarding,
     );
   }
 
@@ -257,11 +258,17 @@ class _NormalView extends StatelessWidget {
   final VoidCallback onExport;
   final VoidCallback onImport;
 
+  /// False during onboarding: the sheet is reached from "Restore from backup"
+  /// on an install that has nothing in it yet, so offering to export is an
+  /// offer to write an empty file.
+  final bool showExport;
+
   const _NormalView({
     super.key,
     required this.isExporting,
     required this.onExport,
     required this.onImport,
+    required this.showExport,
   });
 
   @override
@@ -294,26 +301,32 @@ class _NormalView extends StatelessWidget {
               ),
             ],
           ),
-          const _Separator(),
-          _Section(
-            title: 'menu_export'.tr(),
-            children: [
-              _BsButton(
-                onPressed: isExporting ? null : onExport,
-                icon: Icons.file_download_outlined,
-                label: isExporting ? 'backup_progress_preparing'.tr() : 'menu_export'.tr(),
-                primary: false,
-                loading: isExporting,
-              ),
-              _Hint(
-                lines: [
-                  _HintLine(
-                    text: 'backup_hint_export'.tr(),
-                  ),
-                ],
-              ),
-            ],
-          ),
+          if (showExport) ...[
+            const _Separator(),
+            _Section(
+              title: 'menu_export'.tr(),
+              children: [
+                _BsButton(
+                  onPressed: isExporting ? null : onExport,
+                  icon: Icons.file_download_outlined,
+                  label: isExporting
+                      // Not `backup_progress_preparing`: that one says
+                      // "Preparing import...", and it was on this button too.
+                      ? 'backup_progress_preparing_export'.tr()
+                      : 'menu_export'.tr(),
+                  primary: false,
+                  loading: isExporting,
+                ),
+                _Hint(
+                  lines: [
+                    _HintLine(
+                      text: 'backup_hint_export'.tr(),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
