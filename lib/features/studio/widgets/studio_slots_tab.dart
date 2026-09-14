@@ -2,8 +2,6 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/model_fetcher.dart';
-import '../../../core/llm/transport/llm_protocol.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/memory_book_api_settings.dart';
 import '../../../core/models/pipeline_settings.dart';
@@ -11,11 +9,9 @@ import '../../../core/models/studio_config.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../../shared/widgets/glaze_error_dialog.dart';
-import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../settings/api_list_provider.dart';
+import '../../settings/widgets/api_slot_group.dart';
 import '../studio_injection_points.dart';
 import 'studio_slot_settings_dialog.dart';
 
@@ -50,15 +46,8 @@ class StudioSlotsTab extends ConsumerStatefulWidget {
 }
 
 class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
-  /// Fetched model id lists keyed by `'<slot>:<apiConfigId>|<endpoint>|<model>'`.
-  final Map<String, List<String>> _fetchedModelsBySlot = {};
-
-  /// Cache keys currently being fetched, to avoid duplicate requests.
-  final Set<String> _fetchingModelSlots = {};
-
   @override
   Widget build(BuildContext context) {
-    final configs = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
     final profile = ref.watch(studioPresetProvider).value;
     final pipeline = ref.watch(pipelineSettingsProvider);
 
@@ -81,7 +70,6 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
         ),
         _slot(
           context,
-          configs: configs,
           slotName: 'pregen',
           studioSlot: StudioSlot.controller,
           title: studioInjectionPointLabel('pregen'),
@@ -89,7 +77,6 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
           apiConfigId: profile?.cheapApiConfigId ?? '',
           onApiConfigChanged: (id) => _saveProfile(
             (c) => c.copyWith(cheapApiConfigId: id),
-            slotName: 'pregen',
           ),
           model: pipeline.studioAgent.studioControllerModelOverride,
           onModelChanged: (value) => _savePipeline(
@@ -102,7 +89,6 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
         ),
         _slot(
           context,
-          configs: configs,
           slotName: 'final',
           studioSlot: StudioSlot.finalGenerator,
           title: studioInjectionPointLabel('final'),
@@ -110,7 +96,6 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
           apiConfigId: profile?.expensiveApiConfigId ?? '',
           onApiConfigChanged: (id) => _saveProfile(
             (c) => c.copyWith(expensiveApiConfigId: id),
-            slotName: 'final',
           ),
           model: pipeline.studioAgent.studioFinalModelOverride,
           onModelChanged: (value) => _savePipeline(
@@ -123,7 +108,6 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
         ),
         _slot(
           context,
-          configs: configs,
           slotName: 'cleaner',
           studioSlot: StudioSlot.cleaner,
           title: studioInjectionPointLabel('cleaner'),
@@ -131,7 +115,6 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
           apiConfigId: profile?.cleanerApiConfigId ?? '',
           onApiConfigChanged: (id) => _saveProfile(
             (c) => c.copyWith(cleanerApiConfigId: id),
-            slotName: 'cleaner',
           ),
           model: pipeline.cleaner.postCleanerModel,
           onModelChanged: (value) => _savePipeline(
@@ -152,7 +135,6 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
         ),
         _slot(
           context,
-          configs: configs,
           slotName: 'ledger',
           studioSlot: StudioSlot.ledger,
           title: studioInjectionPointLabel('ledger'),
@@ -160,7 +142,6 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
           apiConfigId: profile?.ledgerApiConfigId ?? '',
           onApiConfigChanged: (id) => _saveProfile(
             (c) => c.copyWith(ledgerApiConfigId: id),
-            slotName: 'ledger',
           ),
           model: pipeline.ledger.studioLedgerModel,
           onModelChanged: (value) => _savePipeline(
@@ -169,13 +150,12 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
           ),
         ),
         // MemoryBook draft generation is an auxiliary LLM call like the ones
-        // above, so its connection and model belong here rather than inside
-        // the memory sheet — where they were the only two controls that wrote
-        // through on change while the rest of that form waited for Save.
+        // above, so it is bound here alongside them. The memory sheet's own
+        // API block edits the same slot through the same widget; it buffers
+        // the edit until Save, where this tab writes through on change.
         _slot(
           context,
           key: widget.memoryBookSlotKey,
-          configs: configs,
           slotName: 'memory_book',
           studioSlot: null,
           title: 'magic_memory_books'.tr(),
@@ -199,16 +179,9 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
     );
   }
 
-  /// Writes the MemoryBook slot and drops the cached model list, which is
-  /// keyed by the connection it was fetched from.
   Future<void> _saveMemoryBookApi(
     MemoryBookApiSettings Function(MemoryBookApiSettings) mutate,
-  ) async {
-    await _savePipeline(
-      (p) => p.copyWith(memoryBookApi: mutate(p.memoryBookApi)),
-    );
-    if (mounted) setState(() => _clearSlotModelCache('memory_book'));
-  }
+  ) => _savePipeline((p) => p.copyWith(memoryBookApi: mutate(p.memoryBookApi)));
 
   // ── Persistence ────────────────────────────────────────────────────────────
 
@@ -220,10 +193,7 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
   ///
   /// The `default` row is seeded on the first edit only when the active id no
   /// longer resolves, never just by opening the tab.
-  Future<void> _saveProfile(
-    StudioPreset Function(StudioPreset) mutate, {
-    required String slotName,
-  }) async {
+  Future<void> _saveProfile(StudioPreset Function(StudioPreset) mutate) async {
     final repo = ref.read(studioPresetRepoProvider);
     final activeId = await ref.read(activeStudioPresetProvider.future);
     final preset =
@@ -234,9 +204,6 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
       ).copyWith(updatedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000),
     );
     ref.invalidate(studioPresetProvider);
-    // The model list is keyed by the connection; clear it so the next open
-    // refetches against the new endpoint/key.
-    if (mounted) setState(() => _clearSlotModelCache(slotName));
   }
 
   /// Model overrides and generation settings are global app settings.
@@ -252,10 +219,13 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
   /// One stage = one settings group: the stage name as its header, its blurb
   /// as the description, then the connection, the model override and the link
   /// to this stage's parameter overrides.
+  ///
+  /// The rows themselves, their pickers and the fetched-model cache live in
+  /// [ApiSlotGroup] — MemoryBook's own settings sheet binds its slot with the
+  /// same widget, so the two read and behave identically.
   Widget _slot(
     BuildContext context, {
     Key? key,
-    required List<ApiConfig> configs,
     required String slotName,
     // Null for a slot that has no Studio parameter overrides of its own —
     // MemoryBook generation runs on the connection and the model alone.
@@ -271,36 +241,24 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
     String? extraValue,
     ValueChanged<String>? onExtraChanged,
   }) {
-    return MenuGroup(
-      key: key,
+    return ApiSlotGroup(
+      key: key ?? ValueKey('studio-slot-$slotName'),
       header: title,
       description: description,
-      items: [
-        MenuSelectorItem(
-          label: 'studio_slot_api'.tr(),
-          currentValue: _apiName(configs, apiConfigId),
-          onTap: () => _pickApiConfig(
-            context,
-            configs: configs,
-            selectedId: apiConfigId,
-            onSelected: onApiConfigChanged,
-          ),
-        ),
-        _modelSelector(
-          slotName: slotName,
-          apiConfigId: apiConfigId,
-          value: model,
-          onChanged: onModelChanged,
-        ),
+      apiConfigId: apiConfigId,
+      onApiConfigChanged: onApiConfigChanged,
+      modelRows: [
+        ApiSlotModelRow(value: model, onChanged: onModelChanged),
         if (extraLabel != null && onExtraChanged != null)
-          _modelSelector(
-            slotName: 'cleaner_audit',
-            apiConfigId: apiConfigId,
-            value: extraValue ?? '',
-            onChanged: onExtraChanged,
+          ApiSlotModelRow(
+            cacheTag: 'audit_model',
             label: extraLabel,
             description: extraDescription,
+            value: extraValue ?? '',
+            onChanged: onExtraChanged,
           ),
+      ],
+      trailingItems: [
         if (studioSlot != null)
           MenuItem(
             icon: Icons.tune,
@@ -311,213 +269,23 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
               size: 22,
               color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
             ),
-            onTap: () => _openSlotSettings(studioSlot, apiConfigId, configs),
+            onTap: () => _openSlotSettings(studioSlot, apiConfigId),
           ),
       ],
-    );
-  }
-
-  /// A model override row rendered as a dropdown. Empty reads as "Automatic",
-  /// and the picker always offers that entry back so a slot can be returned to
-  /// the connection's own model.
-  Widget _modelSelector({
-    required String slotName,
-    required String apiConfigId,
-    required String value,
-    required ValueChanged<String> onChanged,
-    String? label,
-    String? description,
-  }) {
-    return MenuSelectorItem(
-      label: label ?? 'studio_slot_model'.tr(),
-      description: description,
-      currentValue: value.isEmpty ? 'studio_slot_model_auto'.tr() : value,
-      onTap: () => _openModelSelector(
-        slotName: slotName,
-        apiConfigId: apiConfigId,
-        value: value,
-        onChanged: onChanged,
-      ),
-    );
-  }
-
-  String _apiName(List<ApiConfig> configs, String id) {
-    if (id.isEmpty) return 'studio_slot_use_chat_api'.tr();
-    final config = configs.where((c) => c.id == id).firstOrNull;
-    if (config == null) return 'unnamed_entry'.tr();
-    if (config.name.isNotEmpty) return config.name;
-    if (config.model.isNotEmpty) return config.model;
-    return 'unnamed_entry'.tr();
-  }
-
-  void _pickApiConfig(
-    BuildContext context, {
-    required List<ApiConfig> configs,
-    required String selectedId,
-    required ValueChanged<String> onSelected,
-  }) {
-    BottomSheetItem radio(String id, String label) => BottomSheetItem(
-      label: label,
-      icon: selectedId == id
-          ? Icons.radio_button_checked
-          : Icons.radio_button_off,
-      iconColor: selectedId == id
-          ? context.cs.primary
-          : context.cs.onSurfaceVariant,
-      onTap: () {
-        Navigator.of(context, rootNavigator: true).pop();
-        onSelected(id);
-      },
-    );
-
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'studio_slot_api'.tr(),
-      items: [
-        radio('', 'studio_slot_use_chat_api'.tr()),
-        for (final config in configs)
-          radio(
-            config.id,
-            config.name.isNotEmpty
-                ? config.name
-                : (config.model.isNotEmpty
-                      ? config.model
-                      : 'unnamed_entry'.tr()),
-          ),
-      ],
-    );
-  }
-
-  // ── Fetched model picker ───────────────────────────────────────────────────
-
-  /// The connection named by the "API connection" row above the model picker:
-  /// the slot's own selection, or — only while the slot is left on "Use
-  /// selected LLM connection" — the active LLM preset.
-  ///
-  /// A slot pointing at a deleted config resolves to null rather than falling
-  /// through to the active preset, so the picker can never list models from an
-  /// endpoint other than the one the row displays.
-  ApiConfig? _slotApiConfig(String apiConfigId, List<ApiConfig> configs) {
-    if (apiConfigId.isNotEmpty) {
-      return configs.where((c) => c.id == apiConfigId).firstOrNull;
-    }
-    return ref.read(activeApiConfigProvider);
-  }
-
-  String _modelCacheKey(
-    String slotName,
-    String apiConfigId,
-    List<ApiConfig> configs,
-  ) {
-    final config = _slotApiConfig(apiConfigId, configs);
-    final apiKey = config == null
-        ? apiConfigId
-        : '${config.id}|${config.endpoint}|${config.model}';
-    return '$slotName:$apiKey';
-  }
-
-  void _clearSlotModelCache(String slotName) {
-    final prefix = '$slotName:';
-    _fetchedModelsBySlot.removeWhere((key, _) => key.startsWith(prefix));
-    _fetchingModelSlots.removeWhere((key) => key.startsWith(prefix));
-  }
-
-  Future<void> _fetchModels({
-    required String slotName,
-    required String apiConfigId,
-  }) async {
-    final configs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
-    final cacheKey = _modelCacheKey(slotName, apiConfigId, configs);
-    if (_fetchingModelSlots.contains(cacheKey)) return;
-    final config = _slotApiConfig(apiConfigId, configs);
-    if (config == null) {
-      GlazeToast.show(context, 'studio_slot_no_api'.tr());
-      return;
-    }
-    // Same precondition as the LLM tab's fetch button: OpenRouter's URL is
-    // hardcoded, every other protocol needs an endpoint of its own.
-    final endpointRequired = config.protocol != LlmProtocol.openrouter;
-    if ((endpointRequired && config.endpoint.trim().isEmpty) ||
-        config.apiKey.trim().isEmpty) {
-      GlazeToast.show(context, 'settings_err_endpoint_key'.tr());
-      return;
-    }
-    setState(() => _fetchingModelSlots.add(cacheKey));
-    try {
-      final ids = await ModelFetcher.fetchModelIds(config);
-      if (!mounted) return;
-      setState(() => _fetchedModelsBySlot[cacheKey] = ids);
-    } catch (e) {
-      if (mounted) {
-        GlazeErrorDialog.show(context, e, prefix: 'settings_err_failed'.tr());
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _fetchingModelSlots.remove(cacheKey));
-      }
-    }
-  }
-
-  Future<void> _openModelSelector({
-    required String slotName,
-    required String apiConfigId,
-    required String value,
-    required ValueChanged<String> onChanged,
-  }) async {
-    final configs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
-    final cacheKey = _modelCacheKey(slotName, apiConfigId, configs);
-    final fetched = _fetchedModelsBySlot[cacheKey] ?? const <String>[];
-    if (fetched.isEmpty) {
-      await _fetchModels(slotName: slotName, apiConfigId: apiConfigId);
-      if (!mounted) return;
-    }
-    final models = <String>{
-      ...?_fetchedModelsBySlot[cacheKey],
-      if (value.isNotEmpty) value,
-    }.toList()..sort();
-    // "Automatic" is always offered, even when the fetch came back empty —
-    // otherwise a slot pointed at a stale model id could never be reset.
-    final items = <BottomSheetItem>[
-      BottomSheetItem(
-        label: 'studio_slot_model_auto'.tr(),
-        icon: value.isEmpty ? Icons.check : null,
-        iconColor: context.cs.primary,
-        onTap: () {
-          Navigator.of(context, rootNavigator: true).pop();
-          onChanged('');
-        },
-      ),
-      for (final m in models)
-        BottomSheetItem(
-          label: m,
-          icon: m == value ? Icons.check : null,
-          iconColor: context.cs.primary,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            onChanged(m);
-          },
-        ),
-    ];
-    if (models.isEmpty) GlazeToast.show(context, 'settings_err_no_models'.tr());
-    final selectedIndex = models.indexOf(value);
-    await GlazeBottomSheet.show<void>(
-      context,
-      title: 'onboarding_select_model'.tr(),
-      // +1 for the leading "Automatic" entry.
-      scrollToIndex: selectedIndex >= 0 ? selectedIndex + 1 : null,
-      items: items,
     );
   }
 
   // ── Advanced slot settings ─────────────────────────────────────────────────
 
-  Future<void> _openSlotSettings(
-    StudioSlot slot,
-    String apiConfigId,
-    List<ApiConfig> configs,
-  ) async {
+  Future<void> _openSlotSettings(StudioSlot slot, String apiConfigId) async {
     final pipeline = ref.read(pipelineSettingsProvider);
-    final presetConfig = _slotApiConfig(apiConfigId, configs);
+    final configs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
+    // A slot left on "use the chat connection" reads its inherited parameter
+    // values off the active LLM preset; one pointing at a deleted config shows
+    // none rather than the active preset's.
+    final presetConfig = apiConfigId.isEmpty
+        ? ref.read(activeApiConfigProvider)
+        : configs.where((c) => c.id == apiConfigId).firstOrNull;
     final updated = await showModalBottomSheet<StudioSlotSettings>(
       context: context,
       isScrollControlled: true,

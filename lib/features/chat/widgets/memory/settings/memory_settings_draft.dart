@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../../core/models/memory_book.dart';
+import '../../../../../core/models/memory_book_api_settings.dart';
 
 /// The in-progress edit of [MemoryBookSettings] behind the settings sheet.
 ///
@@ -50,6 +51,14 @@ class MemorySettingsDraft {
   bool vectorSearchEnabled;
   double vectorThreshold;
 
+  /// Which connection, model and generation limits drafts are written with.
+  ///
+  /// Global app state rather than per-book settings, but it is buffered here
+  /// like everything else on the sheet: these rows used to write straight
+  /// through to `PipelineSettings` on change, so dismissing the sheet kept a
+  /// model the user had only been trying out.
+  MemoryBookApiSettings memoryBookApi;
+
   /// The custom token budget field. Lives here rather than in a tab so the
   /// value survives a tab switch, which rebuilds the tab bodies.
   final TextEditingController budgetController;
@@ -88,12 +97,14 @@ class MemorySettingsDraft {
     required this.keyMatchMode,
     required this.vectorSearchEnabled,
     required this.vectorThreshold,
+    required this.memoryBookApi,
     required this.budgetController,
   });
 
   factory MemorySettingsDraft.from(
     MemoryBookSettings s, {
     required double vectorThreshold,
+    MemoryBookApiSettings memoryBookApi = const MemoryBookApiSettings(),
   }) {
     final budgetPreset = normalizeBudgetPreset(
       s.memoryBudgetPreset,
@@ -143,6 +154,7 @@ class MemorySettingsDraft {
       keyMatchMode: s.keyMatchMode,
       vectorSearchEnabled: s.vectorSearchEnabled,
       vectorThreshold: vectorThreshold,
+      memoryBookApi: memoryBookApi,
       budgetController: TextEditingController(
         text: (budgetTokens ?? 6000).toString(),
       ),

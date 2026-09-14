@@ -16,6 +16,13 @@ enum MenuGroupHeaderVariant { standard, accentCaps }
 /// rather than day-to-day tuning: the screen stays readable for someone who
 /// only needs an endpoint and a key, and the rest is one tap away. Collapsed
 /// state is per-mount on purpose — reopening the screen starts tidy again.
+///
+/// Expanded, the header and what it reveals are **one** card. The header used
+/// to be a card of its own with a 12 px gap under it, so opening a section
+/// produced a floating strip above a stack of unrelated-looking groups and
+/// nothing on screen said which rows belonged to it. Now the chevron is the
+/// only thing that changes, the children render flat (see [MenuGroupNesting])
+/// and the block simply grows downward.
 class MenuCollapsibleSection extends StatefulWidget {
   final String label;
   final String? helpTerm;
@@ -39,68 +46,132 @@ class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
   Widget build(BuildContext context) {
     final flat = DetachedShellHost.drawsChrome(context);
     final radius = flat ? BorderRadius.zero : BorderRadius.circular(20);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: flat
-              ? EdgeInsets.zero
-              : const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: GlassSurface(
-            enableRipple: true,
-            borderRadius: radius,
-            border: flat
-                ? Border(bottom: BorderSide(color: context.cs.outlineVariant))
-                : Border.all(color: context.cs.outlineVariant),
-            child: InkWell(
-              borderRadius: radius,
-              onTap: () {
-                Haptics.selectionClick();
-                setState(() => _expanded = !_expanded);
-              },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
-                ),
-                child: Row(
-                  children: [
-                    // Expanded, not bare: a long or localized label used to
-                    // push the chevron off the row and overflow it. It takes
-                    // the free space itself rather than leaving it to a
-                    // Spacer, which would compete with it and ellipsise a
-                    // label that had room.
-                    Expanded(
-                      child: Text(
-                        widget.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: context.cs.onSurfaceVariant,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ),
-                    if (widget.helpTerm != null)
-                      HelpTip(term: widget.helpTerm!),
-                    AnimatedRotation(
-                      turns: _expanded ? 0.5 : 0,
-                      duration: const Duration(milliseconds: 150),
-                      child: Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+    final surface = GlassSurface(
+      enableRipple: true,
+      borderRadius: radius,
+      border: flat
+          ? Border(bottom: BorderSide(color: context.cs.outlineVariant))
+          : Border.all(color: context.cs.outlineVariant),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            // Only the top corners round while the section is open: the card
+            // continues past the header into its own content.
+            borderRadius: _expanded
+                ? BorderRadius.vertical(top: radius.topLeft)
+                : radius,
+            onTap: () {
+              Haptics.selectionClick();
+              setState(() => _expanded = !_expanded);
+            },
+            child: _buildHeader(context),
+          ),
+          // The children are laid out inside this card, so they must not draw
+          // cards of their own. The last one also drops its separator rule,
+          // which would otherwise double up against the card's own edge.
+          if (_expanded)
+            for (var i = 0; i < widget.children.length; i++)
+              MenuGroupNesting(
+                showDivider: i < widget.children.length - 1,
+                child: widget.children[i],
+              ),
+        ],
+      ),
+    );
+
+    if (flat) return surface;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: surface,
+    );
+  }
+
+  /// The header carries a top-to-bottom wash of the accent colour while the
+  /// section is open, so the block reads as one thing with a lid rather than
+  /// as a row that happens to sit above some rows.
+  Widget _buildHeader(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: _expanded
+              ? [
+                  context.cs.primary.withValues(alpha: 0.22),
+                  context.cs.primary.withValues(alpha: 0.0),
+                ]
+              : [
+                  context.cs.primary.withValues(alpha: 0.0),
+                  context.cs.primary.withValues(alpha: 0.0),
+                ],
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          // Expanded, not bare: a long or localized label used to push the
+          // chevron off the row and overflow it. It takes the free space
+          // itself rather than leaving it to a Spacer, which would compete
+          // with it and ellipsise a label that had room.
+          Expanded(
+            child: Text(
+              widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _expanded
+                    ? context.cs.onSurface
+                    : context.cs.onSurfaceVariant,
+                fontSize: 16,
+                fontWeight: _expanded ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
           ),
-        ),
-        if (_expanded) ...widget.children,
-      ],
+          if (widget.helpTerm != null) HelpTip(term: widget.helpTerm!),
+          AnimatedRotation(
+            turns: _expanded ? 0.5 : 0,
+            duration: const Duration(milliseconds: 150),
+            child: Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: _expanded
+                  ? context.cs.primary
+                  : context.cs.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
     );
   }
+}
+
+/// Marks a subtree as living *inside* another card, so the [MenuGroup]s in it
+/// drop their own surface, gutters and rounding and render as plain runs of
+/// rows separated by a rule.
+///
+/// The same thing [DetachedShellHost] does for a screen hosted in the floating
+/// window, scoped to one widget: a card drawn inside a card reads as a mistake
+/// either way. The difference is that a nested group paints no glass of its
+/// own — the enclosing card already did, and a second pass of tint and blur
+/// over the same pixels only muddies them.
+class MenuGroupNesting extends InheritedWidget {
+  /// Whether a rule is drawn under this group. False for the last one in a
+  /// section, where the card's own edge already closes the block.
+  final bool showDivider;
+
+  const MenuGroupNesting({
+    super.key,
+    this.showDivider = true,
+    required super.child,
+  });
+
+  static MenuGroupNesting? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<MenuGroupNesting>();
+
+  @override
+  bool updateShouldNotify(MenuGroupNesting oldWidget) =>
+      oldWidget.showDivider != showDivider;
 }
 
 // ── Group container ────────────────────────────────────────────────────────────
@@ -145,6 +216,21 @@ class MenuGroup extends StatelessWidget {
         const SizedBox(height: 6),
       ],
     );
+
+    // Inside an expanded [MenuCollapsibleSection] the section's own card is
+    // already painted underneath, so the group contributes rows and a rule and
+    // nothing else — no gutters, no rounding, and no second pane of glass.
+    final nesting = MenuGroupNesting.of(context);
+    if (nesting != null) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          border: nesting.showDivider
+              ? Border(bottom: BorderSide(color: context.cs.outlineVariant))
+              : null,
+        ),
+        child: body,
+      );
+    }
 
     // Inside the floating window the host already draws a frame, so a group
     // that keeps its own card reads as a card inside a card. There it runs

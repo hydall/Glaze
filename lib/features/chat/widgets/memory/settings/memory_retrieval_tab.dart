@@ -1,23 +1,14 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import '../../../../../shared/theme/app_colors.dart';
 import '../../../../../shared/widgets/list_controls.dart';
 import '../../../../../shared/widgets/menu_group.dart';
-import '../../../../settings/api_settings_screen.dart';
 import 'memory_settings_draft.dart';
 
-/// Retrieval — how a memory is matched and where it is injected, plus the link
-/// to where its generation API now lives.
+/// Retrieval — how a memory is matched and where it is injected.
 ///
-/// Returned as two lists: [apiSections], which belongs in the always-visible
-/// part of the form because it is the one row people come here looking for,
-/// and [matchingSections], which is tuning and sits behind a disclosure.
-///
-/// The generation API *used* to be configured right here, with a connection
-/// dropdown and a model dropdown that wrote straight through to
-/// `PipelineSettings` on change while every other control on the sheet waited
-/// for Save — so Cancel silently kept the new model. Both rows now live with
-/// the app's other pipeline slots in API settings.
+/// Tuning rather than day-to-day settings, so [matchingSections] sits behind a
+/// disclosure. The generation API that used to share this file is its own
+/// section now: see `memory_api_section.dart`.
 class MemoryRetrievalSections {
   final MemorySettingsDraft draft;
 
@@ -34,30 +25,6 @@ class MemoryRetrievalSections {
     required this.onChanged,
     required this.vectorAvailable,
   });
-
-  List<Widget> apiSections(BuildContext context) {
-    return [
-      MenuGroup(
-        header: 'tab_api'.tr(),
-        description: 'memory_books_api_moved_desc'.tr(),
-        items: [
-          MenuItem(
-            icon: Icons.hub_outlined,
-            label: 'memory_books_generation_connection'.tr(),
-            trailing: Icon(
-              Icons.chevron_right,
-              size: 22,
-              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-            ),
-            onTap: () => showApiSettingsSheet(
-              context,
-              focusSection: ApiSettingsSection.memoryBook,
-            ),
-          ),
-        ],
-      ),
-    ];
-  }
 
   List<Widget> matchingSections(BuildContext context) {
     return [

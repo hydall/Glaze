@@ -569,6 +569,14 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     );
     if (newResult != null && mounted) {
       await _ctrl.updateSettings(newResult.settings, newResult.vectorThreshold);
+      // The generation slot is global app state, not part of the book, so it
+      // is written where the Agents tab writes it — the sheet only buffers it.
+      final pipeline = ref.read(pipelineSettingsProvider);
+      if (pipeline.memoryBookApi != newResult.memoryBookApi) {
+        await ref
+            .read(pipelineSettingsProvider.notifier)
+            .save(pipeline.copyWith(memoryBookApi: newResult.memoryBookApi));
+      }
       if (mounted) setState(() {});
     }
   }

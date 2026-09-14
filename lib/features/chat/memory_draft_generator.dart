@@ -13,6 +13,7 @@ import '../../core/llm/memory_draft_transcript_builder.dart';
 import '../../core/llm/regex_service.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/llm/transport/transport_factory.dart';
+import '../../core/models/api_config.dart';
 import '../../core/models/memory_book.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/pipeline_settings.dart';
@@ -111,6 +112,9 @@ class MemoryDraftGenerator {
     String protocol;
     var useResponsesApi = false;
     int? receiveTimeoutMs;
+    // The connection the slot resolved to, or null on the custom-endpoint
+    // branch, which has no saved connection to inherit limits from.
+    ApiConfig? slotConfig;
 
     if (isCustom) {
       endpoint = pipeline.memoryBookApi.generationEndpoint;
@@ -127,6 +131,7 @@ class MemoryDraftGenerator {
       if (chatConfig == null) {
         throw Exception('No chat API config available');
       }
+      slotConfig = chatConfig;
       endpoint = chatConfig.endpoint;
       apiKey = chatConfig.apiKey;
       model = pipeline.memoryBookApi.generationModel.isNotEmpty
@@ -142,12 +147,17 @@ class MemoryDraftGenerator {
       throw Exception('API not configured for memory generation');
     }
 
-    final maxTokens =
-        (pipeline.memoryBookApi.generationMaxTokens != null &&
-            pipeline.memoryBookApi.generationMaxTokens! > 0)
-        ? pipeline.memoryBookApi.generationMaxTokens!
-        : 25000;
-    final temperature = pipeline.memoryBookApi.generationTemperature ?? 0.4;
+    // Left on "auto", the output cap is the one configured on the connection
+    // this draft runs through — not a fixed number written in here. The old
+    // flat 25000 was above what several providers accept for output plus
+    // reasoning tokens, and no field in the app could bring it back down.
+    final maxTokens = MemoryBookApiConfigResolver.maxTokensFor(
+      pipeline.memoryBookApi,
+      slotConfig,
+    );
+    final temperature = MemoryBookApiConfigResolver.temperatureFor(
+      pipeline.memoryBookApi,
+    );
 
     final completer = Completer<String>();
     final transport = pickChatTransport(protocol);

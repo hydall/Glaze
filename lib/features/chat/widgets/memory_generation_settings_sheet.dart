@@ -3,14 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/memory_book.dart';
+import '../../../core/models/memory_book_api_settings.dart';
 import '../../../core/services/memory_prompt_presets.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/memory_settings_provider.dart';
+import '../../settings/api_settings_screen.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import 'custom_prompt_manager_sheet.dart';
+import 'memory/settings/memory_api_section.dart';
 import 'memory/settings/memory_capture_tab.dart';
 import 'memory/settings/memory_retrieval_tab.dart';
 import 'memory/settings/memory_selection_tab.dart';
@@ -33,6 +36,12 @@ import 'memory/settings/memory_settings_draft.dart';
 /// saying it existed. What the form actually needed was for the two thirds
 /// nobody tunes daily to be *collapsed*, which is what
 /// [MenuCollapsibleSection] is for.
+///
+/// The API block is a real slot again ([MemoryApiSections]) rather than a link
+/// out to API settings — it binds the same connection and model rows the
+/// Agents tab uses, plus the output limit and temperature that only drafting
+/// has. Everything on it, that block included, is buffered in
+/// [MemorySettingsDraft] and written on Save.
 class MemoryGenerationSettingsSheet extends ConsumerStatefulWidget {
   final MemoryBookSettings settings;
   final String? sessionId;
@@ -81,6 +90,7 @@ class _MemoryGenerationSettingsSheetState
     _draft = MemorySettingsDraft.from(
       widget.settings,
       vectorThreshold: ref.read(memoryGlobalSettingsProvider).vectorThreshold,
+      memoryBookApi: ref.read(pipelineSettingsProvider).memoryBookApi,
     );
   }
 
@@ -104,6 +114,7 @@ class _MemoryGenerationSettingsSheetState
       MemorySettingsSheetResult(
         settings: _draft.toSettings(widget.settings),
         vectorThreshold: _draft.vectorThreshold,
+        memoryBookApi: _draft.memoryBookApi,
       ),
     );
   }
@@ -121,6 +132,11 @@ class _MemoryGenerationSettingsSheetState
       draft: _draft,
       onChanged: _onChanged,
       budgetPercent: widget.settings.maxInjectionBudgetPercent,
+    );
+    final api = MemoryApiSections(
+      api: _draft.memoryBookApi,
+      onChanged: (value) => setState(() => _draft.memoryBookApi = value),
+      onOpenApiSettings: _openApiSettings,
     );
     final retrieval = MemoryRetrievalSections(
       draft: _draft,
@@ -152,7 +168,7 @@ class _MemoryGenerationSettingsSheetState
           ),
           children: [
             ...capture.build(context),
-            ...retrieval.apiSections(context),
+            ...api.build(context),
             MenuCollapsibleSection(
               label: 'memory_section_budget'.tr(),
               children: selection.budgetSections(context),
@@ -169,6 +185,35 @@ class _MemoryGenerationSettingsSheetState
         ),
       ),
     );
+  }
+
+  /// Leaves for the API screen with the slot already written, so the screen —
+  /// which edits the same `PipelineSettings` and writes through on change —
+  /// opens on what this sheet is showing rather than on the last saved state.
+  Future<void> _openApiSettings() async {
+    await _saveMemoryBookApi();
+    if (!mounted) return;
+    await showApiSettingsSheet(
+      context,
+      focusSection: ApiSettingsSection.memoryBook,
+    );
+    if (!mounted) return;
+    // The screen may have changed the slot; take what it left behind so Save
+    // does not write this sheet's older copy back over it.
+    setState(
+      () => _draft.memoryBookApi = ref.read(pipelineSettingsProvider)
+          .memoryBookApi,
+    );
+  }
+
+  /// Persists the buffered generation slot. Global app state, so it goes to
+  /// `PipelineSettings` rather than into the book the rest of the sheet edits.
+  Future<void> _saveMemoryBookApi() async {
+    final pipeline = ref.read(pipelineSettingsProvider);
+    if (pipeline.memoryBookApi == _draft.memoryBookApi) return;
+    await ref
+        .read(pipelineSettingsProvider.notifier)
+        .save(pipeline.copyWith(memoryBookApi: _draft.memoryBookApi));
   }
 
   Future<void> _viewCurrentPrompt() async {
@@ -220,8 +265,13 @@ class MemorySettingsSheetResult {
   final MemoryBookSettings settings;
   final double vectorThreshold;
 
+  /// The generation slot as edited on the sheet. Global app state, so the host
+  /// writes it to `PipelineSettings` rather than to the book.
+  final MemoryBookApiSettings memoryBookApi;
+
   const MemorySettingsSheetResult({
     required this.settings,
     required this.vectorThreshold,
+    required this.memoryBookApi,
   });
 }
