@@ -251,16 +251,16 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
     return ref.read(pipelineSettingsProvider.notifier).save(mutate(pipeline));
   }
 
-  /// Writes one of the three per-preset lanes onto the active preset.
-  ///
-  /// [effective] is what the rows are showing — the preset's own settings where
-  /// it has them, the globals where it does not — so the first edit of a lane
-  /// stores the values the user was already looking at rather than resetting
-  /// the untouched ones to their defaults.
+  /// Writes the active preset's runtime settings.
   Future<void> _savePresetRuntime(
     StudioRuntimeSettings Function(StudioRuntimeSettings) mutate,
-  ) => _saveProfile((preset) => preset.copyWith(runtime: mutate(preset.runtime)));
+  ) =>
+      _saveProfile((preset) => preset.copyWith(runtime: mutate(preset.runtime)));
 
+  /// The three lane writers all take the `effective` settings the rows are
+  /// showing — the preset's own where it has them, the globals where it does
+  /// not — so the first edit of a lane stores the values the user was already
+  /// looking at instead of resetting the untouched ones to their defaults.
   Future<void> _saveCleaner(
     PipelineSettings effective,
     CleanerSettings Function(CleanerSettings) mutate,
