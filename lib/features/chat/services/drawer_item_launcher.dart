@@ -9,7 +9,6 @@ import 'package:go_router/go_router.dart';
 import '../../../core/services/chat_import_export.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
-import '../../card_rewrite/card_rewriter_studio_sheet.dart';
 import '../../character_list/character_detail_screen.dart';
 import '../../extensions/widgets/ext_blocks_settings_sheet.dart';
 import '../../glossary/glossary_sheet.dart';
@@ -138,23 +137,6 @@ class DrawerItemLauncher {
         );
       case 'agent-ops':
         await _showAgentOpsLog(context);
-      case 'card-rewriter':
-        await _showCardRewriter(context);
-    }
-  }
-
-  Future<void> _showCardRewriter(BuildContext context) async {
-    final session = ref.read(chatProvider(charId)).value?.session;
-    if (session == null) return;
-    final route = await CardRewriterStudioSheet.show(
-      context,
-      charId: charId,
-      sessionId: session.id,
-    );
-    if (!context.mounted) return;
-    if (route != null && route.isNotEmpty) {
-      onClose?.call();
-      context.go(route);
     }
   }
 

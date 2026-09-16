@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:easy_localization/easy_localization.dart';
@@ -7,24 +6,36 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/db/app_db.dart'
     show CardEvolutionWriterCallRow, RewriteJobRow;
-import '../../core/db/repositories/card_evolution_repo.dart'
-    show CardEvolutionFinalizeOutcome;
-import '../../core/llm/model_fetcher.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/card_rewriter_settings.dart';
 import '../../core/state/card_rewriter_providers.dart';
 import '../../core/state/active_studio_preset_provider.dart';
-import '../../core/state/pipeline_settings_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/utils/time_formatter.dart';
+import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_expansion_tile.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../settings/api_list_provider.dart';
+import '../studio/widgets/studio_preset_options_sheet.dart'
+    show confirmStudioDelete;
+import 'card_rewriter_labels.dart';
 import 'card_rewriter_recovery_view_service.dart';
+import 'widgets/card_rewriter_recovery_tile.dart';
 
-/// Studio sub-screen for the review-only automated Card Rewriter.
+/// The Card Rewriter lane's management surface — the Agent Ops tab of the same
+/// name.
+///
+/// **Management only.** What the lane *is* — whether it runs, on which
+/// connection, with which model and timeout — is configured per Studio preset:
+/// the switch and the lane settings live in the agentic preset editor's
+/// pipeline, the connection and model in the Agents tab of the API sheet. This
+/// screen drives what has already been configured: run a batch now, recover an
+/// interrupted writer chain, read what the last calls returned, and open a
+/// proposal for review.
 class CardRewriterStudioSheet extends ConsumerStatefulWidget {
   const CardRewriterStudioSheet({
     super.key,
@@ -35,18 +46,6 @@ class CardRewriterStudioSheet extends ConsumerStatefulWidget {
   final String charId;
   final String sessionId;
 
-  static Future<String?> show(
-    BuildContext context, {
-    required String charId,
-    required String sessionId,
-  }) {
-    return GlazeBottomSheet.show<String>(
-      context,
-      title: 'card_rewriter_studio_title'.tr(),
-      child: CardRewriterStudioSheet(charId: charId, sessionId: sessionId),
-    );
-  }
-
   @override
   ConsumerState<CardRewriterStudioSheet> createState() =>
       _CardRewriterStudioSheetState();
@@ -54,67 +53,20 @@ class CardRewriterStudioSheet extends ConsumerStatefulWidget {
 
 class _CardRewriterStudioSheetState
     extends ConsumerState<CardRewriterStudioSheet> {
-  List<String> _models = const [];
-  bool _loadingModels = false;
   bool _running = false;
   String? _recoveringCallId;
 
-  Future<void> _save(CardRewriterSettings Function(CardRewriterSettings) edit) {
-    final pipeline = ref.read(pipelineSettingsProvider);
-    return ref
-        .read(pipelineSettingsProvider.notifier)
-        .save(pipeline.copyWith(cardRewriter: edit(pipeline.cardRewriter)));
-  }
+  // ── Actions ────────────────────────────────────────────────────────────────
 
-  Future<void> _selectApi(CardRewriterSettings settings) async {
-    final configs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
-    if (configs.isEmpty) {
-      GlazeToast.show(context, 'card_rewriter_studio_no_api_configs'.tr());
-      return;
-    }
-    await GlazeBottomSheet.show<void>(
+  /// Pops the sheet onto the review route when a run produced a proposal. The
+  /// caller routes; a sheet cannot push a screen the drawer sits on top of.
+  bool _popToReview(String? jobId) {
+    if (jobId == null) return false;
+    Navigator.of(
       context,
-      title: 'card_rewriter_studio_api_title'.tr(),
-      items: [
-        for (final config in configs)
-          BottomSheetItem(
-            label: _apiLabel(config),
-            hint: config.endpoint,
-            icon: config.id == settings.apiConfigId ? Icons.check : Icons.api,
-            onTap: () {
-              Navigator.of(context, rootNavigator: true).pop();
-              unawaited(
-                _save(
-                  (value) =>
-                      value.copyWith(apiConfigId: config.id, modelOverride: ''),
-                ),
-              );
-              setState(() => _models = const []);
-            },
-          ),
-      ],
-    );
-  }
-
-  Future<void> _fetchModels(ApiConfig? config) async {
-    if (config == null || _loadingModels) return;
-    setState(() => _loadingModels = true);
-    try {
-      final models = await ModelFetcher.fetchModelIds(config);
-      if (!mounted) return;
-      setState(() => _models = models);
-    } catch (error) {
-      if (mounted) {
-        GlazeToast.show(
-          context,
-          'card_rewriter_studio_fetch_models_failed'.tr(
-            namedArgs: {'error': '$error'},
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _loadingModels = false);
-    }
+      rootNavigator: true,
+    ).pop('/character/${widget.charId}/rewrite/$jobId');
+    return true;
   }
 
   Future<void> _run(
@@ -134,16 +86,10 @@ class _CardRewriterStudioSheetState
           : await service.resumeFailedWriter(recovery.claim.id);
       if (!mounted) return;
       _refreshRecovery();
-      if (outcome.isPersisted && outcome.job != null) {
-        Navigator.of(
-          context,
-          rootNavigator: true,
-        ).pop('/character/${widget.charId}/rewrite/${outcome.job!.id}');
-        return;
-      }
+      if (outcome.isPersisted && _popToReview(outcome.job?.id)) return;
       GlazeToast.show(
         context,
-        _runMessage(outcome),
+        cardRewriterRunMessage(outcome),
         position: ToastPosition.top,
       );
     } catch (error) {
@@ -167,14 +113,8 @@ class _CardRewriterStudioSheetState
           .retryFailedWriterCall(call.id);
       if (!mounted) return;
       _refreshRecovery();
-      if (outcome.isPersisted && outcome.job != null) {
-        Navigator.of(
-          context,
-          rootNavigator: true,
-        ).pop('/character/${widget.charId}/rewrite/${outcome.job!.id}');
-        return;
-      }
-      GlazeToast.show(context, _runMessage(outcome));
+      if (outcome.isPersisted && _popToReview(outcome.job?.id)) return;
+      GlazeToast.show(context, cardRewriterRunMessage(outcome));
     } catch (error) {
       if (mounted) {
         GlazeToast.show(
@@ -191,51 +131,17 @@ class _CardRewriterStudioSheetState
 
   Future<void> _correctWriterCall(CardEvolutionWriterCallRow call) async {
     if (_running || _recoveringCallId != null) return;
-    final controller = TextEditingController(text: call.responseText ?? '');
-    String? response;
-    await GlazeBottomSheet.show<void>(
-      context,
-      title: 'card_rewriter_studio_correct_title'.tr(
-        namedArgs: {'stage': _writerStageLabel(call.stage)},
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('card_rewriter_studio_correct_body'.tr()),
-            const SizedBox(height: 12),
-            GlazeTextField(controller: controller, maxLines: 14),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: () {
-                response = controller.text.trim();
-                Navigator.of(context, rootNavigator: true).pop();
-              },
-              child: Text('card_rewriter_studio_validate_continue'.tr()),
-            ),
-          ],
-        ),
-      ),
-    );
-    controller.dispose();
-    if (!mounted || response == null || response!.isEmpty) return;
+    final response = await _askForCorrectedResponse(call);
+    if (!mounted || response == null || response.isEmpty) return;
     setState(() => _recoveringCallId = call.id);
     try {
       final outcome = await ref
           .read(automatedCardEvolutionServiceProvider)
-          .correctFailedWriterCall(call.id, response: response!);
+          .correctFailedWriterCall(call.id, response: response);
       if (!mounted) return;
       _refreshRecovery();
-      if (outcome.isPersisted && outcome.job != null) {
-        Navigator.of(
-          context,
-          rootNavigator: true,
-        ).pop('/character/${widget.charId}/rewrite/${outcome.job!.id}');
-        return;
-      }
-      GlazeToast.show(context, _runMessage(outcome));
+      if (outcome.isPersisted && _popToReview(outcome.job?.id)) return;
+      GlazeToast.show(context, cardRewriterRunMessage(outcome));
     } catch (error) {
       if (mounted) {
         GlazeToast.show(
@@ -250,26 +156,64 @@ class _CardRewriterStudioSheetState
     }
   }
 
+  /// The hand-editing sheet for a response the parser rejected. What comes back
+  /// still goes through the same parser and validation, so this is a correction
+  /// of the model's output, not a way around the contract.
+  Future<String?> _askForCorrectedResponse(
+    CardEvolutionWriterCallRow call,
+  ) async {
+    final controller = TextEditingController(text: call.responseText ?? '');
+    try {
+      String? response;
+      await GlazeBottomSheet.show<void>(
+        context,
+        title: 'card_rewriter_studio_correct_title'.tr(
+          namedArgs: {'stage': cardRewriterStageLabel(call.stage)},
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'card_rewriter_studio_correct_body'.tr(),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: context.cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              GlazeTextField(controller: controller, maxLines: 14),
+              const SizedBox(height: 12),
+              GlazeActionButton(
+                icon: Icons.check_rounded,
+                label: 'card_rewriter_studio_validate_continue'.tr(),
+                tone: GlazeActionTone.primary,
+                expand: true,
+                onTap: () {
+                  response = controller.text.trim();
+                  Navigator.of(context, rootNavigator: true).pop();
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+      return response;
+    } finally {
+      controller.dispose();
+    }
+  }
+
   Future<void> _deleteWriterRecovery(CardRewriterRecoveryView recovery) async {
     if (_running || _recoveringCallId != null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('card_rewriter_studio_delete_chain_title'.tr()),
-        content: Text('card_rewriter_studio_delete_chain_body'.tr()),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text('common_cancel'.tr()),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text('rewrite_delete'.tr()),
-          ),
-        ],
-      ),
+    final confirmed = await confirmStudioDelete(
+      context,
+      title: 'card_rewriter_studio_delete_chain_title'.tr(),
+      description: 'card_rewriter_studio_delete_chain_body'.tr(),
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
     setState(() => _recoveringCallId = recovery.claim.id);
     try {
       final outcome = await ref
@@ -294,596 +238,366 @@ class _CardRewriterStudioSheetState
     ref.invalidate(cardRewriteDebugRunsProvider(widget.sessionId));
   }
 
-  String _runMessage(
-    CardEvolutionFinalizeOutcome outcome,
-  ) => switch (outcome.kind) {
-    'notEligible' => 'card_rewriter_studio_outcome_not_eligible'.tr(),
-    'busy' => 'card_rewriter_studio_outcome_busy'.tr(),
-    'activeJob' => 'card_rewriter_studio_outcome_active_job'.tr(),
-    'modelNotConfigured' =>
-      'card_rewriter_studio_outcome_model_not_configured'.tr(),
-    'cardModelFailed' => 'card_rewriter_studio_outcome_card_model_failed'.tr(
-      namedArgs: {'error': outcome.detail ?? 'unknown'},
-    ),
-    'lorebookModelFailed' =>
-      'card_rewriter_studio_outcome_lorebook_model_failed'.tr(
-        namedArgs: {'error': outcome.detail ?? 'unknown'},
-      ),
-    'invalidCardOutput' => 'card_rewriter_studio_outcome_invalid_card'.tr(
-      namedArgs: {'error': outcome.detail ?? 'unknown'},
-    ),
-    'invalidOperation' => 'card_rewriter_studio_outcome_invalid_operation'.tr(
-      namedArgs: {'error': outcome.detail ?? 'unknown'},
-    ),
-    'invalidLorebookOperation' =>
-      'card_rewriter_studio_outcome_invalid_lorebook_operation'.tr(),
-    'invalidLorebookOutput' =>
-      'card_rewriter_studio_outcome_invalid_lorebook_output'.tr(),
-    'emptyModelProposal' => 'card_rewriter_studio_outcome_empty_proposal'.tr(),
-    'snapshotUnavailable' ||
-    'stale' ||
-    'staleEvidence' => 'card_rewriter_studio_outcome_stale'.tr(),
-    'snapshotTooLarge' =>
-      outcome.detail ?? 'card_rewriter_studio_outcome_too_large'.tr(),
-    'disabled' => 'card_rewriter_studio_outcome_disabled'.tr(),
-    'cancelled' => 'card_rewriter_studio_outcome_cancelled'.tr(),
-    'writerCallNotFound' => 'card_rewriter_studio_outcome_call_not_found'.tr(),
-    'writerCallNotFailed' ||
-    'writerNotFailed' => 'card_rewriter_studio_outcome_not_failed'.tr(),
-    'writerCallNotFrontier' => 'card_rewriter_studio_outcome_not_frontier'.tr(),
-    'writerCallRetryFailed' ||
-    'leaseLost' => 'card_rewriter_studio_outcome_lease_lost'.tr(),
-    'claimMissing' => 'card_rewriter_studio_outcome_claim_missing'.tr(),
-    _ => 'card_rewriter_studio_outcome_skipped'.tr(
-      namedArgs: {'kind': outcome.kind},
-    ),
-  };
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final settings = ref.watch(
-      pipelineSettingsProvider.select((value) => value.cardRewriter),
-    );
+    final settings = ref.watch(cardRewriterSettingsProvider);
     final configs = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
-    final config = configs
-        .where((item) => item.id == settings.apiConfigId)
-        .firstOrNull;
-    final models = <String>{
-      ..._models,
-      if (settings.modelOverride.isNotEmpty) settings.modelOverride,
-      if (config?.model.isNotEmpty == true) config!.model,
-    }.toList()..sort();
-    final configured = settings.apiConfigId.isNotEmpty && config != null;
-    final jobs = ref.watch(cardRewriteJobsBySessionProvider(widget.sessionId));
-    final lorebookOverlays = ref.watch(
-      cardRewriteLorebookOverlaysProvider(widget.sessionId),
-    );
-    final debugRuns = ref.watch(cardRewriteDebugRunsProvider(widget.sessionId));
+    final configured =
+        settings.apiConfigId.isNotEmpty &&
+        configs.any((item) => item.id == settings.apiConfigId);
     final recoveryViews = ref.watch(
       cardRewriterRecoveryViewsProvider(widget.sessionId),
     );
     final firstRecovery = recoveryViews.value?.firstOrNull;
-    final recoveryLoading = recoveryViews.isLoading;
     final studioPreset = ref.watch(studioPresetProvider).value;
     final ledgerEnabled =
         studioPreset != null && studioPreset.agentEnabled['ledger'] != false;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Material(
-            type: MaterialType.transparency,
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text('card_rewriter_studio_enabled'.tr()),
-              subtitle: Text('card_rewriter_studio_enabled_description'.tr()),
-              value: settings.enabled,
-              onChanged: (enabled) =>
-                  _save((value) => value.copyWith(enabled: enabled)),
-            ),
-          ),
-          if (!ledgerEnabled) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    color: Theme.of(context).colorScheme.onErrorContainer,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'card_rewriter_studio_ledger_required'.tr(),
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onErrorContainer,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          Material(
-            type: MaterialType.transparency,
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text('card_rewriter_studio_rewrite_lorebook'.tr()),
-              subtitle: Text(
-                'card_rewriter_studio_rewrite_lorebook_description'.tr(),
-              ),
-              value: settings.lorebookEvolutionEnabled,
-              onChanged: settings.enabled
-                  ? (enabled) => _save(
-                      (value) =>
-                          value.copyWith(lorebookEvolutionEnabled: enabled),
-                    )
-                  : null,
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextFormField(
-            key: ValueKey('timeout-${settings.timeoutMs}'),
-            initialValue: '${settings.timeoutMs ~/ 1000}',
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              border: const OutlineInputBorder(),
-              labelText: 'card_rewriter_studio_timeout'.tr(),
-              helperText: 'card_rewriter_studio_timeout_description'.tr(),
-              isDense: true,
-            ),
-            onChanged: (raw) {
-              final seconds = int.tryParse(raw);
-              if (seconds == null || seconds <= 0) return;
-              final timeoutMs = seconds * 1000;
-              if (timeoutMs == settings.timeoutMs) return;
-              unawaited(_save((value) => value.copyWith(timeoutMs: timeoutMs)));
-            },
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'card_rewriter_studio_model'.tr(),
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'card_rewriter_studio_model_description'.tr(),
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => _selectApi(settings),
-              icon: const Icon(Icons.api, size: 16),
-              label: Text(
-                config == null
-                    ? 'card_rewriter_studio_select_api'.tr()
-                    : 'card_rewriter_studio_api'.tr(
-                        namedArgs: {'api': _apiLabel(config)},
-                      ),
-              ),
-            ),
-          ),
-          DropdownButtonFormField<String>(
-            key: ValueKey('${settings.apiConfigId}:${settings.modelOverride}'),
-            initialValue: models.contains(settings.modelOverride)
-                ? settings.modelOverride
-                : null,
-            isExpanded: true,
-            decoration: InputDecoration(
-              border: const OutlineInputBorder(),
-              isDense: true,
-              helperText: _loadingModels
-                  ? 'card_rewriter_studio_loading_models'.tr()
-                  : configured
-                  ? 'card_rewriter_studio_empty_uses_api_model'.tr()
-                  : 'card_rewriter_studio_select_api_first'.tr(),
-            ),
-            items: [
-              DropdownMenuItem(
-                value: '',
-                child: Text('card_rewriter_studio_use_api_model'.tr()),
-              ),
-              for (final model in models)
-                DropdownMenuItem(value: model, child: Text(model)),
-            ],
-            onTap: () => unawaited(_fetchModels(config)),
-            onChanged: configured
-                ? (model) => _save(
-                    (value) => value.copyWith(modelOverride: model ?? ''),
-                  )
-                : null,
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed:
-                !_running &&
-                    !recoveryLoading &&
-                    (firstRecovery != null ||
-                        (settings.enabled && ledgerEnabled && configured))
-                ? () => _run(settings, recovery: firstRecovery)
-                : null,
-            icon: _running
-                ? const SizedBox.square(dimension: 16, child: GlazeSpinner())
-                : const Icon(Icons.auto_fix_high_outlined),
-            label: Text(
-              _running
-                  ? firstRecovery == null
-                        ? 'card_rewriter_studio_preparing'.tr()
-                        : 'card_rewriter_studio_continuing'.tr()
-                  : firstRecovery == null
-                  ? 'card_rewriter_studio_run_now'.tr()
-                  : 'card_rewriter_studio_continue_chain'.tr(),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'card_rewriter_studio_interrupted_chains'.tr(),
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 4),
-          recoveryViews.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(12),
-              child: Center(child: GlazeSpinner()),
-            ),
-            error: (_, _) =>
-                Text('card_rewriter_studio_interrupted_load_failed'.tr()),
-            data: (items) => items.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text('card_rewriter_studio_no_interrupted'.tr()),
-                  )
-                : Column(
-                    children: [
-                      for (final recovery in items)
-                        _WriterRecoveryTile(
-                          recovery: recovery,
-                          busy: _running || _recoveringCallId != null,
-                          onContinue: () => _run(settings, recovery: recovery),
-                          onRetry: _retryWriterCall,
-                          onCorrect: _correctWriterCall,
-                          onDelete: () => _deleteWriterRecovery(recovery),
-                        ),
-                    ],
-                  ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'card_rewriter_studio_diagnostics'.tr(),
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 4),
-          debugRuns.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(12),
-              child: Center(child: GlazeSpinner()),
-            ),
-            error: (_, _) =>
-                Text('card_rewriter_studio_diagnostics_load_failed'.tr()),
-            data: (items) => items.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text('card_rewriter_studio_no_calls'.tr()),
-                  )
-                : Column(
-                    children: [
-                      for (final run in items)
-                        ExpansionTile(
-                          tilePadding: EdgeInsets.zero,
-                          leading: Icon(
-                            run.status == 'ok'
-                                ? Icons.check_circle_outline
-                                : Icons.error_outline,
-                            color: run.status == 'ok'
-                                ? Theme.of(context).colorScheme.primary
-                                : Theme.of(context).colorScheme.error,
-                          ),
-                          title: Text(
-                            '${_debugStageLabel(run.stage)} · ${_debugStatusLabel(run.status)}',
-                          ),
-                          subtitle: Text(
-                            run.model.isEmpty
-                                ? 'card_rewriter_studio_model_unavailable'.tr()
-                                : run.model,
-                          ),
-                          childrenPadding: const EdgeInsets.only(bottom: 12),
-                          expandedCrossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SelectableText(
-                              run.output ??
-                                  'card_rewriter_studio_raw_output_unavailable'
-                                      .tr(),
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: 11,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'card_rewriter_studio_legacy_stage_note'.tr(),
-                              style: const TextStyle(fontSize: 11),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'card_rewriter_studio_past_diffs'.tr(),
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 4),
-          lorebookOverlays.when(
-            loading: () => const SizedBox.shrink(),
-            error: (_, _) => const SizedBox.shrink(),
-            data: (items) => items.isEmpty
-                ? const SizedBox.shrink()
-                : Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      leading: const Icon(Icons.menu_book_outlined),
-                      title: Text(
-                        'card_rewriter_studio_active_lorebook_changes'.tr(
-                          namedArgs: {'count': '${items.length}'},
-                        ),
-                      ),
-                      subtitle: Text(
-                        'card_rewriter_studio_synced_history_note'.tr(),
-                      ),
-                    ),
-                  ),
-          ),
-          jobs.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(12),
-              child: Center(child: GlazeSpinner()),
-            ),
-            error: (_, _) =>
-                Text('card_rewriter_studio_history_load_failed'.tr()),
-            data: (items) {
-              final automated = items.where(_isAutomated).toList();
-              if (automated.isEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text(
-                    lorebookOverlays.value?.isNotEmpty == true
-                        ? 'card_rewriter_studio_no_local_proposals'.tr()
-                        : 'card_rewriter_studio_no_proposals'.tr(),
-                  ),
-                );
-              }
-              return Column(
-                children: [
-                  for (final job in automated)
-                    Material(
-                      type: MaterialType.transparency,
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.compare_arrows_outlined),
-                        title: Text(_statusLabel(job.status)),
-                        subtitle: Text(
-                          formatRelativeTimeFromSeconds(job.updatedAt),
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.of(
-                          context,
-                          rootNavigator: true,
-                        ).pop('/character/${widget.charId}/rewrite/${job.id}'),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
+    final blocker = _blocker(
+      settings: settings,
+      ledgerEnabled: ledgerEnabled,
+      configured: configured,
     );
-  }
-}
 
-class _WriterRecoveryTile extends StatelessWidget {
-  const _WriterRecoveryTile({
-    required this.recovery,
-    required this.busy,
-    required this.onContinue,
-    required this.onRetry,
-    required this.onCorrect,
-    required this.onDelete,
-  });
-
-  final CardRewriterRecoveryView recovery;
-  final bool busy;
-  final VoidCallback onContinue;
-  final ValueChanged<CardEvolutionWriterCallRow> onRetry;
-  final ValueChanged<CardEvolutionWriterCallRow> onCorrect;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final frontier = recovery.frontier;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ExpansionTile(
-        leading: Icon(Icons.pause_circle_outline, color: context.cs.error),
-        title: Text(
-          frontier == null
-              ? recovery.calls.isEmpty
-                    ? 'card_rewriter_studio_resume_chain'.tr()
-                    : 'card_rewriter_studio_finalize_chain'.tr()
-              : 'card_rewriter_studio_stage_failed'.tr(
-                  namedArgs: {'stage': _writerStageLabel(frontier.stage)},
-                ),
-        ),
-        subtitle: Text(
-          'card_rewriter_studio_requests_completed'.tr(
-            namedArgs: {
-              'completed': '${recovery.completedCount}',
-              'total': '${recovery.calls.length}',
-            },
-          ),
-        ),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-        expandedCrossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _RecoveryDetail(
-            label: 'card_rewriter_studio_claim'.tr(),
-            value: recovery.claim.id,
-          ),
-          if (recovery.claim.failureCode != null)
-            _RecoveryDetail(
-              label: 'card_rewriter_studio_failure'.tr(),
-              value: recovery.claim.failureCode!,
-            ),
-          if (recovery.claim.failureDetail != null)
-            _RecoveryDetail(
-              label: 'card_rewriter_studio_failure_detail'.tr(),
-              value: recovery.claim.failureDetail!,
-            ),
-          const SizedBox(height: 6),
-          for (final call in recovery.calls)
-            _WriterCallTile(call: call, isFrontier: call.id == frontier?.id),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton.icon(
-                onPressed: busy ? null : onContinue,
-                icon: const Icon(Icons.play_arrow_outlined),
-                label: Text('card_rewriter_studio_continue_chain'.tr()),
-              ),
-              if (frontier?.status == 'failed') ...[
-                OutlinedButton.icon(
-                  onPressed: busy ? null : () => onRetry(frontier!),
-                  icon: const Icon(Icons.refresh),
-                  label: Text('card_rewriter_studio_retry_request'.tr()),
-                ),
-                FilledButton.icon(
-                  onPressed: busy ? null : () => onCorrect(frontier!),
-                  icon: const Icon(Icons.edit_outlined),
-                  label: Text('card_rewriter_studio_correct_response'.tr()),
-                ),
-              ],
-              OutlinedButton.icon(
-                onPressed: busy ? null : onDelete,
-                icon: const Icon(Icons.delete_outline_rounded),
-                label: Text('rewrite_delete'.tr()),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: context.cs.error,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _WriterCallTile extends StatelessWidget {
-  const _WriterCallTile({required this.call, required this.isFrontier});
-
-  final CardEvolutionWriterCallRow call;
-  final bool isFrontier;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (call.status) {
-      'completed' => context.cs.primary,
-      'failed' => context.cs.error,
-      _ => Colors.orange,
-    };
-    return ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: const EdgeInsets.only(bottom: 10),
-      expandedCrossAxisAlignment: CrossAxisAlignment.start,
-      leading: Icon(switch (call.status) {
-        'completed' => Icons.check_circle_outline,
-        'failed' => Icons.error_outline,
-        'prepared' => Icons.pause_circle_outline,
-        _ => Icons.hourglass_top,
-      }, color: color),
-      title: Text(
-        '${call.ordinal}. ${_writerStageLabel(call.stage)}'
-        '${call.stageOrdinal > 1 ? ' ${call.stageOrdinal}' : ''}',
-      ),
-      subtitle: Text(
-        isFrontier
-            ? 'card_rewriter_studio_call_current'.tr(
-                namedArgs: {'status': _writerCallStatusLabel(call.status)},
-              )
-            : _writerCallStatusLabel(call.status),
-      ),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        _RecoveryDetail(
-          label: 'card_rewriter_studio_prompt_hash'.tr(),
-          value: call.promptHash,
+        if (blocker != null) ...[
+          _LaneNotice(message: blocker),
+          const SizedBox(height: 12),
+        ],
+        GlazeActionButton(
+          icon: Icons.auto_fix_high_outlined,
+          tone: GlazeActionTone.primary,
+          expand: true,
+          busy: _running,
+          label: _running
+              ? firstRecovery == null
+                    ? 'card_rewriter_studio_preparing'.tr()
+                    : 'card_rewriter_studio_continuing'.tr()
+              : firstRecovery == null
+              ? 'card_rewriter_studio_run_now'.tr()
+              : 'card_rewriter_studio_continue_chain'.tr(),
+          onTap:
+              !recoveryViews.isLoading &&
+                  (firstRecovery != null || blocker == null)
+              ? () => _run(settings, recovery: firstRecovery)
+              : null,
         ),
-        if (call.failureCode != null)
-          _RecoveryDetail(
-            label: 'card_rewriter_studio_failure'.tr(),
-            value: call.failureCode!,
-          ),
-        if (call.failureDetail != null)
-          _RecoveryDetail(
-            label: 'card_rewriter_studio_failure_detail'.tr(),
-            value: call.failureDetail!,
-          ),
-        if (call.parserCode != null)
-          _RecoveryDetail(
-            label: 'card_rewriter_studio_parser'.tr(),
-            value: call.parserCode!,
-          ),
-        if (call.parserDetail != null)
-          _RecoveryDetail(
-            label: 'card_rewriter_studio_parser_detail'.tr(),
-            value: call.parserDetail!,
-          ),
-        const SizedBox(height: 6),
-        Text(
-          'card_rewriter_studio_prompt'.tr(),
-          style: const TextStyle(fontWeight: FontWeight.w600),
+        const SizedBox(height: 20),
+        _SectionLabel('card_rewriter_studio_interrupted_chains'.tr()),
+        recoveryViews.when(
+          loading: _loading,
+          error: (_, _) =>
+              _empty('card_rewriter_studio_interrupted_load_failed'.tr()),
+          data: (items) => items.isEmpty
+              ? _empty('card_rewriter_studio_no_interrupted'.tr())
+              : Column(
+                  children: [
+                    for (final recovery in items)
+                      CardRewriterRecoveryTile(
+                        recovery: recovery,
+                        busy: _running || _recoveringCallId != null,
+                        onContinue: () => _run(settings, recovery: recovery),
+                        onRetry: _retryWriterCall,
+                        onCorrect: _correctWriterCall,
+                        onDelete: () => _deleteWriterRecovery(recovery),
+                      ),
+                  ],
+                ),
         ),
-        SelectableText(
-          call.prompt,
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'card_rewriter_studio_response'.tr(),
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        SelectableText(
-          call.responseText ?? 'card_rewriter_studio_no_response'.tr(),
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
-        ),
+        const SizedBox(height: 20),
+        _SectionLabel('card_rewriter_studio_diagnostics'.tr()),
+        _buildDiagnostics(),
+        const SizedBox(height: 20),
+        _SectionLabel('card_rewriter_studio_past_diffs'.tr()),
+        _buildLorebookOverlays(),
+        _buildProposals(),
       ],
     );
   }
+
+  /// Why the run button is dead, or null when the lane is ready. Each line
+  /// names the setting that is missing — all of which now live elsewhere.
+  String? _blocker({
+    required CardRewriterSettings settings,
+    required bool ledgerEnabled,
+    required bool configured,
+  }) {
+    if (!ledgerEnabled) return 'card_rewriter_studio_ledger_required'.tr();
+    if (!settings.enabled) return 'card_rewriter_studio_outcome_disabled'.tr();
+    if (!configured) return 'card_rewriter_studio_select_api_first'.tr();
+    return null;
+  }
+
+  Widget _buildDiagnostics() {
+    return ref
+        .watch(cardRewriteDebugRunsProvider(widget.sessionId))
+        .when(
+          loading: _loading,
+          error: (_, _) =>
+              _empty('card_rewriter_studio_diagnostics_load_failed'.tr()),
+          data: (items) => items.isEmpty
+              ? _empty('card_rewriter_studio_no_calls'.tr())
+              : Column(
+                  children: [
+                    for (final run in items)
+                      GlazeExpansionTile(
+                        showDivider: true,
+                        leading: Icon(
+                          run.status == 'ok'
+                              ? Icons.check_circle_outline
+                              : Icons.error_outline,
+                          size: 18,
+                          color: run.status == 'ok'
+                              ? context.cs.primary
+                              : context.cs.error,
+                        ),
+                        title: Text(
+                          '${cardRewriterDebugStageLabel(run.stage)} · '
+                          '${cardRewriterDebugStatusLabel(run.status)}',
+                        ),
+                        subtitle: Text(
+                          run.model.isEmpty
+                              ? 'card_rewriter_studio_model_unavailable'.tr()
+                              : run.model,
+                        ),
+                        children: [
+                          CardRewriterRawBlock(
+                            label: cardRewriterDebugStageLabel(run.stage),
+                            body:
+                                run.output ??
+                                'card_rewriter_studio_raw_output_unavailable'
+                                    .tr(),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'card_rewriter_studio_legacy_stage_note'.tr(),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: context.cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+        );
+  }
+
+  Widget _buildLorebookOverlays() {
+    return ref
+        .watch(cardRewriteLorebookOverlaysProvider(widget.sessionId))
+        .when(
+          loading: () => const SizedBox.shrink(),
+          error: (_, _) => const SizedBox.shrink(),
+          data: (items) => items.isEmpty
+              ? const SizedBox.shrink()
+              : Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _LaneNotice(
+                    icon: Icons.menu_book_outlined,
+                    message: 'card_rewriter_studio_active_lorebook_changes'.tr(
+                      namedArgs: {'count': '${items.length}'},
+                    ),
+                    detail: 'card_rewriter_studio_synced_history_note'.tr(),
+                  ),
+                ),
+        );
+  }
+
+  Widget _buildProposals() {
+    final overlays = ref.watch(
+      cardRewriteLorebookOverlaysProvider(widget.sessionId),
+    );
+    return ref
+        .watch(cardRewriteJobsBySessionProvider(widget.sessionId))
+        .when(
+          loading: _loading,
+          error: (_, _) =>
+              _empty('card_rewriter_studio_history_load_failed'.tr()),
+          data: (items) {
+            final automated = items.where(_isAutomated).toList();
+            if (automated.isEmpty) {
+              return _empty(
+                overlays.value?.isNotEmpty == true
+                    ? 'card_rewriter_studio_no_local_proposals'.tr()
+                    : 'card_rewriter_studio_no_proposals'.tr(),
+              );
+            }
+            return Column(
+              children: [
+                for (final job in automated)
+                  _ProposalRow(
+                    status: cardRewriterJobStatusLabel(job.status),
+                    updatedAt: formatRelativeTimeFromSeconds(job.updatedAt),
+                    onTap: () => _popToReview(job.id),
+                  ),
+              ],
+            );
+          },
+        );
+  }
+
+  Widget _loading() => const Padding(
+    padding: EdgeInsets.all(12),
+    child: Center(child: GlazeSpinner()),
+  );
+
+  Widget _empty(String message) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 12),
+    child: Text(
+      message,
+      style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
+    ),
+  );
 }
 
-class _RecoveryDetail extends StatelessWidget {
-  const _RecoveryDetail({required this.label, required this.value});
+/// A caption above a block of rows.
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.label);
 
   final String label;
-  final String value;
 
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 4),
-    child: SelectableText('$label: $value'),
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+        color: context.cs.onSurface,
+      ),
+    ),
   );
+}
+
+/// A standing note about the lane: what is blocking a run, or what the session
+/// is already carrying. Not an error dialog — it belongs next to the action it
+/// explains and stays on screen.
+class _LaneNotice extends StatelessWidget {
+  const _LaneNotice({
+    required this.message,
+    this.detail,
+    this.icon = Icons.info_outline_rounded,
+  });
+
+  final String message;
+  final String? detail;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassSurface(
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(
+        color: context.cs.onSurfaceVariant.withValues(alpha: 0.2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 18, color: context.cs.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    message,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: context.cs.onSurface,
+                      height: 1.3,
+                    ),
+                  ),
+                  if (detail case final caption?) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      caption,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.cs.onSurfaceVariant,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One stored proposal, opening the durable review route.
+class _ProposalRow extends StatelessWidget {
+  const _ProposalRow({
+    required this.status,
+    required this.updatedAt,
+    required this.onTap,
+  });
+
+  final String status;
+  final String updatedAt;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: GlassSurface(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.cs.outlineVariant),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+          child: Row(
+            children: [
+              Icon(
+                Icons.compare_arrows_outlined,
+                size: 20,
+                color: context.cs.onSurfaceVariant,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      status,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: context.cs.onSurface,
+                      ),
+                    ),
+                    Text(
+                      updatedAt,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                size: 22,
+                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 bool _isAutomated(RewriteJobRow job) {
@@ -894,51 +608,3 @@ bool _isAutomated(RewriteJobRow job) {
     return false;
   }
 }
-
-String _apiLabel(ApiConfig config) {
-  if (config.name.isNotEmpty) return config.name;
-  if (config.model.isNotEmpty) return config.model;
-  return config.endpoint.isNotEmpty ? config.endpoint : config.id;
-}
-
-String _statusLabel(String status) => switch (status) {
-  'pending' => 'card_rewriter_studio_status_review'.tr(),
-  'applied' => 'card_rewriter_studio_status_applied'.tr(),
-  'failed' => 'card_rewriter_studio_status_failed'.tr(),
-  'cancelled' => 'card_rewriter_studio_status_cancelled'.tr(),
-  _ => 'card_rewriter_studio_status_generating'.tr(),
-};
-
-String _writerStageLabel(String stage) => switch (stage) {
-  'history_consolidation' =>
-    'card_rewriter_studio_stage_history_consolidation'.tr(),
-  'card_writer' => 'card_rewriter_studio_stage_card_writer'.tr(),
-  'card_repair' => 'card_rewriter_studio_stage_card_repair'.tr(),
-  'lorebook_writer' => 'card_rewriter_studio_stage_lorebook_writer'.tr(),
-  _ => stage,
-};
-
-String _writerCallStatusLabel(String status) => switch (status) {
-  'completed' => 'card_rewriter_studio_status_completed'.tr(),
-  'failed' => 'card_rewriter_studio_status_failed'.tr(),
-  // Recovery chains only render failed claims, so a prepared call is always
-  // a checkpoint of an interrupted attempt — never an in-flight request.
-  'prepared' => 'card_rewriter_studio_status_prepared'.tr(),
-  _ => 'card_rewriter_studio_status_pending'.tr(),
-};
-
-String _debugStageLabel(String stage) => switch (stage) {
-  'card' || 'card_writer' => 'card_rewriter_studio_stage_card_writer'.tr(),
-  'card_repair' => 'card_rewriter_studio_stage_card_repair'.tr(),
-  'history_consolidation' =>
-    'card_rewriter_studio_stage_history_consolidation'.tr(),
-  'lorebook' ||
-  'lorebook_writer' => 'card_rewriter_studio_stage_lorebook_writer'.tr(),
-  _ => stage,
-};
-
-String _debugStatusLabel(String status) => switch (status) {
-  'ok' || 'completed' => 'card_rewriter_studio_status_completed'.tr(),
-  'failed' || 'error' => 'card_rewriter_studio_status_failed'.tr(),
-  _ => status,
-};

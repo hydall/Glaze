@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +9,7 @@ import '../../../shared/widgets/sheet_view.dart';
 import '../../../shared/widgets/swipe_tab_switcher.dart';
 import '../../card_rewrite/card_rewriter_studio_sheet.dart';
 import '../chat_provider.dart';
+import '../state/agent_ops_tab_provider.dart';
 import 'agentic_collector_tab.dart';
 import 'agentic_reconciler_tab.dart';
 import 'agentic_snapshots_tab.dart';
@@ -48,13 +51,26 @@ class AgenticOperationsLogDialog extends ConsumerStatefulWidget {
 
 class _AgenticOperationsLogDialogState
     extends ConsumerState<AgenticOperationsLogDialog> {
-  int _activeIndex = 0;
-  final Set<int> _visited = {0};
+  /// Opens on the tab this sheet was last closed on — see
+  /// [agentOpsTabProvider]. Clamped here because the stored index may name a
+  /// tab an older build had and this one does not.
+  late int _activeIndex = ref
+      .read(agentOpsTabProvider)
+      .clamp(0, _tabCount - 1);
 
-  void _selectTab(int index) => setState(() {
-    _activeIndex = index;
-    _visited.add(index);
-  });
+  /// Tabs are built on first visit, so an expensive one costs nothing until it
+  /// is opened. The remembered tab counts as visited.
+  late final Set<int> _visited = {_activeIndex};
+
+  static const _tabCount = 4;
+
+  void _selectTab(int index) {
+    setState(() {
+      _activeIndex = index;
+      _visited.add(index);
+    });
+    unawaited(setAgentOpsTab(ref, index));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -99,7 +115,7 @@ class _AgenticOperationsLogDialogState
         ? children.single
         : SwipeTabSwitcher(
             index: _activeIndex,
-            length: 4,
+            length: _tabCount,
             onChanged: _selectTab,
             child: KeyedSubtree(
               key: ValueKey(sessionId),

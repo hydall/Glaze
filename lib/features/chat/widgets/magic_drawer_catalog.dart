@@ -98,12 +98,6 @@ List<MagicDrawerItemDef> buildMagicDrawerItems() => [
     icon: Icons.smart_toy_outlined,
     category: MagicDrawerCategory.tools,
   ),
-  MagicDrawerItemDef(
-    id: 'card-rewriter',
-    label: 'magic_card_rewriter'.tr(),
-    icon: Icons.auto_fix_high_outlined,
-    category: MagicDrawerCategory.tools,
-  ),
 ];
 
 /// The catalog entry for [id], or null when a stored layout or a pinned button

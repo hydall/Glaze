@@ -37,6 +37,7 @@ import 'shared/theme/theme_provider.dart';
 
 import 'features/chat/widgets/chat_webview_preload.dart';
 import 'features/chat/widgets/continue_failure_listener.dart';
+import 'features/chat/state/agent_ops_tab_provider.dart';
 import 'features/chat/widgets/lorebook_vector_search_diagnostic_listener.dart';
 import 'shared/widgets/app_launch_splash.dart';
 import 'shared/shell/desktop/desktop_glossary_popup.dart';
@@ -90,6 +91,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     _initInBackground(loadActiveSelections(ref), 'active selections');
     _initInBackground(loadLorebookActivations(ref), 'lorebook activations');
     _initInBackground(loadLorebookSettings(ref), 'lorebook settings');
+    _initInBackground(loadAgentOpsTab(ref), 'agent ops tab');
     _initInBackground(seedFeaturedPresets(ref), 'featured preset seeding');
     final notificationForTesting = widget.notificationForTesting;
     if (notificationForTesting != null) {
