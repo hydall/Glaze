@@ -15,7 +15,7 @@ import 'db_provider.dart';
 /// * When `true`, Studio behaves as before, honouring each session's own
 ///   [StudioConfig.enabled] flag.
 ///
-/// Ext Blocks has an equivalent master flag inside `ExtensionsSettings.enabled`;
+/// External Blocks has an equivalent master flag inside `ExtensionsSettings.enabled`;
 /// this provider covers Studio, which had no global on/off before.
 final studioFeatureEnabledProvider =
     StateNotifierProvider<StudioFeatureEnabledNotifier, bool>(

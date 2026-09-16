@@ -61,7 +61,7 @@ void main() {
     expect(find.text('Настроить контекст блока'), findsNothing);
   });
 
-  /// Two presets, the first active and holding one block, with Ext Blocks on.
+  /// Two presets, the first active and holding one block, with External Blocks on.
   Future<ProviderContainer> pumpPanel(
     WidgetTester tester, {
     bool enabled = true,

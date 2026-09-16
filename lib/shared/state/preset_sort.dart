@@ -59,7 +59,7 @@ class PresetSortState {
 }
 
 /// The stored sort of one preset list. Each list supplies its own pair of
-/// preference keys, so the API presets and the Ext Blocks presets are sorted
+/// preference keys, so the API presets and the External Blocks presets are sorted
 /// independently.
 class PresetSortNotifier extends AsyncNotifier<PresetSortState> {
   PresetSortNotifier({required this.modeKey, required this.orderKey});

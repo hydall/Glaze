@@ -219,7 +219,7 @@ class MagicDrawerAddList extends StatelessWidget {
     required this.onSelect,
   });
 
-  // TODO(l10n): localize section labels alongside 'Coverage'/'Ext Blocks'.
+  // TODO(l10n): localize these section labels alongside 'Coverage'.
   static String _categoryLabel(MagicDrawerCategory category) =>
       switch (category) {
         MagicDrawerCategory.session => 'Session',

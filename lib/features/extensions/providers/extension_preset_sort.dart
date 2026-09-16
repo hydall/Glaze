@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/legacy.dart';
 
 import '../../../shared/state/preset_sort.dart';
 
-/// How the Ext Blocks preset switcher is ordered, stored separately from the
+/// How the External Blocks preset switcher is ordered, stored separately from the
 /// API presets' own sort so dragging one list never reorders the other.
 final extensionPresetSortProvider =
     AsyncNotifierProvider<PresetSortNotifier, PresetSortState>(

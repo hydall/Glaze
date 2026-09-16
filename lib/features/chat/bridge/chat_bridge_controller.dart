@@ -819,7 +819,7 @@ class ChatBridgeController {
   Future<void> patchMemoryStatuses(Map<String, String?> statuses) =>
       callJs('patchMemoryStatuses', jsonEncode(statuses));
 
-  // Ext Blocks
+  // External Blocks
 
   /// Sends block panel data to JS so the inline panel renders/updates.
   Future<void> showExtBlocksPanel(

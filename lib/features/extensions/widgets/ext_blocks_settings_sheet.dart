@@ -21,7 +21,7 @@ import '../screens/preset_editor/sections/profiles_section.dart';
 import '../services/block_transfer_service.dart';
 import 'ext_blocks_permissions_sheet.dart';
 
-/// Ext Blocks control panel, opened from the magic drawer and from Tools.
+/// External Blocks control panel, opened from the magic drawer and from Tools.
 ///
 /// The whole feature hangs off the switch in the header: with it off there is
 /// nothing to configure, so the body is a single line explaining that rather

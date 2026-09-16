@@ -88,7 +88,7 @@ List<MagicDrawerItemDef> buildMagicDrawerItems() => [
   ),
   MagicDrawerItemDef(
     id: 'ext-blocks',
-    label: 'Ext Blocks',
+    label: 'ext_blocks_title'.tr(),
     icon: Icons.extension_outlined,
     category: MagicDrawerCategory.config,
   ),

@@ -253,7 +253,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     await _saveLayout();
   }
 
-  /// Opens the same Ext Blocks sheet as chat Quick Access.
+  /// Opens the same External Blocks sheet as chat Quick Access.
   Future<void> _openExtBlocks() => showModalBottomSheet<void>(
     context: context,
     useRootNavigator: true,

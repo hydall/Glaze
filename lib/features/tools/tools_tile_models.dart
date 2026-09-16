@@ -56,7 +56,7 @@ class ToolsTileDef {
   final bool isAvatar;
 
   /// Feature-gated tiles are hidden unless their experimental master switch is
-  /// on — same gating as chat Quick Access (Ext Blocks).
+  /// on — same gating as chat Quick Access (External Blocks).
   final bool featureGated;
 
   const ToolsTileDef({

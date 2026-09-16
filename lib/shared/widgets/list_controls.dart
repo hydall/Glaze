@@ -168,7 +168,7 @@ class GlazeSortIconChip extends StatelessWidget {
 }
 
 /// Glass button for a single action next to a chip — the permissions shield
-/// beside the Ext Blocks preset pill, for one.
+/// beside the External Blocks preset pill, for one.
 ///
 /// Same 32pt glass as [GlazeDropdownChip] and [GlazeReorderToggleButton], with
 /// no state to show and no chevron: it acts rather than opens a choice. Give it

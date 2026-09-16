@@ -44,7 +44,7 @@ class ExtensionsSettingsNotifier extends StateNotifier<ExtensionsSettings> {
   }
 
   /// Selects a preset and ensures [enabled] is on if [presetId] is non-null.
-  /// Use this from the Ext Blocks sheet so a first-time setup works
+  /// Use this from the External Blocks sheet so a first-time setup works
   /// without the user having to flip a separate master toggle.
   Future<void> selectPreset(String? presetId) async {
     state = state.copyWith(

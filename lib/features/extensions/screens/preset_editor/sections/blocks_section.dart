@@ -231,7 +231,7 @@ String blockTriggerSummary(BlockConfig block) {
 }
 
 /// Opens one block's settings as a sheet and writes the result back into
-/// [preset]. Shared with the Ext Blocks panel, so tapping a block goes straight
+/// [preset]. Shared with the External Blocks panel, so tapping a block goes straight
 /// to its settings wherever the list is shown.
 void editBlockSheet(
   BuildContext context,
