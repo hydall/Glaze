@@ -6,8 +6,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
+import 'package:glaze_flutter/shared/widgets/menu_group.dart';
 import 'package:glaze_flutter/features/extensions/models/block_config.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
+import 'package:glaze_flutter/features/extensions/models/preset_permissions.dart';
 import 'package:glaze_flutter/features/extensions/screens/preset_editor/block_edit_dialog.dart';
 import 'package:glaze_flutter/features/extensions/screens/preset_editor/sections/blocks_section.dart';
 import 'package:glaze_flutter/features/extensions/screens/preset_editor/sections/permissions_section.dart';
@@ -49,9 +51,16 @@ void main() {
   testWidgets('PermissionsSection renders capability switches', (tester) async {
     await pumpSection(tester, const PermissionsSection(preset: preset));
 
-    expect(find.text('Разрешения (capabilities)'), findsOneWidget);
+    // Grouped by scope rather than one flat list of twenty switches.
+    expect(find.text('perm_group_chat_vars'), findsOneWidget);
+    expect(find.text('perm_group_actions'), findsOneWidget);
+    expect(find.text('perm_show_toast'), findsOneWidget);
+    // The capability id the bridge checks stays next to its switch.
     expect(find.text('show_toast'), findsOneWidget);
-    expect(find.byType(SwitchListTile), findsWidgets);
+    expect(
+      find.byType(MenuSwitchItem),
+      findsNWidgets(GlazeCapability.values.length),
+    );
   });
 
   testWidgets('ProfilesSection renders generateText profile rows', (

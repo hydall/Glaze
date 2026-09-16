@@ -38,6 +38,7 @@ import 'api_preset_selection_provider.dart';
 import 'api_preset_sort.dart';
 import 'widgets/connection_status.dart';
 import '../../shared/widgets/menu_group.dart';
+import '../../shared/widgets/preset_switcher.dart';
 import '../../shared/widgets/extra_request_parameters_editor.dart';
 
 /// A section of the API screen a caller can open it *on*.
@@ -763,43 +764,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     String activeName, {
     required bool forEmbedding,
   }) {
-    return GestureDetector(
+    return PresetPill(
+      label: activeName,
       onTap: list.isEmpty
           ? null
           : () => _showPresetSheet(forEmbedding: forEmbedding),
-      child: Container(
-        height: 32,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        constraints: const BoxConstraints(maxWidth: 220),
-        decoration: BoxDecoration(
-          color: context.cs.primary.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: context.cs.primary.withValues(alpha: 0.22)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                activeName,
-                style: TextStyle(
-                  color: context.cs.primary,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(width: 2),
-            Icon(
-              Icons.keyboard_arrow_down_rounded,
-              color: context.cs.primary,
-              size: 16,
-            ),
-          ],
-        ),
-      ),
     );
   }
 
