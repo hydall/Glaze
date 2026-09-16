@@ -778,7 +778,7 @@ if (messageData.isEditing) classes.push('editing');
 
     const isError = sectionEl.classList.contains('error');
 
-    if (!isTyping && !isError && !animate) {
+    if (!isError && !animate) {
       // Only reuse the bubble's OWN content host (a direct child of the body).
       // A ':scope >' guard is essential: the error window nests its own
       // `.message-content` (body > .error-window > … > .message-content), so a
@@ -790,7 +790,7 @@ if (messageData.isEditing) classes.push('editing');
       if (existingHost && existingHost.shadowRoot) {
         const glazeMsg = existingHost.shadowRoot.querySelector('.glaze-message');
         if (glazeMsg) {
-          this._writeShadowContent(existingHost, text, isUser, false, {
+          this._writeShadowContent(existingHost, text, isUser, isTyping, {
             messageId: sectionEl.dataset.messageId,
           });
           if (reasoning && reasoning.trim()) {
@@ -798,11 +798,17 @@ if (messageData.isEditing) classes.push('editing');
             if (reasoningEl) {
               const rHost = reasoningEl.querySelector('.msg-reasoning-inner .message-content');
               if (rHost) {
-                this._writeShadowContent(rHost, reasoning, isUser, false, {
+                this._writeShadowContent(rHost, reasoning, isUser, isTyping, {
                   isReasoning: true,
                 });
               }
+            } else {
+              reasoningEl = this._createReasoningBlock(reasoning, isUser);
+              const contentStack = sectionEl.querySelector('.msg-content-stack');
+              contentStack.insertBefore(reasoningEl, contentStack.firstChild);
             }
+          } else {
+            sectionEl.querySelector('.msg-reasoning')?.remove();
           }
           return;
         }

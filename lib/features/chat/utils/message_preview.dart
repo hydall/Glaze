@@ -1,28 +1,41 @@
 import '../../../core/models/chat_message.dart';
 
-/// Build a short single-line preview of a chat message for use in
-/// system notifications (Android foreground/background).
-/// Strips common markdown markers so the preview is readable in the
-/// notification body. Pure function — no Riverpod, no state.
-///
-/// A message a Continue run extended is previewed from its continuation
-/// boundary, so the notification announces the text that was just generated
-/// instead of the opening the user has already read (INV-CM7).
-String? buildMessagePreview(List<ChatMessage> messages) {
+/// Finds the completed assistant message without falling back to another turn.
+ChatMessage? findNotificationMessage(
+  List<ChatMessage> messages,
+  String messageId,
+) {
+  for (final message in messages) {
+    if (message.id != messageId) continue;
+    final isAssistant =
+        message.role == 'assistant' || message.role == 'character';
+    if (!isAssistant ||
+        message.isError ||
+        message.isTyping ||
+        message.isHidden) {
+      return null;
+    }
+    return message;
+  }
+  return null;
+}
+
+/// Builds a short single-line notification preview for one known message.
+/// A continued message is previewed from its continuation boundary so the
+/// notification announces only the text that was just generated (INV-CM7).
+String? buildMessagePreview(ChatMessage message) {
   try {
-    for (final m in messages.reversed) {
-      final content = previewSource(m.content, m.continuationOffset);
-      if (content.isNotEmpty) {
-        final text = content
-            .replaceAll(RegExp(r'\*\*[^*]+\*\*'), '')
-            .replaceAll(RegExp(r'\*[^*]+\*'), '')
-            .replaceAll(RegExp(r'==[^=]+=='), '')
-            .replaceAll(RegExp(r'<[^>]+>'), '')
-            .replaceAll(RegExp(r'\s+'), ' ')
-            .trim();
-        if (text.isNotEmpty) {
-          return text.length > 80 ? '${text.substring(0, 80)}...' : text;
-        }
+    final content = previewSource(message.content, message.continuationOffset);
+    if (content.isNotEmpty) {
+      final text = content
+          .replaceAll(RegExp(r'\*\*[^*]+\*\*'), '')
+          .replaceAll(RegExp(r'\*[^*]+\*'), '')
+          .replaceAll(RegExp(r'==[^=]+=='), '')
+          .replaceAll(RegExp(r'<[^>]+>'), '')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (text.isNotEmpty) {
+        return text.length > 80 ? '${text.substring(0, 80)}...' : text;
       }
     }
   } catch (_) {}

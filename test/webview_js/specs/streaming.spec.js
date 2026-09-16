@@ -49,3 +49,54 @@ test('a half-written tag never reaches the reader as text', async ({ page }) => 
     await expectCleanRender(page);
   }
 });
+
+test('streaming updates reuse the message shadow host', async ({ page }) => {
+  await page.goto('/assets/chat_webview/index.html');
+  await page.waitForFunction(() => !!window.bridge);
+  await page.evaluate(() => {
+    window.__streamMessage = (text) => JSON.stringify({
+      id: 'a1',
+      role: 'assistant',
+      text,
+      timestamp: 1767225600000,
+      isUser: false,
+      isAssistant: true,
+      isSystem: false,
+      isError: false,
+      isHidden: false,
+      isTyping: true,
+      isGenerating: true,
+      isPostGenRunning: false,
+    });
+    window.bridge.setMessages(JSON.stringify([]));
+    window.bridge.appendMessage(window.__streamMessage('first'));
+  });
+  await page.waitForTimeout(50);
+  await page.evaluate(() => {
+    window.__streamHost = document.querySelector(
+      '[data-message-id="a1"] .msg-body > .message-content',
+    );
+    window.bridge.updateMessage(window.__streamMessage('first and second'));
+  });
+  await page.waitForTimeout(50);
+
+  const shape = await page.evaluate(() => {
+    const host = document.querySelector(
+      '[data-message-id="a1"] .msg-body > .message-content',
+    );
+    return {
+      sameHost: host === window.__streamHost,
+      text: host?.shadowRoot?.querySelector('.glaze-message')?.textContent,
+    };
+  });
+  expect(shape.sameHost).toBe(true);
+  expect(shape.text).toContain('first and second');
+});
+
+test('transient streaming prefixes do not fill the formatter cache', async ({ page }) => {
+  await render(page, 'first prefix', { isTyping: true });
+  expect(await page.evaluate(() => window.harness.formatter.cache.size)).toBe(0);
+
+  await render(page, 'settled message');
+  expect(await page.evaluate(() => window.harness.formatter.cache.size)).toBe(1);
+});

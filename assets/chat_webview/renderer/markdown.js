@@ -77,7 +77,13 @@ export function writeShadowContent({
       root.innerHTML = '';
       return;
     }
-    let formatted = formatMessageBody(formatter, text, isUser, isReasoning);
+    let formatted = formatMessageBody(
+      formatter,
+      text,
+      isUser,
+      isReasoning,
+      !isTyping,
+    );
     if (searchQuery) formatted = applySearchHighlight(formatted);
     if (!allowMessageScripts && SCRIPT_TAG.test(formatted)) {
       notifyMessageScriptBlocked();

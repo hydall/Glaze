@@ -163,6 +163,18 @@ class GenerationPipeline {
         );
         return null;
       }
+      final completedMessageId =
+          continueTargetId ??
+          regenTargetId ??
+          result.session!.messages.lastOrNull?.id;
+      if (completedMessageId == null) {
+        await _handlePipelineError(
+          StateError('Generation completed without a message'),
+          genId,
+          continueTargetId: continueTargetId,
+        );
+        return null;
+      }
 
       // Continue mode extends an existing assistant message instead of adding
       // a turn, so it owns its own commit + post-gen tail (INV-CM1). Awaited
@@ -251,6 +263,7 @@ class GenerationPipeline {
             character: character,
             service: service,
             notifService: notifService,
+            completedMessageId: completedMessageId,
             regenTargetId: regenTargetId,
             studioTurnConfig: studioTurnConfig,
           );
@@ -338,6 +351,7 @@ class GenerationPipeline {
         character: character,
         service: service,
         notifService: notifService,
+        completedMessageId: completedMessageId,
         regenTargetId: regenTargetId,
         studioTurnConfig: studioTurnConfig,
       );
@@ -435,6 +449,7 @@ class GenerationPipeline {
       character: character,
       service: service,
       notifService: notifService,
+      completedMessageId: continueTargetId,
       regenTargetId: continueTargetId,
       studioTurnConfig: studioTurnConfig,
     );

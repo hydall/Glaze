@@ -255,8 +255,15 @@ class ChatWebViewBuildListeners {
             reasoning: next.reasoning ?? original.reasoning,
             isTyping: true,
           );
-          b.updateMessage(updated);
-          syncState.regenStreamingSent = true;
+          unawaited(
+            _pushStreamingMessage(
+              b,
+              updated,
+              listenerEpoch,
+              updateInPlace: true,
+              markRegenStreamingSent: true,
+            ),
+          );
         }
         return;
       }
@@ -280,10 +287,15 @@ class ChatWebViewBuildListeners {
                 original.reasoning,
             isTyping: true,
           );
-          b.updateMessage(updated);
-          // No virtual streaming message was appended for this run, so the
-          // falling edge must not try to remove one.
-          syncState.regenStreamingSent = true;
+          unawaited(
+            _pushStreamingMessage(
+              b,
+              updated,
+              listenerEpoch,
+              updateInPlace: true,
+              markRegenStreamingSent: true,
+            ),
+          );
           return;
         }
       }
@@ -299,7 +311,14 @@ class ChatWebViewBuildListeners {
         if (idx >= 0) {
           final original = messages[idx];
           final updated = original.copyWith(content: next.text, isTyping: true);
-          b.updateMessage(updated);
+          unawaited(
+            _pushStreamingMessage(
+              b,
+              updated,
+              listenerEpoch,
+              updateInPlace: true,
+            ),
+          );
         }
         return;
       }
@@ -320,13 +339,17 @@ class ChatWebViewBuildListeners {
   Future<void> _pushStreamingMessage(
     ChatBridgeController bridge,
     ChatMessage message,
-    int epoch,
-  ) => pushStreamingMessageOwned(
+    int epoch, {
+    bool updateInPlace = false,
+    bool markRegenStreamingSent = false,
+  }) => pushStreamingMessageOwned(
     bridge: bridge,
     message: message,
     syncState: syncState,
     epoch: epoch,
     isCurrent: () => ready() && (isCurrentBridge?.call(bridge) ?? true),
+    updateInPlace: updateInPlace,
+    markRegenStreamingSent: markRegenStreamingSent,
   );
 
   void _listenInfoBlocks() {

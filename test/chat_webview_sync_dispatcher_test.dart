@@ -333,27 +333,30 @@ void main() {
       expect(bridge.retireTypingPlaceholderCalls, 0);
     });
 
-    test('impersonation streams into the composer and retires nothing', () async {
-      // Impersonation reuses the generating flag, so it reaches the reconcile
-      // as busy — and it never had a chat bubble to retire.
-      final bridge = _FakeBridge();
-      final state = ChatWebViewSyncState()..wasBusy = true;
+    test(
+      'impersonation streams into the composer and retires nothing',
+      () async {
+        // Impersonation reuses the generating flag, so it reaches the reconcile
+        // as busy — and it never had a chat bubble to retire.
+        final bridge = _FakeBridge();
+        final state = ChatWebViewSyncState()..wasBusy = true;
 
-      await reconcileActiveGenerationBridge(
-        bridge: bridge,
-        syncState: state,
-        isBusy: true,
-        isImpersonating: true,
-        regenTargetId: null,
-        continuationTargetId: null,
-        streaming: const StreamingState(text: 'composer text'),
-        messages: const [],
-        streamingId: '__streaming__',
-        isCurrent: () => true,
-      );
+        await reconcileActiveGenerationBridge(
+          bridge: bridge,
+          syncState: state,
+          isBusy: true,
+          isImpersonating: true,
+          regenTargetId: null,
+          continuationTargetId: null,
+          streaming: const StreamingState(text: 'composer text'),
+          messages: const [],
+          streamingId: '__streaming__',
+          isCurrent: () => true,
+        );
 
-      expect(bridge.retireTypingPlaceholderCalls, 0);
-    });
+        expect(bridge.retireTypingPlaceholderCalls, 0);
+      },
+    );
 
     test('serializes persisted and streaming message mutations', () async {
       final state = ChatWebViewSyncState();
@@ -393,6 +396,34 @@ void main() {
       await expectLater(failed, throwsStateError);
       await recovered;
       expect(calls, ['failed', 'recovered']);
+      expect(state.messageMutationPending, isNull);
+    });
+
+    test('streaming queue keeps only the latest waiting snapshot', () async {
+      final state = ChatWebViewSyncState();
+      final firstMutation = Completer<void>();
+      final calls = <String>[];
+
+      final first = state.enqueueLatestStreamingMutation('a1', () async {
+        calls.add('first:start');
+        await firstMutation.future;
+        calls.add('first:done');
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      final superseded = state.enqueueLatestStreamingMutation('a1', () async {
+        calls.add('superseded');
+      });
+      final latest = state.enqueueLatestStreamingMutation('a1', () async {
+        calls.add('latest');
+      });
+
+      await superseded;
+      expect(calls, ['first:start']);
+
+      firstMutation.complete();
+      await Future.wait([first, latest]);
+      expect(calls, ['first:start', 'first:done', 'latest']);
       expect(state.messageMutationPending, isNull);
     });
 
@@ -510,29 +541,32 @@ void main() {
       expect(bridge.searchCalls, [('foo', 2, false)]);
     });
 
-    test('a delta that settles after the run does not re-append the bubble', () async {
-      // The shared mutation queue can hold a delta that was still crossing the
-      // channel when the run settled: the falling edge removes the placeholder
-      // synchronously, so this lands after it. Appending there stood the
-      // finished reply a second time under itself, in a bubble nothing takes
-      // away again — it survived leaving and re-opening the chat.
-      final bridge = _FakeBridge();
-      final syncState = ChatWebViewSyncState()
-        ..wasBusy = false
-        ..streamingSent = false;
+    test(
+      'a delta that settles after the run does not re-append the bubble',
+      () async {
+        // The shared mutation queue can hold a delta that was still crossing the
+        // channel when the run settled: the falling edge removes the placeholder
+        // synchronously, so this lands after it. Appending there stood the
+        // finished reply a second time under itself, in a bubble nothing takes
+        // away again — it survived leaving and re-opening the chat.
+        final bridge = _FakeBridge();
+        final syncState = ChatWebViewSyncState()
+          ..wasBusy = false
+          ..streamingSent = false;
 
-      await pushStreamingMessageOwned(
-        bridge: bridge,
-        message: _assistant('__streaming__'),
-        syncState: syncState,
-        epoch: syncState.streamEpoch,
-        isCurrent: () => true,
-      );
+        await pushStreamingMessageOwned(
+          bridge: bridge,
+          message: _assistant('__streaming__'),
+          syncState: syncState,
+          epoch: syncState.streamEpoch,
+          isCurrent: () => true,
+        );
 
-      expect(bridge.appendedMessages, isEmpty);
-      expect(bridge.updatedMessages, isEmpty);
-      expect(syncState.streamingSent, isFalse);
-    });
+        expect(bridge.appendedMessages, isEmpty);
+        expect(bridge.updatedMessages, isEmpty);
+        expect(syncState.streamingSent, isFalse);
+      },
+    );
 
     test('session switch invalidates a delayed streaming delta', () async {
       final bridge = _FakeBridge();

@@ -209,9 +209,9 @@ loomledger { display: block; font-family: 'Card', cursive; }
   },
   {
     id: 'nested-quotes',
-    title: 'Guillemets and straight quotes in one message',
-    origin: 'formatter step 8',
-    text: `«Он сказал «тихо» и вышел», — а потом "добавил вслух".`,
+    title: 'Guillemets, curly and straight quotes in one message',
+    origin: 'formatter step 8; Discord #1549835404016881744',
+    text: `«Он сказал «тихо» и вышел», затем “добавил <b title="не диалог">вслух</b>”, а после "прямо".`,
   },
   {
     id: 'inline-tags-in-prose',

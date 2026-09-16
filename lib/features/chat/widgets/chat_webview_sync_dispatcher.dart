@@ -26,6 +26,8 @@ class ChatWebViewSyncState {
   /// placeholders, and streaming deltas must share one queue because mapping a
   /// message can await image resolution before it reaches JavaScript.
   Future<void>? messageMutationPending;
+  final Map<String, _LatestStreamingMutation> _latestStreamingMutations = {};
+  final Set<String> _scheduledStreamingMutations = {};
 
   Future<void> enqueueMessageMutation(Future<void> Function() mutation) {
     final previous = messageMutationPending;
@@ -50,6 +52,48 @@ class ChatWebViewSyncState {
     return operation;
   }
 
+  /// Keeps at most one pending streaming snapshot per message. An in-flight
+  /// bridge call is allowed to finish; every older snapshot waiting behind it
+  /// is replaced by the newest one. Each drain re-enters the shared mutation
+  /// queue so structural updates can still run between streamed frames.
+  Future<void> enqueueLatestStreamingMutation(
+    String messageId,
+    Future<void> Function() mutation,
+  ) {
+    final completer = Completer<void>();
+    final previous = _latestStreamingMutations[messageId];
+    previous?.completer.complete();
+    _latestStreamingMutations[messageId] = _LatestStreamingMutation(
+      mutation,
+      completer,
+    );
+    if (_scheduledStreamingMutations.add(messageId)) {
+      _scheduleLatestStreamingMutation(messageId);
+    }
+    return completer.future;
+  }
+
+  void _scheduleLatestStreamingMutation(String messageId) {
+    unawaited(
+      enqueueMessageMutation(() async {
+        final pending = _latestStreamingMutations.remove(messageId);
+        if (pending == null) return;
+        try {
+          await pending.mutation();
+          pending.completer.complete();
+        } catch (error, stackTrace) {
+          pending.completer.completeError(error, stackTrace);
+        }
+      }).whenComplete(() {
+        _scheduledStreamingMutations.remove(messageId);
+        if (_latestStreamingMutations.containsKey(messageId) &&
+            _scheduledStreamingMutations.add(messageId)) {
+          _scheduleLatestStreamingMutation(messageId);
+        }
+      }),
+    );
+  }
+
   /// Set when the display-regex list changed while the bridge was still
   /// initializing, i.e. after the initializer read the list it painted with.
   /// The messages on screen were rewritten with the older list, and only a
@@ -60,6 +104,13 @@ class ChatWebViewSyncState {
   /// Invalidates async streaming work when generation or session ownership
   /// changes. Callers capture the value and re-check it after every await.
   int streamEpoch = 0;
+}
+
+class _LatestStreamingMutation {
+  const _LatestStreamingMutation(this.mutation, this.completer);
+
+  final Future<void> Function() mutation;
+  final Completer<void> completer;
 }
 
 /// Per-field diff dispatch for [ChatWebViewWidget.didUpdateWidget].
@@ -157,7 +208,11 @@ class ChatWebViewSyncDispatcher {
     _maybeApplyInsets(bridge: bridge, old: old, current: current);
 
     _maybeApplyGeneratingState(bridge: bridge, old: old, current: current);
-    _maybeRestoreRegenerateAfterSend(bridge: bridge, old: old, current: current);
+    _maybeRestoreRegenerateAfterSend(
+      bridge: bridge,
+      old: old,
+      current: current,
+    );
 
     // Level-reconcile the native-side streaming flags too. If the previous
     // generation's falling edge was missed while the WebView was not ready or

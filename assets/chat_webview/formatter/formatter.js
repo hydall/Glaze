@@ -58,9 +58,9 @@ export class Formatter {
   // scans that field for image tags, so a tag in it must not render as a block
   // here either (INV-IG11); the same flag covers a `<think>` block found inline
   // in the message body.
-  format(text, isUser = false, inReasoning = false) {
+  format(text, isUser = false, inReasoning = false, useCache = true) {
     const key = `${text}:${isUser}:${inReasoning}`;
-    if (this.cache.has(key)) return this.cache.get(key);
+    if (useCache && this.cache.has(key)) return this.cache.get(key);
 
     let result;
     try {
@@ -76,11 +76,13 @@ export class Formatter {
       result = result.replace(ANY_PLACEHOLDER, '');
     }
 
-    if (this.cache.size >= this.cacheMaxSize) {
-      const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
+    if (useCache) {
+      if (this.cache.size >= this.cacheMaxSize) {
+        const firstKey = this.cache.keys().next().value;
+        this.cache.delete(firstKey);
+      }
+      this.cache.set(key, result);
     }
-    this.cache.set(key, result);
     return result;
   }
 

@@ -272,17 +272,43 @@ test('blockquote and horizontal rule render as elements', async ({ page }) => {
   expect(shape.rules).toBe(1);
 });
 
-test('quotes keep their spans, nested guillemets included', async ({ page }) => {
+test('quotes keep their spans, including curly and nested guillemets', async ({ page }) => {
   await render(page, card('nested-quotes').text);
   const shape = await page.evaluate(() => {
     const root = window.harness.currentRoot();
     return {
-      marks: root.querySelectorAll('.chat-quote').length,
-      texts: root.querySelectorAll('.chat-quote-text').length,
+      marks: Array.from(root.querySelectorAll('.chat-quote'))
+        .map((node) => node.textContent),
+      texts: Array.from(root.querySelectorAll('.chat-quote-text'))
+        .map((node) => node.textContent),
+      curlyHoldsTag: !!root.querySelector('.chat-quote-text b'),
+      attribute: root.querySelector('.chat-quote-text b')?.getAttribute('title') || '',
     };
   });
-  expect(shape.marks).toBeGreaterThanOrEqual(2);
-  expect(shape.texts).toBeGreaterThanOrEqual(2);
+  expect(shape.marks).toEqual(['«', '»', '“', '”', '"', '"']);
+  expect(shape.texts).toEqual([
+    'Он сказал ',
+    ' и вышел',
+    'добавил вслух',
+    'прямо',
+  ]);
+  expect(shape.curlyHoldsTag).toBe(true);
+  expect(shape.attribute).toBe('не диалог');
+});
+
+test('an unclosed curly quote stays formatted while streaming', async ({ page }) => {
+  await render(page, 'Он сказал “ещё печатает', { isTyping: true });
+  const shape = await page.evaluate(() => {
+    const root = window.harness.currentRoot();
+    return {
+      marks: Array.from(root.querySelectorAll('.chat-quote'))
+        .map((node) => node.textContent),
+      texts: Array.from(root.querySelectorAll('.chat-quote-text'))
+        .map((node) => node.textContent),
+    };
+  });
+  expect(shape.marks).toEqual(['“']);
+  expect(shape.texts).toEqual(['ещё печатает']);
 });
 
 test('Glaze colour markers render as styled spans', async ({ page }) => {

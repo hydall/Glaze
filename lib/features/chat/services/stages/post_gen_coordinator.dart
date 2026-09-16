@@ -145,6 +145,7 @@ class PostGenCoordinator {
     required Character? character,
     required ChatGenerationService service,
     required GenerationNotificationService notifService,
+    required String completedMessageId,
     String? regenTargetId,
     StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
@@ -166,6 +167,7 @@ class PostGenCoordinator {
         genId: genId,
         character: character,
         notifService: notifService,
+        completedMessageId: completedMessageId,
       );
     } catch (_) {
       ordinaryMemoryLease?.release();

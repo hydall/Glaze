@@ -92,29 +92,40 @@ Future<void> pushStreamingMessageOwned({
   required ChatWebViewSyncState syncState,
   required int epoch,
   required bool Function() isCurrent,
+  bool updateInPlace = false,
+  bool markRegenStreamingSent = false,
 }) async {
   bool ownsStream() => isCurrent() && syncState.streamEpoch == epoch;
-  final operation = syncState.enqueueMessageMutation(() async {
-    try {
-      if (!ownsStream()) return;
-      if (syncState.streamingSent) {
-        await bridge.updateMessage(message);
-      } else if (syncState.wasBusy) {
-        // The first delta of a run whose placeholder append is still in
-        // flight puts the bubble up itself. Only while a reply is actually on
-        // its way, though: this runs on the shared mutation queue, so a delta
-        // that was still crossing the channel when the run settled lands
-        // *after* the falling edge removed the placeholder — and appending it
-        // there stands the finished reply a second time under itself, in a
-        // bubble nothing will ever take away again.
-        await bridge.appendMessage(message);
-      } else {
-        return;
+  final operation = syncState.enqueueLatestStreamingMutation(
+    message.id,
+    () async {
+      try {
+        if (!ownsStream()) return;
+        if (updateInPlace || syncState.streamingSent) {
+          await bridge.updateMessage(message, isStreamingUpdate: true);
+        } else if (syncState.wasBusy) {
+          // The first delta of a run whose placeholder append is still in
+          // flight puts the bubble up itself. Only while a reply is actually on
+          // its way, though: this runs on the shared mutation queue, so a delta
+          // that was still crossing the channel when the run settled lands
+          // *after* the falling edge removed the placeholder — and appending it
+          // there stands the finished reply a second time under itself, in a
+          // bubble nothing will ever take away again.
+          await bridge.appendMessage(message);
+        } else {
+          return;
+        }
+        if (ownsStream()) {
+          if (updateInPlace) {
+            if (markRegenStreamingSent) syncState.regenStreamingSent = true;
+          } else {
+            syncState.streamingSent = true;
+          }
+        }
+      } catch (_) {
+        // Leave streamingSent false so a later delta can retry the append.
       }
-      if (ownsStream()) syncState.streamingSent = true;
-    } catch (_) {
-      // Leave streamingSent false so a later delta can retry the append.
-    }
-  });
+    },
+  );
   await operation;
 }

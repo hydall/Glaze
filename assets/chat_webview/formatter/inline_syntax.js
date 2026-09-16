@@ -30,7 +30,9 @@ const PLACEHOLDER_GROUP = `${SENTINEL}[A-Z_]+\\d+${SENTINEL}`;
 // opaque, and `="…"` is an attribute value, not dialogue.
 const QUOTE_REGEX = new RegExp(
   `(${PLACEHOLDER_GROUP})|(=[ \\t]*"(?:[^"]|\\\\")*?")|(")((?:[^"]|\\\\")*?)(")` +
-  `|(«)([^»\\u0001]*?(?:«[^»\\u0001]*?»[^»\\u0001]*?)*?)(»)|(")((?:[^"]*)$)`,
+  `|(“)((?:[^”]|\\\\”)*?)(”)` +
+  `|(«)([^»\\u0001]*?(?:«[^»\\u0001]*?»[^»\\u0001]*?)*?)(»)` +
+  `|(")((?:[^"]*)$)|(“)((?:[^”]*)$)`,
   'gm',
 );
 
@@ -38,8 +40,10 @@ function applyQuotes(text) {
   return text.replace(QUOTE_REGEX, (
     match, placeholder, attribute,
     openQ, closedContent, closeQ,
+    openC, curlyContent, closeC,
     openG, guillemetContent, closeG,
     openU, unclosedContent,
+    openCurlyU, unclosedCurlyContent,
   ) => {
     if (placeholder) return placeholder;
     if (attribute) return attribute;
@@ -47,6 +51,11 @@ function applyQuotes(text) {
       return `<span class="chat-quote">${openQ}</span>` +
         `<span class="chat-quote-text">${closedContent}</span>` +
         `<span class="chat-quote">${closeQ}</span>`;
+    }
+    if (openC !== undefined) {
+      return `<span class="chat-quote">${openC}</span>` +
+        `<span class="chat-quote-text">${curlyContent}</span>` +
+        `<span class="chat-quote">${closeC}</span>`;
     }
     if (openG !== undefined) {
       // Nested «outer «inner» more outer» — split at the inner «» so the inner
@@ -63,6 +72,10 @@ function applyQuotes(text) {
     if (openU !== undefined) {
       return `<span class="chat-quote">${openU}</span>` +
         `<span class="chat-quote-text">${unclosedContent}</span>`;
+    }
+    if (openCurlyU !== undefined) {
+      return `<span class="chat-quote">${openCurlyU}</span>` +
+        `<span class="chat-quote-text">${unclosedCurlyContent}</span>`;
     }
     return match;
   });

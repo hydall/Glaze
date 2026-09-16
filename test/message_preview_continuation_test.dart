@@ -18,7 +18,7 @@ void main() {
       ),
     ];
 
-    expect(buildMessagePreview(messages), 'Then the door opened.');
+    expect(buildMessagePreview(messages.last), 'Then the door opened.');
   });
 
   test('a message that was never continued is quoted from the start', () {
@@ -30,7 +30,7 @@ void main() {
       ),
     ];
 
-    expect(buildMessagePreview(messages), 'She set the lamp down.');
+    expect(buildMessagePreview(messages.last), 'She set the lamp down.');
   });
 
   test('markdown markers are still stripped out of a continuation', () {
@@ -43,7 +43,7 @@ void main() {
       ),
     ];
 
-    expect(buildMessagePreview(messages), 'and and text.');
+    expect(buildMessagePreview(messages.last), 'and and text.');
   });
 
   test('the 80-character cap applies to the continuation slice', () {
@@ -57,7 +57,7 @@ void main() {
       ),
     ];
 
-    final preview = buildMessagePreview(messages)!;
+    final preview = buildMessagePreview(messages.last)!;
     expect(preview, '${'x' * 80}...');
   });
 
@@ -71,6 +71,54 @@ void main() {
       ),
     ];
 
-    expect(buildMessagePreview(messages), 'Only an opening.');
+    expect(buildMessagePreview(messages.last), 'Only an opening.');
+  });
+
+  test('an empty assistant reply never falls back to the user prompt', () {
+    const messages = [
+      ChatMessage(id: 'u', role: 'user', content: 'Repeat this in a push'),
+      ChatMessage(id: 'a', role: 'assistant', content: ''),
+    ];
+
+    final target = findNotificationMessage(messages, 'a');
+    expect(target, isNotNull);
+    expect(buildMessagePreview(target!), isNull);
+  });
+
+  test('a reasoning-only reply never falls back to the user prompt', () {
+    const messages = [
+      ChatMessage(id: 'u', role: 'user', content: 'Do not notify this'),
+      ChatMessage(
+        id: 'a',
+        role: 'assistant',
+        content: '',
+        reasoning: 'Internal reasoning',
+        isAllReasoning: true,
+      ),
+    ];
+
+    final target = findNotificationMessage(messages, 'a');
+    expect(target, isNotNull);
+    expect(buildMessagePreview(target!), isNull);
+  });
+
+  test('regeneration preview ignores a newer user message', () {
+    const messages = [
+      ChatMessage(id: 'u1', role: 'user', content: 'First prompt'),
+      ChatMessage(id: 'a1', role: 'assistant', content: 'Regenerated reply'),
+      ChatMessage(id: 'u2', role: 'user', content: 'Newer prompt'),
+    ];
+
+    final target = findNotificationMessage(messages, 'a1');
+    expect(target, isNotNull);
+    expect(buildMessagePreview(target!), 'Regenerated reply');
+  });
+
+  test('notification target rejects non-assistant messages', () {
+    const messages = [
+      ChatMessage(id: 'u', role: 'user', content: 'User message'),
+    ];
+
+    expect(findNotificationMessage(messages, 'u'), isNull);
   });
 }
