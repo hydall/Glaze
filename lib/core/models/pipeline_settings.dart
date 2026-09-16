@@ -22,6 +22,15 @@ part 'pipeline_settings.g.dart';
 /// - [memoryBookApi] — MemoryBook draft-generation LLM (model/endpoint/key).
 /// - [cardRewriter] — review-only card-evolution enablement and dedicated LLM.
 ///
+/// Three of the six are **per-preset overridable**: [cleaner], [ledger] and
+/// [cardRewriter] each have a matching nullable field on
+/// `StudioRuntimeSettings`, and a Studio preset that carries one runs on it
+/// instead of the value here. `applyStudioPresetOverrides`
+/// (studio_pipeline_overrides.dart) folds the two, and the UI for those three
+/// lanes writes to the active preset. The values here are the fallback for a
+/// preset that has never configured the lane, and for generation with Studio
+/// off.
+///
 /// Singleton global, persisted in SharedPreferences under the 'pipelineSettings'
 /// key (see `pipeline_settings_provider.dart`). Previously per-session in the
 /// `pipeline_settings_rows` Drift table; that table was dropped in schema v52

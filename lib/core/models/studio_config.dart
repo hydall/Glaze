@@ -2,7 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import '../llm/studio/studio_context.dart';
+import 'card_rewriter_settings.dart';
+import 'cleaner_settings.dart';
 import 'ledger_prompt_injection_mode.dart';
+import 'ledger_settings.dart';
 
 part 'studio_config.freezed.dart';
 part 'studio_config.g.dart';
@@ -13,15 +16,38 @@ enum StudioBlockType { instruction, context, history, priorBriefs }
 /// Runtime extraction always uses [currentReconciled].
 enum StudioLedgerEngine { currentReconciled, legacyTurnOnly }
 
-/// Per-preset runtime metadata that is NOT duplicated by global
-/// [PipelineSettings]. Model overrides, sampling parameters, and cleaner /
-/// ledger settings live exclusively in [PipelineSettings] so the UI and the
-/// runtime read from the same source. [StudioRuntimeSettings] carries only
-/// fields that are genuinely per-preset.
+/// Per-preset runtime metadata.
+///
+/// The three post-processing lanes — Post Clean, Studio Ledger and Card
+/// Rewriter — are configured **per preset**: [cleaner], [ledger] and
+/// [cardRewriter] each hold that preset's own copy of the settings object
+/// otherwise found in the global [PipelineSettings].
+///
+/// All three are nullable, and null means *not configured on this preset*: the
+/// global value applies. That is what an install carries before it first edits
+/// a preset's lane, so nothing changes until the user touches a setting —
+/// `applyStudioPresetOverrides` (studio_pipeline_overrides.dart) is the single
+/// place that folds one over the other, and every runtime consumer reads the
+/// folded result rather than either source.
+///
+/// Everything else (the pre-generation controller and final-writer model
+/// overrides, MemoryBook) is still global and does not appear here.
 @freezed
 abstract class StudioRuntimeSettings with _$StudioRuntimeSettings {
   const factory StudioRuntimeSettings({
     @Default(1) int version,
+
+    /// This preset's Post Clean settings, or null to use the global ones.
+    CleanerSettings? cleaner,
+
+    /// This preset's Studio Ledger settings, or null to use the global ones.
+    LedgerSettings? ledger,
+
+    /// This preset's Card Rewriter settings, or null to use the global ones.
+    /// The lane's API slot and model override live inside it — unlike the
+    /// other stages, Card Rewriter has no `*ApiConfigId` column of its own on
+    /// [StudioPreset], because it was per-preset from the day it moved here.
+    CardRewriterSettings? cardRewriter,
     @Default([]) List<String> broadcastBlocks,
     @JsonKey(unknownEnumValue: StudioLedgerEngine.currentReconciled)
     @Default(StudioLedgerEngine.currentReconciled)

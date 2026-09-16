@@ -3,6 +3,7 @@ import '../models/pipeline_settings.dart';
 import '../models/ledger_prompt_injection_mode.dart';
 import '../models/ledger_prompt_injection_policy.dart';
 import '../models/studio_config.dart';
+import '../models/studio_pipeline_overrides.dart';
 import 'aux_llm_client.dart';
 import 'studio_slot_resolver.dart';
 
@@ -30,15 +31,32 @@ class StudioTurnConfigSnapshot {
                    mode: LedgerPromptInjectionMode.legacy,
                  )
                : deriveLedgerPromptInjectionPolicy(preset)),
-       pipelineSettings = config?.enabled == true && preset != null
-           ? pipelineSettings.copyWith(
-               cleaner: preset.agentEnabled['post_clean'] == false
-                   ? pipelineSettings.cleaner.copyWith(
-                       postCleanerEnabled: false,
-                     )
-                   : pipelineSettings.cleaner,
-             )
-           : pipelineSettings;
+       pipelineSettings = _resolvePipelineSettings(
+         globals: pipelineSettings,
+         config: config,
+         preset: preset,
+       );
+
+  /// The settings this turn actually runs on: the preset's own Post Clean /
+  /// Ledger / Card Rewriter settings folded over the globals, and then the
+  /// preset's agent toggles folded over that.
+  ///
+  /// Order matters. The toggle is what the preset editor's switch writes, so it
+  /// has to win over the lane's own `postCleanerEnabled` — otherwise turning
+  /// Post Clean off in the pipeline list would be undone by the preset's stored
+  /// cleaner settings.
+  static PipelineSettings _resolvePipelineSettings({
+    required PipelineSettings globals,
+    required StudioConfig? config,
+    required StudioPreset? preset,
+  }) {
+    final resolved = applyStudioPresetOverrides(globals, preset);
+    if (config?.enabled != true || preset == null) return resolved;
+    if (preset.agentEnabled['post_clean'] != false) return resolved;
+    return resolved.copyWith(
+      cleaner: resolved.cleaner.copyWith(postCleanerEnabled: false),
+    );
+  }
 
   bool get enabled => config != null && preset != null;
 

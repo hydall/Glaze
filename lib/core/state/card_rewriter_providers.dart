@@ -6,23 +6,40 @@ import '../../features/settings/api_list_provider.dart';
 import '../llm/card_rewrite_slot_resolver.dart';
 import '../llm/aux_llm_client.dart';
 import '../models/api_config.dart';
+import '../models/card_rewriter_settings.dart';
+import '../models/studio_pipeline_overrides.dart';
 import '../services/card_rewriter/manual_rewrite_service.dart';
 import '../services/card_rewriter/automated_card_evolution_service.dart';
+import 'active_studio_preset_provider.dart';
 import 'db_provider.dart';
 import 'studio_turn_config_resolver.dart';
+
+/// The Card Rewriter settings the lane actually runs on: the active Studio
+/// preset's own copy when it has one, the global settings otherwise.
+///
+/// Every reader — the services below, the Agent Ops management tab, the
+/// post-generation status card — goes through this, so the lane can never run
+/// on one preset's settings while the UI edits another's. While the preset is
+/// still loading the globals stand in; the services only call their closures
+/// once a turn has resolved its preset, so nothing runs on the stand-in.
+final cardRewriterSettingsProvider = Provider<CardRewriterSettings>((ref) {
+  return effectiveCardRewriterSettings(
+    ref.watch(pipelineSettingsProvider),
+    ref.watch(studioPresetProvider).value,
+  );
+});
 
 /// Phase-4B writer lane: the manual card-rewrite LLM orchestration service.
 ///
 /// Wired here (not in `db_provider.dart`) because model resolution reads
 /// `apiListProvider`, which itself imports `db_provider.dart`.
 ///
-/// Its dedicated API/model slot is persisted in the global Studio settings.
-/// It always fails explicitly when the selected API preset is absent; it never
-/// falls back to the active chat configuration.
+/// Its dedicated API/model slot is persisted on the active Studio preset (see
+/// [cardRewriterSettingsProvider]). It always fails explicitly when the
+/// selected API preset is absent; it never falls back to the active chat
+/// configuration.
 final manualRewriteServiceProvider = Provider<ManualRewriteService>((ref) {
-  final settings = ref.watch(
-    pipelineSettingsProvider.select((value) => value.cardRewriter),
-  );
+  final settings = ref.watch(cardRewriterSettingsProvider);
   final service = ManualRewriteService(
     db: ref.watch(appDbProvider),
     jobRepo: ref.watch(manualRewriteJobRepoProvider),
@@ -44,9 +61,7 @@ final manualRewriteServiceProvider = Provider<ManualRewriteService>((ref) {
 
 final automatedCardEvolutionServiceProvider =
     Provider<AutomatedCardEvolutionService>((ref) {
-      final settings = ref.watch(
-        pipelineSettingsProvider.select((value) => value.cardRewriter),
-      );
+      final settings = ref.watch(cardRewriterSettingsProvider);
       Future<AuxApiConfig> resolveModel() async {
         await ref.read(apiListProvider.future);
         final apiConfigs =
@@ -71,25 +86,16 @@ final automatedCardEvolutionServiceProvider =
         requestCaptureRepo: ref.watch(llmRequestCaptureRepoProvider),
         resolveModel: resolveModel,
         resolveCollectorModel: resolveCollectorModel,
-        isEnabled: () =>
-            ref.read(pipelineSettingsProvider).cardRewriter.enabled,
-        isLorebookEvolutionEnabled: () => ref
-            .read(pipelineSettingsProvider)
-            .cardRewriter
-            .lorebookEvolutionEnabled,
+        isEnabled: () => ref.read(cardRewriterSettingsProvider).enabled,
+        isLorebookEvolutionEnabled: () =>
+            ref.read(cardRewriterSettingsProvider).lorebookEvolutionEnabled,
         timeoutMs: settings.timeoutMs,
-        observationPromotionThreshold: () => ref
-            .read(pipelineSettingsProvider)
-            .cardRewriter
-            .observationPromotionThreshold,
-        observationMinConfidence: () => ref
-            .read(pipelineSettingsProvider)
-            .cardRewriter
-            .observationMinConfidence,
-        observationExpiryRuns: () => ref
-            .read(pipelineSettingsProvider)
-            .cardRewriter
-            .observationExpiryRuns,
+        observationPromotionThreshold: () =>
+            ref.read(cardRewriterSettingsProvider).observationPromotionThreshold,
+        observationMinConfidence: () =>
+            ref.read(cardRewriterSettingsProvider).observationMinConfidence,
+        observationExpiryRuns: () =>
+            ref.read(cardRewriterSettingsProvider).observationExpiryRuns,
         executor:
             ({
               required config,
