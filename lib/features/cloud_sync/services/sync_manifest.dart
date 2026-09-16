@@ -77,7 +77,10 @@ class SyncManifestBuilder implements SyncManifestProvider {
   /// [cloudManifest] — when pulling, used to avoid bumping updatedAt to now for
   /// entities that only differ from a stale local manifest but match cloud.
   @override
-  Future<SyncManifest> buildLocalManifest({SyncManifest? cloudManifest}) async {
+  Future<SyncManifest> buildLocalManifest({
+    SyncManifest? cloudManifest,
+    bool applyAcceptedHashes = true,
+  }) async {
     final deviceId = await getDeviceId();
     final now = DateTime.now().millisecondsSinceEpoch;
     final entries = <String, SyncManifestEntry>{};
@@ -509,11 +512,27 @@ class SyncManifestBuilder implements SyncManifestProvider {
     await _addSingletons(entries, previous, now, cloudManifest);
     await _addDeletedEntries(entries, now);
 
+    final acceptedLocalHashes = <String, String>{};
+    if (applyAcceptedHashes) {
+      for (final accepted in previous.acceptedLocalHashes.entries) {
+        final entry = entries[accepted.key];
+        final previousEntry = previous.entries[accepted.key];
+        if (entry == null ||
+            previousEntry == null ||
+            entry.hash != accepted.value) {
+          continue;
+        }
+        entries[accepted.key] = previousEntry;
+        acceptedLocalHashes[accepted.key] = accepted.value;
+      }
+    }
+
     return SyncManifest(
       deviceId: deviceId,
       createdAt: previous.createdAt,
       lastSync: previous.lastSync,
       entries: entries,
+      acceptedLocalHashes: acceptedLocalHashes,
     );
   }
 
@@ -591,7 +610,8 @@ class SyncManifestBuilder implements SyncManifestProvider {
   ) async {
     final singletons = <String, dynamic>{};
 
-    final lorebooks = await _lorebookRepo.getAll();
+    final lorebooks = await _lorebookRepo.getAll()
+      ..sort((a, b) => a.id.compareTo(b.id));
     singletons['lorebooks'] = lorebooks.map((l) => l.toJson()).toList();
 
     final apiConfigs = await _apiRepo.getAll();

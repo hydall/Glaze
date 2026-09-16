@@ -48,6 +48,7 @@ abstract class SyncLorebookStore {
   Future<List<Lorebook>> getAll();
   Future<Lorebook?> getById(String id);
   Future<void> put(Lorebook l);
+  Future<void> putAll(List<Lorebook> lorebooks);
   Future<void> delete(String id);
 }
 

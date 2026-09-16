@@ -34,6 +34,7 @@ class LorebookRepo implements SyncLorebookStore {
   /// Writes [lorebooks] in a single batch — one reactive emission instead of
   /// one per book. Used by the mass character import, where every card can
   /// carry an embedded character book.
+  @override
   Future<void> putAll(List<Lorebook> lorebooks) async {
     if (lorebooks.isEmpty) return;
     final companions = lorebooks.map(_toCompanion).toList();

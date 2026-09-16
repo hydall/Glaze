@@ -286,7 +286,9 @@ class SyncEngine {
       entries: cleanedEntries,
       apiKeysIncluded: _includeApiKeys,
     );
-    final manifestJson = jsonEncode(updatedManifest.toJson());
+    final manifestJson = jsonEncode(
+      updatedManifest.toJson(includeLocalState: false),
+    );
     await _adapter.upload(cloudPath('manifest', 'manifest'), manifestJson);
     await _manifestBuilder.writeLocalManifest(updatedManifest);
     await _manifestBuilder.clearDeleted();
@@ -624,12 +626,29 @@ class SyncEngine {
   }) async {
     final rebuilt = await _manifestBuilder.buildLocalManifest(
       cloudManifest: cloudManifest,
+      applyAcceptedHashes: false,
     );
     final entries = Map<String, SyncManifestEntry>.from(rebuilt.entries);
+    final acceptedLocalHashes = <String, String>{};
+
+    for (final accepted in localManifest.acceptedLocalHashes.entries) {
+      final rebuiltEntry = rebuilt.entries[accepted.key];
+      final baselineEntry = localManifest.entries[accepted.key];
+      if (rebuiltEntry == null ||
+          baselineEntry == null ||
+          rebuiltEntry.hash != accepted.value) {
+        continue;
+      }
+      entries[accepted.key] = baselineEntry;
+      acceptedLocalHashes[accepted.key] = accepted.value;
+    }
     for (final entry in acceptedCloudEntries) {
-      if (entry.type == 'reconciliation_state' ||
-          entry.type == 'session_lorebook_overlays') {
-        entries[entry.key] = entry;
+      final rebuiltEntry = rebuilt.entries[entry.key];
+      entries[entry.key] = entry;
+      if (rebuiltEntry != null && rebuiltEntry.hash != entry.hash) {
+        acceptedLocalHashes[entry.key] = rebuiltEntry.hash;
+      } else {
+        acceptedLocalHashes.remove(entry.key);
       }
     }
     await _manifestBuilder.writeLocalManifest(
@@ -639,6 +658,7 @@ class SyncEngine {
             : rebuilt.createdAt,
         lastSync: DateTime.now().millisecondsSinceEpoch,
         entries: entries,
+        acceptedLocalHashes: acceptedLocalHashes,
       ),
     );
     await _manifestBuilder.clearDeleted();
@@ -904,7 +924,8 @@ class SyncEngine {
           if (mb == null) return null;
           return mb.toJson();
         case 'lorebooks':
-          final all = await _lorebookRepo.getAll();
+          final all = await _lorebookRepo.getAll()
+            ..sort((a, b) => a.id.compareTo(b.id));
           return {
             '__singleton': true,
             'items': all.map((l) => l.toJson()).toList(),
@@ -1085,6 +1106,8 @@ class SyncEngine {
       }
     } catch (_) {
       if (type == 'chat' ||
+          type == 'lorebooks' ||
+          type == 'extension_preset' ||
           type == 'tracker_snapshot' ||
           type == 'tracker_value' ||
           type == 'reconciliation_state' ||
@@ -1256,22 +1279,16 @@ class SyncEngine {
       }
     }
 
-    // Upsert all cloud lorebooks.
-    for (final lb in parsed) {
-      await _lorebookRepo.put(lb);
-    }
+    await _lorebookRepo.putAll(parsed);
 
-    // Rebuild lorebookActivations prefs from the DB truth so that the
-    // connections UI and the scanner use consistent data across devices.
-    await _rebuildLorebookActivationsPrefs();
+    await _rebuildLorebookActivationsPrefs(parsed);
   }
 
   /// Reads all lorebooks from the DB and rewrites the `lorebookActivations`
   /// SharedPreferences key from their activationScope / activationTargetId
   /// fields. Called after a lorebook pull to eliminate stale prefs that would
   /// otherwise show phantom character/chat connections in the UI.
-  Future<void> _rebuildLorebookActivationsPrefs() async {
-    final all = await _lorebookRepo.getAll();
+  Future<void> _rebuildLorebookActivationsPrefs(List<Lorebook> all) async {
     final charMap = <String, List<String>>{};
     final chatMap = <String, List<String>>{};
     for (final lb in all) {

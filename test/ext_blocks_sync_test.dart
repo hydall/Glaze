@@ -16,8 +16,10 @@ import 'package:glaze_flutter/core/utils/sync_deletion_tracker.dart';
 import 'package:glaze_flutter/core/application/session_deletion_store.dart';
 import 'package:glaze_flutter/core/application/character_deletion_store.dart';
 import 'package:glaze_flutter/features/cloud_sync/cloud_adapter.dart';
+import 'package:glaze_flutter/features/cloud_sync/services/sync_conflict.dart';
 import 'package:glaze_flutter/features/cloud_sync/services/sync_engine.dart';
 import 'package:glaze_flutter/features/cloud_sync/services/sync_manifest.dart';
+import 'package:glaze_flutter/features/cloud_sync/services/sync_serialization.dart';
 import 'package:glaze_flutter/features/cloud_sync/sync_models.dart';
 import 'package:glaze_flutter/features/extensions/models/block_config.dart';
 import 'package:glaze_flutter/features/extensions/models/block_run_status.dart';
@@ -174,6 +176,13 @@ class FakeLorebookStore implements SyncLorebookStore {
   }
 
   @override
+  Future<void> putAll(List<Lorebook> lorebooks) async {
+    for (final lorebook in lorebooks) {
+      data[lorebook.id] = lorebook;
+    }
+  }
+
+  @override
   Future<void> delete(String id) async {
     data.remove(id);
   }
@@ -281,6 +290,7 @@ class FakeTrackerSnapshotStore implements SyncTrackerSnapshotStore {
 
 class FakeTrackerValueStore implements SyncTrackerValueStore {
   final Map<String, List<Map<String, dynamic>>> data = {};
+  Map<String, dynamic>? preservedOnDelete;
 
   @override
   Future<List<String>> getAllSessionIds() async => data.keys.toList();
@@ -292,6 +302,9 @@ class FakeTrackerValueStore implements SyncTrackerValueStore {
   @override
   Future<void> deleteBySessionId(String sessionId) async {
     data.remove(sessionId);
+    if (preservedOnDelete case final preserved?) {
+      data[sessionId] = [Map<String, dynamic>.from(preserved)];
+    }
   }
 
   @override
@@ -416,7 +429,10 @@ class InMemoryManifestProvider implements SyncManifestProvider {
        );
 
   @override
-  Future<SyncManifest> buildLocalManifest({SyncManifest? cloudManifest}) async {
+  Future<SyncManifest> buildLocalManifest({
+    SyncManifest? cloudManifest,
+    bool applyAcceptedHashes = true,
+  }) async {
     final raw = _storage['manifest'];
     final prefs = await SharedPreferences.getInstance();
     if (raw != null) {
@@ -424,7 +440,10 @@ class InMemoryManifestProvider implements SyncManifestProvider {
     } else {
       await prefs.remove('gz_sync_manifest_v2');
     }
-    return _builder.buildLocalManifest(cloudManifest: cloudManifest);
+    return _builder.buildLocalManifest(
+      cloudManifest: cloudManifest,
+      applyAcceptedHashes: applyAcceptedHashes,
+    );
   }
 
   @override
@@ -647,6 +666,65 @@ void main() {
     );
   });
 
+  test('normalized Tracker Values do not repeat on the next pull', () async {
+    final source = SyncWorld();
+    source.trackerValues.data['session-1'] = [
+      {
+        'sessionId': 'session-1',
+        'name': 'scene',
+        'value': 'cloud',
+        'scope': 'chat',
+        'provenance': 'studio_ledger',
+        'updatedAt': 1234,
+      },
+    ];
+    await source.engine.pushEntities(onProgress: (_) {});
+
+    final target = SyncWorld();
+    target.cloud.files.addAll(source.cloud.files);
+    target.trackerValues.preservedOnDelete = {
+      'sessionId': 'session-1',
+      'name': '__ledger_manual_mutation_revision_v1',
+      'value': '7',
+      'scope': 'chat',
+      'provenance': 'system',
+      'updatedAt': 1235,
+    };
+
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+    final conflicts = <SyncConflict>[];
+    final progress = <SyncProgress>[];
+    await target.engine.pullEntities(
+      onProgress: progress.add,
+      onConflict: conflicts.add,
+    );
+
+    expect(conflicts, isEmpty);
+    expect(progress.any((item) => item.message == 'Nothing to pull'), isTrue);
+    final acceptedManifest = await target.manifestProvider.readLocalManifest();
+
+    target.trackerValues.data['session-1']!.add({
+      'sessionId': 'session-1',
+      'name': 'local-edit',
+      'value': 'changed after pull',
+      'scope': 'chat',
+      'provenance': 'manual',
+      'updatedAt': DateTime.now().millisecondsSinceEpoch + 1000,
+    });
+    final changedManifest = await target.manifestProvider.buildLocalManifest(
+      cloudManifest: SyncManifest.fromJson(
+        jsonDecode(target.cloud.files[cloudPath('manifest', 'manifest')]!)
+            as Map<String, dynamic>,
+      ),
+    );
+    expect(
+      changedManifest.entries[entryKey('tracker_value', 'session-1')]?.hash,
+      isNot(
+        acceptedManifest.entries[entryKey('tracker_value', 'session-1')]?.hash,
+      ),
+    );
+  });
+
   // ── Test 2: ExtensionPreset push/pull round-trip ─────────────────────
   test('ExtensionPreset push/pull round-trip preserves data', () async {
     final deviceA = SyncWorld();
@@ -685,6 +763,50 @@ void main() {
       deviceB.extensionPresets.data['ep1']!.blocks.first.contextMessageCount,
       -1,
     );
+  });
+
+  test('migrated ExtensionPreset does not repeat on the next pull', () async {
+    final source = SyncWorld();
+    await source.extensionPresets.put(makeExtPresetWithBlock('legacy'));
+    await source.engine.pushEntities(onProgress: (_) {});
+
+    final path = cloudPath('extension_preset', 'legacy');
+    final legacyJson =
+        jsonDecode(source.cloud.files[path]!) as Map<String, dynamic>;
+    final blocks = (legacyJson['blocks'] as List).cast<Map<String, dynamic>>();
+    blocks.single.remove('contextPolicy');
+    legacyJson['messageCount'] = 9;
+    final manifestPath = cloudPath('manifest', 'manifest');
+    final manifest = SyncManifest.fromJson(
+      jsonDecode(source.cloud.files[manifestPath]!) as Map<String, dynamic>,
+    );
+    final key = entryKey('extension_preset', 'legacy');
+    source.cloud.files[path] = jsonEncode(legacyJson);
+    source.cloud.files[manifestPath] = jsonEncode(
+      manifest
+          .copyWith(
+            entries: {
+              ...manifest.entries,
+              key: manifest.entries[key]!.copyWith(
+                hash: SyncSerialization.computeSyncHash(legacyJson),
+              ),
+            },
+          )
+          .toJson(includeLocalState: false),
+    );
+
+    final target = SyncWorld();
+    target.cloud.files.addAll(source.cloud.files);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+    final conflicts = <SyncConflict>[];
+    final progress = <SyncProgress>[];
+    await target.engine.pullEntities(
+      onProgress: progress.add,
+      onConflict: conflicts.add,
+    );
+
+    expect(conflicts, isEmpty);
+    expect(progress.any((item) => item.message == 'Nothing to pull'), isTrue);
   });
 
   // ── Test 3: ExtensionPreset deletion tracking ─────────────────────────

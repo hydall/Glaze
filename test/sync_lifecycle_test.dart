@@ -222,6 +222,13 @@ class FakeLorebookStore implements SyncLorebookStore {
   }
 
   @override
+  Future<void> putAll(List<Lorebook> lorebooks) async {
+    for (final lorebook in lorebooks) {
+      data[lorebook.id] = lorebook;
+    }
+  }
+
+  @override
   Future<void> delete(String id) async {
     data.remove(id);
   }
@@ -605,7 +612,10 @@ class InMemoryManifestProvider implements SyncManifestProvider {
        );
 
   @override
-  Future<SyncManifest> buildLocalManifest({SyncManifest? cloudManifest}) async {
+  Future<SyncManifest> buildLocalManifest({
+    SyncManifest? cloudManifest,
+    bool applyAcceptedHashes = true,
+  }) async {
     // Sync in-memory storage → SharedPreferences so the builder's
     // readLocalManifest() sees the same manifest the tests wrote.
     final raw = _storage['manifest'];
@@ -615,7 +625,10 @@ class InMemoryManifestProvider implements SyncManifestProvider {
     } else {
       await prefs.remove('gz_sync_manifest_v2');
     }
-    return _builder.buildLocalManifest(cloudManifest: cloudManifest);
+    return _builder.buildLocalManifest(
+      cloudManifest: cloudManifest,
+      applyAcceptedHashes: applyAcceptedHashes,
+    );
   }
 
   @override
@@ -845,6 +858,71 @@ void main() {
       progressList.firstWhere(
         (p) => p.total > 0 || p.message?.contains('Nothing to push') == true,
       );
+
+  test('lorebook singleton hash is independent of repository order', () async {
+    final first = SyncWorld();
+    first.lorebooks.data['b'] = makeLorebook('b');
+    first.lorebooks.data['a'] = makeLorebook('a');
+    final second = SyncWorld();
+    second.lorebooks.data['a'] = makeLorebook('a');
+    second.lorebooks.data['b'] = makeLorebook('b');
+
+    final firstManifest = await first.manifestProvider.buildLocalManifest();
+    final secondManifest = await second.manifestProvider.buildLocalManifest();
+
+    expect(
+      firstManifest.entries[entryKey('lorebooks', 'lorebooks')]?.hash,
+      secondManifest.entries[entryKey('lorebooks', 'lorebooks')]?.hash,
+    );
+  });
+
+  test('legacy lorebook defaults do not repeat on the next pull', () async {
+    final source = SyncWorld();
+    source.lorebooks.data['book'] = makeLorebook(
+      'book',
+    ).copyWith(settings: const LorebookSettings());
+    await source.engine.pushEntities(onProgress: (_) {});
+
+    final lorebookPath = cloudPath('lorebooks', 'lorebooks');
+    final cloudData =
+        jsonDecode(source.cloud.files[lorebookPath]!) as Map<String, dynamic>;
+    final items = (cloudData['items'] as List).cast<Map<String, dynamic>>();
+    final settings = items.single['settings'] as Map<String, dynamic>;
+    settings.remove('vectorizeAllEntries');
+    final manifestPath = cloudPath('manifest', 'manifest');
+    final manifest = SyncManifest.fromJson(
+      jsonDecode(source.cloud.files[manifestPath]!) as Map<String, dynamic>,
+    );
+    final key = entryKey('lorebooks', 'lorebooks');
+    source.cloud.files[lorebookPath] = jsonEncode(cloudData);
+    source.cloud.files[manifestPath] = jsonEncode(
+      manifest
+          .copyWith(
+            entries: {
+              ...manifest.entries,
+              key: manifest.entries[key]!.copyWith(
+                hash: SyncSerialization.computeSyncHash(items),
+              ),
+            },
+          )
+          .toJson(includeLocalState: false),
+    );
+
+    final target = SyncWorld();
+    target.cloud.files.addAll(source.cloud.files);
+    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+    target.cloud.downloadCalls.clear();
+    final conflicts = <SyncConflict>[];
+    final progress = <SyncProgress>[];
+    await target.engine.pullEntities(
+      onProgress: progress.add,
+      onConflict: conflicts.add,
+    );
+
+    expect(conflicts, isEmpty);
+    expect(progress.any((item) => item.message == 'Nothing to pull'), isTrue);
+    expect(target.cloud.downloadCalls, [manifestPath]);
+  });
 
   test('pull applies chat before its reconciliation state', () async {
     final reconciliationStates = FakeReconciliationStateStore();

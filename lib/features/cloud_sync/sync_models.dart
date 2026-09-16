@@ -118,6 +118,13 @@ class SyncManifest {
   final int createdAt;
   final Map<String, SyncManifestEntry> entries;
 
+  /// Local canonical hashes recorded when a cloud payload was accepted.
+  ///
+  /// A pulled payload can normalize while being decoded or reconciled. The
+  /// cloud hash remains the sync baseline, while this map identifies the
+  /// unchanged local representation produced by that pull.
+  final Map<String, String> acceptedLocalHashes;
+
   /// Whether the last cloud push included API/embedding keys in api_presets.
   final bool apiKeysIncluded;
 
@@ -127,6 +134,7 @@ class SyncManifest {
     this.lastSync,
     required this.createdAt,
     this.entries = const {},
+    this.acceptedLocalHashes = const {},
     this.apiKeysIncluded = false,
   });
 
@@ -136,6 +144,7 @@ class SyncManifest {
     int? lastSync,
     int? createdAt,
     Map<String, SyncManifestEntry>? entries,
+    Map<String, String>? acceptedLocalHashes,
     bool? apiKeysIncluded,
   }) => SyncManifest(
     version: version ?? this.version,
@@ -143,16 +152,19 @@ class SyncManifest {
     lastSync: lastSync ?? this.lastSync,
     createdAt: createdAt ?? this.createdAt,
     entries: entries ?? this.entries,
+    acceptedLocalHashes: acceptedLocalHashes ?? this.acceptedLocalHashes,
     apiKeysIncluded: apiKeysIncluded ?? this.apiKeysIncluded,
   );
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toJson({bool includeLocalState = true}) => {
     'version': version,
     'deviceId': deviceId,
     'lastSync': lastSync,
     'createdAt': createdAt,
     'apiKeysIncluded': apiKeysIncluded,
     'entries': entries.map((k, v) => MapEntry(k, v.toJson())),
+    if (includeLocalState && acceptedLocalHashes.isNotEmpty)
+      'acceptedLocalHashes': acceptedLocalHashes,
   };
 
   factory SyncManifest.fromJson(Map<String, dynamic> m) => SyncManifest(
@@ -162,6 +174,11 @@ class SyncManifest {
     createdAt: m['createdAt'] as int? ?? DateTime.now().millisecondsSinceEpoch,
     apiKeysIncluded: m['apiKeysIncluded'] as bool? ?? false,
     entries: _parseEntries(m['entries'] as Map<String, dynamic>?),
+    acceptedLocalHashes:
+        (m['acceptedLocalHashes'] as Map<String, dynamic>?)?.map(
+          (key, value) => MapEntry(key, value as String),
+        ) ??
+        const {},
   );
 
   static Map<String, SyncManifestEntry> _parseEntries(Map<String, dynamic>? m) {

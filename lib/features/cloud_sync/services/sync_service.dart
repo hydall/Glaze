@@ -73,6 +73,7 @@ class SyncService {
   bool get autoSyncEnabled => _autoSyncEnabled;
   int get autoSyncMessageCount => _autoSyncMessageCount;
   bool get isSyncing => _status == SyncStatus.syncing;
+  bool get operationInProgress => _operationInProgress;
   bool get hasConflicts => _conflicts.isNotEmpty;
 
   String? get gdriveFolderId {
@@ -345,6 +346,55 @@ class SyncService {
     }
   }
 
+  Future<void> resolveAllConflictsAndApply(
+    String choice, {
+    required void Function(SyncProgress) onProgress,
+  }) async {
+    if (_operationInProgress) {
+      throw StateError('Sync operation already in progress');
+    }
+    _operationInProgress = true;
+    try {
+      await _withSyncForeground(() async {
+        _status = SyncStatus.syncing;
+        _lastError = null;
+        final conflicts = List<SyncConflict>.from(_conflicts);
+        if (choice == 'cloud') {
+          _resolvedAsCloud.addAll(
+            conflicts
+                .map((conflict) => conflict.key)
+                .where((key) => !_resolvedAsCloud.contains(key)),
+          );
+        } else {
+          _resolvedAsLocal = true;
+        }
+        _conflicts.clear();
+
+        try {
+          await _engine.applyPendingPull(
+            onProgress: onProgress,
+            resolvedAsCloud: _resolvedAsCloud.isNotEmpty
+                ? List.from(_resolvedAsCloud)
+                : null,
+            pushLocalChanges: _resolvedAsLocal,
+          );
+          _resolvedAsCloud.clear();
+          _resolvedAsLocal = false;
+          _lastSyncTime = DateTime.now().millisecondsSinceEpoch;
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setInt('gz_sync_last', _lastSyncTime!);
+          _status = SyncStatus.idle;
+        } catch (e) {
+          _lastError = e.toString();
+          _status = SyncStatus.error;
+          rethrow;
+        }
+      });
+    } finally {
+      _operationInProgress = false;
+    }
+  }
+
   /// Records the conflict resolution choice (updates manifest, tracks
   /// cloud-resolved keys). Does NOT trigger a pull — call [applyPendingPull]
   /// once all conflicts have been resolved.
@@ -461,6 +511,12 @@ class SyncService {
       _messageCounter = 0;
       await fullPush();
     }
+  }
+
+  Future<bool> tryAutoPush() async {
+    if (_operationInProgress || hasConflicts || !isConnected()) return false;
+    await fullPush();
+    return true;
   }
 
   bool isConnected() {

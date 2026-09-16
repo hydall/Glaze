@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
@@ -97,9 +99,7 @@ void notifySyncMessageGenerated(Ref ref) {
     ref.read(autoSyncMessageCounterProvider.notifier).state = 0;
     final syncAsync = ref.read(syncServiceProvider);
     syncAsync.whenData((service) {
-      if (service.isConnected()) {
-        service.fullPush();
-      }
+      unawaited(service.tryAutoPush().catchError((_) => false));
     });
   }
 }

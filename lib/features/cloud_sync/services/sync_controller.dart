@@ -40,6 +40,7 @@ class SyncController {
   bool _isConnectingGdrive = false;
   bool _isDisconnecting = false;
   bool _isWiping = false;
+  bool _isResolvingConflicts = false;
   Map<String, dynamic>? _syncResult;
   bool _syncIncludeApiKeys = false;
   String? _gdriveFolderId;
@@ -50,6 +51,7 @@ class SyncController {
   bool get isConnectingGdrive => _isConnectingGdrive;
   bool get isDisconnecting => _isDisconnecting;
   bool get isWiping => _isWiping;
+  bool get isResolvingConflicts => _isResolvingConflicts;
   Map<String, dynamic>? get syncResult => _syncResult;
   bool get syncIncludeApiKeys => _syncIncludeApiKeys;
   String? get gdriveFolderId => _gdriveFolderId;
@@ -296,29 +298,34 @@ class SyncController {
   }
 
   Future<String?> resolveAllConflicts(String choice) async {
+    if (_isResolvingConflicts) return null;
     final service = _ref.read(syncServiceProvider).value;
     if (service == null) return null;
     final conflictsNotifier = _ref.read(syncConflictsProvider.notifier);
     final errorNotifier = _ref.read(syncLastErrorProvider.notifier);
     final statusNotifier = _ref.read(syncStatusProvider.notifier);
     final progressNotifier = _ref.read(syncProgressProvider.notifier);
+    _isResolvingConflicts = true;
     // Optimistically clear all conflict rows immediately.
     conflictsNotifier.state = [];
     statusNotifier.state = SyncStatus.syncing;
     try {
-      await service.resolveAllConflicts(choice);
-      conflictsNotifier.state = List.from(service.conflicts);
-      return await _applyPendingPullAndFinalize(
-        service,
-        setStatus: (value) => statusNotifier.state = value,
-        setProgress: (value) => progressNotifier.state = value,
-        setError: (value) => errorNotifier.state = value,
+      await service.resolveAllConflictsAndApply(
+        choice,
+        onProgress: (value) => progressNotifier.state = value,
       );
+      conflictsNotifier.state = List.from(service.conflicts);
+      if (isMounted()) await refreshDataProvidersAfterPull();
+      return 'Sync complete';
     } catch (e) {
       errorNotifier.state = e.toString();
       conflictsNotifier.state = List.from(service.conflicts);
       statusNotifier.state = service.status;
       return 'Could not resolve conflicts: $e';
+    } finally {
+      _isResolvingConflicts = false;
+      statusNotifier.state = service.status;
+      progressNotifier.state = null;
     }
   }
 
