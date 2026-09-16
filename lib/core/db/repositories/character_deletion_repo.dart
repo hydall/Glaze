@@ -18,7 +18,7 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
         characterIds: {},
         sessionIds: {},
         studioConfigSessionIds: {},
-        lorebookIds: {},
+        detachedLorebookIds: {},
       );
     }
 
@@ -57,19 +57,19 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
                 .getSingleOrNull();
         if (sibling != null) retainedVariantGroups.add(groupId);
       }
-      final deletedLorebookTargets = ids
+      final orphanedLorebookTargets = ids
           .where((id) => !retainedVariantGroups.contains(id))
           .toList();
 
-      final lorebooks = deletedLorebookTargets.isEmpty
+      final lorebooks = orphanedLorebookTargets.isEmpty
           ? const <LorebookRow>[]
           : await (_db.select(_db.lorebooks)..where(
                   (row) =>
                       row.activationScope.equals('character') &
-                      row.activationTargetId.isIn(deletedLorebookTargets),
+                      row.activationTargetId.isIn(orphanedLorebookTargets),
                 ))
                 .get();
-      final lorebookIds = lorebooks.map((row) => row.lorebookId).toSet();
+      final detachedLorebookIds = lorebooks.map((row) => row.lorebookId).toSet();
 
       final sessionDeletion = SessionDeletionQueries(_db);
       for (final sessionId in sessionIds) {
@@ -80,16 +80,21 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
       // character-owned rewrite/transition here, children before parents.
       await _deleteCharacterRewriteProvenance(ids);
 
-      if (lorebookIds.isNotEmpty) {
-        await (_db.delete(_db.embeddings)..where(
-              (row) =>
-                  row.sourceType.equals('lorebook_entry') &
-                  row.sourceId.isIn(lorebookIds),
+      // A lorebook outlives the character it was connected to. Deleting the
+      // card must not take the world with it, so the book is detached back to
+      // global scope — entries, settings and embeddings all stay intact and the
+      // user can re-connect it to another character.
+      if (detachedLorebookIds.isNotEmpty) {
+        await (_db.update(_db.lorebooks)..where(
+              (row) => row.lorebookId.isIn(detachedLorebookIds),
             ))
-            .go();
-        await (_db.delete(
-          _db.lorebooks,
-        )..where((row) => row.lorebookId.isIn(lorebookIds))).go();
+            .write(
+              LorebooksCompanion(
+                activationScope: const Value('global'),
+                activationTargetId: const Value(null),
+                updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+              ),
+            );
       }
       await (_db.delete(
         _db.characterRevisionRows,
@@ -124,7 +129,7 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
         characterIds: characterIds,
         sessionIds: sessionIds,
         studioConfigSessionIds: studioConfigSessionIds,
-        lorebookIds: lorebookIds,
+        detachedLorebookIds: detachedLorebookIds,
       );
     });
   }

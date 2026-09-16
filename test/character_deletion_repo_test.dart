@@ -58,9 +58,49 @@ void main() {
     expect(result.characterIds, {'target'});
     expect(result.sessionIds, {'target-session'});
     expect(result.studioConfigSessionIds, {'target-session'});
-    expect(result.lorebookIds, {'target-lorebook'});
+    expect(result.detachedLorebookIds, {'target-lorebook'});
     await _expectCharacterCount(db, 'target', 'target-session', 0);
     await _expectCharacterCount(db, 'control', 'control-session', 1);
+  });
+
+  test('keeps the connected lorebook and detaches it to global', () async {
+    await _seedCharacter(db, 'target', sessionId: 'target-session');
+
+    final result = await repo.deleteCharacters({'target'});
+
+    expect(result.detachedLorebookIds, {'target-lorebook'});
+    final lorebook = await (db.select(
+      db.lorebooks,
+    )..where((row) => row.lorebookId.equals('target-lorebook'))).getSingle();
+    expect(lorebook.activationScope, 'global');
+    expect(lorebook.activationTargetId, isNull);
+    expect(lorebook.entriesJson, '[]');
+    expect(lorebook.updatedAt, greaterThan(0));
+
+    // The book survives, so its embeddings stay valid too.
+    final embeddings = await db
+        .customSelect(
+          "SELECT COUNT(*) AS count FROM embeddings "
+          "WHERE source_type = 'lorebook_entry' AND source_id = 'target-lorebook'",
+        )
+        .getSingle();
+    expect(embeddings.read<int>('count'), 1);
+  });
+
+  test('detaches every orphaned character lorebook in a bulk delete', () async {
+    await _seedCharacter(db, 'first', sessionId: 'first-session');
+    await _seedCharacter(db, 'second', sessionId: 'second-session');
+
+    final result = await repo.deleteCharacters({'first', 'second'});
+
+    expect(result.detachedLorebookIds, {'first-lorebook', 'second-lorebook'});
+    final remaining = await (db.select(db.lorebooks)
+          ..where((row) => row.activationScope.equals('global')))
+        .get();
+    expect(
+      remaining.map((row) => row.lorebookId).toSet(),
+      {'first-lorebook', 'second-lorebook'},
+    );
   });
 
   test(
@@ -97,7 +137,7 @@ void main() {
     expect(remaining.variantOrder, 0);
   });
 
-  test('deleting the group representative preserves a shared lorebook', () async {
+  test('deleting the group representative keeps a shared lorebook attached', () async {
     await db.customStatement(
       "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('cover', 'cover', 'cover', 0)",
     );
@@ -110,13 +150,12 @@ void main() {
 
     final result = await repo.deleteCharacters({'cover'});
 
-    expect(result.lorebookIds, isEmpty);
-    expect(
-      await (db.select(
-        db.lorebooks,
-      )..where((row) => row.lorebookId.equals('shared'))).getSingleOrNull(),
-      isNot(equals(null)),
-    );
+    expect(result.detachedLorebookIds, isEmpty);
+    final shared = await (db.select(
+      db.lorebooks,
+    )..where((row) => row.lorebookId.equals('shared'))).getSingle();
+    expect(shared.activationScope, 'character');
+    expect(shared.activationTargetId, 'cover');
   });
 
   test(
@@ -269,11 +308,6 @@ Future<void> _expectCharacterCount(
       sessionId,
     ),
     ('embeddings', "source_type = 'chat_message' AND source_id = ?", sessionId),
-    (
-      'embeddings',
-      "source_type = 'lorebook_entry' AND source_id = ?",
-      '$characterId-lorebook',
-    ),
     (
       'embeddings',
       "source_type = 'lorebook_entry' AND source_id = ?",

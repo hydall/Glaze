@@ -91,7 +91,7 @@ class FakeCharacterDeletionStore implements CharacterDeletionStore {
       characterIds: characterIds,
       sessionIds: const {},
       studioConfigSessionIds: const {},
-      lorebookIds: const {},
+      detachedLorebookIds: const {},
     );
   }
 }

@@ -476,16 +476,17 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
         await SyncDeletionTracker.record('studio_config', sid);
       }
     }
-    for (final lorebookId in result.lorebookIds) {
-      await SyncDeletionTracker.record('lorebooks', lorebookId);
-    }
     for (final id in result.characterIds) {
       await SyncDeletionTracker.record('character', id);
     }
+    // Lorebooks are never tombstoned here: the books the deleted characters
+    // were connected to survive as global books (see `CharacterDeletionRepo`)
+    // and travel to the cloud as a normal update of the lorebook collection.
 
     final activations = ref.read(lorebookActivationsProvider);
+    var cleaned = activations;
     if (result.characterIds.any(activations.character.containsKey)) {
-      final cleaned = LorebookActivations(
+      cleaned = LorebookActivations(
         character: {
           for (final entry in activations.character.entries)
             if (!result.characterIds.contains(entry.key))
@@ -496,9 +497,47 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
       ref.read(lorebookActivationsProvider.notifier).state = cleaned;
       await saveLorebookActivations(cleaned);
     }
+    await _rebindDetachedLorebooks(result.detachedLorebookIds, cleaned);
+    if (result.detachedLorebookIds.isNotEmpty) {
+      ref.invalidate(lorebooksProvider);
+    }
 
     for (final character in characters) {
       await _cleanupFiles(character);
+    }
+  }
+
+  /// Re-points books the deletion detached (`activationScope: 'global'`) back
+  /// at a character that is still connected to them through the activation map.
+  ///
+  /// The scope/target columns are a denormalised mirror of that map, so a book
+  /// linked to several characters must keep pointing at one of the survivors
+  /// instead of falling back to global. A book with no survivor left stays
+  /// global — detached, fully intact, and ready to be connected again.
+  Future<void> _rebindDetachedLorebooks(
+    Set<String> detachedLorebookIds,
+    LorebookActivations activations,
+  ) async {
+    if (detachedLorebookIds.isEmpty) return;
+    final repo = ref.read(lorebookRepoProvider);
+    for (final lorebookId in detachedLorebookIds) {
+      String? survivor;
+      for (final entry in activations.character.entries) {
+        if (entry.value.contains(lorebookId)) {
+          survivor = entry.key;
+          break;
+        }
+      }
+      if (survivor == null) continue;
+      final lorebook = await repo.getById(lorebookId);
+      if (lorebook == null) continue;
+      await repo.put(
+        lorebook.copyWith(
+          activationScope: 'character',
+          activationTargetId: survivor,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
     }
   }
 

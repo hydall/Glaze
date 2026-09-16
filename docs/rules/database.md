@@ -314,9 +314,21 @@ The session cascade removes MemoryBook state, Memory Catalog/Graph rows, live
 trackers and snapshots, reconciliation checkpoints/journals, character
 knowledge, summaries, InfoBlocks, chat/message-memory embeddings, session
 baseline, Studio config, chat-scoped lorebooks and their embeddings, and the
-chat row. Character deletion additionally removes character-scoped lorebooks
-and embeddings, folder memberships, character rows, and promotes a remaining
-variation representative when required.
+chat row. Character deletion additionally removes folder memberships, character
+rows, and promotes a remaining variation representative when required.
+
+**A lorebook outlives the character it was connected to.** Deleting a character
+never deletes the books connected to it: every `activation_scope = 'character'`
+book whose target no longer exists is rewritten to `activation_scope = 'global'`
+with a NULL `activation_target_id` and a fresh `updated_at`, keeping its
+entries, settings, and `lorebook_entry` embeddings. `CharacterDeletionResult`
+reports these as `detachedLorebookIds`, and `CharactersNotifier.removeMany`
+re-points a detached book at another character that is still linked to it
+through the `lorebookActivations` map (the scope/target columns are only a
+denormalised mirror of that map). A book whose target group still has a
+surviving variation is left attached and is not reported as detached. Because
+the books survive, character deletion writes **no** `lorebooks` sync tombstone;
+the detach travels to the cloud as a normal lorebook-collection update.
 
 `CharactersNotifier.removeMany` performs sync tombstones, preference cleanup,
 and filesystem cleanup only after the DB transaction commits. Remote sync
