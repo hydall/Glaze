@@ -73,7 +73,8 @@ void main() {
       db.lorebooks,
     )..where((row) => row.lorebookId.equals('target-lorebook'))).getSingle();
     expect(lorebook.activationScope, 'global');
-    expect(lorebook.activationTargetId, isNull);
+    // `isNull` is ambiguous here: drift and flutter_test both export it.
+    expect(lorebook.activationTargetId, null);
     expect(lorebook.entriesJson, '[]');
     expect(lorebook.updatedAt, greaterThan(0));
 
