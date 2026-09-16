@@ -11,7 +11,7 @@ import '../../../shared/widgets/menu_group.dart';
 /// The Card Rewriter lane, rendered in the preset's pipeline list under the
 /// Studio Ledger it feeds off.
 ///
-/// Same row geometry as [StudioAgentRow] so the section reads as one list, but
+/// Same row geometry as the agent rows so the section reads as one list, but
 /// the lane is not a Studio controller: it has no prompt blocks and no spec in
 /// the ontology. It runs after a reconciliation commits, on that commit's
 /// evidence, which is why it sits last and why the switch is dead while the

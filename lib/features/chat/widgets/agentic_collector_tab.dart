@@ -6,7 +6,9 @@ import '../../../core/models/card_evolution_observation.dart';
 import '../../../core/state/card_rewriter_providers.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_expansion_tile.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_text_field.dart';
 import '../../../shared/widgets/glaze_toast.dart';
@@ -104,12 +106,15 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
               hint: '{"observations": []}',
             ),
             const SizedBox(height: 12),
-            FilledButton(
-              onPressed: () {
+            GlazeActionButton(
+              icon: Icons.check_rounded,
+              label: 'agent_ops_validate_apply'.tr(),
+              tone: GlazeActionTone.primary,
+              expand: true,
+              onTap: () {
                 response = controller.text.trim();
                 Navigator.of(context, rootNavigator: true).pop();
               },
-              child: Text('agent_ops_validate_apply'.tr()),
             ),
           ],
         ),
@@ -185,11 +190,11 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                 ),
               ),
               const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: () =>
+              GlazeActionButton(
+                icon: Icons.refresh,
+                label: 'btn_retry'.tr(),
+                onTap: () =>
                     ref.invalidate(collectorViewProvider(widget.sessionId)),
-                icon: const Icon(Icons.refresh),
-                label: Text('btn_retry'.tr()),
               ),
             ],
           ),
@@ -257,24 +262,18 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
             ],
             if (data.unclaimedPairCount > 0) ...[
               const SizedBox(height: 10),
-              FilledButton.tonalIcon(
-                onPressed:
-                    _runningPending ||
-                        _recoveringRunId != null ||
+              GlazeActionButton(
+                icon: Icons.play_arrow_outlined,
+                label: 'agent_ops_run_collector'.tr(
+                  namedArgs: {'count': '${data.unclaimedPairCount}'},
+                ),
+                tone: GlazeActionTone.primary,
+                busy: _runningPending,
+                onTap:
+                    _recoveringRunId != null ||
                         data.blockingFailedRun != null
                     ? null
                     : _runPendingCollectors,
-                icon: _runningPending
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: GlazeSpinner(),
-                      )
-                    : const Icon(Icons.play_arrow_outlined),
-                label: Text(
-                  'agent_ops_run_collector'.tr(
-                    namedArgs: {'count': '${data.unclaimedPairCount}'},
-                  ),
-                ),
               ),
             ],
             const SizedBox(height: 14),
@@ -287,25 +286,26 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
               _CollectorEmpty(text: 'agent_ops_no_collector_runs'.tr())
             else
               for (final run in data.runs)
-                Card(
-                  margin: const EdgeInsets.only(bottom: 6),
-                  child: ExpansionTile(
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: GlazeExpansionTile(
+                    surface: true,
                     leading: Icon(
                       switch (run.row.status) {
                         'completed' => Icons.check_circle_outline,
                         'failed' => Icons.error_outline,
                         _ => Icons.hourglass_top,
                       },
+                      size: 20,
                       color: switch (run.row.status) {
                         'completed' => context.cs.primary,
                         'failed' => context.cs.error,
-                        _ => Colors.orange,
+                        _ => context.cs.tertiary,
                       },
                     ),
                     title: Text(_collectorRunLabel(run)),
                     subtitle: Text(_collectorStatusLabel(run.row.status)),
-                    childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                    expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                    childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
                     children: [
                       _Detail(
                         label: 'agent_ops_run_id'.tr(),
@@ -362,28 +362,28 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            OutlinedButton.icon(
-                              onPressed:
+                            GlazeActionButton(
+                              icon: Icons.refresh,
+                              label:
+                                  (run.canRetryExact
+                                          ? 'agent_ops_retry_exact_prompt'
+                                          : 'agent_ops_retry_collector')
+                                      .tr(),
+                              onTap:
                                   !_runningPending &&
                                       _recoveringRunId == null &&
                                       run.canRetry
                                   ? () => _retryCollector(run)
                                   : null,
-                              icon: const Icon(Icons.refresh),
-                              label: Text(
-                                (run.canRetryExact
-                                        ? 'agent_ops_retry_exact_prompt'
-                                        : 'agent_ops_retry_collector')
-                                    .tr(),
-                              ),
                             ),
-                            FilledButton.icon(
-                              onPressed:
+                            GlazeActionButton(
+                              icon: Icons.edit_outlined,
+                              label: 'agent_ops_correct_response'.tr(),
+                              tone: GlazeActionTone.primary,
+                              onTap:
                                   !_runningPending && _recoveringRunId == null
                                   ? () => _correct(run)
                                   : null,
-                              icon: const Icon(Icons.edit_outlined),
-                              label: Text('agent_ops_correct_response'.tr()),
                             ),
                           ],
                         ),
@@ -458,12 +458,13 @@ class _ObservationTile extends StatelessWidget {
       'promoted' => context.cs.primary,
       'expired' => context.cs.error,
       'consumed' => context.cs.onSurfaceVariant,
-      _ => Colors.orange,
+      _ => context.cs.tertiary,
     };
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      child: ExpansionTile(
-        leading: Icon(Icons.auto_awesome_outlined, color: color),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: GlazeExpansionTile(
+        surface: true,
+        leading: Icon(Icons.auto_awesome_outlined, size: 20, color: color),
         title: Text(observation.observedChange),
         subtitle: Text(
           'agent_ops_observation_summary'.tr(
@@ -474,8 +475,7 @@ class _ObservationTile extends StatelessWidget {
             },
           ),
         ),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
         children: [
           _Detail(
             label: 'agent_ops_scope'.tr(),

@@ -8,7 +8,9 @@ import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_expansion_tile.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../services/current_ledger_injection_preview_service.dart';
@@ -171,31 +173,24 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
     final confirmed = await GlazeBottomSheet.show<bool>(
       context,
       title: 'agent_ops_regenerate_title'.tr(),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'agent_ops_regenerate_body'.tr(
-                namedArgs: {'commit': _runLabel(run)},
-              ),
-              style: TextStyle(color: context.cs.onSurfaceVariant),
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.of(context, rootNavigator: true).pop(true),
-              child: Text('agent_ops_regenerate'.tr()),
-            ),
-            TextButton(
-              onPressed: () =>
-                  Navigator.of(context, rootNavigator: true).pop(false),
-              child: Text('btn_cancel'.tr()),
-            ),
-          ],
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.refresh_outlined,
+        description: 'agent_ops_regenerate_body'.tr(
+          namedArgs: {'commit': _runLabel(run)},
         ),
       ),
+      items: [
+        BottomSheetItem(
+          label: 'agent_ops_regenerate'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
+        ),
+        BottomSheetItem(
+          label: 'btn_cancel'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
+        ),
+      ],
     );
     if (confirmed != true || !mounted) return;
     setState(() => _regeneratingRunId = run.row.id);
@@ -253,6 +248,13 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
   Widget build(BuildContext context) {
     final ledgerEnabled =
         ref.watch(studioPresetProvider).value?.agentEnabled['ledger'] != false;
+    // Any Ledger work in flight — including a regeneration started from a
+    // commit row — locks every run action: they all write the same chain.
+    final busy =
+        !ledgerEnabled ||
+        _runningLedger ||
+        _runningReconciliation ||
+        _regeneratingRunId != null;
     final snapshot = ref.watch(reconcilerViewProvider(widget.sessionId));
     return snapshot.when(
       loading: () => const Center(child: GlazeSpinner()),
@@ -302,57 +304,33 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        FilledButton.tonalIcon(
-                          onPressed:
-                              ledgerEnabled &&
-                                  !_runningLedger &&
-                                  !_runningReconciliation &&
-                                  _regeneratingRunId == null
-                              ? () => _runReconciliation(
-                                  hasMissingLedger:
-                                      data.missingLedgerTarget != null,
-                                )
-                              : null,
-                          icon: _runningReconciliation
-                              ? const SizedBox.square(
-                                  dimension: 16,
-                                  child: GlazeSpinner(),
-                                )
-                              : const Icon(Icons.rule_folder_outlined),
-                          label: Text('agent_ops_run_reconciliation'.tr()),
+                        GlazeActionButton(
+                          icon: Icons.rule_folder_outlined,
+                          label: 'agent_ops_run_reconciliation'.tr(),
+                          tone: GlazeActionTone.primary,
+                          busy: _runningReconciliation,
+                          onTap: busy ? null : () => _runReconciliation(
+                            hasMissingLedger:
+                                data.missingLedgerTarget != null,
+                          ),
                         ),
-                        FilledButton.tonalIcon(
-                          style: data.missingLedgerTarget == null
-                              ? null
-                              : FilledButton.styleFrom(
-                                  backgroundColor: context.cs.errorContainer,
-                                  foregroundColor: context.cs.onErrorContainer,
-                                ),
-                          onPressed:
-                              ledgerEnabled &&
-                                  !_runningLedger &&
-                                  !_runningReconciliation &&
-                                  _regeneratingRunId == null
-                              ? () => _rerunLedger(
-                                  missingEndpoint:
-                                      data.missingLedgerTarget != null,
-                                )
-                              : null,
-                          icon: _runningLedger
-                              ? const SizedBox.square(
-                                  dimension: 16,
-                                  child: GlazeSpinner(),
-                                )
-                              : Icon(
-                                  data.missingLedgerTarget == null
-                                      ? Icons.replay_outlined
-                                      : Icons.warning_amber_rounded,
-                                ),
-                          label: Text(
-                            (data.missingLedgerTarget == null
-                                    ? 'agent_ops_rerun_ledger'
-                                    : 'agent_ops_run_missing_ledger')
-                                .tr(),
+                        GlazeActionButton(
+                          // A missing Ledger is what blocks reconciliation, so
+                          // the button that fixes it reads as the urgent one.
+                          icon: data.missingLedgerTarget == null
+                              ? Icons.replay_outlined
+                              : Icons.warning_amber_rounded,
+                          label:
+                              (data.missingLedgerTarget == null
+                                      ? 'agent_ops_rerun_ledger'
+                                      : 'agent_ops_run_missing_ledger')
+                                  .tr(),
+                          tone: data.missingLedgerTarget == null
+                              ? GlazeActionTone.neutral
+                              : GlazeActionTone.destructive,
+                          busy: _runningLedger,
+                          onTap: busy ? null : () => _rerunLedger(
+                            missingEndpoint: data.missingLedgerTarget != null,
                           ),
                         ),
                       ],
@@ -437,7 +415,7 @@ class _RunTile extends StatelessWidget {
       ),
       ReconciliationRunViewStatus.stale => (
         Icons.history_toggle_off,
-        Colors.orange,
+        context.cs.tertiary,
         'agent_ops_status_stale'.tr(),
       ),
       ReconciliationRunViewStatus.chainCorrupt => (
@@ -446,10 +424,11 @@ class _RunTile extends StatelessWidget {
         'agent_ops_status_chain_corrupt'.tr(),
       ),
     };
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      child: ExpansionTile(
-        leading: Icon(icon, color: color),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: GlazeExpansionTile(
+        surface: true,
+        leading: Icon(icon, size: 20, color: color),
         title: Text(_runLabel(run)),
         subtitle: Text(
           'agent_ops_commit_summary'.tr(
@@ -459,8 +438,7 @@ class _RunTile extends StatelessWidget {
             },
           ),
         ),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
         children: [
           _MonoDetail(label: 'agent_ops_run_id'.tr(), value: run.row.id),
           _MonoDetail(
@@ -478,12 +456,11 @@ class _RunTile extends StatelessWidget {
             ),
           if (onRegenerate != null) ...[
             const SizedBox(height: 6),
-            FilledButton.tonalIcon(
-              onPressed: regenerating ? null : onRegenerate,
-              icon: regenerating
-                  ? const SizedBox.square(dimension: 16, child: GlazeSpinner())
-                  : const Icon(Icons.refresh_outlined),
-              label: Text('agent_ops_regenerate'.tr()),
+            GlazeActionButton(
+              icon: Icons.refresh_outlined,
+              label: 'agent_ops_regenerate'.tr(),
+              busy: regenerating,
+              onTap: onRegenerate,
             ),
           ],
           const SizedBox(height: 6),
@@ -534,11 +511,13 @@ class _DebugTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final failed = row.status != 'ok' || row.parseFailure != 'none';
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      child: ExpansionTile(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: GlazeExpansionTile(
+        surface: true,
         leading: Icon(
           failed ? Icons.error_outline : Icons.data_object,
+          size: 20,
           color: failed ? context.cs.error : context.cs.primary,
         ),
         title: Text('${row.status} · ${row.model}'),
@@ -549,8 +528,7 @@ class _DebugTile extends StatelessWidget {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
         children: [
           _MonoDetail(label: 'agent_ops_endpoint'.tr(), value: row.messageId),
           _MonoDetail(label: 'agent_ops_parse'.tr(), value: row.parseFailure),
@@ -631,10 +609,10 @@ class _ErrorState extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
-          TextButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh),
-            label: Text('btn_retry'.tr()),
+          GlazeActionButton(
+            icon: Icons.refresh,
+            label: 'btn_retry'.tr(),
+            onTap: onRetry,
           ),
         ],
       ),

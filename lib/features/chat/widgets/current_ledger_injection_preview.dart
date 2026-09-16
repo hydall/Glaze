@@ -5,8 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/ledger_prompt_injection_mode.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
+import '../../../shared/widgets/glaze_expansion_tile.dart';
 import '../../../shared/widgets/glaze_filter_chip_bar.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
+import '../../../shared/widgets/list_controls.dart';
 import '../services/current_ledger_injection_preview_service.dart';
 
 class CurrentLedgerInjectionPreviewCard extends ConsumerStatefulWidget {
@@ -49,12 +52,14 @@ class _CurrentLedgerInjectionPreviewCardState
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
-                IconButton(
+                GlazeActionChip(
+                  icon: _expanded
+                      ? Icons.refresh_rounded
+                      : Icons.visibility_outlined,
                   tooltip: _expanded
                       ? 'action_refresh'.tr()
                       : 'agent_ops_build_preview'.tr(),
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () {
+                  onTap: () {
                     if (_expanded) {
                       ref.invalidate(
                         currentLedgerInjectionPreviewProvider(_key),
@@ -63,11 +68,6 @@ class _CurrentLedgerInjectionPreviewCardState
                       setState(() => _expanded = true);
                     }
                   },
-                  icon: Icon(
-                    _expanded
-                        ? Icons.refresh_rounded
-                        : Icons.visibility_outlined,
-                  ),
                 ),
               ],
             ),
@@ -82,10 +82,10 @@ class _CurrentLedgerInjectionPreviewCardState
             if (!_expanded)
               Align(
                 alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => setState(() => _expanded = true),
-                  icon: const Icon(Icons.visibility_outlined),
-                  label: Text('agent_ops_build_preview'.tr()),
+                child: GlazeActionButton(
+                  icon: Icons.visibility_outlined,
+                  label: 'agent_ops_build_preview'.tr(),
+                  onTap: () => setState(() => _expanded = true),
                 ),
               )
             else
@@ -160,9 +160,7 @@ class _CurrentLedgerInjectionPreviewCardState
           title: 'agent_ops_arc'.tr(),
           content: selected.arcContent,
         ),
-        ExpansionTile(
-          dense: true,
-          tilePadding: EdgeInsets.zero,
+        GlazeExpansionTile(
           childrenPadding: const EdgeInsets.only(bottom: 4),
           title: Text('agent_ops_selection_diagnostics'.tr()),
           subtitle: Text(
@@ -214,9 +212,7 @@ class _InjectionSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = content?.trim();
-    return ExpansionTile(
-      dense: true,
-      tilePadding: EdgeInsets.zero,
+    return GlazeExpansionTile(
       childrenPadding: const EdgeInsets.only(bottom: 8),
       title: Text(title),
       subtitle: Text(

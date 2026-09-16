@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/tracker.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_expansion_tile.dart';
+import '../../../shared/widgets/list_controls.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../services/agentic_snapshots_service.dart';
 import 'agentic_operations_log_dialog.dart' show AgenticSessionScope;
@@ -88,17 +90,16 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                   ),
                 ),
                 const Spacer(),
-                IconButton(
-                  onPressed: _editClock,
-                  icon: const Icon(Icons.schedule_outlined, size: 18),
+                GlazeActionChip(
+                  icon: Icons.schedule_outlined,
                   tooltip: 'agent_ops_clock_title'.tr(),
-                  visualDensity: VisualDensity.compact,
+                  onTap: _editClock,
                 ),
-                IconButton(
-                  onPressed: _reload,
-                  icon: const Icon(Icons.refresh, size: 18),
+                const SizedBox(width: 8),
+                GlazeActionChip(
+                  icon: Icons.refresh,
                   tooltip: 'agent_ops_reload'.tr(),
-                  visualDensity: VisualDensity.compact,
+                  onTap: _reload,
                 ),
               ],
             ),
@@ -124,8 +125,15 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                     vertical: 4,
                   ),
                   itemCount: snapshots.length,
-                  separatorBuilder: (_, _) =>
-                      const Divider(height: 1, indent: 12, endIndent: 12),
+                  // The rows are one list, not cards: a hairline in the
+                  // theme's own outline keeps them readable without giving
+                  // each snapshot a surface of its own.
+                  separatorBuilder: (context, _) => Divider(
+                    height: 1,
+                    indent: 12,
+                    endIndent: 12,
+                    color: context.cs.outlineVariant.withValues(alpha: 0.5),
+                  ),
                   itemBuilder: (context, i) =>
                       _SnapshotTile(view: snapshots[i]),
                 ),
@@ -146,9 +154,8 @@ class _SnapshotTile extends ConsumerWidget {
     final tt = Theme.of(context).textTheme;
     final snapshot = view.snapshot;
     final trackers = snapshot.trackers;
-    return ExpansionTile(
-      dense: true,
-      tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+    return GlazeExpansionTile(
+      childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
       leading: Icon(
         Icons.history_edu_outlined,
         size: 20,

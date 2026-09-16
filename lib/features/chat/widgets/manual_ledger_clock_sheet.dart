@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/game_time.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_text_field.dart';
 import '../services/manual_ledger_clock_service.dart';
@@ -136,9 +137,11 @@ class _ManualLedgerClockSheetState
                   ),
                 ),
                 const SizedBox(width: 12),
-                OutlinedButton(
-                  onPressed: _loading || _saving ? null : _load,
-                  child: Text('agent_ops_clock_load'.tr()),
+                GlazeActionButton(
+                  icon: Icons.download_outlined,
+                  label: 'agent_ops_clock_load'.tr(),
+                  busy: _loading,
+                  onTap: _saving ? null : _load,
                 ),
               ],
             ),
@@ -164,16 +167,13 @@ class _ManualLedgerClockSheetState
               ),
             ],
             const SizedBox(height: 12),
-            FilledButton(
-              onPressed: rows == null || rows.isEmpty || _loading || _saving
-                  ? null
-                  : _save,
-              child: _saving
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text('agent_ops_clock_save'.tr()),
+            GlazeActionButton(
+              icon: Icons.save_outlined,
+              label: 'agent_ops_clock_save'.tr(),
+              tone: GlazeActionTone.primary,
+              expand: true,
+              busy: _saving,
+              onTap: rows == null || rows.isEmpty || _loading ? null : _save,
             ),
           ],
         ),
