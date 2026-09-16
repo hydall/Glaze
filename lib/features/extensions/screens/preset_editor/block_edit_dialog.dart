@@ -3,18 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../../shared/widgets/glaze_scaffold.dart';
 import '../../../../shared/widgets/menu_group.dart';
 import '../../../../shared/widgets/sheet_view.dart';
+import '../../../settings/widgets/api_slot_group.dart';
 import '../../models/block_config.dart';
 import '../../models/block_injection.dart';
 import '../../models/block_modes.dart';
 import '../../models/connection_profiles.dart';
 import '../../models/extension_context_policy.dart';
 import '../../widgets/extension_context_policy_editor.dart';
-import 'widgets/api_config_selector.dart';
 import 'widgets/block_type_picker.dart';
-import 'widgets/model_field.dart';
-import 'widgets/section_label.dart';
 import 'sections/upstream_block_sections.dart';
 
 class BlockEditDialog extends ConsumerStatefulWidget {
@@ -31,8 +30,6 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late TextEditingController _nameController;
   late TextEditingController _templateController;
   late TextEditingController _promptController;
-  late TextEditingController _apiConfigController;
-  late TextEditingController _modelController;
   late TextEditingController _contextSystemPromptController;
   late TextEditingController _injectPrefixController;
   late TextEditingController _staticHtmlController;
@@ -50,7 +47,11 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late bool _useStaticHtml;
   late bool _manualOnly;
   late ExtensionContextPolicy _contextPolicy;
-  bool _fetchingModels = false;
+
+  /// The connection and model this block overrides to. Empty means it follows
+  /// the preset's own connection.
+  late String _apiConfigId;
+  late String _model;
 
   // Settings carried over from the original ExtBlocks extension.
   late TextEditingController _periodController;
@@ -71,6 +72,10 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late BlockRunOrder _executionOrder;
   late RewriteMode _rewriteMode;
   late ScriptType _scriptType;
+
+  /// Not editable here: a Glaze preset runs on one connection, so big /
+  /// medium / small all resolve to it. Carried through save so a block
+  /// imported from the original extension exports unchanged.
   late ConnectionProfile _apiPreset;
   late bool _periodicTimer;
 
@@ -87,8 +92,8 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
         ? b.imagePromptInstruction
         : b.prompt;
     _promptController = TextEditingController(text: promptText);
-    _apiConfigController = TextEditingController(text: b.apiConfigId);
-    _modelController = TextEditingController(text: b.model);
+    _apiConfigId = b.apiConfigId;
+    _model = b.model;
     _contextSystemPromptController = TextEditingController(
       text: b.contextSystemPrompt,
     );
@@ -169,8 +174,8 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       injectLastN: isInfoblock ? _injectLastN : 0,
       injectPrefix: isInfoblock ? _injectPrefixController.text : '',
       dependsOnPrevious: _dependsOnPrevious,
-      apiConfigId: usesLlm ? _apiConfigController.text.trim() : '',
-      model: usesLlm ? _modelController.text.trim() : '',
+      apiConfigId: usesLlm ? _apiConfigId : '',
+      model: usesLlm ? _model : '',
       imagePromptInstruction: '',
       imageGenEnabled: true,
       contextMessageCount: usesLlm ? _contextMessageCount : 0,
@@ -187,7 +192,8 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       triggerOnSwipe: _triggerOnSwipe,
       generationPause: _generationPause,
       // Never zero: the interval check divides by it.
-      period: int.tryParse(_periodController.text.trim()) ?? widget.block.period,
+      period:
+          int.tryParse(_periodController.text.trim()) ?? widget.block.period,
       keyword: _keywordController.text,
       keywordIsRegex: _keywordIsRegex,
       hideDisplay: _hideDisplay,
@@ -229,23 +235,14 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
 
     final proceed = await GlazeBottomSheet.show<bool>(
       context,
-      title: 'Not recommended with Studio Canon',
-      bigInfo: const BottomSheetBigInfo(
+      title: 'block_inject_warn_title'.tr(),
+      bigInfo: BottomSheetBigInfo(
         icon: Icons.warning_amber_rounded,
-        description:
-            'User InfBlocks can conflict with Studio Canon State and may '
-            'cause duplicated, stale, or lower-authority facts to enter the '
-            'prompt. Studio Canon already tracks scene, entity, relationship, '
-            'arc, and world state.\n\n'
-            'Recommended: keep user InfBlocks visible in panels only.\n\n'
-            'Allowed alternatives: image generation services, JS runner '
-            'tools, and manual panel workflows.\n\n'
-            'If you continue, user InfBlocks will be injected only as '
-            'low-authority hints. They must never outrank Studio Canon State.',
+        description: 'block_inject_warn_body'.tr(),
       ),
       items: [
         BottomSheetItem(
-          label: 'Continue anyway',
+          label: 'block_inject_warn_continue'.tr(),
           centered: true,
           isDestructive: true,
           onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
@@ -267,8 +264,6 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _nameController.dispose();
     _templateController.dispose();
     _promptController.dispose();
-    _apiConfigController.dispose();
-    _modelController.dispose();
     _contextSystemPromptController.dispose();
     _injectPrefixController.dispose();
     _staticHtmlController.dispose();
@@ -371,131 +366,272 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               executionOrder: _executionOrder,
               rewriteMode: _rewriteMode,
               scriptType: _scriptType,
-              apiPreset: _apiPreset,
               onGenerationOrderChanged: (v) =>
                   setState(() => _generationOrder = v),
               onExecutionOrderChanged: (v) =>
                   setState(() => _executionOrder = v),
               onRewriteModeChanged: (v) => setState(() => _rewriteMode = v),
               onScriptTypeChanged: (v) => setState(() => _scriptType = v),
-              onApiPresetChanged: (v) => setState(() => _apiPreset = v),
             ),
-            // Not yet rebuilt on the UI kit; keeps the gutter the body used
-            // to supply for everyone.
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-            if (_type == BlockType.infoblock ||
-                _type == BlockType.imageGen ||
-                _type == BlockType.jsRunner) ...[
-              const SizedBox(height: 8),
-              _DependsOnPreviousSwitch(
-                type: _type,
-                value: _dependsOnPrevious,
-                onChanged: (v) => setState(() => _dependsOnPrevious = v),
-              ),
-            ],
-            if (_type == BlockType.infoblock) ...[
-              const SizedBox(height: 16),
-              _InfoblockInjectFields(
-                inject: _inject,
-                injectPrefixController: _injectPrefixController,
-                injectLastNController: _injectLastNController,
-                onInjectChanged: (v) {
-                  _onInjectChanged(v);
+            ..._outputItems(),
+            ..._promptItems(),
+            if (_type == BlockType.interactive) _interactiveGroup(),
+            ..._contextItems(),
+            if (_usesLlm)
+              ApiSlotGroup(
+                header: switch (_type) {
+                  BlockType.imageGen ||
+                  BlockType.jsRunner => 'block_api_agent_label'.tr(),
+                  _ => 'block_api_section_label'.tr(),
                 },
-                onLastNChanged: (v) => _injectLastN = v,
-              ),
-            ],
-            if (_usesStandardLlmFields) ...[
-              const SizedBox(height: 16),
-              _PromptFields(type: _type, controller: _promptController),
-            ],
-            if (_type == BlockType.infoblock) ...[
-              const SizedBox(height: 8),
-              _TemplateField(controller: _templateController),
-            ],
-            if (_usesLlm) ...[
-              const SizedBox(height: 16),
-              SectionLabel('block_sec_context'.tr()),
-              ExtensionContextPolicyEditor(
-                policy: _contextPolicy,
-                onChanged: (policy) => setState(() => _contextPolicy = policy),
-              ),
-            ],
-            if (_usesStandardLlmFields) ...[
-              const SizedBox(height: 16),
-              _LlmOptionsFields(
-                type: _type,
-                apiConfigController: _apiConfigController,
-                modelController: _modelController,
-                contextSystemPromptController: _contextSystemPromptController,
-                contextMessageCountController: _contextMessageCountController,
-                previousBlocksCountController: _previousBlocksCountController,
-                contextMessageCount: _contextMessageCount,
-                previousBlocksCount: _previousBlocksCount,
-                streamToPanel: _streamToPanel,
-                fetchingModels: _fetchingModels,
-                onContextMessageCountChanged: (v) => _contextMessageCount = v,
-                onPreviousBlocksCountChanged: (v) => _previousBlocksCount = v,
-                onStreamToPanelChanged: (v) =>
-                    setState(() => _streamToPanel = v),
-                onApiChanged: (id) {
-                  setState(() {
-                    _apiConfigController.text = id ?? '';
-                    _modelController.clear();
-                  });
-                },
-                onFetchStart: () => setState(() => _fetchingModels = true),
-                onFetchEnd: () => setState(() => _fetchingModels = false),
-              ),
-            ],
-            if (_type == BlockType.imageGen) const _ImageGenHelpText(),
-            if (_type == BlockType.jsRunner) const _JsRunnerHelpText(),
-            if (_type == BlockType.interactive) ...[
-              const SizedBox(height: 16),
-              _InteractiveFields(
-                useStaticHtml: _useStaticHtml,
-                staticHtmlController: _staticHtmlController,
-                promptController: _promptController,
-                minHeightController: _minHeightController,
-                dependsOnPrevious: _dependsOnPrevious,
-                contextMessageCount: _contextMessageCount,
-                contextMessageCountController: _contextMessageCountController,
-                contextSystemPromptController: _contextSystemPromptController,
-                apiConfigController: _apiConfigController,
-                modelController: _modelController,
-                fetchingModels: _fetchingModels,
-                streamToPanel: _streamToPanel,
-                onUseStaticHtmlChanged: (v) =>
-                    setState(() => _useStaticHtml = v),
-                onMinHeightChanged: (_) {},
-                onDependsOnPreviousChanged: (v) =>
-                    setState(() => _dependsOnPrevious = v),
-                onContextMessageCountChanged: (v) => _contextMessageCount = v,
-                onApiChanged: (id) {
-                  setState(() {
-                    _apiConfigController.text = id ?? '';
-                    _modelController.clear();
-                  });
-                },
-                onFetchStart: () => setState(() => _fetchingModels = true),
-                onFetchEnd: () => setState(() => _fetchingModels = false),
-                onStreamToPanelChanged: (v) =>
-                    setState(() => _streamToPanel = v),
-              ),
-            ],
-            const SizedBox(height: 16),
-            FilledButton(onPressed: _save, child: Text('btn_save'.tr())),
+                apiConfigId: _apiConfigId,
+                onApiConfigChanged: (id) => setState(() {
+                  _apiConfigId = id;
+                  // Endpoint and key come from the connection; a model picked
+                  // against the previous one would not resolve.
+                  _model = '';
+                }),
+                modelRows: [
+                  ApiSlotModelRow(
+                    value: _model,
+                    onChanged: (value) => setState(() => _model = value),
+                  ),
                 ],
+              ),
+            if (_type == BlockType.imageGen)
+              const _HelpText('block_image_gen_help'),
+            if (_type == BlockType.jsRunner)
+              const _HelpText('block_js_runner_help'),
+            if (_type == BlockType.interactive)
+              const _HelpText('block_interactive_help'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: GlazePillButton(
+                  icon: Icons.check_rounded,
+                  label: 'btn_save'.tr(),
+                  onTap: _save,
+                ),
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// What the block does with its result: whether it follows the block before
+  /// it, whether it is injected into the prompt, and whether it streams.
+  List<Widget> _outputItems() {
+    final dependsLabelled =
+        _type == BlockType.infoblock ||
+        _type == BlockType.imageGen ||
+        _type == BlockType.jsRunner;
+    final items = <Widget>[
+      if (dependsLabelled)
+        MenuSwitchItem(
+          label: 'block_depends_on_prev'.tr(),
+          description: switch (_type) {
+            BlockType.imageGen => 'block_depends_sub_image'.tr(),
+            BlockType.jsRunner => 'block_depends_sub_js'.tr(),
+            _ => 'block_depends_sub_default'.tr(),
+          },
+          value: _dependsOnPrevious,
+          onChanged: (v) => setState(() => _dependsOnPrevious = v),
+        ),
+      if (_type == BlockType.interactive && !_useStaticHtml)
+        MenuSwitchItem(
+          label: 'block_interactive_depends'.tr(),
+          description: 'block_interactive_depends_sub'.tr(),
+          value: _dependsOnPrevious,
+          onChanged: (v) => setState(() => _dependsOnPrevious = v),
+        ),
+      if (_type == BlockType.infoblock) ...[
+        MenuSwitchItem(
+          label: 'block_inject_title'.tr(),
+          description: 'block_inject_desc'.tr(),
+          value: _inject,
+          onChanged: _onInjectChanged,
+        ),
+        if (_inject) ...[
+          MenuFieldItem(
+            label: 'block_inject_last_n_label'.tr(),
+            helper: 'block_inject_last_n_helper'.tr(),
+            controller: _injectLastNController,
+            keyboardType: TextInputType.number,
+            onChanged: (v) => _injectLastN = int.tryParse(v) ?? 0,
+          ),
+          MenuFieldItem(
+            label: 'block_inject_prefix_label'.tr(),
+            helper: 'block_inject_prefix_helper'.tr(),
+            controller: _injectPrefixController,
+            maxLines: 4,
+          ),
+        ],
+      ],
+      if (_usesLlm)
+        MenuSwitchItem(
+          label: _type == BlockType.interactive
+              ? 'block_interactive_stream_title'.tr()
+              : 'block_stream_title'.tr(),
+          description: switch (_type) {
+            BlockType.imageGen => 'block_stream_sub_image'.tr(),
+            BlockType.jsRunner => 'block_stream_sub_js'.tr(),
+            BlockType.interactive => 'block_interactive_stream_sub'.tr(),
+            _ => 'block_stream_sub_default'.tr(),
+          },
+          value: _streamToPanel,
+          onChanged: (v) => setState(() => _streamToPanel = v),
+        ),
+    ];
+    if (items.isEmpty) return const [];
+    return [MenuGroup(header: 'block_sec_output'.tr(), items: items)];
+  }
+
+  /// The instruction the block is generated from, and the layout its result is
+  /// wrapped in. An interactive block keeps its own, in [_interactiveGroup].
+  List<Widget> _promptItems() {
+    if (!_usesStandardLlmFields) return const [];
+    return [
+      MenuGroup(
+        header: switch (_type) {
+          BlockType.imageGen => 'block_prompt_image_agent'.tr(),
+          BlockType.jsRunner => 'block_prompt_js_agent'.tr(),
+          _ => 'block_prompt_and_format'.tr(),
+        },
+        items: [
+          MenuFieldItem(
+            label: switch (_type) {
+              BlockType.imageGen => 'block_prompt_label_image'.tr(),
+              BlockType.jsRunner => 'block_prompt_label_js'.tr(),
+              _ => 'block_prompt_label_default'.tr(),
+            },
+            placeholder: switch (_type) {
+              BlockType.imageGen => 'block_prompt_hint_image'.tr(),
+              BlockType.jsRunner => 'block_prompt_hint_js'.tr(),
+              _ => 'block_prompt_hint_default'.tr(),
+            },
+            helper: switch (_type) {
+              BlockType.imageGen => 'block_prompt_helper_image'.tr(),
+              BlockType.jsRunner => 'block_prompt_helper_js'.tr(),
+              _ => 'block_prompt_helper_default'.tr(),
+            },
+            controller: _promptController,
+            maxLines: _type == BlockType.infoblock ? 4 : 12,
+          ),
+          if (_type == BlockType.infoblock)
+            MenuFieldItem(
+              label: 'block_template_label'.tr(),
+              placeholder: 'block_template_hint'.tr(),
+              helper: 'block_template_helper'.tr(),
+              controller: _templateController,
+              maxLines: 5,
+            ),
+        ],
+      ),
+    ];
+  }
+
+  /// Where an interactive block's HTML comes from: written by hand, or asked
+  /// of the model.
+  Widget _interactiveGroup() {
+    return MenuGroup(
+      header: 'block_html_source_label'.tr(),
+      items: [
+        MenuSelectorItem(
+          label: 'block_html_source_label'.tr(),
+          currentValue: _useStaticHtml
+              ? 'block_html_static'.tr()
+              : 'block_html_llm'.tr(),
+          onTap: _pickHtmlSource,
+        ),
+        if (_useStaticHtml)
+          MenuFieldItem(
+            label: 'block_static_html_label'.tr(),
+            helper: 'block_static_html_helper'.tr(),
+            controller: _staticHtmlController,
+            maxLines: 18,
+          )
+        else
+          MenuFieldItem(
+            label: 'block_llm_html_label'.tr(),
+            helper: 'block_llm_html_helper'.tr(),
+            controller: _promptController,
+            maxLines: 12,
+          ),
+        MenuFieldItem(
+          label: 'block_min_height_label'.tr(),
+          helper: 'block_min_height_helper'.tr(),
+          controller: _minHeightController,
+          keyboardType: TextInputType.number,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickHtmlSource() async {
+    await GlazeBottomSheet.show<void>(
+      context,
+      title: 'block_html_source_label'.tr(),
+      items: [
+        for (final static in const [false, true])
+          BottomSheetItem(
+            label: static ? 'block_html_static'.tr() : 'block_html_llm'.tr(),
+            icon: _useStaticHtml == static
+                ? Icons.radio_button_checked
+                : Icons.radio_button_off,
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              setState(() => _useStaticHtml = static);
+            },
+          ),
+      ],
+    );
+  }
+
+  /// What the block's own request is built from.
+  List<Widget> _contextItems() {
+    if (!_usesLlm) return const [];
+    final policy = ExtensionContextPolicyEditor(
+      policy: _contextPolicy,
+      onChanged: (value) => setState(() => _contextPolicy = value),
+    );
+    return [
+      MenuGroup(
+        header: 'block_sec_context'.tr(),
+        items: [
+          policy.mainSwitch(),
+          MenuFieldItem(
+            label: 'block_context_count_label'.tr(),
+            helper: _usesStandardLlmFields
+                ? 'block_context_count_helper_full'.tr()
+                : 'block_context_count_helper'.tr(),
+            controller: _contextMessageCountController,
+            keyboardType: const TextInputType.numberWithOptions(signed: true),
+            onChanged: (v) =>
+                _contextMessageCount = int.tryParse(v) ?? _contextMessageCount,
+          ),
+          MenuFieldItem(
+            label: 'block_context_prompt_label'.tr(),
+            placeholder: 'block_context_prompt_hint'.tr(),
+            helper: 'block_context_prompt_helper'.tr(),
+            controller: _contextSystemPromptController,
+            maxLines: 5,
+          ),
+          if (_usesStandardLlmFields)
+            MenuFieldItem(
+              label: 'block_previous_blocks_label'.tr(),
+              helper: 'block_previous_blocks_helper'.tr(),
+              controller: _previousBlocksCountController,
+              keyboardType: TextInputType.number,
+              onChanged: (v) => _previousBlocksCount =
+                  int.tryParse(v) ?? _previousBlocksCount,
+            ),
+        ],
+      ),
+      ?policy.detailsGroup(),
+    ];
   }
 
   /// The single-valued trigger our pipeline selects on, derived from the
@@ -519,509 +655,22 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       (_type == BlockType.interactive && !_useStaticHtml);
 }
 
-class _DependsOnPreviousSwitch extends StatelessWidget {
-  const _DependsOnPreviousSwitch({
-    required this.type,
-    required this.value,
-    required this.onChanged,
-  });
+/// A muted paragraph under a type's settings, explaining what that type does.
+class _HelpText extends StatelessWidget {
+  const _HelpText(this.labelKey);
 
-  final BlockType type;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return SwitchListTile(
-      title: Text('block_depends_on_prev'.tr()),
-      subtitle: Text(
-        type == BlockType.imageGen
-            ? 'block_depends_sub_image'.tr()
-            : type == BlockType.jsRunner
-            ? 'block_depends_sub_js'.tr()
-            : 'block_depends_sub_default'.tr(),
-      ),
-      value: value,
-      onChanged: onChanged,
-      contentPadding: EdgeInsets.zero,
-    );
-  }
-}
-
-class _InfoblockInjectFields extends StatelessWidget {
-  const _InfoblockInjectFields({
-    required this.inject,
-    required this.injectPrefixController,
-    required this.injectLastNController,
-    required this.onInjectChanged,
-    required this.onLastNChanged,
-  });
-
-  final bool inject;
-  final TextEditingController injectPrefixController;
-  final TextEditingController injectLastNController;
-  final ValueChanged<bool> onInjectChanged;
-  final ValueChanged<int> onLastNChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        SwitchListTile(
-          title: Text('block_inject_title'.tr()),
-          subtitle: Text('block_inject_desc'.tr()),
-          value: inject,
-          onChanged: onInjectChanged,
-          contentPadding: EdgeInsets.zero,
-        ),
-        if (inject) ...[
-          const SizedBox(height: 8),
-          TextField(
-            controller: injectLastNController,
-            decoration: InputDecoration(
-              labelText: 'block_inject_last_n_label'.tr(),
-              helperText: 'block_inject_last_n_helper'.tr(),
-            ),
-            keyboardType: TextInputType.number,
-            onChanged: (v) => onLastNChanged(int.tryParse(v) ?? 0),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: injectPrefixController,
-            decoration: InputDecoration(
-              labelText: 'block_inject_prefix_label'.tr(),
-              helperText: 'block_inject_prefix_helper'.tr(),
-              alignLabelWithHint: true,
-            ),
-            minLines: 1,
-            maxLines: 4,
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _PromptFields extends StatelessWidget {
-  const _PromptFields({required this.type, required this.controller});
-
-  final BlockType type;
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        SectionLabel(switch (type) {
-          BlockType.imageGen => 'block_prompt_image_agent'.tr(),
-          BlockType.jsRunner => 'block_prompt_js_agent'.tr(),
-          _ => 'block_prompt_and_format'.tr(),
-        }),
-        TextField(
-          controller: controller,
-          decoration: InputDecoration(
-            labelText: switch (type) {
-              BlockType.imageGen => 'block_prompt_label_image'.tr(),
-              BlockType.jsRunner => 'block_prompt_label_js'.tr(),
-              _ => 'block_prompt_label_default'.tr(),
-            },
-            hintText: switch (type) {
-              BlockType.imageGen => 'block_prompt_hint_image'.tr(),
-              BlockType.jsRunner => 'block_prompt_hint_js'.tr(),
-              _ => 'block_prompt_hint_default'.tr(),
-            },
-            helperText: switch (type) {
-              BlockType.imageGen => 'block_prompt_helper_image'.tr(),
-              BlockType.jsRunner => 'block_prompt_helper_js'.tr(),
-              _ => 'block_prompt_helper_default'.tr(),
-            },
-            alignLabelWithHint: true,
-          ),
-          maxLines: type == BlockType.infoblock ? 4 : 12,
-          minLines: type == BlockType.infoblock ? 2 : 6,
-        ),
-      ],
-    );
-  }
-}
-
-class _TemplateField extends StatelessWidget {
-  const _TemplateField({required this.controller});
-
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      decoration: InputDecoration(
-        labelText: 'block_template_label'.tr(),
-        hintText: 'block_template_hint'.tr(),
-        helperText: 'block_template_helper'.tr(),
-        alignLabelWithHint: true,
-      ),
-      maxLines: 5,
-      minLines: 2,
-      style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-    );
-  }
-}
-
-class _LlmOptionsFields extends StatelessWidget {
-  const _LlmOptionsFields({
-    required this.type,
-    required this.apiConfigController,
-    required this.modelController,
-    required this.contextSystemPromptController,
-    required this.contextMessageCountController,
-    required this.previousBlocksCountController,
-    required this.contextMessageCount,
-    required this.previousBlocksCount,
-    required this.streamToPanel,
-    required this.fetchingModels,
-    required this.onContextMessageCountChanged,
-    required this.onPreviousBlocksCountChanged,
-    required this.onStreamToPanelChanged,
-    required this.onApiChanged,
-    required this.onFetchStart,
-    required this.onFetchEnd,
-  });
-
-  final BlockType type;
-  final TextEditingController apiConfigController;
-  final TextEditingController modelController;
-  final TextEditingController contextSystemPromptController;
-  final TextEditingController contextMessageCountController;
-  final TextEditingController previousBlocksCountController;
-  final int contextMessageCount;
-  final int previousBlocksCount;
-  final bool streamToPanel;
-  final bool fetchingModels;
-  final ValueChanged<int> onContextMessageCountChanged;
-  final ValueChanged<int> onPreviousBlocksCountChanged;
-  final ValueChanged<bool> onStreamToPanelChanged;
-  final ValueChanged<String?> onApiChanged;
-  final VoidCallback onFetchStart;
-  final VoidCallback onFetchEnd;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        SectionLabel('block_chat_context_section'.tr()),
-        _ContextMessageCountField(
-          controller: contextMessageCountController,
-          value: contextMessageCount,
-          onChanged: onContextMessageCountChanged,
-          fullHelper: true,
-        ),
-        const SizedBox(height: 8),
-        _ContextSystemPromptField(controller: contextSystemPromptController),
-        const SizedBox(height: 8),
-        _PreviousBlocksCountField(
-          controller: previousBlocksCountController,
-          value: previousBlocksCount,
-          onChanged: onPreviousBlocksCountChanged,
-        ),
-        const SizedBox(height: 16),
-        SectionLabel(switch (type) {
-          BlockType.imageGen => 'block_api_agent_label'.tr(),
-          BlockType.jsRunner => 'block_api_agent_label'.tr(),
-          _ => 'block_api_section_label'.tr(),
-        }),
-        ApiConfigSelector(
-          selectedId: apiConfigController.text,
-          onSelected: onApiChanged,
-        ),
-        const SizedBox(height: 8),
-        ModelField(
-          controller: modelController,
-          apiConfigId: apiConfigController.text,
-          fetching: fetchingModels,
-          onFetchStart: onFetchStart,
-          onFetchEnd: onFetchEnd,
-        ),
-        const SizedBox(height: 4),
-        SwitchListTile(
-          title: Text('block_stream_title'.tr()),
-          subtitle: Text(switch (type) {
-            BlockType.imageGen => 'block_stream_sub_image'.tr(),
-            BlockType.jsRunner => 'block_stream_sub_js'.tr(),
-            _ => 'block_stream_sub_default'.tr(),
-          }),
-          value: streamToPanel,
-          onChanged: onStreamToPanelChanged,
-          contentPadding: EdgeInsets.zero,
-        ),
-      ],
-    );
-  }
-}
-
-class _InteractiveFields extends StatelessWidget {
-  const _InteractiveFields({
-    required this.useStaticHtml,
-    required this.staticHtmlController,
-    required this.promptController,
-    required this.minHeightController,
-    required this.dependsOnPrevious,
-    required this.contextMessageCount,
-    required this.contextMessageCountController,
-    required this.contextSystemPromptController,
-    required this.apiConfigController,
-    required this.modelController,
-    required this.fetchingModels,
-    required this.streamToPanel,
-    required this.onUseStaticHtmlChanged,
-    required this.onMinHeightChanged,
-    required this.onDependsOnPreviousChanged,
-    required this.onContextMessageCountChanged,
-    required this.onApiChanged,
-    required this.onFetchStart,
-    required this.onFetchEnd,
-    required this.onStreamToPanelChanged,
-  });
-
-  final bool useStaticHtml;
-  final TextEditingController staticHtmlController;
-  final TextEditingController promptController;
-  final TextEditingController minHeightController;
-  final bool dependsOnPrevious;
-  final int contextMessageCount;
-  final TextEditingController contextMessageCountController;
-  final TextEditingController contextSystemPromptController;
-  final TextEditingController apiConfigController;
-  final TextEditingController modelController;
-  final bool fetchingModels;
-  final bool streamToPanel;
-  final ValueChanged<bool> onUseStaticHtmlChanged;
-  final ValueChanged<int> onMinHeightChanged;
-  final ValueChanged<bool> onDependsOnPreviousChanged;
-  final ValueChanged<int> onContextMessageCountChanged;
-  final ValueChanged<String?> onApiChanged;
-  final VoidCallback onFetchStart;
-  final VoidCallback onFetchEnd;
-  final ValueChanged<bool> onStreamToPanelChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        SectionLabel('block_html_source_label'.tr()),
-        SegmentedButton<bool>(
-          segments: [
-            ButtonSegment(
-              value: false,
-              label: Text('block_html_llm'.tr()),
-              icon: const Icon(Icons.auto_awesome),
-            ),
-            ButtonSegment(
-              value: true,
-              label: Text('block_html_static'.tr()),
-              icon: const Icon(Icons.code),
-            ),
-          ],
-          selected: {useStaticHtml},
-          onSelectionChanged: (s) => onUseStaticHtmlChanged(s.first),
-          style: ButtonStyle(visualDensity: VisualDensity.compact),
-        ),
-        const SizedBox(height: 8),
-        if (useStaticHtml)
-          TextField(
-            controller: staticHtmlController,
-            decoration: InputDecoration(
-              labelText: 'block_static_html_label'.tr(),
-              helperText: 'block_static_html_helper'.tr(),
-              alignLabelWithHint: true,
-            ),
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-            minLines: 6,
-            maxLines: 18,
-          )
-        else
-          TextField(
-            controller: promptController,
-            decoration: InputDecoration(
-              labelText: 'block_llm_html_label'.tr(),
-              helperText: 'block_llm_html_helper'.tr(),
-              alignLabelWithHint: true,
-            ),
-            minLines: 4,
-            maxLines: 12,
-          ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: minHeightController,
-          decoration: InputDecoration(
-            labelText: 'block_min_height_label'.tr(),
-            helperText: 'block_min_height_helper'.tr(),
-          ),
-          keyboardType: TextInputType.number,
-          onChanged: (v) => onMinHeightChanged(int.tryParse(v) ?? 120),
-        ),
-        if (!useStaticHtml) ...[
-          const SizedBox(height: 8),
-          SwitchListTile(
-            title: Text('block_interactive_depends'.tr()),
-            subtitle: Text('block_interactive_depends_sub'.tr()),
-            value: dependsOnPrevious,
-            onChanged: onDependsOnPreviousChanged,
-            contentPadding: EdgeInsets.zero,
-          ),
-          const SizedBox(height: 16),
-          SectionLabel('block_chat_context_section'.tr()),
-          _ContextMessageCountField(
-            controller: contextMessageCountController,
-            value: contextMessageCount,
-            onChanged: onContextMessageCountChanged,
-            fullHelper: false,
-          ),
-          const SizedBox(height: 8),
-          _ContextSystemPromptField(controller: contextSystemPromptController),
-          const SizedBox(height: 16),
-          SectionLabel('block_api_section_label'.tr()),
-          ApiConfigSelector(
-            selectedId: apiConfigController.text,
-            onSelected: onApiChanged,
-          ),
-          const SizedBox(height: 8),
-          ModelField(
-            controller: modelController,
-            apiConfigId: apiConfigController.text,
-            fetching: fetchingModels,
-            onFetchStart: onFetchStart,
-            onFetchEnd: onFetchEnd,
-          ),
-          const SizedBox(height: 4),
-          SwitchListTile(
-            title: Text('block_interactive_stream_title'.tr()),
-            subtitle: Text('block_interactive_stream_sub'.tr()),
-            value: streamToPanel,
-            onChanged: onStreamToPanelChanged,
-            contentPadding: EdgeInsets.zero,
-          ),
-        ],
-        const _InteractiveHelpText(),
-      ],
-    );
-  }
-}
-
-class _ContextMessageCountField extends StatelessWidget {
-  const _ContextMessageCountField({
-    required this.controller,
-    required this.value,
-    required this.onChanged,
-    required this.fullHelper,
-  });
-
-  final TextEditingController controller;
-  final int value;
-  final ValueChanged<int> onChanged;
-  final bool fullHelper;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      decoration: InputDecoration(
-        labelText: 'block_context_count_label'.tr(),
-        helperText: fullHelper
-            ? 'block_context_count_helper_full'.tr()
-            : 'block_context_count_helper'.tr(),
-      ),
-      keyboardType: const TextInputType.numberWithOptions(signed: true),
-      controller: controller,
-      onChanged: (v) => onChanged(int.tryParse(v) ?? value),
-    );
-  }
-}
-
-class _PreviousBlocksCountField extends StatelessWidget {
-  const _PreviousBlocksCountField({
-    required this.controller,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final TextEditingController controller;
-  final int value;
-  final ValueChanged<int> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      decoration: InputDecoration(
-        labelText: 'block_previous_blocks_label'.tr(),
-        helperText: 'block_previous_blocks_helper'.tr(),
-      ),
-      keyboardType: TextInputType.number,
-      controller: controller,
-      onChanged: (v) => onChanged(int.tryParse(v) ?? value),
-    );
-  }
-}
-
-class _ContextSystemPromptField extends StatelessWidget {
-  const _ContextSystemPromptField({required this.controller});
-
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      decoration: InputDecoration(
-        labelText: 'block_context_prompt_label'.tr(),
-        hintText: 'block_context_prompt_hint'.tr(),
-        helperText: 'block_context_prompt_helper'.tr(),
-        alignLabelWithHint: true,
-      ),
-      maxLines: 5,
-      minLines: 2,
-    );
-  }
-}
-
-class _ImageGenHelpText extends StatelessWidget {
-  const _ImageGenHelpText();
+  final String labelKey;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.fromLTRB(32, 0, 32, 8),
       child: Text(
-        'block_image_gen_help'.tr(),
-        style: const TextStyle(fontSize: 12, height: 1.4),
-      ),
-    );
-  }
-}
-
-class _JsRunnerHelpText extends StatelessWidget {
-  const _JsRunnerHelpText();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Text(
-        'block_js_runner_help'.tr(),
-        style: const TextStyle(fontSize: 12, height: 1.4),
-      ),
-    );
-  }
-}
-
-class _InteractiveHelpText extends StatelessWidget {
-  const _InteractiveHelpText();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Text(
-        'block_interactive_help'.tr(),
-        style: const TextStyle(fontSize: 12, height: 1.4),
+        labelKey.tr(),
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          height: 1.4,
+        ),
       ),
     );
   }

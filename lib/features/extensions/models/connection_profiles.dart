@@ -1,41 +1,9 @@
-import 'package:freezed_annotation/freezed_annotation.dart';
-
-part 'connection_profiles.freezed.dart';
-part 'connection_profiles.g.dart';
-
-/// Per-preset connection profile mapping for `glaze.generateText({ preset })`.
+/// Profile name a JS caller may ask `glaze.generateText` for.
 ///
-/// Extensions can request one of three connection profiles when calling
-/// `generateText`:
-///   * `big`    — typically a large-context, high-quality model (e.g. a
-///                flagship 70B+ class or a strong reasoning model).
-///   * `medium` — the default mid-tier model.
-///   * `small`  — a fast, cheap model suitable for short classifier or
-///                rewriter tasks.
-///
-/// Each profile maps to an `ApiConfig.id` from the user's API config
-/// list. When a profile is unset, the bridge falls back to the active
-/// API config so existing single-config setups keep working unchanged.
-@freezed
-abstract class ConnectionProfiles with _$ConnectionProfiles {
-  const factory ConnectionProfiles({
-    /// `apiConfigId` to use when the JS caller asks for `big`.
-    /// Empty string means "fall back to the active API config".
-    @Default('') String big,
-
-    /// `apiConfigId` to use when the JS caller asks for `medium`.
-    @Default('') String medium,
-
-    /// `apiConfigId` to use when the JS caller asks for `small`.
-    @Default('') String small,
-  }) = _ConnectionProfiles;
-
-  factory ConnectionProfiles.fromJson(Map<String, dynamic> json) =>
-      _$ConnectionProfilesFromJson(json);
-}
-
-/// Profile name → key into [ConnectionProfiles]. Used by the bridge to
-/// look up the right `apiConfigId` from a JS request.
+/// The original extension routes each block through one of three connections;
+/// Glaze runs a preset on a single connection, so every profile resolves to
+/// the same one. The names are kept because imported blocks carry them and the
+/// bridge accepts them.
 enum ConnectionProfile { big, medium, small }
 
 extension ConnectionProfileX on ConnectionProfile {

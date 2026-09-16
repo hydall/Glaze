@@ -7,7 +7,6 @@ import '../../../../../shared/widgets/menu_group.dart';
 import '../../../models/block_config.dart';
 import '../../../models/block_injection.dart';
 import '../../../models/block_modes.dart';
-import '../../../models/connection_profiles.dart';
 
 /// The block-editor groups that mirror the original ExtBlocks extension:
 /// triggers, state flags, injection placement and run order.
@@ -42,12 +41,6 @@ String rewriteModeLabel(RewriteMode mode) => switch (mode) {
 String scriptTypeLabel(ScriptType type) => switch (type) {
   ScriptType.stScript => 'block_script_type_st'.tr(),
   ScriptType.js => 'block_script_type_js'.tr(),
-};
-
-String apiPresetLabel(ConnectionProfile preset) => switch (preset) {
-  ConnectionProfile.big => 'block_api_preset_big'.tr(),
-  ConnectionProfile.medium => 'block_api_preset_medium'.tr(),
-  ConnectionProfile.small => 'block_api_preset_small'.tr(),
 };
 
 /// Opens a picker for one of a fixed set of values.
@@ -284,12 +277,10 @@ class BlockOrderGroup extends StatelessWidget {
     required this.executionOrder,
     required this.rewriteMode,
     required this.scriptType,
-    required this.apiPreset,
     required this.onGenerationOrderChanged,
     required this.onExecutionOrderChanged,
     required this.onRewriteModeChanged,
     required this.onScriptTypeChanged,
-    required this.onApiPresetChanged,
     super.key,
   });
 
@@ -298,12 +289,10 @@ class BlockOrderGroup extends StatelessWidget {
   final BlockRunOrder executionOrder;
   final RewriteMode rewriteMode;
   final ScriptType scriptType;
-  final ConnectionProfile apiPreset;
   final ValueChanged<BlockRunOrder> onGenerationOrderChanged;
   final ValueChanged<BlockRunOrder> onExecutionOrderChanged;
   final ValueChanged<RewriteMode> onRewriteModeChanged;
   final ValueChanged<ScriptType> onScriptTypeChanged;
-  final ValueChanged<ConnectionProfile> onApiPresetChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -363,18 +352,6 @@ class BlockOrderGroup extends StatelessWidget {
           ),
         ),
       ],
-      MenuSelectorItem(
-        label: 'block_api_preset'.tr(),
-        currentValue: apiPresetLabel(apiPreset),
-        onTap: () => pickBlockOption<ConnectionProfile>(
-          context: context,
-          title: 'block_api_preset'.tr(),
-          options: ConnectionProfile.values,
-          current: apiPreset,
-          labelOf: apiPresetLabel,
-          onPicked: onApiPresetChanged,
-        ),
-      ),
     ];
 
     return MenuGroup(header: 'block_sec_order'.tr(), items: items);

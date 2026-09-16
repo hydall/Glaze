@@ -140,16 +140,15 @@ void main() {
     expect(shield.center.dy, closeTo(pill.center.dy, 1));
     expect(shield.left, greaterThan(pill.right));
     // Hard against the same right edge as the cards under it.
-    final api = tester.getRect(find.text('extblocks_api_section'));
+    final api = tester.getRect(find.text('tab_api'));
     expect(shield.right, greaterThan(api.right));
     // Then the API card, then the blocks.
     final blocks = tester.getTopLeft(find.textContaining('(1)')).dy;
     expect(pill.top, lessThan(api.top));
     expect(api.top, lessThan(blocks));
-    // The three connection profiles are the API card's rows.
-    expect(find.text('extblocks_profile_big'), findsOneWidget);
-    expect(find.text('extblocks_profile_medium'), findsOneWidget);
-    expect(find.text('extblocks_profile_small'), findsOneWidget);
+    // One connection slot, the same pair the Agents tab and memory books show.
+    expect(find.text('studio_slot_api'), findsOneWidget);
+    expect(find.text('studio_slot_model'), findsOneWidget);
   });
 
   testWidgets('tapping a block opens that block, not a screen', (tester) async {

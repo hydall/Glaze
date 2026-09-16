@@ -2,38 +2,33 @@ import '../../../../core/models/api_config.dart';
 import '../models/connection_profiles.dart';
 import '../models/extension_preset.dart';
 
-/// Resolves the [ApiConfig] for a JS `glaze.generateText({ preset })` call
-/// based on the active extension preset's [ConnectionProfiles] mapping.
+/// Resolves the [ApiConfig] a JS `glaze.generateText({ preset })` call runs on.
 ///
-/// The mapping is opt-in: when a profile slot is empty (or the user has
-/// not configured connection profiles for the preset), the resolver
-/// falls back to [activeFallback]. This is the same behaviour the
-/// bridge had before the mapping existed, so existing single-config
-/// setups continue to work without any user changes.
+/// A Glaze extension preset has one connection, so the requested [profile]
+/// does not change the answer: every call goes to the preset's own connection.
+/// The argument is still accepted because blocks imported from the original
+/// extension carry `big` / `medium` / `small`, and rejecting it would break
+/// scripts that pass it.
 ///
-/// [activeFallback] is normally the user's currently-selected active
-/// API config (`activeApiConfigProvider`). When the active config is
-/// `null` the resolver returns `null` and the bridge surfaces a
-/// `StateError` ("No active API config available") — matching the
-/// pre-existing bridge contract.
+/// The connection is opt-in: when the preset names none — or names one that no
+/// longer exists — the resolver falls back to [activeFallback]. That is the
+/// behaviour the bridge had before presets could pick a connection at all, so
+/// existing setups keep working untouched.
+///
+/// [activeFallback] is normally the user's currently-selected active API config
+/// (`activeApiConfigProvider`). When it is `null` too the resolver returns
+/// `null` and the bridge surfaces a `StateError` ("No active API config
+/// available") — matching the pre-existing bridge contract.
 class ConnectionProfileResolver {
   const ConnectionProfileResolver();
 
-  /// Returns the [ApiConfig] for [profile], or `null` if no API
-  /// config is registered for the requested profile and the fallback
-  /// is also `null`. The caller decides whether `null` should surface
-  /// as a bridge error.
   ApiConfig? resolve(
     ExtensionPreset? preset,
     ConnectionProfile profile,
     ApiConfig? activeFallback,
     Iterable<ApiConfig> allConfigs,
   ) {
-    final mappedId = switch (profile) {
-      ConnectionProfile.big => preset?.connectionProfiles.big ?? '',
-      ConnectionProfile.medium => preset?.connectionProfiles.medium ?? '',
-      ConnectionProfile.small => preset?.connectionProfiles.small ?? '',
-    };
+    final mappedId = preset?.apiConfigId ?? '';
     if (mappedId.isNotEmpty) {
       final match = allConfigs.where((c) => c.id == mappedId).firstOrNull;
       if (match != null) return match;
