@@ -62,7 +62,7 @@ class StudioSlotInheritedRow extends StatelessWidget {
             height: 46,
             alignment: Alignment.centerLeft,
             decoration: BoxDecoration(
-              color: const Color(0xFF252525),
+              color: context.inputFill,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(

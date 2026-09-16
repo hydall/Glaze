@@ -215,4 +215,14 @@ class GlazeColors extends ThemeExtension<GlazeColors> {
 extension GlazeColorsX on BuildContext {
   GlazeColors get colors => Theme.of(this).extension<GlazeColors>() ?? GlazeColors.dark;
   ColorScheme get cs => Theme.of(this).colorScheme;
+
+  /// Fill behind an input box — a text field, or a selector styled to match
+  /// one.
+  ///
+  /// The dark value is the one these controls have always used, kept literal so
+  /// the dark theme is unchanged. It used to be the only value, which painted a
+  /// near-black box into every light-theme form.
+  Color get inputFill => Theme.of(this).brightness == Brightness.dark
+      ? const Color(0xFF252525)
+      : cs.surfaceContainerHighest;
 }

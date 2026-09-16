@@ -647,7 +647,7 @@ class MenuFieldItem extends StatelessWidget {
                 color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
               ),
               filled: true,
-              fillColor: const Color(0xFF252525),
+              fillColor: context.inputFill,
               suffixIcon: suffix,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -909,7 +909,7 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
           ),
           decoration: InputDecoration(
             filled: true,
-            fillColor: const Color(0xFF252525),
+            fillColor: context.inputFill,
             contentPadding: const EdgeInsets.symmetric(horizontal: 8),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
@@ -1163,7 +1163,7 @@ class MenuSelectorItem extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               constraints: const BoxConstraints(minHeight: 48),
               decoration: BoxDecoration(
-                color: const Color(0xFF252525),
+                color: context.inputFill,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: context.cs.outlineVariant),
               ),

@@ -48,63 +48,71 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
           onPressed: () => _importPreset(context, ref),
         ),
       ],
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(
-          0,
-          MediaQuery.paddingOf(context).top + 12,
-          0,
-          MediaQuery.paddingOf(context).bottom + 24,
-        ),
-        children: [
-          MenuGroup(
-            header: 'extblocks_preset_section'.tr(),
-            description: 'extblocks_sheet_subtitle'.tr(),
-            items: [
-              MenuSwitchItem(
-                label: 'extblocks_enabled'.tr(),
-                description: 'extblocks_enabled_desc'.tr(),
-                value: settings.enabled,
-                onChanged: (value) => ref
-                    .read(extensionsSettingsProvider.notifier)
-                    .update(settings.copyWith(enabled: value)),
-              ),
-              MenuSelectorItem(
-                label: 'extblocks_active_preset'.tr(),
-                currentValue:
-                    activePreset?.name ?? 'extblocks_preset_none'.tr(),
-                onTap: () => _pickPreset(context, ref, settings, presets),
-              ),
-              MenuItem(
-                icon: Icons.add_circle_outline,
-                label: 'extblocks_preset_create'.tr(),
-                onTap: () => _createPreset(ref, presets),
-              ),
-              if (activePreset != null)
-                MenuItem(
-                  icon: Icons.tune_outlined,
-                  label: 'extblocks_preset_edit'.tr(),
-                  onTap: () {
-                    Navigator.pop(context);
-                    context.push(
-                      '/extensions/preset-editor/${activePreset.id}',
-                    );
-                  },
-                ),
-            ],
+      // The header inset SheetView reports lives inside its own subtree,
+      // so the padding must be read from a context below it — the outer
+      // one puts the first row under the header strip.
+      body: Builder(
+        builder: (context) => ListView(
+          padding: EdgeInsets.fromLTRB(
+            0,
+            MediaQuery.paddingOf(context).top + 12,
+            0,
+            MediaQuery.paddingOf(context).bottom + 24,
           ),
-          if (activePreset == null)
-            _Hint(text: 'extblocks_no_preset_hint'.tr())
-          else
-            _BlocksGroup(
-              preset: activePreset,
-              onImport: () => _importBlocks(context, ref, activePreset),
+          children: [
+            MenuGroup(
+              header: 'extblocks_preset_section'.tr(),
+              description: 'extblocks_sheet_subtitle'.tr(),
+              items: [
+                MenuSwitchItem(
+                  label: 'extblocks_enabled'.tr(),
+                  description: 'extblocks_enabled_desc'.tr(),
+                  value: settings.enabled,
+                  onChanged: (value) => ref
+                      .read(extensionsSettingsProvider.notifier)
+                      .update(settings.copyWith(enabled: value)),
+                ),
+                MenuSelectorItem(
+                  label: 'extblocks_active_preset'.tr(),
+                  currentValue:
+                      activePreset?.name ?? 'extblocks_preset_none'.tr(),
+                  onTap: () => _pickPreset(context, ref, settings, presets),
+                ),
+                MenuItem(
+                  icon: Icons.add_circle_outline,
+                  label: 'extblocks_preset_create'.tr(),
+                  onTap: () => _createPreset(ref, presets),
+                ),
+                if (activePreset != null)
+                  MenuItem(
+                    icon: Icons.tune_outlined,
+                    label: 'extblocks_preset_edit'.tr(),
+                    onTap: () {
+                      Navigator.pop(context);
+                      context.push(
+                        '/extensions/preset-editor/${activePreset.id}',
+                      );
+                    },
+                  ),
+              ],
             ),
-        ],
+            if (activePreset == null)
+              _Hint(text: 'extblocks_no_preset_hint'.tr())
+            else
+              _BlocksGroup(
+                preset: activePreset,
+                onImport: () => _importBlocks(context, ref, activePreset),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  Future<void> _createPreset(WidgetRef ref, List<ExtensionPreset> presets) async {
+  Future<void> _createPreset(
+    WidgetRef ref,
+    List<ExtensionPreset> presets,
+  ) async {
     final preset = ExtensionPreset(
       id: generateId(),
       name: 'extblocks_preset_default_name'.tr(args: ['${presets.length + 1}']),
