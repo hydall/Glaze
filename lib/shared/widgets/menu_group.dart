@@ -5,6 +5,7 @@ import '../theme/app_colors.dart';
 import '../shell/shell_header_provider.dart';
 import 'glass_surface.dart';
 import 'help_tip.dart';
+import 'glaze_switch.dart';
 
 enum MenuGroupHeaderVariant { standard, accentCaps }
 
@@ -525,21 +526,9 @@ class MenuSwitchItem extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 16),
-            Switch(
+            GlazeSwitch(
               value: value,
-              onChanged: included ?? true
-                  ? (v) {
-                      Haptics.selectionClick();
-                      onChanged(v);
-                    }
-                  : null,
-              activeThumbColor: context.cs.primary,
-              activeTrackColor: context.cs.primary.withValues(alpha: 0.5),
-              trackOutlineColor: WidgetStateProperty.resolveWith(
-                (states) => states.contains(WidgetState.selected)
-                    ? Colors.transparent
-                    : context.cs.outlineVariant,
-              ),
+              onChanged: included ?? true ? onChanged : null,
             ),
           ],
         ),

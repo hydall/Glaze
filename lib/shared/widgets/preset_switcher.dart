@@ -1,52 +1,45 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
+import '../state/preset_sort.dart';
 import '../theme/app_colors.dart';
 import 'glass_surface.dart';
 import 'glaze_bottom_sheet.dart';
+import 'list_controls.dart';
 
 /// The preset dropdown shared by every screen that runs on a named preset.
 ///
 /// It started on the LLM API screen — an accent pill showing the active preset,
-/// tapped to open a sheet of the others. This file is that pair, lifted out so
-/// the panel does not have to reinvent it: [PresetPill] is the button,
-/// [PresetSwitcher.show] is the sheet behind it.
+/// tapped to open a sheet of the others, sorted or dragged into place. This
+/// file is that pair, lifted out so other screens do not have to reinvent it:
+/// [PresetPill] is the button, [PresetSwitcher.show] is the sheet behind it.
 ///
-/// Everything a preset list needs lives in the sheet rather than on the screen:
-/// creating and importing sit in the header, exporting and deleting sit on the
-/// row they belong to. The screen keeps the pill and nothing else.
+/// Everything a preset list needs lives in the sheet rather than on the screen.
+/// Actions are never loose buttons: the list's own (new, import) sit in one
+/// overflow menu in the header, next to the sort control, and a preset's own
+/// (export, delete, whatever else the caller adds) sit in the overflow menu on
+/// its row.
 
-/// An icon button in the switcher's header — "new preset", "import".
-class PresetSwitcherHeaderAction {
+/// One row of an overflow menu, in the header or on a preset.
+class PresetSwitcherAction {
   final IconData icon;
-  final String? tooltip;
+  final String label;
+  final bool isDestructive;
 
-  /// Whether the sheet closes before [onTap] runs. Creating a preset usually
-  /// closes (the next step is editing it); importing usually does not, so the
-  /// imported preset appears in the list that is already open.
-  final bool closesSheet;
+  /// Whether the switcher itself closes before [onTap] runs. Creating a preset
+  /// usually closes (the next step is editing it); importing usually does not,
+  /// so the imported preset appears in the list that is already open.
+  final bool closesSwitcher;
   final VoidCallback onTap;
 
-  const PresetSwitcherHeaderAction({
+  const PresetSwitcherAction({
     required this.icon,
+    required this.label,
     required this.onTap,
-    this.tooltip,
-    this.closesSheet = false,
-  });
-}
-
-/// A trailing icon button on one row — "export", "delete".
-class PresetSwitcherRowAction {
-  final IconData icon;
-  final Color? color;
-  final bool closesSheet;
-  final VoidCallback onTap;
-
-  const PresetSwitcherRowAction({
-    required this.icon,
-    required this.onTap,
-    this.color,
-    this.closesSheet = false,
+    this.isDestructive = false,
+    this.closesSwitcher = false,
   });
 }
 
@@ -57,13 +50,12 @@ class PresetSwitcherEntry {
   final String? sublabel;
   final bool isActive;
 
-  /// Icon shown in place of the radio button. Null keeps the radio.
-  final IconData? icon;
-  final List<PresetSwitcherRowAction> actions;
+  /// What alphabetical sorting compares. Defaults to [label].
+  final String? sortName;
 
-  /// Whether picking this row closes the sheet. A picker closes; a list that
-  /// stays open to be edited further does not.
-  final bool closesSheet;
+  /// When the preset was created, for "date added" sorting.
+  final int createdAt;
+  final List<PresetSwitcherAction> menu;
   final VoidCallback onSelect;
 
   const PresetSwitcherEntry({
@@ -72,10 +64,21 @@ class PresetSwitcherEntry {
     required this.onSelect,
     this.sublabel,
     this.isActive = false,
-    this.icon,
-    this.actions = const [],
-    this.closesSheet = true,
+    this.sortName,
+    this.createdAt = 0,
+    this.menu = const [],
   });
+}
+
+/// The stored sort of the list being shown, plus the ephemeral "dragging is
+/// armed" flag the header's toggle writes. Omit it for a list with no order of
+/// its own — the switcher then shows the rows exactly as the builder returns
+/// them, and no sort control.
+class PresetSwitcherSort {
+  final AsyncNotifierProvider<PresetSortNotifier, PresetSortState> sort;
+  final StateProvider<bool> reorderArmed;
+
+  const PresetSwitcherSort({required this.sort, required this.reorderArmed});
 }
 
 /// Builds the rows on every rebuild of the open sheet, so creating, importing
@@ -90,75 +93,199 @@ class PresetSwitcher {
     BuildContext context, {
     required String title,
     required PresetSwitcherEntriesBuilder entriesBuilder,
-    List<PresetSwitcherHeaderAction> headerActions = const [],
-  }) {
-    return GlazeBottomSheet.show<void>(
+    List<PresetSwitcherAction> menu = const [],
+    PresetSwitcherSort? sort,
+  }) async {
+    await GlazeBottomSheet.show<void>(
       context,
       title: title,
-      headerAction: headerActions.isEmpty
-          ? null
-          : Builder(
-              builder: (context) => GlassBackdropGroup(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final action in headerActions)
-                      IconButton(
-                        icon: Icon(action.icon, color: context.cs.primary),
-                        tooltip: action.tooltip,
-                        onPressed: () => _run(
-                          context,
-                          closesSheet: action.closesSheet,
-                          onTap: action.onTap,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-      cardsBuilder: (context, ref) => BottomSheetCards(
-        items: [
-          for (final entry in entriesBuilder(context, ref))
-            BottomSheetCardItem(
-              id: entry.id,
-              label: entry.label,
-              sublabel: entry.sublabel,
-              icon:
-                  entry.icon ??
-                  (entry.isActive
-                      ? Icons.radio_button_checked_rounded
-                      : Icons.radio_button_unchecked_rounded),
-              isActive: entry.isActive,
-              actions: [
-                for (final action in entry.actions)
-                  BottomSheetAction(
-                    icon: action.icon,
-                    color: action.color ?? context.cs.onSurfaceVariant,
-                    onTap: () => _run(
-                      context,
-                      closesSheet: action.closesSheet,
-                      onTap: action.onTap,
+      headerAction: _Header(menu: menu, sort: sort),
+      cardsBuilder: (context, ref) {
+        final entries = entriesBuilder(context, ref);
+        final sortState = sort == null
+            ? const PresetSortState()
+            : ref.watch(sort.sort).value ?? const PresetSortState();
+        final sorted = sort == null
+            ? entries
+            : sortPresetItems(
+                entries,
+                sortState,
+                idOf: (e) => e.id,
+                nameOf: (e) => e.sortName ?? e.label,
+                createdAtOf: (e) => e.createdAt,
+              );
+        final reordering =
+            sort != null &&
+            sortState.mode == PresetSortMode.manual &&
+            ref.watch(sort.reorderArmed);
+
+        return BottomSheetCards(
+          items: [
+            for (final entry in sorted)
+              BottomSheetCardItem(
+                id: entry.id,
+                label: entry.label,
+                sublabel: entry.sublabel,
+                icon: entry.isActive
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                isActive: entry.isActive,
+                actions: [
+                  // One overflow button, never a row of loose icons: a preset's
+                  // actions are all one tap away and none of them is a
+                  // mis-tap's reach from selecting the preset.
+                  if (entry.menu.isNotEmpty)
+                    BottomSheetAction(
+                      icon: Icons.more_vert_rounded,
+                      color: context.cs.onSurfaceVariant,
+                      onTap: () => _showMenu(context, entry.label, entry.menu),
                     ),
-                  ),
-              ],
-              onTap: () => _run(
-                context,
-                closesSheet: entry.closesSheet,
-                onTap: entry.onSelect,
+                ],
+                onTap: () {
+                  Navigator.of(context, rootNavigator: true).pop();
+                  entry.onSelect();
+                },
               ),
-            ),
-        ],
-      ),
+          ],
+          onReorder: reordering
+              ? (oldIndex, newIndex) =>
+                    _onReorder(ref, sort, sorted, oldIndex, newIndex)
+              : null,
+        );
+      },
     );
+    if (sort != null && context.mounted) {
+      // The armed drag belongs to the open sheet, not to the screen behind it.
+      ProviderScope.containerOf(
+        context,
+        listen: false,
+      ).read(sort.reorderArmed.notifier).state = false;
+    }
   }
 
-  static void _run(
-    BuildContext context, {
-    required bool closesSheet,
-    required VoidCallback onTap,
-  }) {
-    if (closesSheet) Navigator.of(context, rootNavigator: true).pop();
-    onTap();
+  static void _onReorder(
+    WidgetRef ref,
+    PresetSwitcherSort sort,
+    List<PresetSwitcherEntry> shown,
+    int oldIndex,
+    int newIndex,
+  ) {
+    if (oldIndex == newIndex) return;
+    final order = [for (final entry in shown) entry.id];
+    order.insert(newIndex, order.removeAt(oldIndex));
+    ref.read(sort.sort.notifier).setManualOrder(order);
+  }
+
+  /// An overflow menu, as its own sheet over the switcher.
+  static void _showMenu(
+    BuildContext context,
+    String title,
+    List<PresetSwitcherAction> actions,
+  ) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: title,
+      items: [
+        for (final action in actions)
+          BottomSheetItem(
+            label: action.label,
+            icon: action.icon,
+            isDestructive: action.isDestructive,
+            onTap: () {
+              // Pops the menu; a second pop closes the switcher under it when
+              // the action asked for that.
+              Navigator.of(context, rootNavigator: true).pop();
+              if (action.closesSwitcher) {
+                Navigator.of(context, rootNavigator: true).pop();
+              }
+              action.onTap();
+            },
+          ),
+      ],
+    );
+  }
+}
+
+/// Sort control plus the list's own overflow menu, in the switcher's header.
+class _Header extends ConsumerWidget {
+  const _Header({required this.menu, required this.sort});
+
+  final List<PresetSwitcherAction> menu;
+  final PresetSwitcherSort? sort;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sortState = sort == null
+        ? null
+        : ref.watch(sort!.sort).value ?? const PresetSortState();
+    final armed = sort == null ? false : ref.watch(sort!.reorderArmed);
+
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (sortState != null) ...[
+          // Only the manually ordered list has an order to drag rows into.
+          if (sortState.mode == PresetSortMode.manual) ...[
+            GlazeReorderToggleButton(
+              armed: armed,
+              tooltip: 'sort_reorder'.tr(),
+              onTap: () => ref.read(sort!.reorderArmed.notifier).state = !armed,
+            ),
+            const SizedBox(width: 8),
+          ],
+          GlazeSortIconChip(
+            icon: sortState.mode.icon,
+            tooltip: sortState.mode.label,
+            onTap: () => _showSortPicker(context, ref, sortState.mode),
+          ),
+        ],
+        if (menu.isNotEmpty)
+          IconButton(
+            icon: Icon(Icons.more_vert_rounded, color: context.cs.primary),
+            tooltip: 'preset_switcher_menu'.tr(),
+            onPressed: () => PresetSwitcher._showMenu(
+              context,
+              'preset_switcher_menu'.tr(),
+              menu,
+            ),
+          ),
+      ],
+    );
+
+    // One backdrop capture for the row instead of one per chip: these are plain
+    // siblings that never overlap. See [GlassBackdropGroup].
+    return GlassBackdropGroup(child: row);
+  }
+
+  void _showSortPicker(
+    BuildContext context,
+    WidgetRef ref,
+    PresetSortMode current,
+  ) {
+    showGlazePickerSheet(
+      context,
+      title: 'sort_by'.tr(),
+      items: [
+        for (final mode in PresetSortMode.values)
+          GlazePickerItem(
+            label: mode.label,
+            icon: mode.icon,
+            hint: mode.hint,
+            isActive: mode == current,
+            value: mode,
+          ),
+      ],
+      onSelect: (v) {
+        final mode = v as PresetSortMode;
+        if (mode == current) return;
+        // Another mode has no order to drag rows into: the toggle goes away, so
+        // it must not stay armed behind it.
+        if (mode != PresetSortMode.manual) {
+          ref.read(sort!.reorderArmed.notifier).state = false;
+        }
+        ref.read(sort!.sort.notifier).setMode(mode);
+      },
+    );
   }
 }
 

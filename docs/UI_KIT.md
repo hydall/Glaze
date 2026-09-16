@@ -32,7 +32,7 @@ styling a Material widget with `Colors.white.withValues(alpha: 0.05)` and
 | `ElevatedButton` / `OutlinedButton` / `FilledButton` in a toolbar | `GlassSurface` tile with `onTap`, or `GlazePillButton` (`glaze_scaffold.dart`) | There is no generic Glaze button — a tile built on `GlassSurface` *is* the button. |
 | `Chip` / `FilterChip` / `ChoiceChip` | `GlazeFilterChipBar` (`glaze_filter_chip_bar.dart`), `GlazeDropdownChip` / `GlazeFilterIconButton` (`list_controls.dart`), `CardTagChips`, `VariationChip`, `ConnectionChip` / `ConnectionScopeChip` | Pick the one that matches the role; a bare toggle in a form is usually a `MenuSwitchItem`, not a chip. |
 | `DropdownButton` / `PopupMenuButton` | `GlazeDropdownChip` + `showGlazePickerSheet` (`list_controls.dart`), or `MenuSelectorItem` inside a `MenuGroup` | |
-| A hand-rolled "active preset" chip and its picker | `PresetPill` + `PresetSwitcher.show` (`preset_switcher.dart`) | The preset dropdown, from the LLM API screen. The pill names the active preset; the sheet behind it picks another, and carries create/import in its header and export/delete on each row — so a screen never grows preset-management rows of its own. |
+| A hand-rolled "active preset" chip and its picker | `PresetPill` + `PresetSwitcher.show` (`preset_switcher.dart`) | The preset dropdown, from the LLM API screen. The pill names the active preset; the sheet behind it picks another, sorts the list (`PresetSwitcherSort` over `lib/shared/state/preset_sort.dart` — alphabetical / date added / dragged-into-place) and keeps every action in an overflow menu: the list's own (new, import) in the header, a preset's own (export, delete) on its row. A screen using it never grows preset-management rows or loose action buttons of its own. |
 | `TextField` | `GlazeTextField` (`glaze_text_field.dart`) standalone, `MenuFieldItem` inside a menu group, `GenericEditor` for a whole form | |
 | A hand-built settings form | `GenericEditor` + `GenericEditorSection` / `GenericEditorField` (`generic_editor.dart`) | Declarative field list (`text` / `number` / `tags` / `textarea` / `select` / `switch` / `greeting_list` / `info`), renders as `MenuGroup`s, debounced save. |
 | A full-screen text editor route | `FullscreenEditorScreen.show` (`fullscreen_editor.dart`) | |
@@ -47,8 +47,9 @@ styling a Material widget with `Colors.white.withValues(alpha: 0.05)` and
 Supporting pieces you normally get for free (via the widgets above) but may
 need directly: `GlazeBackground`, `TopEdgeBlur`, `NoiseOverlay`,
 `GlowInkWell` / `GlowRippleOverlay`, `FilterSheet`, `ImageViewer`,
-`FolderNameDialog`, `ConnectionSection` and friends, and the `InlineMd`
-renderers in `colored_markdown.dart`.
+`FolderNameDialog`, `ConnectionSection` and friends, `GlazeSwitch` (the
+accent-tinted switch `MenuSwitchItem` uses, for the rare toggle outside a menu
+row), and the `InlineMd` renderers in `colored_markdown.dart`.
 
 ## Which sheet
 

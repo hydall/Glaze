@@ -63,15 +63,17 @@ void main() {
     );
   });
 
-  testWidgets('ProfilesSection renders generateText profile rows', (
+  testWidgets('ProfilesSection renders the three connection profiles', (
     tester,
   ) async {
     await pumpSection(tester, const ProfilesSection(preset: preset));
 
-    expect(find.text('Профили подключения (generateText)'), findsOneWidget);
-    expect(find.text('big'), findsOneWidget);
-    expect(find.text('medium'), findsOneWidget);
-    expect(find.text('small'), findsOneWidget);
+    expect(find.text('extblocks_api_section'), findsOneWidget);
+    expect(find.text('extblocks_profile_big'), findsOneWidget);
+    expect(find.text('extblocks_profile_medium'), findsOneWidget);
+    expect(find.text('extblocks_profile_small'), findsOneWidget);
+    // Unset profiles fall back to whichever API the app is on.
+    expect(find.text('extblocks_profile_default'), findsNWidgets(3));
   });
 
   testWidgets('BlockEditDialog renders the default infoblock editor', (

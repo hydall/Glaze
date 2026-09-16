@@ -97,7 +97,7 @@ class BlocksSection extends ConsumerWidget {
     );
     final updated = preset.copyWith(blocks: [...preset.blocks, block]);
     await ref.read(extensionPresetsProvider.notifier).update(updated);
-    if (context.mounted) _editBlock(context, ref, updated, block);
+    if (context.mounted) editBlockSheet(context, ref, updated, block);
   }
 }
 
@@ -122,7 +122,7 @@ class _BlockTile extends ConsumerWidget {
           subtitle: blockSubtitle(block),
           enabled: block.enabled,
           onToggle: (v) => _toggleBlock(ref, preset, block, v),
-          onTap: () => _editBlock(context, ref, preset, block),
+          onTap: () => editBlockSheet(context, ref, preset, block),
           onMore: () => _showBlockActions(context, ref, preset, block),
         ),
         Positioned(
@@ -230,7 +230,10 @@ String blockTriggerSummary(BlockConfig block) {
   return sides.join(' + ');
 }
 
-void _editBlock(
+/// Opens one block's settings as a sheet and writes the result back into
+/// [preset]. Shared with the Ext Blocks panel, so tapping a block goes straight
+/// to its settings wherever the list is shown.
+void editBlockSheet(
   BuildContext context,
   WidgetRef ref,
   ExtensionPreset preset,

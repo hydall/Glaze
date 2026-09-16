@@ -94,15 +94,12 @@ void main() {
 
     test('an unknown stored mode falls back to the manual order', () {
       expect(
-        ApiPresetSortModeInfo.fromWireName('defaultOrder'),
+        PresetSortModeInfo.fromWireName('defaultOrder'),
         ApiPresetSortMode.manual,
       );
+      expect(PresetSortModeInfo.fromWireName(null), ApiPresetSortMode.manual);
       expect(
-        ApiPresetSortModeInfo.fromWireName(null),
-        ApiPresetSortMode.manual,
-      );
-      expect(
-        ApiPresetSortModeInfo.fromWireName('alphabetical'),
+        PresetSortModeInfo.fromWireName('alphabetical'),
         ApiPresetSortMode.alphabetical,
       );
     });

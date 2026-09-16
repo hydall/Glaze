@@ -12,6 +12,9 @@ import 'package:glaze_flutter/features/extensions/models/extensions_settings.dar
 import 'package:glaze_flutter/features/extensions/providers/extension_presets_provider.dart';
 import 'package:glaze_flutter/features/extensions/providers/extensions_settings_provider.dart';
 import 'package:glaze_flutter/features/extensions/widgets/ext_blocks_settings_sheet.dart';
+import 'package:glaze_flutter/features/extensions/screens/preset_editor/block_edit_dialog.dart';
+import 'package:glaze_flutter/shared/widgets/glaze_switch.dart';
+import 'package:glaze_flutter/shared/widgets/list_controls.dart';
 import 'package:glaze_flutter/shared/widgets/preset_switcher.dart';
 
 void main() {
@@ -58,8 +61,12 @@ void main() {
     expect(find.text('Настроить контекст блока'), findsNothing);
   });
 
-  testWidgets('preset management hides behind the pill', (tester) async {
-    tester.view.physicalSize = const Size(800, 2000);
+  /// Two presets, the first active and holding one block, with Ext Blocks on.
+  Future<ProviderContainer> pumpPanel(
+    WidgetTester tester, {
+    bool enabled = true,
+  }) async {
+    tester.view.physicalSize = const Size(800, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -85,7 +92,7 @@ void main() {
         .add(const ExtensionPreset(id: 'p2', name: 'Other preset', blocks: []));
     await container
         .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(enabled: true, activePresetId: 'p1'));
+        .update(ExtensionsSettings(enabled: enabled, activePresetId: 'p1'));
 
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -96,63 +103,104 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    return container;
+  }
 
-    // The panel itself carries the pill and the permissions row — creating,
-    // importing and exporting a preset are no longer rows of their own.
+  testWidgets('the master switch lives in the header and gates the body', (
+    tester,
+  ) async {
+    final container = await pumpPanel(tester, enabled: false);
+
+    // Off: one line of explanation, and nothing to configure under it.
+    expect(find.byType(GlazeSwitch), findsOneWidget);
+    expect(find.text('extblocks_disabled_hint'), findsOneWidget);
+    expect(find.byType(PresetPill), findsNothing);
+    expect(find.text('Ledger'), findsNothing);
+
+    await tester.tap(find.byType(GlazeSwitch));
+    await tester.pumpAndSettle();
+
+    expect(container.read(extensionsSettingsProvider).enabled, isTrue);
+    expect(find.text('extblocks_disabled_hint'), findsNothing);
+    expect(find.byType(PresetPill), findsOneWidget);
+    expect(find.text('Ledger'), findsOneWidget);
+  });
+
+  testWidgets('the dropdown heads the body and API settings come first', (
+    tester,
+  ) async {
+    await pumpPanel(tester);
+
     expect(find.byType(PresetPill), findsOneWidget);
     expect(find.text('Active preset'), findsOneWidget);
-    expect(find.text('extblocks_permissions'), findsOneWidget);
-    expect(find.text('extblocks_preset_create'), findsNothing);
+    // API card, then blocks, then permissions.
+    final api = tester.getTopLeft(find.text('extblocks_api_section')).dy;
+    final blocks = tester.getTopLeft(find.textContaining('(1)')).dy;
+    final permissions = tester
+        .getTopLeft(find.text('extblocks_permissions'))
+        .dy;
+    expect(tester.getTopLeft(find.byType(PresetPill)).dy, lessThan(api));
+    expect(api, lessThan(blocks));
+    expect(blocks, lessThan(permissions));
+    // The three connection profiles are the API card's rows.
+    expect(find.text('extblocks_profile_big'), findsOneWidget);
+    expect(find.text('extblocks_profile_medium'), findsOneWidget);
+    expect(find.text('extblocks_profile_small'), findsOneWidget);
+  });
+
+  testWidgets('tapping a block opens that block, not a screen', (tester) async {
+    await pumpPanel(tester);
+
+    await tester.tap(find.text('Ledger'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(BlockEditDialog), findsOneWidget);
+    expect(find.text('block_edit_name_label'), findsOneWidget);
+  });
+
+  testWidgets('the switcher sorts and keeps its actions in overflow menus', (
+    tester,
+  ) async {
+    await pumpPanel(tester);
 
     await tester.tap(find.byType(PresetPill));
     await tester.pumpAndSettle();
 
-    // The switcher lists every preset plus "none", and carries creating and
-    // importing in its header.
     expect(find.text('extblocks_preset_pick'), findsOneWidget);
     expect(find.text('Other preset'), findsOneWidget);
-    expect(find.text('extblocks_preset_none'), findsOneWidget);
-    expect(find.byTooltip('extblocks_preset_create'), findsOneWidget);
-    expect(find.byTooltip('extblocks_preset_import'), findsOneWidget);
-    // Export and delete sit on each preset row, two per preset.
-    expect(find.byIcon(Icons.file_upload_outlined), findsNWidgets(2));
-    expect(find.byIcon(Icons.delete_outline_rounded), findsNWidgets(2));
+    // The sort control and the drag toggle the API presets sheet has, and no
+    // loose action buttons beside them.
+    expect(find.byType(GlazeSortIconChip), findsOneWidget);
+    expect(find.byType(GlazeReorderToggleButton), findsOneWidget);
+    // One overflow button for the list, one per preset row.
+    expect(find.byIcon(Icons.more_vert_rounded), findsNWidgets(3));
+
+    // The list's menu: creating and importing.
+    await tester.tap(find.byTooltip('preset_switcher_menu'));
+    await tester.pumpAndSettle();
+    expect(find.text('extblocks_preset_create'), findsOneWidget);
+    expect(find.text('extblocks_preset_import'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('a preset row carries export and delete in its own menu', (
+    tester,
+  ) async {
+    await pumpPanel(tester);
+
+    await tester.tap(find.byType(PresetPill));
+    await tester.pumpAndSettle();
+    // The row menus follow the header's, in list order.
+    await tester.tap(find.byIcon(Icons.more_vert_rounded).at(1));
+    await tester.pumpAndSettle();
+
+    expect(find.text('extblocks_preset_export'), findsOneWidget);
+    expect(find.text('extblocks_preset_delete'), findsOneWidget);
   });
 
   testWidgets('switcher row switches the active preset', (tester) async {
-    tester.view.physicalSize = const Size(800, 2000);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    SharedPreferences.setMockInitialValues({});
-    final db = AppDatabase.forTesting(NativeDatabase.memory());
-    addTearDown(db.close);
-    final container = ProviderContainer(
-      overrides: [appDbProvider.overrideWithValue(db)],
-    );
-    addTearDown(container.dispose);
-    await container
-        .read(extensionPresetsProvider.notifier)
-        .add(
-          const ExtensionPreset(id: 'p1', name: 'Active preset', blocks: []),
-        );
-    await container
-        .read(extensionPresetsProvider.notifier)
-        .add(const ExtensionPreset(id: 'p2', name: 'Other preset', blocks: []));
-    await container
-        .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(enabled: true, activePresetId: 'p1'));
-
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: const MaterialApp(
-          home: Scaffold(body: ExtBlocksSettingsSheet()),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
+    final container = await pumpPanel(tester);
 
     await tester.tap(find.byType(PresetPill));
     await tester.pumpAndSettle();
