@@ -54,15 +54,16 @@ class _AgenticOperationsLogDialogState
   /// Opens on the tab this sheet was last closed on — see
   /// [agentOpsTabProvider]. Clamped here because the stored index may name a
   /// tab an older build had and this one does not.
-  late int _activeIndex = ref
-      .read(agentOpsTabProvider)
-      .clamp(0, _tabCount - 1);
+  late int _activeIndex = _openingTab(ref.read(agentOpsTabProvider));
 
   /// Tabs are built on first visit, so an expensive one costs nothing until it
   /// is opened. The remembered tab counts as visited.
   late final Set<int> _visited = {_activeIndex};
 
   static const _tabCount = 4;
+
+  static int _openingTab(int stored) =>
+      stored < 0 || stored >= _tabCount ? 0 : stored;
 
   void _selectTab(int index) {
     setState(() {

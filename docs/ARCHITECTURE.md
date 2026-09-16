@@ -616,7 +616,20 @@ Studio has two separate persisted layers:
 - `studio_config_rows` stores per-session Studio activation (`enabled` flag);
 - `studio_preset_rows` stores user-owned prompt presets as JSON block lists,
   per-controller toggles, an explicit `executionMode`, and nested
-  `StudioRuntimeSettings` (agent/cleaner/ledger tuning and broadcast blocks).
+  `StudioRuntimeSettings` (broadcast blocks, Ledger prompt-injection mode,
+  reasoning tags, and this preset's own Post Clean / Ledger / Card Rewriter
+  settings).
+
+The three post-processing lanes are configured **per preset**:
+`StudioRuntimeSettings.cleaner` / `.ledger` / `.cardRewriter` each hold that
+preset's copy of the settings object otherwise found in the global
+`PipelineSettings`. Null means the lane is unconfigured on this preset and the
+global value applies, which is what an install carries until someone edits a
+lane. `applyStudioPresetOverrides` (`core/models/studio_pipeline_overrides.dart`)
+is the single fold; `StudioTurnConfigSnapshot` applies it to the whole turn and
+`cardRewriterSettingsProvider` to the Card Rewriter lane, so no consumer reads
+either source directly. The pre-generation controller and final-writer model
+overrides, and MemoryBook generation, stay global.
 
 The active Studio preset is a global selection (`activeStudioPresetId` in
 SharedPreferences, synced via `local_storage`). Session rows carry only the
@@ -772,11 +785,15 @@ preset blocks to agents by `targetAgentId` and expands chat-time macros
 (`{{char}}`, `{{user}}`, `{{studio_*_brief}}`). Broadcast rules for the
 POST-cleaner live in `StudioPreset.runtime.broadcastBlocks`.
 
-Manual editing: `studio_settings_sheet.dart` exposes a "Edit Preset Blocks"
-button (opens `StudioPresetEditorSheet`), and a per-slot settings dialog
-for model parameters (temperature, topP, reasoning, etc.). Studio
-agent/cleaner/ledger settings are written to the active preset's
-`StudioRuntimeSettings`, not to global `PipelineSettings`.
+Manual editing is split across two surfaces. The agentic preset editor
+(`StudioPresetEditorBody`) owns the pipeline: the blocks, the agent switches,
+and — under the Ledger whose reconciliation commits feed it — the Card Rewriter
+lane's switch and its own settings. The Agents tab of the API sheet
+(`StudioSlotsTab`) owns every stage's connection and model, plus the per-slot
+parameter dialog (temperature, topP, reasoning, timeouts). Post Clean, Ledger
+and Card Rewriter rows there read and write the active preset's
+`StudioRuntimeSettings`; the pre-generation, final and MemoryBook rows write
+global `PipelineSettings`.
 
 ### Nested swipes (agentSwipes)
 
