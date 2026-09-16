@@ -11,7 +11,7 @@ import { TrackpadScroll } from './trackpad_scroll.js';
 import { InteractionDispatch } from './interaction_dispatch.js';
 import { PanelHost } from './panel_host.js';
 import { sanitizeExtBlockHtml } from './html_sanitizer.js';
-import { parseImageResultElement } from '../formatter/formatter.js';
+import { parseImageResultElement, parseImagePendingPayload } from '../formatter/formatter.js';
 import { ICON } from '../renderer/icon_library.js';
 import { applyTypingPhase } from '../renderer/typing_phase.js';
 
@@ -75,6 +75,12 @@ export class Bridge {
     // One "a message tried to run JS" report per WebView load — see
     // notifyMessageScriptBlocked().
     this._messageScriptBlockedNotified = false;
+    // Live elapsed clock for running ext-blocks (see _ensureExtBlockTicker).
+    this._extBlockTicker = null;
+    // Localized "Generating image…" label for the block image placeholder.
+    // Flutter passes it with each showExtBlocksPanel; the default keeps a panel
+    // rendered before the first push readable.
+    this._extBlockImageGenLabel = 'Generating image…';
     renderer.selectionManager = this._selectionManager;
     this._swipeHandler = new SwipeGestureHandler(
       (name, args) => this._sendToFlutter(name, args),
@@ -1782,6 +1788,8 @@ export class Bridge {
     const { messageId, blocks, canRunAll } = data;
     if (!messageId) return;
 
+    if (data.imageGenLabel) this._extBlockImageGenLabel = data.imageGenLabel;
+
     const section = document.querySelector(`[data-message-id="${messageId}"]`);
     if (!section) return;
 
@@ -1798,6 +1806,13 @@ export class Bridge {
       content.appendChild(panel);
     }
 
+    // A full re-render drops the DOM, so carry running blocks' elapsed-clock
+    // start times across so their timer doesn't reset to 0 on every refresh.
+    const prevStarts = new Map();
+    panel.querySelectorAll('.ext-block-item[data-start]').forEach((el) => {
+      prevStarts.set(el.dataset.blockId, el.dataset.start);
+    });
+
     panel.innerHTML = '';
 
     if (canRunAll) {
@@ -1805,10 +1820,11 @@ export class Bridge {
       toolbar.className = 'ext-blocks-toolbar';
       const runAllBtn = document.createElement('button');
       runAllBtn.type = 'button';
-      runAllBtn.className = 'ext-block-btn ext-blocks-run-all';
+      runAllBtn.className = 'ext-blocks-run-all';
       runAllBtn.dataset.action = 'ext-blocks-run-all';
       runAllBtn.dataset.messageId = messageId;
-      runAllBtn.textContent = '▶ Запустить блоки';
+      runAllBtn.title = 'Запустить блоки';
+      runAllBtn.innerHTML = `${ICON.play}<span>Запустить блоки</span>`;
       toolbar.appendChild(runAllBtn);
       panel.appendChild(toolbar);
     }
@@ -1823,7 +1839,7 @@ export class Bridge {
 
       const caret = document.createElement('span');
       caret.className = 'ext-block-caret';
-      caret.textContent = '▸';
+      caret.innerHTML = ICON.chevronDown;
       header.appendChild(caret);
 
       const name = document.createElement('span');
@@ -1831,59 +1847,48 @@ export class Bridge {
       name.textContent = block.blockName || block.blockId || '—';
       header.appendChild(name);
 
-      const statusEl = document.createElement('span');
-      statusEl.className = 'ext-block-status';
-      statusEl.textContent = this._extBlockStatusLabel(block.status);
-      header.appendChild(statusEl);
+      // Header marker: a live clock while running, a muted pill for the
+      // pre-run / stopped states, and nothing for done. An error block takes
+      // over the body instead of a header marker.
+      if (block.status === 'running') {
+        if (prevStarts.has(block.blockId)) item.dataset.start = prevStarts.get(block.blockId);
+        header.appendChild(this._extBlockTimerEl(item));
+      } else if (block.status === 'pending' || block.status === 'stopped') {
+        const statusEl = document.createElement('span');
+        statusEl.className = 'ext-block-status';
+        statusEl.textContent = this._extBlockStatusLabel(block.status);
+        header.appendChild(statusEl);
+      }
 
-      // Buttons — no per-btnGroup listener so the click bubbles up to the
-      // document-level delegation in `_interaction.handleClick` (which
-      // dispatches via `_actionMap`). The header's own click listener has
-      // a `closest('.ext-block-btn')` guard so it won't toggle collapse.
+      // Icon buttons — no per-btnGroup listener, so the click bubbles up to
+      // the document-level delegation in `_interaction.handleClick` (which
+      // dispatches via `_actionMap`). The header's own click listener has a
+      // `closest('.ext-block-btn')` guard so it won't toggle collapse.
       const btnGroup = document.createElement('span');
       btnGroup.className = 'ext-block-actions';
 
+      const makeButton = (action, icon, title, danger = false) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ext-block-btn' + (danger ? ' ext-block-btn-danger' : '');
+        btn.dataset.action = action;
+        btn.dataset.blockId = block.blockId;
+        btn.dataset.messageId = messageId;
+        btn.title = title;
+        btn.innerHTML = icon;
+        return btn;
+      };
+
       // Pending entries are preset placeholders and have no persisted row yet.
       if (block.id) {
-        const editBtn = document.createElement('button');
-        editBtn.type = 'button';
-        editBtn.className = 'ext-block-btn ext-block-btn-icon';
-        editBtn.dataset.action = 'ext-block-edit';
-        editBtn.dataset.blockId = block.blockId;
-        editBtn.dataset.messageId = messageId;
-        editBtn.title = 'Редактировать';
-        editBtn.textContent = '✎';
-        btnGroup.appendChild(editBtn);
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.type = 'button';
-        deleteBtn.className = 'ext-block-btn ext-block-btn-icon ext-block-btn-danger';
-        deleteBtn.dataset.action = 'ext-block-delete';
-        deleteBtn.dataset.blockId = block.blockId;
-        deleteBtn.dataset.messageId = messageId;
-        deleteBtn.title = 'Удалить';
-        deleteBtn.textContent = '✕';
-        btnGroup.appendChild(deleteBtn);
+        btnGroup.appendChild(makeButton('ext-block-edit', ICON.edit, 'Редактировать'));
+        btnGroup.appendChild(makeButton('ext-block-delete', ICON.trash, 'Удалить', true));
       }
 
       if (block.status === 'running') {
-        const stopBtn = document.createElement('button');
-        stopBtn.type = 'button';
-        stopBtn.className = 'ext-block-btn';
-        stopBtn.dataset.action = 'ext-block-stop';
-        stopBtn.dataset.blockId = block.blockId;
-        stopBtn.dataset.messageId = messageId;
-        stopBtn.textContent = '■ Стоп';
-        btnGroup.appendChild(stopBtn);
+        btnGroup.appendChild(makeButton('ext-block-stop', ICON.stop, 'Стоп'));
       } else if (block.status === 'pending') {
-        const startBtn = document.createElement('button');
-        startBtn.type = 'button';
-        startBtn.className = 'ext-block-btn';
-        startBtn.dataset.action = 'ext-block-regen';
-        startBtn.dataset.blockId = block.blockId;
-        startBtn.dataset.messageId = messageId;
-        startBtn.textContent = '▶ Запустить';
-        btnGroup.appendChild(startBtn);
+        btnGroup.appendChild(makeButton('ext-block-regen', ICON.play, 'Запустить'));
       } else {
         const canRegenImage = block.type === 'imageGen' && block.content && (
           /\[IMG:RESULT:/.test(block.content) ||
@@ -1891,24 +1896,16 @@ export class Bridge {
           /data-iig-instruction/i.test(block.content)
         );
         if (canRegenImage) {
-          const imgRegenBtn = document.createElement('button');
-          imgRegenBtn.type = 'button';
-          imgRegenBtn.className = 'ext-block-btn';
-          imgRegenBtn.dataset.action = 'ext-block-regen-image';
-          imgRegenBtn.dataset.blockId = block.blockId;
-          imgRegenBtn.dataset.messageId = messageId;
-          imgRegenBtn.textContent = '↺ Картинка';
-          btnGroup.appendChild(imgRegenBtn);
+          btnGroup.appendChild(makeButton('ext-block-regen-image', ICON.image, 'Перегенерировать картинку'));
         }
-        const regenBtn = document.createElement('button');
-        regenBtn.type = 'button';
-        regenBtn.className = 'ext-block-btn';
-        regenBtn.dataset.action = 'ext-block-regen';
-        regenBtn.dataset.blockId = block.blockId;
-        regenBtn.dataset.messageId = messageId;
-        regenBtn.textContent = '↺ Перегенерировать';
-        btnGroup.appendChild(regenBtn);
+        btnGroup.appendChild(makeButton('ext-block-regen', ICON.regen, 'Перегенерировать'));
       }
+
+      // Trailing buttons are pinned right; the spacer absorbs the space so the
+      // name and its timer hug the left edge.
+      const spacer = document.createElement('span');
+      spacer.className = 'ext-block-spacer';
+      header.appendChild(spacer);
 
       header.appendChild(btnGroup);
       header.addEventListener('click', (e) => {
@@ -1917,14 +1914,22 @@ export class Bridge {
       });
       item.appendChild(header);
 
-      // Content body (collapsible).
+      // Collapsible body — animated like reasoning, not display:none.
+      const collapse = document.createElement('div');
+      collapse.className = 'ext-block-collapse';
       const body = document.createElement('div');
       body.className = 'ext-block-body';
-      this._fillExtBlockBody(body, block);
-      item.appendChild(body);
+      const inner = document.createElement('div');
+      inner.className = 'ext-block-inner';
+      this._fillExtBlockBody(inner, block);
+      body.appendChild(inner);
+      collapse.appendChild(body);
+      item.appendChild(collapse);
 
       panel.appendChild(item);
     }
+
+    this._ensureExtBlockTicker();
   }
 
   /**
@@ -1946,13 +1951,29 @@ export class Bridge {
     if (!item) return false;
 
     item.className = `ext-block-item ${status || 'running'}`;
-    const statusEl = item.querySelector('.ext-block-status');
-    if (statusEl) statusEl.textContent = this._extBlockStatusLabel(status);
 
-    const body = item.querySelector('.ext-block-body');
-    if (!body) return false;
-    body.innerHTML = '';
-    this._fillExtBlockBody(body, { content, status });
+    // Keep the header clock in step: while running it keeps counting (the full
+    // render already placed it), otherwise a leftover clock is torn down. A
+    // terminal state always arrives via showExtBlocksPanel, so this is only a
+    // defensive cleanup.
+    if ((status || 'running') === 'running') {
+      item.querySelector('.ext-block-status')?.remove();
+      if (!item.querySelector('.ext-block-timer')) {
+        const header = item.querySelector('.ext-block-header');
+        const spacer = item.querySelector('.ext-block-spacer');
+        if (header && spacer) header.insertBefore(this._extBlockTimerEl(item), spacer);
+        else if (header) header.appendChild(this._extBlockTimerEl(item));
+      }
+      this._ensureExtBlockTicker();
+    } else {
+      delete item.dataset.start;
+      item.querySelector('.ext-block-timer')?.remove();
+    }
+
+    const inner = item.querySelector('.ext-block-inner');
+    if (!inner) return false;
+    inner.innerHTML = '';
+    this._fillExtBlockBody(inner, { content, status });
     item.classList.remove('collapsed');
     return true;
   }
@@ -1961,6 +1982,13 @@ export class Bridge {
     return String(value || '')
       .replace(/&/g, '&amp;')
       .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  _escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
   }
@@ -2007,7 +2035,35 @@ export class Bridge {
     );
   }
 
+  /* The shimmer placeholder a pending `[IMG:GEN:…]` block renders as — the
+   * same visual language as a message's inline image placeholder. */
+  _extBlockImageGenMarkup(instruction) {
+    const prompt = this._extBlockImageGenPrompt(instruction);
+    const promptEl = prompt
+      ? `<div class="ext-block-imagegen-prompt">${this._escapeHtml(prompt)}</div>`
+      : '';
+    return `<div class="ext-block-imagegen"><div class="ext-block-imagegen-surface"></div><div class="ext-block-imagegen-head">${this._escapeHtml(this._extBlockImageGenLabel)}</div>${promptEl}</div>`;
+  }
+
+  /* The human-readable prompt out of a `[IMG:GEN:…]` instruction payload
+   * (JSON `prompt`/`caption`, or the raw text), matching the message formatter. */
+  _extBlockImageGenPrompt(instruction) {
+    const raw = parseImagePendingPayload(instruction).instruction.trim();
+    if (!raw) return '';
+    try {
+      const json = JSON.parse(raw);
+      if (json && typeof json === 'object') {
+        return (json.prompt || json.caption || '').replace(/^SCENE_PROMPT:\s*/, '');
+      }
+    } catch (_) { /* fall through to raw text */ }
+    return raw;
+  }
+
   _fillExtBlockBody(body, block) {
+    if (block.status === 'error') {
+      this._renderExtBlockError(body, block);
+      return;
+    }
     const hasContent = block.content && block.content.trim().length > 0;
     if (!hasContent && block.status !== 'pending') {
       const empty = document.createElement('div');
@@ -2020,10 +2076,23 @@ export class Bridge {
 
     const content = this._extBlockLegacyImageTokens(block.content);
     const imgResultRegex = /\[IMG:RESULT:([^\]]+)\]/;
+    const imgGenRegex = /\[IMG:GEN(?::([\s\S]*?))?\]/;
     const hasImgResult = imgResultRegex.test(content);
+    const hasImgGen = imgGenRegex.test(content);
     const hasHtmlMarkup = /<[a-z][\s\S]*>/i.test(content);
 
-    if (hasImgResult && hasHtmlMarkup) {
+    if (hasImgGen) {
+      // A pending image block renders the same shimmer placeholder the inline
+      // message image uses; the block header already carries the clock + stop.
+      const html = content
+        .replace(/<p class="ext-block-image-pending">[\s\S]*?<\/p>/g, '')
+        .replace(imgGenRegex, (match, instruction) =>
+          this._extBlockImageGenMarkup(instruction || ''));
+      const htmlEl = document.createElement('div');
+      htmlEl.className = 'ext-block-content';
+      htmlEl.innerHTML = sanitizeExtBlockHtml(html);
+      body.appendChild(htmlEl);
+    } else if (hasImgResult && hasHtmlMarkup) {
       let html = content.replace(
         /\[IMG:RESULT:([^\]]+)\]/g,
         (match, payload) => this._renderExtBlockImageHtml(payload),
@@ -2068,6 +2137,71 @@ export class Bridge {
       case 'done': return 'готово';
       default: return status || '—';
     }
+  }
+
+  /* Builds the running block's header clock: a clock glyph + a rolling seconds
+   * label. [item.dataset.start] is stamped with the current time when absent,
+   * so a re-run starts from 0 and a re-render reuses the preserved start. */
+  _extBlockTimerEl(item) {
+    if (!item.dataset.start) item.dataset.start = String(Date.now());
+    const timer = document.createElement('span');
+    timer.className = 'ext-block-timer';
+    const clock = document.createElement('span');
+    clock.innerHTML = ICON.clock;
+    clock.firstChild.style.cssText = 'width:12px;height:12px;fill:currentColor;';
+    timer.appendChild(clock.firstChild);
+    const time = document.createElement('span');
+    time.className = 'ext-block-time';
+    const sec = (Date.now() - Number(item.dataset.start)) / 1000;
+    time.textContent = (this.batterySaver ? sec.toFixed(0) : sec.toFixed(1)) + 's';
+    timer.appendChild(time);
+    return timer;
+  }
+
+  /* One shared interval repaints every running block's elapsed label; it stops
+   * itself when no running block is left on screen. */
+  _ensureExtBlockTicker() {
+    if (this._extBlockTicker) return;
+    const tick = () => {
+      const els = document.querySelectorAll('.ext-block-item.running .ext-block-time');
+      if (els.length === 0) { this._stopExtBlockTicker(); return; }
+      const now = Date.now();
+      const battery = this.batterySaver;
+      for (const el of els) {
+        const item = el.closest('.ext-block-item');
+        const start = Number(item?.dataset.start || now);
+        const sec = (now - start) / 1000;
+        el.textContent = (battery ? sec.toFixed(0) : sec.toFixed(1)) + 's';
+      }
+    };
+    if (!document.querySelector('.ext-block-item.running .ext-block-time')) return;
+    tick();
+    this._extBlockTicker = setInterval(tick, this.batterySaver ? 1000 : 100);
+  }
+
+  _stopExtBlockTicker() {
+    if (this._extBlockTicker) {
+      clearInterval(this._extBlockTicker);
+      this._extBlockTicker = null;
+    }
+  }
+
+  /* A failed block shows the message-style error window in place of its own
+   * content. */
+  _renderExtBlockError(inner, block) {
+    const win = document.createElement('div');
+    win.className = 'error-window';
+    const hdr = document.createElement('div');
+    hdr.className = 'error-header';
+    const label = document.createElement('span');
+    label.textContent = 'ERROR';
+    hdr.appendChild(label);
+    win.appendChild(hdr);
+    const content = document.createElement('div');
+    content.className = 'error-content';
+    content.innerHTML = sanitizeExtBlockHtml(block.content || '');
+    win.appendChild(content);
+    inner.appendChild(win);
   }
 
   /**

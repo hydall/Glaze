@@ -140,8 +140,7 @@ class ImagePixelRenderer {
       sessionId: sessionId,
       messageId: messageId,
       placeholder: placeholder,
-      content:
-          '$sourceContent\n<p class="ext-block-image-pending">⏳ Генерация изображения…</p>',
+      content: sourceContent,
       force: true,
     );
 

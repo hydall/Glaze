@@ -87,11 +87,12 @@ class ChatWebViewExtBlockCallbacks {
       final character = ref.read(characterByIdProvider(charId));
       if (character == null) return;
       final persona = _effectivePersona();
+      final binding = _bindingFor(sessionId, messageId, blockId, chatState.messages);
       await ref.read(extensionPostGenServiceProvider).rerunBlock(
             blockId: blockId,
             messageId: messageId,
-            swipeId: _swipeIdFor(chatState.messages, messageId),
-            agentSwipeId: _agentSwipeIdFor(chatState.messages, messageId),
+            swipeId: binding.swipeId,
+            agentSwipeId: binding.agentSwipeId,
             sessionId: sessionId,
             charId: charId,
             messages: chatState.messages,
@@ -115,11 +116,12 @@ class ChatWebViewExtBlockCallbacks {
       final character = ref.read(characterByIdProvider(charId));
       if (character == null) return;
       final persona = _effectivePersona();
+      final binding = _bindingFor(sessionId, messageId, blockId, chatState.messages);
       await ref.read(extensionPostGenServiceProvider).rerunImageOnly(
             blockId: blockId,
             messageId: messageId,
-            swipeId: _swipeIdFor(chatState.messages, messageId),
-            agentSwipeId: _agentSwipeIdFor(chatState.messages, messageId),
+            swipeId: binding.swipeId,
+            agentSwipeId: binding.agentSwipeId,
             sessionId: sessionId,
             charId: charId,
             character: character,
@@ -225,5 +227,30 @@ class ChatWebViewExtBlockCallbacks {
       }
     }
     return -1;
+  }
+
+  /// The swipe / agentSwipe binding a block re-run must target: the block's own
+  /// stored binding when it has one, otherwise the message's.
+  ///
+  /// A stored block keeps the binding it was written with — `agentSwipeId = -1`
+  /// when the post-cleaner was skipped — while the message carries the freezed
+  /// default `0`. Re-running with the message's value re-binds the block, and
+  /// the provider's `agentSwipeId` fallback then stops finding its siblings
+  /// (the re-bound block makes the exact match non-empty), so they re-render
+  /// as "pending".
+  ({int swipeId, int agentSwipeId}) _bindingFor(
+    String sessionId,
+    String messageId,
+    String blockId,
+    List<dynamic> messages,
+  ) {
+    final block = _blockForChat(sessionId, messageId, blockId);
+    if (block != null) {
+      return (swipeId: block.swipeId, agentSwipeId: block.agentSwipeId);
+    }
+    return (
+      swipeId: _swipeIdFor(messages, messageId),
+      agentSwipeId: _agentSwipeIdFor(messages, messageId),
+    );
   }
 }
