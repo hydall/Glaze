@@ -289,21 +289,23 @@
 
 /* ============================================================
  * Ext Blocks badge + inline panel
+ * Same glassmorphism + accordion language as .msg-reasoning and
+ * .msg-studio-output, so blocks read as part of the chat chrome.
  * ============================================================ */
 
 .ext-blocks-panel {
   margin-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
+/* Interactive (iframe) panel still keeps its own framed card, but on the
+ * same radius / border the rest of the chrome uses. */
 .interactive-panel {
   margin-top: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  border-radius: 12px;
   background: rgba(0, 0, 0, 0.18);
   overflow: hidden;
   contain: layout style;
@@ -314,105 +316,193 @@
   border: 0;
   background: transparent;
 }
+
+/* Toolbar — "Run all" pill, right-aligned, accent like the switcher/regenerate
+ * chrome (not the old yellow). */
 .ext-blocks-toolbar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  margin-bottom: 2px;
+  gap: 8px;
+  padding: 0 2px;
 }
 .ext-blocks-run-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: rgba(255, 215, 0, 0.95);
-  border-color: rgba(255, 215, 0, 0.35);
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--primary-color, #7996CE);
+  background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid rgba(var(--primary-rgb, 121, 150, 206), 0.45);
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+  tap-highlight-color: transparent;
 }
+.ext-blocks-run-all:hover {
+  background-color: rgba(var(--primary-rgb, 121, 150, 206), 0.18);
+  border-color: rgba(var(--primary-rgb, 121, 150, 206), 0.65);
+}
+.ext-blocks-run-all:active { transform: scale(0.95); }
+.ext-blocks-run-all svg { width: 13px; height: 13px; fill: currentColor; pointer-events: none; }
 
+/* One block = one MenuGroup-style glass card: rounded 20, outlineVariant
+ * border, glass surface. */
 .ext-block-item {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 8px 10px;
+  background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 20px;
+  overflow: hidden;
 }
-.ext-block-item.running { border-color: rgba(255, 215, 0, 0.3); }
-.ext-block-item.pending { border-color: rgba(255, 255, 255, 0.15); border-style: dashed; }
-.ext-block-item.error   { border-color: rgba(255, 123, 123, 0.3); }
-.ext-block-item.done    { border-color: rgba(76, 175, 80, 0.2); }
-.ext-block-item.running .ext-block-status {
-  color: rgba(255, 215, 0, 0.9);
-  animation: pending-pulse 2s ease-in-out infinite;
-}
-.ext-block-item.pending .ext-block-status {
-  color: rgba(255, 255, 255, 0.45);
-  font-style: italic;
-  text-transform: none;
-}
+/* Status tints the outer edge, subtle enough to sit inside the chat. */
+.ext-block-item.running { border-color: rgba(255, 215, 0, 0.28); }
+.ext-block-item.pending { border-color: rgba(255, 255, 255, 0.14); border-style: dashed; }
+.ext-block-item.error   { border-color: rgba(255, 123, 123, 0.32); }
+.ext-block-item.done    { border-color: var(--border-color, rgba(255, 255, 255, 0.1)); }
 
+/* Header row — a MenuGroup-style title row: no dark strip, no rule, just the
+ * name (bold, on-surface) and its trailing controls on the card glass. */
 .ext-block-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  padding: 14px 16px 10px;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  padding: 2px 0;
-  border-radius: 4px;
+  transition: background-color 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  tap-highlight-color: transparent;
 }
-.ext-block-header:hover { background: rgba(255, 255, 255, 0.03); }
+.ext-block-header:hover { background-color: rgba(255, 255, 255, 0.04); }
+
 .ext-block-caret {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
-  display: inline-block;
-  width: 12px;
-  transition: transform 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-gray);
+  opacity: 0.8;
+  transition: transform 0.3s ease;
+  flex-shrink: 0;
 }
-.ext-block-item.collapsed .ext-block-caret { transform: rotate(0deg); }
-.ext-block-item:not(.collapsed) .ext-block-caret { transform: rotate(90deg); }
-.ext-block-item.collapsed .ext-block-body { display: none; }
-.ext-block-body {
-  margin-top: 4px;
-  padding-left: 20px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
-}
+.ext-block-caret svg { width: 16px; height: 16px; fill: currentColor; }
+.ext-block-item.collapsed .ext-block-caret { transform: rotate(-90deg); }
+
 .ext-block-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
-  flex: 1;
-}
-.ext-block-status {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.ext-block-actions { display: flex; gap: 4px; }
-.ext-block-btn {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.7);
-  cursor: pointer;
-  font-family: inherit;
-}
-.ext-block-btn:hover { background: rgba(255, 255, 255, 0.1); }
-.ext-block-btn-icon {
-  padding: 1px 6px;
-  font-size: 12px;
-  line-height: 1;
-}
-.ext-block-btn-danger {
-  border-color: rgba(255, 123, 123, 0.25);
-  color: rgba(255, 123, 123, 0.8);
-}
-.ext-block-btn-danger:hover {
-  background: rgba(255, 123, 123, 0.15);
-  border-color: rgba(255, 123, 123, 0.45);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-color, #e0e0e0);
 }
 
+/* Absorbs the free space so the trailing buttons pin right while the name and
+ * its timer hug the left edge. */
+.ext-block-spacer { flex: 1 1 0; min-width: 0; }
+
+/* Header marker — a live elapsed clock while running (mirrors the .gen-stat
+ * clock under a message), a muted pill for the pre-run/stopped states, and
+ * nothing for done. Errors drop the marker entirely: the body turns into an
+ * error window instead. */
+.ext-block-status {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.5);
+  background: transparent;
+}
+
+/* Live elapsed timer — same clock + seconds as the generation stat under a
+ * message. */
+.ext-block-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-gray);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ext-block-timer svg { width: 12px; height: 12px; fill: currentColor; }
+
+/* Actions — circular glass buttons matching the chat input bar's round
+ * buttons (_CircleBtn in input_bar.dart): surface glass, hairline border,
+ * primary-colored icon. */
+.ext-block-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.ext-block-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+  background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  color: var(--primary-color, #7996CE);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+  tap-highlight-color: transparent;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.ext-block-btn:hover { background-color: rgba(var(--primary-rgb, 121, 150, 206), 0.16); }
+.ext-block-btn:active { transform: scale(0.9); }
+.ext-block-btn svg { width: 14px; height: 14px; fill: currentColor; pointer-events: none; }
+.ext-block-btn-danger { color: #ff6b6b; }
+.ext-block-btn-danger:hover { background-color: rgba(255, 107, 107, 0.16); }
+
+/* Collapsible body — animated like reasoning, not display:none. */
+.ext-block-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ext-block-item.collapsed .ext-block-collapse { grid-template-rows: 0fr; }
+.ext-block-body {
+  overflow: hidden;
+  min-height: 0;
+}
+.ext-block-inner {
+  padding: 0 16px 16px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.62);
+  line-height: 1.5;
+}
+/* A failed block replaces its content with the message-style error window;
+ * the inner padding already provides the spacing its margin-top was for. */
+.ext-block-inner > .error-window { margin-top: 0; }
+
+/* Block content — the wrapper the sanitizer scopes block CSS under. */
 .ext-block-content {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.62);
   line-height: 1.5;
 }
 .ext-block-content.empty {
@@ -459,11 +549,39 @@
   color: rgba(255, 255, 255, 0.85);
   padding: 2px 0;
 }
-.ext-block-image-pending {
-  opacity: 0.75;
-  font-style: italic;
-  margin-top: 8px;
-  color: rgba(255, 255, 255, 0.6);
+
+/* JS block: script source + result. */
+.ext-block-js-source {
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.ext-block-js-source summary {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+}
+.ext-block-js-source pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  opacity: 0.9;
+  margin-top: 6px;
+}
+.ext-block-js-result {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.62);
+}
+.ext-block-js-result pre {
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 0;
 }
 
 .ext-block-js-pending {
@@ -473,23 +591,65 @@
   color: rgba(255, 255, 255, 0.6);
 }
 
-.ext-block-js-source summary {
-  cursor: pointer;
-  opacity: 0.85;
-  margin-bottom: 6px;
+/* Image generation placeholder — the same shimmer surface as the inline imggen
+ * placeholder a message renders, but self-contained: the block header already
+ * carries the elapsed clock and stop button, so this only paints the shimmer,
+ * the hint and the prompt. */
+.ext-block-imagegen {
+  position: relative;
+  min-height: 120px;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 4px 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
-
-.ext-block-js-source pre {
-  white-space: pre-wrap;
-  font-size: 12px;
+.ext-block-imagegen-surface {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-color: rgba(128, 128, 128, 0.12);
+  background-image: linear-gradient(90deg,
+    rgba(128, 128, 128, 0.00) 25%,
+    rgba(128, 128, 128, 0.16) 50%,
+    rgba(128, 128, 128, 0.00) 75%);
+  background-size: 200% 100%;
+  animation: ext-block-imagegen-shimmer 1.5s infinite linear;
+  pointer-events: none;
+}
+.ext-block-imagegen-head {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 12px 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color, #e0e0e0);
   opacity: 0.9;
+}
+.ext-block-imagegen-prompt {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0.6;
+  max-height: 2.8em;
+  overflow: hidden;
+  word-break: break-word;
+}
+@keyframes ext-block-imagegen-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
 .ext-block-image {
   display: block;
   max-width: 100%;
   width: 100%;
-  border-radius: 6px;
+  border-radius: 8px;
   margin-top: 4px;
   cursor: pointer;
 }

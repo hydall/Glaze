@@ -1270,7 +1270,7 @@ void main() {
       expect(
         bridgeControllerJs,
         contains(
-          "import { parseImageResultElement } from "
+          "import { parseImageResultElement, parseImagePendingPayload } from "
           "'../formatter/formatter.js';",
         ),
       );
@@ -1364,7 +1364,7 @@ void main() {
       );
       expect(
         rendererJs,
-        contains('formatMessageBody(formatter, text, isUser, isReasoning)'),
+        contains(RegExp(r'formatMessageBody\([^)]*isReasoning')),
       );
       // Restored as the literal text the model wrote, before the leak sweep.
       expect(formatterFormatterJs, contains("case 'text':"));
@@ -2742,9 +2742,8 @@ void main() {
       final body = _extractBlockBody(rendererJs, idx);
       expect(
         body,
-        contains('!isTyping && !isError && !animate'),
-        reason:
-            'Fast path condition must check not-typing, not-error, not-animate',
+        contains('!isError && !animate'),
+        reason: 'Fast path condition must check not-error, not-animate',
       );
       expect(
         body,

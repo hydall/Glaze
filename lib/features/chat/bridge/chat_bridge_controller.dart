@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -834,6 +835,7 @@ class ChatBridgeController {
       'messageId': messageId,
       'blocks': resolvedBlocks,
       'canRunAll': canRunAll,
+      'imageGenLabel': 'image_gen_generating'.tr(),
     });
     await callJs('showExtBlocksPanel', payload);
   }
