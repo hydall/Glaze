@@ -1,11 +1,43 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import 'block_context_item.dart';
+import 'block_injection.dart';
+import 'block_modes.dart';
+import 'connection_profiles.dart';
 import 'extension_context_policy.dart';
 
 part 'block_config.freezed.dart';
 part 'block_config.g.dart';
 
-enum BlockType { infoblock, imageGen, jsRunner, interactive }
+enum BlockType {
+  infoblock,
+  imageGen,
+  jsRunner,
+  interactive,
+
+  /// Rewrites the character's own reply instead of adding a panel.
+  rewrite,
+
+  /// Carries a state document updated by an "updater" block rather than
+  /// being regenerated from scratch each time.
+  accumulation,
+}
+
+/// Whether the runtime can execute a block of this type.
+///
+/// Rewrite and accumulation blocks come in from the original extension's
+/// exports and are fully editable here, but nothing runs them yet. Keeping
+/// them out of the automatic chain is what stops an imported preset from
+/// stamping an error card onto every message.
+extension BlockTypeRunnable on BlockType {
+  bool get isRunnable => switch (this) {
+    BlockType.infoblock ||
+    BlockType.imageGen ||
+    BlockType.jsRunner ||
+    BlockType.interactive => true,
+    BlockType.rewrite || BlockType.accumulation => false,
+  };
+}
 
 enum BlockTrigger { afterUser, afterAssistant, periodic }
 
@@ -77,6 +109,78 @@ abstract class BlockConfig with _$BlockConfig {
     /// afterAssistant, periodic). It only runs when the user presses
     /// "Run All" / "Rerun" manually from the ext-blocks panel.
     @Default(false) bool manualOnly,
+
+    // ── Upstream parity ────────────────────────────────────────────────────
+    // Fields below mirror the original ExtBlocks extension one-for-one so its
+    // exported blocks survive a round trip. [BlockTrigger] stays for the
+    // existing Glaze block types; the two booleans are the original's own
+    // trigger model, where a block may answer to both sides at once.
+    /// Run after a user message.
+    @Default(false) bool triggerOnUser,
+
+    /// Run after a character message.
+    @Default(true) bool triggerOnChar,
+
+    /// Run after a swipe. Script blocks only.
+    @Default(false) bool triggerOnSwipe,
+
+    /// Pause the main reply when [keyword] shows up, run this block, resume.
+    @Default(false) bool generationPause,
+
+    /// Run once every this many messages. Ignored while [keyword] is set,
+    /// which switches the block to keyword triggering.
+    @Default(2) int period,
+
+    /// Run whenever this string shows up in the triggering message.
+    @Default('') String keyword,
+
+    /// Treat [keyword] as a regular expression.
+    @Default(false) bool keywordIsRegex,
+
+    /// Keep the result out of the panel, leaving it visible only to the model.
+    @Default(false) bool hideDisplay,
+
+    /// Run without holding up the rest of the chain.
+    @Default(false) bool background,
+
+    /// Put the result through the user's own text replacements.
+    @Default(false) bool applyRegex,
+
+    /// Role the injected result is attributed to.
+    @Default(InjectionRole.system) InjectionRole injectionRole,
+
+    /// Where the injected result goes relative to the main prompt.
+    @Default(InjectionPosition.afterMainPrompt)
+    InjectionPosition injectionPosition,
+
+    /// Depth for [InjectionPosition.inChat]. Negative counts from the start of
+    /// the chat instead of the end.
+    @Default(4) int injectionDepth,
+
+    /// Ordered context sources for this block's request.
+    @Default(<BlockContextItem>[]) List<BlockContextItem> context,
+
+    /// Which of the three connection presets this block generates on.
+    @Default(ConnectionProfile.big) ConnectionProfile apiPreset,
+
+    /// Rewrite blocks: run before or after the generated blocks.
+    @Default(BlockRunOrder.before) BlockRunOrder generationOrder,
+
+    /// Script blocks: run before or after the generated blocks.
+    @Default(BlockRunOrder.before) BlockRunOrder executionOrder,
+
+    /// Rewrite blocks: whole text, or only the changed fragments.
+    @Default(RewriteMode.full) RewriteMode rewriteMode,
+
+    /// Script blocks: which language [script] is written in.
+    @Default(ScriptType.js) ScriptType scriptType,
+
+    /// Script blocks: run after the host's own commands have been handled.
+    @Default(false) bool generationAfterCommands,
+
+    /// Accumulation blocks: name of the block that carries the update
+    /// operations. Must differ from [name].
+    @Default('') String updaterName,
   }) = _BlockConfig;
 
   factory BlockConfig.fromJson(Map<String, dynamic> json) =>

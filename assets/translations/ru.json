@@ -1809,6 +1809,8 @@
   "block_type_js": "JS",
   "block_type_panel": "Панель",
   "block_type_interactive": "Интерактивная панель",
+  "block_type_rewrite": "Переписывание",
+  "block_type_accumulation": "Накопительный",
   "block_trigger_label": "Триггер",
   "block_trigger_after_user": "После user",
   "block_trigger_after_assistant": "После assistant",

@@ -200,13 +200,34 @@ String blockSubtitle(BlockConfig block) {
     BlockType.imageGen => 'block_type_image'.tr(),
     BlockType.jsRunner => 'block_type_js'.tr(),
     BlockType.interactive => 'block_type_interactive'.tr(),
+    BlockType.rewrite => 'block_type_rewrite'.tr(),
+    BlockType.accumulation => 'block_type_accumulation'.tr(),
   };
-  final trigger = switch (block.trigger) {
-    BlockTrigger.afterUser => 'block_trigger_after_user'.tr(),
-    BlockTrigger.afterAssistant => 'block_trigger_after_assistant'.tr(),
-    BlockTrigger.periodic => 'block_trigger_periodic'.tr(),
-  };
-  return '$type • $trigger';
+  return '$type • ${blockTriggerSummary(block)}';
+}
+
+/// Human-readable trigger line for a block.
+///
+/// A block can answer to both sides at once, so the two flags are reported
+/// together rather than collapsed into [BlockConfig.trigger] — a block that
+/// runs after every message would otherwise read as running after only one.
+String blockTriggerSummary(BlockConfig block) {
+  if (block.trigger == BlockTrigger.periodic) {
+    return 'block_trigger_periodic'.tr();
+  }
+
+  final sides = [
+    if (block.triggerOnUser) 'block_trigger_after_user'.tr(),
+    if (block.triggerOnChar) 'block_trigger_after_assistant'.tr(),
+  ];
+
+  if (sides.isEmpty) {
+    return block.trigger == BlockTrigger.afterUser
+        ? 'block_trigger_after_user'.tr()
+        : 'block_trigger_after_assistant'.tr();
+  }
+
+  return sides.join(' + ');
 }
 
 void _editBlock(

@@ -28,6 +28,7 @@ import 'blocks/infoblock_handler.dart';
 import 'blocks/block_status_tracker.dart';
 import 'blocks/periodic_js_block_runner.dart';
 import 'blocks/single_block_runner.dart';
+import 'blocks/unsupported_block_handler.dart';
 
 final extensionPostGenServiceProvider = Provider<ExtensionPostGenService>(
   (ref) => ExtensionPostGenService(ref),
@@ -520,6 +521,20 @@ class ExtensionPostGenService {
           makeStreamHandler: _makeStreamHandler,
           publishStreamingBlockContent: _publishStreamingBlockContent,
           executeJsScript: _executeContextJsScript,
+        );
+      case BlockType.rewrite:
+        return UnsupportedBlockHandler(
+          markBlockError: _markContextBlockError,
+          reason:
+              'Rewrite blocks can be edited and exported, but are not executed '
+              'yet.',
+        );
+      case BlockType.accumulation:
+        return UnsupportedBlockHandler(
+          markBlockError: _markContextBlockError,
+          reason:
+              'Accumulation blocks can be edited and exported, but are not '
+              'executed yet.',
         );
       case BlockType.interactive:
         return InteractiveBlockHandler(

@@ -1798,6 +1798,8 @@
   "block_type_js": "JS",
   "block_type_panel": "Panel",
   "block_type_interactive": "Interactive Panel",
+  "block_type_rewrite": "Rewrite",
+  "block_type_accumulation": "Accumulation",
   "block_trigger_label": "Trigger",
   "block_trigger_after_user": "After User",
   "block_trigger_after_assistant": "After Assistant",
