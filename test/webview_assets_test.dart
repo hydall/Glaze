@@ -1362,9 +1362,17 @@ void main() {
         rendererMessageJs,
         contains('this._writeShadowContent(shadowHost, reasoning, isUser, false, {'),
       );
+      // The call gained a fifth argument and got wrapped across lines, so match
+      // the argument order instead of one exact spelling — what this guards is
+      // that the reasoning flag still reaches the formatter.
       expect(
         rendererJs,
-        contains('formatMessageBody(formatter, text, isUser, isReasoning)'),
+        matches(
+          RegExp(
+            r'formatMessageBody\(\s*formatter,\s*text,\s*isUser,\s*isReasoning\b',
+          ),
+        ),
+        reason: 'the reasoning flag must be threaded into formatMessageBody',
       );
       // Restored as the literal text the model wrote, before the leak sweep.
       expect(formatterFormatterJs, contains("case 'text':"));
@@ -2740,11 +2748,20 @@ void main() {
       expect(idx, isNot(-1), reason: 'updateMessageContent must exist');
 
       final body = _extractBlockBody(rendererJs, idx);
+      // A streaming update now takes the fast path too: `isTyping` is passed
+      // down to `_writeShadowContent` instead of forcing a full rebuild, so the
+      // condition itself only guards the error window and the animation.
       expect(
         body,
-        contains('!isTyping && !isError && !animate'),
+        contains('!isError && !animate'),
+        reason: 'Fast path condition must check not-error, not-animate',
+      );
+      expect(
+        body,
+        contains('this._writeShadowContent(existingHost, text, isUser, isTyping, {'),
         reason:
-            'Fast path condition must check not-typing, not-error, not-animate',
+            'the fast path must hand the typing state to the shadow writer, '
+            'since it no longer falls through to a full rebuild while typing',
       );
       expect(
         body,
