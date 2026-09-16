@@ -6,24 +6,28 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/models/preset.dart';
+import '../../core/platform/haptics.dart';
+import '../../core/state/active_selection_provider.dart';
+import '../../core/state/db_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../shared/shell/desktop/sidebar_tool_panels.dart';
-import '../../core/models/preset.dart';
-import '../../core/state/active_selection_provider.dart';
-import '../../core/utils/platform_paths.dart';
-import '../../core/state/db_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
-import '../personas/persona_list_provider.dart';
-import '../presets/preset_image.dart';
-import '../presets/preset_list_provider.dart';
 import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
+import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat/widgets/chat_stats_sheet.dart';
+import '../chat/widgets/magic_drawer_widgets.dart' show MagicCardBadge;
 import '../extensions/providers/extensions_settings_provider.dart';
 import '../extensions/widgets/ext_blocks_settings_sheet.dart';
 import '../image_gen/widgets/image_gen_sheet.dart';
+import '../personas/persona_list_provider.dart';
+import '../presets/preset_image.dart';
+import '../presets/preset_list_provider.dart';
+import 'tools_layout_service.dart';
+import 'tools_tile_models.dart';
 
 class PersonaInfo {
   final String name;
@@ -73,22 +77,6 @@ final _activePresetImageProvider = Provider<ImageProvider?>((ref) {
   return preset != null ? presetCoverImage(preset) : null;
 });
 
-// SVG paths matching ToolsView.vue
-const _kIconPersonas =
-    'M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1z';
-const _kIconPresets =
-    'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z';
-const _kIconApi =
-    'M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z';
-const _kIconLorebook =
-    'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z';
-const _kIconRegex =
-    'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z';
-const _kIconStats =
-    'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z';
-const _kIconImageGen =
-    'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z';
-
 Widget _svgPath(
   String d, {
   Color fill = Colors.white,
@@ -99,6 +87,18 @@ Widget _svgPath(
   height: size,
   colorFilter: ColorFilter.mode(fill, BlendMode.srcIn),
 );
+
+/// The icon a tile's def carries — an SVG glyph or an [IconData].
+Widget _tileGlyph(
+  ToolsTileDef def, {
+  required Color color,
+  required double size,
+}) {
+  if (def.svgPath != null) {
+    return _svgPath(def.svgPath!, fill: color, size: size);
+  }
+  return Icon(def.icon, color: color, size: size);
+}
 
 class ToolsScreen extends ConsumerStatefulWidget {
   /// Rendered inside the desktop right sidebar rather than as the middle
@@ -116,6 +116,14 @@ class ToolsScreen extends ConsumerStatefulWidget {
 class _ToolsScreenState extends ConsumerState<ToolsScreen>
     with ShellHeaderMixin {
   final ScrollController _scrollController = ScrollController();
+  final List<ToolsTileDef> _allTiles = buildToolsTileCatalog();
+
+  final List<String> _itemIds = [];
+  final Map<String, ToolsTileSize> _sizes = {};
+  final Set<String> _deletedIds = {};
+  bool _loading = true;
+  bool _editing = false;
+  String? _draggingId;
 
   @override
   int get headerBranchIndex => 2;
@@ -124,13 +132,125 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
   bool get publishesShellHeader => !widget.inSidebar;
 
   @override
-  ShellHeaderConfig buildShellHeader() =>
-      ShellHeaderConfig(title: 'tab_tools'.tr());
+  ShellHeaderConfig buildShellHeader() => ShellHeaderConfig(
+    title: 'tab_tools'.tr(),
+    actions: [_HeaderEditToggle(editing: _editing, onTap: _toggleEditing)],
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLayout();
+  }
 
   @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadLayout() async {
+    try {
+      final layout = await ToolsLayoutService(ref).loadLayout(_allTiles);
+      if (!mounted) return;
+      setState(() {
+        _itemIds
+          ..clear()
+          ..addAll(layout.itemIds);
+        _sizes
+          ..clear()
+          ..addAll(layout.sizes);
+        _deletedIds
+          ..clear()
+          ..addAll(layout.deletedIds);
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('[ToolsScreen] _loadLayout error: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _saveLayout() =>
+      ToolsLayoutService(ref).saveLayout(_itemIds, _sizes, _deletedIds);
+
+  void _toggleEditing() {
+    setState(() => _editing = !_editing);
+    refreshShellHeader();
+  }
+
+  ToolsTileDef? _defFor(String id) {
+    for (final tile in _allTiles) {
+      if (tile.id == id) return tile;
+    }
+    return null;
+  }
+
+  ToolsTileSize _sizeFor(ToolsTileDef def) => _sizes[def.id] ?? def.defaultSize;
+
+  bool _featureVisible(ToolsTileDef def, bool extBlocksEnabled) =>
+      !def.featureGated || extBlocksEnabled;
+
+  List<ToolsTileDef> _visibleTiles(bool extBlocksEnabled) => _itemIds
+      .map(_defFor)
+      .whereType<ToolsTileDef>()
+      .where((def) => _featureVisible(def, extBlocksEnabled))
+      .toList();
+
+  bool _canAdd(bool extBlocksEnabled) => _allTiles.any(
+    (tile) =>
+        !_itemIds.contains(tile.id) && _featureVisible(tile, extBlocksEnabled),
+  );
+
+  Future<void> _removeTile(String id) async {
+    setState(() {
+      _itemIds.remove(id);
+      _deletedIds.add(id);
+    });
+    await _saveLayout();
+  }
+
+  void _resizeTile(String id) {
+    Haptics.selectionClick();
+    final def = _defFor(id);
+    if (def == null) return;
+    setState(() => _sizes[id] = _sizeFor(def).next);
+    _saveLayout();
+  }
+
+  Future<void> _moveTile(String movingId, String targetId) async {
+    final from = _itemIds.indexOf(movingId);
+    final to = _itemIds.indexOf(targetId);
+    if (from < 0 || to < 0 || from == to) return;
+    setState(() {
+      _itemIds.insert(to, _itemIds.removeAt(from));
+      _draggingId = null;
+    });
+    await _saveLayout();
+  }
+
+  Future<void> _showAddSheet(bool extBlocksEnabled) async {
+    final hidden = _allTiles
+        .where((tile) => !_itemIds.contains(tile.id))
+        .where((tile) => _featureVisible(tile, extBlocksEnabled))
+        .toList();
+    if (hidden.isEmpty) return;
+
+    final selected = await GlazeBottomSheet.show<ToolsTileDef>(
+      context,
+      title: 'sheet_title_add_tool'.tr(),
+      child: _ToolsAddList(
+        items: hidden,
+        onSelect: (item) =>
+            Navigator.of(context, rootNavigator: true).pop(item),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _itemIds.add(selected.id);
+      _deletedIds.remove(selected.id);
+    });
+    await _saveLayout();
   }
 
   /// Opens the same Ext Blocks sheet as chat Quick Access.
@@ -142,29 +262,45 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     builder: (_) => const ExtBlocksSettingsSheet(),
   );
 
-  /// Lays [tiles] out two per row, 8px apart. IntrinsicHeight + stretch so
-  /// both tiles in a row share the taller one's height and fill the whole
-  /// allocated cell; an odd tile count leaves the trailing cell empty.
-  List<Widget> _gridRows(List<Widget> tiles) {
-    final rows = <Widget>[];
-    for (var i = 0; i < tiles.length; i += 2) {
-      if (rows.isNotEmpty) rows.add(const SizedBox(height: 8));
-      rows.add(
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(child: tiles[i]),
-              const SizedBox(width: 8),
-              Expanded(
-                child: i + 1 < tiles.length ? tiles[i + 1] : const SizedBox(),
-              ),
-            ],
-          ),
-        ),
-      );
+  /// From the sidebar, a tool opens as a sidebar panel; from the route it
+  /// pushes `/tools/<id>` as before.
+  void _openTool(BuildContext context, WidgetRef ref, String id) {
+    if (widget.inSidebar) {
+      showPanelInRightSidebar(ref, sidebarToolPanel(id));
+      return;
     }
-    return rows;
+    context.push('/tools/$id');
+  }
+
+  /// Runs the tool a tile represents. Sheets stay over the screen; everything
+  /// else navigates or opens a sidebar panel.
+  void _launchTool(BuildContext context, WidgetRef ref, String id) {
+    switch (id) {
+      case 'personas':
+      case 'presets':
+      case 'api':
+      case 'lorebooks':
+      case 'regex':
+        _openTool(context, ref, id);
+      case 'stats':
+        showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          useRootNavigator: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => const ChatStatsSheet(initialCharId: ''),
+        );
+      case 'image-gen':
+        showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          useRootNavigator: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => const ImageGenSheet(),
+        );
+      case 'ext-blocks':
+        _openExtBlocks();
+    }
   }
 
   /// Animates the list back to the top (guarded against a detached / multiply
@@ -179,14 +315,35 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     );
   }
 
-  /// From the sidebar, a tool opens as a sidebar panel; from the route it
-  /// pushes `/tools/<id>` as before.
-  void _openTool(BuildContext context, WidgetRef ref, String id) {
-    if (widget.inSidebar) {
-      showPanelInRightSidebar(ref, sidebarToolPanel(id));
-      return;
+  String _subtitleFor(
+    ToolsTileDef def,
+    PersonaInfo? personaInfo,
+    String presetName,
+  ) {
+    switch (def.id) {
+      case 'personas':
+        return personaInfo?.name ?? 'user';
+      case 'presets':
+        return presetName;
+      default:
+        return def.subtitle;
     }
-    context.push('/tools/$id');
+  }
+
+  ImageProvider? _artworkFor(
+    ToolsTileDef def,
+    String? avatarPath,
+    ImageProvider? presetImage,
+  ) {
+    switch (def.id) {
+      case 'personas':
+        if (avatarPath == null || avatarPath.isEmpty) return null;
+        return FileImage(File(avatarPath));
+      case 'presets':
+        return presetImage;
+      default:
+        return null;
+    }
   }
 
   @override
@@ -212,114 +369,241 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
       });
     }
 
+    final tiles = _visibleTiles(extBlocksEnabled);
+
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          ListView(
-            controller: _scrollController,
-            padding: EdgeInsets.fromLTRB(16, topPad + 16, 16, bottomPad),
-            children: [
-              _HeroCard(
-                iconPath: _kIconPersonas,
-                title: 'menu_personas'.tr(),
-                subtitle: personaInfo?.name ?? 'user',
-                avatarPath: resolvedAvatar,
-                isAvatar: true,
-                onTap: () => _openTool(context, ref, 'personas'),
+      body: ListView(
+        controller: _scrollController,
+        padding: EdgeInsets.fromLTRB(16, topPad + 16, 16, bottomPad),
+        children: _loading
+            ? const [
+                SizedBox(
+                  height: 200,
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+              ]
+            : _buildRows(
+                context,
+                tiles,
+                extBlocksEnabled,
+                personaInfo,
+                resolvedAvatar,
+                presetName,
+                presetImage,
               ),
-              const SizedBox(height: 10),
-              _HeroCard(
-                iconPath: _kIconPresets,
-                title: 'tab_presets'.tr(),
-                subtitle: presetName,
-                backgroundImage: presetImage,
-                onTap: () => _openTool(context, ref, 'presets'),
-              ),
-              const SizedBox(height: 10),
-              ..._gridRows([
-                _GridTile(
-                  iconPath: _kIconApi,
-                  title: 'tab_api'.tr(),
-                  subtitle: 'tools_api_subtitle'.tr(),
-                  showStatusDot: true,
-                  onTap: () => _openTool(context, ref, 'api'),
-                ),
-                _GridTile(
-                  iconPath: _kIconLorebook,
-                  title: 'menu_lorebooks'.tr(),
-                  subtitle: 'tools_lorebooks_subtitle'.tr(),
-                  onTap: () => _openTool(context, ref, 'lorebooks'),
-                ),
-                _GridTile(
-                  iconPath: _kIconRegex,
-                  title: 'menu_regex'.tr(),
-                  subtitle: 'tools_regex_subtitle'.tr(),
-                  onTap: () => _openTool(context, ref, 'regex'),
-                ),
-                _GridTile(
-                  iconPath: _kIconStats,
-                  title: 'stats_title'.tr(),
-                  subtitle: 'stats_subtitle'.tr(),
-                  onTap: () => showModalBottomSheet<void>(
-                    context: context,
-                    isScrollControlled: true,
-                    useRootNavigator: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (_) => const ChatStatsSheet(initialCharId: ''),
-                  ),
-                ),
-                _GridTile(
-                  iconPath: _kIconImageGen,
-                  title: 'imggen_title'.tr(),
-                  subtitle: 'imggen_subtitle'.tr(),
-                  onTap: () => showModalBottomSheet<void>(
-                    context: context,
-                    isScrollControlled: true,
-                    useRootNavigator: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (_) => const ImageGenSheet(),
-                  ),
-                ),
-                // Ext Blocks and Studio only appear once their experimental
-                // master switches are on — same gating as chat Quick Access.
-                if (extBlocksEnabled)
-                  _GridTile(
-                    icon: Icons.extension_outlined,
-                    title: 'ext_blocks_title'.tr(),
-                    subtitle: 'tools_ext_blocks_subtitle'.tr(),
-                    onTap: _openExtBlocks,
-                  ),
-              ]),
-            ],
+      ),
+    );
+  }
+
+  /// Packs the visible tiles into rows: small tiles pair up two-per-row, wide
+  /// and large tiles each take a full row at their own height.
+  List<Widget> _buildRows(
+    BuildContext context,
+    List<ToolsTileDef> tiles,
+    bool extBlocksEnabled,
+    PersonaInfo? personaInfo,
+    String? resolvedAvatar,
+    String presetName,
+    ImageProvider? presetImage,
+  ) {
+    final rows = <Widget>[];
+    final pendingSmall = <ToolsTileDef>[];
+
+    Widget tileFor(ToolsTileDef def) => _buildTile(
+      context,
+      def,
+      personaInfo,
+      resolvedAvatar,
+      presetName,
+      presetImage,
+    );
+
+    void flushSmallRow() {
+      if (pendingSmall.isEmpty) return;
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 10));
+      final first = pendingSmall.removeAt(0);
+      final second = pendingSmall.isNotEmpty ? pendingSmall.removeAt(0) : null;
+      rows.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: tileFor(first)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: second != null ? tileFor(second) : const SizedBox(),
+            ),
+          ],
+        ),
+      );
+    }
+
+    for (final def in tiles) {
+      if (_sizeFor(def) == ToolsTileSize.small) {
+        pendingSmall.add(def);
+        if (pendingSmall.length == 2) flushSmallRow();
+      } else {
+        flushSmallRow();
+        if (rows.isNotEmpty) rows.add(const SizedBox(height: 10));
+        rows.add(tileFor(def));
+      }
+    }
+    flushSmallRow();
+
+    if (_editing && _canAdd(extBlocksEnabled)) {
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 10));
+      rows.add(_AddTile(onTap: () => _showAddSheet(extBlocksEnabled)));
+    }
+
+    return rows;
+  }
+
+  Widget _buildTile(
+    BuildContext context,
+    ToolsTileDef def,
+    PersonaInfo? personaInfo,
+    String? resolvedAvatar,
+    String presetName,
+    ImageProvider? presetImage,
+  ) {
+    final size = _sizeFor(def);
+    final subtitle = _subtitleFor(def, personaInfo, presetName);
+    final artwork = _artworkFor(def, resolvedAvatar, presetImage);
+
+    Widget tile(
+      ToolsTileSize tileSize, {
+      bool editing = false,
+      bool glass = true,
+      VoidCallback? onTap,
+    }) => _ToolTile(
+      def: def,
+      size: tileSize,
+      subtitle: subtitle,
+      artwork: artwork,
+      editing: editing,
+      onTap: onTap,
+      onDelete: () => _removeTile(def.id),
+      onResize: () => _resizeTile(def.id),
+      glass: glass,
+    );
+
+    if (!_editing) {
+      return tile(size, onTap: () => _launchTool(context, ref, def.id));
+    }
+
+    final display = tile(size, editing: true);
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          details.data != def.id && _itemIds.contains(details.data),
+      onAcceptWithDetails: (details) => _moveTile(details.data, def.id),
+      builder: (context, _, _) {
+        return LongPressDraggable<String>(
+          data: def.id,
+          delay: const Duration(milliseconds: 300),
+          onDragStarted: () {
+            Haptics.mediumImpact();
+            setState(() => _draggingId = def.id);
+          },
+          onDragEnd: (_) {
+            if (_draggingId == def.id) setState(() => _draggingId = null);
+          },
+          feedback: SizedBox(
+            width: 150,
+            height: size.isSquare ? 132 : size.height.clamp(0, 132),
+            child: Material(
+              color: Colors.transparent,
+              child: Opacity(opacity: 0.92, child: tile(size, glass: false)),
+            ),
           ),
-        ],
+          childWhenDragging: Opacity(opacity: 0.25, child: display),
+          child: display,
+        );
+      },
+    );
+  }
+}
+
+/// Pencil in the shell header that toggles Tools edit mode. At rest it is a
+/// bare glyph; the accent ring appears while editing so the state change is
+/// what draws it, matching the chat drawer's edit toggle.
+class _HeaderEditToggle extends StatelessWidget {
+  final bool editing;
+  final VoidCallback onTap;
+
+  const _HeaderEditToggle({required this.editing, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = editing ? 'btn_ok'.tr() : 'tools_customize'.tr();
+
+    return Tooltip(
+      message: label,
+      preferBelow: false,
+      child: Semantics(
+        button: true,
+        toggled: editing,
+        label: label,
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: editing
+                  ? context.cs.primary.withValues(alpha: 0.22)
+                  : Colors.transparent,
+              border: Border.all(
+                color: editing
+                    ? context.cs.primary.withValues(alpha: 0.38)
+                    : Colors.transparent,
+              ),
+            ),
+            child: Icon(
+              editing ? Icons.check : Icons.edit_outlined,
+              size: 18,
+              color: editing
+                  ? context.cs.primary
+                  : context.cs.onSurface.withValues(alpha: 0.55),
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
-class _HeroCard extends StatelessWidget {
-  final String iconPath;
-  final String title;
+/// One Windows-Phone-style tile.
+///
+/// The two hero tiles — personas and presets — keep their original full-bleed
+/// look (avatar / cover + label) and adapt it to whatever size they are
+/// assigned. Everything else renders the generic icon layout.
+class _ToolTile extends StatelessWidget {
+  final ToolsTileDef def;
+  final ToolsTileSize size;
   final String subtitle;
-  final bool isAvatar;
-  final String? avatarPath;
+  final ImageProvider? artwork;
+  final bool editing;
+  final VoidCallback? onTap;
+  final VoidCallback? onDelete;
+  final VoidCallback? onResize;
 
-  /// Image shown as the card background (e.g. a preset's cover — a bundled
-  /// asset for a featured preset, a stored file for a user-picked one).
-  /// Applies only to the non-avatar layout and does not change the card size.
-  final ImageProvider? backgroundImage;
-  final VoidCallback onTap;
+  /// False for the drag feedback, which renders over the [Overlay] where a
+  /// [GlassSurface]'s backdrop filter has nothing sensible to sample — a plain
+  /// solid card is cheaper and visually identical enough under the finger.
+  final bool glass;
 
-  const _HeroCard({
-    required this.iconPath,
-    required this.title,
+  const _ToolTile({
+    required this.def,
+    required this.size,
     required this.subtitle,
-    this.isAvatar = false,
-    this.avatarPath,
-    this.backgroundImage,
-    required this.onTap,
+    this.artwork,
+    this.editing = false,
+    this.onTap,
+    this.onDelete,
+    this.onResize,
+    this.glass = true,
   });
 
   static const _labelStyle = TextStyle(
@@ -329,146 +613,350 @@ class _HeroCard extends StatelessWidget {
     color: Color(0xE6FFFFFF), // rgba(255,255,255,0.9)
   );
 
-  /// Cards filled with artwork — the persona avatar, a preset cover — get a
-  /// stronger accent outline: the default hairline is invisible against a
-  /// photo, and the frame is what separates the art from the page background.
-  bool get _hasArtwork => isAvatar || backgroundImage != null;
+  bool get _isSmall => size == ToolsTileSize.small;
+
+  /// The old `_HeroCard` frame: an artwork hero gets the accent outline that
+  /// separates its art from the page; everything else the hairline.
+  bool get _hasArtworkFrame => def.isAvatar || artwork != null;
 
   @override
   Widget build(BuildContext context) {
-    final card = GlassSurface(
+    final inner = def.hero ? _buildHero(context) : _buildGeneric(context);
+
+    if (!glass) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Container(color: context.cs.surfaceContainerHigh, child: inner),
+      );
+    }
+
+    return GlassSurface(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(
-        color: _hasArtwork
-            ? context.cs.primary.withValues(alpha: 0.5)
-            : context.cs.outlineVariant,
-        width: _hasArtwork ? 2 : 1,
+      borderRadius: BorderRadius.circular(16),
+      border: _hasArtworkFrame
+          ? Border.all(
+              color: context.cs.primary.withValues(alpha: 0.5),
+              width: 2,
+            )
+          : Border.all(
+              color: editing
+                  ? context.cs.primary.withValues(alpha: 0.55)
+                  : context.cs.outlineVariant,
+              width: editing ? 1.5 : 1,
+            ),
+      child: inner,
+    );
+  }
+
+  Widget _sized(Widget child) {
+    if (size.isSquare) return AspectRatio(aspectRatio: 1, child: child);
+    return SizedBox(height: size.height, child: child);
+  }
+
+  List<Widget> _editBadges(BuildContext context) => [
+    if (editing && onDelete != null)
+      Positioned(
+        top: 6,
+        right: 6,
+        child: MagicCardBadge(
+          icon: Icons.close,
+          color: const Color(0xFFFF3B30),
+          tooltip: 'btn_delete'.tr(),
+          onTap: onDelete!,
+        ),
       ),
-      child: SizedBox(
-        height: isAvatar ? null : 140,
-        child: Stack(
+    if (editing && onResize != null)
+      Positioned(
+        bottom: 6,
+        right: 6,
+        child: MagicCardBadge(
+          icon: Icons.aspect_ratio,
+          color: context.cs.onSurfaceVariant,
+          tooltip: 'tools_resize'.tr(),
+          onTap: onResize!,
+        ),
+      ),
+  ];
+
+  Widget _buildHero(BuildContext context) {
+    return _sized(
+      Stack(
+        fit: StackFit.expand,
+        children: [
+          if (def.isAvatar) ...[
+            if (artwork != null)
+              Image(
+                image: artwork!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              )
+            else
+              _AvatarGradientPlaceholder(
+                subtitle: subtitle,
+                fontSize: _isSmall ? 40 : 80,
+              ),
+            // Dark scrim so the white label/subtitle stay legible over art.
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.3),
+                    Colors.black.withValues(alpha: 0.8),
+                  ],
+                ),
+              ),
+            ),
+          ] else if (artwork != null) ...[
+            Image(
+              image: artwork!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.35),
+                    Colors.black.withValues(alpha: 0.8),
+                  ],
+                ),
+              ),
+            ),
+          ] else
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: 0.05),
+                    Colors.white.withValues(alpha: 0.01),
+                  ],
+                ),
+              ),
+            ),
+          Padding(
+            padding: EdgeInsets.all(_isSmall ? 12 : 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    if (!def.isAvatar) ...[
+                      _heroIconBox(context, _isSmall ? 28 : 36),
+                      const SizedBox(width: 12),
+                    ],
+                    Text(
+                      def.title.toUpperCase(),
+                      style: _labelStyle.copyWith(fontSize: _isSmall ? 11 : 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: _isSmall ? 14 : 20,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                  maxLines: _isSmall ? 1 : 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          ..._editBadges(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGeneric(BuildContext context) {
+    return _sized(
+      Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withValues(alpha: 0.05),
+                  Colors.white.withValues(alpha: 0.01),
+                ],
+              ),
+            ),
+          ),
+          _content(context),
+          ..._editBadges(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _heroIconBox(BuildContext context, double boxSize) {
+    return Container(
+      width: boxSize,
+      height: boxSize,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(boxSize * 0.28),
+      ),
+      child: Center(
+        child: _tileGlyph(def, color: Colors.white, size: boxSize * 0.55),
+      ),
+    );
+  }
+
+  Widget _iconBox(BuildContext context, double boxSize) {
+    return Container(
+      width: boxSize,
+      height: boxSize,
+      decoration: BoxDecoration(
+        color: context.cs.surface,
+        borderRadius: BorderRadius.circular(boxSize * 0.3),
+      ),
+      child: Center(
+        child: _tileGlyph(
+          def,
+          color: context.cs.onSurfaceVariant,
+          size: boxSize * 0.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _content(BuildContext context) {
+    if (size == ToolsTileSize.small) {
+      return Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (isAvatar) ...[
-              Positioned.fill(
-                child: avatarPath != null && avatarPath!.isNotEmpty
-                    ? Image.file(
-                        File(resolveGlazeFilePath(avatarPath!)!),
-                        key: ValueKey(avatarPath),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) =>
-                            _AvatarGradientPlaceholder(subtitle: subtitle),
-                      )
-                    : _AvatarGradientPlaceholder(subtitle: subtitle),
+            _iconBox(context, 38),
+            const Spacer(),
+            Text(
+              def.title,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: context.cs.onSurface,
               ),
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.3),
-                        Colors.black.withValues(alpha: 0.8),
-                      ],
-                    ),
-                  ),
-                ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: context.cs.primary,
               ),
-            ] else if (backgroundImage != null) ...[
-              Positioned.fill(
-                child: Image(
-                  image: backgroundImage!,
-                  key: ValueKey(backgroundImage),
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                ),
-              ),
-              // Dark scrim so the white label/subtitle stay legible over art.
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.35),
-                        Colors.black.withValues(alpha: 0.8),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ] else ...[
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Colors.white.withValues(alpha: 0.05),
-                        Colors.white.withValues(alpha: 0.01),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            Padding(
-              padding: const EdgeInsets.all(20),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (size == ToolsTileSize.wide) {
+      return Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: [
+            _iconBox(context, 44),
+            const SizedBox(width: 14),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (isAvatar)
-                    Text(title.toUpperCase(), style: _labelStyle)
-                  else
-                    Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Center(
-                            child: _svgPath(
-                              iconPath,
-                              fill: Colors.white,
-                              size: 20,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(title.toUpperCase(), style: _labelStyle),
-                      ],
+                  Text(
+                    def.title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: context.cs.onSurface,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
                   Text(
                     subtitle,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: context.cs.primary,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
             ),
           ],
         ),
+      );
+    }
+
+    // large, no artwork — centred icon layout.
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _iconBox(context, 56),
+          const SizedBox(height: 14),
+          Text(
+            def.title,
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: context.cs.onSurface,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: context.cs.primary,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
-
-    if (isAvatar) return AspectRatio(aspectRatio: 1, child: card);
-    return card;
   }
 }
 
+/// Gradient backdrop for a persona hero with no avatar image, showing the
+/// first letter of the active persona's name.
 class _AvatarGradientPlaceholder extends StatelessWidget {
   final String subtitle;
-  const _AvatarGradientPlaceholder({required this.subtitle});
+  final double fontSize;
+
+  const _AvatarGradientPlaceholder({
+    required this.subtitle,
+    required this.fontSize,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -483,10 +971,10 @@ class _AvatarGradientPlaceholder extends StatelessWidget {
       child: Center(
         child: Text(
           subtitle.isNotEmpty ? subtitle[0].toUpperCase() : '?',
-          style: const TextStyle(
-            fontSize: 80,
+          style: TextStyle(
+            fontSize: fontSize,
             fontWeight: FontWeight.w800,
-            color: Color(0xCCFFFFFF), // rgba(255,255,255,0.8)
+            color: const Color(0xCCFFFFFF), // rgba(255,255,255,0.8)
           ),
         ),
       ),
@@ -494,25 +982,12 @@ class _AvatarGradientPlaceholder extends StatelessWidget {
   }
 }
 
-class _GridTile extends StatelessWidget {
-  final String? iconPath;
-  final IconData? icon;
-  final String title;
-  final String subtitle;
+/// The "+" tile edit mode appends to the grid. Always the last cell, never a
+/// drag target — it has nothing to reorder and opens the add sheet instead.
+class _AddTile extends StatelessWidget {
   final VoidCallback onTap;
-  final bool showStatusDot;
 
-  const _GridTile({
-    this.iconPath,
-    this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-    this.showStatusDot = false,
-  }) : assert(
-         iconPath != null || icon != null,
-         'Provide either an SVG iconPath or an IconData icon',
-       );
+  const _AddTile({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -520,75 +995,75 @@ class _GridTile extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       border: Border.all(color: context.cs.outlineVariant),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.start,
-          children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: context.cs.surface,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Center(
-                    child: iconPath != null
-                        ? _svgPath(
-                            iconPath!,
-                            fill: context.cs.onSurfaceVariant,
-                            size: 22,
-                          )
-                        : Icon(
-                            icon,
-                            color: context.cs.onSurfaceVariant,
-                            size: 22,
-                          ),
-                  ),
+      child: SizedBox(
+        height: ToolsTileSize.small.height,
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.add,
+                size: 22,
+                color: context.cs.onSurface.withValues(alpha: 0.6),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'action_add'.tr(),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: context.cs.onSurface,
                 ),
-                if (showStatusDot)
-                  Positioned(
-                    bottom: -2,
-                    right: -2,
-                    child: Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: context.cs.onSurfaceVariant,
-                        border: Border.all(color: context.cs.surface, width: 2),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// List of hidden tools shown by the add sheet — one row per tile, mirroring
+/// the chat drawer's "Add Tool" list.
+class _ToolsAddList extends StatelessWidget {
+  final List<ToolsTileDef> items;
+  final ValueChanged<ToolsTileDef> onSelect;
+
+  const _ToolsAddList({required this.items, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final item in items)
+          InkWell(
+            onTap: () => onSelect(item),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              child: Row(
+                children: [
+                  _tileGlyph(
+                    item,
+                    color: context.cs.onSurface.withValues(alpha: 0.85),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      item.title,
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: context.cs.onSurface,
                       ),
                     ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: context.cs.onSurface,
+                ],
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: context.cs.primary,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
+          ),
+      ],
     );
   }
 }
