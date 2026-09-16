@@ -6,10 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/ledger_prompt_injection_mode.dart';
 import '../../core/models/ledger_prompt_injection_policy.dart';
+import '../../core/models/card_rewriter_settings.dart';
 import '../../core/models/preset_folder.dart';
 import '../../core/models/studio_config.dart';
 import '../../core/models/studio_preset_block_groups.dart';
 import '../../core/models/studio_preset_block_reorder.dart';
+import '../../core/models/studio_pipeline_overrides.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../shared/theme/app_colors.dart';
@@ -202,6 +204,16 @@ class StudioPresetEditorBodyState
     final preset = _preset;
     if (preset == null) return;
     await _persistNow(applyStudioAgentToggle(preset, specId, value));
+  }
+
+  /// The Card Rewriter lane is configured per preset, so an edit is written
+  /// onto the preset being edited — not the active one, which may be another.
+  Future<void> _setCardRewriter(CardRewriterSettings next) async {
+    final preset = _preset;
+    if (preset == null) return;
+    await _persistNow(
+      preset.copyWith(runtime: preset.runtime.copyWith(cardRewriter: next)),
+    );
   }
 
   Future<void> _setLedgerPromptInjection(LedgerPromptInjectionMode mode) async {
@@ -742,6 +754,13 @@ class StudioPresetEditorBodyState
       onToggleAgent: _toggleAgent,
       onLedgerPromptInjectionChanged: (mode) =>
           unawaited(_setLedgerPromptInjection(mode)),
+      // Resolved here rather than in the row: the lane falls back to the
+      // global settings until this preset stores its own.
+      cardRewriter: effectiveCardRewriterSettings(
+        ref.watch(pipelineSettingsProvider),
+        preset,
+      ),
+      onCardRewriterChanged: (next) => unawaited(_setCardRewriter(next)),
     );
     return PresetCard(
       child: Column(

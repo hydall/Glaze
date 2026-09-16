@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/llm/studio_controller_ontology.dart';
+import '../../../core/models/card_rewriter_settings.dart';
 import '../../../core/models/ledger_prompt_injection_mode.dart';
 import '../../../core/models/ledger_prompt_injection_policy.dart';
 import '../../../core/models/studio_config.dart';
@@ -12,6 +13,7 @@ import '../studio_injection_points.dart';
 import '../studio_preset_stats.dart';
 import 'studio_agent_row.dart';
 import 'studio_block_row.dart';
+import 'studio_card_rewriter_row.dart';
 
 /// The id of the Post Clean block that drives the Fact Checker pass. Surfaced
 /// as its own row rather than buried among the generic Post Clean blocks.
@@ -52,6 +54,12 @@ class StudioBlockSectionList extends StatefulWidget {
   final void Function(String specId, bool enabled) onToggleAgent;
   final ValueChanged<LedgerPromptInjectionMode> onLedgerPromptInjectionChanged;
 
+  /// The Card Rewriter settings of the preset being edited, already resolved
+  /// against the globals, and the sink for an edit of them. The lane is the
+  /// last row of the Ledger section — see [StudioCardRewriterRow].
+  final CardRewriterSettings cardRewriter;
+  final ValueChanged<CardRewriterSettings> onCardRewriterChanged;
+
   const StudioBlockSectionList({
     super.key,
     required this.preset,
@@ -67,6 +75,8 @@ class StudioBlockSectionList extends StatefulWidget {
     required this.onMoveToSection,
     required this.onToggleAgent,
     required this.onLedgerPromptInjectionChanged,
+    required this.cardRewriter,
+    required this.onCardRewriterChanged,
   });
 
   @override
@@ -123,6 +133,10 @@ class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
         rows.add(_StudioListRow.agent(point, spec));
         if (point == 'ledger' && spec.id == 'ledger') {
           rows.add(_StudioListRow.ledgerPromptInjection(point));
+          // Card Rewriter has no blocks of its own, so it is not a section: it
+          // is the last thing the Ledger stage does, rendered under the agent
+          // whose reconciliation commits are its input.
+          rows.add(_StudioListRow.cardRewriter(point));
         }
         // The post-processing context setting controls how many trailing
         // messages a post-processing agent is handed. It only applies to the
@@ -241,6 +255,16 @@ class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
         onChanged: widget.onLedgerPromptInjectionChanged,
       );
     }
+    if (row.isCardRewriter) {
+      return StudioCardRewriterRow(
+        key: const ValueKey('studio_card_rewriter'),
+        settings: widget.cardRewriter,
+        ledgerEnabled:
+            widget.preset.agentEnabled['ledger'] != false,
+        onChanged: widget.onCardRewriterChanged,
+        isLast: isLast,
+      );
+    }
     if (row.isFactChecker) {
       final block = row.factCheckerBlock!;
       return StudioFactCheckerRow(
@@ -311,6 +335,7 @@ class _StudioListRow {
   final bool isPostContext;
   final bool isFactChecker;
   final bool isLedgerPromptInjection;
+  final bool isCardRewriter;
   final StudioPresetBlock? factCheckerBlock;
 
   const _StudioListRow.header(
@@ -324,6 +349,7 @@ class _StudioListRow {
        isPostContext = false,
        isFactChecker = false,
        isLedgerPromptInjection = false,
+       isCardRewriter = false,
        factCheckerBlock = null;
 
   const _StudioListRow.agent(this.point, this.spec)
@@ -335,6 +361,7 @@ class _StudioListRow {
       isPostContext = false,
       isFactChecker = false,
       isLedgerPromptInjection = false,
+      isCardRewriter = false,
       factCheckerBlock = null;
 
   const _StudioListRow.postContext(this.point)
@@ -347,6 +374,7 @@ class _StudioListRow {
       isPostContext = true,
       isFactChecker = false,
       isLedgerPromptInjection = false,
+      isCardRewriter = false,
       factCheckerBlock = null;
 
   const _StudioListRow.ledgerPromptInjection(this.point)
@@ -359,6 +387,20 @@ class _StudioListRow {
       isPostContext = false,
       isFactChecker = false,
       isLedgerPromptInjection = true,
+      isCardRewriter = false,
+      factCheckerBlock = null;
+
+  const _StudioListRow.cardRewriter(this.point)
+    : label = null,
+      count = 0,
+      expanded = false,
+      onToggle = null,
+      entry = null,
+      spec = null,
+      isPostContext = false,
+      isFactChecker = false,
+      isLedgerPromptInjection = false,
+      isCardRewriter = true,
       factCheckerBlock = null;
 
   const _StudioListRow.factChecker(this.point, this.factCheckerBlock)
@@ -370,7 +412,8 @@ class _StudioListRow {
       spec = null,
       isPostContext = false,
       isFactChecker = true,
-      isLedgerPromptInjection = false;
+      isLedgerPromptInjection = false,
+      isCardRewriter = false;
 
   const _StudioListRow.placeholder(this.point)
     : label = null,
@@ -382,6 +425,7 @@ class _StudioListRow {
       isPostContext = false,
       isFactChecker = false,
       isLedgerPromptInjection = false,
+      isCardRewriter = false,
       factCheckerBlock = null;
 
   const _StudioListRow.block(this.point, this.entry)
@@ -393,6 +437,7 @@ class _StudioListRow {
       isPostContext = false,
       isFactChecker = false,
       isLedgerPromptInjection = false,
+      isCardRewriter = false,
       factCheckerBlock = null;
 
   bool get isHeader => label != null;

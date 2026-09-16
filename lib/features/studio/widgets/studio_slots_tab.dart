@@ -3,9 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/api_config.dart';
+import '../../../core/models/card_rewriter_settings.dart';
+import '../../../core/models/cleaner_settings.dart';
+import '../../../core/models/ledger_settings.dart';
 import '../../../core/models/memory_book_api_settings.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
+import '../../../core/models/studio_pipeline_overrides.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
@@ -26,6 +30,11 @@ import 'studio_slot_settings_dialog.dart';
 /// Each stage is one group of three dropdown-style rows: the API connection,
 /// the model override, and a link into [StudioSlotSettingsDialog] for that
 /// stage's parameter overrides.
+///
+/// Three of the stages — Post Clean, Studio Ledger and Card Rewriter — are
+/// configured **per preset**, so their rows read and write the active preset's
+/// own settings (`applyStudioPresetOverrides`) rather than the globals. The
+/// pre-generation, final and MemoryBook slots remain global.
 class StudioSlotsTab extends ConsumerStatefulWidget {
   final ScrollController controller;
 
@@ -49,7 +58,14 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
   @override
   Widget build(BuildContext context) {
     final profile = ref.watch(studioPresetProvider).value;
-    final pipeline = ref.watch(pipelineSettingsProvider);
+    // Post Clean, Ledger and Card Rewriter are configured per preset, so the
+    // rows below show what the *active* preset runs on: its own settings where
+    // it has them, the globals where it does not. The pre-generation and final
+    // slots are still global and read straight off `pipeline`.
+    final pipeline = applyStudioPresetOverrides(
+      ref.watch(pipelineSettingsProvider),
+      profile,
+    );
 
     return ListView(
       controller: widget.controller,
@@ -117,20 +133,18 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
             (c) => c.copyWith(cleanerApiConfigId: id),
           ),
           model: pipeline.cleaner.postCleanerModel,
-          onModelChanged: (value) => _savePipeline(
-            (p) => p.copyWith(
-              cleaner: p.cleaner.copyWith(postCleanerModel: value),
-            ),
+          onModelChanged: (value) => _saveCleaner(
+            pipeline,
+            (c) => c.copyWith(postCleanerModel: value),
           ),
           // The Fact Checker pass runs before the rewrite and can use a cheaper
           // model. It inherits the cleaner's connection — only the model differs.
           extraLabel: 'studio_slot_audit_model'.tr(),
           extraDescription: 'studio_slot_audit_model_desc'.tr(),
           extraValue: pipeline.cleaner.postCleanerAuditModel,
-          onExtraChanged: (value) => _savePipeline(
-            (p) => p.copyWith(
-              cleaner: p.cleaner.copyWith(postCleanerAuditModel: value),
-            ),
+          onExtraChanged: (value) => _saveCleaner(
+            pipeline,
+            (c) => c.copyWith(postCleanerAuditModel: value),
           ),
         ),
         _slot(
@@ -144,9 +158,32 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
             (c) => c.copyWith(ledgerApiConfigId: id),
           ),
           model: pipeline.ledger.studioLedgerModel,
-          onModelChanged: (value) => _savePipeline(
-            (p) =>
-                p.copyWith(ledger: p.ledger.copyWith(studioLedgerModel: value)),
+          onModelChanged: (value) => _saveLedger(
+            pipeline,
+            (l) => l.copyWith(studioLedgerModel: value),
+          ),
+        ),
+        // Card Rewriter runs after the Ledger's reconciliation, on the evidence
+        // that reconciliation commits, so it is bound here in that order. Its
+        // connection lives inside the lane's own settings object rather than in
+        // a preset column of its own — it was per-preset from the start.
+        _slot(
+          context,
+          slotName: 'card_rewriter',
+          studioSlot: null,
+          title: 'card_rewriter_studio_title'.tr(),
+          description: 'studio_slot_card_rewriter_desc'.tr(),
+          apiConfigId: pipeline.cardRewriter.apiConfigId,
+          onApiConfigChanged: (id) => _saveCardRewriter(
+            pipeline,
+            // A model picked against the previous connection would not resolve
+            // on the new one, so the override is cleared with the change.
+            (c) => c.copyWith(apiConfigId: id, modelOverride: ''),
+          ),
+          model: pipeline.cardRewriter.modelOverride,
+          onModelChanged: (value) => _saveCardRewriter(
+            pipeline,
+            (c) => c.copyWith(modelOverride: value),
           ),
         ),
         // MemoryBook draft generation is an auxiliary LLM call like the ones
@@ -206,13 +243,40 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
     ref.invalidate(studioPresetProvider);
   }
 
-  /// Model overrides and generation settings are global app settings.
+  /// The pre-generation and final slots are still global app settings.
   Future<void> _savePipeline(
     PipelineSettings Function(PipelineSettings) mutate,
   ) {
     final pipeline = ref.read(pipelineSettingsProvider);
     return ref.read(pipelineSettingsProvider.notifier).save(mutate(pipeline));
   }
+
+  /// Writes one of the three per-preset lanes onto the active preset.
+  ///
+  /// [effective] is what the rows are showing — the preset's own settings where
+  /// it has them, the globals where it does not — so the first edit of a lane
+  /// stores the values the user was already looking at rather than resetting
+  /// the untouched ones to their defaults.
+  Future<void> _savePresetRuntime(
+    StudioRuntimeSettings Function(StudioRuntimeSettings) mutate,
+  ) => _saveProfile((preset) => preset.copyWith(runtime: mutate(preset.runtime)));
+
+  Future<void> _saveCleaner(
+    PipelineSettings effective,
+    CleanerSettings Function(CleanerSettings) mutate,
+  ) => _savePresetRuntime((r) => r.copyWith(cleaner: mutate(effective.cleaner)));
+
+  Future<void> _saveLedger(
+    PipelineSettings effective,
+    LedgerSettings Function(LedgerSettings) mutate,
+  ) => _savePresetRuntime((r) => r.copyWith(ledger: mutate(effective.ledger)));
+
+  Future<void> _saveCardRewriter(
+    PipelineSettings effective,
+    CardRewriterSettings Function(CardRewriterSettings) mutate,
+  ) => _savePresetRuntime(
+    (r) => r.copyWith(cardRewriter: mutate(effective.cardRewriter)),
+  );
 
   // ── Rows ───────────────────────────────────────────────────────────────────
 
@@ -278,7 +342,13 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
   // ── Advanced slot settings ─────────────────────────────────────────────────
 
   Future<void> _openSlotSettings(StudioSlot slot, String apiConfigId) async {
-    final pipeline = ref.read(pipelineSettingsProvider);
+    // The dialog reads and writes a whole PipelineSettings, so it is handed the
+    // effective one. Where the result goes depends on the slot: the two
+    // per-preset lanes are written back onto the preset, the rest stay global.
+    final pipeline = applyStudioPresetOverrides(
+      ref.read(pipelineSettingsProvider),
+      ref.read(studioPresetProvider).value,
+    );
     final configs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
     // A slot left on "use the chat connection" reads its inherited parameter
     // values off the active LLM preset; one pointing at a deleted config shows
@@ -299,6 +369,15 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
       ),
     );
     if (!mounted || updated == null) return;
-    await _savePipeline((p) => updated.applyTo(p, slot));
+    final applied = updated.applyTo(pipeline, slot);
+    switch (slot) {
+      case StudioSlot.cleaner:
+        await _savePresetRuntime((r) => r.copyWith(cleaner: applied.cleaner));
+      case StudioSlot.ledger:
+        await _savePresetRuntime((r) => r.copyWith(ledger: applied.ledger));
+      case StudioSlot.controller:
+      case StudioSlot.finalGenerator:
+        await _savePipeline((p) => updated.applyTo(p, slot));
+    }
   }
 }

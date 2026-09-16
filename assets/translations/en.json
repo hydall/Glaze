@@ -2475,6 +2475,7 @@
   "studio_slot_final_desc": "Writes the visible reply — put a high-quality model here.",
   "studio_slot_cleaner_desc": "Post Clean: audits the reply, then rewrites it.",
   "studio_slot_ledger_desc": "Maintains the Studio Ledger (session state). When left empty, it uses the post-processing slot.",
+  "studio_slot_card_rewriter_desc": "Writes the reviewed card and lorebook rewrites after reconciliation. A dedicated connection is required \u2014 this lane never falls back to the chat model.",
   "studio_slot_api": "API connection",
   "studio_slot_model": "Model override",
   "studio_slot_audit_model": "Fact Checker model",

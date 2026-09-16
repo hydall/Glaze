@@ -2496,6 +2496,7 @@
   "studio_slot_final_desc": "Пишет видимый ответ — сюда ставь качественную модель.",
   "studio_slot_cleaner_desc": "Post Clean: проверяет ответ, затем переписывает его.",
   "studio_slot_ledger_desc": "Ведёт Studio Ledger (состояние сессии). Если оставить пустым, берёт слот постобработки.",
+  "studio_slot_card_rewriter_desc": "Пишет правки карточки и лорбука на ревью после реконсиляции. Нужно отдельное подключение \u2014 на модель чата эта линия не откатывается.",
   "studio_slot_api": "Подключение API",
   "studio_slot_model": "Переопределение модели",
   "studio_slot_audit_model": "Модель Fact Checker",
