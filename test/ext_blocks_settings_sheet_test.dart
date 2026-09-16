@@ -126,22 +126,26 @@ void main() {
     expect(find.text('Ledger'), findsOneWidget);
   });
 
-  testWidgets('the dropdown heads the body and API settings come first', (
+  testWidgets('the dropdown and permissions share the row above the cards', (
     tester,
   ) async {
     await pumpPanel(tester);
 
     expect(find.byType(PresetPill), findsOneWidget);
     expect(find.text('Active preset'), findsOneWidget);
-    // API card, then blocks, then permissions.
+    // Permissions ride at the other end of the pill's own row.
+    final pill = tester.getRect(find.byType(PresetPill));
+    final shield = tester.getRect(find.byType(GlazeIconChip));
+    expect(shield.center.dy, closeTo(pill.center.dy, 1));
+    expect(shield.left, greaterThan(pill.right));
+    // Hard against the same right edge as the cards under it.
+    final card = tester.getRect(find.text('extblocks_api_section'));
+    expect(shield.right, greaterThan(card.right));
+    // Then the API card, then the blocks.
     final api = tester.getTopLeft(find.text('extblocks_api_section')).dy;
     final blocks = tester.getTopLeft(find.textContaining('(1)')).dy;
-    final permissions = tester
-        .getTopLeft(find.text('extblocks_permissions'))
-        .dy;
-    expect(tester.getTopLeft(find.byType(PresetPill)).dy, lessThan(api));
+    expect(pill.top, lessThan(api));
     expect(api, lessThan(blocks));
-    expect(blocks, lessThan(permissions));
     // The three connection profiles are the API card's rows.
     expect(find.text('extblocks_profile_big'), findsOneWidget);
     expect(find.text('extblocks_profile_medium'), findsOneWidget);
@@ -191,7 +195,8 @@ void main() {
 
     await tester.tap(find.byType(PresetPill));
     await tester.pumpAndSettle();
-    // The row menus follow the header's, in list order.
+    // The card list is built before the header, so the row menus come
+    // first, in list order.
     await tester.tap(find.byIcon(Icons.more_vert_rounded).at(1));
     await tester.pumpAndSettle();
 

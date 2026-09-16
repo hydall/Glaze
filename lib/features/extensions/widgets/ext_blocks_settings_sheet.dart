@@ -7,6 +7,7 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/list_controls.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/preset_switcher.dart';
 import '../../../shared/widgets/sheet_view.dart';
@@ -82,15 +83,33 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
               _Hint(text: 'extblocks_disabled_hint'.tr())
             else ...[
               // The dropdown heads the list: it says which preset everything
-              // below belongs to.
+              // below belongs to. Permissions sit at the other end of the same
+              // row — they are the preset's, not a setting among the blocks.
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: PresetPill(
-                    label: activePreset?.name ?? 'extblocks_preset_none'.tr(),
-                    onTap: () => _showPresetSwitcher(context, ref),
-                  ),
+                child: Row(
+                  // spaceBetween rather than a Spacer: the pill keeps its own
+                  // width (a Flexible next to a Spacer would split the free
+                  // space between them and leave the shield short of the edge).
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
+                      child: PresetPill(
+                        label:
+                            activePreset?.name ?? 'extblocks_preset_none'.tr(),
+                        onTap: () => _showPresetSwitcher(context, ref),
+                      ),
+                    ),
+                    if (activePreset != null)
+                      GlazeIconChip(
+                        icon: Icons.verified_user_outlined,
+                        tooltip: 'extblocks_permissions'.tr(),
+                        onTap: () => ExtBlocksPermissionsSheet.show(
+                          context,
+                          activePreset.id,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               if (activePreset == null)
@@ -100,19 +119,6 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
                 _BlocksGroup(
                   preset: activePreset,
                   onImport: () => _importBlocks(context, ref, activePreset),
-                ),
-                MenuGroup(
-                  items: [
-                    MenuItem(
-                      icon: Icons.verified_user_outlined,
-                      label: 'extblocks_permissions'.tr(),
-                      subtitle: 'extblocks_permissions_desc'.tr(),
-                      onTap: () => ExtBlocksPermissionsSheet.show(
-                        context,
-                        activePreset.id,
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ],

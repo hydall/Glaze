@@ -1834,7 +1834,6 @@
   "extblocks_profile_default": "Active API",
   "extblocks_profile_missing": "Not found (id={})",
   "extblocks_permissions": "Permissions",
-  "extblocks_permissions_desc": "What this preset’s blocks may reach",
   "extblocks_preset_delete_confirm": "Delete “{}”? Its {} block(s) go with it.",
   "perm_group_chat_vars": "Chat variables",
   "perm_group_character_vars": "Character variables",

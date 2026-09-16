@@ -167,6 +167,47 @@ class GlazeSortIconChip extends StatelessWidget {
   }
 }
 
+/// Round glass button for a single action next to a chip — the permissions
+/// shield beside the Ext Blocks preset pill, for one.
+///
+/// Same 32pt circle as [GlazeReorderToggleButton], without a state to show.
+class GlazeIconChip extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const GlazeIconChip({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: SizedBox(
+          width: 32,
+          height: 32,
+          child: GlassSurface(
+            borderRadius: BorderRadius.circular(16),
+            tint: context.cs.surface,
+            border: Border.all(
+              color: context.cs.primary.withValues(alpha: 0.18),
+            ),
+            child: Center(
+              child: Icon(icon, size: 18, color: context.cs.primary),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Glass toggle that arms dragging for a manually ordered list, shown next to
 /// the sort chip while that mode is picked.
 ///

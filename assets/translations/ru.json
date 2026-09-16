@@ -1845,7 +1845,6 @@
   "extblocks_profile_default": "Активный API",
   "extblocks_profile_missing": "Не найдено (id={})",
   "extblocks_permissions": "Разрешения",
-  "extblocks_permissions_desc": "Что доступно блокам этого пресета",
   "extblocks_preset_delete_confirm": "Удалить «{}»? Вместе с ним удалятся блоки: {}.",
   "perm_group_chat_vars": "Переменные чата",
   "perm_group_character_vars": "Переменные персонажа",
