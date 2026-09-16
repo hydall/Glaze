@@ -60,6 +60,15 @@ class MemoryBooksActions {
     required this.isReindexing,
     required this.showIndexActions,
   });
+
+  /// Whether [other] would render the same chrome. The callbacks are stable
+  /// behaviour of the tab's state, so only the values the chrome reads can
+  /// differ — publishing a new set that matches the old one changes nothing on
+  /// screen.
+  bool sameChrome(MemoryBooksActions other) =>
+      isReindexing == other.isReindexing &&
+      showIndexActions == other.showIndexActions &&
+      (deleteAllDrafts == null) == (other.deleteAllDrafts == null);
 }
 
 /// Memory Books tab of the Memory sheet — "Shelf" layout.
@@ -101,6 +110,12 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   String _query = '';
   _EntryFilter _entryFilter = _EntryFilter.all;
   _DraftFilter _draftFilter = _DraftFilter.all;
+
+  /// The last [MemoryBooksActions] handed to the host, so an unchanged set is
+  /// not republished. The host rebuilds from these, and publishing from
+  /// `build` means that rebuild runs this `build` again: without the guard the
+  /// sheet setState'd itself on every frame and never settled.
+  MemoryBooksActions? _publishedActions;
 
   @override
   void initState() {
@@ -236,6 +251,9 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
       isReindexing: _ctrl.isReindexing,
       showIndexActions: vectorAvailable,
     );
+    final published = _publishedActions;
+    if (published != null && published.sameChrome(actions)) return;
+    _publishedActions = actions;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) publish(actions);
     });

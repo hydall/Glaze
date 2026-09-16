@@ -286,4 +286,30 @@ void main() {
     );
   }, skip: !_runGoldens);
 
+  testWidgets('the books tab stops scheduling frames once it has settled', (
+    tester,
+  ) async {
+    final db = await _seedDb();
+    addTearDown(db.close);
+    await _pump(
+      tester,
+      const MemorySheet(charId: _charId, initialTab: MemoryTab.books),
+      overrides: [
+        appDbProvider.overrideWithValue(db),
+        vectorSearchAvailableProvider.overrideWithValue(true),
+        chatProvider(_charId).overrideWith(() => _StubChat(_charId)),
+      ],
+    );
+    // The tab publishes its chrome callbacks from build and the host rebuilds
+    // on them. Republishing an unchanged set setState'd the host on every
+    // frame, so the whole sheet never stopped rebuilding. Nothing here animates,
+    // so once it has settled no frame may be pending.
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(
+      tester.binding.hasScheduledFrame,
+      isFalse,
+      reason: 'the memory sheet keeps rebuilding after it has settled',
+    );
+  });
+
 }
