@@ -117,6 +117,19 @@ class ChatInputBar extends ConsumerStatefulWidget {
   /// same whether it is tapped in the grid or up here.
   final Future<bool> Function()? beforeGeneration;
 
+  /// The composer floats over the chat WebView, whose pixels a Flutter
+  /// `BackdropFilter` cannot always sample. Where it cannot, the pill and the
+  /// circle buttons drop their own blur and have it mirrored into the WebView
+  /// as CSS strips instead (see [chatWebViewBlurIsFlutterSide] and
+  /// [BlurRegionTracker]).
+  final bool blurViaWebView;
+
+  /// Shares one backdrop capture with the rest of the chrome painted over the
+  /// same body — in practice the header pill at the other edge. Only the
+  /// surfaces that float directly over the body take it; anything nested
+  /// inside one of them keeps its own blur.
+  final BackdropKey? backdropKey;
+
   const ChatInputBar({
     super.key,
     required this.onSend,
@@ -154,6 +167,8 @@ class ChatInputBar extends ConsumerStatefulWidget {
     this.isEditingMessage = false,
     this.charId,
     this.beforeGeneration,
+    this.blurViaWebView = true,
+    this.backdropKey,
   });
 
   @override
@@ -699,6 +714,8 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       color: resolved.color,
       batterySaver: widget.batterySaver,
       blurRegionId: 'btn-pin-${pin.encode()}',
+      blurViaWebView: widget.blurViaWebView,
+      backdropKey: widget.backdropKey,
     );
     if (!editing) return button;
 
@@ -988,6 +1005,19 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     }
   }
 
+  /// Wraps a surface that floats directly over the chat WebView. Where the
+  /// blur is mirrored into the page, the surface's rect has to be tracked for
+  /// the bridge; where Flutter blurs the WebView itself there is nothing to
+  /// mirror, and the tracker is left out entirely.
+  Widget _floatingChrome({
+    required String id,
+    required double radius,
+    required Widget child,
+  }) {
+    if (!widget.blurViaWebView) return child;
+    return BlurRegionTracker(id: id, radius: radius, child: child);
+  }
+
   @override
   Widget build(BuildContext context) {
     final preset = ref.watch(themeProvider.select((s) => s.activePreset));
@@ -1003,12 +1033,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     _listenImpersonation();
 
     if (widget.showSearchControls) {
-      final searchContent = BlurRegionTracker(
+      final searchContent = _floatingChrome(
         id: 'input-pill',
         radius: 28,
         child: GlassSurface(
           enableRipple: true,
-          blurViaWebView: true,
+          blurViaWebView: widget.blurViaWebView,
+          backdropKey: widget.backdropKey,
           borderRadius: BorderRadius.circular(28),
           tint: context.cs.surface,
           border: uiBorder,
@@ -1070,12 +1101,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     }
 
     if (widget.isSelectionMode) {
-      final selectionContent = BlurRegionTracker(
+      final selectionContent = _floatingChrome(
         id: 'input-pill',
         radius: 28,
         child: GlassSurface(
           enableRipple: true,
-          blurViaWebView: true,
+          blurViaWebView: widget.blurViaWebView,
+          backdropKey: widget.backdropKey,
           borderRadius: BorderRadius.circular(28),
           tint: context.cs.surface,
           border: uiBorder,
@@ -1294,12 +1326,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
               color: Colors.transparent,
               elevation: 0,
               borderRadius: BorderRadius.circular(28),
-              child: BlurRegionTracker(
+              child: _floatingChrome(
                 id: 'input-pill',
                 radius: 28,
                 child: GlassSurface(
                   enableRipple: true,
-                  blurViaWebView: true,
+                  blurViaWebView: widget.blurViaWebView,
+                  backdropKey: widget.backdropKey,
                   borderRadius: BorderRadius.circular(28),
                   tint: context.cs.surface,
                   border: _guidanceMode
@@ -1498,11 +1531,22 @@ class _CircleBtn extends ConsumerStatefulWidget {
   final Color? color;
   final bool batterySaver;
 
-  /// When set, the button's rect is mirrored into the chat WebView as a
-  /// backdrop-blur region (see [BlurRegionTracker]). Only buttons that sit
-  /// directly over the WebView (the bottom row) need one; buttons nested
-  /// inside an already-tracked pill must leave it null.
+  /// Set on the buttons that float directly over the chat WebView (the bottom
+  /// row); buttons nested inside an already-blurred pill leave it null. Where
+  /// the blur is mirrored into the page, it is also the id of this button's
+  /// region (see [BlurRegionTracker]).
   final String? blurRegionId;
+
+  /// True while the chrome's blur is mirrored into the WebView instead of
+  /// being drawn here — then a floating button drops its own blur pass and
+  /// registers its rect instead.
+  final bool blurViaWebView;
+
+  /// Backdrop capture shared with the rest of the floating chrome. Only for
+  /// buttons that float over the body ([blurRegionId] set): one nested inside
+  /// a pill is painted over that pill's own blur and cannot share a capture
+  /// taken before it.
+  final BackdropKey? backdropKey;
 
   const _CircleBtn({
     required this.icon,
@@ -1510,6 +1554,8 @@ class _CircleBtn extends ConsumerStatefulWidget {
     this.color,
     this.batterySaver = false,
     this.blurRegionId,
+    this.blurViaWebView = true,
+    this.backdropKey,
   });
 
   @override
@@ -1544,6 +1590,7 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
   @override
   Widget build(BuildContext context) {
     final preset = ref.watch(themeProvider.select((s) => s.activePreset));
+    final floating = widget.blurRegionId != null;
     final btn = GestureDetector(
       onTap: widget.onTap,
       onTapDown: (widget.onTap != null && !widget.batterySaver)
@@ -1562,9 +1609,10 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
           height: 40,
           child: GlassSurface(
             // Only the top-level circle buttons carry a blurRegionId (they
-            // float over the WebView and are mirrored to a CSS strip); the
-            // ones nested inside the input pill keep their Flutter blur.
-            blurViaWebView: widget.blurRegionId != null,
+            // float over the WebView); the ones nested inside the input pill
+            // always keep their own Flutter blur.
+            blurViaWebView: floating && widget.blurViaWebView,
+            backdropKey: floating ? widget.backdropKey : null,
             borderRadius: BorderRadius.circular(20),
             tint: context.cs.surface,
             border: _uiBorder(context, preset),
@@ -1580,7 +1628,7 @@ class _CircleBtnState extends ConsumerState<_CircleBtn>
       ),
     );
     final regionId = widget.blurRegionId;
-    if (regionId == null) return btn;
+    if (regionId == null || !widget.blurViaWebView) return btn;
     return BlurRegionTracker(id: regionId, radius: 20, child: btn);
   }
 }

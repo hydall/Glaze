@@ -31,13 +31,14 @@ class GlassSurface extends ConsumerWidget {
   final double rippleRadiusFactor;
   final double rippleIntensity;
 
-  /// When this surface floats over the chat `InAppWebView`, its own Flutter
-  /// [BackdropFilter] cannot sample the natively-composited WebView pixels, so
-  /// the blur is instead reproduced by a CSS `backdrop-filter` strip *inside*
-  /// the WebView (mirrored via [BlurRegionTracker] → `setOverlayBlurRegions`).
-  /// Setting this drops the redundant Flutter blur pass entirely — the surface
-  /// paints only tint / border / noise — which also removes the per-frame blur
-  /// recompute that made the keyboard animation janky.
+  /// Set when this surface floats over the chat `InAppWebView` on a platform
+  /// whose WebView pixels a Flutter [BackdropFilter] cannot sample (see
+  /// `chatWebViewBlurIsFlutterSide`). The blur is then reproduced by a CSS
+  /// `backdrop-filter` strip *inside* the WebView, mirrored via
+  /// `BlurRegionTracker` → `setOverlayBlurRegions`, and setting this drops the
+  /// redundant Flutter pass entirely — the surface paints only tint / border /
+  /// noise. Where the WebView *is* part of the Flutter frame this stays false
+  /// and the surface blurs it like any other content.
   final bool blurViaWebView;
 
   /// Shares one backdrop capture with every other [GlassSurface] painted under
@@ -124,11 +125,11 @@ class GlassSurface extends ConsumerWidget {
     final fillColor = behind == null
         ? tinted
         : Color.alphaBlend(tinted, behind);
-    // Over the chat WebView the blur is done by an in-WebView CSS strip, so the
-    // Flutter BackdropFilter is dropped here (it would sample the platform-view
-    // hole, not the WebView content, and cost a blur pass every frame). A fully
-    // opaque fill hides the backdrop too, so the blur would be invisible and
-    // only cost a saveLayer + blur every frame.
+    // With the blur mirrored into the WebView, the Flutter BackdropFilter is
+    // dropped here: it would sample the platform-view hole rather than the web
+    // content, and cost a blur pass every frame for nothing. A fully opaque
+    // fill hides the backdrop too, so the blur would be invisible and only
+    // cost a saveLayer + blur every frame.
     final blur =
         (batterySaver ||
             PerfDebug.noGlassBlur ||

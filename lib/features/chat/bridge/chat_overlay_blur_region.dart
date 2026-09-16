@@ -4,14 +4,17 @@ import 'dart:ui';
 /// A rounded-rect area of a Flutter glass element (header pill, chat input
 /// pill, circle buttons) that overlays the chat WebView.
 ///
-/// Flutter's `BackdropFilter` cannot sample the natively-composited
-/// `InAppWebView` pixels, so the "glass blur" of overlaying widgets is
-/// reproduced in two synced layers keyed by these regions:
-///  * inside the WebView — fixed `backdrop-filter` strips blur the messages
-///    scrolling underneath (see `setOverlayBlurRegions` in
-///    `assets/chat_webview/bridge/chat_bridge_controller.js`);
-///  * below the WebView — a `BackdropFilter` sandwich in
-///    `ChatWebViewSurface` blurs the (Flutter-side, global) background.
+/// Only used where a Flutter `BackdropFilter` cannot sample the WebView's
+/// pixels — see [chatWebViewBlurIsFlutterSide], which is what decides between
+/// the two paths. There the chrome drops its own blur and the "glass blur" is
+/// reproduced by fixed `backdrop-filter` strips *inside* the WebView, one per
+/// region (see `setOverlayBlurRegions` in
+/// `assets/chat_webview/bridge/chat_bridge_controller.js`).
+///
+/// The cost of that path is the synchronisation: the strips are pushed over
+/// the bridge after the frame that moved the widget, so they trail the chrome
+/// through every keyboard, drawer or composer-growth animation — which is why
+/// the measuring pass holds still until the layout settles.
 ///
 /// Coordinates are in the WebView's local space, which equals CSS pixels:
 /// the chat WebView is always full-screen (`resizeToAvoidBottomInset:

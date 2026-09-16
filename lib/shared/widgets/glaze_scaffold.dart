@@ -53,10 +53,17 @@ class GlazeScaffold extends StatelessWidget {
   final bool hideHeader;
   final bool showBackground;
 
-  /// Set for the chat screen, whose body is a full-screen `InAppWebView`. The
-  /// floating header then drops its Flutter blur and lets an in-WebView CSS
-  /// strip reproduce it (see [GlassSurface.blurViaWebView]).
+  /// Set by the chat screen, whose body is a full-screen `InAppWebView`, on
+  /// the platforms where Flutter cannot blur that WebView itself. The floating
+  /// header then drops its Flutter blur and lets an in-WebView CSS strip
+  /// reproduce it (see [GlassSurface.blurViaWebView]).
   final bool headerBlurViaWebView;
+
+  /// Shares the header's backdrop capture with the other glass chrome painted
+  /// over the same body — the chat's input pill and the circle buttons beside
+  /// it (see [GlassSurface.backdropKey]). They sit at opposite edges and never
+  /// overlap, so one blur pass serves all of them instead of one each.
+  final BackdropKey? headerBackdropKey;
 
   /// Draws the header edge to edge with square corners, the way the desktop
   /// shell paints a tab's header, instead of as an inset floating pill.
@@ -91,6 +98,7 @@ class GlazeScaffold extends StatelessWidget {
     this.useShellHeader = false,
     this.headerBranchIndex,
     this.headerBlurViaWebView = false,
+    this.headerBackdropKey,
     this.flushHeader = false,
   });
 
@@ -125,6 +133,7 @@ class GlazeScaffold extends StatelessWidget {
           showBack: showBack,
           onBack: backHandler,
           blurViaWebView: headerBlurViaWebView,
+          backdropKey: headerBackdropKey,
           borderRadius: flushHeader
               ? BorderRadius.zero
               : const BorderRadius.all(Radius.circular(20)),
@@ -273,11 +282,17 @@ class GlazeAppBar extends ConsumerWidget {
   final Widget? leading;
   final BorderRadius borderRadius;
 
-  /// When the header floats over the chat WebView its blur is reproduced by a
-  /// CSS strip inside the WebView (see [GlassSurface.blurViaWebView]); the
-  /// Flutter BackdropFilter is then dropped. Only the chat header sets this —
-  /// standalone shell-tab headers keep their own blur.
+  /// When the header floats over a chat WebView that Flutter cannot sample,
+  /// its blur is reproduced by a CSS strip inside the WebView (see
+  /// [GlassSurface.blurViaWebView]) and the Flutter BackdropFilter is dropped.
+  /// Only the chat header sets this — standalone shell-tab headers keep their
+  /// own blur.
   final bool blurViaWebView;
+
+  /// Passed straight to [GlassSurface.backdropKey]: the header joins the
+  /// backdrop group of the chrome it is painted alongside, so the engine blurs
+  /// the backdrop once for all of them.
+  final BackdropKey? backdropKey;
 
   const GlazeAppBar({
     super.key,
@@ -289,6 +304,7 @@ class GlazeAppBar extends ConsumerWidget {
     this.leading,
     this.borderRadius = const BorderRadius.all(Radius.circular(20)),
     this.blurViaWebView = false,
+    this.backdropKey,
   });
 
   @override
@@ -296,6 +312,7 @@ class GlazeAppBar extends ConsumerWidget {
     return GlassSurface(
       enableRipple: true,
       blurViaWebView: blurViaWebView,
+      backdropKey: backdropKey,
       borderRadius: borderRadius,
       border: Border.all(color: context.cs.outlineVariant),
       child: SizedBox(

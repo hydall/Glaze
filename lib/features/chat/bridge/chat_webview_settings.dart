@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import 'chat_webview_blur_mode.dart';
+
 /// Android reserved domain for [WebViewAssetLoader] (flutter_inappwebview default).
 const String kChatWebViewAndroidAssetDomain = 'appassets.androidplatform.net';
 
@@ -86,7 +88,10 @@ InAppWebViewSettings chatWebViewInAppSettings({bool isInspectable = true}) {
     domStorageEnabled: true,
     transparentBackground: chatWebViewTransparentBackground(),
     isInspectable: isInspectable,
-    useHybridComposition: true,
+    // Android composition mode. See [chatWebViewUsesHybridComposition] — false
+    // hands the WebView to Flutter as a texture layer, which is what lets the
+    // chat chrome blur it with an ordinary BackdropFilter.
+    useHybridComposition: chatWebViewUsesHybridComposition(),
     cacheEnabled: true,
     useWideViewPort: true,
     loadWithOverviewMode: true,
