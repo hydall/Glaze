@@ -171,7 +171,7 @@ Widget _systemBadge(BuildContext context) {
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        'System',
+        'block_role_system'.tr(),
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w700,
@@ -193,7 +193,7 @@ Widget _appendBadge(BuildContext context) {
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        '↩ Last User',
+        'block_append_badge'.tr(),
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w700,

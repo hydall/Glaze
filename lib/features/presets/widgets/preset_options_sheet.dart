@@ -109,9 +109,9 @@ void showPresetRename(
     context,
     title: 'action_rename_preset'.tr(),
     input: BottomSheetInput(
-      placeholder: 'Preset name',
+      placeholder: 'placeholder_preset_name'.tr(),
       value: currentName,
-      confirmLabel: 'Rename',
+      confirmLabel: 'action_rename'.tr(),
       onConfirm: (value) {
         Navigator.of(context, rootNavigator: true).pop();
         onRename(value);
@@ -131,9 +131,9 @@ void showPresetAuthorDialog(
     context,
     title: 'action_set_author'.tr(),
     input: BottomSheetInput(
-      placeholder: 'Author (optional)',
+      placeholder: 'placeholder_author_optional'.tr(),
       value: currentAuthor,
-      confirmLabel: 'Save',
+      confirmLabel: 'btn_save'.tr(),
       onConfirm: (value) {
         Navigator.of(context, rootNavigator: true).pop();
         onSubmit(value.trim());

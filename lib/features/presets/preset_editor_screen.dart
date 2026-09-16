@@ -585,7 +585,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           child: Row(
             children: [
               Text(
-                'Advanced Settings',
+                'section_advanced_settings'.tr(),
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
@@ -655,11 +655,10 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
                 ),
               ],
               const SizedBox(height: 20),
-              const _SectionLabel('Impersonation'),
+              _SectionLabel('section_impersonation'.tr()),
               const SizedBox(height: 8),
               Text(
-                'Prompt sent when you tap the impersonate button — the model '
-                'writes your next message into the input box.',
+                'preset_impersonation_desc'.tr(),
                 style: TextStyle(
                   color: context.cs.onSurfaceVariant,
                   fontSize: 12,
@@ -1596,7 +1595,7 @@ Widget _linkedSessionContentCard(
             Row(
               children: [
                 Text(
-                  'Content',
+                  'section_content'.tr(),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -1605,7 +1604,7 @@ Widget _linkedSessionContentCard(
                 ),
                 const Spacer(),
                 Text(
-                  'from current chat',
+                  'preset_content_from_chat'.tr(),
                   style: TextStyle(
                     fontSize: 11,
                     color: context.cs.onSurfaceVariant,
@@ -1655,7 +1654,7 @@ Widget _linkedSessionContentCard(
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          'Edit content',
+                          'preset_edit_content'.tr(),
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,

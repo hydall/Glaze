@@ -675,16 +675,16 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         onTap: () => _showAddSheet(context),
         borderRadius: BorderRadius.circular(14),
         splashColor: Colors.white.withValues(alpha: 0.1),
-        child: const Padding(
-          padding: EdgeInsets.symmetric(vertical: 14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.add, color: Colors.white, size: 20),
-              SizedBox(width: 8),
+              const Icon(Icons.add, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
               Text(
-                'Add / Import',
-                style: TextStyle(
+                'preset_add_import'.tr(),
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
@@ -995,11 +995,11 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   void _showAddSheet(BuildContext context) {
     GlazeBottomSheet.show<void>(
       context,
-      title: 'Add Preset',
+      title: 'preset_add_title'.tr(),
       items: [
         BottomSheetItem(
           icon: Icons.add_circle_outline,
-          label: 'Create New Preset',
+          label: 'preset_create_new'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _openEditor(null);
@@ -1007,7 +1007,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         ),
         BottomSheetItem(
           icon: Icons.smart_toy_outlined,
-          label: 'Add Agentic Preset',
+          label: 'preset_add_agentic'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _createAgenticPreset();
@@ -1015,7 +1015,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         ),
         BottomSheetItem(
           icon: Icons.file_upload_outlined,
-          label: 'Import from File',
+          label: 'action_import'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _importPreset();

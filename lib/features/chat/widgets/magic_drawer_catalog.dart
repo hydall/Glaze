@@ -22,7 +22,7 @@ List<MagicDrawerItemDef> buildMagicDrawerItems() => [
   ),
   MagicDrawerItemDef(
     id: 'memory',
-    label: 'Memory',
+    label: 'memory_sheet_title'.tr(),
     icon: Icons.subject,
     category: MagicDrawerCategory.session,
   ),

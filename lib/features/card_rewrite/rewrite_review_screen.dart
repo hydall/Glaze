@@ -485,7 +485,7 @@ class _ApplyFooter extends ConsumerWidget {
                       ? () => _rejectAndClose(context, ref, hasPending)
                       : null,
                   icon: const Icon(Icons.close_rounded),
-                  label: const Text('Reject and close'),
+                  label: Text('rewrite_btn_reject_and_close'.tr()),
                   style: TextButton.styleFrom(
                     foregroundColor: context.cs.error,
                   ),
