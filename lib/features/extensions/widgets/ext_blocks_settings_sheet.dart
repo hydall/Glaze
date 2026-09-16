@@ -1,18 +1,29 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/utils/id_generator.dart';
-import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/menu_group.dart';
+import '../../../shared/widgets/sheet_view.dart';
+import '../models/block_config.dart';
 import '../models/extension_preset.dart';
 import '../providers/extension_presets_provider.dart';
 import '../providers/extensions_settings_provider.dart';
+import '../screens/preset_editor/sections/blocks_section.dart';
+import '../services/block_transfer_service.dart';
 
-/// Bottom sheet shown from the magic drawer to manage Ext Blocks settings.
-/// Contains a preset selector and an "Edit preset" button.
+/// Ext Blocks control panel, opened from the magic drawer and from Tools.
+///
+/// It is the quick surface: pick the preset, see its blocks, toggle one, and
+/// move blocks in or out as files. Anything that needs room — editing a block,
+/// permissions, connection profiles — lives in the preset editor, one tap away.
 class ExtBlocksSettingsSheet extends ConsumerWidget {
   const ExtBlocksSettingsSheet({super.key});
+
+  static const _transfer = BlockTransferService();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -22,54 +33,56 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
         ? presets.where((p) => p.id == settings.activePresetId).firstOrNull
         : null;
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 32,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: context.cs.outlineVariant.withValues(alpha: 0.4),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
+    return SheetView(
+      title: 'extblocks_sheet_title'.tr(),
+      actions: [
+        if (activePreset != null)
+          SheetViewAction(
+            icon: const Icon(Icons.file_upload_outlined, size: 20),
+            tooltip: 'extblocks_preset_export'.tr(),
+            onPressed: () => _exportPreset(context, activePreset),
+          ),
+        SheetViewAction(
+          icon: const Icon(Icons.file_download_outlined, size: 20),
+          tooltip: 'extblocks_preset_import'.tr(),
+          onPressed: () => _importPreset(context, ref),
+        ),
+      ],
+      body: ListView(
+        padding: EdgeInsets.fromLTRB(
+          0,
+          MediaQuery.paddingOf(context).top + 12,
+          0,
+          MediaQuery.paddingOf(context).bottom + 24,
+        ),
+        children: [
+          MenuGroup(
+            header: 'extblocks_preset_section'.tr(),
+            description: 'extblocks_sheet_subtitle'.tr(),
+            items: [
+              MenuSwitchItem(
+                label: 'extblocks_enabled'.tr(),
+                description: 'extblocks_enabled_desc'.tr(),
+                value: settings.enabled,
+                onChanged: (value) => ref
+                    .read(extensionsSettingsProvider.notifier)
+                    .update(settings.copyWith(enabled: value)),
               ),
-              const SizedBox(height: 12),
-              Text(
-                'Ext Blocks',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: context.cs.onSurface,
-                ),
+              MenuSelectorItem(
+                label: 'extblocks_active_preset'.tr(),
+                currentValue:
+                    activePreset?.name ?? 'extblocks_preset_none'.tr(),
+                onTap: () => _pickPreset(context, ref, settings, presets),
               ),
-              const SizedBox(height: 4),
-              Text(
-                'Выберите пресет расширений для текущего чата',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: context.cs.onSurfaceVariant,
-                ),
+              MenuItem(
+                icon: Icons.add_circle_outline,
+                label: 'extblocks_preset_create'.tr(),
+                onTap: () => _createPreset(ref, presets),
               ),
-              const SizedBox(height: 16),
-              _SelectorTile(
-                icon: Icons.tune_outlined,
-                label: 'Активный пресет',
-                value: activePreset?.name ?? 'Не выбран',
-                onTap: () =>
-                    _showPresetSelector(context, ref, settings, presets),
-              ),
-              const SizedBox(height: 8),
-              if (activePreset != null) ...[
-                _ActionTile(
-                  icon: Icons.edit_outlined,
-                  label: 'Редактировать пресет',
+              if (activePreset != null)
+                MenuItem(
+                  icon: Icons.tune_outlined,
+                  label: 'extblocks_preset_edit'.tr(),
                   onTap: () {
                     Navigator.pop(context);
                     context.push(
@@ -77,28 +90,24 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
                     );
                   },
                 ),
-                const SizedBox(height: 8),
-                _BlocksList(preset: activePreset),
-              ],
-              const SizedBox(height: 8),
-              _ActionTile(
-                icon: Icons.add_circle_outline,
-                label: 'Создать пресет',
-                onTap: () => _createPreset(context, ref),
-              ),
             ],
           ),
-        ),
+          if (activePreset == null)
+            _Hint(text: 'extblocks_no_preset_hint'.tr())
+          else
+            _BlocksGroup(
+              preset: activePreset,
+              onImport: () => _importBlocks(context, ref, activePreset),
+            ),
+        ],
       ),
     );
   }
 
-  Future<void> _createPreset(BuildContext context, WidgetRef ref) async {
-    final presets = ref.read(extensionPresetsProvider);
-    final name = 'Пресет ${presets.length + 1}';
+  Future<void> _createPreset(WidgetRef ref, List<ExtensionPreset> presets) async {
     final preset = ExtensionPreset(
       id: generateId(),
-      name: name,
+      name: 'extblocks_preset_default_name'.tr(args: ['${presets.length + 1}']),
       blocks: const [],
       createdAt: DateTime.now().millisecondsSinceEpoch,
     );
@@ -106,7 +115,7 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
     await ref.read(extensionsSettingsProvider.notifier).selectPreset(preset.id);
   }
 
-  void _showPresetSelector(
+  void _pickPreset(
     BuildContext context,
     WidgetRef ref,
     dynamic settings,
@@ -115,16 +124,13 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
     final activeId = settings.activePresetId as String?;
     GlazeBottomSheet.show<void>(
       context,
-      title: 'Выберите пресет',
+      title: 'extblocks_preset_pick'.tr(),
       items: [
         BottomSheetItem(
-          label: 'Не выбран',
+          label: 'extblocks_preset_none'.tr(),
           icon: activeId == null
               ? Icons.radio_button_checked
               : Icons.radio_button_off,
-          iconColor: activeId == null
-              ? context.cs.primary
-              : context.cs.onSurfaceVariant,
           onTap: () {
             Navigator.pop(context);
             ref.read(extensionsSettingsProvider.notifier).selectPreset(null);
@@ -136,9 +142,6 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
             icon: activeId == preset.id
                 ? Icons.radio_button_checked
                 : Icons.radio_button_off,
-            iconColor: activeId == preset.id
-                ? context.cs.primary
-                : context.cs.onSurfaceVariant,
             onTap: () {
               Navigator.pop(context);
               ref
@@ -150,179 +153,219 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
       ],
     );
   }
-}
 
-class _SelectorTile extends StatelessWidget {
-  const _SelectorTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.onTap,
-  });
+  Future<void> _importPreset(BuildContext context, WidgetRef ref) async {
+    final preset = await _transfer.importPreset();
+    if (!context.mounted) return;
+    if (preset == null) {
+      GlazeToast.show(context, 'extblocks_import_none'.tr());
+      return;
+    }
+    await ref.read(extensionPresetsProvider.notifier).add(preset);
+    await ref.read(extensionsSettingsProvider.notifier).selectPreset(preset.id);
+    if (!context.mounted) return;
+    GlazeToast.show(
+      context,
+      'extblocks_import_done'.tr(args: ['${preset.blocks.length}']),
+    );
+  }
 
-  final IconData icon;
-  final String label;
-  final String value;
-  final VoidCallback onTap;
+  Future<void> _exportPreset(
+    BuildContext context,
+    ExtensionPreset preset,
+  ) async {
+    try {
+      final path = await _transfer.exportPreset(preset);
+      if (!context.mounted || path.isEmpty) return;
+      GlazeToast.show(context, 'extblocks_export_done'.tr(args: [path]));
+    } catch (e) {
+      if (!context.mounted) return;
+      GlazeToast.show(context, 'extblocks_export_failed'.tr(args: ['$e']));
+    }
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: 0.06),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, size: 22, color: const Color(0xFF99A2AD)),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(fontSize: 15, color: context.cs.onSurface),
-                ),
-              ),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Icon(
-                Icons.chevron_right,
-                size: 20,
-                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-              ),
-            ],
-          ),
-        ),
-      ),
+  Future<void> _importBlocks(
+    BuildContext context,
+    WidgetRef ref,
+    ExtensionPreset preset,
+  ) async {
+    final result = await _transfer.importBlocks(
+      startOrder: preset.blocks.length,
+    );
+    if (!context.mounted || result.cancelled) return;
+
+    if (result.blocks.isNotEmpty) {
+      await ref
+          .read(extensionPresetsProvider.notifier)
+          .update(
+            preset.copyWith(blocks: [...preset.blocks, ...result.blocks]),
+          );
+    }
+    if (!context.mounted) return;
+
+    if (result.unreadable.isNotEmpty) {
+      GlazeToast.show(
+        context,
+        'extblocks_import_unreadable'.tr(args: [result.unreadable.join(', ')]),
+      );
+      return;
+    }
+    GlazeToast.show(
+      context,
+      result.isEmpty
+          ? 'extblocks_import_none'.tr()
+          : 'extblocks_import_done'.tr(args: ['${result.blocks.length}']),
     );
   }
 }
 
-class _ActionTile extends StatelessWidget {
-  const _ActionTile({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
+/// The active preset's blocks, read-only apart from the enable toggle.
+///
+/// Editing opens the preset editor rather than a second editor here, so there
+/// is one place where a block's settings live.
+class _BlocksGroup extends ConsumerWidget {
+  const _BlocksGroup({required this.preset, required this.onImport});
 
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: 0.06),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, size: 22, color: context.cs.primary),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(fontSize: 15, color: context.cs.onSurface),
-                ),
-              ),
-              Icon(
-                Icons.chevron_right,
-                size: 20,
-                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BlocksList extends ConsumerWidget {
-  const _BlocksList({required this.preset});
   final ExtensionPreset preset;
+  final VoidCallback onImport;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (preset.blocks.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-        child: Text(
-          'В пресете нет блоков. Нажмите «Редактировать пресет» чтобы добавить.',
-          style: TextStyle(
-            fontSize: 12,
-            color: context.cs.onSurfaceVariant.withValues(alpha: 0.6),
-          ),
-        ),
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 0, 4),
-          child: Text(
-            'Блоки (${preset.blocks.length})',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: context.cs.onSurfaceVariant,
+    final blocks = preset.blocks.toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
+
+    return MenuGroup(
+      header: '${'extblocks_blocks_section'.tr()} (${blocks.length})',
+      items: [
+        if (blocks.isEmpty)
+          _Hint(text: 'extblocks_blocks_empty'.tr())
+        else
+          for (final block in blocks)
+            MenuScriptItem(
+              name: block.name.isEmpty
+                  ? 'extblocks_block_unnamed'.tr()
+                  : block.name,
+              subtitle: _subtitle(block),
+              enabled: block.enabled,
+              onToggle: (value) => _toggle(ref, block, value),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/extensions/preset-editor/${preset.id}');
+              },
+              onMore: () => _showActions(context, ref, block),
             ),
-          ),
-        ),
-        ...preset.blocks.map(
-          (block) => Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Row(
-              children: [
-                Icon(
-                  block.enabled
-                      ? Icons.check_circle_outline
-                      : Icons.radio_button_unchecked,
-                  size: 16,
-                  color: block.enabled
-                      ? context.cs.primary
-                      : context.cs.onSurfaceVariant.withValues(alpha: 0.4),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    block.name.isEmpty ? 'Без имени' : block.name,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: context.cs.onSurface.withValues(
-                        alpha: block.enabled ? 0.9 : 0.5,
-                      ),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
+        MenuItem(
+          icon: Icons.file_download_outlined,
+          label: 'extblocks_blocks_import'.tr(),
+          onTap: onImport,
         ),
       ],
+    );
+  }
+
+  /// Adds a note to the type/trigger line when the runtime cannot run this
+  /// type yet, so an imported rewrite block does not look simply broken.
+  String _subtitle(BlockConfig block) {
+    final base = blockSubtitle(block);
+    if (block.type.isRunnable) return base;
+    return '$base • ${'extblocks_not_executed'.tr()}';
+  }
+
+  void _toggle(WidgetRef ref, BlockConfig block, bool enabled) {
+    ref
+        .read(extensionPresetsProvider.notifier)
+        .update(
+          preset.copyWith(
+            blocks: [
+              for (final b in preset.blocks)
+                if (b.id == block.id) b.copyWith(enabled: enabled) else b,
+            ],
+          ),
+        );
+  }
+
+  void _showActions(BuildContext context, WidgetRef ref, BlockConfig block) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: block.name.isEmpty ? 'extblocks_block_unnamed'.tr() : block.name,
+      items: [
+        BottomSheetItem(
+          label: 'extblocks_block_export'.tr(),
+          icon: Icons.file_upload_outlined,
+          onTap: () {
+            Navigator.pop(context);
+            _export(context, block);
+          },
+        ),
+        BottomSheetItem(
+          label: 'extblocks_block_duplicate'.tr(),
+          icon: Icons.copy_outlined,
+          onTap: () {
+            Navigator.pop(context);
+            _duplicate(ref, block);
+          },
+        ),
+        BottomSheetItem(
+          label: 'extblocks_block_delete'.tr(),
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onTap: () {
+            Navigator.pop(context);
+            _delete(ref, block);
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _export(BuildContext context, BlockConfig block) async {
+    try {
+      final path = await const BlockTransferService().exportBlock(block);
+      if (!context.mounted || path.isEmpty) return;
+      GlazeToast.show(context, 'extblocks_export_done'.tr(args: [path]));
+    } catch (e) {
+      if (!context.mounted) return;
+      GlazeToast.show(context, 'extblocks_export_failed'.tr(args: ['$e']));
+    }
+  }
+
+  void _duplicate(WidgetRef ref, BlockConfig block) {
+    final copy = block.copyWith(
+      id: generateId(),
+      name: '${block.name} (2)',
+      order: preset.blocks.length,
+    );
+    ref
+        .read(extensionPresetsProvider.notifier)
+        .update(preset.copyWith(blocks: [...preset.blocks, copy]));
+  }
+
+  void _delete(WidgetRef ref, BlockConfig block) {
+    ref
+        .read(extensionPresetsProvider.notifier)
+        .update(
+          preset.copyWith(
+            blocks: preset.blocks.where((b) => b.id != block.id).toList(),
+          ),
+        );
+  }
+}
+
+class _Hint extends StatelessWidget {
+  const _Hint({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 8, 32, 16),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
     );
   }
 }

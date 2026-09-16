@@ -137,7 +137,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
   Future<void> _openExtBlocks() => showModalBottomSheet<void>(
     context: context,
     useRootNavigator: true,
-    backgroundColor: context.cs.surfaceContainerHigh,
+    backgroundColor: Colors.transparent,
     isScrollControlled: true,
     builder: (_) => const ExtBlocksSettingsSheet(),
   );

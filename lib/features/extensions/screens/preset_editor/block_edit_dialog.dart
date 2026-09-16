@@ -3,15 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../../shared/widgets/menu_group.dart';
 import '../../../../shared/widgets/sheet_view.dart';
 import '../../models/block_config.dart';
+import '../../models/block_injection.dart';
+import '../../models/block_modes.dart';
+import '../../models/connection_profiles.dart';
 import '../../models/extension_context_policy.dart';
 import '../../widgets/extension_context_policy_editor.dart';
 import 'widgets/api_config_selector.dart';
-import 'widgets/block_trigger_picker.dart';
 import 'widgets/block_type_picker.dart';
 import 'widgets/model_field.dart';
 import 'widgets/section_label.dart';
+import 'sections/upstream_block_sections.dart';
 
 class BlockEditDialog extends ConsumerStatefulWidget {
   const BlockEditDialog({required this.block, required this.onSave, super.key});
@@ -37,7 +41,6 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late TextEditingController _contextMessageCountController;
   late TextEditingController _previousBlocksCountController;
   late BlockType _type;
-  late BlockTrigger _trigger;
   late bool _inject;
   late int _injectLastN;
   late bool _dependsOnPrevious;
@@ -48,6 +51,28 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late bool _manualOnly;
   late ExtensionContextPolicy _contextPolicy;
   bool _fetchingModels = false;
+
+  // Settings carried over from the original ExtBlocks extension.
+  late TextEditingController _periodController;
+  late TextEditingController _keywordController;
+  late TextEditingController _injectionDepthController;
+  late TextEditingController _updaterNameController;
+  late bool _triggerOnUser;
+  late bool _triggerOnChar;
+  late bool _triggerOnSwipe;
+  late bool _generationPause;
+  late bool _keywordIsRegex;
+  late bool _hideDisplay;
+  late bool _background;
+  late bool _applyRegex;
+  late InjectionRole _injectionRole;
+  late InjectionPosition _injectionPosition;
+  late BlockRunOrder _generationOrder;
+  late BlockRunOrder _executionOrder;
+  late RewriteMode _rewriteMode;
+  late ScriptType _scriptType;
+  late ConnectionProfile _apiPreset;
+  late bool _periodicTimer;
 
   @override
   void initState() {
@@ -80,7 +105,6 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       text: b.previousBlocksCount.toString(),
     );
     _type = b.type;
-    _trigger = b.trigger;
     _inject = b.inject;
     _injectLastN = b.injectLastN;
     _dependsOnPrevious = b.dependsOnPrevious;
@@ -91,6 +115,36 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _contextPolicy = b.contextPolicy;
     _useStaticHtml =
         b.type == BlockType.interactive && b.script.trim().isNotEmpty;
+
+    _periodController = TextEditingController(text: b.period.toString());
+    _keywordController = TextEditingController(text: b.keyword);
+    _injectionDepthController = TextEditingController(
+      text: b.injectionDepth.toString(),
+    );
+    _updaterNameController = TextEditingController(text: b.updaterName);
+    _triggerOnUser = b.triggerOnUser;
+    _triggerOnChar = b.triggerOnChar;
+    _triggerOnSwipe = b.triggerOnSwipe;
+    _generationPause = b.generationPause;
+    _keywordIsRegex = b.keywordIsRegex;
+    _hideDisplay = b.hideDisplay;
+    _background = b.background;
+    _applyRegex = b.applyRegex;
+    _injectionRole = b.injectionRole;
+    _injectionPosition = b.injectionPosition;
+    _generationOrder = b.generationOrder;
+    _executionOrder = b.executionOrder;
+    _rewriteMode = b.rewriteMode;
+    _scriptType = b.scriptType;
+    _apiPreset = b.apiPreset;
+    _periodicTimer = b.trigger == BlockTrigger.periodic;
+    // Blocks saved before the two-sided triggers existed only carry the single
+    // enum. Our own derivation never produces afterUser for anything but a
+    // user-only block, so reading it back is unambiguous.
+    if (b.trigger == BlockTrigger.afterUser && !b.triggerOnUser) {
+      _triggerOnUser = true;
+      _triggerOnChar = false;
+    }
   }
 
   void _save() {
@@ -108,7 +162,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     return widget.block.copyWith(
       name: _nameController.text.trim(),
       type: _type,
-      trigger: _trigger,
+      trigger: _resolvedTrigger,
       template: isInfoblock ? _templateController.text : '',
       prompt: usesLlm ? _promptController.text : '',
       inject: isInfoblock ? _inject : false,
@@ -128,6 +182,28 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       script: isInteractive
           ? (_useStaticHtml ? _staticHtmlController.text : '')
           : (isJs ? widget.block.script : ''),
+      triggerOnUser: _triggerOnUser,
+      triggerOnChar: _triggerOnChar,
+      triggerOnSwipe: _triggerOnSwipe,
+      generationPause: _generationPause,
+      // Never zero: the interval check divides by it.
+      period: int.tryParse(_periodController.text.trim()) ?? widget.block.period,
+      keyword: _keywordController.text,
+      keywordIsRegex: _keywordIsRegex,
+      hideDisplay: _hideDisplay,
+      background: _background,
+      applyRegex: _applyRegex,
+      injectionRole: _injectionRole,
+      injectionPosition: _injectionPosition,
+      injectionDepth:
+          int.tryParse(_injectionDepthController.text.trim()) ??
+          widget.block.injectionDepth,
+      generationOrder: _generationOrder,
+      executionOrder: _executionOrder,
+      rewriteMode: _rewriteMode,
+      scriptType: _scriptType,
+      apiPreset: _apiPreset,
+      updaterName: _updaterNameController.text.trim(),
     );
   }
 
@@ -200,6 +276,10 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _injectLastNController.dispose();
     _contextMessageCountController.dispose();
     _previousBlocksCountController.dispose();
+    _periodController.dispose();
+    _keywordController.dispose();
+    _injectionDepthController.dispose();
+    _updaterNameController.dispose();
     super.dispose();
   }
 
@@ -208,7 +288,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     return SheetView(
       title: 'block_edit_title'.tr(),
       showHandle: true,
-      bodyPadding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      bodyPadding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
       actions: [
         SheetViewAction(
           icon: const Icon(Icons.check, size: 22),
@@ -221,27 +301,92 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
         child: ListView(
           children: [
             const SizedBox(height: 8),
-            TextField(
-              controller: _nameController,
-              decoration: InputDecoration(
-                labelText: 'block_edit_name_label'.tr(),
+            MenuGroup(
+              header: 'block_sec_basics'.tr(),
+              items: [
+                MenuFieldItem(
+                  label: 'block_edit_name_label'.tr(),
+                  controller: _nameController,
+                ),
+                BlockTypePicker(selected: _type, onChanged: _onTypeChanged),
+                if (_type == BlockType.accumulation)
+                  MenuFieldItem(
+                    label: 'block_updater_name'.tr(),
+                    description: 'block_updater_name_desc'.tr(),
+                    controller: _updaterNameController,
+                  ),
+                MenuSwitchItem(
+                  label: 'block_manual_only_title'.tr(),
+                  description: 'block_manual_only_sub'.tr(),
+                  value: _manualOnly,
+                  onChanged: (v) => setState(() => _manualOnly = v),
+                ),
+                if (_type == BlockType.jsRunner)
+                  MenuSwitchItem(
+                    label: 'block_trig_periodic'.tr(),
+                    value: _periodicTimer,
+                    onChanged: (v) => setState(() => _periodicTimer = v),
+                  ),
+              ],
+            ),
+            BlockTriggersGroup(
+              type: _type,
+              onUser: _triggerOnUser,
+              onChar: _triggerOnChar,
+              onSwipe: _triggerOnSwipe,
+              generationPause: _generationPause,
+              periodController: _periodController,
+              keywordController: _keywordController,
+              keywordIsRegex: _keywordIsRegex,
+              onUserChanged: (v) => setState(() => _triggerOnUser = v),
+              onCharChanged: (v) => setState(() => _triggerOnChar = v),
+              onSwipeChanged: (v) => setState(() => _triggerOnSwipe = v),
+              onGenerationPauseChanged: (v) =>
+                  setState(() => _generationPause = v),
+              onKeywordIsRegexChanged: (v) =>
+                  setState(() => _keywordIsRegex = v),
+            ),
+            BlockStateGroup(
+              hideDisplay: _hideDisplay,
+              background: _background,
+              applyRegex: _applyRegex,
+              onHideDisplayChanged: (v) => setState(() => _hideDisplay = v),
+              onBackgroundChanged: (v) => setState(() => _background = v),
+              onApplyRegexChanged: (v) => setState(() => _applyRegex = v),
+            ),
+            // A rewrite block replaces the reply instead of being injected
+            // alongside it, so placement settings would mean nothing for it.
+            if (_type != BlockType.rewrite)
+              BlockInjectionGroup(
+                role: _injectionRole,
+                position: _injectionPosition,
+                depthController: _injectionDepthController,
+                onRoleChanged: (v) => setState(() => _injectionRole = v),
+                onPositionChanged: (v) =>
+                    setState(() => _injectionPosition = v),
               ),
+            BlockOrderGroup(
+              type: _type,
+              generationOrder: _generationOrder,
+              executionOrder: _executionOrder,
+              rewriteMode: _rewriteMode,
+              scriptType: _scriptType,
+              apiPreset: _apiPreset,
+              onGenerationOrderChanged: (v) =>
+                  setState(() => _generationOrder = v),
+              onExecutionOrderChanged: (v) =>
+                  setState(() => _executionOrder = v),
+              onRewriteModeChanged: (v) => setState(() => _rewriteMode = v),
+              onScriptTypeChanged: (v) => setState(() => _scriptType = v),
+              onApiPresetChanged: (v) => setState(() => _apiPreset = v),
             ),
-            const SizedBox(height: 16),
-            BlockTypePicker(selected: _type, onChanged: _onTypeChanged),
-            const SizedBox(height: 16),
-            BlockTriggerPicker(
-              selected: _trigger,
-              onChanged: (v) => setState(() => _trigger = v),
-            ),
-            const SizedBox(height: 4),
-            SwitchListTile(
-              title: Text('block_manual_only_title'.tr()),
-              subtitle: Text('block_manual_only_sub'.tr()),
-              value: _manualOnly,
-              onChanged: (v) => setState(() => _manualOnly = v),
-              contentPadding: EdgeInsets.zero,
-            ),
+            // Not yet rebuilt on the UI kit; keeps the gutter the body used
+            // to supply for everyone.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
             if (_type == BlockType.infoblock ||
                 _type == BlockType.imageGen ||
                 _type == BlockType.jsRunner) ...[
@@ -274,7 +419,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
             ],
             if (_usesLlm) ...[
               const SizedBox(height: 16),
-              SectionLabel('Контекст блока'),
+              SectionLabel('block_sec_context'.tr()),
               ExtensionContextPolicyEditor(
                 policy: _contextPolicy,
                 onChanged: (policy) => setState(() => _contextPolicy = policy),
@@ -344,10 +489,24 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
             ],
             const SizedBox(height: 16),
             FilledButton(onPressed: _save, child: Text('btn_save'.tr())),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  /// The single-valued trigger our pipeline selects on, derived from the
+  /// switches the editor actually shows.
+  BlockTrigger get _resolvedTrigger {
+    if (_periodicTimer && _type == BlockType.jsRunner) {
+      return BlockTrigger.periodic;
+    }
+    return _triggerOnUser && !_triggerOnChar
+        ? BlockTrigger.afterUser
+        : BlockTrigger.afterAssistant;
   }
 
   bool get _usesStandardLlmFields =>

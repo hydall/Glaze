@@ -109,7 +109,7 @@ void main() {
     expect(find.text('block_edit_title'), findsOneWidget);
     expect(find.text('block_edit_name_label'), findsOneWidget);
     expect(find.text('block_type_infoblock'), findsOneWidget);
-    expect(find.text('Контекст блока'), findsOneWidget);
+    expect(find.text('block_sec_context'), findsOneWidget);
     expect(
       find.text('Передавать тот же контекст, что и в основную модель'),
       findsOneWidget,
@@ -119,7 +119,10 @@ void main() {
     await tester.tap(
       find.text('Передавать тот же контекст, что и в основную модель'),
     );
-    await tester.tap(find.widgetWithText(FilledButton, 'btn_save'));
+    final saveButton = find.widgetWithText(FilledButton, 'btn_save');
+    await tester.ensureVisible(saveButton);
+    await tester.pumpAndSettle();
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
 
     expect(savedBlock!.contextPolicy.useMainModelContext, isTrue);
@@ -163,7 +166,10 @@ void main() {
 
     expect(tester.widget<TextField>(contextField).controller!.text, '17');
 
-    await tester.tap(find.widgetWithText(FilledButton, 'btn_save').last);
+    final saveButton = find.widgetWithText(FilledButton, 'btn_save').last;
+    await tester.ensureVisible(saveButton);
+    await tester.pump();
+    await tester.tap(saveButton);
     await tester.pump();
     expect(savedBlock?.contextMessageCount, 17);
   });

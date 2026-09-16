@@ -49,6 +49,15 @@ void main() {
 
   group('Test 20 — Fullscreen warning when enabling inject', () {
     testWidgets('shows fullscreen warning when enabling inject', (tester) async {
+      // The editor now carries the original extension's full settings, so the
+      // form is far taller than a default test viewport. Giving it room keeps
+      // every row built and clear of the sheet's header strip, which a
+      // scrolled-to row can end up hiding under.
+      tester.view.physicalSize = const Size(800, 5000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
       final container = await setupContainer();
 
       final block = const BlockConfig(
@@ -66,7 +75,7 @@ void main() {
           ),
         ),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       final injectSwitchFinder = find.ancestor(
         of: find.text('block_inject_title'),
@@ -74,11 +83,6 @@ void main() {
       );
       expect(injectSwitchFinder, findsOneWidget);
 
-      await tester.scrollUntilVisible(
-        injectSwitchFinder,
-        100,
-        scrollable: find.byType(Scrollable).first,
-      );
       await tester.tap(injectSwitchFinder);
       await tester.pumpAndSettle();
 

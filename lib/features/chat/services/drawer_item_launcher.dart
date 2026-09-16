@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/services/chat_import_export.dart';
-import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../card_rewrite/card_rewriter_studio_sheet.dart';
@@ -133,7 +132,7 @@ class DrawerItemLauncher {
         await showModalBottomSheet<void>(
           context: context,
           useRootNavigator: true,
-          backgroundColor: context.cs.surfaceContainerHigh,
+          backgroundColor: Colors.transparent,
           isScrollControlled: true,
           builder: (_) => const ExtBlocksSettingsSheet(),
         );
