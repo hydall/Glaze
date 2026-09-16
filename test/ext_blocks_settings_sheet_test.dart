@@ -133,19 +133,19 @@ void main() {
 
     expect(find.byType(PresetPill), findsOneWidget);
     expect(find.text('Active preset'), findsOneWidget);
-    // Permissions ride at the other end of the pill's own row.
+    // Permissions ride at the right end of the pill's own row, labelled.
     final pill = tester.getRect(find.byType(PresetPill));
-    final shield = tester.getRect(find.byType(GlazeIconChip));
+    final shield = tester.getRect(find.byType(GlazeActionChip));
+    expect(find.text('extblocks_permissions'), findsOneWidget);
     expect(shield.center.dy, closeTo(pill.center.dy, 1));
     expect(shield.left, greaterThan(pill.right));
     // Hard against the same right edge as the cards under it.
-    final card = tester.getRect(find.text('extblocks_api_section'));
-    expect(shield.right, greaterThan(card.right));
+    final api = tester.getRect(find.text('extblocks_api_section'));
+    expect(shield.right, greaterThan(api.right));
     // Then the API card, then the blocks.
-    final api = tester.getTopLeft(find.text('extblocks_api_section')).dy;
     final blocks = tester.getTopLeft(find.textContaining('(1)')).dy;
-    expect(pill.top, lessThan(api));
-    expect(api, lessThan(blocks));
+    expect(pill.top, lessThan(api.top));
+    expect(api.top, lessThan(blocks));
     // The three connection profiles are the API card's rows.
     expect(find.text('extblocks_profile_big'), findsOneWidget);
     expect(find.text('extblocks_profile_medium'), findsOneWidget);

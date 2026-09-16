@@ -88,9 +88,9 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                 child: Row(
-                  // spaceBetween rather than a Spacer: the pill keeps its own
-                  // width (a Flexible next to a Spacer would split the free
-                  // space between them and leave the shield short of the edge).
+                  // spaceBetween rather than a Spacer: a Flexible next to a
+                  // Spacer would split the free space with the pill and leave
+                  // the chip short of the cards' right edge.
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Flexible(
@@ -100,15 +100,20 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
                         onTap: () => _showPresetSwitcher(context, ref),
                       ),
                     ),
-                    if (activePreset != null)
-                      GlazeIconChip(
-                        icon: Icons.verified_user_outlined,
-                        tooltip: 'extblocks_permissions'.tr(),
-                        onTap: () => ExtBlocksPermissionsSheet.show(
-                          context,
-                          activePreset.id,
+                    if (activePreset != null) ...[
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: GlazeActionChip(
+                          icon: Icons.verified_user_outlined,
+                          label: 'extblocks_permissions'.tr(),
+                          tooltip: 'extblocks_permissions'.tr(),
+                          onTap: () => ExtBlocksPermissionsSheet.show(
+                            context,
+                            activePreset.id,
+                          ),
                         ),
                       ),
+                    ],
                   ],
                 ),
               ),
