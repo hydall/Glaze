@@ -1467,40 +1467,22 @@ export class Bridge {
   }
 
   /* ---------- Inline edit (toggle into .msg-body) ---------- */
+  /* Entering edit mode does not move the chat. The controller restores the
+   * scroll position it took before swapping the body for the textarea, and
+   * nothing else here touches it: a message tapped for editing is a message the
+   * reader is already looking at, and the jump this used to make — a smooth
+   * scroll putting the message's top under the header — took the rest of the
+   * chat with it and dragged the header and the context card through their own
+   * scroll reactions on the way.
+   *
+   * The caret is still kept in view, but by the browser rather than by us: it
+   * reveals the caret on focus and as the text grows, and `scroll-padding`
+   * on the container is what keeps that reveal clear of the chrome (see
+   * _applyBottomPadding). That only ever scrolls as far as the caret needs. */
   startEdit(messageId) {
     this._editController.startEdit(messageId, (pos) => {
       if (pos !== undefined) this.virtualList.container.scrollTop = pos;
       return this.virtualList.container.scrollTop;
-    });
-    // After the textarea/footer have been swapped in (and the prior scroll
-    // position restored by the controller), smoothly bring the top of the
-    // edited message into view so the user starts editing from its beginning.
-    this._scrollMessageToTop(messageId);
-  }
-
-  // Smoothly scroll so the top of [messageId] lands just below the translucent
-  // header. The container carries a dynamic `padding-top` (header inset, see
-  // setTopPadding), so we subtract it to avoid the message hiding behind it.
-  _scrollMessageToTop(messageId) {
-    const container = this.virtualList?.container;
-    if (!container) return;
-    requestAnimationFrame(() => {
-      const section = document.querySelector(`[data-message-id="${messageId}"]`);
-      if (!section || !container.isConnected) return;
-      const cRect = container.getBoundingClientRect();
-      const sRect = section.getBoundingClientRect();
-      const padTop = parseFloat(getComputedStyle(container).paddingTop) || 0;
-      const target = container.scrollTop + (sRect.top - cRect.top) - padTop - 8;
-      this.virtualList.isProgrammaticScrolling = true;
-      container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
-      setTimeout(() => {
-        this.virtualList.isProgrammaticScrolling = false;
-        // Re-sync the render window to the resting scroll position (scroll
-        // events fired during the animation were gated out above).
-        if (typeof this.virtualList.updateWindow === 'function') {
-          this.virtualList.updateWindow();
-        }
-      }, 500);
     });
   }
 

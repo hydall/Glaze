@@ -36,8 +36,7 @@ async function openEditedChat(page) {
   }, COMPOSER);
   await page.waitForTimeout(400);
   await page.evaluate(() => window.bridge.startEdit('m3'));
-  // startEdit finishes with a smooth scroll that runs for about half a second.
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(300);
 }
 
 /** Where the caret's line sits, and where the chrome starts.
@@ -102,4 +101,53 @@ test('the container carries scroll padding for both edges', async ({ page }) => 
   // edge. The header's is pushed separately from the input bar's.
   expect(pads.top).toBeGreaterThan(72);
   expect(pads.bottom).toBeGreaterThan(pads.paddingBottom);
+});
+
+// Tapping edit is not a request to go anywhere: the message is already on
+// screen. Moving the chat under the reader took the header and the context
+// card with it, through the scroll reactions each of them runs.
+test('entering edit mode leaves the chat where it was', async ({ page }) => {
+  await page.goto('/assets/chat_webview/index.html');
+  await page.waitForFunction(() => !!window.bridge);
+  await page.evaluate((composer) => {
+    const long = Array.from({ length: 40 }, (_, i) => `line ${i} of the reply`).join('\n');
+    const msgs = [];
+    for (let i = 0; i < 8; i++) {
+      msgs.push({
+        id: `m${i}`, role: 'assistant', text: i === 3 ? long : `short ${i}`,
+        timestamp: 1767225600000, isUser: false, isAssistant: true,
+        isSystem: false, isError: false, isHidden: false, isTyping: false,
+        isGenerating: false, isPostGenRunning: false,
+      });
+    }
+    window.bridge.setMessages(JSON.stringify(msgs));
+    window.bridge.setBottomPadding(composer, 0);
+  }, COMPOSER);
+  await page.waitForTimeout(400);
+
+  const scrollTop = () =>
+    page.evaluate(() => Math.round(document.getElementById('chat-container').scrollTop));
+
+  // Park the message low in the viewport — tapping edit on something you can
+  // see near the input bar is the case the old jump was worst for.
+  await page.evaluate(() => {
+    const c = document.getElementById('chat-container');
+    const sec = document.querySelector('[data-message-id="m3"]');
+    c.scrollTop +=
+      sec.getBoundingClientRect().top - c.getBoundingClientRect().bottom + 160;
+  });
+  await page.waitForTimeout(300);
+
+  const before = await scrollTop();
+  await page.evaluate(() => window.bridge.startEdit('m3'));
+  // Long enough to have covered the smooth scroll this used to run.
+  await page.waitForTimeout(900);
+  const moved = Math.abs((await scrollTop()) - before);
+
+  // Not zero: focusing the textarea makes the browser reveal the caret, and
+  // with the container's scroll-padding that reveal nudges the chat far enough
+  // to clear the composer. That is a caret's worth of movement. What is gone is
+  // the jump that put the message's top under the header, which on this fixture
+  // carried the chat hundreds of pixels.
+  expect(moved).toBeLessThan(60);
 });
