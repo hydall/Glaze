@@ -93,6 +93,73 @@ test('streaming updates reuse the message shadow host', async ({ page }) => {
   expect(shape.text).toContain('first and second');
 });
 
+// A regenerate / continue / post-clean run turns a bubble that is already on
+// screen into the typing bubble. It must show the pencil and the phase label
+// the run pushes, not an empty bubble: the phase label is the only thing on
+// screen between "send" and the first token.
+test('a rendered bubble turned typing shows the phase label', async ({ page }) => {
+  await page.goto('/assets/chat_webview/index.html');
+  await page.waitForFunction(() => !!window.bridge);
+  await page.evaluate(() => {
+    window.__regenMessage = (text, isTyping) => JSON.stringify({
+      id: 'r1',
+      role: 'assistant',
+      text,
+      timestamp: 1767225600000,
+      isUser: false,
+      isAssistant: true,
+      isSystem: false,
+      isError: false,
+      isHidden: false,
+      isTyping,
+      isGenerating: isTyping,
+      isPostGenRunning: false,
+    });
+    window.bridge.setMessages(JSON.stringify([]));
+    window.bridge.appendMessage(window.__regenMessage('the reply being replaced', false));
+  });
+  await page.waitForTimeout(50);
+
+  await page.evaluate(() => {
+    window.bridge.setGenerationPhase('Building prompt...');
+    window.bridge.updateMessage(window.__regenMessage('', true));
+  });
+  await page.waitForTimeout(50);
+
+  const typing = await page.evaluate(() => {
+    const section = document.querySelector('[data-message-id="r1"]');
+    return {
+      hasContainer: !!section.querySelector('.typing-container'),
+      label: section.querySelector('.typing-text')?.textContent ?? null,
+    };
+  });
+  expect(typing.hasContainer, 'the typing bubble lost its pencil').toBe(true);
+  expect(typing.label).toBe('Building prompt...');
+
+  // A later phase reaches the same bubble, and the first token replaces the
+  // whole indicator with the reply.
+  await page.evaluate(() => window.bridge.setGenerationPhase('Waiting for the model...'));
+  await page.waitForTimeout(200);
+  expect(
+    await page.evaluate(
+      () => document.querySelector('[data-message-id="r1"] .typing-text')?.textContent,
+    ),
+  ).toBe('Waiting for the model...');
+
+  await page.evaluate(() => window.bridge.updateMessage(window.__regenMessage('a fresh', true)));
+  await page.waitForTimeout(50);
+  const streaming = await page.evaluate(() => {
+    const section = document.querySelector('[data-message-id="r1"]');
+    const host = section.querySelector('.msg-body > .message-content');
+    return {
+      hasContainer: !!section.querySelector('.typing-container'),
+      text: host?.shadowRoot?.querySelector('.glaze-message')?.textContent,
+    };
+  });
+  expect(streaming.hasContainer).toBe(false);
+  expect(streaming.text).toContain('a fresh');
+});
+
 test('transient streaming prefixes do not fill the formatter cache', async ({ page }) => {
   await render(page, 'first prefix', { isTyping: true });
   expect(await page.evaluate(() => window.harness.formatter.cache.size)).toBe(0);

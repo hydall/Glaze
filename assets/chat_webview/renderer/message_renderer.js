@@ -778,7 +778,15 @@ if (messageData.isEditing) classes.push('editing');
 
     const isError = sectionEl.classList.contains('error');
 
-    if (!isError && !animate) {
+    // A typing bubble with nothing in it yet is not a content bubble: it is the
+    // pencil and the phase label the run pushes through setGenerationPhase().
+    // Reusing the existing content host for it writes an empty shadow root and
+    // leaves the bubble blank, which is what swallowed the phase label on
+    // regenerate / continue / post-clean runs — those start from a bubble that
+    // already has a host, so they never reached the rebuild below.
+    const isTypingPlaceholder = isTyping && (!text || !text.trim());
+
+    if (!isError && !animate && !isTypingPlaceholder) {
       // Only reuse the bubble's OWN content host (a direct child of the body).
       // A ':scope >' guard is essential: the error window nests its own
       // `.message-content` (body > .error-window > … > .message-content), so a
