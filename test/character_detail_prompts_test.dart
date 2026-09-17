@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/features/character_list/character_detail_screen.dart';
@@ -90,6 +91,54 @@ void main() {
       expect(offset(cycle), 0);
       expect(offset(cycle + 2000), 20);
       expect(offset(cycle * 3 + 3500), 40);
+    });
+  });
+
+  group('measureHeroName', () {
+    const name = 'My College Scholarship Depends on Managing These Assets';
+    const style = TextStyle(fontSize: 22, fontWeight: FontWeight.w700);
+
+    ({double viewport, double overflow}) measure({
+      required double maxWidth,
+      required TextScaler scale,
+      TextStyle textStyle = style,
+    }) => measureHeroName(
+      name: name,
+      style: textStyle,
+      maxWidth: maxWidth,
+      textDirection: TextDirection.ltr,
+      textScaler: scale,
+    );
+
+    test('a name that fits within the capped lines does not overflow', () {
+      final layout = measure(maxWidth: 4000, scale: TextScaler.noScaling);
+      expect(layout.overflow, lessThanOrEqualTo(0.5));
+    });
+
+    test('a scaled-up name is measured at the scaled height', () {
+      // Regression: the painter previously ran without the ambient textScaler,
+      // so the clip viewport used the unscaled line height and sliced the
+      // second line once the system font was enlarged.
+      final unscaled = measure(maxWidth: 360, scale: TextScaler.noScaling);
+      final scaled = measure(maxWidth: 360, scale: const TextScaler.linear(2));
+
+      expect(scaled.viewport, greaterThan(unscaled.viewport));
+      expect(scaled.overflow, greaterThan(unscaled.overflow));
+    });
+
+    test('an inherited line height is part of the measurement', () {
+      final plain = measure(maxWidth: 360, scale: TextScaler.noScaling);
+      final tall = measure(
+        maxWidth: 360,
+        scale: TextScaler.noScaling,
+        textStyle: const TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          height: 2,
+        ),
+      );
+
+      expect(tall.viewport, greaterThan(plain.viewport));
     });
   });
 }

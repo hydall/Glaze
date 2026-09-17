@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -1231,6 +1232,34 @@ const _kHeroNameHold = Duration(milliseconds: 1600);
 /// Scroll speed, in logical pixels per second. Slow enough to read.
 const _kHeroNameSpeed = 26.0;
 
+/// Measures a hero name capped to [maxLines] and reports the height of that
+/// cap ([viewport]) plus how much taller the name is than the cap ([overflow]).
+///
+/// The measurement has to use the *rendered* style and text scale. A bare
+/// [TextPainter] ignores both the ambient [DefaultTextStyle] (which [Text]
+/// merges in, including any `height`) and the accessibility text scale [Text]
+/// applies — so at a larger system font the painter thinks a name needs two
+/// lines while it is really laid out taller, and the fixed clip cuts through
+/// the second line.
+({double viewport, double overflow}) measureHeroName({
+  required String name,
+  required TextStyle style,
+  required double maxWidth,
+  required ui.TextDirection textDirection,
+  required TextScaler textScaler,
+  int maxLines = _kHeroNameMaxLines,
+}) {
+  final painter = TextPainter(
+    text: TextSpan(text: name, style: style),
+    textDirection: textDirection,
+    textScaler: textScaler,
+  )..layout(maxWidth: maxWidth);
+  final viewport = painter.preferredLineHeight * maxLines;
+  final overflow = painter.height - viewport;
+  painter.dispose();
+  return (viewport: viewport, overflow: overflow);
+}
+
 /// Where the name sits in its loop after [elapsedMs]: held at the top for
 /// [holdMs], scrolled down over [scrollMs], held at the bottom for another
 /// [holdMs], then back to the top. Returns the distance scrolled, from 0 to
@@ -1293,31 +1322,34 @@ class _HeroNameState extends State<_HeroName>
     // unreadable for almost everyone, and this ticker only runs while a sheet
     // whose name actually overflows is on screen.
     final animate = !MediaQuery.disableAnimationsOf(context);
+    // Match what [Text] actually renders: the ambient style merged with the
+    // hero style, at the ambient text scale.
+    final style = DefaultTextStyle.of(context).style.merge(_kHeroNameStyle);
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final painter = TextPainter(
-          text: TextSpan(text: widget.name, style: _kHeroNameStyle),
+        final layout = measureHeroName(
+          name: widget.name,
+          style: style,
+          maxWidth: constraints.maxWidth,
           textDirection: Directionality.of(context),
-        )..layout(maxWidth: constraints.maxWidth);
-        final viewport = painter.preferredLineHeight * _kHeroNameMaxLines;
-        final overflow = painter.height - viewport;
-        painter.dispose();
+          textScaler: MediaQuery.textScalerOf(context),
+        );
 
-        final text = Text(widget.name, style: _kHeroNameStyle);
-        if (overflow <= 0.5) {
+        final text = Text(widget.name, style: style);
+        if (layout.overflow <= 0.5) {
           _setTicking(false);
           return text;
         }
 
-        final clipped = SizedBox(height: viewport, child: text);
+        final clipped = SizedBox(height: layout.viewport, child: text);
         if (!animate) {
           _setTicking(false);
           return ClipRect(child: clipped);
         }
 
         _setTicking(true);
-        final scrollMs = overflow / _kHeroNameSpeed * 1000.0;
+        final scrollMs = layout.overflow / _kHeroNameSpeed * 1000.0;
         final holdMs = _kHeroNameHold.inMilliseconds.toDouble();
 
         return ClipRect(
@@ -1329,7 +1361,7 @@ class _HeroNameState extends State<_HeroName>
                 0,
                 -heroNameScrollOffset(
                   elapsedMs: elapsed,
-                  overflow: overflow,
+                  overflow: layout.overflow,
                   holdMs: holdMs,
                   scrollMs: scrollMs,
                 ),
