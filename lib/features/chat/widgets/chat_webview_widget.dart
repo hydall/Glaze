@@ -1407,6 +1407,21 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     return b.setBottomPadding(px, viewportHeight: viewportHeight);
   }
 
+  /// Pushes the mirrored glass rects at the page directly, bypassing the
+  /// widget property and the rebuild it would take to carry them down.
+  ///
+  /// The chrome moves every frame of a keyboard, drawer or composer-growth
+  /// animation, and the strips have to move with it or they sit where the
+  /// chrome was until it settles. That is affordable frame by frame only
+  /// without a rebuild, which is what this is for. The property path stays as
+  /// the level-triggered one: it re-asserts the same rects when the page is
+  /// (re)initialized or the session switches.
+  Future<void> applyBlurRegions(List<ChatOverlayBlurRegion> regions) {
+    final b = _bridge;
+    if (b == null || !_ready) return Future.value();
+    return b.setOverlayBlurRegions(regions);
+  }
+
   Future<void> scrollToMessage(String id, {bool highlight = false}) {
     final b = _bridge;
     if (b == null) return Future.value();

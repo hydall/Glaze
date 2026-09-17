@@ -783,6 +783,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// widget would register a dependency outside the build phase.
   bool _blurFlushHeader = false;
 
+  /// Whether the page should be holding strips at all, captured in build for
+  /// the same reason: the post-frame pass must not read providers. Mirrors the
+  /// gate the WebView's `blurRegions` property applies.
+  bool _blurMirrorEnabled = false;
+
   /// Keyboard-inset settle tracking for the WebView-bound bottom inset.
   /// While the keyboard animates, the WebView receives the predicted end
   /// value once (per-frame `setBottomPadding` pushes relayout the whole
@@ -1246,13 +1251,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
 
   void _measureBlurRegions() {
     if (!mounted || widget.blurIsFlutterSide) return;
-    // Transient layout: while the keyboard or drawer animates, the overlays
-    // move every frame — re-measuring would push per-frame region updates
-    // over the JS bridge and repaint the Flutter blur sandwich each frame.
-    // A build is guaranteed at settle (the keyboard settle-timer setState,
-    // the drawer animation's final tick with isAnimating == false), and it
-    // re-schedules this measure, so the final rects always land.
-    if (!_keyboardSettled || widget.drawerCtrl.isDrawerAnimating) return;
     final box = _webViewStateKey.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.attached || !box.hasSize) return;
     final origin = box.localToGlobal(Offset.zero);
@@ -1287,9 +1285,25 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       ..._blurRegistry.measure(box),
     ];
     regions.sort((a, b) => a.id.compareTo(b.id));
-    if (!listEquals(regions, _blurRegions)) {
-      setState(() => _blurRegions = regions);
-    }
+    if (listEquals(regions, _blurRegions)) return;
+    _blurRegions = regions;
+    // Deliberately not setState: the overlays move every frame of a keyboard,
+    // drawer or composer-growth animation, and rebuilding this subtree to
+    // carry the rects down as a widget property was what made a per-frame
+    // update too expensive to do — which is why the pass used to hold still
+    // until the layout settled, leaving the strips parked where the chrome had
+    // been for the whole animation. Pushed straight at the page instead, the
+    // frame costs one small bridge call and no rebuild, so the strips can
+    // follow. The property below still carries the same list for the paths
+    // that re-assert state (first paint after the page is ready, session
+    // switch); the page no-ops on geometry it already has.
+    unawaited(_pushBlurRegions());
+  }
+
+  /// Hands the measured rects to the page without going through a rebuild.
+  Future<void> _pushBlurRegions() async {
+    if (!_blurMirrorEnabled) return;
+    await _webViewStateKey.currentState?.applyBlurRegions(_blurRegions);
   }
 
   @override
@@ -1433,6 +1447,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     final messageListTop = MediaQuery.paddingOf(context).top + 10 + 56;
     _blurSafeTop = MediaQuery.paddingOf(context).top;
     _blurFlushHeader = isDesktopLayout(context);
+    _blurMirrorEnabled =
+        !widget.blurIsFlutterSide && !batterySaver && preset.elementBlur > 0;
 
     final bgBlur = preset.bgBlur > 0 ? preset.bgBlur : 0.0;
     final fontStyle = batteryAware(
@@ -1649,12 +1665,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         bottomInset: webViewBottomInset,
                         viewportHeight: _webViewBoxHeight,
                         topInset: effectiveTopInset,
-                        blurRegions:
-                            (widget.blurIsFlutterSide ||
-                                batterySaver ||
-                                preset.elementBlur <= 0)
-                            ? const <ChatOverlayBlurRegion>[]
-                            : _blurRegions,
+                        blurRegions: _blurMirrorEnabled
+                            ? _blurRegions
+                            : const <ChatOverlayBlurRegion>[],
                         charName: character?.name,
                         charColor: character?.color,
                         personaName: effectivePersona?.name,

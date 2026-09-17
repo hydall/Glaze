@@ -3,39 +3,44 @@ import 'package:flutter/foundation.dart';
 /// Where the glass blur of the chat chrome (header pill, input pill, the
 /// circle buttons beside it) is actually produced.
 ///
-/// A Flutter `BackdropFilter` blurs what is already drawn into the Flutter
-/// frame. Whether the chat `InAppWebView` is part of that frame depends on how
-/// each platform embeds it, and that is the whole decision here:
+/// The default everywhere is the mirrored path: the chrome drops its own blur
+/// pass and the blur is reproduced by `backdrop-filter` strips *inside* the
+/// WebView, positioned from rects Flutter measures and pushes over the bridge
+/// (see [ChatOverlayBlurRegion] and `setOverlayBlurRegions`).
 ///
-///  * **Windows** — `flutter_inappwebview_windows` never puts a WebView2 child
-///    window over the Flutter surface. It drives WebView2 off-screen, captures
-///    its frames and hands them to the engine as an external texture that the
-///    plugin draws with a `Texture` widget. The web content is therefore an
-///    ordinary layer of the Flutter frame and a `BackdropFilter` above it
-///    samples it like any other pixels.
-///  * **iOS** — the embedder implements backdrop blur for platform views: when
-///    a `BackdropFilter` overlaps a `UiKitView`, it copies the `gaussianBlur`
-///    `CAFilter` out of a `UIVisualEffectView` and installs it on the platform
-///    view's clipping layer, so UIKit blurs the WKWebView for us.
-///  * **Android** — nothing blurs a platform view under hybrid composition,
-///    where Flutter content above the WebView is drawn into a separate overlay
-///    surface. Under texture layer hybrid composition (TLHC) the WebView is
-///    drawn into an `ImageReader` surface that Flutter composites as a texture
-///    layer inside the frame, which a `BackdropFilter` can sample — the same
-///    reason `video_player`'s texture mode can be blurred and its platform-view
-///    mode cannot. Which one we get is [chatWebViewUsesHybridComposition].
-///  * **macOS / Linux** — an `NSView` platform view with no embedder support
-///    (and no WebView at all on Linux), so the in-WebView CSS strips stay.
+/// The alternative is a Flutter `BackdropFilter` that samples the WebView
+/// directly. That works only where the WebView is part of the Flutter frame:
 ///
-/// Where this returns false the chrome drops its own blur pass and the blur is
-/// mirrored into the WebView as fixed `backdrop-filter` strips positioned over
-/// the bridge — correct, but two layers that have to be kept in sync, and they
-/// visibly lag the widget whenever the chrome moves.
+///  * **Windows** — `flutter_inappwebview_windows` drives WebView2 off-screen
+///    and hands its frames to the engine as an external texture drawn with a
+///    `Texture` widget, so the web content is an ordinary layer of the frame.
+///  * **iOS** — the embedder implements backdrop blur for platform views: a
+///    `BackdropFilter` over a `UiKitView` installs a `gaussianBlur` CAFilter on
+///    the platform view's clipping layer.
+///  * **Android** — only under texture layer hybrid composition, which is why
+///    the opt-in also turns [chatWebViewUsesHybridComposition] off.
+///  * **macOS / Linux** — an unsampled `NSView` platform view (and no WebView
+///    at all on Linux), so it cannot work there at all.
+///
+/// It is off by default because of what it costs while the reader scrolls. The
+/// backdrop under the glass is then new pixels on every frame, so the blur can
+/// never be reused: on Windows that is a render-pass break and a blur pass per
+/// strip per frame, and on Android it also puts the WebView on a texture-layer
+/// copy of every frame that hybrid composition does not pay for.
+///
+/// `--dart-define=CHAT_WEBVIEW_FLUTTER_BLUR=true` opts back into it, for
+/// comparing the two paths against each other in one build.
+const bool kChatWebViewFlutterBlur = bool.fromEnvironment(
+  'CHAT_WEBVIEW_FLUTTER_BLUR',
+);
+
+/// Whether the chrome blurs the WebView with its own `BackdropFilter` rather
+/// than having that blur mirrored into the page.
 ///
 /// [platform] is for tests; production callers pass nothing and get
 /// [defaultTargetPlatform].
 bool chatWebViewBlurIsFlutterSide([TargetPlatform? platform]) {
-  if (kChatWebViewForceCssBlur) return false;
+  if (!kChatWebViewFlutterBlur) return false;
   return switch (platform ?? defaultTargetPlatform) {
     TargetPlatform.windows || TargetPlatform.iOS => true,
     TargetPlatform.android => !chatWebViewUsesHybridComposition(),
@@ -45,26 +50,15 @@ bool chatWebViewBlurIsFlutterSide([TargetPlatform? platform]) {
 
 /// Value for `InAppWebViewSettings.useHybridComposition`, read only on Android.
 ///
-/// False puts the chat WebView on texture layer hybrid composition (the plugin
-/// switches from `initExpensiveAndroidView` to `initSurfaceAndroidView`), which
-/// is what makes [chatWebViewBlurIsFlutterSide] true there. The known costs:
-/// TLHC cannot host a `SurfaceView` (fullscreen HTML5 video would render at the
-/// wrong place — the chat page plays none), it copies the WebView's frame into
-/// a texture, and the texture can trail the Flutter frame by one frame. The
-/// trailing frame moves nothing on screen: the blurred *content* is one frame
-/// old, the blurred *rect* is exactly the widget's, which is the opposite of
-/// the mirrored-strip lag it replaces.
-bool chatWebViewUsesHybridComposition() => kChatWebViewForceHybridComposition;
-
-/// `--dart-define=CHAT_WEBVIEW_CSS_BLUR=true` puts every platform back on the
-/// mirrored CSS strips, for comparing the two against each other in one build.
-const bool kChatWebViewForceCssBlur = bool.fromEnvironment(
-  'CHAT_WEBVIEW_CSS_BLUR',
-);
-
-/// `--dart-define=CHAT_WEBVIEW_HYBRID_COMPOSITION=true` puts Android back on
-/// hybrid composition — and therefore back on the CSS strips, since nothing can
-/// sample a platform view there.
-const bool kChatWebViewForceHybridComposition = bool.fromEnvironment(
-  'CHAT_WEBVIEW_HYBRID_COMPOSITION',
-);
+/// True (the default) keeps the WebView on hybrid composition: it stays a real
+/// view in the Android hierarchy and Flutter content above it goes to an
+/// overlay surface. Nothing in the Flutter frame can sample it — which is
+/// exactly why the blur is mirrored into the page instead.
+///
+/// The opt-in flips it to texture layer hybrid composition, where the WebView
+/// is drawn into an `ImageReader` surface that Flutter composites as a texture
+/// layer and a `BackdropFilter` can therefore sample. That copy is per frame,
+/// the texture can trail the Flutter frame by one, and TLHC cannot host a
+/// `SurfaceView` — fullscreen HTML5 video would render in the wrong place, of
+/// which the chat page plays none.
+bool chatWebViewUsesHybridComposition() => !kChatWebViewFlutterBlur;
