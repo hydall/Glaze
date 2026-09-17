@@ -1,6 +1,9 @@
 import 'package:drift/drift.dart';
 
 import '../../models/lorebook.dart';
+import '../../models/historical_message_window.dart';
+import 'session_canon_checkpoint_repo.dart';
+import 'session_lorebook_revision_repo.dart';
 import '../../services/card_rewriter/card_rewriter_contracts.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
@@ -58,6 +61,7 @@ class SessionLorebookEvolutionRepo {
   Future<EffectiveSessionLorebooks> resolveEffectiveLorebooks({
     required String sessionId,
     required List<Lorebook> lorebooks,
+    HistoricalMessageWindow? historicalWindow,
   }) async {
     if (sessionId.isEmpty || lorebooks.isEmpty) {
       return EffectiveSessionLorebooks(
@@ -68,7 +72,7 @@ class SessionLorebookEvolutionRepo {
     final rows = await (db.select(
       db.sessionLorebookEvolutionRows,
     )..where((row) => row.chatSessionId.equals(sessionId))).get();
-    if (rows.isEmpty) {
+    if (rows.isEmpty && historicalWindow == null) {
       return EffectiveSessionLorebooks(
         lorebooks: lorebooks,
         overlayTargets: const {},
@@ -76,8 +80,39 @@ class SessionLorebookEvolutionRepo {
     }
     final contentByKey = {
       for (final row in rows)
-        '${row.lorebookId}\u0000${row.entryId}': row.content,
+        '${row.lorebookId}\u0000${row.entryId}': historicalWindow == null
+            ? row.content
+            : row.baseContent,
     };
+    if (historicalWindow != null) {
+      final checkpointRepo = SessionCanonCheckpointRepo(db);
+      final selected = await checkpointRepo.getForHistoricalWindow(
+        sessionId,
+        historicalWindow,
+      );
+      final checkpoints = await checkpointRepo.getForSession(sessionId);
+      final sequenceById = {
+        for (final checkpoint in checkpoints)
+          checkpoint.id: checkpoint.sequence,
+      };
+      final revisions = await SessionLorebookRevisionRepo(
+        db,
+      ).getForSession(sessionId);
+      revisions.sort(
+        (a, b) => (sequenceById[a.checkpointId] ?? -1).compareTo(
+          sequenceById[b.checkpointId] ?? -1,
+        ),
+      );
+      for (final revision in revisions) {
+        final sequence = sequenceById[revision.checkpointId];
+        if (selected != null &&
+            sequence != null &&
+            sequence <= selected.sequence) {
+          contentByKey['${revision.lorebookId}\u0000${revision.entryId}'] =
+              revision.content;
+        }
+      }
+    }
     final knownTargets = <SessionLorebookTarget>{};
     final effective = [
       for (final book in lorebooks)

@@ -5,6 +5,11 @@ import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/character_knowledge_fact_repo.dart';
+import 'package:glaze_flutter/core/models/character_knowledge_fact.dart';
+import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/models/historical_message_window.dart';
+import 'package:glaze_flutter/core/models/knowledge_cleanup.dart';
 import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 
 void main() {
@@ -474,6 +479,77 @@ void main() {
       throwsA(anything),
     );
   });
+
+  test(
+    'historical knowledge unwinds exact effects without replaying cleanup',
+    () async {
+      await _seedSession(db);
+      final facts = CharacterKnowledgeFactRepo(db);
+      await facts.insertTentative(
+        const CharacterKnowledgeFact(
+          id: 'known',
+          chatSessionId: 'session',
+          knowerKey: 'alice',
+          subjectKey: 'stranger',
+          factClass: CharacterKnowledgeFactClass.knowledge,
+          predicate: 'met',
+          object: 'at the gate',
+          epistemicState: CharacterKnowledgeEpistemicState.observed,
+          sourceMessageId: 'earlier',
+          sourceSwipeId: 0,
+          sourceAgentSwipeId: 0,
+        ),
+      );
+      var predecessor = '';
+      for (var ordinal = 1; ordinal <= 2; ordinal++) {
+        final run = _run(
+          id: 'run-$ordinal',
+          ordinal: ordinal,
+          predecessor: predecessor,
+          result: {'rename': ordinal},
+        );
+        expect(await repo.append(run), isA<ReconciliationRunAppended>());
+        final before = await repo.captureState('session');
+        await facts.applyReconciliationCleanup(
+          sessionId: 'session',
+          endpointMessageId: 'message',
+          messageIds: ['message'],
+          ops: [
+            KnowledgeCleanupOp.renameEntity(
+              fromKey: ordinal == 1 ? 'stranger' : 'guard',
+              toKey: ordinal == 1 ? 'guard' : 'prince',
+              canonicalName: ordinal == 1 ? 'Guard' : 'Prince',
+            ),
+          ],
+        );
+        await repo.recordEffect(
+          runId: run.id,
+          sessionId: 'session',
+          before: before,
+          after: await repo.captureState('session'),
+          createdAt: ordinal,
+        );
+        predecessor = run.chainHash;
+      }
+      final live = await repo.captureState('session');
+      final historical = await facts.getForHistoricalWindow(
+        'session',
+        HistoricalMessageWindow([
+          const ChatMessage(
+            id: 'earlier',
+            role: 'assistant',
+            content: 'A stranger waits.',
+          ),
+        ]),
+      );
+      expect(historical.single.subjectKey, 'stranger');
+      expect(
+        (await facts.getReviewableForSession('session')).single.subjectKey,
+        'prince',
+      );
+      expect(await repo.currentStateMatches('session', live), isTrue);
+    },
+  );
 
   test('validates exact effects and reconstructs anchored messages', () async {
     await _seedSession(db);

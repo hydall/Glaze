@@ -1,5 +1,7 @@
 import '../models/memory_book.dart';
+import 'game_time.dart';
 import 'memory_excerpt_selector.dart';
+import 'memory_temporal_context.dart';
 
 /// Formats [MemoryInjectionItem]s into the canonical memory block text used
 /// by the prompt builder, memory injection service, and isolate worker.
@@ -9,18 +11,13 @@ import 'memory_excerpt_selector.dart';
 String formatMemoryItems(
   List<MemoryInjectionItem> items, {
   required bool includeContextHeader,
+  GameTimeState gameTime = const GameTimeState(),
 }) {
   final parts = <String>[];
   if (includeContextHeader) {
     parts.add('Memory context:');
-    if (items.isNotEmpty) {
-      parts.add(
-        '[Earlier accepted session evidence. MemoryBook cannot override current '
-        'Ledger canon, but it overrides a conflicting card baseline for this '
-        'session.]',
-      );
-    }
   }
+  if (items.isNotEmpty) parts.add(historicalMemoryHeader(gameTime));
   for (final item in items) {
     final title = item.entry.title.isNotEmpty
         ? item.entry.title
@@ -30,7 +27,7 @@ String formatMemoryItems(
         ? 'Memory: $title'
         : 'Memory: $title ($range)';
     final ledger = item.entry.ledgerRange.trim();
-    final metadata = ledger.isEmpty ? '' : '\nLedger range: $ledger';
+    final metadata = '\n${memoryOccurrence(ledger)}';
     if (item.excerpt) {
       parts.add(
         '$heading$metadata\n${item.text.trim()}\n[Excerpted from a larger Memory Book entry]',

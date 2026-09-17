@@ -5,6 +5,9 @@ import '../models/api_config.dart';
 import '../db/repositories/session_lorebook_evolution_repo.dart';
 import '../models/character.dart';
 import '../models/chat_message.dart';
+import '../models/historical_message_window.dart';
+import '../db/repositories/ledger_raw_tracker_state_reader.dart';
+import 'memory_draft_transcript_builder.dart';
 import '../utils/cast_helpers.dart';
 import '../models/lorebook.dart';
 import '../models/memory_book.dart';
@@ -177,7 +180,19 @@ class PromptPayloadBuilder {
     if (sourceCharacter == null) {
       throw StateError('Character not found: $effectiveCharId');
     }
-    final effectiveContext = session == null || !includeEffectiveCanon
+    HistoricalMessageWindow? historicalWindow;
+    if (session != null && excludeSnapshotMessageId != null) {
+      final durable = await _ref.read(chatRepoProvider).getById(session.id);
+      throwIfAborted();
+      if (durable == null) throw StateError('Historical session is missing.');
+      historicalWindow = HistoricalMessageWindow.before(
+        durable.messages,
+        excludeSnapshotMessageId,
+      );
+      session = session.copyWith(messages: historicalWindow.messages);
+    }
+    final effectiveContext =
+        session == null || (!includeEffectiveCanon && historicalWindow == null)
         ? null
         : readOnlyEffectiveCanon
         ? await _ref
@@ -195,7 +210,9 @@ class PromptPayloadBuilder {
                 excludeSnapshotMessageId: excludeSnapshotMessageId,
               );
     final character = effectiveContext?.character ?? sourceCharacter;
-    final effectiveProjection = effectiveContext == null
+    throwIfAborted();
+    final effectiveProjection =
+        effectiveContext == null || !includeEffectiveCanon
         ? null
         : EffectiveCanonPromptProjection.fromContext(effectiveContext);
 
@@ -231,6 +248,7 @@ class PromptPayloadBuilder {
               .resolveEffectiveLorebooks(
                 sessionId: session.id,
                 lorebooks: sourceLorebooks,
+                historicalWindow: historicalWindow,
               );
     final lorebooks = effectiveLorebooks.lorebooks;
     throwIfAborted();
@@ -275,7 +293,9 @@ class PromptPayloadBuilder {
       runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
 
       final summaryService = _ref.read(summaryServiceProvider);
-      summaryContent = await summaryService.getSummary(session.id);
+      summaryContent = historicalWindow == null
+          ? await summaryService.getSummary(session.id)
+          : null;
       throwIfAborted();
 
       final memoryService = _ref.read(memoryInjectionServiceProvider);
@@ -313,6 +333,7 @@ class PromptPayloadBuilder {
               shouldAbort: shouldAbort,
               cancelToken: cancelToken,
               contextBudgetTokens: chatApi.contextSize,
+              allowedSourceMessageIds: historicalWindow?.byId.keys.toSet(),
             )
           : Future.value(
               MemoryCandidateBuildResult(
@@ -339,6 +360,10 @@ class PromptPayloadBuilder {
                   config: embeddingConfig,
                   cancelToken: cancelToken,
                   shouldAbort: shouldAbort,
+                  allowedSourceMessageIds: historicalWindow?.byId.keys.toSet(),
+                  sourceMessages: {
+                    for (final message in session.messages) message.id: message,
+                  },
                 )
                 .timeout(
                   const Duration(seconds: 30),
@@ -363,23 +388,17 @@ class PromptPayloadBuilder {
       vectorEntries = results[1] as List<LorebookEntry>;
       final recallResult = results[2] as MessageRecallResult;
       if (recallResult.matches.isNotEmpty) {
-        final block = StringBuffer();
-        block.writeln('<recalled_messages>');
-        block.writeln(
-          'Semantically relevant raw message chunks from earlier in this chat. '
-          'Do not explicitly reference "remembering" these — use them as ground '
-          'truth context.',
-        );
-        for (final match in recallResult.matches) {
-          block.writeln('---');
-          block.writeln(match.text);
-        }
-        block.writeln('</recalled_messages>');
-        recalledMessagesContent = block.toString();
         recalledMessageChunks = recallResult.matches
             .map(
-              (m) =>
-                  RecalledMessageChunk(text: m.text, messageIds: m.messageIds),
+              (m) => RecalledMessageChunk(
+                text: m.text,
+                messageIds: m.messageIds,
+                ledgerRange: MemoryDraftTranscriptBuilder.ledgerRange(
+                  session!.messages
+                      .where((message) => m.messageIds.contains(message.id))
+                      .toList(),
+                ),
+              ),
             )
             .toList(growable: false);
       }
@@ -487,31 +506,45 @@ class PromptPayloadBuilder {
           );
         }
       } catch (_) {}
-      try {
-        final entities = await _ref
-            .read(memoryEntityRepoProvider)
-            .getBySessionId(sessionId);
-        if (entities.isNotEmpty) {
-          final active = entities.where((e) => e.status == 'active').take(20);
-          entitiesContent = active
-              .map(
-                (e) =>
-                    '- ${e.name} (${e.entityType})'
-                    '${e.facts.isNotEmpty ? ": ${e.facts.join("; ")}" : ""}',
-              )
-              .join('\n');
-        }
-      } catch (_) {}
+      if (historicalWindow == null) {
+        try {
+          final entities = await _ref
+              .read(memoryEntityRepoProvider)
+              .getBySessionId(sessionId);
+          if (entities.isNotEmpty) {
+            final active = entities.where((e) => e.status == 'active').take(20);
+            entitiesContent = active
+                .map(
+                  (e) =>
+                      '- ${e.name} (${e.entityType})'
+                      '${e.facts.isNotEmpty ? ": ${e.facts.join("; ")}" : ""}',
+                )
+                .join('\n');
+          }
+        } catch (_) {}
+      }
     }
 
+    final clockTrackers =
+        effectiveContext?.committedTrackers ??
+        (sessionId == null
+            ? const <Tracker>[]
+            : (await LedgerRawTrackerStateReader(_ref.read(appDbProvider)).read(
+                sessionId,
+                historicalWindow: historicalWindow,
+              )).committedTrackers);
     await _ensureEffectiveCanonCurrent(
       charId: effectiveCharId,
       session: session,
       context: effectiveContext,
       excludeSnapshotMessageId: excludeSnapshotMessageId,
     );
-    final gameTimeState = GameTimeState.fromTrackers(
-      ledgerTrackers ?? const <Tracker>[],
+    throwIfAborted();
+    final gameTimeState = GameTimeState.fromTrackers(clockTrackers);
+    recalledMessagesContent = const RecalledMessagesResolver().resolve(
+      chunks: recalledMessageChunks,
+      visibleMessageIds: const {},
+      gameTime: gameTimeState,
     );
     return GenerationContextInputs(
       character: character,

@@ -1,4 +1,5 @@
 import '../../models/ledger_raw_tracker_state.dart';
+import '../../models/historical_message_window.dart';
 import '../../models/tracker.dart';
 import '../app_db.dart';
 import 'tracker_repo.dart';
@@ -20,18 +21,25 @@ final class LedgerRawTrackerStateReader {
   Future<LedgerRawTrackerState> read(
     String sessionId, {
     String? excludeSnapshotMessageId,
+    HistoricalMessageWindow? historicalWindow,
   }) async {
-    final snapshot = excludeSnapshotMessageId == null
+    final snapshot = historicalWindow != null
+        ? await _snapshots.getCommittedInWindow(sessionId, historicalWindow)
+        : excludeSnapshotMessageId == null
         ? await _snapshots.getLatestCommitted(sessionId)
         : await _snapshots.getLatestCommittedExcludingMessage(
             sessionId,
             excludeSnapshotMessageId,
           );
-    final controls = await _trackers.getLiveCanonControls(sessionId);
+    final controls = historicalWindow == null
+        ? await _trackers.getLiveCanonControls(sessionId)
+        : const <Tracker>[];
     final committed = snapshot?.trackers
         .where((tracker) => tracker.scope == 'ledger')
         .toList(growable: true);
-    if (committed != null && excludeSnapshotMessageId == null) {
+    if (committed != null &&
+        excludeSnapshotMessageId == null &&
+        historicalWindow == null) {
       final names = committed.map((tracker) => tracker.name).toSet();
       final liveClock = await _trackers.getCompleteGameTime(sessionId);
       committed.addAll(

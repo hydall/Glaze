@@ -27,13 +27,17 @@ PromptPayload _payloadWith({
 
 void main() {
   group('effectiveRecalledMessagesContent', () {
-    test('returns raw recalledMessagesContent when no chunks exist', () {
+    test('frames legacy recalledMessagesContent when no chunks exist', () {
       final payload = _payloadWith(
         recalledMessagesContent: '<recalled>old style</recalled>',
       );
       expect(
         effectiveRecalledMessagesContent(payload),
-        '<recalled>old style</recalled>',
+        contains('<recalled>old style</recalled>'),
+      );
+      expect(
+        effectiveRecalledMessagesContent(payload),
+        contains('Historical evidence, not current state'),
       );
     });
 

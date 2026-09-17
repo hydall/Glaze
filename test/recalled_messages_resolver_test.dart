@@ -13,7 +13,11 @@ void main() {
         visibleMessageIds: const {},
         fallbackContent: '<recalled>legacy</recalled>',
       ),
-      '<recalled>legacy</recalled>',
+      allOf(
+        contains('Historical evidence'),
+        contains('Occurred: story time unknown'),
+        endsWith('<recalled>legacy</recalled>'),
+      ),
     );
     expect(
       resolver.resolve(
@@ -56,17 +60,17 @@ void main() {
 
     expect(
       content,
-      '<recalled_messages>\n'
-      'Earlier accepted raw-message evidence. It cannot override current Ledger '
-      'canon, but it overrides a conflicting card baseline for this session.\n'
-      'Semantically relevant raw message chunks from earlier in this chat. '
-      'Do not explicitly reference "remembering" these — use them as ground '
-      'truth context.\n'
-      '---\n'
-      'first\n'
-      '---\n'
-      'second\n'
-      '</recalled_messages>',
+      allOf(
+        startsWith(
+          '<recalled_messages>\n[Historical evidence, not current state]',
+        ),
+        contains('Current story point: unknown'),
+        contains('preserving speaker perspective'),
+        endsWith(
+          '---\nOccurred: story time unknown\nfirst\n---\nOccurred: story time unknown\nsecond\n</recalled_messages>',
+        ),
+        isNot(contains('ground truth context')),
+      ),
     );
   });
 

@@ -115,7 +115,7 @@ void main() {
           rangeEnd: 4,
         ),
       ], includeContextHeader: false);
-      expect(out, startsWith('Memory: 1-4\n'));
+      expect(out, contains('Memory: 1-4\n'));
       expect(out, isNot(contains('Memory: 1-4 (1-4)')));
     });
 
@@ -141,7 +141,7 @@ void main() {
       expect(
         out,
         contains(
-          'Ledger range: 15.09.2026 · RP_Day 0 · 21:00 -> '
+          'Occurred: 15.09.2026 · RP_Day 0 · 21:00 -> '
           '15.09.2026 · RP_Day 0 · 21:30',
         ),
       );
@@ -159,14 +159,19 @@ void main() {
         _item(id: 'e1', title: 'A', text: 'aaa'),
         _item(id: 'e2', title: 'B', text: 'bbb'),
       ], includeContextHeader: false);
-      expect(out, contains('Memory: A\naaa\n\nMemory: B\nbbb'));
+      expect(
+        out,
+        contains(
+          'Memory: A\nOccurred: story time unknown\naaa\n\nMemory: B\nOccurred: story time unknown\nbbb',
+        ),
+      );
     });
 
     test('whitespace-only text body keeps heading with empty body line', () {
       final out = formatMemoryItems([
         _item(id: 'e1', title: 'T1', text: '   '),
       ], includeContextHeader: false);
-      expect(out, 'Memory: T1\n');
+      expect(out, endsWith('Memory: T1\nOccurred: story time unknown\n'));
     });
   });
 }

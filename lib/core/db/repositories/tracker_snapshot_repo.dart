@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
+import '../../models/historical_message_window.dart';
+
 import '../../models/tracker.dart';
 import '../../models/tracker_snapshot.dart';
 import '../../llm/game_time.dart';
@@ -28,6 +30,31 @@ class TrackerSnapshotRepo {
   final AppDatabase db;
 
   const TrackerSnapshotRepo(this.db);
+
+  Future<TrackerSnapshot?> getCommittedInWindow(
+    String sessionId,
+    HistoricalMessageWindow window,
+  ) async {
+    final snapshots = await getBySessionId(sessionId);
+    final byMessage = {
+      for (final snapshot in snapshots)
+        if (snapshot.committed &&
+            window.containsAnchor(
+              snapshot.messageId,
+              snapshot.swipeId,
+              snapshot.agentSwipeId,
+            ))
+          snapshot.messageId: snapshot,
+    };
+    for (final message in window.messages.reversed) {
+      final snapshot = byMessage[message.id];
+      if (snapshot != null) return snapshot;
+    }
+    // Empty anchors are migration/bootstrap snapshots, never a future turn.
+    return snapshots
+        .where((s) => s.committed && s.messageId.isEmpty)
+        .firstOrNull;
+  }
 
   /// Upsert a snapshot for the anchor `(sessionId, messageId, swipeId,
   /// agentSwipeId)`. Re-runs replace the prior snapshot for the same anchor

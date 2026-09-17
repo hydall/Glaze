@@ -5,6 +5,8 @@ import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/embedding_repo.dart';
 import 'package:glaze_flutter/core/llm/embedding_service.dart';
 import 'package:glaze_flutter/core/llm/message_recall_service.dart';
+import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 
 class _FakeEmbeddingService extends EmbeddingService {
   @override
@@ -49,7 +51,7 @@ void main() {
         sourceType: sourceType,
         sourceId: sourceId,
         vectors: [vector],
-        textHash: entryId,
+        textHash: computeHash(text),
         retrievalMetadata: {
           'messageIds': messageIds,
           'chunks': [
@@ -103,6 +105,40 @@ void main() {
       expect(result.matches.single.entryId, 'older');
       expect(result.matches.single.messageIds, ['m1']);
     });
+
+    test(
+      'rejects future sources and obsolete selected content before recall',
+      () async {
+        for (final id in ['old', 'changed', 'future']) {
+          await putChunk(
+            entryId: id,
+            messageIds: [id],
+            text: 'assistant: $id',
+            vector: [1, 0],
+          );
+        }
+        final result = await service.recall(
+          sessionId: 's1',
+          currentText: 'query',
+          config: const EmbeddingConfig(endpoint: 'test'),
+          allowedSourceMessageIds: {'old', 'changed'},
+          sourceMessages: const {
+            'old': ChatMessage(id: 'old', role: 'assistant', content: 'old'),
+            'changed': ChatMessage(
+              id: 'changed',
+              role: 'assistant',
+              content: 'selected replacement',
+            ),
+            'future': ChatMessage(
+              id: 'future',
+              role: 'assistant',
+              content: 'future',
+            ),
+          },
+        );
+        expect(result.matches.map((match) => match.entryId), ['old']);
+      },
+    );
 
     test('isolates recall rows by source type and session', () async {
       await putChunk(

@@ -24,6 +24,7 @@ import 'prompt/exact_lorebook_manifest.dart';
 import 'prompt/lorebook_context_resolver.dart';
 import 'prompt/lorebook_classifier.dart';
 import 'prompt/memory_block_injector.dart';
+import 'prompt/memory_context_resolver.dart';
 import 'prompt/prompt_payload.dart';
 import 'prompt/prompt_result.dart';
 import 'prompt/recalled_message_chunk.dart';
@@ -814,11 +815,32 @@ PromptResult _assembleMessages({
   // uses memoryTokens=0, producing a wider visible window than the final
   // breakdown — messages in that "phantom zone" get excluded from memory
   // (sourceWindowExclusion) yet also dropped from history, so the model
-  // sees neither. We use the selection's totalTokens (actual sum of picked
-  // entries) as the estimate; excerpting may reduce this further, but the
-  // visible window stays conservative (fewer excluded messages is always
-  // safe — the model still sees them in history).
-  final estimatedMemoryTokens = payload.memorySelection?.totalTokens ?? 0;
+  // sees neither. Reserve the packed content including expanded temporal
+  // headers; the body-only selection cost undercounts that envelope.
+  final requestClock = GameTimeState(
+    time: payload.gameTime,
+    date: payload.gameDate,
+    day: int.tryParse(payload.gameDay ?? ''),
+  );
+  final estimatedMemoryTokens = payload.memorySelection == null
+      ? 0
+      : const MemoryContextResolver()
+            .resolve(
+              selection: payload.memorySelection!,
+              visibleMessageIds: const {},
+              disableSourceWindowExclusion:
+                  payload.disableSourceWindowExclusion,
+              excerptingEnabled: payload.memoryExcerptingEnabled,
+              packingMode: payload.memoryPackingMode,
+              excerptTokensPerChunk: payload.memoryExcerptTokensPerChunk,
+              excerptChunksPerEntry: payload.memoryExcerptChunksPerEntry,
+              chunkFirstTopEntries: payload.chunkFirstTopEntries,
+              chunkFirstTopChunks: payload.chunkFirstTopChunks,
+              summaryExcerpt: payload.summaryContent,
+              gameTime: requestClock,
+            )
+            .excerptSelection
+            .totalTokens;
 
   var breakdown = calculator.calculate(
     staticBlocks: attributionBlocks,
@@ -842,6 +864,7 @@ PromptResult _assembleMessages({
     visibleMessageIds: recallVisibleMessageIds,
     fallbackContent: payload.recalledMessagesContent,
     disableSourceWindowExclusion: payload.disableSourceWindowExclusion,
+    gameTime: requestClock,
   );
   if (recalledMessagesContent != null && recalledMessagesContent.isNotEmpty) {
     injectRecalledMessagesBlock(
@@ -1048,6 +1071,11 @@ String? effectiveRecalledMessagesContent(
   visibleMessageIds: visibleMessageIds ?? payload.sourceWindowVisibleMessageIds,
   fallbackContent: payload.recalledMessagesContent,
   disableSourceWindowExclusion: payload.disableSourceWindowExclusion,
+  gameTime: GameTimeState(
+    time: payload.gameTime,
+    date: payload.gameDate,
+    day: int.tryParse(payload.gameDay ?? ''),
+  ),
 );
 
 /// Appends the contents of preset blocks with `appendToLastMessage = true` to

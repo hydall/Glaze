@@ -74,7 +74,7 @@ class ChatMessageEmbeddingService {
     final chunks = <_MessageChunk>[];
     for (int i = 0; i + chunkSize <= eligible.length; i += chunkSize) {
       final slice = eligible.sublist(i, i + chunkSize);
-      final text = _formatChunk(slice);
+      final text = formatChunk(slice);
       chunks.add(
         _MessageChunk(
           index: i ~/ chunkSize,
@@ -198,7 +198,7 @@ class ChatMessageEmbeddingService {
     await _repo.deleteBySourceType('chat_message');
   }
 
-  String _formatChunk(List<ChatMessage> slice) {
+  static String formatChunk(List<ChatMessage> slice) {
     // Marinara format: "Name: content\n\nName: content". We use role as
     // the "Name" — gives the embedder signal about who said what without
     // leaking persona names (which may be long / contain macros).

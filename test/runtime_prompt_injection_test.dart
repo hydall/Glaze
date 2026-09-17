@@ -158,7 +158,7 @@ void main() {
         keywordMatchedTerms: const {
           'm1': ['ritual map', 'debt'],
         },
-        maxInjectionTokens: 12,
+        maxInjectionTokens: 300,
         maxInjectedEntries: 1,
         vectorWeight: 0,
         recencyBoost: false,
@@ -194,6 +194,7 @@ void main() {
         ),
         memorySelection: selection,
         memoryInjectionTarget: 'hard_block',
+        memoryPackingMode: 'chunk_first',
       ),
     );
 
@@ -236,7 +237,7 @@ void main() {
         keywordMatchedTerms: const {
           'm1': ['ritual map', 'debt'],
         },
-        maxInjectionTokens: 12,
+        maxInjectionTokens: 300,
         maxInjectedEntries: 1,
         vectorWeight: 0,
         recencyBoost: false,
@@ -310,7 +311,7 @@ void main() {
         keywordMatchedTerms: const {
           'm1': ['ritual map', 'debt'],
         },
-        maxInjectionTokens: 12,
+        maxInjectionTokens: 300,
         maxInjectedEntries: 1,
         vectorWeight: 0,
         recencyBoost: false,
@@ -390,7 +391,7 @@ void main() {
           keywordMatchedTerms: const {
             'm1': ['ritual map', 'debt'],
           },
-          maxInjectionTokens: 12,
+          maxInjectionTokens: 300,
           maxInjectedEntries: 1,
           vectorWeight: 0,
           recencyBoost: false,
@@ -475,7 +476,7 @@ void main() {
           keywordMatchedTerms: const {
             'm1': ['ritual map', 'debt'],
           },
-          maxInjectionTokens: 12,
+          maxInjectionTokens: 300,
           maxInjectedEntries: 1,
           vectorWeight: 0,
           recencyBoost: false,
@@ -551,7 +552,7 @@ void main() {
           matchedKeys: const ['needle'],
         ),
       ],
-      budgetTokens: 100,
+      budgetTokens: 300,
       entryCap: 1,
     );
 

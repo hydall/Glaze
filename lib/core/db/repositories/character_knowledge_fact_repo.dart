@@ -3,16 +3,156 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 
 import '../../models/character_knowledge_fact.dart';
+import '../../models/historical_message_window.dart';
 import '../../models/knowledge_cleanup.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
 import 'reconciliation_state_codec.dart';
+import 'ledger_reconciliation_run_repo.dart';
 
 /// Transactional lifecycle store for swipe-safe atomic character facts.
 class CharacterKnowledgeFactRepo {
   const CharacterKnowledgeFactRepo(this.db);
 
   final AppDatabase db;
+
+  /// Reconstructs lifecycle at a message boundary without changing live rows.
+  /// Later cleanup is unwound before resolving supersession in the prefix.
+  Future<List<CharacterKnowledgeFact>> getForHistoricalWindow(
+    String sessionId,
+    HistoricalMessageWindow window,
+  ) async {
+    final rows = await (db.select(
+      db.characterKnowledgeFactRows,
+    )..where((row) => row.chatSessionId.equals(sessionId))).get();
+    final byId = {for (final row in rows) row.id: row};
+    final runs = LedgerReconciliationRunRepo(db);
+    final restoredRanges = <Set<String>>[];
+    for (final run in (await runs.readSession(sessionId)).reversed) {
+      final anchors = (jsonDecode(run.anchorsJson) as List)
+          .cast<Map<String, dynamic>>();
+      if (anchors.every(
+        (anchor) => window.containsAnchor(
+          anchor['messageId'] as String,
+          anchor['swipeId'] as int,
+          anchor['agentSwipeId'] as int,
+        ),
+      )) {
+        continue;
+      }
+      final effect = await runs.validateEffect(run);
+      if (effect is! ReconciliationEffectValid) {
+        throw StateError('Historical knowledge effect is unavailable.');
+      }
+      restoredRanges.add(
+        anchors.map((anchor) => anchor['messageId'] as String).toSet(),
+      );
+      final before = ReconciliationStateCodec.decode(
+        sessionId: sessionId,
+        ledgerJson: '[]',
+        knowledgeJson: effect.before.knowledgeJson,
+      ).knowledgeRows;
+      final after = ReconciliationStateCodec.decode(
+        sessionId: sessionId,
+        ledgerJson: '[]',
+        knowledgeJson: effect.after.knowledgeJson,
+      ).knowledgeRows;
+      final previous = {for (final row in before) row.id: row};
+      final following = {for (final row in after) row.id: row};
+      for (final id in {...previous.keys, ...following.keys}) {
+        if (previous[id] == following[id]) continue;
+        if (previous[id] case final row?) {
+          byId[id] = row;
+        } else {
+          byId.remove(id);
+        }
+      }
+    }
+    final journals =
+        await (db.select(db.ledgerReconciliationCleanupJournals)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..orderBy([(row) => OrderingTerm.desc(row.id)]))
+            .get();
+    for (final journal in journals) {
+      final ids = (jsonDecode(journal.messageIdsJson) as List).cast<String>();
+      if (window.containsSources(ids)) continue;
+      // Exact effects include cleanup. Replaying its partial before-image a
+      // second time could reintroduce a state from a later reconciliation.
+      if (restoredRanges.any(
+        (range) =>
+            range.length == ids.toSet().length && ids.every(range.contains),
+      )) {
+        continue;
+      }
+      for (final image
+          in (jsonDecode(journal.beforeImagesJson) as List)
+              .cast<Map<String, dynamic>>()) {
+        final row = byId[image['id']];
+        if (row == null) continue;
+        byId[row.id] = row.copyWith(
+          knowerKey: image['knowerKey'] as String,
+          knowerName: image['knowerName'] as String,
+          subjectKey: image['subjectKey'] as String,
+          subjectName: image['subjectName'] as String,
+          lifecycle: image['lifecycle'] as String,
+          updatedAt: image['updatedAt'] as int,
+        );
+      }
+    }
+    final allFacts = byId.values.map(_fromRow).toList();
+    bool inWindow(CharacterKnowledgeFact fact) => window.containsAnchor(
+      fact.sourceMessageId,
+      fact.sourceSwipeId,
+      fact.sourceAgentSwipeId,
+    );
+    final candidates = byId.values
+        .where(
+          (row) => window.containsAnchor(
+            row.sourceMessageId,
+            row.sourceSwipeId,
+            row.sourceAgentSwipeId,
+          ),
+        )
+        .map(_fromRow)
+        .where((fact) {
+          if (fact.lifecycle == CharacterKnowledgeFactLifecycle.retracted) {
+            return false;
+          }
+          if (fact.lifecycle != CharacterKnowledgeFactLifecycle.superseded) {
+            return true;
+          }
+          final successors = allFacts.where(
+            (other) =>
+                other.supersedesId == fact.id &&
+                other.lifecycle != CharacterKnowledgeFactLifecycle.retracted,
+          );
+          return successors.isNotEmpty &&
+              successors.every((other) => !inWindow(other));
+        })
+        .toList();
+    final positions = {
+      for (var i = 0; i < window.messages.length; i++) window.messages[i].id: i,
+    };
+    candidates.sort((a, b) {
+      final position = positions[a.sourceMessageId]!.compareTo(
+        positions[b.sourceMessageId]!,
+      );
+      if (position != 0) return position;
+      if (a.supersedesId == b.id) return 1;
+      if (b.supersedesId == a.id) return -1;
+      final created = a.createdAt.compareTo(b.createdAt);
+      return created != 0 ? created : a.id.compareTo(b.id);
+    });
+    final slots = <String, CharacterKnowledgeFact>{};
+    for (final fact in candidates) {
+      slots[semanticSlotKey(
+        fact,
+      )] = fact.lifecycle == CharacterKnowledgeFactLifecycle.superseded
+          ? fact.copyWith(lifecycle: CharacterKnowledgeFactLifecycle.active)
+          : fact;
+    }
+    return slots.values.toList(growable: false);
+  }
 
   /// Restores every knowledge row for a session from an exact captured image.
   /// The caller may include this operation in a wider transaction.

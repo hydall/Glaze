@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 
 import '../db/app_db.dart' show EmbeddingRow;
 import '../db/repositories/embedding_repo.dart';
+import '../models/chat_message.dart';
+import 'chat_message_embedding_service.dart';
+import '../utils/cast_helpers.dart';
 import 'embedding_service.dart';
 import 'transport/llm_capture_context.dart';
 import 'vector_math.dart';
@@ -61,6 +64,8 @@ class MessageRecallService {
     int topK = defaultTopK,
     int maxChars = defaultMaxChars,
     Set<String> visibleMessageIds = const {},
+    Set<String>? allowedSourceMessageIds,
+    Map<String, ChatMessage>? sourceMessages,
     CancelToken? cancelToken,
     bool Function()? shouldAbort,
   }) async {
@@ -75,6 +80,29 @@ class MessageRecallService {
 
       final candidates = <VectorCandidate>[];
       for (final row in rows) {
+        final sourceIds = _decodeMessageIds(row);
+        if (allowedSourceMessageIds != null &&
+            (sourceIds.isEmpty ||
+                !sourceIds.every(allowedSourceMessageIds.contains))) {
+          continue;
+        }
+        if (sourceMessages != null) {
+          final sources = sourceIds.map((id) => sourceMessages[id]).toList();
+          if (sources.isEmpty ||
+              sources.any(
+                (message) =>
+                    message == null ||
+                    message.isHidden ||
+                    message.isTyping ||
+                    message.isError,
+              )) {
+            continue;
+          }
+          final text = ChatMessageEmbeddingService.formatChunk(
+            sources.cast<ChatMessage>(),
+          );
+          if (computeHash(text) != row.textHash) continue;
+        }
         if (!_repo.hasUsableVectors(row)) continue;
         final vectors = _repo.decodeVectors(row);
         if (vectors == null || vectors.isEmpty) continue;

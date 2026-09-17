@@ -12,6 +12,8 @@ import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/tracker.dart';
+import 'package:glaze_flutter/core/models/tracker_snapshot.dart';
+import 'package:glaze_flutter/core/db/repositories/tracker_snapshot_repo.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/memory_settings_provider.dart';
 
@@ -77,11 +79,14 @@ void main() {
         );
       });
       final builder = container.read(builderProvider);
-      await container.read(characterRepoProvider).put(
-        const Character(id: 'c1', name: 'Character'),
-      );
+      await container
+          .read(characterRepoProvider)
+          .put(const Character(id: 'c1', name: 'Character'));
 
-      for (final (mode, expectedArc) in [('balanced', false), ('fast', false)]) {
+      for (final (mode, expectedArc) in [
+        ('balanced', false),
+        ('fast', false),
+      ]) {
         await container
             .read(memoryGlobalSettingsProvider.notifier)
             .save(MemoryGlobalSettings(memoryMode: mode));
@@ -132,13 +137,15 @@ void main() {
       await container
           .read(memoryGlobalSettingsProvider.notifier)
           .save(const MemoryGlobalSettings());
-      await container.read(memoryBookRepoProvider).put(
-        const MemoryBook(
-          id: 'memorybook_s1',
-          sessionId: 's1',
-          settings: MemoryBookSettings(enabled: false),
-        ),
-      );
+      await container
+          .read(memoryBookRepoProvider)
+          .put(
+            const MemoryBook(
+              id: 'memorybook_s1',
+              sessionId: 's1',
+              settings: MemoryBookSettings(enabled: false),
+            ),
+          );
       final callsBeforeBookDisable = loadCount;
       final bookDisabledPayload = await builder.buildFromPreFetched(
         charId: 'c1',
@@ -158,6 +165,53 @@ void main() {
       expect(bookDisabledPayload.studioSessionStateContent, isNull);
       expect(bookDisabledPayload.arcContent, isNull);
       expect(bookDisabledPayload.entitiesContent, isNull);
+
+      const session = ChatSession(
+        id: 's1',
+        characterId: 'c1',
+        sessionIndex: 0,
+        messages: [
+          ChatMessage(id: 'before', role: 'user', content: 'Before'),
+          ChatMessage(id: 'target', role: 'assistant', content: 'Target'),
+          ChatMessage(
+            id: 'future',
+            role: 'assistant',
+            content: 'Future secret',
+          ),
+        ],
+      );
+      await container.read(chatRepoProvider).put(session);
+      for (final (messageId, day) in [('before', '12'), ('future', '37')]) {
+        await TrackerSnapshotRepo(db).upsert(
+          TrackerSnapshot(
+            sessionId: 's1',
+            messageId: messageId,
+            swipeId: 0,
+            agentSwipeId: 0,
+            committed: true,
+            trackers: [
+              Tracker(
+                sessionId: 's1',
+                name: 'world:day',
+                value: day,
+                scope: 'ledger',
+              ),
+            ],
+          ),
+        );
+      }
+      final historical = await builder.collectGenerationContext(
+        charId: 'c1',
+        session: session,
+        apiConfigOverride: const ApiConfig(id: 'api'),
+        excludeSnapshotMessageId: 'target',
+        allowRemoteRetrieval: false,
+      );
+      expect(historical.history.map((message) => message.id), ['before']);
+      expect(historical.gameDay, '12');
+      expect(historical.summaryContent, isNull);
+      expect(historical.entitiesContent, isNull);
+      expect(historical.studioSessionStateContent, isNull);
     },
   );
 }

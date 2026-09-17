@@ -1,17 +1,10 @@
 import '../../models/chat_message.dart';
+import '../game_time.dart';
 import '../memory_excerpt_selector.dart';
-import '../memory_formatting.dart';
 import '../memory_selector.dart';
+import 'memory_prompt_packer.dart';
 
-final class ResolvedMemoryContent {
-  final String hardBlockContent;
-  final String macroContent;
-
-  const ResolvedMemoryContent({
-    required this.hardBlockContent,
-    required this.macroContent,
-  });
-}
+export 'memory_prompt_packer.dart' show ResolvedMemoryContent;
 
 final class MemoryContextResolution {
   final MemorySelection selection;
@@ -41,6 +34,7 @@ final class MemoryContextResolver {
     required int chunkFirstTopEntries,
     required int chunkFirstTopChunks,
     String? summaryExcerpt,
+    GameTimeState gameTime = const GameTimeState(),
   }) {
     final refiltered = _refilterSelection(
       selection,
@@ -48,20 +42,25 @@ final class MemoryContextResolver {
       chunkBudgeting: packingMode == 'chunk_first',
       disableSourceWindowExclusion: disableSourceWindowExclusion,
     );
-    final useExcerptPacking = excerptingEnabled || packingMode == 'chunk_first';
-    final excerpted = !useExcerptPacking
-        ? MemoryExcerptSelector.fullEntries(refiltered)
-        : MemoryExcerptSelector.select(
-            refiltered,
-            packingMode: packingMode,
-            maxExcerptTokensPerEntry: excerptTokensPerChunk,
-            maxExcerptChunksPerEntry: excerptChunksPerEntry,
-            chunkFirstTopEntries: chunkFirstTopEntries,
-            chunkFirstTopChunks: chunkFirstTopChunks,
-          );
+    const packer = MemoryPromptPacker();
+    final excerpted = packer.pack(
+      selection: refiltered,
+      excerptingEnabled: excerptingEnabled,
+      packingMode: packingMode,
+      excerptTokensPerChunk: excerptTokensPerChunk,
+      excerptChunksPerEntry: excerptChunksPerEntry,
+      chunkFirstTopEntries: chunkFirstTopEntries,
+      chunkFirstTopChunks: chunkFirstTopChunks,
+      gameTime: gameTime,
+      summaryExcerpt: summaryExcerpt,
+    );
     final content = excerpted.items.isEmpty
         ? null
-        : _buildContent(excerpted, summaryExcerpt: summaryExcerpt);
+        : packer.format(
+            excerpted.items,
+            summaryExcerpt: summaryExcerpt,
+            gameTime: gameTime,
+          );
     return MemoryContextResolution(
       selection: refiltered,
       excerptSelection: excerpted,
@@ -111,27 +110,6 @@ final class MemoryContextResolver {
         diversityAware: false,
         chunkBudgeting: chunkBudgeting,
       ),
-    );
-  }
-
-  ResolvedMemoryContent _buildContent(
-    MemoryExcerptSelection excerptSelection, {
-    String? summaryExcerpt,
-  }) {
-    final macro = formatMemoryItems(
-      excerptSelection.items,
-      includeContextHeader: false,
-    );
-    final parts = <String>[];
-    if (summaryExcerpt != null && summaryExcerpt.isNotEmpty) {
-      parts.add('Summary excerpt:\n$summaryExcerpt');
-    }
-    parts.add(
-      formatMemoryItems(excerptSelection.items, includeContextHeader: true),
-    );
-    return ResolvedMemoryContent(
-      hardBlockContent: parts.join('\n\n'),
-      macroContent: macro,
     );
   }
 }

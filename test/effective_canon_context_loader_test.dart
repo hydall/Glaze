@@ -7,9 +7,16 @@ import 'package:glaze_flutter/core/db/repositories/applied_canon_transition_repo
 import 'package:glaze_flutter/core/db/repositories/canon_transition_fact_ref_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_knowledge_fact_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
+import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/db/repositories/character_revision_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_snapshot_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/session_canon_checkpoint_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/session_lorebook_revision_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/session_lorebook_evolution_repo.dart';
+import 'package:glaze_flutter/core/models/historical_message_window.dart';
+import 'package:glaze_flutter/core/models/lorebook.dart';
 import 'package:glaze_flutter/core/llm/prompt/ledger_tracker_loader.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/character_knowledge_fact.dart';
@@ -123,6 +130,18 @@ void main() {
   });
 
   test('regen exclusion removes target snapshot and target facts', () async {
+    await ChatRepo(db).put(
+      const ChatSession(
+        id: 's',
+        characterId: 'c',
+        sessionIndex: 0,
+        messages: [
+          ChatMessage(id: 'previous', role: 'assistant', content: 'Before'),
+          ChatMessage(id: 'target', role: 'assistant', content: 'Target'),
+          ChatMessage(id: 'future', role: 'assistant', content: 'Future'),
+        ],
+      ),
+    );
     await TrackerSnapshotRepo(db).upsert(
       const TrackerSnapshot(
         sessionId: 's',
@@ -161,6 +180,25 @@ void main() {
     );
     await facts.insertTentative(_fact('kept', sourceMessageId: 'previous'));
     await facts.insertTentative(_fact('excluded', sourceMessageId: 'target'));
+    await facts.insertTentative(_fact('future', sourceMessageId: 'future'));
+    await TrackerSnapshotRepo(db).upsert(
+      const TrackerSnapshot(
+        sessionId: 's',
+        messageId: 'future',
+        swipeId: 0,
+        agentSwipeId: 0,
+        trackers: [
+          Tracker(
+            sessionId: 's',
+            name: 'scene.location',
+            value: 'future',
+            scope: 'ledger',
+          ),
+        ],
+        committed: true,
+        createdAt: 3,
+      ),
+    );
 
     final context = await loader.loadReadOnly(
       sessionId: 's',
@@ -180,6 +218,141 @@ void main() {
       isTrue,
     );
   });
+
+  test('historical card and lore use the same surviving checkpoint', () async {
+    const messages = [
+      ChatMessage(id: 'previous', role: 'assistant', content: 'Before'),
+      ChatMessage(id: 'target', role: 'assistant', content: 'Target'),
+      ChatMessage(id: 'future', role: 'assistant', content: 'Future'),
+    ];
+    await ChatRepo(db).put(
+      const ChatSession(
+        id: 's',
+        characterId: 'c',
+        sessionIndex: 0,
+        messages: messages,
+      ),
+    );
+    final first = _character('before revelation');
+    await loader.load(sessionId: 's', sourceCharacter: first);
+    final checkpoints = SessionCanonCheckpointRepo(db);
+    final initial = (await revisions.getForCharacter('c')).single;
+    final root = await checkpoints.appendRootInTransaction(
+      sessionId: 's',
+      characterId: 'c',
+      characterRevision: initial.revision,
+      characterRevisionHash: initial.revisionHash,
+    );
+    final lore = SessionLorebookRevisionRepo(db);
+    await lore.appendInTransaction(
+      checkpointId: root.id,
+      sessionId: 's',
+      lorebookId: 'book',
+      entryId: 'entry',
+      baseContentHash: 'initial',
+      expectedPreviousContentHash: 'initial',
+      content: 'Identity unknown',
+      contentHash: 'old',
+      rewriteOperationId: 'root',
+    );
+    final future = first.copyWith(description: 'identity revealed');
+    await loader.load(sessionId: 's', sourceCharacter: future);
+    final next = (await revisions.getForCharacter('c')).last;
+    final checkpoint = await checkpoints.appendInTransaction(
+      sessionId: 's',
+      expectedParentCheckpointId: root.id,
+      characterId: 'c',
+      characterRevision: next.revision,
+      characterRevisionHash: next.revisionHash,
+      rewriteJobId: 'future-job',
+      anchor: const SessionCanonCheckpointAnchor(
+        messageId: 'future',
+        swipeId: 0,
+        agentSwipeId: 0,
+      ),
+    );
+    await lore.appendInTransaction(
+      checkpointId: checkpoint.id,
+      sessionId: 's',
+      lorebookId: 'book',
+      entryId: 'entry',
+      baseContentHash: 'initial',
+      expectedPreviousContentHash: 'old',
+      content: 'Identity revealed',
+      contentHash: 'new',
+      rewriteOperationId: 'future-job',
+    );
+    final context = await loader.loadReadOnly(
+      sessionId: 's',
+      sourceCharacter: future,
+      excludeSnapshotMessageId: 'target',
+    );
+    expect(context.effectiveRevision.number, initial.revision);
+    final historicalLore = await SessionLorebookEvolutionRepo(db)
+        .resolveEffectiveLorebooks(
+          sessionId: 's',
+          historicalWindow: HistoricalMessageWindow.before(messages, 'target'),
+          lorebooks: const [
+            Lorebook(
+              id: 'book',
+              name: 'Book',
+              entries: [
+                LorebookEntry(id: 'entry', content: 'Identity revealed'),
+              ],
+            ),
+          ],
+        );
+    expect(
+      historicalLore.lorebooks.single.entries.single.content,
+      'Identity unknown',
+    );
+    expect((await revisions.getForCharacter('c')).last.revision, next.revision);
+  });
+
+  test(
+    'historical knowledge restores superseded facts without mutating live state',
+    () async {
+      final old = _fact('old', sourceMessageId: 'previous');
+      final replacement = old.copyWith(
+        id: 'replacement',
+        sourceMessageId: 'future',
+        object: 'new truth',
+      );
+      await facts.insertTentative(old);
+      await facts.activateAnchor(
+        sessionId: 's',
+        messageId: 'previous',
+        swipeId: 0,
+        agentSwipeId: 0,
+      );
+      await facts.insertTentative(replacement);
+      await facts.activateAnchor(
+        sessionId: 's',
+        messageId: 'future',
+        swipeId: 0,
+        agentSwipeId: 0,
+      );
+      final historical = await facts.getForHistoricalWindow(
+        's',
+        HistoricalMessageWindow(const [
+          ChatMessage(id: 'previous', role: 'assistant', content: 'Before'),
+        ]),
+      );
+      expect(historical.single.id, 'old');
+      expect(
+        historical.single.lifecycle,
+        CharacterKnowledgeFactLifecycle.active,
+      );
+      expect(
+        (await facts.getById('old'))!.lifecycle,
+        CharacterKnowledgeFactLifecycle.superseded,
+      );
+      expect(
+        (await facts.getById('replacement'))!.lifecycle,
+        CharacterKnowledgeFactLifecycle.active,
+      );
+    },
+  );
 
   test('read-only exact state overrides current Ledger and facts', () async {
     final character = _character('one');

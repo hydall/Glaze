@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../../utils/id_generator.dart';
+import '../../models/historical_message_window.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
 
@@ -21,6 +22,34 @@ class SessionCanonCheckpointRepo {
   const SessionCanonCheckpointRepo(this.db);
 
   final AppDatabase db;
+
+  Future<SessionCanonCheckpointRow?> getForHistoricalWindow(
+    String sessionId,
+    HistoricalMessageWindow window,
+  ) async {
+    final checkpoints = await getForSession(sessionId);
+    SessionCanonCheckpointRow? selected;
+    var prefixValid = true;
+    for (final checkpoint in checkpoints) {
+      final survives =
+          checkpoint.sequence == 0 ||
+          checkpoint.anchorMessageId.startsWith('canon-rollback-root:') ||
+          window.containsAnchor(
+            checkpoint.anchorMessageId,
+            checkpoint.anchorSwipeId,
+            checkpoint.anchorAgentSwipeId,
+          );
+      final rollback =
+          checkpoint.rewriteJobId?.startsWith('canon-rollback:') ?? false;
+      if (rollback) prefixValid = survives;
+      if (prefixValid && survives) {
+        selected = checkpoint;
+      } else if (!rollback) {
+        prefixValid = false;
+      }
+    }
+    return selected;
+  }
 
   Future<SessionCanonCheckpointRow?> getLatest(String sessionId) =>
       (db.select(db.sessionCanonCheckpointRows)

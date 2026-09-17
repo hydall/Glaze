@@ -159,6 +159,11 @@ final class StudioContextPreparer {
                   ),
           );
 
+    final gameTimeState = GameTimeState(
+      time: inputs.gameTime,
+      date: inputs.gameDate,
+      day: int.tryParse(inputs.gameDay ?? ''),
+    );
     final memory = inputs.memorySelection == null
         ? null
         : const MemoryContextResolver().resolve(
@@ -172,12 +177,12 @@ final class StudioContextPreparer {
             chunkFirstTopEntries: inputs.chunkFirstTopEntries,
             chunkFirstTopChunks: inputs.chunkFirstTopChunks,
             summaryExcerpt: inputs.summaryContent,
+            gameTime: gameTimeState,
           );
     final memoryHardContent = memory?.content?.hardBlockContent;
-    final memoryMacroContent =
-        memory?.content?.macroContent ??
-        inputs.memoryMacroContent ??
-        inputs.memoryContent;
+    final memoryMacroContent = memory != null
+        ? memory.content?.macroContent
+        : inputs.memoryMacroContent ?? inputs.memoryContent;
     final loreMacroContent = lore.loreMacroBuffer.join('\n\n');
     final macroContext = baseMacroContext.copyWith(
       charDescription: _prepend(
@@ -206,6 +211,7 @@ final class StudioContextPreparer {
       visibleMessageIds: visibleMessageIds,
       fallbackContent: inputs.recalledMessagesContent,
       disableSourceWindowExclusion: disableSourceWindowExclusion,
+      gameTime: gameTimeState,
     );
 
     final slots = <StudioContextSlot, List<PromptMessage>>{
@@ -259,17 +265,12 @@ final class StudioContextPreparer {
           ? null
           : '${inputs.summaryPrefix ?? ''}${inputs.summaryContent}',
     );
-    final gameTimeState = GameTimeState(
-      time: inputs.gameTime,
-      date: inputs.gameDate,
-      day: int.tryParse(inputs.gameDay ?? ''),
-    );
     // Game-clock macros ({{gametime}} and friends) expand in the packed
     // memory content so Memory Book entries can anchor to in-game time.
     add(
       StudioContextSlot.memory,
       gameTimeState.expandMacros(
-        memoryHardContent ?? inputs.memoryContent ?? '',
+        (memory != null ? memoryHardContent : inputs.memoryContent) ?? '',
       ),
     );
     slots[StudioContextSlot.loreBefore]!.addAll(lore.loreBefore);

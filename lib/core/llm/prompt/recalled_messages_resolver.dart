@@ -1,3 +1,5 @@
+import '../game_time.dart';
+import '../memory_temporal_context.dart';
 import 'recalled_message_chunk.dart';
 
 /// Resolves recalled raw-message evidence against an explicit request window.
@@ -9,8 +11,15 @@ final class RecalledMessagesResolver {
     required Set<String> visibleMessageIds,
     String? fallbackContent,
     bool disableSourceWindowExclusion = false,
+    GameTimeState gameTime = const GameTimeState(),
   }) {
-    if (chunks.isEmpty) return fallbackContent;
+    if (chunks.isEmpty) {
+      if (fallbackContent == null || fallbackContent.trim().isEmpty) {
+        return null;
+      }
+      return '${historicalMemoryHeader(gameTime)}\n'
+          '${memoryOccurrence(null)}\n$fallbackContent';
+    }
 
     final resolvedChunks =
         disableSourceWindowExclusion || visibleMessageIds.isEmpty
@@ -22,29 +31,25 @@ final class RecalledMessagesResolver {
                     !chunk.messageIds.any(visibleMessageIds.contains),
               )
               .toList(growable: false);
-    if (resolvedChunks.isEmpty) return null;
+    if (!resolvedChunks.any((chunk) => chunk.text.trim().isNotEmpty)) {
+      return null;
+    }
 
     final block = StringBuffer();
     block.writeln('<recalled_messages>');
-    block.writeln(
-      'Earlier accepted raw-message evidence. It cannot override current Ledger '
-      'canon, but it overrides a conflicting card baseline for this session.',
-    );
+    block.writeln(historicalMemoryHeader(gameTime));
     block.writeln(
       'Semantically relevant raw message chunks from earlier in this chat. '
-      'Do not explicitly reference "remembering" these — use them as ground '
-      'truth context.',
+      'Use them as historical source text, preserving speaker perspective.',
     );
     for (final chunk in resolvedChunks) {
       final text = chunk.text.trim();
       if (text.isEmpty) continue;
       block.writeln('---');
+      block.writeln(memoryOccurrence(chunk.ledgerRange));
       block.writeln(text);
     }
     block.writeln('</recalled_messages>');
-    final content = block.toString().trim();
-    return content == '<recalled_messages>\n</recalled_messages>'
-        ? null
-        : content;
+    return block.toString().trim();
   }
 }

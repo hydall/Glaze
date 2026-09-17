@@ -190,7 +190,7 @@ class EffectiveCanonContextLoader {
     required bool reconcile,
     String? excludeSnapshotMessageId,
   }) async {
-    final source = reconcile
+    final source = reconcile && excludeSnapshotMessageId == null
         ? await _reconcileSource(sourceCharacter)
         : await _readSource(sourceCharacter);
     final input = await _readRepository.readFromSource(
@@ -201,7 +201,9 @@ class EffectiveCanonContextLoader {
     final assembly = _assemble(
       EffectiveCanonAssemblyInput(
         sourceCharacter: input.sourceCharacter,
-        lineage: source.lineage,
+        lineage: excludeSnapshotMessageId != null && input.lineage.isNotEmpty
+            ? input.lineage
+            : source.lineage,
         baseline: input.baseline,
         facts: input.facts,
         committedTrackers: input.committedTrackers,

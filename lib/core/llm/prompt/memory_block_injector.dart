@@ -344,6 +344,7 @@ DeferredMemoryResult finalizeDeferredMemory({
     chunkFirstTopEntries: payload.chunkFirstTopEntries,
     chunkFirstTopChunks: payload.chunkFirstTopChunks,
     summaryExcerpt: payload.summaryContent,
+    gameTime: gameTime,
   );
   final refiltered = resolved.selection;
   MemorySelection? finalMemorySelection = refiltered;
@@ -355,11 +356,8 @@ DeferredMemoryResult finalizeDeferredMemory({
 
   if (excerpted.items.isNotEmpty) {
     final rebuilt = resolved.content!;
-    // Game-clock macros in memory entries ({{gametime}} and friends) expand
-    // here so Memory Book content can anchor itself to the current in-game
-    // time without the full macro engine running over entry text.
-    var memoryContent = gameTime.expandMacros(rebuilt.hardBlockContent);
-    var memoryMacroContent = gameTime.expandMacros(rebuilt.macroContent);
+    var memoryContent = rebuilt.hardBlockContent;
+    var memoryMacroContent = rebuilt.macroContent;
     final replacedMacro = replaceDeferredMemoryPlaceholders(
       messages,
       rebuilt.macroContent,
@@ -403,8 +401,23 @@ DeferredMemoryResult finalizeDeferredMemory({
       memoryMacroContent: memoryMacroContent,
       visibleMessageIds: sourceWindowVisibleMessageIds,
     );
-  } else if (refiltered.entries.isEmpty &&
-      shouldInjectFactualContinuityGuard(payload)) {
+  } else {
+    replaceDeferredMemoryPlaceholders(messages, '');
+    macroTokens.remove('memory');
+    breakdown = recomputeBreakdownWithMemory(
+      calculator: calculator,
+      baseBreakdown: breakdown,
+      attributionBlocks: attributionBlocks,
+      historyMessages: messages.where((m) => m.isHistory).toList(),
+      lorebookReserveTokens: lorebookReserve,
+      macroTokens: macroTokens,
+      vectorLoreTokens: vectorLoreTokens,
+      memoryContent: '',
+      memoryMacroContent: '',
+      visibleMessageIds: sourceWindowVisibleMessageIds,
+    );
+  }
+  if (excerpted.items.isEmpty && shouldInjectFactualContinuityGuard(payload)) {
     const guard =
         'Factual continuity note: The latest user message may refer to older context, but no reliable Memory Book entry was selected. Do not invent specific past events; ask for clarification or answer only from visible chat context.';
     final hasMemoryBlock =
