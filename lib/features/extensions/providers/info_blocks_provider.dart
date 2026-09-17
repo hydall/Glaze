@@ -204,6 +204,37 @@ class InfoBlocksNotifier extends StateNotifier<List<InfoBlock>> {
       ..sort((a, b) => a.order.compareTo(b.order));
   }
 
+  /// The `agentSwipeId` this message's blocks actually live under.
+  ///
+  /// [getByMessageId] matches the exact binding first and only falls back to
+  /// the legacy `-1` rows when nothing matches exactly. A run that writes a
+  /// fresh row under the requested binding therefore makes the exact match
+  /// non-empty and hides every legacy sibling, which the panel then re-renders
+  /// as `pending`. Callers that start a run for an existing message resolve the
+  /// binding through this method first, so a new row joins its siblings instead
+  /// of orphaning them.
+  int resolveAgentSwipeId(
+    String messageId, {
+    int swipeId = 0,
+    int agentSwipeId = -1,
+  }) {
+    if (agentSwipeId == -1) return -1;
+    final hasExact = state.any(
+      (b) =>
+          b.messageId == messageId &&
+          b.swipeId == swipeId &&
+          b.agentSwipeId == agentSwipeId,
+    );
+    if (hasExact) return agentSwipeId;
+    final hasLegacy = state.any(
+      (b) =>
+          b.messageId == messageId &&
+          b.swipeId == swipeId &&
+          b.agentSwipeId == -1,
+    );
+    return hasLegacy ? -1 : agentSwipeId;
+  }
+
   /// Aggregated status for a message:
   /// - 'running' if any block is running
   /// - 'error' if any block errored (and none running)

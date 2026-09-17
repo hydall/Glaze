@@ -1,6 +1,7 @@
 import 'package:collection/collection.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/block_config.dart';
 import '../providers/extension_presets_provider.dart';
 import '../providers/extensions_settings_provider.dart';
 import '../providers/info_blocks_provider.dart';
@@ -60,7 +61,21 @@ class ExtBlocksPanelBuilder {
     return isLastAssistant;
   }
 
-  /// Merges enabled preset blocks with DB rows. Missing rows become `pending`.
+  /// Whether a block without a stored row belongs in this message's panel as a
+  /// `pending` placeholder.
+  ///
+  /// The panel hangs under an assistant message and runs the `afterAssistant`
+  /// set, so only those blocks can ever fill a placeholder here. An
+  /// `afterUser` block stores its result under the user message (deliberately
+  /// panel-less), a `periodic` block stores nothing at all, and `rewrite` /
+  /// `accumulation` blocks have no runtime yet — listing them would leave a row
+  /// stuck on "pending" forever, with a run button that either re-binds the
+  /// block to the wrong message or writes an error card.
+  static bool _canPlaceholder(BlockConfig cfg) =>
+      cfg.trigger == BlockTrigger.afterAssistant && cfg.type.isRunnable;
+
+  /// Merges enabled preset blocks with DB rows. A block that can run here but
+  /// has no row yet becomes `pending`.
   static List<Map<String, dynamic>> build(
     Ref ref, {
     required String sessionId,
@@ -91,20 +106,28 @@ class ExtBlocksPanelBuilder {
 
     return [
       for (final cfg in enabledConfigs)
-        dbByBlockId[cfg.id]?.toMap() ??
-            {
-              'blockId': cfg.id,
-              'blockName': cfg.name,
-              'type': cfg.type.name,
-              'status': 'pending',
-              'content': '',
-              'order': cfg.order,
-            },
+        if (dbByBlockId[cfg.id] != null)
+          {...dbByBlockId[cfg.id]!.toMap(), 'manualOnly': cfg.manualOnly}
+        else if (_canPlaceholder(cfg))
+          {
+            'blockId': cfg.id,
+            'blockName': cfg.name,
+            'type': cfg.type.name,
+            'status': 'pending',
+            'content': '',
+            'order': cfg.order,
+            'manualOnly': cfg.manualOnly,
+          },
     ];
   }
 
+  /// Whether the panel's "run all" control has anything to do: a block the
+  /// automatic `afterAssistant` chain would run is not finished. Manual-only
+  /// blocks are excluded — Run All never runs them, so a panel holding nothing
+  /// but a manual placeholder would offer a button that does nothing.
   static bool canRunAll(List<Map<String, dynamic>> blocks) {
     return blocks.any((b) {
+      if (b['manualOnly'] == true) return false;
       final s = b['status'] as String? ?? '';
       return s == 'pending' || s == 'error' || s == 'stopped';
     });

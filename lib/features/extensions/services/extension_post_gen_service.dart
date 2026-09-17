@@ -115,13 +115,13 @@ class ExtensionPostGenService {
     onStarted?.call();
 
     if (clearExisting) {
-      await _ref
-          .read(infoBlocksProvider(sessionId).notifier)
-          .deleteByMessageId(
-            messageId,
-            swipeId: swipeId,
-            agentSwipeId: agentSwipeId,
-          );
+      await _clearRowsForBlocks(
+        sessionId: sessionId,
+        messageId: messageId,
+        swipeId: swipeId,
+        agentSwipeId: agentSwipeId,
+        blockIds: {for (final block in blocks) block.id},
+      );
     }
 
     _refreshPanelForMessage(
@@ -159,6 +159,30 @@ class ExtensionPostGenService {
       );
     }
     return true;
+  }
+
+  /// Drops the stored rows of the blocks this run is about to re-create, and
+  /// only those. A manual-only block's result, or one left by a block that no
+  /// longer belongs to the automatic chain, is not this run's to delete —
+  /// wiping it would blank a panel entry nothing is going to fill again.
+  Future<void> _clearRowsForBlocks({
+    required String sessionId,
+    required String messageId,
+    required int swipeId,
+    required int agentSwipeId,
+    required Set<String> blockIds,
+  }) async {
+    final notifier = _ref.read(infoBlocksProvider(sessionId).notifier);
+    final rows = await _repo.getByMessageId(
+      sessionId,
+      messageId,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+    );
+    for (final row in rows) {
+      if (!blockIds.contains(row.blockId)) continue;
+      await notifier.delete(row.id);
+    }
   }
 
   ExtensionPreset? _resolveActivePreset() {
