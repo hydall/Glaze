@@ -12,6 +12,11 @@ import { InteractionDispatch } from './interaction_dispatch.js';
 import { PanelHost } from './panel_host.js';
 import { sanitizeExtBlockHtml } from './html_sanitizer.js';
 import { parseImageResultElement, parseImagePendingPayload } from '../formatter/formatter.js';
+
+/* Breathing room the caret keeps from the chrome it is being revealed past.
+ * Landing the caret exactly on the input bar's edge reads as though it is
+ * still half under it. */
+const CARET_REVEAL_GUTTER_PX = 12;
 import { ICON } from '../renderer/icon_library.js';
 import { applyTypingPhase } from '../renderer/typing_phase.js';
 
@@ -1198,7 +1203,7 @@ export class Bridge {
       this._bottomInsetApplied = true;
       cancelAnimationFrame(this._repinRaf);
       this._repinAnimating = false;
-      container.style.paddingBottom = target + 'px';
+      this._applyBottomPadding(container, target);
       container.scrollTop = targetScrollTop;
       this._finishRepin(container);
       return;
@@ -1214,7 +1219,7 @@ export class Bridge {
     // the padding it reveals sits under the keyboard / input bar where it cannot
     // be seen mid-transition.
     if (target > prevPadding) {
-      container.style.paddingBottom = target + 'px';
+      this._applyBottomPadding(container, target);
     } else if (paddingChanged) {
       this._scheduleShrink(container);
     }
@@ -1245,7 +1250,7 @@ export class Bridge {
       const target = this._targetBottomPadding();
       const applied = parseFloat(container.style.paddingBottom) || 0;
       if (target >= applied - 0.1) return;
-      container.style.paddingBottom = target + 'px';
+      this._applyBottomPadding(container, target);
     }, 260);
   }
 
@@ -1253,6 +1258,28 @@ export class Bridge {
   // absorb by shrinking. See _setupViewportShrinkListener.
   _targetBottomPadding() {
     return Math.max(0, this._bottomInsetPx - this._viewportShrinkPx());
+  }
+
+  /* Writes the bottom inset as BOTH kinds of padding.
+   *
+   * `padding-bottom` reserves the space at the end of the list, which is what
+   * keeps the newest message off the input bar. It does nothing for anything
+   * reached mid-list, though, and the browser's own "scroll this into view" is
+   * the main such caller: the chat WebView is full-screen and never resizes
+   * when the keyboard opens (the scaffold runs with
+   * `resizeToAvoidBottomInset: false`), so as far as the page is concerned the
+   * scrollport runs to the bottom of the screen and a caret sitting behind the
+   * input bar is perfectly visible — the browser leaves it there. That is what
+   * put the caret of an edited message under the composer: the reveal had
+   * nothing to reveal.
+   *
+   * `scroll-padding-bottom` is the property for exactly this — the part of the
+   * scrollport something else is covering — and the browser's caret reveal
+   * honours it. The extra gutter keeps the caret off the chrome's edge instead
+   * of flush against it. */
+  _applyBottomPadding(container, target) {
+    container.style.paddingBottom = target + 'px';
+    container.style.scrollPaddingBottom = target + CARET_REVEAL_GUTTER_PX + 'px';
   }
 
   // The offset that parks the newest message on the input bar, once everything
@@ -1310,7 +1337,7 @@ export class Bridge {
     const target = this._targetBottomPadding();
     const applied = parseFloat(container.style.paddingBottom) || 0;
     if (target > applied) {
-      container.style.paddingBottom = target + 'px';
+      this._applyBottomPadding(container, target);
     } else if (target < applied - 0.1) {
       this._scheduleShrink(container);
     }
@@ -1330,6 +1357,10 @@ export class Bridge {
   setTopPadding(px) {
     const container = document.getElementById('chat-container') || document.body;
     container.style.paddingTop = px + 'px';
+    // The floating header covers the same number of pixels at the top, and a
+    // reveal that parks its target under it is just as invisible — see
+    // _applyBottomPadding.
+    container.style.scrollPaddingTop = px + CARET_REVEAL_GUTTER_PX + 'px';
   }
 
   /* ---------- Overlay blur regions (Flutter glass over the WebView) ----------
