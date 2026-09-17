@@ -88,8 +88,9 @@ InAppWebViewSettings chatWebViewInAppSettings({bool isInspectable = true}) {
     domStorageEnabled: true,
     transparentBackground: chatWebViewTransparentBackground(),
     isInspectable: isInspectable,
-    // Android composition mode. See [chatWebViewUsesHybridComposition] — false
-    // hands the WebView to Flutter as a texture layer, which is what lets the
+    // Android composition mode. See [chatWebViewUsesHybridComposition] — true
+    // (the default) keeps the WebView a real view in the Android hierarchy;
+    // false hands it to Flutter as a texture layer, which is what would let the
     // chat chrome blur it with an ordinary BackdropFilter.
     useHybridComposition: chatWebViewUsesHybridComposition(),
     cacheEnabled: true,

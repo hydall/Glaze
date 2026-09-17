@@ -211,7 +211,10 @@ class SelectionManager {
       bar = document.createElement('div');
       bar.id = 'selection-bar';
       bar.className = 'selection-bar';
-      bar.innerHTML = '<button class="sel-btn" data-action="copy">Copy</button><button class="sel-btn" data-action="quote">Quote</button>';
+      // Copy only. A Quote button sat here for a long time sending a `quote`
+      // action that the Dart side never implemented — `onSelectionAction`
+      // handles `copy` and nothing else, so it was a button that did nothing.
+      bar.innerHTML = '<button class="sel-btn" data-action="copy">Copy</button>';
       bar.addEventListener('click', (e) => {
         const btn = e.target.closest('.sel-btn');
         if (!btn) return;
