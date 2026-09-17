@@ -15,6 +15,7 @@ export class GenTimer {
     this._prime = null;
     this._primeTicksLeft = 0;
     this._start = null;
+    this._boundId = null;
   }
 
   _format(startTime) {
@@ -50,8 +51,7 @@ export class GenTimer {
    * clock can start a frame or two before it is appended. */
   _tick() {
     const timeStr = this._format(this._start);
-    const streamingEl = document.querySelector('[data-message-id="__streaming__"]')
-      || document.querySelector('.message-section.char .msg-body .typing-container')?.closest('.message-section');
+    const streamingEl = this._findBubble();
     if (!streamingEl) return false;
 
     let wrapper = streamingEl.querySelector('.gen-time-wrapper');
@@ -88,6 +88,31 @@ export class GenTimer {
     return false;
   }
 
+  /* The bubble this run's clock is counting for.
+   *
+   * A plain send streams into the placeholder, which carries the `__streaming__`
+   * id for the whole run, so looking it up again every tick always found it. A
+   * regenerate, continue or post-clean run streams into a message that already
+   * has an id of its own, and the only thing that marked it as this run's bubble
+   * was the typing indicator — which the first token replaces with the reply.
+   * Re-deriving the bubble on every tick therefore lost it the moment text
+   * arrived, and the clock sat frozen at a fraction of a second until the
+   * finished message brought its recorded time. So the bubble is remembered once
+   * found and released when the clock stops. A binding is only replaced when the
+   * search actually turns something up, so a row the virtual list has scrolled
+   * out of the DOM does not drop it.
+   */
+  _findBubble() {
+    if (this._boundId) {
+      const bound = document.querySelector(`[data-message-id="${this._boundId}"]`);
+      if (bound) return bound;
+    }
+    const found = document.querySelector('[data-message-id="__streaming__"]')
+      || document.querySelector('.message-section.char .msg-body .typing-container')?.closest('.message-section');
+    if (found) this._boundId = found.dataset.messageId || null;
+    return found || null;
+  }
+
   /* Runs at the fast cadence until the bubble shows up, then gets out of the
    * way. Without it battery saver waits out its full second regardless of the
    * immediate paint, because the bubble is not in the DOM yet when it runs. */
@@ -114,5 +139,6 @@ export class GenTimer {
       this._interval = null;
     }
     this._start = null;
+    this._boundId = null;
   }
 }

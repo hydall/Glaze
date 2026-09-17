@@ -152,3 +152,72 @@ test('a clock already running is not restarted by the generation edge', async ({
   );
   expect(startedAfter).toBe(startedBefore);
 });
+
+// A regenerate, continue or post-clean run does not stream into the
+// `__streaming__` placeholder — it streams into a message that is already on
+// screen under its own id. The clock has to find that bubble, and keep it: the
+// only thing marking it as this run's bubble is the typing indicator, and the
+// first token replaces that with the reply.
+async function regenerate(page) {
+  await page.evaluate(() => {
+    window.bridge.batterySaver = true;
+    window.bridge.setMessages(
+      JSON.stringify([
+        JSON.parse(window.__M('a1', 'assistant', 'the reply being replaced')),
+      ]),
+    );
+    window.bridge.setGenerating(true);
+    window.bridge.updateMessage(
+      window.__M('a1', 'assistant', '', { isTyping: true, isGenerating: true }),
+    );
+  });
+}
+
+const regenClock = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('[data-message-id="a1"] .gen-time-badge');
+    return el ? el.textContent.trim() : null;
+  });
+
+test('a regenerated bubble gets the clock too', async ({ page }) => {
+  await boot(page);
+  await regenerate(page);
+
+  await page.waitForTimeout(350);
+  expect(await regenClock(page)).toBe('0s');
+});
+
+test('the clock keeps counting once the reply starts arriving', async ({
+  page,
+}) => {
+  await boot(page);
+  await regenerate(page);
+  await page.waitForTimeout(350);
+
+  // The first token replaces the typing indicator with the reply. Re-deriving
+  // the bubble from that indicator on every tick lost it here, and the clock
+  // froze for the rest of the run.
+  await page.evaluate(() => {
+    window.bridge.updateMessage(
+      window.__M('a1', 'assistant', 'a fresh', {
+        isTyping: true,
+        isGenerating: true,
+      }),
+    );
+  });
+  await page.waitForTimeout(1400);
+  expect(await regenClock(page)).toBe('1s');
+
+  await page.waitForTimeout(1000);
+  expect(await regenClock(page)).toBe('2s');
+});
+
+test('the clock releases its bubble when the run ends', async ({ page }) => {
+  await boot(page);
+  await regenerate(page);
+  await page.waitForTimeout(350);
+  expect(await page.evaluate(() => window.bridge._genTimer._boundId)).toBe('a1');
+
+  await page.evaluate(() => window.bridge.setGenerating(false));
+  expect(await page.evaluate(() => window.bridge._genTimer._boundId)).toBeNull();
+});
