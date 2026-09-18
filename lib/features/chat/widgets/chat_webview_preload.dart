@@ -21,6 +21,40 @@ class _ChatWebViewPreloaderState extends State<ChatWebViewPreloader> {
   /// of on every rebuild of the preloader.
   late final InAppWebViewSettings _webViewSettings = chatWebViewInAppSettings();
 
+  /// The preloaded page's render process died before any chat attached to it.
+  ///
+  /// Android kills the render process under memory pressure, and the WebView
+  /// preloaded at startup is an ordinary victim. The preloader used to keep
+  /// that corpse in the shared keep-alive: the first chat to open re-attached
+  /// to a page that no longer existed, and the reader got a blank chat whose
+  /// bridge never came up. Drop the dead keep-alive instead, so the first chat
+  /// builds a fresh native WebView, and stop preloading for this launch — a
+  /// process that died once under memory pressure is not worth preloading a
+  /// replacement of, and remounting here could race a chat that is already
+  /// attaching.
+  ///
+  /// This covers the preload window only. Once `onLoadStop` retires the
+  /// preloader's WebView there is no native view listening for death, which is
+  /// why the surface's own init handshake has to bound its reads and rebuild.
+  void _handlePreloadProcessGone() {
+    if (!mounted || _preloaded) return;
+    debugPrint(
+      '[ChatWebView] preload render process gone; dropping the preload '
+      'keep-alive so the first chat builds a fresh WebView',
+    );
+    // Unmount the dead platform view first, then dispose the keep-alive on the
+    // next frame — the same order the chat surface uses when it replaces a
+    // dead view.
+    setState(() => _preloaded = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await InAppWebViewController.disposeKeepAlive(chatWebViewKeepAlive);
+      } catch (e) {
+        debugPrint('[ChatWebView] disposing the preload keep-alive failed: $e');
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // Skip webview preloading on Windows and Linux (no InAppWebView
@@ -48,6 +82,19 @@ class _ChatWebViewPreloaderState extends State<ChatWebViewPreloader> {
                   initialSettings: _webViewSettings,
                   onLoadStop: (_, _) {
                     if (mounted) setState(() => _preloaded = true);
+                  },
+                  onRenderProcessGone: (_, detail) {
+                    debugPrint(
+                      '[ChatWebView] preload render process gone '
+                      '(didCrash: ${detail.didCrash})',
+                    );
+                    _handlePreloadProcessGone();
+                  },
+                  onWebContentProcessDidTerminate: (_) {
+                    debugPrint(
+                      '[ChatWebView] preload web content process terminated',
+                    );
+                    _handlePreloadProcessGone();
                   },
                   shouldOverrideUrlLoading: (controller, request) async {
                     return chatWebViewNavigationPolicy(request.request.url);

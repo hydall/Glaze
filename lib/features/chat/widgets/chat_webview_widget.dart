@@ -33,9 +33,15 @@ import 'chat_webview_recovery.dart';
 import 'chat_webview_surface.dart';
 import 'chat_webview_sync_dispatcher.dart';
 import 'message_scripts_prompt_sheet.dart';
+import 'webview_bridge_probe.dart';
 import 'webview_callbacks.dart';
 
 const String _kStreamingId = '__streaming__';
+
+/// The expression that tells the handshake the page's JS bridge is up. Shared
+/// by the fast-path probe and the polling fallback so the two can never drift.
+const String _kJsBridgeReadyProbe =
+    'typeof window.bridge !== "undefined" && window.bridge != null';
 const Duration _kBridgeOpTimeout = Duration(seconds: 15);
 const Duration _kWebViewInitTimeout = Duration(seconds: 45);
 const Duration _kJsBridgeReadyTimeout = Duration(seconds: 30);
@@ -369,10 +375,19 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
     // Fast path: JS already fired onWebViewReady (keep-alive preload case —
     // the page was loaded before the chat screen opened).
-    final alreadyReady = await bridge.evalJsWithResult(
-      'typeof window.bridge !== "undefined" && window.bridge != null',
+    //
+    // Bounded, because this is the first read of a page that may already be
+    // dead: the OS can kill the render process of the shared keep-alive
+    // WebView while no chat is mounted, and a dead page accepts the call
+    // without ever answering it. Unbounded, that hang is terminal — the init
+    // future is already claimed, so `_kickInitWhenReady` backs off and the
+    // rebuild path never runs. A timeout throws out of here into the same
+    // `_handleWebViewFailure(rebuildable: true)` the init timeout uses.
+    final alreadyReady = await probeWebViewJsBridge(
+      () => bridge.evalJsWithResult(_kJsBridgeReadyProbe),
+      timeout: _kBridgeOpTimeout,
     );
-    if (alreadyReady == true) {
+    if (alreadyReady) {
       PerfDebug.chatWebViewJsBridgeReady();
       return;
     }
@@ -396,9 +411,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       while (!completer.isCompleted && DateTime.now().isBefore(deadline)) {
         await Future<void>.delayed(const Duration(milliseconds: 200));
         if (completer.isCompleted) return;
-        final ready = await bridge.evalJsWithResult(
-          'typeof window.bridge !== "undefined" && window.bridge != null',
-        );
+        final ready = await bridge.evalJsWithResult(_kJsBridgeReadyProbe);
         if (ready == true && !completer.isCompleted) completer.complete();
       }
     }());
