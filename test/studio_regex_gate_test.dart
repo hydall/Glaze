@@ -7,12 +7,16 @@ import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/state/active_regex_provider.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/global_regex_provider.dart';
+import 'package:glaze_flutter/core/state/studio_feature_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// The global scripts behind a load that has not finished yet — which is every
-/// cold start, where they come out of SharedPreferences while the chat is
-/// already opening. Reading the provider's `.value` in that window is what
-/// dropped them from the list the chat's first paint asked for.
+/// A chat preset and an agentic (Studio) preset are mutually exclusive, so the
+/// chat preset's scripts must not reach any pass while Studio is on.
+///
+/// These live in their own file on purpose: [SharedPreferences] caches the
+/// instance it hands out for the lifetime of the test isolate, so a file that
+/// has already resolved preferences with the switch *off* cannot turn it on
+/// again part-way through.
 class _SlowGlobalRegexNotifier extends GlobalRegexNotifier {
   @override
   Future<List<PresetRegex>> build() async {
@@ -23,13 +27,6 @@ class _SlowGlobalRegexNotifier extends GlobalRegexNotifier {
         name: 'Global card',
         regex: '/CARD/g',
         ephemerality: [1],
-      ),
-      PresetRegex(
-        id: 'global-off',
-        name: 'Disabled',
-        regex: '/OFF/g',
-        ephemerality: [1],
-        disabled: true,
       ),
     ];
   }
@@ -42,13 +39,6 @@ const _presetDisplay = PresetRegex(
   ephemerality: [1],
 );
 
-const _presetPromptOnly = PresetRegex(
-  id: 'preset-prompt-only',
-  name: 'Prompt only',
-  regex: '/PROMPT/g',
-  ephemerality: [2],
-);
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -56,14 +46,10 @@ void main() {
   late ProviderContainer container;
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'feature_studio_enabled': true});
     db = AppDatabase.forTesting(NativeDatabase.memory());
     await PresetRepo(db).put(
-      const Preset(
-        id: 'p1',
-        name: 'Preset',
-        regexes: [_presetDisplay, _presetPromptOnly],
-      ),
+      const Preset(id: 'p1', name: 'Preset', regexes: [_presetDisplay]),
     );
     container = ProviderContainer(
       overrides: [
@@ -78,25 +64,35 @@ void main() {
     return db.close();
   });
 
-  test('the resolved list waits for the global scripts', () async {
+  test('the stored switch is what the notifier settles on', () async {
+    // Pins the fixture itself: if this one fails, the tests below are failing
+    // over preferences, not over the resolver they are about.
+    await container.read(studioFeatureEnabledProvider.notifier).ready;
+
+    expect(container.read(studioFeatureEnabledProvider), isTrue);
+  });
+
+  test('Studio drops the chat preset scripts and keeps the global ones',
+      () async {
     final active = await container.read(activeRegexesProvider.future);
 
     expect(
       active.map((r) => r.id),
-      containsAll(<String>['preset-display', 'global-display']),
-      reason: 'a global script must not be dropped because it loaded late',
+      isNot(contains('preset-display')),
+      reason:
+          'an agentic preset replaces the chat preset, so its scripts belong '
+          'to a prompt this turn never builds',
     );
-    expect(active.map((r) => r.id), isNot(contains('global-off')));
+    expect(active.map((r) => r.id), contains('global-display'));
   });
 
-  test('the display list is what the first paint can rely on', () async {
+  test('the resolved list waits for the switch to be read', () async {
+    // The switch is a StateNotifier that starts at `false` and flips once
+    // SharedPreferences answers. Asking straight away — which is what the
+    // chat's first paint does — must not catch that window and hand back the
+    // chat preset's scripts for a Studio session.
     final display = await container.read(displayRegexesProvider.future);
 
-    expect(display.map((r) => r.id), ['preset-display', 'global-display']);
-    expect(
-      display.map((r) => r.id),
-      isNot(contains('preset-prompt-only')),
-      reason: 'a prompt-only script has no business in the display pass',
-    );
+    expect(display.map((r) => r.id), ['global-display']);
   });
 }
