@@ -42,6 +42,15 @@ class StudioFeatureEnabledNotifier extends StateNotifier<bool> {
   /// window where an enabled Studio still reads as off.
   Future<void> get ready => _loaded.future;
 
+  /// The switch once [ready] has settled. Readers want this rather than
+  /// `await ready` followed by a read of the provider: the flip out of the
+  /// loading window rebuilds every watcher, so a `ref` touched after that
+  /// await belongs to a build that is already gone.
+  Future<bool> get settled async {
+    await _loaded.future;
+    return state;
+  }
+
   /// Reads the stored flag, completing [ready] whichever way it goes — a throw
   /// on the way out must not leave every awaiting reader hanging.
   Future<void> _load() async {
@@ -89,3 +98,14 @@ class StudioFeatureEnabledNotifier extends StateNotifier<bool> {
 
   Future<void> enable() async => setEnabled(true);
 }
+
+/// The master switch, settled — see [StudioFeatureEnabledNotifier.settled].
+///
+/// Watching the value (not just the notifier) is what makes a runtime toggle
+/// from Settings rebuild the readers; the returned future resolves to the
+/// loaded value either way, so no reader has to catch the flip itself.
+final studioFeatureSettledProvider = FutureProvider<bool>((ref) {
+  final notifier = ref.watch(studioFeatureEnabledProvider.notifier);
+  ref.watch(studioFeatureEnabledProvider);
+  return notifier.settled;
+});

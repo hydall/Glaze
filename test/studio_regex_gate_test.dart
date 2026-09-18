@@ -72,6 +72,15 @@ void main() {
     expect(container.read(studioFeatureEnabledProvider), isTrue);
   });
 
+  test('the settled switch is what a resolver can branch on', () async {
+    // The middle link: if this passes and the two below fail, the resolver is
+    // reading the switch wrong rather than the switch reading itself wrong.
+    expect(
+      await container.read(studioFeatureSettledProvider.future),
+      isTrue,
+    );
+  });
+
   test('Studio drops the chat preset scripts and keeps the global ones',
       () async {
     final active = await container.read(activeRegexesProvider.future);

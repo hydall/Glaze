@@ -7,6 +7,10 @@ import 'global_regex_provider.dart';
 import 'studio_feature_provider.dart';
 
 final activeRegexesProvider = FutureProvider<List<PresetRegex>>((ref) async {
+  // Every dependency is subscribed here, before the first await. A `ref`
+  // touched after one belongs to a build that a changed dependency may already
+  // have replaced — and the Studio switch changes precisely then, as it comes
+  // out of its loading window.
   final repo = ref.watch(presetRepoProvider);
   // Awaited, not read. The global scripts load from SharedPreferences, and on a
   // cold start that has not finished by the time anything asks for this list:
@@ -17,18 +21,14 @@ final activeRegexesProvider = FutureProvider<List<PresetRegex>>((ref) async {
   // A chat preset and an agentic (Studio) preset are mutually exclusive: the
   // master switch is the flag that says which kind is in effect, and with
   // Studio on there is no active chat preset at all — its scripts belong to a
-  // prompt this turn never builds. Awaited for the same reason as above; the
-  // flag reads `false` until SharedPreferences answers, and the first paint
-  // must not see the chat preset's scripts in a Studio session.
-  final studioNotifier = ref.watch(studioFeatureEnabledProvider.notifier);
-  // Subscribed before the await so a later flip of the switch recomputes this
-  // list; the value itself is re-read once [ready] settles, so the first pass
-  // never depends on catching the flip.
-  ref.watch(studioFeatureEnabledProvider);
-  await studioNotifier.ready;
-  final studioEnabled = ref.read(studioFeatureEnabledProvider);
-  final presets = await repo.getAll();
+  // prompt this turn never builds. Settled rather than read, for the same
+  // reason the global scripts are awaited: the switch reads `false` until
+  // SharedPreferences answers, and the first paint asks exactly once.
+  final studioSettled = ref.watch(studioFeatureSettledProvider.future);
   final activeId = ref.watch(activePresetIdProvider);
+
+  final studioEnabled = await studioSettled;
+  final presets = await repo.getAll();
   final preset = activeId != null
       ? presets.where((p) => p.id == activeId).firstOrNull
       : (presets.isNotEmpty ? presets.first : null);
