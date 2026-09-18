@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/features/chat/bridge/chat_webview_settings.dart';
@@ -15,8 +17,23 @@ void main() {
   // overflow: hidden`), so there is no native scroll range to suppress and
   // neither flag buys anything.
   group('chat WebView touch axes', () {
+    late InAppWebViewSettings settings;
+
+    setUp(() {
+      // Both flags are set unconditionally, so any platform proves them — but
+      // not Android, which `flutter test` reports by default. There
+      // [chatWebViewInAppSettings] builds a [WebViewAssetLoader], whose path
+      // handler is a platform-interface factory that asserts on a registered
+      // native implementation the test host does not have.
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      settings = chatWebViewInAppSettings();
+    });
+
+    tearDown(() {
+      debugDefaultTargetPlatformOverride = null;
+    });
+
     test('horizontal touch movement reaches the page', () {
-      final settings = chatWebViewInAppSettings();
       expect(
         settings.disableHorizontalScroll,
         isNot(true),
@@ -27,7 +44,6 @@ void main() {
     });
 
     test('vertical touch movement reaches the page', () {
-      final settings = chatWebViewInAppSettings();
       expect(
         settings.disableVerticalScroll,
         isNot(true),
@@ -41,7 +57,7 @@ void main() {
       // The bounce/glow moves the whole page, carrying the fixed Flutter-glass
       // strips out from under the Flutter chrome. Unlike the axis flags, this
       // one does not touch the event stream.
-      expect(chatWebViewInAppSettings().disallowOverScroll, isTrue);
+      expect(settings.disallowOverScroll, isTrue);
     });
   });
 }
