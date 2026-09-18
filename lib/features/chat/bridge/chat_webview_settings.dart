@@ -104,12 +104,21 @@ InAppWebViewSettings chatWebViewInAppSettings({bool isInspectable = true}) {
     useShouldOverrideUrlLoading: true,
     webViewAssetLoader: chatWebViewAssetLoader(),
     // The page is a full-screen chat whose only scroll is the in-page
-    // #chat-container. Any native WebView scroll or overscroll moves the whole
-    // page — including the fixed Flutter-glass blur strips — out from under the
-    // Flutter chrome, so it is disabled here. `disableVerticalScroll` is
-    // deliberately NOT set: on Android it consumes every ACTION_MOVE, which
-    // would take the container's own touch scrolling down with it.
+    // #chat-container. The document itself is pinned in CSS (`html, body` are
+    // `position: fixed; overflow: hidden`), so it has no scroll range on either
+    // axis and nothing native is left to suppress; this only stops the
+    // overscroll glow/bounce from dragging the fixed Flutter-glass blur strips
+    // out from under the Flutter chrome.
+    //
+    // Neither `disableHorizontalScroll` nor `disableVerticalScroll` may be set
+    // here. On Android the plugin implements both by rewriting the touch
+    // stream: with a single axis disabled it calls `event.setLocation()` on
+    // every ACTION_MOVE/UP/CANCEL and pins that axis to its ACTION_DOWN value,
+    // so the page sees a touch that never moves along it. Pinning X killed the
+    // message swipe gesture (its dx was always 0, so the axis lock read every
+    // drag as a vertical scroll) along with horizontal scrolling of wide code
+    // blocks and tables; pinning Y would take the container's own touch
+    // scrolling down with it.
     disallowOverScroll: true,
-    disableHorizontalScroll: true,
   );
 }

@@ -93,6 +93,7 @@ class _GenericEditorState extends State<GenericEditor> {
   final Map<String, TextEditingController> _controllers = {};
   Timer? _saveTimer;
   bool _hasPendingSave = false;
+  bool _syncingControllers = false;
 
   @override
   void initState() {
@@ -112,23 +113,28 @@ class _GenericEditorState extends State<GenericEditor> {
       }
     }
     if (changed) {
-      for (final section in widget.config) {
-        for (final field in section.fields) {
-          if (field.type == 'text' ||
-              field.type == 'textarea' ||
-              field.type == 'number') {
-            final val = _localItem[field.key]?.toString() ?? '';
-            if (_controllers[field.key]?.text != val) {
-              _controllers[field.key]?.text = val;
-            }
-          } else if (field.type == 'tags') {
-            final val = _localItem[field.key];
-            final strVal = (val is List) ? val.join(', ') : '';
-            if (_controllers[field.key]?.text != strVal) {
-              _controllers[field.key]?.text = strVal;
+      _syncingControllers = true;
+      try {
+        for (final section in widget.config) {
+          for (final field in section.fields) {
+            if (field.type == 'text' ||
+                field.type == 'textarea' ||
+                field.type == 'number') {
+              final val = _localItem[field.key]?.toString() ?? '';
+              if (_controllers[field.key]?.text != val) {
+                _controllers[field.key]?.text = val;
+              }
+            } else if (field.type == 'tags') {
+              final val = _localItem[field.key];
+              final strVal = (val is List) ? val.join(', ') : '';
+              if (_controllers[field.key]?.text != strVal) {
+                _controllers[field.key]?.text = strVal;
+              }
             }
           }
         }
+      } finally {
+        _syncingControllers = false;
       }
     }
   }
@@ -155,6 +161,7 @@ class _GenericEditorState extends State<GenericEditor> {
   }
 
   void _updateField(String key, String type, String text) {
+    if (_syncingControllers) return;
     if (type == 'number') {
       _localItem[key] = num.tryParse(text) ?? _localItem[key];
     } else if (type == 'tags') {
