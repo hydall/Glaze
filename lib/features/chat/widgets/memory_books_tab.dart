@@ -823,8 +823,12 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
       child: MemoryEntryEditorSheet(entry: entry),
     );
     if (result != null && mounted) {
-      await _ctrl.editEntry(entry, result);
-      if (mounted) setState(() {});
+      try {
+        await _ctrl.editEntry(entry, result);
+        if (mounted) setState(() {});
+      } catch (error) {
+        if (mounted) GlazeToast.show(context, formatError(error));
+      }
     }
   }
 

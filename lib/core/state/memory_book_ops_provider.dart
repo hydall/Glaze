@@ -23,6 +23,32 @@ class _MemoryBookOps {
       .read(memoryBookRepoProvider)
       .approveDraft(sessionId, draftId, expected);
 
+  Future<MemoryEntry?> reviseEntry({
+    required String sessionId,
+    required MemoryEntry expected,
+    required MemoryEntry proposed,
+    String reason = 'manual_edit',
+  }) => ref
+      .read(memoryBookRepoProvider)
+      .reviseEntry(
+        sessionId: sessionId,
+        expected: expected,
+        proposed: proposed,
+        reason: reason,
+      );
+
+  Future<MemoryEntry?> restoreEntryRevision({
+    required String sessionId,
+    required MemoryEntry expected,
+    required String revisionId,
+  }) => ref
+      .read(memoryBookRepoProvider)
+      .restoreEntryRevision(
+        sessionId: sessionId,
+        expected: expected,
+        revisionId: revisionId,
+      );
+
   Future<void> updateSettings(
     String sessionId,
     MemoryBookSettings settings,

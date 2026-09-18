@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app_db.dart';
 import '../tables.dart';
 import '../../models/memory_book.dart';
+import '../../models/memory_entry_revisions.dart';
 import '../../models/memory_source_manifest.dart';
 import 'chat_repo.dart';
 import '../../services/memory_prompt_presets.dart';
@@ -81,6 +82,18 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
 
   Future<void> _put(MemoryBook book) async {
     final existing = await getBySessionId(book.sessionId);
+    final priorEntries = {
+      for (final entry in existing?.entries ?? const <MemoryEntry>[])
+        entry.id: entry,
+    };
+    book = book.copyWith(
+      entries: book.entries
+          .map(
+            (entry) =>
+                MemoryEntryRevisions.prepare(entry, priorEntries[entry.id]),
+          )
+          .toList(),
+    );
     final checkedDrafts = book.pendingDrafts
         .where(
           (draft) =>
@@ -218,21 +231,25 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
         'Memory sources changed. Regenerate the draft before approval.',
       );
     }
-    final entry = MemoryEntry(
-      id: draft.id.replaceAll('draft_', 'mem_'),
-      title: draft.title,
-      content: draft.content,
-      keys: draft.keys,
-      keyParagraphs: draft.keyParagraphs,
-      ledgerRange: draft.ledgerRange,
-      vectorSearch: draft.vectorSearch,
-      messageIds: draft.messageIds,
-      messageRange: draft.messageRange,
-      sourceManifest: draft.sourceManifest,
-      sourceSwipeId: draft.sourceSwipeId,
-      sourceAgentSwipeId: draft.sourceAgentSwipeId,
-      source: draft.source,
-      createdAt: DateTime.now().millisecondsSinceEpoch,
+    final entry = MemoryEntryRevisions.initialize(
+      MemoryEntry(
+        id: draft.id.replaceAll('draft_', 'mem_'),
+        title: draft.title,
+        content: draft.content,
+        keys: draft.keys,
+        keyParagraphs: draft.keyParagraphs,
+        ledgerRange: draft.ledgerRange,
+        vectorSearch: draft.vectorSearch,
+        messageIds: draft.messageIds,
+        messageRange: draft.messageRange,
+        sourceManifest: draft.sourceManifest,
+        sourceSwipeId: draft.sourceSwipeId,
+        sourceAgentSwipeId: draft.sourceAgentSwipeId,
+        source: draft.source,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+      reason: 'approved_generation',
+      reviewer: 'user',
     );
     final updated = book.copyWith(
       entries: [...book.entries, entry],
@@ -365,6 +382,71 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
       await put(existing.copyWith(entries: updatedEntries));
     });
     return didUpdate;
+  }
+
+  /// Applies an editor result only if [expected] is still the durable entry.
+  /// Text changes append a revision; the previous active snapshot is never
+  /// replaced or deleted.
+  Future<MemoryEntry?> reviseEntry({
+    required String sessionId,
+    required MemoryEntry expected,
+    required MemoryEntry proposed,
+    String reason = 'manual_edit',
+  }) => transaction(() async {
+    final book = await getBySessionId(sessionId);
+    final current = book?.entries
+        .where((entry) => entry.id == expected.id)
+        .firstOrNull;
+    if (book == null || current == null) return null;
+    final normalizedExpected = MemoryEntryRevisions.initialize(expected);
+    final normalizedCurrent = MemoryEntryRevisions.initialize(current);
+    if (normalizedCurrent != normalizedExpected || proposed.id != current.id) {
+      throw StateError('Memory changed while editing. Reload before saving.');
+    }
+    final edited = current.copyWith(
+      title: proposed.title,
+      content: proposed.content,
+      keys: proposed.keys,
+      keyParagraphs: proposed.keyParagraphs,
+      ledgerRange: proposed.ledgerRange,
+    );
+    final revised = MemoryEntryRevisions.prepare(
+      edited,
+      current,
+      author: 'user',
+      reason: reason,
+      reviewer: 'user',
+    );
+    await put(
+      book.copyWith(
+        entries: book.entries
+            .map((entry) => entry.id == current.id ? revised : entry)
+            .toList(),
+      ),
+    );
+    return revised;
+  });
+
+  /// Restores the text from [revisionId] by appending a new active revision.
+  /// The historical revision remains untouched and the active pointer never
+  /// moves backwards.
+  Future<MemoryEntry?> restoreEntryRevision({
+    required String sessionId,
+    required MemoryEntry expected,
+    required String revisionId,
+  }) async {
+    final current = await getBySessionId(sessionId).then(
+      (book) =>
+          book?.entries.where((entry) => entry.id == expected.id).firstOrNull,
+    );
+    if (current == null) return null;
+    final restored = MemoryEntryRevisions.restoreRevision(current, revisionId);
+    return reviseEntry(
+      sessionId: sessionId,
+      expected: expected,
+      proposed: restored,
+      reason: 'restore_revision',
+    );
   }
 
   /// Atomically removes the entry with [entryId] from the memory book for

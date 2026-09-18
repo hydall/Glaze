@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/memory_injection_service.dart';
 import '../../../core/llm/memory_draft_planner.dart';
 import '../../../core/models/memory_book.dart';
+import '../../../core/models/memory_entry_revisions.dart';
 import '../../../core/models/memory_source_manifest.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
@@ -380,22 +381,67 @@ class MemoryBookController {
 
   Future<MemoryEntry?> editEntry(MemoryEntry entry, MemoryEntry result) async {
     if (_book == null) return null;
-    final entries = [..._book!.entries];
-    final idx = entries.indexWhere((e) => e.id == entry.id);
-    if (idx >= 0) entries[idx] = result;
-    _book = _book!.copyWith(entries: entries);
-    await save();
-    await _ref.read(memoryBookOpsProvider).deleteEmbeddingEntry(result.id);
-    await _autoIndexEntry(result);
-    return result;
+    MemoryEntry? revised;
+    await _bookWrites.runDurableOperation(() async {
+      revised = await _ref
+          .read(memoryBookOpsProvider)
+          .reviseEntry(
+            sessionId: _sessionId,
+            expected: entry,
+            proposed: result,
+          );
+      _publishRevision(revised);
+    });
+    if (revised == null) return null;
+    await _ref.read(memoryBookOpsProvider).deleteEmbeddingEntry(revised!.id);
+    await _autoIndexEntry(revised!);
+    return revised;
+  }
+
+  void _publishRevision(MemoryEntry? revised) {
+    final latest = _book;
+    if (latest == null || revised == null) return;
+    _book = latest.copyWith(
+      entries: latest.entries
+          .map((current) => current.id == revised.id ? revised : current)
+          .toList(),
+    );
   }
 
   Future<MemoryEntry?> addEntry(MemoryEntry result) async {
     if (_book == null) return null;
+    result = MemoryEntryRevisions.initialize(
+      result,
+      author: 'user',
+      reason: 'manual_create',
+      reviewer: 'user',
+    );
     _book = _book!.copyWith(entries: [..._book!.entries, result]);
     await save();
     await _autoIndexEntry(result);
     return result;
+  }
+
+  Future<MemoryEntry?> restoreEntryRevision(
+    MemoryEntry entry,
+    String revisionId,
+  ) async {
+    if (_book == null) return null;
+    MemoryEntry? restored;
+    await _bookWrites.runDurableOperation(() async {
+      restored = await _ref
+          .read(memoryBookOpsProvider)
+          .restoreEntryRevision(
+            sessionId: _sessionId,
+            expected: entry,
+            revisionId: revisionId,
+          );
+      _publishRevision(restored);
+    });
+    if (restored == null) return null;
+    await _ref.read(memoryBookOpsProvider).deleteEmbeddingEntry(restored!.id);
+    await _autoIndexEntry(restored!);
+    return restored;
   }
 
   Future<void> editDraft(MemoryDraft draft, MemoryEntry result) async {

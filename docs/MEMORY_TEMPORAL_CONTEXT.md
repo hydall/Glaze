@@ -1,5 +1,12 @@
 # Historical memory context
 
+> Roadmap decision (2026-09-18): the expanded source-integrity increment is a
+> candidate for simplification because historical source edits have low expected
+> ROI. Automatic repair/maintenance and history-browser UI are frozen. This file
+> describes the current implementation; no source checks or badges have yet been
+> removed. The revised planning document is
+> `docs/untracked/TEMPORAL_MEMORY_EDITING_DESIGN.md` (local, gitignored).
+
 Memory Books describe episodes at their source story time. Current Ledger and
 Character Knowledge describe the applicable state at the generation boundary.
 An NPC being alive in an earlier episode and dead later is chronology, not a
@@ -44,6 +51,26 @@ ordered prefix before that target, including the selected swipe and agent swipe.
   generation. User configuration, extension instructions, and macro variables
   remain current configuration; this is not a snapshot of all application inputs.
 
+## Immutable text revisions
+
+- Entries carry an append-only list of text snapshots and an `activeRevisionId`.
+  The current title, body, keys, paragraph offsets, and source-time label must
+  match the final snapshot. Retrieval omits inconsistent projections.
+- Old entries receive a synthetic first revision without changing their text.
+  JSON export/import and chat branches preserve existing snapshots.
+- Each snapshot records its source IDs/manifest, author, reason, creation time,
+  and reviewer metadata where applicable. Source invalidation and swipe-index
+  maintenance affect current eligibility, not the evidence stored in old snapshots.
+- Manual edits use an atomic expected-entry check. A stale editor cannot replace
+  newer content. Generic book saves also preserve the existing history and append
+  changed text; they cannot replace an existing snapshot.
+- Restoring a revision appends a new reviewed snapshot, even when its text matches
+  the current body. It does not move the active pointer backwards. Restoration
+  copies text only and cannot reactivate invalidated source evidence.
+- The existing editor saves revisions automatically. Revision restoration is
+  available through the repository/controller API; a history-browser UI remains
+  separate. Explicit entry deletion retains its existing deletion semantics.
+
 ## Boundaries of this increment
 
 The temporal increment adds framing and reads existing historical evidence. The
@@ -55,8 +82,7 @@ manifest remain explicitly unverified and retain their normal non-historical
 compatibility behavior. A manifest proves source identity and content, not that
 the summary itself is semantically correct.
 
-Typed occurrence ranges, immutable Memory Book text revisions, and character
-audience ACLs are still separate work.
+Typed occurrence ranges and character audience ACLs are still separate work.
 
 Scene detection, automatic continuity digests, and a provider-wide request budget
 manager remain separate work. The memory cap here is measured using the existing
@@ -67,4 +93,6 @@ token estimator, not provider billing tokens.
 Regression coverage includes partial and unknown clocks, historical beliefs,
 alive-then/dead-now framing, all three packing modes, tiny budgets, memory macro
 placement, Raw Recall source edits, historical card and lorebook checkpoints,
-future fact supersession, reconciliation cleanup, and request-prefix collection.
+future fact supersession, reconciliation cleanup, request-prefix collection,
+legacy revision migration, immutable history, stale editor rejection, and
+restoration as a new revision.

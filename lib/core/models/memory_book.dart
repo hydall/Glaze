@@ -42,6 +42,29 @@ abstract class MessageRange with _$MessageRange {
 }
 
 @freezed
+abstract class MemoryEntryRevision with _$MemoryEntryRevision {
+  const factory MemoryEntryRevision({
+    required String id,
+    required int version,
+    @Default('') String title,
+    @Default('') String content,
+    @Default([]) List<String> keys,
+    @Default({}) Map<String, List<int>> keyParagraphs,
+    @Default('') String ledgerRange,
+    @Default([]) List<String> messageIds,
+    MemorySourceManifest? sourceManifest,
+    required int createdAt,
+    @Default('system') String author,
+    @Default('initial') String reason,
+    String? reviewer,
+    int? reviewedAt,
+  }) = _MemoryEntryRevision;
+
+  factory MemoryEntryRevision.fromJson(Map<String, dynamic> json) =>
+      _$MemoryEntryRevisionFromJson(json);
+}
+
+@freezed
 abstract class MemoryEntry with _$MemoryEntry {
   const factory MemoryEntry({
     required String id,
@@ -82,6 +105,8 @@ abstract class MemoryEntry with _$MemoryEntry {
     /// `MessageRecallService` / memory vector search do not surface them
     /// (Marinara analog).
     @Default(false) bool excludeFromVectorization,
+    String? activeRevisionId,
+    @Default([]) List<MemoryEntryRevision> revisions,
   }) = _MemoryEntry;
 
   factory MemoryEntry.fromJson(Map<String, dynamic> json) =>
@@ -206,6 +231,44 @@ Map<String, dynamic> _migrateEntryInPlace(Map<String, dynamic> json) {
         'invalidated': true,
       },
     };
+  }
+  if (out['revisions'] != null && out['revisions'] is! List) {
+    out = {...out, 'revisions': <dynamic>[]};
+  }
+  final revisions = out['revisions'] as List?;
+  if (revisions == null || revisions.isEmpty) {
+    final entryId = out['id'];
+    if (entryId is String && entryId.isNotEmpty) {
+      final createdAt = out['createdAt'] is num
+          ? (out['createdAt'] as num).toInt()
+          : 0;
+      out = {
+        ...out,
+        'activeRevisionId': '$entryId:r1',
+        'revisions': [
+          {
+            'id': '$entryId:r1',
+            'version': 1,
+            'title': out['title'] is String ? out['title'] : '',
+            'content': out['content'] is String ? out['content'] : '',
+            'keys': out['keys'] is List ? out['keys'] : const <String>[],
+            'keyParagraphs': out['keyParagraphs'] is Map
+                ? out['keyParagraphs']
+                : const <String, dynamic>{},
+            'ledgerRange': out['ledgerRange'] is String
+                ? out['ledgerRange']
+                : '',
+            'messageIds': out['messageIds'] is List
+                ? out['messageIds']
+                : const <String>[],
+            'sourceManifest': out['sourceManifest'],
+            'createdAt': createdAt,
+            'author': 'system',
+            'reason': 'imported_legacy',
+          },
+        ],
+      };
+    }
   }
   return out;
 }

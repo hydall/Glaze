@@ -5,6 +5,7 @@ import 'dart:isolate';
 import '../utils/platform_paths.dart';
 
 import '../models/chat_message.dart';
+import '../models/memory_entry_revisions.dart';
 import '../utils/cast_helpers.dart';
 import 'glaze_matcher.dart';
 import 'memory_budget.dart';
@@ -413,11 +414,12 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
     final validEntries = inputs.memoryEntries
         .where(
           (entry) =>
-              entry.sourceManifest?.validate(
-                entry.messageIds,
-                inputs.history,
-              ) !=
-              MemorySourceValidity.invalid,
+              MemoryEntryRevisions.isUsable(entry) &&
+              (entry.sourceManifest?.validate(
+                    entry.messageIds,
+                    inputs.history,
+                  ) !=
+                  MemorySourceValidity.invalid),
         )
         .toList();
     final visibleHistory = inputs.history
