@@ -364,6 +364,21 @@ the other.
 This contract is exercised in `test/memory_chat_concurrency_test.dart` with
 distinct marker responses and reversed completion order.
 
+### INV-M3a: A memory draft generation outlives the sheet that started it ✅ ENFORCED
+
+The request, its cancel token, its session lease and its persistence belong to
+`memoryDraftJobsProvider`, not to the memory sheet. Closing the sheet mid-request
+must not cancel it, must not lose its result, and must not leak the lease; the
+result is written with `MemoryBookRepo.mutateDraft`, and reopening the sheet
+shows the same job with the same start time. Nothing in this path may reach for
+a `WidgetRef` after the await — a ref whose widget is gone throws instead of
+persisting, which is how finished drafts used to be discarded.
+
+Whoever writes a memory book from outside the sheet bumps
+`memoryBookRevisionProvider` afterwards, so an open sheet re-reads rather than
+saving its own stale copy back over the write. Covered by
+`test/memory_draft_jobs_test.dart`.
+
 ### INV-M4: Memory draft ownership remains exclusive ✅ ENFORCED
 
 Starting the same draft twice remains prohibited. Memory workflows use:

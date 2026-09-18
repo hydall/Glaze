@@ -7,6 +7,7 @@ import '../../../../core/models/pipeline_settings.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_settings_provider.dart';
 import '../../../memory/state/memory_active_drafts_provider.dart';
+import '../../../memory/state/memory_book_revision_provider.dart';
 import '../../memory_draft_generator.dart';
 import 'stage_context.dart';
 
@@ -83,6 +84,11 @@ class MemoryDraftStage {
       if (plan.drafts.isEmpty) return;
 
       await repo.appendDrafts(session.id, plan.drafts);
+      // An open memory sheet holds the book it read when it opened, so it has
+      // to be told the durable one moved under it — otherwise these drafts
+      // stay invisible until it is closed and reopened, and its next save
+      // writes its own copy back over them.
+      _publishBookChange();
       if (!settings.autoGenerateEnabled || generationLease == null) return;
 
       final pipeline = ctx.ref.read(pipelineSettingsProvider);
@@ -117,6 +123,7 @@ class MemoryDraftStage {
               error: null,
             ),
           );
+          _publishBookChange();
         } catch (e) {
           if (!ctx.ref.mounted) return;
           await repo.mutateDraft(
@@ -128,6 +135,7 @@ class MemoryDraftStage {
               updatedAt: DateTime.now().millisecondsSinceEpoch,
             ),
           );
+          _publishBookChange();
         }
       }
     } catch (e) {
@@ -135,5 +143,11 @@ class MemoryDraftStage {
     } finally {
       generationLease?.release();
     }
+  }
+
+  /// Tells whoever is reading a memory book that the stored one changed.
+  void _publishBookChange() {
+    if (!ctx.ref.mounted) return;
+    ctx.ref.read(memoryBookRevisionProvider.notifier).state++;
   }
 }

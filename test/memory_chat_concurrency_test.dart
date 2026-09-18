@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,10 +16,8 @@ import 'package:glaze_flutter/features/chat/chat_generation_service.dart';
 import 'package:glaze_flutter/features/chat/chat_provider.dart';
 import 'package:glaze_flutter/features/chat/chat_session_service.dart';
 import 'package:glaze_flutter/features/chat/chat_state.dart';
-import 'package:glaze_flutter/features/memory/controllers/memory_book_write_queue.dart';
-import 'package:glaze_flutter/features/memory/controllers/memory_draft_generation_controller.dart';
-import 'package:glaze_flutter/features/memory/controllers/memory_settings_mapper.dart';
 import 'package:glaze_flutter/features/memory/state/memory_active_drafts_provider.dart';
+import 'package:glaze_flutter/features/memory/state/memory_draft_jobs_provider.dart';
 
 class _ControlledChatGenerationService extends ChatGenerationService {
   _ControlledChatGenerationService(super.ref);
@@ -70,7 +67,6 @@ class _Harness {
     required this.container,
     required this.chatService,
     required this.chatNotifier,
-    required this.memoryController,
     required this.memoryStarted,
     required this.memoryResult,
     required this.memoryCalls,
@@ -81,8 +77,18 @@ class _Harness {
   final ProviderContainer container;
   final _ControlledChatGenerationService chatService;
   final ChatNotifier chatNotifier;
-  final MemoryDraftGenerationController memoryController;
   final Completer<void> memoryStarted;
+
+  /// The generation lifecycle lives in the container, not in a widget — which
+  /// is the point: the memory sheet can be closed mid-request and the result
+  /// still lands in the book.
+  MemoryDraftJobsNotifier get memoryJobs =>
+      container.read(memoryDraftJobsProvider.notifier);
+
+  bool get memoryGenerating => container
+      .read(memoryDraftJobsProvider)
+      .isGenerating(sessionId, 'draft-1');
+
   final Completer<MemoryDraft> memoryResult;
   final int Function() memoryCalls;
   final String charId;
@@ -122,25 +128,6 @@ void main() {
   );
   var harnessSequence = 0;
 
-  Future<WidgetRef> pumpRef(
-    WidgetTester tester,
-    ProviderContainer container,
-  ) async {
-    late WidgetRef captured;
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: Consumer(
-          builder: (context, ref, child) {
-            captured = ref;
-            return const SizedBox();
-          },
-        ),
-      ),
-    );
-    return captured;
-  }
-
   Future<_Harness> createHarness(WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
     ChatSessionService.clearCache();
@@ -149,11 +136,28 @@ void main() {
     final sessionId = 's$fixtureId';
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     late _ControlledChatGenerationService chatService;
+    final memoryStarted = Completer<void>();
+    final memoryResult = Completer<MemoryDraft>();
+    var memoryCalls = 0;
     final container = ProviderContainer(
       overrides: [
         appDbProvider.overrideWithValue(db),
         chatGenerationServiceProvider.overrideWith((ref) {
           return chatService = _ControlledChatGenerationService(ref);
+        }),
+        memoryDraftGeneratorProvider.overrideWithValue(({
+          required draft,
+          required settings,
+          required pipeline,
+          required messages,
+          required charId,
+          required sessionId,
+          required sessionVars,
+          cancelToken,
+        }) {
+          memoryCalls++;
+          if (!memoryStarted.isCompleted) memoryStarted.complete();
+          return memoryResult.future;
         }),
       ],
     );
@@ -184,48 +188,10 @@ void main() {
     await container.read(chatProvider(charId).future);
     container.read(chatGenerationServiceProvider);
 
-    final widgetRef = await pumpRef(tester, container);
-    addTearDown(() => tester.pumpWidget(const SizedBox()));
-    final memoryStarted = Completer<void>();
-    final memoryResult = Completer<MemoryDraft>();
-    var memoryCalls = 0;
-    MemoryBook? currentBook = book;
-    final repo = container.read(memoryBookRepoProvider);
-    final writeQueue = MemoryBookWriteQueue(
-      readLatest: () => currentBook,
-      publish: (book) => currentBook = book,
-      persist: repo.put,
-    );
-    final memoryController = MemoryDraftGenerationController(
-      ref: widgetRef,
-      charId: charId,
-      sessionId: sessionId,
-      settingsMapper: const MemorySettingsMapper(),
-      bookGetter: () => currentBook,
-      persistMutation: writeQueue.mutate,
-      generate:
-          ({
-            required draft,
-            required settings,
-            required pipeline,
-            required messages,
-            required charId,
-            required sessionId,
-            required sessionVars,
-            cancelToken,
-          }) {
-            memoryCalls++;
-            if (!memoryStarted.isCompleted) memoryStarted.complete();
-            return memoryResult.future;
-          },
-    );
-    addTearDown(memoryController.dispose);
-
     return _Harness(
       container: container,
       chatService: chatService,
       chatNotifier: container.read(chatProvider(charId).notifier),
-      memoryController: memoryController,
       memoryStarted: memoryStarted,
       memoryResult: memoryResult,
       memoryCalls: () => memoryCalls,
@@ -234,13 +200,11 @@ void main() {
     );
   }
 
-  Future<void> startMemory(_Harness harness) =>
-      harness.memoryController.generateDraft(
-        initialDraft.id,
-        onStart: () {},
-        onComplete: () {},
-        onError: (error) => fail('memory generation failed: $error'),
-      );
+  Future<void> startMemory(_Harness harness) => harness.memoryJobs.generate(
+    sessionId: harness.sessionId,
+    charId: harness.charId,
+    draftId: initialDraft.id,
+  );
 
   testWidgets(
     'chat and manual memory overlap and persist only their own marker',
@@ -264,10 +228,7 @@ void main() {
         'memory generation start',
       );
 
-      expect(
-        harness.memoryController.isDraftGenerating(initialDraft.id),
-        isTrue,
-      );
+      expect(harness.memoryGenerating, isTrue);
       expect(
         harness.container
             .read(chatProvider(harness.charId))
@@ -356,7 +317,7 @@ void main() {
 
     await second;
     expect(harness.memoryCalls(), 1);
-    expect(harness.memoryController.isDraftGenerating(initialDraft.id), isTrue);
+    expect(harness.memoryGenerating, isTrue);
 
     harness.memoryResult.complete(
       initialDraft.copyWith(content: 'ONLY_RESULT', updatedAt: 6),

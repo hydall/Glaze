@@ -12,6 +12,7 @@ import '../../../shared/widgets/glaze_expansion_tile.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_text_field.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../state/agent_ops_jobs_provider.dart';
 import '../services/collector_view_service.dart';
 import '../services/prompt_capture_view_service.dart';
 
@@ -26,12 +27,26 @@ class AgenticCollectorTab extends ConsumerStatefulWidget {
 }
 
 class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
-  String? _recoveringRunId;
-  bool _runningPending = false;
+  String get _pendingKey => AgentOpsJobKeys.collectorPending(widget.sessionId);
+  String _recoveryKey(String runId) =>
+      AgentOpsJobKeys.collectorRecovery(widget.sessionId, runId);
 
+  AgentOpsJobsNotifier get _jobs => ref.read(agentOpsJobsProvider.notifier);
+
+  /// Read rather than watched: `build` watches the set once, which is what
+  /// rebuilds these.
+  bool get _runningPending => _jobs.isRunning(_pendingKey);
+  bool get _recovering => _jobs.isAnyRunning(
+    AgentOpsJobKeys.collectorRecoveryScope(widget.sessionId),
+  );
   Future<void> _runPendingCollectors() async {
-    if (_runningPending || _recoveringRunId != null) return;
-    setState(() => _runningPending = true);
+    if (_recovering) return;
+    // Held in a provider, not in this State: the run keeps going when the
+    // sheet is closed, so reopening it has to find the same spinner and the
+    // same guard against starting it twice. The notifier is captured up front
+    // because `ref` is unusable once the widget is gone.
+    final jobs = _jobs;
+    if (!jobs.start(_pendingKey)) return;
     try {
       final outcome = await ref
           .read(automatedCardEvolutionServiceProvider)
@@ -57,15 +72,17 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
         );
       }
     } finally {
-      if (mounted) setState(() => _runningPending = false);
+      jobs.finish(_pendingKey);
     }
   }
 
   Future<void> _retryCollector(CollectorRunView run) async {
-    if (_runningPending || _recoveringRunId != null || !run.canRetry) {
+    if (_runningPending || _recovering || !run.canRetry) {
       return;
     }
-    setState(() => _recoveringRunId = run.row.id);
+    final jobs = _jobs;
+    final key = _recoveryKey(run.row.id);
+    if (!jobs.start(key)) return;
     try {
       final outcome = await ref
           .read(automatedCardEvolutionServiceProvider)
@@ -81,12 +98,12 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
         );
       }
     } finally {
-      if (mounted) setState(() => _recoveringRunId = null);
+      jobs.finish(key);
     }
   }
 
   Future<void> _correct(CollectorRunView run) async {
-    if (_runningPending || _recoveringRunId != null) return;
+    if (_runningPending || _recovering) return;
     final controller = TextEditingController(text: run.latestResponse ?? '');
     String? response;
     await GlazeBottomSheet.show<void>(
@@ -122,7 +139,9 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
     );
     controller.dispose();
     if (!mounted || response == null || response!.isEmpty) return;
-    setState(() => _recoveringRunId = run.row.id);
+    final jobs = _jobs;
+    final key = _recoveryKey(run.row.id);
+    if (!jobs.start(key)) return;
     try {
       final outcome = await ref
           .read(automatedCardEvolutionServiceProvider)
@@ -140,7 +159,7 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
         );
       }
     } finally {
-      if (mounted) setState(() => _recoveringRunId = null);
+      jobs.finish(key);
     }
   }
 
@@ -175,6 +194,9 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
 
   @override
   Widget build(BuildContext context) {
+    // Subscribes this tab to the running-jobs set; the `_running…` getters
+    // above read it.
+    ref.watch(agentOpsJobsProvider);
     final snapshot = ref.watch(collectorViewProvider(widget.sessionId));
     return snapshot.when(
       loading: () => const Center(child: GlazeSpinner()),
@@ -269,9 +291,7 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                 ),
                 tone: GlazeActionTone.primary,
                 busy: _runningPending,
-                onTap:
-                    _recoveringRunId != null ||
-                        data.blockingFailedRun != null
+                onTap: _recovering || data.blockingFailedRun != null
                     ? null
                     : _runPendingCollectors,
               ),
@@ -371,7 +391,7 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                                       .tr(),
                               onTap:
                                   !_runningPending &&
-                                      _recoveringRunId == null &&
+                                      !_recovering &&
                                       run.canRetry
                                   ? () => _retryCollector(run)
                                   : null,
@@ -380,8 +400,7 @@ class _AgenticCollectorTabState extends ConsumerState<AgenticCollectorTab> {
                               icon: Icons.edit_outlined,
                               label: 'agent_ops_correct_response'.tr(),
                               tone: GlazeActionTone.primary,
-                              onTap:
-                                  !_runningPending && _recoveringRunId == null
+                              onTap: !_runningPending && !_recovering
                                   ? () => _correct(run)
                                   : null,
                             ),

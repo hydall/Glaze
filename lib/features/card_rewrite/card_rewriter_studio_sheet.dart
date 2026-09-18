@@ -25,6 +25,7 @@ import '../studio/widgets/studio_preset_options_sheet.dart'
 import 'card_rewriter_labels.dart';
 import 'card_rewriter_recovery_view_service.dart';
 import 'widgets/card_rewriter_recovery_tile.dart';
+import '../chat/state/agent_ops_jobs_provider.dart';
 
 /// The Card Rewriter lane's management surface — the Agent Ops tab of the same
 /// name.
@@ -53,8 +54,20 @@ class CardRewriterStudioSheet extends ConsumerStatefulWidget {
 
 class _CardRewriterStudioSheetState
     extends ConsumerState<CardRewriterStudioSheet> {
-  bool _running = false;
-  String? _recoveringCallId;
+  AgentOpsJobsNotifier get _jobs => ref.read(agentOpsJobsProvider.notifier);
+
+  String get _runKey => AgentOpsJobKeys.cardRewriter(widget.sessionId);
+  String _recoveryKey(String callId) =>
+      AgentOpsJobKeys.cardRewriterRecovery(widget.sessionId, callId);
+
+  /// Held in a provider, not in this State: a rewriter run keeps going when
+  /// the sheet is closed, so reopening it has to find the same spinner and the
+  /// same guard against starting it twice. Read rather than watched — `build`
+  /// watches the set once, which is what rebuilds them.
+  bool get _running => _jobs.isRunning(_runKey);
+  bool get _recovering => _jobs.isAnyRunning(
+    AgentOpsJobKeys.cardRewriterRecoveryScope(widget.sessionId),
+  );
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -78,7 +91,10 @@ class _CardRewriterStudioSheetState
         (!settings.enabled || settings.apiConfigId.isEmpty)) {
       return;
     }
-    setState(() => _running = true);
+    // Captured before the await: `ref` is unusable once the widget is gone,
+    // and the job still has to be cleared when it finishes.
+    final jobs = _jobs;
+    if (!jobs.start(_runKey)) return;
     try {
       final service = ref.read(automatedCardEvolutionServiceProvider);
       final outcome = recovery == null
@@ -100,13 +116,15 @@ class _CardRewriterStudioSheetState
         );
       }
     } finally {
-      if (mounted) setState(() => _running = false);
+      jobs.finish(_runKey);
     }
   }
 
   Future<void> _retryWriterCall(CardEvolutionWriterCallRow call) async {
-    if (_running || _recoveringCallId != null) return;
-    setState(() => _recoveringCallId = call.id);
+    if (_running || _recovering) return;
+    final jobs = _jobs;
+    final key = _recoveryKey(call.id);
+    if (!jobs.start(key)) return;
     try {
       final outcome = await ref
           .read(automatedCardEvolutionServiceProvider)
@@ -125,15 +143,17 @@ class _CardRewriterStudioSheetState
         );
       }
     } finally {
-      if (mounted) setState(() => _recoveringCallId = null);
+      jobs.finish(key);
     }
   }
 
   Future<void> _correctWriterCall(CardEvolutionWriterCallRow call) async {
-    if (_running || _recoveringCallId != null) return;
+    if (_running || _recovering) return;
     final response = await _askForCorrectedResponse(call);
     if (!mounted || response == null || response.isEmpty) return;
-    setState(() => _recoveringCallId = call.id);
+    final jobs = _jobs;
+    final key = _recoveryKey(call.id);
+    if (!jobs.start(key)) return;
     try {
       final outcome = await ref
           .read(automatedCardEvolutionServiceProvider)
@@ -152,7 +172,7 @@ class _CardRewriterStudioSheetState
         );
       }
     } finally {
-      if (mounted) setState(() => _recoveringCallId = null);
+      jobs.finish(key);
     }
   }
 
@@ -207,14 +227,16 @@ class _CardRewriterStudioSheetState
   }
 
   Future<void> _deleteWriterRecovery(CardRewriterRecoveryView recovery) async {
-    if (_running || _recoveringCallId != null) return;
+    if (_running || _recovering) return;
     final confirmed = await confirmStudioDelete(
       context,
       title: 'card_rewriter_studio_delete_chain_title'.tr(),
       description: 'card_rewriter_studio_delete_chain_body'.tr(),
     );
     if (!confirmed || !mounted) return;
-    setState(() => _recoveringCallId = recovery.claim.id);
+    final jobs = _jobs;
+    final key = _recoveryKey(recovery.claim.id);
+    if (!jobs.start(key)) return;
     try {
       final outcome = await ref
           .read(automatedCardEvolutionServiceProvider)
@@ -229,7 +251,7 @@ class _CardRewriterStudioSheetState
             .tr(namedArgs: {'result': outcome.kind}),
       );
     } finally {
-      if (mounted) setState(() => _recoveringCallId = null);
+      jobs.finish(key);
     }
   }
 
@@ -242,6 +264,8 @@ class _CardRewriterStudioSheetState
 
   @override
   Widget build(BuildContext context) {
+    // Subscribes this sheet to the running-jobs set; the getters above read it.
+    ref.watch(agentOpsJobsProvider);
     final settings = ref.watch(cardRewriterSettingsProvider);
     final configs = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
     final configured =
@@ -298,7 +322,7 @@ class _CardRewriterStudioSheetState
                     for (final recovery in items)
                       CardRewriterRecoveryTile(
                         recovery: recovery,
-                        busy: _running || _recoveringCallId != null,
+                        busy: _running || _recovering,
                         onContinue: () => _run(settings, recovery: recovery),
                         onRetry: _retryWriterCall,
                         onCorrect: _correctWriterCall,

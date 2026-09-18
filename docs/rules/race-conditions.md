@@ -72,6 +72,12 @@ Rule of thumb: if there's an `await` before the mutation, there's a potential ra
   cancellation ownership, staleness checks, and targeted persistence.
 - `memoryActiveDraftsProvider` prevents conflicting memory workflows; it is not
   a chat mutex. Duplicate generation of one draft remains prohibited.
+- Work that a sheet starts but does not finish belongs in a provider, not in the
+  widget's `State`: a `WidgetRef` throws once its widget is gone, so a completion
+  that writes through one is lost. Memory draft generation
+  (`memoryDraftJobsProvider`) and the Agentic Ops runs (`agentOpsJobsProvider`)
+  both keep their in-flight state there, and capture the notifier **before** the
+  await so the job is still cleared when the sheet has closed.
 - Image generation runs only after text generation completes (enforced by call order).
 - Background operations (auto-sync, embedding indexing) should check `isGenerating`
   for the relevant `charId` before starting.

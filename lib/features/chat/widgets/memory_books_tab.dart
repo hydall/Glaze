@@ -21,6 +21,8 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/swipe_tab_switcher.dart';
 import '../../../shared/widgets/tab_slide_switcher.dart';
 import '../../memory/controllers/memory_book_controller.dart';
+import '../../memory/state/memory_book_revision_provider.dart';
+import '../../memory/state/memory_draft_jobs_provider.dart';
 import 'memory/memory_books_controls.dart';
 import 'memory/memory_books_toolbar.dart';
 import 'memory/memory_draft_card.dart';
@@ -120,6 +122,13 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   _EntryFilter _entryFilter = _EntryFilter.all;
   _DraftFilter _draftFilter = _DraftFilter.all;
 
+  /// The generation failure this tab has already put in a toast. Failures are
+  /// published as state rather than handed to a callback, because the request
+  /// may well outlive the sheet that started it; this is what keeps a reopened
+  /// sheet from re-announcing one it already showed — or one that happened
+  /// while it was closed, which the draft's own row already carries.
+  int _reportedFailureSeq = 0;
+
   /// The last [MemoryBooksActions] handed to the host, so an unchanged set is
   /// not republished. The host rebuilds from these, and publishing from
   /// `build` means that rebuild runs this `build` again: without the guard the
@@ -132,6 +141,8 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     _ctrl = MemoryBookController(ref, widget.sessionId, widget.charId);
     _searchCtrl = TextEditingController();
     _searchFocus = FocusNode();
+    _reportedFailureSeq =
+        ref.read(memoryDraftJobsProvider).lastFailure?.seq ?? 0;
     _load();
   }
 
@@ -170,7 +181,6 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   void dispose() {
     _searchCtrl.dispose();
     _searchFocus.dispose();
-    _ctrl.dispose();
     super.dispose();
   }
 
@@ -293,6 +303,15 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
 
   @override
   Widget build(BuildContext context) {
+    // Both of these change from outside this widget: a generation keeps
+    // running when the sheet is closed, and the auto-create stage writes
+    // drafts during a chat turn.
+    ref.listen(memoryBookRevisionProvider, (_, _) => unawaited(_reloadBook()));
+    ref.listen(
+      memoryDraftJobsProvider.select((jobs) => jobs.lastFailure),
+      (_, failure) => _reportFailure(failure),
+    );
+
     final book = _ctrl.book;
     final loading = _ctrl.loading || book == null;
     if (loading) return const Center(child: GlazeSpinner());
@@ -307,7 +326,11 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
         .toList();
 
     final draftsNeedingGen = _ctrl.draftsNeedingGeneration;
-    final isGenerating = _ctrl.isGenerating;
+    // Watched, not read: the rows, the batch panel and the FAB all follow a
+    // run that this widget does not own.
+    final isGenerating = ref
+        .watch(memoryDraftJobsProvider)
+        .isBusy(widget.sessionId);
     // Vector affordances (reindex, index badges, the index filter) only make
     // sense while the active API preset has semantic search switched on.
     final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
@@ -598,13 +621,14 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   }
 
   Widget _buildDraftCard(MemoryDraft draft) {
+    final jobs = ref.watch(memoryDraftJobsProvider);
     return MemoryDraftCard(
       // Prefixed because the search results put entries and drafts in one
       // list, and an approved draft keeps its id as the entry's.
       key: ValueKey('draft-${draft.id}'),
       draft: draft,
-      isGenerating: _ctrl.generatingDrafts[draft.id] == true,
-      generatingSince: _ctrl.genStartTimes[draft.id],
+      isGenerating: jobs.isGenerating(widget.sessionId, draft.id),
+      generatingSince: jobs.startedAt(widget.sessionId, draft.id),
       onGenerate: () => _generateDraft(draft.id),
       onRegenerate: () => _generateDraft(draft.id),
       onCancel: () => _cancelDraft(draft.id),
@@ -645,51 +669,35 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     }
   }
 
-  void _generateDraft(String draftId) {
-    final drafts = _ctrl.book?.pendingDrafts ?? const <MemoryDraft>[];
-    final draftIndex = drafts.indexWhere((draft) => draft.id == draftId);
-    final isRegeneration =
-        draftIndex >= 0 && drafts[draftIndex].content.isNotEmpty;
-    _ctrl.generateDraft(
-      draftId,
-      onStart: () {
-        if (mounted) setState(() {});
-      },
-      onComplete: () {
-        if (mounted) setState(() {});
-      },
-      onError: (error) {
-        if (mounted) {
-          setState(() {});
-          final label = isRegeneration
-              ? 'memory_books_regeneration_failed'.tr()
-              : 'error_generation'.tr();
-          GlazeToast.show(context, '$label: $error');
-        }
-      },
-    );
-  }
+  /// Starts a generation and leaves it alone: the run belongs to
+  /// [memoryDraftJobsProvider], which this tab watches, so the row updates
+  /// whether or not the sheet is still on screen when the request settles.
+  void _generateDraft(String draftId) =>
+      unawaited(_ctrl.generateDraft(draftId));
 
-  void _cancelDraft(String draftId) {
-    _ctrl.cancelDraftGeneration(draftId);
+  void _cancelDraft(String draftId) => _ctrl.cancelDraftGeneration(draftId);
+
+  void _batchGenerate() => unawaited(_ctrl.batchGenerate());
+
+  /// Re-reads the book after something outside this sheet wrote to it — a
+  /// generation finishing, or the auto-create stage adding drafts during a
+  /// chat turn. Without it the sheet showed the book as it was when it opened,
+  /// and its next save wrote that stale copy back over the new drafts.
+  Future<void> _reloadBook() async {
+    await _ctrl.load();
     if (mounted) setState(() {});
   }
 
-  void _batchGenerate() {
-    _ctrl.batchGenerate(
-      onStart: () {
-        if (mounted) setState(() {});
-      },
-      onComplete: () {
-        if (mounted) setState(() {});
-      },
-      onError: (error) {
-        if (mounted) {
-          setState(() {});
-          GlazeToast.show(context, "${'error_generation'.tr()}: $error");
-        }
-      },
-    );
+  /// Reports a generation failure once, and only to a sheet that is open.
+  void _reportFailure(MemoryDraftJobFailure? failure) {
+    if (failure == null || failure.sessionId != widget.sessionId) return;
+    if (failure.seq <= _reportedFailureSeq) return;
+    _reportedFailureSeq = failure.seq;
+    if (!mounted) return;
+    final label = failure.wasRegeneration
+        ? 'memory_books_regeneration_failed'.tr()
+        : 'error_generation'.tr();
+    GlazeToast.show(context, '$label: ${failure.message}');
   }
 
   void _approveDraft(String draftId) async {

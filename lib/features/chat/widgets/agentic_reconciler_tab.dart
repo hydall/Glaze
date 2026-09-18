@@ -15,6 +15,7 @@ import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../services/current_ledger_injection_preview_service.dart';
 import '../services/manual_studio_ledger_service.dart';
+import '../state/agent_ops_jobs_provider.dart';
 import '../services/reconciler_view_service.dart';
 import 'current_ledger_injection_preview.dart';
 
@@ -34,9 +35,24 @@ class AgenticReconcilerTab extends ConsumerStatefulWidget {
 }
 
 class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
-  bool _runningLedger = false;
-  bool _runningReconciliation = false;
-  String? _regeneratingRunId;
+  AgentOpsJobsNotifier get _jobs => ref.read(agentOpsJobsProvider.notifier);
+
+  String get _ledgerKey => AgentOpsJobKeys.ledgerRerun(widget.sessionId);
+  String get _reconciliationKey =>
+      AgentOpsJobKeys.reconciliation(widget.sessionId);
+  String _regenKey(String runId) =>
+      AgentOpsJobKeys.reconciliationRegen(widget.sessionId, runId);
+
+  /// Held in a provider, not in this State: a Ledger rerun or a reconciliation
+  /// keeps going when the sheet is closed, so reopening it has to find the
+  /// same spinner and the same guard against starting it twice. Read rather
+  /// than watched — `build` watches the set once, which is what rebuilds them.
+  bool get _runningLedger => _jobs.isRunning(_ledgerKey);
+  bool get _runningReconciliation => _jobs.isRunning(_reconciliationKey);
+  bool get _regenerating => _jobs.isAnyRunning(
+    AgentOpsJobKeys.reconciliationRegenScope(widget.sessionId),
+  );
+  bool _isRegenerating(String runId) => _jobs.isRunning(_regenKey(runId));
 
   Future<void> _refresh() async {
     final previewKey = (
@@ -76,7 +92,10 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
       );
       return;
     }
-    setState(() => _runningReconciliation = true);
+    // Captured before the await: `ref` is unusable once the widget is gone,
+    // and the job still has to be cleared when it finishes.
+    final jobs = _jobs;
+    if (!jobs.start(_reconciliationKey)) return;
     try {
       final outcome = await ref
           .read(manualStudioLedgerServiceProvider)
@@ -106,7 +125,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
         );
       }
     } finally {
-      if (mounted) setState(() => _runningReconciliation = false);
+      jobs.finish(_reconciliationKey);
     }
   }
 
@@ -120,7 +139,8 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
         position: ToastPosition.top,
       );
     }
-    setState(() => _runningLedger = true);
+    final jobs = _jobs;
+    if (!jobs.start(_ledgerKey)) return;
     try {
       final service = ref.read(manualStudioLedgerServiceProvider);
       final outcome = missingEndpoint
@@ -164,12 +184,12 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
         );
       }
     } finally {
-      if (mounted) setState(() => _runningLedger = false);
+      jobs.finish(_ledgerKey);
     }
   }
 
   Future<void> _regenerate(ReconciliationRunView run) async {
-    if (_regeneratingRunId != null) return;
+    if (_regenerating) return;
     final confirmed = await GlazeBottomSheet.show<bool>(
       context,
       title: 'agent_ops_regenerate_title'.tr(),
@@ -193,7 +213,9 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
       ],
     );
     if (confirmed != true || !mounted) return;
-    setState(() => _regeneratingRunId = run.row.id);
+    final jobs = _jobs;
+    final key = _regenKey(run.row.id);
+    if (!jobs.start(key)) return;
     try {
       final outcome = await ref
           .read(manualStudioLedgerServiceProvider)
@@ -232,7 +254,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
         );
       }
     } finally {
-      if (mounted) setState(() => _regeneratingRunId = null);
+      jobs.finish(key);
     }
   }
 
@@ -246,6 +268,8 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
 
   @override
   Widget build(BuildContext context) {
+    // Subscribes this tab to the running-jobs set; the getters above read it.
+    ref.watch(agentOpsJobsProvider);
     final ledgerEnabled =
         ref.watch(studioPresetProvider).value?.agentEnabled['ledger'] != false;
     // Any Ledger work in flight — including a regeneration started from a
@@ -254,7 +278,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
         !ledgerEnabled ||
         _runningLedger ||
         _runningReconciliation ||
-        _regeneratingRunId != null;
+        _regenerating;
     final snapshot = ref.watch(reconcilerViewProvider(widget.sessionId));
     return snapshot.when(
       loading: () => const Center(child: GlazeSpinner()),
@@ -362,7 +386,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                           run.effect != null &&
                           !_runningLedger &&
                           !_runningReconciliation &&
-                          _regeneratingRunId == null &&
+                          !_regenerating &&
                           run.row.id ==
                               data.runs
                                   .lastWhere((item) => item.isCurrent)
@@ -370,7 +394,7 @@ class _AgenticReconcilerTabState extends ConsumerState<AgenticReconcilerTab> {
                                   .id
                       ? () => _regenerate(run)
                       : null,
-                  regenerating: _regeneratingRunId == run.row.id,
+                  regenerating: _isRegenerating(run.row.id),
                 ),
             const SizedBox(height: 14),
             Text(
