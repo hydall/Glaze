@@ -119,6 +119,7 @@ abstract class AppSettings with _$AppSettings {
     @Default(false) bool hideGenerationTime,
     @Default(false) bool hideTokenCount,
     @Default(false) bool groupDialogs,
+
     /// The resolved answer the whole app reads: whether the reduced UI is on
     /// right now. Derived from [batterySaverMode] — under [BatterySaverMode
     /// .system] it tracks the OS, so it changes without anyone touching a
@@ -132,6 +133,12 @@ abstract class AppSettings with _$AppSettings {
     @Default(false) bool hideTooltips,
     @Default(false) bool disableSwipeRegeneration,
     @Default(false) bool allowMessageScripts,
+
+    /// Whether a message in the middle of a chat may be deleted — in bulk
+    /// selection or from its action menu — instead of only a trailing run that
+    /// reaches the last message. Off by default: deleting mid-history breaks
+    /// the prompt context, so it is an explicit opt-in.
+    @Default(false) bool allowMiddleMessageDelete,
     @Default('en') String language,
     @Default(false) bool virtualKeyboardSend,
     @Default(true) bool showOurPicks,
@@ -149,6 +156,7 @@ abstract class AppSettings with _$AppSettings {
     @Default(true) bool openCardAfterImport,
     @Default(true) bool hapticFeedback,
     @Default(true) bool messageVibration,
+
     /// Where a JanitorAI **closed lorebook** is recovered from. [local] runs the
     /// capture + LLM rebuild through the logged-in session; [datacat] takes
     /// whatever book DataCat's copy of the card carries (public scripts only).
@@ -203,6 +211,7 @@ abstract final class AppSettingsPreferences {
     'hideTooltips',
     'disableSwipeRegeneration',
     'allowMessageScripts',
+    'allowMiddleMessageDelete',
     'language',
     'virtualKeyboardSend',
     'showOurPicks',
@@ -247,6 +256,9 @@ abstract final class AppSettingsPreferences {
       allowMessageScripts:
           _coerceBool(prefs.get('allowMessageScripts')) ??
           defaults.allowMessageScripts,
+      allowMiddleMessageDelete:
+          _coerceBool(prefs.get('allowMiddleMessageDelete')) ??
+          defaults.allowMiddleMessageDelete,
       language: supportedAppLanguages.contains(savedLanguage)
           ? savedLanguage!
           : defaults.language,
@@ -309,6 +321,7 @@ abstract final class AppSettingsPreferences {
       'hideTooltips': normalized.hideTooltips,
       'disableSwipeRegeneration': normalized.disableSwipeRegeneration,
       'allowMessageScripts': normalized.allowMessageScripts,
+      'allowMiddleMessageDelete': normalized.allowMiddleMessageDelete,
       'language': normalized.language,
       'virtualKeyboardSend': normalized.virtualKeyboardSend,
       'showOurPicks': normalized.showOurPicks,
@@ -417,6 +430,7 @@ abstract final class AppSettingsPreferences {
     hideTooltips: values['hideTooltips'] as bool,
     disableSwipeRegeneration: values['disableSwipeRegeneration'] as bool,
     allowMessageScripts: values['allowMessageScripts'] as bool,
+    allowMiddleMessageDelete: values['allowMiddleMessageDelete'] as bool,
     language: values['language'] as String,
     virtualKeyboardSend: values['virtualKeyboardSend'] as bool,
     showOurPicks: values['showOurPicks'] as bool,

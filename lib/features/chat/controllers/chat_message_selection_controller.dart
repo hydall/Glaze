@@ -25,6 +25,29 @@ class ChatMessageSelectionController {
     });
   }
 
+  /// Whether the current selection is allowed to be deleted.
+  ///
+  /// With [allowMiddle] off, only a trailing run can go: every message from the
+  /// earliest selected one to the last message must be selected, with no gaps
+  /// and nothing left unselected after it. [allowMiddle] lifts the restriction
+  /// and allows any selection, including one in the middle of the chat.
+  bool canDeleteSelection(
+    List<ChatMessage> messages, {
+    required bool allowMiddle,
+  }) {
+    if (selectedMessageIds.isEmpty || messages.isEmpty) return false;
+    if (allowMiddle) return true;
+    final selectedIndices = selectedMessageIds
+        .map((id) => messages.indexWhere((m) => m.id == id))
+        .where((idx) => idx >= 0)
+        .toList();
+    if (selectedIndices.isEmpty) return false;
+    final earliest = selectedIndices.reduce((a, b) => a < b ? a : b);
+    final lastIndex = messages.length - 1;
+    if (earliest > lastIndex) return false;
+    return selectedIndices.length == lastIndex - earliest + 1;
+  }
+
   Future<void> hideSelected(
     WidgetRef ref,
     String charId,
@@ -41,6 +64,10 @@ class ChatMessageSelectionController {
 
   /// Deletes every selected message and leaves selection mode.
   ///
+  /// Refuses a selection that [canDeleteSelection] rejects — a middle message
+  /// with middle deletion disabled — so the restriction holds even if a caller
+  /// bypasses the hidden toolbar button.
+  ///
   /// Deliberately not `async`: the indices are resolved and the selection is
   /// dropped synchronously, so a caller that rebuilds before awaiting the
   /// returned future sees the toolbar gone on the frame of the tap. The delete
@@ -49,8 +76,12 @@ class ChatMessageSelectionController {
   Future<void> deleteSelected(
     WidgetRef ref,
     String charId,
-    List<ChatMessage> messages,
-  ) {
+    List<ChatMessage> messages, {
+    bool allowMiddle = false,
+  }) {
+    if (!canDeleteSelection(messages, allowMiddle: allowMiddle)) {
+      return Future<void>.value();
+    }
     final indices = selectedMessageIds
         .map((id) => messages.indexWhere((m) => m.id == id))
         .where((idx) => idx >= 0)

@@ -1747,6 +1747,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                   isLast:
                                       index == widget.state.messages.length - 1,
                                   isGenerating: widget.state.isGenerating,
+                                  allowMiddleDelete:
+                                      appSettings?.allowMiddleMessageDelete ??
+                                      false,
                                   isHidden:
                                       widget.state.messages[index].isHidden,
                                   canDeleteSwipe:
@@ -2239,8 +2242,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         beforeGeneration: _maybeSeedGameTime,
                         onClose: () => widget.drawerCtrl.closeDrawer(),
                         disableEffects:
-                            batterySaver &&
-                            widget.drawerCtrl.isDrawerAnimating,
+                            batterySaver && widget.drawerCtrl.isDrawerAnimating,
                         onScrollToMessage: (id) => _scrollToTargetMessage(id),
                       ),
                     ),
@@ -2268,6 +2270,14 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                     final allSelectedHidden = _selectionCtrl
                                         .allSelectedHidden(
                                           widget.state.messages,
+                                        );
+                                    final allowMiddleDelete =
+                                        appSettings?.allowMiddleMessageDelete ??
+                                        false;
+                                    final canDeleteSelected = _selectionCtrl
+                                        .canDeleteSelection(
+                                          widget.state.messages,
+                                          allowMiddle: allowMiddleDelete,
                                         );
                                     return ChatInputBar(
                                       key: ValueKey(widget.state.session?.id),
@@ -2303,6 +2313,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                           .selectedMessageIds
                                           .length,
                                       allSelectedHidden: allSelectedHidden,
+                                      canDeleteSelected: canDeleteSelected,
                                       onCancelSelection: () {
                                         setState(() {
                                           _selectionCtrl.clearSelection();
@@ -2339,6 +2350,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                               ref,
                                               widget.charId,
                                               widget.state.messages,
+                                              allowMiddle: allowMiddleDelete,
                                             );
                                         if (mounted) setState(() {});
                                         await pending;
@@ -2346,9 +2358,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                       },
                                       isDrawerOpen:
                                           widget.drawerCtrl.drawerOpen ||
-                                          widget
-                                              .drawerCtrl
-                                              .switchingToDrawer,
+                                          widget.drawerCtrl.switchingToDrawer,
                                       virtualKeyboardSend:
                                           widget.virtualKeyboardSend,
                                       enterToSend: widget.enterToSend,

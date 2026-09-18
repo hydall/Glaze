@@ -121,6 +121,15 @@ class ChatGroup extends SettingsGroup {
           value: settings.allowMessageScripts,
           onChanged: (v) => _setScripts(context, ref, v),
         ),
+        toggle(
+          id: 'allow_middle_delete',
+          label: 'menu_allow_middle_delete'.tr(),
+          description: 'desc_allow_middle_delete'.tr(),
+          value: settings.allowMiddleMessageDelete,
+          onChanged: (v) => notifierOf(
+            ref,
+          ).save(settings.copyWith(allowMiddleMessageDelete: v)),
+        ),
       ],
     );
   }

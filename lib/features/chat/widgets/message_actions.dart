@@ -19,6 +19,7 @@ void showMessageContextMenu({
   required bool isError,
   required bool isLast,
   required bool isGenerating,
+  required bool allowMiddleDelete,
   required bool isHidden,
   required bool canDeleteSwipe,
   required bool canDeleteAgentSwipe,
@@ -143,7 +144,7 @@ void showMessageContextMenu({
                 .deleteActiveAgentSwipe(messageIndex);
           },
         ),
-      if (isLast && !isGenerating)
+      if ((isLast || allowMiddleDelete) && !isGenerating)
         BottomSheetItem(
           icon: Icons.delete,
           label: 'Delete',

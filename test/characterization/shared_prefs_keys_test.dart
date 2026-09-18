@@ -18,6 +18,7 @@ void main() {
       'hideTooltips': bool,
       'disableSwipeRegeneration': bool,
       'allowMessageScripts': bool,
+      'allowMiddleMessageDelete': bool,
       'language': String,
       'virtualKeyboardSend': bool,
       'showOurPicks': bool,
@@ -305,6 +306,8 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.hideTooltips;
     case 'disableSwipeRegeneration':
       return s.disableSwipeRegeneration;
+    case 'allowMiddleMessageDelete':
+      return s.allowMiddleMessageDelete;
     case 'virtualKeyboardSend':
       return s.virtualKeyboardSend;
     case 'showOurPicks':

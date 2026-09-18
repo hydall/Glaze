@@ -101,6 +101,11 @@ class ChatInputBar extends ConsumerStatefulWidget {
   final VoidCallback? onHideSelected;
   final VoidCallback? onDeleteSelected;
 
+  /// Whether the current selection passes the delete rule. When false the
+  /// delete button is not rendered at all, so a middle message cannot be
+  /// removed while middle deletion is disabled.
+  final bool canDeleteSelected;
+
   /// Selects everything above / below the last tapped message. Tapping again
   /// with that run already selected clears it.
   final VoidCallback? onSelectAbove;
@@ -161,6 +166,7 @@ class ChatInputBar extends ConsumerStatefulWidget {
     this.onCancelSelection,
     this.onHideSelected,
     this.onDeleteSelected,
+    this.canDeleteSelected = false,
     this.onSelectAbove,
     this.onSelectBelow,
     this.allSelectedHidden = false,
@@ -836,8 +842,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 emptyAction!.onTap!();
               } else {
                 final guidance =
-                    _guidanceMode &&
-                        _guidanceController.text.trim().isNotEmpty
+                    _guidanceMode && _guidanceController.text.trim().isNotEmpty
                     ? _guidanceController.text.trim()
                     : null;
                 widget.onImpersonate?.call(guidance);
@@ -1161,17 +1166,17 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                       : secondaryColor.withValues(alpha: 0.5),
                   batterySaver: widget.batterySaver,
                 ),
-                const SizedBox(width: 6),
-                _CircleBtn(
-                  icon: Icons.delete,
-                  onTap: widget.selectedCount > 0
-                      ? widget.onDeleteSelected
-                      : null,
-                  color: widget.selectedCount > 0
-                      ? Colors.redAccent
-                      : secondaryColor.withValues(alpha: 0.5),
-                  batterySaver: widget.batterySaver,
-                ),
+                if (widget.canDeleteSelected) ...[
+                  const SizedBox(width: 6),
+                  _CircleBtn(
+                    icon: Icons.delete,
+                    onTap: widget.selectedCount > 0
+                        ? widget.onDeleteSelected
+                        : null,
+                    color: Colors.redAccent,
+                    batterySaver: widget.batterySaver,
+                  ),
+                ],
                 const SizedBox(width: 8),
               ],
             ),

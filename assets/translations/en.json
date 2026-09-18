@@ -880,6 +880,8 @@
   "message_scripts_detected_body": "Scripts are disabled by default for safety (a malicious script can send your chat history to an attacker). Enable JavaScript execution in chat? You can change this at any time in the interface settings.",
   "message_scripts_detected_enable": "Enable",
   "message_scripts_detected_keep_off": "Keep it disabled",
+  "menu_allow_middle_delete": "Delete Messages in the Middle",
+  "desc_allow_middle_delete": "Lets you delete a message from the middle of a chat. Off by default: then only a run of messages reaching the end can be deleted.",
   "theme_back_to_presets": "Back to Presets",
   "theme_hue": "Hue",
   "theme_saturation": "Saturation",
