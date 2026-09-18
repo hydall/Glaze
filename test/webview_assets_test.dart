@@ -2082,6 +2082,49 @@ void main() {
     });
   });
 
+  // ─── document scroll lock ─────────────────────────────────────────────────
+  // Flutter mirrors its glass chrome into the page as `position: fixed`
+  // strips. Any scroll of the page itself (a caret/selection reveal, an
+  // embedder panning the viewport for the keyboard) moves those strips out of
+  // alignment with the Flutter chrome, so the page must not scroll: only
+  // #chat-container may.
+  group('document scroll lock (index.html + chat_bridge_controller.js)', () {
+    test('the keyboard resizes the layout viewport instead of panning it', () {
+      expect(
+        indexHtml,
+        contains('interactive-widget=resizes-content'),
+        reason:
+            'Without it the soft keyboard pans the visual viewport, which drags '
+            'every fixed layer — the Flutter-glass strips included — out from '
+            'under the Flutter chrome.',
+      );
+    });
+
+    test('html and body are fixed and cannot scroll', () {
+      final idx = indexHtml.indexOf('html, body {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(indexHtml, idx);
+      expect(body, contains('position: fixed'));
+      expect(body, contains('overflow: hidden'));
+      expect(body, contains('overscroll-behavior: none'));
+    });
+
+    test('a document scroll is undone and handed to the container', () {
+      expect(bridgeControllerJs, contains('_setupDocumentScrollLock()'));
+      final idx = bridgeControllerJs.indexOf('_setupDocumentScrollLock() {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      expect(body, contains('doc.scrollTop = 0'));
+      expect(
+        body,
+        contains('container.scrollTop += top'),
+        reason:
+            'The movement the browser aimed at the page has to land on the '
+            'chat, or a caret reveal would jump nowhere.',
+      );
+    });
+  });
+
   // ─── message attachments ──────────────────────────────────────────────────
   group('message attachments', () {
     // The Dart mapper sends `imagePaths` (every attachment) alongside

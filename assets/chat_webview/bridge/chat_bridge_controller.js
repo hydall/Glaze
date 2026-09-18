@@ -113,6 +113,7 @@ export class Bridge {
     this._bottomInsetApplied = false;
     this._setupScrollListener();
     this._setupViewportShrinkListener();
+    this._setupDocumentScrollLock();
     this._setupInteractionListener();
     this._setupGlazeRequestRelay();
     this._setupImageClickForward();
@@ -502,6 +503,38 @@ export class Bridge {
     window.addEventListener('resize', onViewportChange);
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', onViewportChange);
+    }
+  }
+
+  /* ---------- Document scroll lock ---------- */
+  // #chat-container is the only scroller in this page. If the document itself
+  // still scrolls — the browser revealing a focused caret or a dragged text
+  // selection on an engine that ignores the CSS lock, or the embedder panning
+  // its viewport — the whole page slides, and with it every `position: fixed`
+  // layer, including the Flutter-glass overlay-blur strips Flutter mirrors into
+  // the page. The strips then sit away from the Flutter chrome and trail it
+  // through keyboard/drawer animations.
+  //
+  // The page is locked in CSS (html/body fixed, overflow hidden); this is the
+  // belt to that suspenders. A document scroll is undone and the same movement
+  // is handed to the container, so the caret/selection reveal still scrolls the
+  // chat instead of the WebView.
+  _setupDocumentScrollLock() {
+    const pin = () => {
+      const doc = document.scrollingElement;
+      if (!doc) return;
+      const top = doc.scrollTop;
+      const left = doc.scrollLeft;
+      if (top === 0 && left === 0) return;
+      doc.scrollTop = 0;
+      doc.scrollLeft = 0;
+      const container = this.virtualList && this.virtualList.container;
+      if (container && top) container.scrollTop += top;
+    };
+    window.addEventListener('scroll', pin, { passive: true });
+    document.addEventListener('scroll', pin, { passive: true });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('scroll', pin, { passive: true });
     }
   }
 

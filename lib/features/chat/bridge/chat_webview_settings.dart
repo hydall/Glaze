@@ -103,5 +103,13 @@ InAppWebViewSettings chatWebViewInAppSettings({bool isInspectable = true}) {
     mixedContentMode: chatWebViewMixedContentMode(),
     useShouldOverrideUrlLoading: true,
     webViewAssetLoader: chatWebViewAssetLoader(),
+    // The page is a full-screen chat whose only scroll is the in-page
+    // #chat-container. Any native WebView scroll or overscroll moves the whole
+    // page — including the fixed Flutter-glass blur strips — out from under the
+    // Flutter chrome, so it is disabled here. `disableVerticalScroll` is
+    // deliberately NOT set: on Android it consumes every ACTION_MOVE, which
+    // would take the container's own touch scrolling down with it.
+    disallowOverScroll: true,
+    disableHorizontalScroll: true,
   );
 }

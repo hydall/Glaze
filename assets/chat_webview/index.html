@@ -2,17 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <!-- `interactive-widget=resizes-content`: the soft keyboard resizes the
+       layout viewport instead of panning it. With the pan (the default), the
+       embedder scrolls the whole page to reveal a focused caret and every
+       `position: fixed` layer — the Flutter-glass strips included — slides out
+       from under the Flutter chrome. Resizing keeps the visual viewport
+       anchored, so the page's only scroll is #chat-container. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
   <title>Glaze Chat</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* The page itself never scrolls: #chat-container is the only scroller.
+       `position: fixed` gives the document no scroll range at all, so the
+       browser cannot answer a caret/selection reveal by scrolling the page
+       (which carried the fixed overlay-blur strips away from the Flutter
+       chrome); the reveal is forced onto the container instead, where
+       `scroll-padding` keeps it clear of the chrome. */
     html, body { background: transparent;
       color: var(--text-color, #e0e0e0);
       font-family: var(--font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif);
       font-size: var(--font-size, 15px);
       letter-spacing: var(--letter-spacing, 0);
+      position: fixed; inset: 0;
+      width: 100%; height: 100%;
       overflow: hidden;
-      height: 100%;
+      overscroll-behavior: none;
     }
     #chat-container {
       /* `dvh`, not `vh`: the soft keyboard shrinks the *visual* viewport while
