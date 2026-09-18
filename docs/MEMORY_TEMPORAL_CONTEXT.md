@@ -1,10 +1,9 @@
 # Historical memory context
 
-> Roadmap decision (2026-09-18): the expanded source-integrity increment is a
-> candidate for simplification because historical source edits have low expected
-> ROI. Automatic repair/maintenance and history-browser UI are frozen. This file
-> describes the current implementation; no source checks or badges have yet been
-> removed. The revised planning document is
+> Roadmap decision (2026-09-18): runtime source policing was reduced because
+> historical source edits have low expected ROI. Automatic repair/maintenance,
+> source-status badges, and history-browser UI are frozen. The revised planning
+> document is
 > `docs/untracked/TEMPORAL_MEMORY_EDITING_DESIGN.md` (local, gitignored).
 
 Memory Books describe episodes at their source story time. Current Ledger and
@@ -73,20 +72,32 @@ ordered prefix before that target, including the selected swipe and agent swipe.
 
 ## Boundaries of this increment
 
-The temporal increment adds framing and reads existing historical evidence. The
-source-integrity increment now adds a per-message manifest for generated and
-approved summaries, including swipe and content fingerprints. It validates
-generation, approval, retrieval, and final request sending; invalidated records
-remain auditable but are excluded from retrieval. Legacy entries without a
-manifest remain explicitly unverified and retain their normal non-historical
-compatibility behavior. A manifest proves source identity and content, not that
-the summary itself is semantically correct.
+The temporal increment adds framing and reads existing historical evidence.
+Generated and approved summaries retain per-message source manifests, including
+swipe and content fingerprints. Generation keeps cancellation and operation
+ownership checks, while approval atomically verifies the expected draft; neither
+path repeatedly rescans old source text. Historical regeneration validates its
+bounded source prefix, and Raw Recall validates the exact stored text it reuses.
+
+Ordinary forward retrieval does not repeatedly hash old chat messages. Before a
+prepared request is sent, it only verifies that the exact selected MemoryBook
+entries remain active and unchanged; this is an asynchronous ownership guard,
+not historical source policing. Records already durably invalidated by message
+or swipe deletion remain auditable and excluded from retrieval. Legacy entries
+without a manifest retain normal non-historical compatibility behavior. A
+manifest proves source identity and content, not that the summary itself is
+semantically correct.
 
 Typed occurrence ranges and character audience ACLs are still separate work.
 
 Scene detection, automatic continuity digests, and a provider-wide request budget
 manager remain separate work. The memory cap here is measured using the existing
 token estimator, not provider billing tokens.
+
+Manual consolidation is also separate planned work. One explicit run may inspect
+at most 10 sequential active entries, produce a reviewable draft, and apply only
+with an immutable before/after snapshot that supports rollback and branch-safe
+copying. No consolidation model call or automatic trigger is part of this branch.
 
 ## Verification
 

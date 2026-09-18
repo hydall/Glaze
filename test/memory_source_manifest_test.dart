@@ -145,55 +145,49 @@ void main() {
       await db.close();
     });
 
-    test(
-      'retrieval excludes changed evidence but keeps matching legacy imports',
-      () async {
-        final repo = container.read(memoryBookRepoProvider);
-        await repo.put(
-          MemoryBook(
-            id: 'book',
-            sessionId: 's',
-            entries: [
-              MemoryEntry(
-                id: 'verified',
-                content: 'Mara in camp',
-                keys: ['Mara'],
-                messageIds: ['a', 'b'],
-                sourceManifest: manifest,
-              ),
-              const MemoryEntry(
-                id: 'legacy',
-                content: 'Mara legacy history',
-                keys: ['Mara'],
-              ),
-            ],
-          ),
-        );
-        final service = container.read(memoryInjectionServiceProvider);
-        final valid = await service.buildCandidates(
+    test('ordinary retrieval does not rescan old evidence text', () async {
+      final repo = container.read(memoryBookRepoProvider);
+      await repo.put(
+        MemoryBook(
+          id: 'book',
           sessionId: 's',
-          history: sources,
-          currentText: 'Mara',
-        );
-        expect(valid.allScores.map((s) => s.entry.id), contains('verified'));
-        final invalid = await service.buildCandidates(
-          sessionId: 's',
-          history: [
-            first,
-            second.copyWith(content: 'Changed'),
+          entries: [
+            MemoryEntry(
+              id: 'verified',
+              content: 'Mara in camp',
+              keys: ['Mara'],
+              messageIds: ['a', 'b'],
+              sourceManifest: manifest,
+            ),
+            const MemoryEntry(
+              id: 'legacy',
+              content: 'Mara legacy history',
+              keys: ['Mara'],
+            ),
           ],
-          currentText: 'Mara',
-        );
-        expect(
-          invalid.allScores.map((s) => s.entry.id),
-          isNot(contains('verified')),
-        );
-        expect(invalid.allScores.map((s) => s.entry.id), contains('legacy'));
-      },
-    );
+        ),
+      );
+      final service = container.read(memoryInjectionServiceProvider);
+      final valid = await service.buildCandidates(
+        sessionId: 's',
+        history: sources,
+        currentText: 'Mara',
+      );
+      expect(valid.allScores.map((s) => s.entry.id), contains('verified'));
+      final invalid = await service.buildCandidates(
+        sessionId: 's',
+        history: [
+          first,
+          second.copyWith(content: 'Changed'),
+        ],
+        currentText: 'Mara',
+      );
+      expect(invalid.allScores.map((s) => s.entry.id), contains('verified'));
+      expect(invalid.allScores.map((s) => s.entry.id), contains('legacy'));
+    });
 
     test(
-      'approval preserves stamps, rejects a changed source, and retains deleted-source history',
+      'approval preserves stamps without rescanning old text and deletion retains history',
       () async {
         final repo = container.read(memoryBookRepoProvider);
         final draft = MemoryDraft(
@@ -219,24 +213,9 @@ void main() {
                 ],
               ),
             );
-        await expectLater(
-          repo.approveDraft('s', draft.id, draft),
-          throwsStateError,
-        );
-        expect((await repo.getBySessionId('s'))!.entries, isEmpty);
-        await container
-            .read(chatRepoProvider)
-            .put(
-              ChatSession(
-                id: 's',
-                characterId: 'c',
-                sessionIndex: 1,
-                messages: sources,
-              ),
-            );
         final approved = await repo.approveDraft('s', draft.id, draft);
         expect(approved!.entries.single.sourceManifest, manifest);
-        expect(await repo.areSourcesCurrent('s', approved.entries), isTrue);
+        expect(await repo.areEntriesCurrent('s', approved.entries), isTrue);
         await repo.updateEntry(
           sessionId: 's',
           entryId: approved.entries.single.id,
@@ -244,7 +223,7 @@ void main() {
             content: 'Edited after preparation',
           ),
         );
-        expect(await repo.areSourcesCurrent('s', approved.entries), isFalse);
+        expect(await repo.areEntriesCurrent('s', approved.entries), isFalse);
         await repo.deleteForMessage('s', 'b');
         final retained = (await repo.getBySessionId('s'))!.entries.single;
         expect(retained.content, 'Edited after preparation');
@@ -253,7 +232,7 @@ void main() {
     );
 
     test(
-      'late generation is retryable and branch copy retains exact evidence',
+      'late generated text stays reviewable and branch copy retains evidence',
       () async {
         final repo = container.read(memoryBookRepoProvider);
         await container
@@ -290,7 +269,7 @@ void main() {
           ),
         );
         final book = (await repo.getBySessionId('s'))!;
-        expect(book.pendingDrafts.single.status, 'needs_regeneration');
+        expect(book.pendingDrafts.single.status, 'pending_approval');
         expect(book.pendingDrafts.single.content, 'Late result');
         await repo.copyForSessionBranch(
           fromSessionId: 's',

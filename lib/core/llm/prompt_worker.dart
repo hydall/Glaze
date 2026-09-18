@@ -11,7 +11,6 @@ import 'glaze_matcher.dart';
 import 'memory_budget.dart';
 import 'memory_retrieval_mode.dart';
 import 'memory_selector.dart';
-import '../models/memory_source_manifest.dart';
 import 'prompt_builder.dart';
 import 'prompt_inputs.dart';
 import 'prompt_worker_codec.dart';
@@ -415,11 +414,7 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
         .where(
           (entry) =>
               MemoryEntryRevisions.isUsable(entry) &&
-              (entry.sourceManifest?.validate(
-                    entry.messageIds,
-                    inputs.history,
-                  ) !=
-                  MemorySourceValidity.invalid),
+              entry.sourceManifest?.invalidated != true,
         )
         .toList();
     final visibleHistory = inputs.history

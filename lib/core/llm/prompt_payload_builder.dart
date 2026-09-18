@@ -795,7 +795,7 @@ class PromptPayloadBuilder {
 
   /// Revalidate the exact entries that reached a prepared request after async
   /// retrieval and prompt assembly. Unselected candidates do not block sending.
-  Future<void> ensureMemorySourcesCurrent({
+  Future<void> ensureMemoryEntriesCurrent({
     required String sessionId,
     required MemorySelection? selection,
     required Iterable<TriggeredEntry> triggered,
@@ -810,7 +810,7 @@ class PromptPayloadBuilder {
     if (used.isEmpty) return;
     if (!await _ref
         .read(memoryBookRepoProvider)
-        .areSourcesCurrent(sessionId, used)) {
+        .areEntriesCurrent(sessionId, used)) {
       throw const PromptBuildStaleException(
         'Memory changed while preparing the request.',
       );

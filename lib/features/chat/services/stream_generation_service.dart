@@ -212,7 +212,7 @@ class StreamGenerationService {
       final promptResult = studioConfig == null
           ? await buildPromptInIsolate(finalPayload)
           : _studioCompatibilityResult(finalStudioContext!);
-      await builder.ensureMemorySourcesCurrent(
+      await builder.ensureMemoryEntriesCurrent(
         sessionId: session.id,
         selection: inputs.memorySelection,
         triggered: promptResult.triggeredMemories,
@@ -394,7 +394,7 @@ class StreamGenerationService {
               macroContext: finalStudioContext!.macroContext,
             );
 
-        await builder.ensureMemorySourcesCurrent(
+        await builder.ensureMemoryEntriesCurrent(
           sessionId: session.id,
           selection: inputs.memorySelection,
           triggered: promptResult.triggeredMemories,
@@ -403,7 +403,7 @@ class StreamGenerationService {
           throw const PromptBuildStaleException('Generation cancelled.');
         }
         final studioResult = await studioService.runTrackerCycle(
-          beforeFinalSend: () => builder.ensureMemorySourcesCurrent(
+          beforeFinalSend: () => builder.ensureMemoryEntriesCurrent(
             sessionId: session.id,
             selection: inputs.memorySelection,
             triggered: promptResult.triggeredMemories,
@@ -681,7 +681,7 @@ class StreamGenerationService {
         _phase(next);
       }
 
-      await builder.ensureMemorySourcesCurrent(
+      await builder.ensureMemoryEntriesCurrent(
         sessionId: session.id,
         selection: inputs.memorySelection,
         triggered: promptResult.triggeredMemories,

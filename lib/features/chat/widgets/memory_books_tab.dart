@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book.dart';
-import '../../../core/models/memory_source_manifest.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
@@ -583,12 +582,6 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             (entry) => MemoryEntryCard(
               key: ValueKey(entry.id),
               entry: entry,
-              sourceValidity:
-                  entry.sourceManifest?.validate(
-                    entry.messageIds,
-                    widget.messages,
-                  ) ??
-                  MemorySourceValidity.unverified,
               // No index badge while semantic search is off in the API —
               // there is nothing to be indexed against.
               embeddingStatus: vectorAvailable

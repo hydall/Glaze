@@ -5,7 +5,6 @@ import '../../../core/llm/memory_injection_service.dart';
 import '../../../core/llm/memory_draft_planner.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/models/memory_entry_revisions.dart';
-import '../../../core/models/memory_source_manifest.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/memory_book_ops_provider.dart';
@@ -241,17 +240,6 @@ class MemoryBookController {
     if (draftIndex < 0) return;
     final draft = _book!.pendingDrafts[draftIndex];
     if (draft.content.isEmpty) return;
-    final session = _ref.read(chatProvider(_charId)).value?.session;
-    if (draft.sourceManifest?.validate(
-          draft.messageIds,
-          session?.messages ?? const [],
-        ) ==
-        MemorySourceValidity.invalid) {
-      throw StateError(
-        'Memory sources changed. Regenerate the draft before approval.',
-      );
-    }
-
     MemoryEntry? entry;
     await _bookWrites.runDurableOperation(() async {
       final approved = await _ref

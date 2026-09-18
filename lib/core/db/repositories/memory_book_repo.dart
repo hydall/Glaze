@@ -7,8 +7,6 @@ import '../app_db.dart';
 import '../tables.dart';
 import '../../models/memory_book.dart';
 import '../../models/memory_entry_revisions.dart';
-import '../../models/memory_source_manifest.dart';
-import 'chat_repo.dart';
 import '../../services/memory_prompt_presets.dart';
 import '../../state/memory_settings_provider.dart';
 import '../../utils/time_helpers.dart';
@@ -94,35 +92,6 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
           )
           .toList(),
     );
-    final checkedDrafts = book.pendingDrafts
-        .where(
-          (draft) =>
-              draft.sourceManifest != null &&
-              draft.status == 'pending_approval',
-        )
-        .toList();
-    if (checkedDrafts.isNotEmpty) {
-      final session = await ChatRepo(attachedDatabase).getById(book.sessionId);
-      book = book.copyWith(
-        pendingDrafts: book.pendingDrafts.map((draft) {
-          if (draft.sourceManifest == null ||
-              draft.status != 'pending_approval') {
-            return draft;
-          }
-          if (draft.sourceManifest!.validate(
-                draft.messageIds,
-                session?.messages ?? const [],
-              ) ==
-              MemorySourceValidity.verified) {
-            return draft;
-          }
-          return draft.copyWith(
-            status: 'needs_regeneration',
-            error: 'Memory sources changed. Regenerate this draft.',
-          );
-        }).toList(),
-      );
-    }
     final retiredEntryIds = <String>{
       ...?existing?.entries
           .where((entry) => entry.source == 'agentic')
@@ -184,23 +153,17 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
     );
   }
 
-  /// Checks a prepared request against one consistent book/chat snapshot.
-  Future<bool> areSourcesCurrent(
+  /// Checks that the exact entries selected for a prepared request are still
+  /// active and unchanged. Historical source validation belongs to the
+  /// historical-request path; ordinary sends do not rescan old chat text.
+  Future<bool> areEntriesCurrent(
     String sessionId,
     Iterable<MemoryEntry> used,
   ) => transaction(() async {
     final book = await getBySessionId(sessionId);
-    final session = await ChatRepo(attachedDatabase).getById(sessionId);
     for (final entry in used) {
       final current = book?.entries.where((e) => e.id == entry.id).firstOrNull;
-      if (current == null ||
-          current != entry ||
-          current.status != 'active' ||
-          current.sourceManifest?.validate(
-                current.messageIds,
-                session?.messages ?? const [],
-              ) ==
-              MemorySourceValidity.invalid) {
+      if (current == null || current != entry || current.status != 'active') {
         return false;
       }
     }
@@ -221,16 +184,6 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
       throw StateError('Memory draft changed. Reload it before approval.');
     }
     if (draft.content.trim().isEmpty) return null;
-    final session = await ChatRepo(attachedDatabase).getById(sessionId);
-    if (draft.sourceManifest?.validate(
-          draft.messageIds,
-          session?.messages ?? const [],
-        ) ==
-        MemorySourceValidity.invalid) {
-      throw StateError(
-        'Memory sources changed. Regenerate the draft before approval.',
-      );
-    }
     final entry = MemoryEntryRevisions.initialize(
       MemoryEntry(
         id: draft.id.replaceAll('draft_', 'mem_'),
