@@ -40,6 +40,16 @@ class StudioRegexNotifier extends AsyncNotifier<List<StudioRegex>> {
     await _persist(updated);
   }
 
+  /// Appends several entries in one write. An import can carry dozens of
+  /// scripts, and persisting each one separately rewrites the whole JSON blob
+  /// once per script.
+  Future<void> addRegexes(Iterable<StudioRegex> entries) async {
+    if (entries.isEmpty) return;
+    final updated = [...?state.value, ...entries];
+    state = AsyncData(updated);
+    await _persist(updated);
+  }
+
   Future<void> updateRegex(StudioRegex entry) async {
     final updated = [
       for (final current in state.value ?? const <StudioRegex>[])

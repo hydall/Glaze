@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,35 +33,52 @@ class StudioFeatureEnabledNotifier extends StateNotifier<bool> {
 
   static const _storageKey = 'feature_studio_enabled';
 
-  Future<void> _load() async {
-    final SharedPreferences prefs;
-    try {
-      prefs = await SharedPreferences.getInstance();
-    } catch (_) {
-      // Keep the feature default-deny when preferences are unavailable.
-      return;
-    }
-    if (!mounted) return;
-    final stored = prefs.getBool(_storageKey);
-    if (stored != null) {
-      state = stored;
-      return;
-    }
+  final _loaded = Completer<void>();
 
-    // First launch after the Experimental Features update: the flag has never
-    // been written. Preserve behaviour for users who were already using Studio
-    // (any session/profile with Studio enabled) by turning the master switch
-    // on for them. Fresh installs have no enabled config and stay off. The
-    // result is persisted so this one-time probe never runs again.
-    var migrated = false;
+  /// Completes once the stored flag (and the one-time migration probe behind
+  /// it) has been read. The state starts at `false` because a [StateNotifier]
+  /// cannot be async, so anything that *branches* on the switch — rather than
+  /// merely rendering it — must await this first, or it decides during the
+  /// window where an enabled Studio still reads as off.
+  Future<void> get ready => _loaded.future;
+
+  /// Reads the stored flag, completing [ready] whichever way it goes — a throw
+  /// on the way out must not leave every awaiting reader hanging.
+  Future<void> _load() async {
     try {
-      migrated = await _ref.read(studioConfigRepoProvider).hasAnyEnabledConfig();
-    } catch (_) {
-      migrated = false;
+      final SharedPreferences prefs;
+      try {
+        prefs = await SharedPreferences.getInstance();
+      } catch (_) {
+        // Keep the feature default-deny when preferences are unavailable.
+        return;
+      }
+      if (!mounted) return;
+      final stored = prefs.getBool(_storageKey);
+      if (stored != null) {
+        state = stored;
+        return;
+      }
+
+      // First launch after the Experimental Features update: the flag has never
+      // been written. Preserve behaviour for users who were already using Studio
+      // (any session/profile with Studio enabled) by turning the master switch
+      // on for them. Fresh installs have no enabled config and stay off. The
+      // result is persisted so this one-time probe never runs again.
+      var migrated = false;
+      try {
+        migrated = await _ref
+            .read(studioConfigRepoProvider)
+            .hasAnyEnabledConfig();
+      } catch (_) {
+        migrated = false;
+      }
+      if (!mounted) return;
+      state = migrated;
+      await prefs.setBool(_storageKey, migrated);
+    } finally {
+      if (!_loaded.isCompleted) _loaded.complete();
     }
-    if (!mounted) return;
-    state = migrated;
-    await prefs.setBool(_storageKey, migrated);
   }
 
   Future<void> setEnabled(bool enabled) async {

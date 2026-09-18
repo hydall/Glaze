@@ -16,6 +16,7 @@ import '../../core/models/studio_regex.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/global_regex_provider.dart';
+import '../../core/state/studio_feature_provider.dart';
 import '../../core/state/studio_regex_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../presets/preset_list_provider.dart';
@@ -27,6 +28,12 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
+
+/// Where a newly added script lands. [agent] is the Studio list, which takes
+/// the place of [preset] while the Studio master switch is on — a chat preset
+/// and an agentic preset are mutually exclusive, so only one of the two is ever
+/// offered.
+enum _RegexScope { preset, global, agent }
 
 class RegexSheet extends ConsumerStatefulWidget {
   final bool startExpanded;
@@ -48,7 +55,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   bool _isPresetScript = false;
   bool _isStudioScript = false;
   Set<String> _activeStudioStages = const {};
-  String _tab = 'standard';
   Timer? _saveTimer;
 
   @override
@@ -287,27 +293,35 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     );
   }
 
+  /// Whether this sheet shows the agent list in place of the chat preset's.
+  ///
+  /// The Studio master switch decides it — except when the sheet was opened to
+  /// edit one named preset (the preset editor's own "Regex" row), where the
+  /// caller has already said which preset's scripts it means.
+  bool get _agentMode =>
+      widget.presetId == null && ref.read(studioFeatureEnabledProvider);
+
   void _showAddMenu(BuildContext context) {
-    if (_tab == 'studio') {
-      final script = _addStudioRegex();
-      _selectScript(
-        script,
-        isPreset: false,
-        isStudio: true,
-        studioStages: const {'final'},
-      );
-      return;
-    }
+    // With Studio on there is no active chat preset, so the first destination
+    // is the agent list instead of the preset's own scripts.
+    final studioEnabled = _agentMode;
     GlazeBottomSheet.show<void>(
       context,
       title: 'menu_regex'.tr(),
       items: [
         BottomSheetItem(
-          icon: Icons.label_outline,
-          label: 'regex_add_to_preset'.tr(),
+          icon: studioEnabled
+              ? Icons.smart_toy_outlined
+              : Icons.label_outline,
+          label: studioEnabled
+              ? 'regex_add_to_agents'.tr()
+              : 'regex_add_to_preset'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _showDestinationMenu(context, toPreset: true);
+            _showDestinationMenu(
+              context,
+              scope: studioEnabled ? _RegexScope.agent : _RegexScope.preset,
+            );
           },
         ),
         BottomSheetItem(
@@ -315,43 +329,65 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           label: 'regex_add_globally'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _showDestinationMenu(context, toPreset: false);
+            _showDestinationMenu(context, scope: _RegexScope.global);
           },
         ),
       ],
     );
   }
 
-  void _showDestinationMenu(BuildContext context, {required bool toPreset}) {
-    String title;
-    if (toPreset) {
-      final pid = _effectivePresetId;
-      final presets = ref.read(presetListProvider).value ?? [];
-      final preset = pid != null
-          ? presets.where((p) => p.id == pid).firstOrNull
-          : presets.firstOrNull;
-      title = preset?.name ?? 'label_active_preset'.tr();
-    } else {
-      title = 'regex_global_scripts'.tr();
-    }
+  String _destinationTitle(_RegexScope scope) => switch (scope) {
+    _RegexScope.agent => 'regex_studio_scripts'.tr(),
+    _RegexScope.global => 'regex_global_scripts'.tr(),
+    _RegexScope.preset => _targetPresetName(),
+  };
 
+  String _targetPresetName() {
+    final pid = _effectivePresetId;
+    final presets = ref.read(presetListProvider).value ?? [];
+    final preset = pid != null
+        ? presets.where((p) => p.id == pid).firstOrNull
+        : presets.firstOrNull;
+    return preset?.name ?? 'label_active_preset'.tr();
+  }
+
+  void _createInScope(_RegexScope scope) {
+    switch (scope) {
+      case _RegexScope.agent:
+        _selectScript(
+          _addStudioRegex(),
+          isPreset: false,
+          isStudio: true,
+          studioStages: const {'final'},
+        );
+        break;
+      case _RegexScope.global:
+        _selectScript(_addGlobalRegex(), isPreset: false);
+        break;
+      case _RegexScope.preset:
+        _addPresetRegex().then((created) {
+          if (created != null && mounted) {
+            _selectScript(created, isPreset: true);
+          }
+        });
+        break;
+    }
+  }
+
+  void _showDestinationMenu(
+    BuildContext context, {
+    required _RegexScope scope,
+  }) {
     GlazeBottomSheet.show<void>(
       context,
-      title: title,
+      title: _destinationTitle(scope),
       items: [
         BottomSheetItem(
           icon: Icons.add,
           label: 'action_create_new'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            if (toPreset) {
-              _addPresetRegex().then((s) {
-                if (s != null && mounted) _selectScript(s, isPreset: true);
-              });
-            } else {
-              final s = _addGlobalRegex();
-              _selectScript(s, isPreset: false);
-            }
+            _createInScope(scope);
           },
         ),
         BottomSheetItem(
@@ -359,7 +395,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           label: 'action_import'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _importRegex(context, globally: !toPreset);
+            _importRegex(context, scope: scope);
           },
         ),
       ],
@@ -393,7 +429,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
 
   Future<void> _importRegex(
     BuildContext context, {
-    required bool globally,
+    required _RegexScope scope,
   }) async {
     FilePickerResult? result;
     try {
@@ -438,10 +474,21 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         return;
       }
 
-      if (globally) {
+      if (scope == _RegexScope.global) {
         await ref
             .read(globalRegexProvider.notifier)
             .importFromJsBackup(combinedRaw);
+        if (context.mounted) GlazeToast.show(context, 'import_success'.tr());
+      } else if (scope == _RegexScope.agent) {
+        // An imported file carries no Studio stages — an ST script has no such
+        // notion. Land them on the Main Writer, the stage a new agent script
+        // already defaults to, and let the user re-aim them from the editor.
+        final imported = _normalizeRawRegexList(combinedRaw)
+            .map(
+              (script) => StudioRegex(script: script, stages: const {'final'}),
+            )
+            .toList();
+        await ref.read(studioRegexProvider.notifier).addRegexes(imported);
         if (context.mounted) GlazeToast.show(context, 'import_success'.tr());
       } else {
         final pid = _effectivePresetId;
@@ -527,6 +574,12 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     final globalAsync = ref.watch(globalRegexProvider);
     final studioAsync = ref.watch(studioRegexProvider);
     final activePresetId = ref.watch(activePresetIdProvider);
+    // The Studio master switch decides which kind of preset is in effect, and
+    // the two are mutually exclusive — so the agent scripts do not sit in a tab
+    // beside the chat preset's, they take its place. Watched here (rather than
+    // read through [_agentMode]) so flipping the switch rebuilds the list.
+    final studioEnabled =
+        widget.presetId == null && ref.watch(studioFeatureEnabledProvider);
 
     final presets = presetsAsync.value ?? [];
     final effectivePresetId = widget.presetId ?? activePresetId;
@@ -545,14 +598,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       title: isEdit ? 'regex_editor'.tr() : 'menu_regex'.tr(),
       showBack: isEdit || widget.startExpanded,
       onBack: isEdit ? _goBack : _goBackFromList,
-      tabs: isEdit
-          ? const []
-          : [
-              SheetViewTab(id: 'standard', label: 'regex_standard_tab'.tr()),
-              SheetViewTab(id: 'studio', label: 'regex_studio_tab'.tr()),
-            ],
-      activeTabId: _tab,
-      onTabSelected: (tab) => setState(() => _tab = tab),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 280),
         transitionBuilder: _buildTransition,
@@ -566,13 +611,13 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
                     ? _setStudioStages
                     : null,
               )
-            : _tab == 'studio'
-            ? _buildStudioListView(context, studioRegexes)
             : _buildListView(
                 context,
-                activePreset,
-                presetRegexes,
-                globalRegexes,
+                studioEnabled: studioEnabled,
+                activePreset: activePreset,
+                presetRegexes: presetRegexes,
+                globalRegexes: globalRegexes,
+                studioRegexes: studioRegexes,
               ),
       ),
       floatingActionButton: isEdit
@@ -586,64 +631,14 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     );
   }
 
-  Widget _buildStudioListView(BuildContext context, List<StudioRegex> entries) {
-    return Builder(
-      key: const ValueKey('studio-regex-list'),
-      builder: (innerContext) => ListView(
-        padding: const EdgeInsets.fromLTRB(0, 20, 0, 96).add(
-          EdgeInsets.only(
-            top: MediaQuery.paddingOf(innerContext).top,
-            bottom: MediaQuery.paddingOf(innerContext).bottom,
-          ),
-        ),
-        children: [
-          MenuGroup(
-            header: 'regex_studio_scripts'.tr(),
-            description: 'regex_studio_description'.tr(),
-            items: [
-              if (entries.isEmpty)
-                const _EmptyState()
-              else
-                ...entries.map((entry) {
-                  final script = entry.script;
-                  return MenuScriptItem(
-                    name: script.name,
-                    subtitle: script.regex.isNotEmpty ? script.regex : null,
-                    enabled: !script.disabled,
-                    onToggle: (enabled) => _toggleScript(
-                      script,
-                      enabled,
-                      isPreset: false,
-                      isStudio: true,
-                      studioStages: entry.stages,
-                    ),
-                    onTap: () => _selectScript(
-                      script,
-                      isPreset: false,
-                      isStudio: true,
-                      studioStages: entry.stages,
-                    ),
-                    onMore: () => _showScriptMenu(
-                      innerContext,
-                      script,
-                      false,
-                      isStudio: true,
-                    ),
-                  );
-                }),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildListView(
-    BuildContext context,
-    Preset? activePreset,
-    List<PresetRegex> presetRegexes,
-    List<PresetRegex> globalRegexes,
-  ) {
+    BuildContext context, {
+    required bool studioEnabled,
+    required Preset? activePreset,
+    required List<PresetRegex> presetRegexes,
+    required List<PresetRegex> globalRegexes,
+    required List<StudioRegex> studioRegexes,
+  }) {
     return Builder(
       key: const ValueKey('regex-list'),
       builder: (innerContext) => ListView(
@@ -655,32 +650,10 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           ),
         ),
         children: [
-          if (presetRegexes.isNotEmpty)
-            MenuGroup(
-              header: 'regex_preset_scripts'.tr(),
-              items: [
-                if (activePreset != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-                    child: _PresetChip(
-                      presetName: activePreset.name,
-                      onTap: widget.presetId == null
-                          ? () => context.go('/tools/presets')
-                          : null,
-                    ),
-                  ),
-                ...presetRegexes.map(
-                  (r) => MenuScriptItem(
-                    name: r.name,
-                    subtitle: r.regex.isNotEmpty ? r.regex : null,
-                    enabled: !r.disabled,
-                    onToggle: (v) => _toggleScript(r, v, isPreset: true),
-                    onTap: () => _selectScript(r, isPreset: true),
-                    onMore: () => _showScriptMenu(innerContext, r, true),
-                  ),
-                ),
-              ],
-            ),
+          if (studioEnabled)
+            _buildAgentGroup(innerContext, studioRegexes)
+          else if (presetRegexes.isNotEmpty)
+            _buildPresetGroup(innerContext, activePreset, presetRegexes),
           MenuGroup(
             header: 'regex_global_scripts'.tr(),
             items: [
@@ -702,6 +675,73 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           const SizedBox(height: 80),
         ],
       ),
+    );
+  }
+
+  Widget _buildAgentGroup(BuildContext context, List<StudioRegex> entries) {
+    return MenuGroup(
+      header: 'regex_studio_scripts'.tr(),
+      description: 'regex_studio_description'.tr(),
+      items: [
+        if (entries.isEmpty)
+          const _EmptyState()
+        else
+          ...entries.map((entry) {
+            final script = entry.script;
+            return MenuScriptItem(
+              name: script.name,
+              subtitle: script.regex.isNotEmpty ? script.regex : null,
+              enabled: !script.disabled,
+              onToggle: (enabled) => _toggleScript(
+                script,
+                enabled,
+                isPreset: false,
+                isStudio: true,
+                studioStages: entry.stages,
+              ),
+              onTap: () => _selectScript(
+                script,
+                isPreset: false,
+                isStudio: true,
+                studioStages: entry.stages,
+              ),
+              onMore: () =>
+                  _showScriptMenu(context, script, false, isStudio: true),
+            );
+          }),
+      ],
+    );
+  }
+
+  Widget _buildPresetGroup(
+    BuildContext context,
+    Preset? activePreset,
+    List<PresetRegex> presetRegexes,
+  ) {
+    return MenuGroup(
+      header: 'regex_preset_scripts'.tr(),
+      items: [
+        if (activePreset != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: _PresetChip(
+              presetName: activePreset.name,
+              onTap: widget.presetId == null
+                  ? () => context.go('/tools/presets')
+                  : null,
+            ),
+          ),
+        ...presetRegexes.map(
+          (r) => MenuScriptItem(
+            name: r.name,
+            subtitle: r.regex.isNotEmpty ? r.regex : null,
+            enabled: !r.disabled,
+            onToggle: (v) => _toggleScript(r, v, isPreset: true),
+            onTap: () => _selectScript(r, isPreset: true),
+            onMore: () => _showScriptMenu(context, r, true),
+          ),
+        ),
+      ],
     );
   }
 }

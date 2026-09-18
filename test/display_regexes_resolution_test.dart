@@ -7,6 +7,8 @@ import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/state/active_regex_provider.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/global_regex_provider.dart';
+import 'package:glaze_flutter/core/state/studio_feature_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// The global scripts behind a load that has not finished yet — which is every
 /// cold start, where they come out of SharedPreferences while the chat is
@@ -49,10 +51,13 @@ const _presetPromptOnly = PresetRegex(
 );
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late AppDatabase db;
   late ProviderContainer container;
 
   setUp(() async {
+    SharedPreferences.setMockInitialValues({});
     db = AppDatabase.forTesting(NativeDatabase.memory());
     await PresetRepo(db).put(
       const Preset(
@@ -94,5 +99,47 @@ void main() {
       isNot(contains('preset-prompt-only')),
       reason: 'a prompt-only script has no business in the display pass',
     );
+  });
+
+  test('Studio drops the chat preset scripts and keeps the global ones',
+      () async {
+    SharedPreferences.setMockInitialValues({'feature_studio_enabled': true});
+    final studioContainer = ProviderContainer(
+      overrides: [
+        appDbProvider.overrideWithValue(db),
+        globalRegexProvider.overrideWith(_SlowGlobalRegexNotifier.new),
+      ],
+    );
+    addTearDown(studioContainer.dispose);
+
+    final active = await studioContainer.read(activeRegexesProvider.future);
+
+    expect(
+      active.map((r) => r.id),
+      isNot(contains('preset-display')),
+      reason:
+          'an agentic preset replaces the chat preset, so its scripts belong '
+          'to a prompt this turn never builds',
+    );
+    expect(active.map((r) => r.id), contains('global-display'));
+  });
+
+  test('the resolved list waits for the Studio switch to be read', () async {
+    SharedPreferences.setMockInitialValues({'feature_studio_enabled': true});
+    final studioContainer = ProviderContainer(
+      overrides: [
+        appDbProvider.overrideWithValue(db),
+        globalRegexProvider.overrideWith(_SlowGlobalRegexNotifier.new),
+      ],
+    );
+    addTearDown(studioContainer.dispose);
+
+    // The switch is a StateNotifier that starts at `false` and flips once
+    // SharedPreferences answers. Asking straight away — which is what the
+    // chat's first paint does — must not catch that window and hand back the
+    // chat preset's scripts for a Studio session.
+    final display = await studioContainer.read(displayRegexesProvider.future);
+
+    expect(display.map((r) => r.id), ['global-display']);
   });
 }
