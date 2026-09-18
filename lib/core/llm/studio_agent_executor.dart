@@ -284,6 +284,7 @@ class StudioAgentExecutor {
     StudioTurnConfigSnapshot? turnConfig,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(List<Map<String, dynamic>> messages)? onMessagesBuilt,
+    Future<void> Function()? beforeSend,
     void Function(Set<String> classifications)? onLorebookClassificationsBuilt,
   }) async {
     final settings = turnConfig?.pipelineSettings ?? _readPipelineSettings();
@@ -321,6 +322,7 @@ class StudioAgentExecutor {
         apiConfigId: apiConfigId,
         turnConfig: turnConfig,
         baseMessages: messages,
+        beforeSend: beforeSend,
         prefill: twoPassPrefills.single,
         onFinalResponseUpdate: onFinalResponseUpdate,
       );
@@ -336,7 +338,10 @@ class StudioAgentExecutor {
       turnConfig: turnConfig,
       charName: context.macroContext.charName,
       userName: context.macroContext.userName,
-      responseJsonSchema: responseJsonSchema.isEmpty ? null : responseJsonSchema,
+      responseJsonSchema: responseJsonSchema.isEmpty
+          ? null
+          : responseJsonSchema,
+      beforeSend: beforeSend,
       onFinalResponseUpdate: onFinalResponseUpdate,
     );
   }
@@ -364,6 +369,7 @@ class StudioAgentExecutor {
     StudioTurnConfigSnapshot? turnConfig,
     required List<Map<String, dynamic>> baseMessages,
     required String prefill,
+    Future<void> Function()? beforeSend,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
   }) async {
     final thinkingInstruction =
@@ -381,6 +387,7 @@ class StudioAgentExecutor {
     final thinking = await _runner.runAgent(
       agent: agent,
       messages: thinkingMessages,
+      beforeSend: beforeSend,
       apiConfig: apiConfig,
       sessionId: sessionId,
       isFinalResponse: true,
@@ -390,10 +397,11 @@ class StudioAgentExecutor {
       charName: context.macroContext.charName,
       userName: context.macroContext.userName,
     );
-    final thinkingText = (thinking.reasoning.trim().isNotEmpty
-            ? thinking.reasoning
-            : thinking.text)
-        .trim();
+    final thinkingText =
+        (thinking.reasoning.trim().isNotEmpty
+                ? thinking.reasoning
+                : thinking.text)
+            .trim();
     if (thinkingText.isEmpty) {
       return const AgentRunResult(text: '', reasoning: '');
     }
@@ -410,6 +418,7 @@ class StudioAgentExecutor {
     final answer = await _runner.runAgent(
       agent: agent,
       messages: answerMessages,
+      beforeSend: beforeSend,
       apiConfig: apiConfig,
       sessionId: sessionId,
       isFinalResponse: true,

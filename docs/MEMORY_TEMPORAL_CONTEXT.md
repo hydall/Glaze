@@ -46,11 +46,17 @@ ordered prefix before that target, including the selected swipe and agent swipe.
 
 ## Boundaries of this increment
 
-This increment adds framing and reads existing historical evidence. It does not
-introduce typed occurrence ranges, immutable Memory Book revisions, a complete
-per-message version manifest for approved summaries, or character audience ACLs.
-Source-ID containment for a summary does not prove that its prose still matches
-every selected swipe. Those checks belong to the next source-integrity phase.
+The temporal increment adds framing and reads existing historical evidence. The
+source-integrity increment now adds a per-message manifest for generated and
+approved summaries, including swipe and content fingerprints. It validates
+generation, approval, retrieval, and final request sending; invalidated records
+remain auditable but are excluded from retrieval. Legacy entries without a
+manifest remain explicitly unverified and retain their normal non-historical
+compatibility behavior. A manifest proves source identity and content, not that
+the summary itself is semantically correct.
+
+Typed occurrence ranges, immutable Memory Book text revisions, and character
+audience ACLs are still separate work.
 
 Scene detection, automatic continuity digests, and a provider-wide request budget
 manager remain separate work. The memory cap here is measured using the existing

@@ -77,6 +77,7 @@ class AgentRunner {
     Map<String, dynamic>? responseJsonSchema,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
+    Future<void> Function()? beforeSend,
   }) async {
     final token = cancelToken ?? CancelToken();
     if (token.isCancelled) {
@@ -105,6 +106,7 @@ class AgentRunner {
         responseJsonSchema: responseJsonSchema,
         onFinalResponseUpdate: onFinalResponseUpdate,
         onIntermediateUpdate: onIntermediateUpdate,
+        beforeSend: beforeSend,
       );
     } catch (e) {
       if (token.isCancelled || (e is DioException && CancelToken.isCancel(e))) {
@@ -143,6 +145,7 @@ class AgentRunner {
     Map<String, dynamic>? responseJsonSchema,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
+    Future<void> Function()? beforeSend,
   }) async {
     final resolved =
         preResolvedConfig ??
@@ -179,6 +182,8 @@ class AgentRunner {
       isFinalResponse,
       turnConfig,
     );
+    await beforeSend?.call();
+    if (cancelToken.isCancelled) throw cancelToken.cancelError!;
     return _streamRunner.run(
       agent: agent,
       messages: messages,

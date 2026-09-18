@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/memory_injection_service.dart';
 import '../../../core/llm/memory_draft_planner.dart';
 import '../../../core/models/memory_book.dart';
+import '../../../core/models/memory_source_manifest.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/memory_book_ops_provider.dart';
@@ -239,32 +240,36 @@ class MemoryBookController {
     if (draftIndex < 0) return;
     final draft = _book!.pendingDrafts[draftIndex];
     if (draft.content.isEmpty) return;
+    final session = _ref.read(chatProvider(_charId)).value?.session;
+    if (draft.sourceManifest?.validate(
+          draft.messageIds,
+          session?.messages ?? const [],
+        ) ==
+        MemorySourceValidity.invalid) {
+      throw StateError(
+        'Memory sources changed. Regenerate the draft before approval.',
+      );
+    }
 
-    final entry = MemoryEntry(
-      id: draft.id.replaceAll('draft_', 'mem_'),
-      title: draft.title,
-      content: draft.content,
-      keys: draft.keys,
-      keyParagraphs: draft.keyParagraphs,
-      ledgerRange: draft.ledgerRange,
-      vectorSearch: draft.vectorSearch,
-      messageIds: draft.messageIds,
-      messageRange: draft.messageRange,
-      status: 'active',
-      createdAt: DateTime.now().millisecondsSinceEpoch,
-      // Preserve the draft's provenance marker for scan/manual entries.
-      source: draft.source,
-      kind: 'curated',
-    );
-
-    _book = _book!.copyWith(
-      entries: [..._book!.entries, entry],
-      pendingDrafts: _book!.pendingDrafts
-          .where((d) => d.id != draftId)
-          .toList(),
-    );
-    await save();
-    await _autoIndexEntry(entry);
+    MemoryEntry? entry;
+    await _bookWrites.runDurableOperation(() async {
+      final approved = await _ref
+          .read(memoryBookOpsProvider)
+          .approveDraft(_sessionId, draftId, draft);
+      if (approved == null) return;
+      entry = approved.entries
+          .where((e) => e.id == draft.id.replaceAll('draft_', 'mem_'))
+          .firstOrNull;
+      final latest = _book;
+      if (latest == null || entry == null) return;
+      _book = latest.copyWith(
+        entries: [...latest.entries.where((e) => e.id != entry!.id), entry!],
+        pendingDrafts: latest.pendingDrafts
+            .where((d) => d.id != draftId)
+            .toList(),
+      );
+    });
+    if (entry != null) await _autoIndexEntry(entry!);
   }
 
   Future<void> deleteDraft(String draftId) async {

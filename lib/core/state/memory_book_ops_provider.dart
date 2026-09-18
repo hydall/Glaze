@@ -15,6 +15,14 @@ class _MemoryBookOps {
     await ref.read(memoryBookRepoProvider).put(book);
   }
 
+  Future<MemoryBook?> approveDraft(
+    String sessionId,
+    String draftId,
+    MemoryDraft expected,
+  ) => ref
+      .read(memoryBookRepoProvider)
+      .approveDraft(sessionId, draftId, expected);
+
   Future<void> updateSettings(
     String sessionId,
     MemoryBookSettings settings,

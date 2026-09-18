@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app_db.dart';
 import '../tables.dart';
 import '../../models/memory_book.dart';
+import '../../models/memory_source_manifest.dart';
+import 'chat_repo.dart';
 import '../../services/memory_prompt_presets.dart';
 import '../../state/memory_settings_provider.dart';
 import '../../utils/time_helpers.dart';
@@ -75,8 +77,39 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
   }
 
   @override
-  Future<void> put(MemoryBook book) async {
+  Future<void> put(MemoryBook book) => transaction(() => _put(book));
+
+  Future<void> _put(MemoryBook book) async {
     final existing = await getBySessionId(book.sessionId);
+    final checkedDrafts = book.pendingDrafts
+        .where(
+          (draft) =>
+              draft.sourceManifest != null &&
+              draft.status == 'pending_approval',
+        )
+        .toList();
+    if (checkedDrafts.isNotEmpty) {
+      final session = await ChatRepo(attachedDatabase).getById(book.sessionId);
+      book = book.copyWith(
+        pendingDrafts: book.pendingDrafts.map((draft) {
+          if (draft.sourceManifest == null ||
+              draft.status != 'pending_approval') {
+            return draft;
+          }
+          if (draft.sourceManifest!.validate(
+                draft.messageIds,
+                session?.messages ?? const [],
+              ) ==
+              MemorySourceValidity.verified) {
+            return draft;
+          }
+          return draft.copyWith(
+            status: 'needs_regeneration',
+            error: 'Memory sources changed. Regenerate this draft.',
+          );
+        }).toList(),
+      );
+    }
     final retiredEntryIds = <String>{
       ...?existing?.entries
           .where((entry) => entry.source == 'agentic')
@@ -137,6 +170,77 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
       ),
     );
   }
+
+  /// Checks a prepared request against one consistent book/chat snapshot.
+  Future<bool> areSourcesCurrent(
+    String sessionId,
+    Iterable<MemoryEntry> used,
+  ) => transaction(() async {
+    final book = await getBySessionId(sessionId);
+    final session = await ChatRepo(attachedDatabase).getById(sessionId);
+    for (final entry in used) {
+      final current = book?.entries.where((e) => e.id == entry.id).firstOrNull;
+      if (current == null ||
+          current != entry ||
+          current.status != 'active' ||
+          current.sourceManifest?.validate(
+                current.messageIds,
+                session?.messages ?? const [],
+              ) ==
+              MemorySourceValidity.invalid) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  /// Approval and source validation share a transaction with the durable chat.
+  Future<MemoryBook?> approveDraft(
+    String sessionId,
+    String draftId,
+    MemoryDraft expected,
+  ) => transaction(() async {
+    final book = await getBySessionId(sessionId);
+    if (book == null) return null;
+    final draft = book.pendingDrafts.where((d) => d.id == draftId).firstOrNull;
+    if (draft == null) return null;
+    if (jsonEncode(draft.toJson()) != jsonEncode(expected.toJson())) {
+      throw StateError('Memory draft changed. Reload it before approval.');
+    }
+    if (draft.content.trim().isEmpty) return null;
+    final session = await ChatRepo(attachedDatabase).getById(sessionId);
+    if (draft.sourceManifest?.validate(
+          draft.messageIds,
+          session?.messages ?? const [],
+        ) ==
+        MemorySourceValidity.invalid) {
+      throw StateError(
+        'Memory sources changed. Regenerate the draft before approval.',
+      );
+    }
+    final entry = MemoryEntry(
+      id: draft.id.replaceAll('draft_', 'mem_'),
+      title: draft.title,
+      content: draft.content,
+      keys: draft.keys,
+      keyParagraphs: draft.keyParagraphs,
+      ledgerRange: draft.ledgerRange,
+      vectorSearch: draft.vectorSearch,
+      messageIds: draft.messageIds,
+      messageRange: draft.messageRange,
+      sourceManifest: draft.sourceManifest,
+      sourceSwipeId: draft.sourceSwipeId,
+      sourceAgentSwipeId: draft.sourceAgentSwipeId,
+      source: draft.source,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+    );
+    final updated = book.copyWith(
+      entries: [...book.entries, entry],
+      pendingDrafts: book.pendingDrafts.where((d) => d.id != draftId).toList(),
+    );
+    await put(updated);
+    return getBySessionId(sessionId);
+  });
 
   /// Repairs prompt selections after the complete set of available presets
   /// changes. Only the settings JSON of affected existing books is updated.
@@ -284,19 +388,13 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
     return didDelete;
   }
 
-  /// Atomically removes all `MemoryEntry` and `MemoryDraft` items whose
-  /// `messageIds` contain [messageId] from the memory book for [sessionId].
-  /// Wraps the read-modify-write in a transaction (database.md Rule 3).
-  ///
-  /// Called by `ChatMessageService.deleteMessage` so deleting an assistant
-  /// message also drops the memory entries/drafts that were sourced from it.
-  /// Items whose `messageIds` does NOT contain [messageId] are preserved
-  /// (they were sourced from other messages and should survive).
+  /// Retains manifested history as invalid evidence when its source is deleted.
+  /// Legacy records retain their existing deletion behavior.
   Future<void> deleteForMessage(String sessionId, String messageId) async {
     await deleteForMessages(sessionId, {messageId});
   }
 
-  /// Atomically removes entries and drafts sourced from any deleted message.
+  /// Atomically invalidates manifested records and removes legacy dependants.
   Future<void> deleteForMessages(
     String sessionId,
     Set<String> messageIds,
@@ -306,12 +404,41 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
       final existing = await getBySessionId(sessionId);
       if (existing == null) return;
       final keptEntries = existing.entries
-          .where((e) => !e.messageIds.any(messageIds.contains))
+          .where(
+            (e) =>
+                e.sourceManifest != null ||
+                !e.messageIds.any(messageIds.contains),
+          )
+          .map(
+            (e) =>
+                e.sourceManifest != null &&
+                    e.messageIds.any(messageIds.contains)
+                ? e.copyWith(sourceManifest: e.sourceManifest!.invalidate())
+                : e,
+          )
           .toList();
       final keptDrafts = existing.pendingDrafts
-          .where((d) => !d.messageIds.any(messageIds.contains))
+          .where(
+            (d) =>
+                d.sourceManifest != null ||
+                !d.messageIds.any(messageIds.contains),
+          )
+          .map(
+            (d) =>
+                d.sourceManifest != null &&
+                    d.messageIds.any(messageIds.contains)
+                ? d.copyWith(
+                    sourceManifest: d.sourceManifest!.invalidate(),
+                    status: 'needs_regeneration',
+                  )
+                : d,
+          )
           .toList();
-      if (keptEntries.length == existing.entries.length &&
+      if (!existing.entries.any((e) => e.messageIds.any(messageIds.contains)) &&
+          !existing.pendingDrafts.any(
+            (d) => d.messageIds.any(messageIds.contains),
+          ) &&
+          keptEntries.length == existing.entries.length &&
           keptDrafts.length == existing.pendingDrafts.length) {
         return;
       }
@@ -348,7 +475,7 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
     required String messageId,
     required int removedSwipeId,
     int? removedAgentSwipeId,
-  }) async {
+  }) => transaction(() async {
     final existing = await getBySessionId(sessionId);
     if (existing == null) return;
 
@@ -370,11 +497,20 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
     final entries = existing.entries
         .where(
           (entry) =>
+              entry.sourceManifest != null ||
               !belongsToMessage(entry.messageIds) ||
               !removeAnchor(entry.sourceSwipeId, entry.sourceAgentSwipeId),
         )
         .map(
-          (entry) => !belongsToMessage(entry.messageIds)
+          (entry) => entry.sourceManifest != null
+              ? entry.copyWith(
+                  sourceManifest: entry.sourceManifest!.removeVariation(
+                    messageId,
+                    removedSwipeId,
+                    removedAgentSwipeId,
+                  ),
+                )
+              : !belongsToMessage(entry.messageIds)
               ? entry
               : entry.copyWith(
                   sourceSwipeId: shiftedSwipe(entry.sourceSwipeId),
@@ -388,11 +524,20 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
     final drafts = existing.pendingDrafts
         .where(
           (draft) =>
+              draft.sourceManifest != null ||
               !belongsToMessage(draft.messageIds) ||
               !removeAnchor(draft.sourceSwipeId, draft.sourceAgentSwipeId),
         )
         .map(
-          (draft) => !belongsToMessage(draft.messageIds)
+          (draft) => draft.sourceManifest != null
+              ? draft.copyWith(
+                  sourceManifest: draft.sourceManifest!.removeVariation(
+                    messageId,
+                    removedSwipeId,
+                    removedAgentSwipeId,
+                  ),
+                )
+              : !belongsToMessage(draft.messageIds)
               ? draft
               : draft.copyWith(
                   sourceSwipeId: shiftedSwipe(draft.sourceSwipeId),
@@ -404,7 +549,7 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
         )
         .toList();
     await put(existing.copyWith(entries: entries, pendingDrafts: drafts));
-  }
+  });
 
   Future<void> copyForSessionBranch({
     required String fromSessionId,

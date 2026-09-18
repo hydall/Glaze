@@ -1,4 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+import 'memory_source_manifest.dart';
 
 part 'memory_book.freezed.dart';
 part 'memory_book.g.dart';
@@ -17,6 +18,7 @@ abstract class MemoryDraft with _$MemoryDraft {
     @Default([]) List<String> messageIds,
     @Default(0) int sourceSwipeId,
     @Default(0) int sourceAgentSwipeId,
+    MemorySourceManifest? sourceManifest,
     MessageRange? messageRange,
     @Default('pending_generation') String status,
     @Default('') String source,
@@ -53,6 +55,7 @@ abstract class MemoryEntry with _$MemoryEntry {
     @Default([]) List<String> messageIds,
     @Default(0) int sourceSwipeId,
     @Default(0) int sourceAgentSwipeId,
+    MemorySourceManifest? sourceManifest,
     int? createdAt,
     MessageRange? messageRange,
     @Default(0) double importance,
@@ -192,6 +195,17 @@ Map<String, dynamic> _migrateEntryInPlace(Map<String, dynamic> json) {
   }
   if (out['source'] is! String) {
     out = {...out, 'source': ''};
+  }
+  if (out['sourceManifest'] != null && out['sourceManifest'] is! Map) {
+    out = {
+      ...out,
+      'sourceManifest': const {
+        'version': 0,
+        'originSessionId': '',
+        'messages': <dynamic>[],
+        'invalidated': true,
+      },
+    };
   }
   return out;
 }

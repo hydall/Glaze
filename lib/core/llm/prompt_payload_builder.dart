@@ -793,6 +793,30 @@ class PromptPayloadBuilder {
     );
   }
 
+  /// Revalidate the exact entries that reached a prepared request after async
+  /// retrieval and prompt assembly. Unselected candidates do not block sending.
+  Future<void> ensureMemorySourcesCurrent({
+    required String sessionId,
+    required MemorySelection? selection,
+    required Iterable<TriggeredEntry> triggered,
+  }) async {
+    if (selection == null) return;
+    final ids = triggered.map((entry) => entry.id).toSet();
+    final used = selection.allScores
+        .map((score) => score.entry)
+        .followedBy(selection.entries)
+        .where((entry) => ids.contains(entry.id))
+        .toList();
+    if (used.isEmpty) return;
+    if (!await _ref
+        .read(memoryBookRepoProvider)
+        .areSourcesCurrent(sessionId, used)) {
+      throw const PromptBuildStaleException(
+        'Memory changed while preparing the request.',
+      );
+    }
+  }
+
   Future<void> _ensureEffectiveCanonCurrent({
     required String charId,
     required ChatSession? session,

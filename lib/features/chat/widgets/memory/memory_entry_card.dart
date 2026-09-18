@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/models/memory_book.dart';
+import '../../../../core/models/memory_source_manifest.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/widgets/glaze_bottom_sheet.dart';
 import 'memory_books_controls.dart';
@@ -23,6 +24,7 @@ const Color _kCyan = Color(0xFF26C6DA);
 /// the three-quarters of rows that are simply active it said nothing at all.
 class MemoryEntryCard extends StatelessWidget {
   final MemoryEntry entry;
+  final MemorySourceValidity sourceValidity;
 
   /// `indexed` / `error` / `none`, or null while the statuses are still being
   /// read from the embedding repo.
@@ -40,13 +42,16 @@ class MemoryEntryCard extends StatelessWidget {
   const MemoryEntryCard({
     super.key,
     required this.entry,
+    this.sourceValidity = MemorySourceValidity.unverified,
     required this.embeddingStatus,
     required this.onEdit,
     required this.onDelete,
     this.showStatus = false,
   });
 
-  bool get _isActive => entry.status == 'active';
+  bool get _isActive =>
+      entry.status == 'active' &&
+      sourceValidity != MemorySourceValidity.invalid;
 
   @override
   Widget build(BuildContext context) {
@@ -81,6 +86,18 @@ class MemoryEntryCard extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               ?_buildIndexIcon(),
+              const SizedBox(width: 6),
+              MemoryStatusIcon(
+                icon: switch (sourceValidity) {
+                  MemorySourceValidity.verified => Icons.link,
+                  MemorySourceValidity.unverified => Icons.help_outline,
+                  MemorySourceValidity.invalid => Icons.link_off,
+                },
+                label: 'memory_sources_${sourceValidity.name}'.tr(),
+                color: sourceValidity == MemorySourceValidity.invalid
+                    ? _kOrange
+                    : context.cs.onSurfaceVariant,
+              ),
               if (!_isActive) ...[
                 const SizedBox(width: 6),
                 MemoryStatusIcon(

@@ -14,6 +14,7 @@ import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
 import '../../../core/llm/studio/studio_stream_interceptor.dart';
+import '../../../core/llm/prompt/prompt_build_stale_exception.dart';
 import '../../../core/llm/studio/studio_history_limiter.dart';
 import '../../../core/llm/studio/studio_context.dart';
 import '../../../core/llm/studio/studio_context_preparer.dart';
@@ -211,6 +212,11 @@ class StreamGenerationService {
       final promptResult = studioConfig == null
           ? await buildPromptInIsolate(finalPayload)
           : _studioCompatibilityResult(finalStudioContext!);
+      await builder.ensureMemorySourcesCurrent(
+        sessionId: session.id,
+        selection: inputs.memorySelection,
+        triggered: promptResult.triggeredMemories,
+      );
       if (_isAborted()) {
         return ChatState(
           session: saveSession ?? session,
@@ -388,7 +394,20 @@ class StreamGenerationService {
               macroContext: finalStudioContext!.macroContext,
             );
 
+        await builder.ensureMemorySourcesCurrent(
+          sessionId: session.id,
+          selection: inputs.memorySelection,
+          triggered: promptResult.triggeredMemories,
+        );
+        if (_isAborted()) {
+          throw const PromptBuildStaleException('Generation cancelled.');
+        }
         final studioResult = await studioService.runTrackerCycle(
+          beforeFinalSend: () => builder.ensureMemorySourcesCurrent(
+            sessionId: session.id,
+            selection: inputs.memorySelection,
+            triggered: promptResult.triggeredMemories,
+          ),
           config: studioConfig,
           inputs: inputs,
           trackerContext: trackerStudioContext,
@@ -660,6 +679,15 @@ class StreamGenerationService {
         if (next == reportedPhase) return;
         reportedPhase = next;
         _phase(next);
+      }
+
+      await builder.ensureMemorySourcesCurrent(
+        sessionId: session.id,
+        selection: inputs.memorySelection,
+        triggered: promptResult.triggeredMemories,
+      );
+      if (_isAborted()) {
+        throw const PromptBuildStaleException('Generation cancelled.');
       }
 
       // Idle timeout: cancel the timer on the first chunk (text OR reasoning)

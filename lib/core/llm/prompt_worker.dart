@@ -10,6 +10,7 @@ import 'glaze_matcher.dart';
 import 'memory_budget.dart';
 import 'memory_retrieval_mode.dart';
 import 'memory_selector.dart';
+import '../models/memory_source_manifest.dart';
 import 'prompt_builder.dart';
 import 'prompt_inputs.dart';
 import 'prompt_worker_codec.dart';
@@ -409,6 +410,16 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
   MemorySelection? memorySelection;
 
   if (inputs.memoryEnabled && inputs.memoryEntries.isNotEmpty) {
+    final validEntries = inputs.memoryEntries
+        .where(
+          (entry) =>
+              entry.sourceManifest?.validate(
+                entry.messageIds,
+                inputs.history,
+              ) !=
+              MemorySourceValidity.invalid,
+        )
+        .toList();
     final visibleHistory = inputs.history
         .where((m) => !m.isHidden && !m.isTyping)
         .toList();
@@ -417,7 +428,7 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
         .join('\n')
         .toLowerCase();
     final keywordMatched = <String, List<String>>{};
-    for (final entry in inputs.memoryEntries) {
+    for (final entry in validEntries) {
       if (entry.status != 'active' || entry.content.trim().isEmpty) continue;
       final matched = <String>{};
       for (final key in entry.keys) {
@@ -450,7 +461,7 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
     memorySelection = MemorySelector.select(
       MemorySelectionInput(
         selectionMode: retrievalMode.isLegacy ? 'legacy' : 'v2',
-        entries: inputs.memoryEntries,
+        entries: validEntries,
         keywordMatchedTerms: keywordMatched,
         maxInjectionTokens: budget,
         maxInjectedEntries: inputs.memoryMaxInjected,

@@ -20,6 +20,8 @@ class MemoryBookWriteQueue {
     if (latest != null) await persist(latest);
   });
 
+  Future<void> runDurableOperation(Future<void> Function() operation) =>
+      _enqueue(operation);
   Future<void> _enqueue(Future<void> Function() operation) {
     final previous = _tail;
     final next = () async {

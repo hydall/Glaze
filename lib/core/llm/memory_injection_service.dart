@@ -8,6 +8,7 @@ import '../db/repositories/memory_salience_repo.dart';
 import '../db/repositories/memory_entity_repo.dart';
 import '../models/chat_message.dart';
 import '../models/memory_book.dart';
+import '../models/memory_source_manifest.dart';
 import '../models/memory_graph.dart';
 import '../state/db_provider.dart';
 import '../state/memory_settings_provider.dart';
@@ -187,6 +188,8 @@ class MemoryInjectionService {
               e.status == 'active' &&
               e.content.trim().isNotEmpty &&
               e.source != 'studio_ledger' &&
+              (e.sourceManifest?.validate(e.messageIds, history) !=
+                  MemorySourceValidity.invalid) &&
               (allowedSourceMessageIds == null ||
                   (e.messageIds.isNotEmpty &&
                       e.messageIds.every(allowedSourceMessageIds.contains))),

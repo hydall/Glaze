@@ -96,6 +96,7 @@ class MemoryStudioService {
     CancelToken? cancelToken,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function()? onFinalStart,
+    Future<void> Function()? beforeFinalSend,
     void Function(List<Map<String, dynamic>> messages)? onFinalMessagesBuilt,
     void Function(Set<String> classifications)?
     onFinalLorebookClassificationsBuilt,
@@ -142,6 +143,7 @@ class MemoryStudioService {
       cancelToken: token,
       apiConfigId: studioPreset.expensiveApiConfigId,
       onFinalResponseUpdate: onFinalResponseUpdate,
+      beforeSend: beforeFinalSend,
       onMessagesBuilt: onFinalMessagesBuilt,
       onLorebookClassificationsBuilt: onFinalLorebookClassificationsBuilt,
       turnConfig: turnConfig,

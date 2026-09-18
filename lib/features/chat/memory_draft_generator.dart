@@ -14,6 +14,7 @@ import '../../core/llm/regex_service.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/memory_book.dart';
+import '../../core/models/memory_source_manifest.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/pipeline_settings.dart';
 import '../../core/services/memory_prompt_presets.dart';
@@ -46,6 +47,11 @@ class MemoryDraftGenerator {
     required Map<String, String> sessionVars,
     CancelToken? cancelToken,
   }) async {
+    final manifest = MemorySourceManifest.capture(
+      sessionId,
+      messages,
+      draft.messageIds,
+    );
     final character = await _read(characterRepoProvider).getById(charId);
     if (character == null) throw StateError('Character not found: $charId');
     final presets = await _read(presetRepoProvider).getAll();
@@ -199,7 +205,7 @@ class MemoryDraftGenerator {
       ),
     );
     return MemoryDraftResponseParser.parse(
-      draft,
+      draft.copyWith(sourceManifest: manifest),
       result,
       ledgerRange: ledgerRange,
     );

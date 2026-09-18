@@ -244,6 +244,42 @@ void main() {
   });
 
   group('AgentRunner Studio final routing', () {
+    test(
+      'rejects stale context after config resolution before transport',
+      () async {
+        final runner = AgentRunner(
+          configResolver: AgentConfigResolver(
+            loadApiConfigs: () async => const [],
+            readActiveApiConfig: () => null,
+            readPipelineSettings: () => const PipelineSettings(),
+          ),
+          readPipelineSettings: () => const PipelineSettings(),
+        );
+        var checked = false;
+        await expectLater(
+          runner.runAgent(
+            agent: const StudioAgent(id: 'final', name: 'Final'),
+            messages: const [],
+            apiConfig: const ApiConfig(id: 'test', name: 'test'),
+            sessionId: 's',
+            isFinalResponse: true,
+            preResolvedConfig: const ResolvedAgentConfig(
+              endpoint: 'https://unused.invalid',
+              apiKey: '',
+              model: 'test',
+              protocol: 'openai',
+            ),
+            beforeSend: () async {
+              checked = true;
+              throw StateError('Sources changed');
+            },
+          ),
+          throwsStateError,
+        );
+        expect(checked, isTrue);
+      },
+    );
+
     test('final max tokens supports an explicit zero override', () {
       const settings = PipelineSettings(
         studioAgent: StudioAgentSettings(

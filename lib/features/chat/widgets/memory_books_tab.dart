@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book.dart';
+import '../../../core/models/memory_source_manifest.dart';
+import '../../../core/utils/error_format.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/memory_settings_provider.dart';
@@ -243,9 +245,8 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     final count = switch (filter) {
       _EntryFilter.all => entries.length,
       _EntryFilter.active => entries.where((e) => e.status == 'active').length,
-      _EntryFilter.needsRebuild => entries
-          .where((e) => e.status == 'needs_rebuild')
-          .length,
+      _EntryFilter.needsRebuild =>
+        entries.where((e) => e.status == 'needs_rebuild').length,
     };
     final label = switch (filter) {
       _EntryFilter.all => 'memory_books_filter_all'.tr(),
@@ -259,14 +260,12 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     final count = switch (filter) {
       _DraftFilter.all => drafts.length,
       _DraftFilter.ready => drafts.where((d) => d.content.isNotEmpty).length,
-      _DraftFilter.needsGeneration => drafts
-          .where(
-            (d) => d.content.isEmpty && d.status == 'pending_generation',
-          )
-          .length,
-      _DraftFilter.failed => drafts
-          .where((d) => d.status == 'needs_regeneration')
-          .length,
+      _DraftFilter.needsGeneration =>
+        drafts
+            .where((d) => d.content.isEmpty && d.status == 'pending_generation')
+            .length,
+      _DraftFilter.failed =>
+        drafts.where((d) => d.status == 'needs_regeneration').length,
     };
     final label = switch (filter) {
       _DraftFilter.all => 'memory_books_filter_all'.tr(),
@@ -584,6 +583,12 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             (entry) => MemoryEntryCard(
               key: ValueKey(entry.id),
               entry: entry,
+              sourceValidity:
+                  entry.sourceManifest?.validate(
+                    entry.messageIds,
+                    widget.messages,
+                  ) ??
+                  MemorySourceValidity.unverified,
               // No index badge while semantic search is off in the API —
               // there is nothing to be indexed against.
               embeddingStatus: vectorAvailable
@@ -701,8 +706,12 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   }
 
   void _approveDraft(String draftId) async {
-    await _ctrl.approveDraft(draftId);
-    if (mounted) setState(() {});
+    try {
+      await _ctrl.approveDraft(draftId);
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) GlazeToast.show(context, formatError(error));
+    }
   }
 
   void _deleteDraft(String draftId) async {
