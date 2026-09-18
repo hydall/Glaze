@@ -92,6 +92,11 @@ class StudioFeatureEnabledNotifier extends StateNotifier<bool> {
 
   Future<void> setEnabled(bool enabled) async {
     state = enabled;
+    // [studioFeatureSettledProvider] deliberately does not watch this value —
+    // see the note there — so a toggle has to announce itself. It cannot
+    // invalidate that provider directly either: the provider depends on this
+    // notifier, which makes invalidating it from here a dependency cycle.
+    _ref.read(studioFeatureRevisionProvider.notifier).state++;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_storageKey, enabled);
   }
@@ -99,13 +104,21 @@ class StudioFeatureEnabledNotifier extends StateNotifier<bool> {
   Future<void> enable() async => setEnabled(true);
 }
 
+/// Bumped by [StudioFeatureEnabledNotifier.setEnabled], so that a runtime
+/// toggle — and only a runtime toggle — re-resolves
+/// [studioFeatureSettledProvider].
+final studioFeatureRevisionProvider = StateProvider<int>((ref) => 0);
+
 /// The master switch, settled — see [StudioFeatureEnabledNotifier.settled].
 ///
-/// Watching the value (not just the notifier) is what makes a runtime toggle
-/// from Settings rebuild the readers; the returned future resolves to the
-/// loaded value either way, so no reader has to catch the flip itself.
+/// It watches the notifier and **not** the switch's value, on purpose.
+/// Watching the value invalidates this provider from inside its own loading
+/// window, the moment the flag flips out of the `false` it starts at; nothing
+/// is listening to the provider itself at that point (a reader holds only its
+/// future), so the rebuild is never scheduled and that future stays pending
+/// forever. The revision above carries a toggle instead, and it never moves
+/// during the load.
 final studioFeatureSettledProvider = FutureProvider<bool>((ref) {
-  final notifier = ref.watch(studioFeatureEnabledProvider.notifier);
-  ref.watch(studioFeatureEnabledProvider);
-  return notifier.settled;
+  ref.watch(studioFeatureRevisionProvider);
+  return ref.watch(studioFeatureEnabledProvider.notifier).settled;
 });

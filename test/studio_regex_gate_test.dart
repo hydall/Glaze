@@ -81,6 +81,26 @@ void main() {
     );
   });
 
+  test('a runtime toggle re-resolves the settled switch', () async {
+    // The settled switch does not watch the switch's value, so this is the
+    // path that carries a toggle from Settings to everything that branches on
+    // it. Nothing else proves that wiring.
+    SharedPreferences.setMockInitialValues({'feature_studio_enabled': false});
+    final toggled = ProviderContainer(
+      overrides: [
+        appDbProvider.overrideWithValue(db),
+        globalRegexProvider.overrideWith(_SlowGlobalRegexNotifier.new),
+      ],
+    );
+    addTearDown(toggled.dispose);
+
+    expect(await toggled.read(studioFeatureSettledProvider.future), isFalse);
+
+    await toggled.read(studioFeatureEnabledProvider.notifier).setEnabled(true);
+
+    expect(await toggled.read(studioFeatureSettledProvider.future), isTrue);
+  });
+
   test('Studio drops the chat preset scripts and keeps the global ones',
       () async {
     final active = await container.read(activeRegexesProvider.future);
