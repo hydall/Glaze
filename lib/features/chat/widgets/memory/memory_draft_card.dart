@@ -106,6 +106,11 @@ class _MemoryDraftCardState extends State<MemoryDraftCard> {
           : _needsRegen
           ? _kDanger
           : null,
+      // Tapping the row is Edit, the way an approved entry's row already is.
+      // A pencil in the action row said the same thing a second time; while a
+      // generation is running there is nothing safe to edit, so the row is
+      // inert instead.
+      onTap: widget.isGenerating ? null : widget.onEdit,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -177,6 +182,18 @@ class _MemoryDraftCardState extends State<MemoryDraftCard> {
               style: const TextStyle(fontSize: 11, color: _kDanger),
             ),
           ],
+          // Regenerate is the one action a draft awaiting approval is most
+          // likely to want and the least likely to find as an unlabelled
+          // glyph, so it sits under the body as a tile that says the word.
+          if (hasContent && !widget.isGenerating) ...[
+            const SizedBox(height: 8),
+            MemoryActionTile(
+              icon: Icons.refresh_rounded,
+              label: 'memory_books_btn_regenerate'.tr(),
+              accent: _kAmber,
+              onTap: widget.onRegenerate,
+            ),
+          ],
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
@@ -202,22 +219,6 @@ class _MemoryDraftCardState extends State<MemoryDraftCard> {
                   color: _kGreen,
                   onTap: widget.onApprove,
                 ),
-              if (hasContent && !widget.isGenerating) ...[
-                const SizedBox(width: 4),
-                MemoryCircleButton(
-                  icon: Icons.refresh_rounded,
-                  label: 'memory_books_btn_regenerate'.tr(),
-                  color: _kAmber,
-                  onTap: widget.onRegenerate,
-                ),
-                const SizedBox(width: 4),
-                MemoryCircleButton(
-                  icon: Icons.edit_outlined,
-                  label: 'action_edit'.tr(),
-                  color: context.cs.primary,
-                  onTap: widget.onEdit,
-                ),
-              ],
               const SizedBox(width: 4),
               MemoryCircleButton(
                 icon: Icons.delete_outline,

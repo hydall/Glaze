@@ -21,6 +21,7 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/swipe_tab_switcher.dart';
 import '../../../shared/widgets/tab_slide_switcher.dart';
 import '../../memory/controllers/memory_book_controller.dart';
+import 'memory/memory_books_controls.dart';
 import 'memory/memory_books_toolbar.dart';
 import 'memory/memory_draft_card.dart';
 import 'memory/memory_entry_card.dart';
@@ -73,10 +74,11 @@ class MemoryBooksActions {
 
 /// Memory Books tab of the Memory sheet — "Shelf" layout.
 ///
-/// The tab strip and the search box are pinned above the list, so they stay
-/// reachable while scrolling and stay off `TopEdgeBlur`'s raster path; the
-/// configuration, the toolbar and the rows scroll under them. Expects a
-/// bounded height from its host.
+/// The tab strip is pinned above the list, so it stays reachable while
+/// scrolling and stays off `TopEdgeBlur`'s raster path; the configuration, the
+/// toolbar and the rows scroll under it. The search button on its right swaps
+/// that strip for a search bar, and the list below it for one that spans both
+/// tabs. Expects a bounded height from its host.
 class MemoryBooksTab extends ConsumerStatefulWidget {
   final String sessionId;
   final String charId;
@@ -105,8 +107,15 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
 
   late final MemoryBookController _ctrl;
   late final TextEditingController _searchCtrl;
+  late final FocusNode _searchFocus;
   Map<String, String> _embeddingStatuses = {};
   int _tabIndex = _tabApproved;
+
+  /// Whether the pinned row is the search bar rather than the tab strip.
+  /// While it is, the list underneath is neither tab: it is everything the
+  /// query matches, approved memories and drafts together.
+  bool _searching = false;
+
   String _query = '';
   _EntryFilter _entryFilter = _EntryFilter.all;
   _DraftFilter _draftFilter = _DraftFilter.all;
@@ -122,6 +131,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     super.initState();
     _ctrl = MemoryBookController(ref, widget.sessionId, widget.charId);
     _searchCtrl = TextEditingController();
+    _searchFocus = FocusNode();
     _load();
   }
 
@@ -159,6 +169,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _searchFocus.dispose();
     _ctrl.dispose();
     super.dispose();
   }
@@ -169,6 +180,27 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     if (index == _tabIndex) return;
     setState(() => _tabIndex = index);
     unawaited(_tabStore.save(index));
+  }
+
+  /// Swaps the tab strip for the search bar. The tab the reader was on is
+  /// kept, not reset — closing the search puts them back on it.
+  void _openSearch() {
+    setState(() => _searching = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  /// The cross on the right of the search bar: drops the query with the bar,
+  /// so the list that comes back is not silently narrowed by a search that is
+  /// no longer on screen.
+  void _closeSearch() {
+    _searchCtrl.clear();
+    _searchFocus.unfocus();
+    setState(() {
+      _searching = false;
+      _query = '';
+    });
   }
 
   // ─── Filtering ───────────────────────────────────────────────────
@@ -289,56 +321,75 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
         SizedBox(height: MediaQuery.paddingOf(context).top + 8),
         _buildPinnedControls(curatedEntries, scanDrafts),
         Expanded(
-          child: SwipeTabSwitcher(
-            index: _tabIndex,
-            length: _tabCount,
-            onChanged: _setTab,
-            child: ListView(
-              padding: EdgeInsets.fromLTRB(
-                0,
-                4,
-                0,
-                // Clears the nav bar and the extended FAB the host floats
-                // over the bottom of this list.
-                MediaQuery.paddingOf(context).bottom + 88,
-              ),
-              children: [
-                // Drafts only. On the approved tab there is nothing to
-                // generate, so this was a panel about the other list.
-                if (_tabIndex != _tabApproved &&
-                    (draftsNeedingGen.isNotEmpty || isGenerating))
-                  MemoryBatchPanel(
-                    pendingCount: draftsNeedingGen.length,
-                    isGenerating: isGenerating,
-                    // The global settings, not the book's snapshot: the
-                    // global copy is what `MemoryDraftStage` actually gates
-                    // auto-generation on.
-                    autoGenerateEnabled: ref
-                        .watch(memoryGlobalSettingsProvider)
-                        .autoGenerateEnabled,
-                    onGenerateBatch: _batchGenerate,
-                  ),
-                // Under the batch panel, not above it: the filter narrows the
-                // list it sits on top of, and the panel is about the queue.
-                _buildFilters(curatedEntries, scanDrafts),
-                TabSlideSwitcher(
-                  index: _tabIndex,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: _tabIndex == _tabApproved
-                        ? _buildApprovedTab(curatedEntries)
-                        : _buildDraftsTab(scanDrafts),
-                  ),
+          child: _searching
+              ? _buildSearchResults(curatedEntries, scanDrafts)
+              : _buildTabbedList(
+                  entries: curatedEntries,
+                  drafts: scanDrafts,
+                  pendingGeneration: draftsNeedingGen.length,
+                  isGenerating: isGenerating,
                 ),
-              ],
-            ),
-          ),
         ),
       ],
     );
   }
 
-  /// The strip and the search box, pinned above the scrolling body.
+  /// The two-tab body: one list, showing whichever tab is selected, with the
+  /// batch panel and the status filter scrolling above it.
+  Widget _buildTabbedList({
+    required List<MemoryEntry> entries,
+    required List<MemoryDraft> drafts,
+    required int pendingGeneration,
+    required bool isGenerating,
+  }) {
+    return SwipeTabSwitcher(
+      index: _tabIndex,
+      length: _tabCount,
+      onChanged: _setTab,
+      child: ListView(
+        padding: EdgeInsets.fromLTRB(
+          0,
+          4,
+          0,
+          // Clears the nav bar and the extended FAB the host floats over the
+          // bottom of this list.
+          MediaQuery.paddingOf(context).bottom + 88,
+        ),
+        children: [
+          // Drafts only. On the approved tab there is nothing to generate, so
+          // this was a panel about the other list.
+          if (_tabIndex != _tabApproved &&
+              (pendingGeneration > 0 || isGenerating))
+            MemoryBatchPanel(
+              pendingCount: pendingGeneration,
+              isGenerating: isGenerating,
+              // The global settings, not the book's snapshot: the global copy
+              // is what `MemoryDraftStage` actually gates auto-generation on.
+              autoGenerateEnabled: ref
+                  .watch(memoryGlobalSettingsProvider)
+                  .autoGenerateEnabled,
+              onGenerateBatch: _batchGenerate,
+            ),
+          // Under the batch panel, not above it: the filter narrows the list
+          // it sits on top of, and the panel is about the queue.
+          _buildFilters(entries, drafts),
+          TabSlideSwitcher(
+            index: _tabIndex,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _tabIndex == _tabApproved
+                  ? _buildApprovedTab(entries)
+                  : _buildDraftsTab(drafts),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The one pinned row above the list: the tab strip with a search button on
+  /// its right, or — once that button is pressed — the search bar that takes
+  /// the row's place, with the cross that gives it back.
   ///
   /// The strip is [GlazeTabBarStyle.underline], not the default pill: the host
   /// sheet already carries a filled pill strip for Summary/Books directly
@@ -349,18 +400,16 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     List<MemoryEntry> entries,
     List<MemoryDraft> drafts,
   ) {
-    // Search earns its row only once the list is long enough to need it;
-    // below that it is a tall empty field above four rows you can already see.
-    final showSearch =
-        (_tabIndex == _tabApproved ? entries.length : drafts.length) > 6 ||
-        _query.isNotEmpty;
-    return Column(
-      // The chip bar sizes to its content; a centring Column would inset it
-      // from the left while every other row here is full width.
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: _searching ? _buildSearchBar() : _buildTabStrip(entries, drafts),
+    );
+  }
+
+  Widget _buildTabStrip(List<MemoryEntry> entries, List<MemoryDraft> drafts) {
+    return Row(
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+        Expanded(
           child: GlazeTabBar(
             style: GlazeTabBarStyle.underline,
             tabs: [
@@ -381,15 +430,89 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             onChanged: _setTab,
           ),
         ),
-        if (showSearch)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: GlazeTextField(
-              controller: _searchCtrl,
-              hint: 'memory_books_search_hint'.tr(),
-              onChanged: (value) => setState(() => _query = value.trim()),
+        const SizedBox(width: 8),
+        MemoryCircleButton(
+          icon: Icons.search_rounded,
+          label: 'memory_books_search_open'.tr(),
+          onTap: _openSearch,
+        ),
+      ],
+    );
+  }
+
+  /// The search bar that replaces the strip. The cross sits where the search
+  /// button was, so the control the reader just pressed is the control that
+  /// undoes it.
+  Widget _buildSearchBar() {
+    return Row(
+      children: [
+        Expanded(
+          child: GlazeTextField(
+            controller: _searchCtrl,
+            focusNode: _searchFocus,
+            hint: 'memory_books_search_hint'.tr(),
+            isDense: true,
+            textInputAction: TextInputAction.search,
+            onChanged: (value) => setState(() => _query = value.trim()),
+          ),
+        ),
+        const SizedBox(width: 8),
+        MemoryCircleButton(
+          icon: Icons.close_rounded,
+          label: 'memory_books_search_close'.tr(),
+          onTap: _closeSearch,
+        ),
+      ],
+    );
+  }
+
+  /// Search results: one list across both tabs, approved memories first and
+  /// then the drafts, each row saying which it is under its title. Searching
+  /// for a memory you half remember is not a question about which tab it ended
+  /// up on, so the tab filters and the batch panel stay out of it.
+  Widget _buildSearchResults(
+    List<MemoryEntry> entries,
+    List<MemoryDraft> drafts,
+  ) {
+    final vectorAvailable = ref.watch(vectorSearchAvailableProvider);
+    final visibleEntries = entries
+        .where((entry) => _matchesQuery(entry.title, entry.content, entry.keys))
+        .toList();
+    final visibleDrafts = drafts
+        .where((draft) => _matchesQuery(draft.title, draft.content, draft.keys))
+        .toList();
+    final empty = visibleEntries.isEmpty && visibleDrafts.isEmpty;
+    return ListView(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        8,
+        16,
+        // Clears the nav bar and the extended FAB the host floats over the
+        // bottom of this list.
+        MediaQuery.paddingOf(context).bottom + 88,
+      ),
+      children: [
+        if (empty)
+          _buildEmpty(
+            entries.isEmpty && drafts.isEmpty
+                ? 'memory_books_empty_approved'.tr()
+                : 'memory_books_empty_filtered'.tr(),
+          )
+        else ...[
+          ...visibleEntries.map(
+            (entry) => MemoryEntryCard(
+              key: ValueKey('entry-${entry.id}'),
+              entry: entry,
+              embeddingStatus: vectorAvailable
+                  ? _embeddingStatuses[entry.id]
+                  : null,
+              showStatus: true,
+              onEdit: () => _editEntry(entry),
+              onDelete: () => _deleteEntry(entry.id),
             ),
           ),
+          ...visibleDrafts.map(_buildDraftCard),
+        ],
       ],
     );
   }
@@ -469,21 +592,25 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
                 : 'memory_books_empty_filtered'.tr(),
           )
         else
-          ...visible.map(
-            (draft) => MemoryDraftCard(
-              key: ValueKey(draft.id),
-              draft: draft,
-              isGenerating: _ctrl.generatingDrafts[draft.id] == true,
-              generatingSince: _ctrl.genStartTimes[draft.id],
-              onGenerate: () => _generateDraft(draft.id),
-              onRegenerate: () => _generateDraft(draft.id),
-              onCancel: () => _cancelDraft(draft.id),
-              onApprove: () => _approveDraft(draft.id),
-              onEdit: () => _editDraft(draft),
-              onDelete: () => _deleteDraft(draft.id),
-            ),
-          ),
+          ...visible.map(_buildDraftCard),
       ],
+    );
+  }
+
+  Widget _buildDraftCard(MemoryDraft draft) {
+    return MemoryDraftCard(
+      // Prefixed because the search results put entries and drafts in one
+      // list, and an approved draft keeps its id as the entry's.
+      key: ValueKey('draft-${draft.id}'),
+      draft: draft,
+      isGenerating: _ctrl.generatingDrafts[draft.id] == true,
+      generatingSince: _ctrl.genStartTimes[draft.id],
+      onGenerate: () => _generateDraft(draft.id),
+      onRegenerate: () => _generateDraft(draft.id),
+      onCancel: () => _cancelDraft(draft.id),
+      onApprove: () => _approveDraft(draft.id),
+      onEdit: () => _editDraft(draft),
+      onDelete: () => _deleteDraft(draft.id),
     );
   }
 

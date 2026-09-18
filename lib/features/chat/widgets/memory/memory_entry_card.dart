@@ -7,6 +7,7 @@ import '../../../../shared/widgets/glaze_bottom_sheet.dart';
 import 'memory_books_controls.dart';
 
 const Color _kOrange = Color(0xFFFF9800);
+const Color _kGreen = Color(0xFF4CAF50);
 const Color _kDanger = Color(0xFFFF5252);
 const Color _kCyan = Color(0xFF26C6DA);
 
@@ -27,6 +28,12 @@ class MemoryEntryCard extends StatelessWidget {
   /// read from the embedding repo.
   final String? embeddingStatus;
 
+  /// Spells the row's state out under the title. Off in the Approved tab,
+  /// where every row is approved and the word would be noise; on in the search
+  /// results, where approved memories and drafts sit in one list and the row
+  /// has to say which it is.
+  final bool showStatus;
+
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -36,6 +43,7 @@ class MemoryEntryCard extends StatelessWidget {
     required this.embeddingStatus,
     required this.onEdit,
     required this.onDelete,
+    this.showStatus = false,
   });
 
   bool get _isActive => entry.status == 'active';
@@ -106,6 +114,18 @@ class MemoryEntryCard extends StatelessWidget {
               ),
             ],
           ),
+          if (showStatus) ...[
+            const SizedBox(height: 3),
+            Text(
+              _isActive
+                  ? 'memory_books_status_approved'.tr()
+                  : 'memory_books_entry_needs_rebuild'.tr(),
+              style: TextStyle(
+                fontSize: 11.5,
+                color: _isActive ? _kGreen : _kOrange,
+              ),
+            ),
+          ],
           const SizedBox(height: 3),
           Text(
             _subtitle(),

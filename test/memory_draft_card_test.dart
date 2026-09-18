@@ -72,11 +72,11 @@ void main() {
       ),
     );
 
-    // The per-row actions are icon buttons; the word survives as the tooltip
-    // and the semantics label, which is what the assertions target.
-    expect(find.byTooltip('memory_books_btn_regenerate'), findsOneWidget);
+    // Regenerate is a labelled tile under the body, so the word itself is on
+    // screen; the rest of the row's actions stay icon buttons with tooltips.
+    expect(find.text('memory_books_btn_regenerate'), findsOneWidget);
     expect(find.text('existing memory'), findsOneWidget);
-    await tester.tap(find.byTooltip('memory_books_btn_regenerate'));
+    await tester.tap(find.text('memory_books_btn_regenerate'));
     expect(regenerations, 1);
   });
 
@@ -113,7 +113,7 @@ void main() {
 
     expect(find.text('safe old content'), findsOneWidget);
     expect(find.text('request failed'), findsOneWidget);
-    expect(find.byTooltip('memory_books_btn_regenerate'), findsOneWidget);
+    expect(find.text('memory_books_btn_regenerate'), findsOneWidget);
   });
 
   testWidgets(
@@ -147,12 +147,87 @@ void main() {
       );
 
       expect(find.byTooltip('memory_books_btn_approve'), findsNothing);
-      expect(find.byTooltip('memory_books_btn_regenerate'), findsNothing);
+      expect(find.text('memory_books_btn_regenerate'), findsNothing);
       expect(find.byTooltip('action_edit'), findsNothing);
       expect(find.byTooltip('memory_books_btn_stop'), findsOneWidget);
       expect(find.byTooltip('btn_delete'), findsOneWidget);
     },
   );
+
+  testWidgets('tapping the row edits the draft instead of a pencil button', (
+    tester,
+  ) async {
+    var edits = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        // The row's buttons are GlassSurface, which reads the active theme
+        // preset.
+        child: MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: Scaffold(
+            body: MemoryDraftCard(
+              draft: const MemoryDraft(
+                id: 'draft-1',
+                title: 'Night talk',
+                content: 'existing memory',
+                status: 'pending_approval',
+              ),
+              isGenerating: false,
+              generatingSince: null,
+              onGenerate: () {},
+              onRegenerate: () {},
+              onCancel: () {},
+              onApprove: () {},
+              onEdit: () => edits++,
+              onDelete: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // The pencil said what the row's own tap now says.
+    expect(find.byTooltip('action_edit'), findsNothing);
+    await tester.tap(find.text('Night talk'));
+    expect(edits, 1);
+  });
+
+  testWidgets('a draft still generating is not editable by tap', (
+    tester,
+  ) async {
+    var edits = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        // The row's buttons are GlassSurface, which reads the active theme
+        // preset.
+        child: MaterialApp(
+          theme: ThemeData.dark(useMaterial3: true),
+          home: Scaffold(
+            body: MemoryDraftCard(
+              draft: const MemoryDraft(
+                id: 'draft-1',
+                title: 'Night talk',
+                content: 'existing memory',
+                status: 'pending_approval',
+              ),
+              isGenerating: true,
+              generatingSince: null,
+              onGenerate: () {},
+              onRegenerate: () {},
+              onCancel: () {},
+              onApprove: () {},
+              onEdit: () => edits++,
+              onDelete: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Night talk'));
+    expect(edits, 0);
+  });
+
   testWidgets('a retry in flight does not show the failure it is retrying', (
     tester,
   ) async {
