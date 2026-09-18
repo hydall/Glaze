@@ -74,7 +74,11 @@ class _AuthorsNoteSheetState extends ConsumerState<AuthorsNoteSheet> {
   // Captured while the element is active so _performSave can still read
   // providers when invoked from GenericEditor.dispose() — by then ref.read
   // throws "Looking up a deactivated widget's ancestor is unsafe".
-  late final ProviderContainer _container;
+  //
+  // Not `late final`: didChangeDependencies runs again whenever an inherited
+  // widget above this one changes — opening a route over the sheet is enough —
+  // and a second assignment to a late final field throws.
+  late ProviderContainer _container;
 
   @override
   void didChangeDependencies() {

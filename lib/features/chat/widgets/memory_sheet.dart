@@ -4,7 +4,6 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/state/summary_providers.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
@@ -13,6 +12,7 @@ import 'memory/memory_books_controls.dart';
 import 'memory/memory_books_toolbar.dart';
 import 'memory/memory_tab_store.dart';
 import 'memory_books_tab.dart';
+import 'summary_settings_sheet.dart';
 import 'summary_tab.dart';
 
 /// Tabs of the Memory sheet, in display order.
@@ -111,7 +111,7 @@ class _MemorySheetState extends ConsumerState<MemorySheet> {
       ),
       actions: [
         if (tab == MemoryTab.summary && session != null)
-          _summaryToggle(session.id),
+          _summarySettingsAction(session.id),
         if (tab == MemoryTab.books && _booksActions != null)
           SheetViewAction(
             // The chat input bar's round glass button, not a bare icon: this
@@ -162,32 +162,29 @@ class _MemorySheetState extends ConsumerState<MemorySheet> {
     );
   }
 
-  /// Master switch for summary injection. Writes through
-  /// [syncSummaryEnabled], which also flips the `summary` block in every
-  /// preset so the toggle is not silently overridden by the active preset.
-  SheetViewAction _summaryToggle(String sessionId) {
-    void setEnabled(bool value) =>
-        syncSummaryEnabled(ref, charId: widget.charId, enabled: value);
-    bool isEnabled() =>
-        ref.read(summaryEnabledProvider(sessionId)).value ?? true;
-    return SheetViewAction(
-      // The switch watches for itself. Watched from `build`, every write to
-      // the summary rebuilt this whole sheet — the chrome, the header
-      // measurement and both tab bodies — to move one switch. And the summary
-      // is written often: the Summary tab saves on a debounce as the reader
-      // types, and every auto-summary during a chat bumps the same revision.
-      icon: Consumer(
-        builder: (context, ref, _) {
-          final enabled =
-              ref.watch(summaryEnabledProvider(sessionId)).value ?? true;
-          return Switch(
-            value: enabled,
-            onChanged: setEnabled,
-            activeThumbColor: Theme.of(context).colorScheme.primary,
-          );
-        },
+  /// The Summary tab's settings, in the same place the Books tab keeps its
+  /// own: one button in the header.
+  ///
+  /// This used to be a bare `Switch` for summary injection — one setting of
+  /// the several the tab carried, promoted to the chrome because it was the
+  /// one worth reaching quickly. It is in the sheet with the rest of them now
+  /// ([SummarySettingsSheet]), which leaves the tab as the summary and the
+  /// button that rewrites it.
+  SheetViewAction _summarySettingsAction(String sessionId) {
+    void open() => unawaited(
+      SummarySettingsSheet.show(
+        context,
+        charId: widget.charId,
+        sessionId: sessionId,
       ),
-      onPressed: () => setEnabled(!isEnabled()),
+    );
+    return SheetViewAction(
+      icon: MemoryCircleButton(
+        icon: Icons.tune_rounded,
+        label: 'summary_settings_title'.tr(),
+        onTap: open,
+      ),
+      onPressed: open,
     );
   }
 }

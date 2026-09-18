@@ -18,6 +18,20 @@ const defaultSummaryPrompt =
 /// macro expansion so nothing inside the transcript is treated as a macro.
 const summaryHistoryPlaceholder = '{{history}}';
 
+/// Placeholder replaced with the summary that is being replaced. A template
+/// that uses it decides where the previous summary goes; one that does not
+/// gets the block below in front of the transcript.
+const summaryPreviousPlaceholder = '{{previous_summary}}';
+
+/// Heading the previous summary is handed over under when the template does
+/// not place it itself. It is an instruction as much as a label: without it a
+/// model reads the block as part of the transcript and summarizes the summary.
+const summaryPreviousHeader =
+    'Previous summary of this conversation. Build on it: carry its facts '
+    'forward, correct what the transcript below contradicts, and add what is '
+    'new. Do not drop established facts just because the transcript no longer '
+    'mentions them.';
+
 /// Fallback generation budget when the API config carries no `maxTokens`.
 const _fallbackMaxTokens = 1024;
 
@@ -45,6 +59,19 @@ class SummaryService {
   Future<bool> isSummaryEnabled(String sessionId) async {
     final row = await _repo.get(sessionId);
     return row?.enabled ?? true;
+  }
+
+  /// Writes only the summarization template. See [SummaryRepo.setPrompt] for
+  /// why this is not [setSummary] with the same content.
+  Future<void> setSummaryPrompt({
+    required String sessionId,
+    required String? prompt,
+  }) {
+    final trimmed = prompt?.trim();
+    return _repo.setPrompt(
+      sessionId: sessionId,
+      prompt: trimmed == null || trimmed.isEmpty ? null : prompt,
+    );
   }
 
   /// Session's custom summarization prompt, or null when it uses the built-in
@@ -118,10 +145,18 @@ class SummaryService {
       throw Exception('API model not configured');
     }
 
+    // The summary this run replaces goes into the prompt. Without it every
+    // run re-derived the whole chat from the transcript alone, so anything the
+    // previous summary had distilled out of messages that have since scrolled
+    // past — or that the model happened to weigh differently this time — was
+    // quietly dropped. Read before the write below, which overwrites it.
+    final previous = await getSummaryContent(sessionId);
+
     final prompt = buildSummaryPrompt(
       history: history,
       template: customPrompt,
       macroContext: macroContext,
+      previousSummary: previous,
     );
 
     final content = await _llm.callOnce(
@@ -175,16 +210,29 @@ class SummaryService {
   ///
   /// A template without `{{history}}` gets the transcript appended, which is
   /// how the built-in prompt works.
+  ///
+  /// [previousSummary] is the summary this run replaces. A template places it
+  /// itself with `{{previous_summary}}`; otherwise it is handed over under
+  /// [summaryPreviousHeader] between the instructions and the transcript. An
+  /// empty or absent one changes nothing about the prompt.
   String buildSummaryPrompt({
     required List<ChatMessage> history,
     String? template,
     MacroContext? macroContext,
+    String? previousSummary,
   }) {
     var resolved = (template == null || template.trim().isEmpty)
         ? defaultSummaryPrompt
         : template;
     if (macroContext != null) {
       resolved = replaceMacros(resolved, macroContext).text;
+    }
+    final previous = previousSummary?.trim() ?? '';
+    final placed = resolved.contains(summaryPreviousPlaceholder);
+    if (placed) {
+      resolved = resolved.replaceAll(summaryPreviousPlaceholder, previous);
+    } else if (previous.isNotEmpty) {
+      resolved = '$resolved\n\n$summaryPreviousHeader\n$previous';
     }
     final historyText = _formatHistory(history);
     if (resolved.contains(summaryHistoryPlaceholder)) {

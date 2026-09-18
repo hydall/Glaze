@@ -2,27 +2,25 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/summary_service.dart';
-import '../../../core/models/preset.dart';
-import '../../../core/state/preset_resolution.dart';
 import '../../../core/state/summary_providers.dart';
+import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/generic_editor.dart';
+import '../../../shared/widgets/glaze_action_button.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
-import '../../../shared/widgets/glaze_spinner.dart';
-import '../../presets/preset_list_provider.dart';
 import '../chat_provider.dart';
 import '../services/summary_generation_service.dart';
 
 /// Summary tab of the Memory sheet.
 ///
-/// Edits three stores at once through a single [GenericEditor]:
-/// - `content` and `prompt` — session-scoped, kept in the summary repo (the
-///   same store the prompt builder reads, so a manual edit injects like a
-///   generated one).
-/// - `role` / `insertionMode` / `depth` — per-preset settings on the effective
-///   preset's `summary` block. They used to be reachable only from the preset
-///   editor, which is what the old hint in this sheet pointed at.
-/// - `autoInterval` — global, in shared preferences.
+/// The summary itself, and the one button that rewrites it. `content` is
+/// session-scoped and kept in the summary repo — the same store the prompt
+/// builder reads, so a manual edit is injected exactly like a generated one.
+///
+/// Everything else the summary has — the master switch, the prompt template,
+/// the auto interval, the injection point — is behind the header's settings
+/// button, in [SummarySettingsSheet]. The tab used to carry all of it in one
+/// scroll, with the switch as a bare `Switch` in the sheet header; only the
+/// text is looked at day to day.
 class SummaryTab extends ConsumerStatefulWidget {
   final String charId;
 
@@ -37,10 +35,6 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
   bool _isGenerating = false;
   Object? _error;
 
-  /// Null until the effective preset has been resolved, or when it carries no
-  /// `summary` block — the block settings section stays hidden in both cases.
-  String? _presetId;
-
   /// Last values written (or loaded). Guards against the no-op save that the
   /// editor schedules when [_load] pushes values into its controllers: that
   /// write would stamp the summary row with the current message count and
@@ -53,7 +47,11 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
   // swipe-dismissed with a pending debounced edit) — by then ref.read throws
   // "Looking up a deactivated widget's ancestor is unsafe". Mirrors
   // AuthorsNoteSheet.
-  late final ProviderContainer _container;
+  //
+  // Not `late final`: didChangeDependencies runs again whenever an inherited
+  // widget above this one changes — opening a route over the sheet is enough —
+  // and a second assignment to a late final field throws.
+  late ProviderContainer _container;
 
   @override
   void didChangeDependencies() {
@@ -71,35 +69,12 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
   Future<void> _load() async {
     final session = ref.read(chatProvider(widget.charId)).value?.session;
     if (session == null) return;
-    final service = ref.read(summaryServiceProvider);
-    final content = await service.getSummaryContent(session.id);
-    final prompt = await service.getSummaryPrompt(session.id);
-    final autoInterval = await ref.read(summaryAutoIntervalProvider.future);
-
-    // The preset list is loaded lazily; effectivePresetForChatProvider yields
-    // null until it resolves, which would leave the block settings hidden.
-    await ref.read(presetListProvider.future);
+    final content = await ref
+        .read(summaryServiceProvider)
+        .getSummaryContent(session.id);
     if (!mounted) return;
-    final preset = ref.read(
-      effectivePresetForChatProvider((
-        charId: widget.charId,
-        sessionId: session.id,
-      )),
-    );
-    final block = _summaryBlockOf(preset);
-
     setState(() {
-      _presetId = block == null ? null : preset?.id;
-      _localItem = {
-        'content': content ?? '',
-        'prompt': prompt ?? '',
-        'autoInterval': autoInterval,
-        if (block != null) ...{
-          'role': block.role,
-          'insertionMode': block.insertionMode,
-          'depth': block.depth ?? 1,
-        },
-      };
+      _localItem = {'content': content ?? ''};
       _savedItem = Map.of(_localItem);
     });
   }
@@ -114,9 +89,6 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     return false;
   }
 
-  static PresetBlock? _summaryBlockOf(Preset? preset) =>
-      preset?.blocks.where((b) => b.id == 'summary').firstOrNull;
-
   Future<void> _performSave(Map<String, dynamic> item) async {
     // Use the captured container, not ref — this can be invoked from
     // GenericEditor.dispose() when the element is already deactivated.
@@ -126,141 +98,34 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     _savedItem = Map.of(item);
 
     final content = (item['content'] as String?)?.trim() ?? '';
-    await _container.read(summaryServiceProvider).setSummary(
+    await _container
+        .read(summaryServiceProvider)
+        .setSummary(
           sessionId: session.id,
           content: content,
           messageCount: session.messages.length,
-          // Stored verbatim (macros stay unexpanded — it is a template).
-          // Empty means "use the built-in prompt".
-          prompt: (item['prompt'] as String?) ?? '',
+          // Left untouched: the template belongs to the settings sheet, and
+          // writing it from here would overwrite an edit made there.
         );
     _container.read(summaryRevisionProvider.notifier).state++;
-
-    await _saveBlockSettings(item);
-    await _saveAutoInterval(item);
   }
 
-  Future<void> _saveAutoInterval(Map<String, dynamic> item) async {
-    final raw = item['autoInterval'];
-    final value = raw is num ? raw.toInt() : int.tryParse('$raw') ?? 0;
-    if (_container.read(summaryAutoIntervalProvider).value == value) return;
-    await _container.read(summaryAutoIntervalProvider.notifier).set(value);
-  }
-
-  /// Writes role / insertion mode / depth back onto the effective preset's
-  /// `summary` block. No-op when the tab never resolved a preset block.
-  Future<void> _saveBlockSettings(Map<String, dynamic> item) async {
-    final presetId = _presetId;
-    if (presetId == null) return;
-    final presets = _container.read(presetListProvider).value ?? const [];
-    final preset = presets.where((p) => p.id == presetId).firstOrNull;
-    if (preset == null) return;
-    final index = preset.blocks.indexWhere((b) => b.id == 'summary');
-    if (index == -1) return;
-
-    final current = preset.blocks[index];
-    final insertionMode =
-        item['insertionMode'] as String? ?? current.insertionMode;
-    final updated = current.copyWith(
-      role: item['role'] as String? ?? current.role,
-      insertionMode: insertionMode,
-      depth: insertionMode == 'depth'
-          ? (item['depth'] as num?)?.toInt() ?? current.depth
-          : current.depth,
-    );
-    if (updated == current) return;
-
-    final blocks = List<PresetBlock>.from(preset.blocks)..[index] = updated;
-    await _container
-        .read(presetListProvider.notifier)
-        .updatePreset(preset.copyWith(blocks: blocks));
-  }
-
+  /// One field. Everything the form used to carry alongside it is in
+  /// [SummarySettingsSheet] now.
   List<GenericEditorSection> get _config => [
-        GenericEditorSection(
-          fields: [
-            GenericEditorField(
-              key: 'content',
-              label: 'summary_title'.tr(),
-              type: 'textarea',
-              placeholder: 'summary_placeholder'.tr(),
-              rows: 8,
-              expandable: true,
-            ),
-          ],
+    GenericEditorSection(
+      fields: [
+        GenericEditorField(
+          key: 'content',
+          label: 'summary_title'.tr(),
+          type: 'textarea',
+          placeholder: 'summary_placeholder'.tr(),
+          rows: 16,
+          expandable: true,
         ),
-        GenericEditorSection(
-          title: 'summary_generation_section'.tr(),
-          fields: [
-            GenericEditorField(
-              key: 'prompt',
-              label: 'summary_prompt_label'.tr(),
-              type: 'textarea',
-              placeholder: defaultSummaryPrompt,
-              rows: 5,
-              expandable: true,
-            ),
-            const GenericEditorField(
-              key: '__promptHint',
-              label: '',
-              type: 'info',
-              text: 'Macros are expanded ({{char}}, {{user}}, {{getvar::…}}). '
-                  'Add {{history}} to place the transcript yourself — without '
-                  'it, it is appended at the end. Leave empty for the built-in '
-                  'prompt.',
-            ),
-            GenericEditorField(
-              key: 'autoInterval',
-              label: 'summary_auto_interval_label'.tr(),
-              type: 'number',
-              placeholder: '0',
-            ),
-            const GenericEditorField(
-              key: '__autoHint',
-              label: '',
-              type: 'info',
-              text: 'Auto-summarize after this many new messages. 0 turns it '
-                  'off. It only runs when the bot replies, never right after '
-                  'your own message. Applies to every chat.',
-            ),
-          ],
-        ),
-        if (_presetId != null)
-          GenericEditorSection(
-            title: 'label_injection_point'.tr(),
-            fields: [
-              GenericEditorField(
-                key: 'role',
-                label: 'label_role'.tr(),
-                type: 'select',
-                options: const [
-                  {'label': 'System', 'value': 'system'},
-                  {'label': 'User', 'value': 'user'},
-                  {'label': 'Assistant', 'value': 'assistant'},
-                ],
-              ),
-              GenericEditorField(
-                key: 'insertionMode',
-                label: 'label_insertion'.tr(),
-                type: 'select',
-                options: [
-                  {'label': 'injection_relative'.tr(), 'value': 'relative'},
-                  {'label': 'injection_depth'.tr(), 'value': 'depth'},
-                ],
-              ),
-              GenericEditorField(
-                key: 'depth',
-                label: 'label_depth'.tr(),
-                type: 'select',
-                options: List.generate(
-                  20,
-                  (i) => {'label': '${i + 1}', 'value': i + 1},
-                ),
-                showIf: (item) => item['insertionMode'] == 'depth',
-              ),
-            ],
-          ),
-      ];
+      ],
+    ),
+  ];
 
   Future<void> _generateSummary() async {
     final session = ref.read(chatProvider(widget.charId)).value?.session;
@@ -271,8 +136,9 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
       _error = null;
     });
     try {
-      // Flush a pending prompt edit first: the editor's save is debounced, and
-      // generation reads the template back out of the repo.
+      // Flush a pending edit first: the editor's save is debounced, and the
+      // run reads both the template and the summary it is replacing back out
+      // of the repo.
       await _performSave(_localItem);
       if (!mounted) return;
       final summary = await ref
@@ -315,6 +181,8 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     );
   }
 
+  /// The one action of the tab, as the kit's button rather than a Material
+  /// `FilledButton` in a hand-picked blue.
   Widget _buildActionBar(BuildContext context) {
     final error = _error;
     return Container(
@@ -325,33 +193,21 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
         MediaQuery.paddingOf(context).bottom + 24,
       ),
       decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
-        ),
+        border: Border(top: BorderSide(color: context.cs.outlineVariant)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          FilledButton.icon(
-            onPressed: _isGenerating ? null : _generateSummary,
-            icon: _isGenerating
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: GlazeSpinner(),
-                  )
-                : const Icon(Icons.auto_awesome, size: 18),
-            label: Text(
-              _isGenerating ? 'Generating...' : 'btn_auto_summary'.tr(),
-            ),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF528BCC),
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
+          GlazeActionButton(
+            icon: Icons.auto_awesome_rounded,
+            label: _isGenerating
+                ? 'summary_generating'.tr()
+                : 'btn_auto_summary'.tr(),
+            tone: GlazeActionTone.primary,
+            expand: true,
+            busy: _isGenerating,
+            onTap: _generateSummary,
           ),
           if (error != null) ...[
             const SizedBox(height: 12),

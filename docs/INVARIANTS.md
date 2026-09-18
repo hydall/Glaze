@@ -335,6 +335,17 @@ aborted.
 additionally requires `session.messages.last` to be a non-error assistant /
 character message. A user message must never trigger it.
 
+### INV-S5: A summary run is given the summary it replaces ✅ ENFORCED
+
+`SummaryService.generateSummary` reads the stored summary before it writes the
+new one and passes it to `buildSummaryPrompt`, which places it at
+`{{previous_summary}}` or, when the template does not, under
+`summaryPreviousHeader` between the instructions and the transcript. A run must
+never re-derive the chat from the transcript alone — that silently drops
+whatever the previous summary had distilled out of messages the model now
+weighs differently. The first run of a session adds nothing. Covered by
+`test/summary_service_test.dart`.
+
 ### INV-S3: Summary does not mutate chat messages
 
 Summary generation only reads history and writes to `ChatSummary` via `SummaryRepo`.

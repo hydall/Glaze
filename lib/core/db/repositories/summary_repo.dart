@@ -64,6 +64,27 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
     );
   }
 
+  /// Writes only the summarization template, leaving the content and the
+  /// message count alone. A settings screen that edits the prompt must not
+  /// stamp a new message count — that silently restarts the auto-summary
+  /// countdown.
+  Future<void> setPrompt({
+    required String sessionId,
+    required String? prompt,
+  }) async {
+    final existing = await get(sessionId);
+    await into(chatSummaries).insertOnConflictUpdate(
+      ChatSummariesCompanion.insert(
+        sessionId: sessionId,
+        content: existing?.content ?? '',
+        enabled: Value(existing?.enabled ?? true),
+        messageCount: Value(existing?.messageCount ?? 0),
+        prompt: Value(prompt),
+        updatedAt: Value(currentTimestampSeconds()),
+      ),
+    );
+  }
+
   Future<void> setEnabled({
     required String sessionId,
     required bool enabled,

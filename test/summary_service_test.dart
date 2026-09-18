@@ -301,6 +301,137 @@ void main() {
     },
   );
 
+  group('the summary being replaced is part of the next prompt', () {
+    const apiConfig = ApiConfig(
+      id: 'api',
+      endpoint: 'https://example.com/v1',
+      apiKey: 'secret',
+      model: 'model',
+    );
+    const history = [ChatMessage(id: '1', role: 'user', content: 'Hello')];
+
+    test('a stored summary is handed over under its own heading', () async {
+      final llm = _RecordingAuxLlmClient();
+      final service = SummaryService(repo, llm: llm);
+      await service.setSummary(
+        sessionId: 'session',
+        content: 'Alla admitted she knew about the letter.',
+        messageCount: 4,
+      );
+
+      await service.generateSummary(
+        sessionId: 'session',
+        history: history,
+        apiConfig: apiConfig,
+      );
+
+      expect(llm.prompt, contains(summaryPreviousHeader));
+      expect(llm.prompt, contains('Alla admitted she knew about the letter.'));
+      // Before the transcript, so the model reads it as context rather than
+      // as the last thing said in the chat.
+      expect(
+        llm.prompt!.indexOf(summaryPreviousHeader),
+        lessThan(llm.prompt!.indexOf('User: Hello')),
+      );
+    });
+
+    test('the first run adds nothing', () async {
+      final llm = _RecordingAuxLlmClient();
+      final service = SummaryService(repo, llm: llm);
+
+      await service.generateSummary(
+        sessionId: 'session',
+        history: history,
+        apiConfig: apiConfig,
+      );
+
+      expect(llm.prompt, isNot(contains(summaryPreviousHeader)));
+      expect(llm.prompt, startsWith(defaultSummaryPrompt.trim()));
+    });
+
+    test('a template places it itself with the placeholder', () async {
+      final llm = _RecordingAuxLlmClient();
+      final service = SummaryService(repo, llm: llm);
+      await service.setSummary(
+        sessionId: 'session',
+        content: 'They reached the pass after dark.',
+        messageCount: 4,
+      );
+
+      await service.generateSummary(
+        sessionId: 'session',
+        history: history,
+        apiConfig: apiConfig,
+        customPrompt: 'So far: $summaryPreviousPlaceholder\n---\n{{history}}',
+      );
+
+      expect(
+        llm.prompt,
+        startsWith('So far: They reached the pass after dark.'),
+      );
+      // Placed, so the default heading is not added on top of it.
+      expect(llm.prompt, isNot(contains(summaryPreviousHeader)));
+    });
+
+    test('a placeholder with nothing to put in it resolves to empty', () async {
+      final llm = _RecordingAuxLlmClient();
+      final service = SummaryService(repo, llm: llm);
+
+      await service.generateSummary(
+        sessionId: 'session',
+        history: history,
+        apiConfig: apiConfig,
+        customPrompt: 'So far: $summaryPreviousPlaceholder\n{{history}}',
+      );
+
+      expect(llm.prompt, startsWith('So far: \n'));
+      expect(llm.prompt, isNot(contains(summaryPreviousPlaceholder)));
+    });
+
+    test('the run replaces what it was given', () async {
+      final llm = _RecordingAuxLlmClient();
+      final service = SummaryService(repo, llm: llm);
+      await service.setSummary(
+        sessionId: 'session',
+        content: 'old summary',
+        messageCount: 4,
+      );
+
+      await service.generateSummary(
+        sessionId: 'session',
+        history: history,
+        apiConfig: apiConfig,
+      );
+
+      expect(await service.getSummaryContent('session'), 'generated summary');
+    });
+  });
+
+  test('the prompt can be written without touching the summary', () async {
+    // The settings sheet edits the template; stamping a message count from
+    // there would silently restart the auto-summary countdown.
+    final service = SummaryService(repo);
+    await service.setSummary(
+      sessionId: 'session',
+      content: 'kept',
+      messageCount: 9,
+    );
+
+    await service.setSummaryPrompt(
+      sessionId: 'session',
+      prompt: 'Recap {{char}}.',
+    );
+
+    expect(await service.getSummaryPrompt('session'), 'Recap {{char}}.');
+    expect(await service.getSummaryContent('session'), 'kept');
+    expect(await service.getSummaryMessageCount('session'), 9);
+
+    // A blank template means "use the built-in prompt", not an empty one.
+    await service.setSummaryPrompt(sessionId: 'session', prompt: '   ');
+    expect(await service.getSummaryPrompt('session'), isNull);
+    expect(await service.getSummaryContent('session'), 'kept');
+  });
+
   test('regeneration threshold behavior is unchanged', () {
     final service = SummaryService(repo);
 
