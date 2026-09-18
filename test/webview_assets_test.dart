@@ -1985,7 +1985,7 @@ void main() {
       );
     });
 
-    test('the shrink is measured against what the reader can see', () {
+    test('the shrink is measured against the scrollport', () {
       expect(
         bridgeControllerJs,
         contains('full - this._visibleViewportH()'),
@@ -1994,14 +1994,27 @@ void main() {
             'same code correct on embedders that resize the WebView and on '
             'those that do not.',
       );
+      final idx = bridgeControllerJs.indexOf('_visibleViewportH() {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
       expect(
-        bridgeControllerJs,
-        contains('Math.min(client, visual)'),
+        body,
+        contains('this.virtualList.container.clientHeight'),
+        reason: 'The scrollport is the container, so that is what to measure.',
+      );
+      expect(
+        body,
+        isNot(contains('visualViewport')),
         reason:
-            'A keyboard that overlays the page shrinks the visual viewport and '
-            'leaves the layout viewport alone, so the element measures full '
-            'height while half of it is behind the keyboard. Whichever of the '
-            'two is smaller is what is on screen.',
+            'What the padding buys is scroll range — room to push the end of '
+            'the list out from under the chrome. Only a scrollport that got '
+            'shorter needs less of it, and a keyboard that merely overlays the '
+            'page does not shorten this one, it covers it. Measuring the '
+            'visual viewport took the keyboard back off the padding while the '
+            'range it stood in for never appeared, so at maximum scroll the '
+            'last lines sat behind the keyboard with nothing left to scroll. '
+            'An embedder that really does resize the WebView still shrinks the '
+            'container, which is the case this subtraction exists for.',
       );
     });
 
