@@ -189,10 +189,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   Timer? _saveTimer;
   bool _loading = false;
 
-  /// WidgetRef captured in initState for safe use in dispose() (where the
-  /// widget is already unmounted and ref.read/watch throw
-  /// "Using ref when a widget is about to or has been unmounted is unsafe").
-  late final WidgetRef _ref;
+  /// The provider container this screen lives in, captured while the element
+  /// is still in the tree.
+  ///
+  /// A save is debounced and flushed on the way out, so its DB writes routinely
+  /// outlive the widget. A `WidgetRef` cannot be used then — read, watch and
+  /// invalidate all throw once the widget is unmounted — and the flush would
+  /// die halfway, after the LLM preset was written but before the embedding
+  /// one. The container has no such lifetime tied to the widget, so [_save]
+  /// goes through it instead.
+  late ProviderContainer _container;
 
   List<TextEditingController> get _ctrls => [
     _nameCtrl,
@@ -217,7 +223,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     // A deep link at the MemoryBook slot opens straight on the tab that holds
     // it rather than on LLM and then jumping.
     _tab = widget.focusSection == ApiSettingsSection.memoryBook ? 2 : 0;
-    _ref = ref;
     for (final c in _ctrls) {
       c.addListener(_scheduleSave);
     }
@@ -242,6 +247,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _container = ProviderScope.containerOf(context, listen: false);
     if (_revealed || _revealAnimation != null) return;
     final animation = ModalRoute.of(context)?.animation;
     if (animation == null || animation.isCompleted) {
@@ -437,9 +443,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   }
 
   Future<void> _save() async {
-    final config = _ref.read(activeApiConfigProvider);
-    final embeddingConfig = _ref.read(activeEmbeddingConfigProvider);
+    final config = _container.read(activeApiConfigProvider);
+    final embeddingConfig = _container.read(activeEmbeddingConfigProvider);
     if (config == null && embeddingConfig == null) return;
+    // The controllers are disposed with the widget, so their text is read up
+    // front rather than after an await. Everything else goes through
+    // [_container], which stays valid for the whole write.
+    final embeddingName = _embNameCtrl.text.trim();
     // Either tab can be the only one with a preset open — the editor still
     // saves the half that has one. The base only supplies the fields the
     // written half does not carry.
@@ -502,19 +512,17 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       // right now (the drawer's stats, the context card under the chat header).
       final budgetChanged =
           updated.contextBudgetSignature != config.contextBudgetSignature;
-      await _ref.read(apiListProvider.notifier).put(updated);
+      await _container.read(apiListProvider.notifier).put(updated);
       if (budgetChanged) {
         TokenBreakdownCache.invalidate();
-        _ref.invalidate(cachedTokenBreakdownProvider);
+        _container.invalidate(cachedTokenBreakdownProvider);
       }
     }
     if (embeddingConfig == null) return;
-    await _ref
+    await _container
         .read(embeddingPresetListProvider.notifier)
         .put(
-          draft
-              .applyEmbeddingTo(embeddingConfig)
-              .copyWith(name: _embNameCtrl.text.trim()),
+          draft.applyEmbeddingTo(embeddingConfig).copyWith(name: embeddingName),
         );
   }
 
@@ -1888,6 +1896,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             icon: Icons.delete_outline_rounded,
             color: context.cs.onSurfaceVariant,
             onTap: () async {
+              // A pending save would race the delete and write the row back.
+              _saveTimer?.cancel();
               await _presetNotifier(forEmbedding).remove(config.id);
               _reloadAfterDelete(activeId, {config.id});
             },
@@ -1899,7 +1909,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           return;
         }
         Navigator.of(context, rootNavigator: true).pop();
-        _saveTimer?.cancel();
+        // Edits made in the last debounce window belong to the preset that is
+        // still open. Flush them to it before the selection moves — cancelling
+        // the timer here simply threw them away.
+        _flushSave();
         if (forEmbedding) {
           // Only the embedding side moves: the chat connection stays where it
           // is, and so does everything the LLM tab holds.
@@ -1976,6 +1989,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             ref.read(apiPresetSelectionProvider.notifier).clear();
+            // As with a single delete: no pending save may outlive the rows.
+            _saveTimer?.cancel();
             for (final id in ids) {
               // Each delete awaits a DB round-trip; bail out if the screen went
               // away in the meantime rather than reading a disposed ref.
@@ -2068,6 +2083,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           Navigator.of(context, rootNavigator: true).pop();
           final trimmed = name.trim();
           if (trimmed.isEmpty) return;
+          // As with picking another preset: the editor is about to be pointed
+          // somewhere else, so whatever is still pending belongs to the preset
+          // being left.
+          _flushSave();
 
           final newConfig = ApiConfig(
             id: DateTime.now().millisecondsSinceEpoch.toString(),

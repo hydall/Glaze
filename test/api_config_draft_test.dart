@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/llm/history_trim.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/extra_request_parameter.dart';
@@ -56,6 +57,95 @@ void main() {
     final mapped = ApiConfigDraft.fromConfig(config).toConfig(config);
 
     expect(mapped, config);
+  });
+
+  // The editor holds these next to the sampling knobs, but the save used to
+  // list the fields it wrote one by one and these were missing from that list,
+  // so closing the sheet put the stored row's old values straight back.
+  test('carries the context group and the reasoning budget', () {
+    const stored = ApiConfig(
+      id: 'api',
+      historyTrimMode: HistoryTrimMode.sliding,
+      historyTrimTriggerPercent: kDefaultHistoryTrimTriggerPercent,
+      historyTrimStepPercent: kDefaultHistoryTrimStepPercent,
+      excludeReasoningFromContextBudget: false,
+    );
+    final source = ApiConfigDraft.fromConfig(stored);
+    final draft = ApiConfigDraft(
+      values: source.values.copyWith(
+        historyTrimMode: HistoryTrimMode.stepped,
+        historyTrimTriggerPercent: 70,
+        historyTrimStepPercent: 45,
+        excludeReasoningFromContextBudget: true,
+      ),
+      name: source.name,
+      endpoint: source.endpoint,
+      apiKey: source.apiKey,
+      model: source.model,
+      maxTokens: source.maxTokens,
+      contextSize: source.contextSize,
+      firstChunkTimeoutSeconds: source.firstChunkTimeoutSeconds,
+      reasoningHistoryCount: source.reasoningHistoryCount,
+      embeddingEndpoint: source.embeddingEndpoint,
+      embeddingApiKey: source.embeddingApiKey,
+      embeddingModel: source.embeddingModel,
+      embeddingMaxChunkTokens: source.embeddingMaxChunkTokens,
+      embeddingRequestsPerMinute: source.embeddingRequestsPerMinute,
+    );
+
+    final saved = draft.applyLlmTo(stored);
+
+    expect(saved.historyTrimMode, HistoryTrimMode.stepped);
+    expect(saved.historyTrimTriggerPercent, 70);
+    expect(saved.historyTrimStepPercent, 45);
+    expect(saved.excludeReasoningFromContextBudget, isTrue);
+    // The cached prompt breakdown is dropped on exactly this signature, so the
+    // save has to move it too.
+    expect(saved.contextBudgetSignature, isNot(stored.contextBudgetSignature));
+  });
+
+  // A garbage trim mode — an older build, a hand-edited backup — must not be
+  // written back onto the row as-is.
+  test('normalizes an unknown trim mode to sliding', () {
+    const stored = ApiConfig(id: 'api', historyTrimMode: 'nonsense');
+    final draft = ApiConfigDraft.fromConfig(stored);
+
+    expect(draft.values.historyTrimMode, HistoryTrimMode.sliding);
+    expect(draft.applyLlmTo(stored).historyTrimMode, HistoryTrimMode.sliding);
+  });
+
+  // Switching the protocol to a custom endpoint rewrites the legacy provider
+  // id; the save has to carry that, or the row keeps the old provider.
+  test('carries the derived provider id onto the preset', () {
+    const stored = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.openrouter,
+      providerId: 'openrouter',
+    );
+    final source = ApiConfigDraft.fromConfig(stored);
+    final draft = ApiConfigDraft(
+      values: source.values.copyWith(
+        protocol: LlmProtocol.customChatCompletion,
+      ),
+      name: source.name,
+      endpoint: source.endpoint,
+      apiKey: source.apiKey,
+      model: source.model,
+      maxTokens: source.maxTokens,
+      contextSize: source.contextSize,
+      firstChunkTimeoutSeconds: source.firstChunkTimeoutSeconds,
+      reasoningHistoryCount: source.reasoningHistoryCount,
+      embeddingEndpoint: source.embeddingEndpoint,
+      embeddingApiKey: source.embeddingApiKey,
+      embeddingModel: source.embeddingModel,
+      embeddingMaxChunkTokens: source.embeddingMaxChunkTokens,
+      embeddingRequestsPerMinute: source.embeddingRequestsPerMinute,
+    );
+
+    final saved = draft.applyLlmTo(stored);
+
+    expect(saved.protocol, LlmProtocol.customChatCompletion);
+    expect(saved.providerId, 'custom_chat_completion');
   });
 
   test('each half of the editor is written to its own preset', () {

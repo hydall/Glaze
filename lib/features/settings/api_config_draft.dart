@@ -1,5 +1,6 @@
 import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/converters/reasoning_effort.dart';
+import '../../core/llm/history_trim.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/models/api_config.dart';
 
@@ -96,6 +97,7 @@ class ApiConfigDraft {
 
     return values.copyWith(
       protocol: protocol,
+      historyTrimMode: HistoryTrimMode.normalize(values.historyTrimMode),
       providerId: protocol == LlmProtocol.customChatCompletion
           ? 'custom_chat_completion'
           : values.providerId,
@@ -152,6 +154,10 @@ class ApiConfigDraft {
         int.tryParse(reasoningHistoryCount) ?? 0;
     return base.copyWith(
       name: name.trim(),
+      // The protocol picker can move a preset onto a custom endpoint, and the
+      // legacy provider id is derived from the protocol — leaving it behind
+      // kept the old provider on the row.
+      providerId: normalized.providerId,
       endpoint: endpoint.trim(),
       apiKey: apiKey.trim(),
       model: model.trim(),
@@ -173,6 +179,15 @@ class ApiConfigDraft {
           ? 0
           : parsedReasoningHistoryCount,
       reasoningEffort: normalized.reasoningEffort,
+      excludeReasoningFromContextBudget:
+          normalized.excludeReasoningFromContextBudget,
+      // The context group's own fields. They are edited on the LLM tab like
+      // everything else here, so the save has to carry them; without these the
+      // trim mode, its threshold and its step silently fell back to whatever
+      // the row already held.
+      historyTrimMode: normalized.historyTrimMode,
+      historyTrimTriggerPercent: normalized.historyTrimTriggerPercent,
+      historyTrimStepPercent: normalized.historyTrimStepPercent,
       omitTemperature: normalized.omitTemperature,
       omitTopP: normalized.omitTopP,
       omitTopK: normalized.omitTopK,
