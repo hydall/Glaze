@@ -38,6 +38,10 @@ const _fallbackMaxTokens = 1024;
 /// Fallback idle timeout when the API config carries no `firstChunkTimeoutMs`.
 const _fallbackTimeoutMs = 60000;
 
+/// Temperature a summary runs at unless the connection's slot pins one.
+/// Summarizing is extraction, not prose — a hot summariser invents facts.
+const kSummaryDefaultTemperature = 0.3;
+
 class SummaryService {
   final SummaryRepo _repo;
   final AuxLlmClient _llm;
@@ -134,6 +138,10 @@ class SummaryService {
     String? customPrompt,
     MacroContext? macroContext,
     CancelToken? cancelToken,
+
+    /// Pins the sampling temperature. Null keeps
+    /// [kSummaryDefaultTemperature].
+    double? temperature,
   }) async {
     // OpenRouter's transport hardcodes its base URL and ignores the config's
     // endpoint, so an empty endpoint is legitimate there.
@@ -176,7 +184,7 @@ class SummaryService {
       maxTokens: apiConfig.maxTokens > 0
           ? apiConfig.maxTokens
           : _fallbackMaxTokens,
-      temperature: 0.3,
+      temperature: temperature ?? kSummaryDefaultTemperature,
       timeoutMs: apiConfig.firstChunkTimeoutMs > 0
           ? apiConfig.firstChunkTimeoutMs
           : _fallbackTimeoutMs,

@@ -322,6 +322,13 @@ calls the protocol's `ChatTransport` with `stream: false`. No SSE. The protocol
 comes from `ApiConfig.protocol` — the summary must never hardcode one provider's
 wire format.
 
+The connection is resolved by `SummaryGenerationService` from the Memory slot
+(`PipelineSettings.memoryBookApi`), the same slot memory drafts run on, falling
+back to the active chat connection when the slot names none. Its model override
+and output cap are folded into the `ApiConfig` handed down; its temperature is
+applied only when it is set, so summarizing otherwise stays at
+`kSummaryDefaultTemperature`.
+
 ### INV-S2: Summary does not create generation registry entries
 
 Summary generation does not touch `ChatState.isGenerating` or any `charId`-keyed
@@ -389,6 +396,15 @@ Whoever writes a memory book from outside the sheet bumps
 `memoryBookRevisionProvider` afterwards, so an open sheet re-reads rather than
 saving its own stale copy back over the write. Covered by
 `test/memory_draft_jobs_test.dart`.
+
+### INV-M3b: Memory drafting runs on the shared auxiliary client ✅ ENFORCED
+
+`MemoryDraftGenerator` calls `AuxLlmClient.callOnce`, never a `ChatTransport`
+directly. That is what gives drafting the retry policy every other auxiliary
+call has — three attempts with backoff on 5xx (504 included), timeouts and
+transient connection errors. A direct transport call has no retry, so one
+gateway hiccup failed the draft outright. Covered by
+`test/memory_draft_transport_test.dart`.
 
 ### INV-M4: Memory draft ownership remains exclusive ✅ ENFORCED
 

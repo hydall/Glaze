@@ -4,13 +4,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/summary_service.dart';
 import '../../../core/models/preset.dart';
+import '../../../core/services/memory_prompt_presets.dart'
+    show MemoryPromptPreset;
+import '../../../core/services/summary_prompt_presets.dart';
 import '../../../core/state/preset_resolution.dart';
 import '../../../core/state/summary_providers.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/list_controls.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../../presets/preset_list_provider.dart';
+import '../../settings/api_settings_screen.dart';
+import 'custom_prompt_manager_sheet.dart';
 
 /// Everything about the summary except the summary itself.
 ///
@@ -61,12 +67,20 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
   bool _enabled = true;
   int _autoInterval = 0;
 
+  /// Saved prompts, buffered like the rest of the form so the manager sheet
+  /// and the picker agree before anything is written.
+  List<MemoryPromptPreset> _customPrompts = const [];
+
   /// Null until the effective preset is resolved, or when it carries no
   /// `summary` block — the injection section stays hidden in both cases.
   String? _presetId;
   String _role = 'system';
   String _insertionMode = 'relative';
   int _depth = 1;
+
+  /// The saved prompts as they were loaded, by identity: the manager sheet
+  /// hands back a new list only when something changed.
+  List<MemoryPromptPreset> _loadedPrompts = const [];
 
   /// What was loaded, so Save writes only what actually changed. Writing the
   /// prompt unconditionally would be harmless; writing the interval or the
@@ -91,6 +105,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     final enabled = await service.isSummaryEnabled(widget.sessionId);
     final prompt = await service.getSummaryPrompt(widget.sessionId);
     final interval = await ref.read(summaryAutoIntervalProvider.future);
+    final customPrompts = await ref.read(summaryCustomPromptsProvider.future);
     // The preset list loads lazily; effectivePresetForChatProvider reads null
     // until it resolves, which would leave the injection section hidden.
     await ref.read(presetListProvider.future);
@@ -107,10 +122,12 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     setState(() {
       _enabled = enabled;
       _autoInterval = interval;
+      _customPrompts = customPrompts;
       _presetId = block == null ? null : preset?.id;
       _role = block?.role ?? _role;
       _insertionMode = block?.insertionMode ?? _insertionMode;
       _depth = block?.depth ?? _depth;
+      _loadedPrompts = customPrompts;
       _loaded = _current();
       _loading = false;
     });
@@ -154,6 +171,11 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
       await ref
           .read(summaryAutoIntervalProvider.notifier)
           .set(current.autoInterval);
+    }
+    if (!identical(_customPrompts, _loadedPrompts)) {
+      await ref
+          .read(summaryCustomPromptsProvider.notifier)
+          .save(_customPrompts);
     }
     await _saveBlockSettings(current, loaded);
     if (!mounted) return;
@@ -245,12 +267,30 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         onChanged: (v) =>
                             setState(() => _autoInterval = v.round()),
                       ),
+                      MenuItem(
+                        icon: Icons.cable_rounded,
+                        label: 'memory_books_generation_connection'.tr(),
+                        subtitle: 'summary_connection_hint'.tr(),
+                        onTap: _openApiSettings,
+                      ),
+                      MenuSelectorItem(
+                        label: 'summary_prompt_preset_label'.tr(),
+                        currentValue: _presetLabel(),
+                        description: 'summary_prompt_preset_hint'.tr(),
+                        onTap: _pickPreset,
+                      ),
+                      MenuItem(
+                        icon: Icons.edit_note_rounded,
+                        label: 'memory_prompt_presets_title'.tr(),
+                        onTap: _openPromptManager,
+                      ),
                       MenuFieldItem(
                         label: 'summary_prompt_label'.tr(),
                         description: 'summary_prompt_hint'.tr(),
                         controller: _promptCtrl,
                         placeholder: defaultSummaryPrompt,
                         maxLines: 6,
+                        onChanged: (_) => setState(() {}),
                       ),
                     ],
                   ),
@@ -286,6 +326,71 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
               ),
             ),
     );
+  }
+
+  /// Which preset the field still holds — or "custom" once it has been edited
+  /// into something of its own.
+  String _presetLabel() {
+    final preset = SummaryPromptPresets.match(_promptCtrl.text, _customPrompts);
+    return preset?.label ?? 'summary_prompt_preset_custom'.tr();
+  }
+
+  /// Picking a preset fills the field with its text. The session stores the
+  /// template itself, so a preset is a starting point rather than a binding —
+  /// edit it afterwards and the picker simply reads "custom".
+  void _pickPreset() {
+    showGlazePickerSheet(
+      context,
+      title: 'summary_prompt_preset_label'.tr(),
+      items: [
+        for (final preset in SummaryPromptPresets.all(_customPrompts))
+          GlazePickerItem(
+            label: preset.label,
+            hint: _excerpt(preset.prompt),
+            isActive:
+                SummaryPromptPresets.match(
+                  _promptCtrl.text,
+                  _customPrompts,
+                )?.key ==
+                preset.key,
+            value: preset.key,
+          ),
+      ],
+      onSelect: (value) {
+        final preset = SummaryPromptPresets.all(
+          _customPrompts,
+        ).where((p) => p.key == value).firstOrNull;
+        if (preset == null) return;
+        setState(() => _promptCtrl.text = preset.prompt);
+      },
+    );
+  }
+
+  /// Summarizing runs on the Memory slot, the same connection memory drafts
+  /// use, so this leaves for where that slot is bound rather than binding a
+  /// second one here.
+  Future<void> _openApiSettings() => showApiSettingsSheet(
+    context,
+    focusSection: ApiSettingsSection.memoryBook,
+  );
+
+  Future<void> _openPromptManager() async {
+    final result = await GlazeBottomSheet.show<List<MemoryPromptPreset>>(
+      context,
+      title: 'memory_prompt_presets_title'.tr(),
+      child: CustomPromptManagerSheet(
+        customPrompts: _customPrompts,
+        builtIn: SummaryPromptPresets.builtIn,
+        title: 'summary_prompt_presets_title'.tr(),
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() => _customPrompts = result);
+  }
+
+  static String _excerpt(String prompt) {
+    final flat = prompt.trim().replaceAll(RegExp(r'\s+'), ' ');
+    return flat.length <= 90 ? flat : '${flat.substring(0, 90)}…';
   }
 
   static String _roleLabel(String role) => switch (role) {

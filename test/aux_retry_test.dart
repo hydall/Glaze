@@ -57,6 +57,40 @@ void main() {
       expect(starts, [(1, 3), (2, 3), (3, 3)]);
     });
 
+    test('a gateway timeout is retried like any other 5xx', () async {
+      // 504 is what a provider's gateway answers when its own upstream took
+      // too long. It is transient by definition, so it must not be the end of
+      // the call — memory drafting used to die on the first one.
+      final runner = const AuxRetryRunner(
+        policy: AuxRetryPolicy(
+          maxAttempts: 3,
+          backoffDelays: [Duration.zero, Duration.zero, Duration.zero],
+        ),
+      );
+      var calls = 0;
+      final outcome = await runner.run(
+        attempt: (_) async {
+          calls++;
+          if (calls < 2) {
+            throw DioException(
+              requestOptions: RequestOptions(path: ''),
+              response: Response(
+                requestOptions: RequestOptions(path: ''),
+                statusCode: 504,
+              ),
+              type: DioExceptionType.badResponse,
+            );
+          }
+          return 'recovered';
+        },
+      );
+
+      expect(outcome.isOk, isTrue);
+      expect(outcome.attempts.first.statusCode, 504);
+      expect(outcome.attempts.first.status, 'http_5xx');
+      expect(calls, 2);
+    });
+
     test('attempt progress failure does not break the request', () async {
       final outcome = await const AuxRetryRunner().run(
         onAttemptStart: (_, _) => throw StateError('detached UI'),

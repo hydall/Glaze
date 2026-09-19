@@ -186,16 +186,18 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
             (c) => c.copyWith(modelOverride: value),
           ),
         ),
-        // MemoryBook draft generation is an auxiliary LLM call like the ones
-        // above, so it is bound here alongside them. The memory sheet's own
-        // API block edits the same slot through the same widget; it buffers
-        // the edit until Save, where this tab writes through on change.
+        // Memory draft generation is an auxiliary LLM call like the ones
+        // above, so it is bound here alongside them — and chat summarization
+        // runs on this same slot, which is why it is named for memory as a
+        // whole rather than for Memory Books. The memory sheet's own API block
+        // edits it through the same widget; it buffers the edit until Save,
+        // where this tab writes through on change.
         _slot(
           context,
           key: widget.memoryBookSlotKey,
           slotName: 'memory_book',
           studioSlot: null,
-          title: 'magic_memory_books'.tr(),
+          title: 'memory_slot_title'.tr(),
           description: 'memory_books_slot_desc'.tr(),
           apiConfigId: pipeline.memoryBookApi.apiConfigId,
           onApiConfigChanged: (id) => _saveMemoryBookApi(

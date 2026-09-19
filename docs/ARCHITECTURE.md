@@ -576,9 +576,9 @@ the result to recover which blocks landed where.
 |------|-------------|-----------|-------|
 | Chat | `ChatState.isGenerating` per `charId` | Yes (SSE) | `AbortHandler`: `CancelToken` + `_activeGenId` |
 | Image gen | `ChatState.isGeneratingImage` + `_imgGenCancelToken` | No (one-shot) | `_imgGenCancelToken` in `ChatNotifier` |
-| Summary (manual) | Widget-local in `summary_tab.dart` | No | Not abortable (INV-S2) |
+| Summary (manual) | Widget-local in `summary_tab.dart` | No | Not abortable (INV-S2). Runs on the Memory slot (`memoryBookApi`), like memory drafts |
 | Summary (auto) | `AutoSummaryStage`, from `PostGenCoordinator` | No | Not abortable (INV-S2) |
-| Memory draft | `memoryDraftJobsProvider` (app-scoped; the memory sheet only starts and reads it) | No | Per-draft `CancelToken`; memory-workflow leases via `memory_active_drafts_provider` |
+| Memory draft | `memoryDraftJobsProvider` (app-scoped; the memory sheet only starts and reads it) | No | Per-draft `CancelToken`; memory-workflow leases via `memory_active_drafts_provider`; 5xx/timeouts retried by `AuxLlmClient` |
 
 ### Reasoning / Thinking
 

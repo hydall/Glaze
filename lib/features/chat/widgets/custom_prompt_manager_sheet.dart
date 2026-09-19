@@ -7,7 +7,20 @@ import '../../../shared/theme/app_colors.dart';
 class CustomPromptManagerSheet extends StatefulWidget {
   final List<MemoryPromptPreset> customPrompts;
 
-  const CustomPromptManagerSheet({super.key, required this.customPrompts});
+  /// The read-only prompts shown above the custom ones, and the keys a new
+  /// one may not collide with. Defaults to the Memory Books set; the summary
+  /// settings pass their own.
+  final List<MemoryPromptPreset> builtIn;
+
+  /// Heading of the sheet. Defaults to the Memory Books one.
+  final String? title;
+
+  const CustomPromptManagerSheet({
+    super.key,
+    required this.customPrompts,
+    this.builtIn = MemoryPromptPresets.builtIn,
+    this.title,
+  });
 
   @override
   State<CustomPromptManagerSheet> createState() =>
@@ -35,7 +48,7 @@ class _CustomPromptManagerSheetState extends State<CustomPromptManagerSheet> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'memory_prompt_presets_title'.tr(),
+                widget.title ?? 'memory_prompt_presets_title'.tr(),
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -51,7 +64,7 @@ class _CustomPromptManagerSheetState extends State<CustomPromptManagerSheet> {
           ),
           const SizedBox(height: 8),
           _sectionLabel('memory_prompt_built_in'.tr()),
-          ...MemoryPromptPresets.builtIn.map(_builtInTile),
+          ...widget.builtIn.map(_builtInTile),
           const SizedBox(height: 12),
           _sectionLabel('memory_prompt_custom'.tr()),
           if (_prompts.isEmpty)
@@ -193,7 +206,7 @@ class _CustomPromptManagerSheetState extends State<CustomPromptManagerSheet> {
       title: 'memory_prompt_copy_as_new'.tr(),
       child: _PromptEditor(
         existingKeys: {
-          ...MemoryPromptPresets.builtIn.map((p) => p.key),
+          ...widget.builtIn.map((p) => p.key),
           ..._prompts.map((p) => p.key),
         },
         initial: preset,
@@ -210,7 +223,7 @@ class _CustomPromptManagerSheetState extends State<CustomPromptManagerSheet> {
       title: 'memory_prompt_create'.tr(),
       child: _PromptEditor(
         existingKeys: {
-          ...MemoryPromptPresets.builtIn.map((p) => p.key),
+          ...widget.builtIn.map((p) => p.key),
           ..._prompts.map((p) => p.key),
         },
       ),
@@ -227,7 +240,7 @@ class _CustomPromptManagerSheetState extends State<CustomPromptManagerSheet> {
       title: 'memory_prompt_edit'.tr(),
       child: _PromptEditor(
         existingKeys: {
-          ...MemoryPromptPresets.builtIn.map((p) => p.key),
+          ...widget.builtIn.map((p) => p.key),
           ..._prompts.map((p) => p.key).where((k) => k != _prompts[index].key),
         },
         initial: _prompts[index],

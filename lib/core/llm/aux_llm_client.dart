@@ -11,6 +11,7 @@ import 'transport/chat_transport.dart';
 import 'transport/chat_transport_request.dart';
 import 'transport/llm_capture_context.dart';
 import 'transport/llm_call_event.dart';
+import 'transport/llm_protocol.dart';
 import 'transport/transport_factory.dart';
 
 typedef AuxTransportPicker = ChatTransport Function(String protocol);
@@ -181,9 +182,7 @@ class AuxLlmClient {
     AuxRawResponseSink? onRawResponse,
     FutureOr<void> Function(int attempt, int maxAttempts)? onAttemptStart,
   }) async {
-    if (config.endpoint.isEmpty || config.model.isEmpty) {
-      throw Exception('Aux API not configured');
-    }
+    _requireConfigured(config);
     if (messages == null && prompt.isEmpty) {
       throw ArgumentError('Provide a prompt or messages');
     }
@@ -247,9 +246,7 @@ class AuxLlmClient {
     bool requestReasoning = false,
     LlmCaptureContext? captureContext,
   }) async {
-    if (config.endpoint.isEmpty || config.model.isEmpty) {
-      throw Exception('Aux API not configured');
-    }
+    _requireConfigured(config);
     final runner = AuxRetryRunner(policy: retryPolicy);
     final identifiedContext = _identifiedContext(captureContext);
     return runner.run(
@@ -278,6 +275,16 @@ class AuxLlmClient {
         captureContext: identifiedContext?.withAttempt(i + 1),
       ),
     );
+  }
+
+  /// OpenRouter's transport hardcodes its base URL and ignores the config's
+  /// endpoint, so an empty endpoint is legitimate there — and a connection the
+  /// chat can talk to must not fail every auxiliary call with "not configured".
+  static void _requireConfigured(AuxApiConfig config) {
+    final endpointRequired = config.protocol != LlmProtocol.openrouter;
+    if ((endpointRequired && config.endpoint.isEmpty) || config.model.isEmpty) {
+      throw Exception('Aux API not configured');
+    }
   }
 
   static LlmCaptureContext? _identifiedContext(LlmCaptureContext? context) {

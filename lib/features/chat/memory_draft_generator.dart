@@ -4,7 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 
-import '../../core/llm/transport/chat_transport_request.dart';
+import '../../core/llm/aux_llm_client.dart';
 import '../../core/llm/transport/llm_capture_context.dart';
 import '../../core/llm/macro_engine.dart';
 import '../../core/llm/memory_book_api_config_resolver.dart';
@@ -12,7 +12,6 @@ import '../../core/llm/memory_draft_response_parser.dart';
 import '../../core/llm/memory_draft_transcript_builder.dart';
 import '../../core/llm/regex_service.dart';
 import '../../core/llm/transport/llm_protocol.dart';
-import '../../core/llm/transport/transport_factory.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/memory_book.dart';
 import '../../core/models/chat_message.dart';
@@ -27,10 +26,15 @@ import '../settings/api_list_provider.dart';
 
 class MemoryDraftGenerator {
   final T Function<T>(ProviderListenable<T> provider) _read;
+  final AuxLlmClient _llm;
 
-  MemoryDraftGenerator(Ref ref) : _read = ref.read;
+  MemoryDraftGenerator(Ref ref, {AuxLlmClient? llm})
+    : _read = ref.read,
+      _llm = llm ?? const AuxLlmClient();
 
-  MemoryDraftGenerator.widget(WidgetRef ref) : _read = ref.read;
+  MemoryDraftGenerator.widget(WidgetRef ref, {AuxLlmClient? llm})
+    : _read = ref.read,
+      _llm = llm ?? const AuxLlmClient();
 
   Future<MemoryDraft> generate({
     required MemoryDraft draft,
@@ -159,43 +163,41 @@ class MemoryDraftGenerator {
       pipeline.memoryBookApi,
     );
 
-    final completer = Completer<String>();
-    final transport = pickChatTransport(protocol);
-
-    await transport.stream(
-      request: ChatTransportRequest(
+    // Through the shared auxiliary client, not a bare transport call: it picks
+    // the same chat transport per protocol, and it brings the retry policy
+    // every other auxiliary call in the app already has. A draft used to die
+    // on the first 5xx — a provider gateway answering one request with 504
+    // left the draft marked `needs_regeneration` and the reader pressing the
+    // button again by hand, while the identical hiccup in the cleaner or the
+    // summary was retried and never seen.
+    final result = await _llm.callOnce(
+      config: AuxApiConfig(
         endpoint: endpoint,
         apiKey: apiKey,
         model: model,
-        messages: [
-          {'role': 'user', 'content': prompt},
-        ],
-        maxTokens: maxTokens,
-        temperature: temperature,
-        topP: 1.0,
-        // Drafting pins its own temperature and doesn't steer top_p.
-        omitTopP: true,
-        stream: false,
+        protocol: protocol,
         useResponsesApi: useResponsesApi,
-        receiveTimeoutMs: receiveTimeoutMs,
-        // Memory-book drafting goes through a chat transport, so it was always
-        // captured — but with no identity, which parked it in the session-less
-        // bucket where no per-chat view could reach it.
-        captureContext: LlmCaptureContext(
-          stage: 'memory.draft',
-          sessionId: sessionId,
-        ),
+        // The connection's own "no temperature" flag travels with it: drafting
+        // pins its own temperature, but a provider that rejects the parameter
+        // rejects it here too.
+        omitTemperature: slotConfig?.omitTemperature ?? false,
+        extraRequestParameters: slotConfig?.extraRequestParameters ?? const [],
       ),
+      prompt: prompt,
+      maxTokens: maxTokens,
+      temperature: temperature,
+      // 0 keeps the old behaviour for a connection that names no timeout: the
+      // request is not cut off on a deadline of ours.
+      timeoutMs: receiveTimeoutMs ?? 0,
       cancelToken: cancelToken,
-      onComplete: (text, _, {rawResponseJson}) {
-        if (!completer.isCompleted) completer.complete(text);
-      },
-      onError: (error) {
-        if (!completer.isCompleted) completer.completeError(error);
-      },
+      // Memory-book drafting goes through a chat transport, so it was always
+      // captured — but with no identity, which parked it in the session-less
+      // bucket where no per-chat view could reach it.
+      captureContext: LlmCaptureContext(
+        stage: 'memory.draft',
+        sessionId: sessionId,
+      ),
     );
-
-    final result = await completer.future;
     return MemoryDraftResponseParser.parse(
       draft,
       result,
