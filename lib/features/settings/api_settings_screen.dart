@@ -70,7 +70,7 @@ class ApiSettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
-  late int _tab; // 0 = LLM, 1 = Embeddings, 2 = Studio agents
+  late int _tab; // 0 = LLM, 1 = Studio agents, 2 = Embeddings
 
   bool _showApiKey = false;
   bool _showEmbApiKey = false;
@@ -222,7 +222,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     super.initState();
     // A deep link at the MemoryBook slot opens straight on the tab that holds
     // it rather than on LLM and then jumping.
-    _tab = widget.focusSection == ApiSettingsSection.memoryBook ? 2 : 0;
+    _tab = widget.focusSection == ApiSettingsSection.memoryBook ? 1 : 0;
     for (final c in _ctrls) {
       c.addListener(_scheduleSave);
     }
@@ -650,12 +650,12 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       onBack: _goBack,
       scrollController: switch (_tab) {
         0 => _llmScrollController,
-        1 => _embScrollController,
-        _ => _agentsScrollController,
+        1 => _agentsScrollController,
+        _ => _embScrollController,
       },
-      // The LLM/Embeddings switcher stays fixed in the header so it never
-      // slides with the tab bodies — a single segmented control that keeps its
-      // own pill animation while the content swipes beneath it.
+      // The LLM/Agents/Embeddings switcher stays fixed in the header so it
+      // never slides with the tab bodies — a single segmented control that
+      // keeps its own pill animation while the content swipes beneath it.
       // The tab bar goes away only while there is nothing at all to configure;
       // an empty Embeddings list is the tab's own empty state, not the screen's.
       headerBottom: list.isEmpty && embeddingList.isEmpty
@@ -680,7 +680,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                             list.isEmpty
                                 ? _buildEmptyState(forEmbedding: false)
                                 : _buildLlmTab(list, activeName),
-                          1 =>
+                          1 => StudioSlotsTab(
+                            controller: _agentsScrollController,
+                            memoryBookSlotKey: _memoryBookSlotKey,
+                          ),
+                          _ =>
                             embeddingList.isEmpty
                                 ? _buildEmptyState(forEmbedding: true)
                                 : _buildEmbeddingsTab(
@@ -688,10 +692,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                                     list,
                                     embeddingName,
                                   ),
-                          _ => StudioSlotsTab(
-                            controller: _agentsScrollController,
-                            memoryBookSlotKey: _memoryBookSlotKey,
-                          ),
                         },
                       ),
                     ),
@@ -708,17 +708,19 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     return 'unnamed_entry'.tr();
   }
 
-  // The fixed LLM/Embeddings segmented control. Lives in the sheet header so it
-  // stays put (and keeps its own pill animation) while the tab bodies slide.
+  // The fixed LLM/Agents/Embeddings segmented control. Lives in the sheet
+  // header so it stays put (and keeps its own pill animation) while the tab
+  // bodies slide. Agents sits next to LLM: both are connections a chat runs
+  // on, while embeddings are only read by search.
   Widget _buildTabBar() {
     return GlazeTabBar(
       tabs: [
         GlazeTabItem(label: 'LLM', icon: Icons.chat_bubble_outline_rounded),
-        GlazeTabItem(label: 'tab_embeddings'.tr(), icon: Icons.layers_outlined),
         GlazeTabItem(
           label: 'studio_agents'.tr(),
           icon: Icons.smart_toy_outlined,
         ),
+        GlazeTabItem(label: 'tab_embeddings'.tr(), icon: Icons.layers_outlined),
       ],
       activeIndex: _tab,
       onChanged: (i) => setState(() => _tab = i),
