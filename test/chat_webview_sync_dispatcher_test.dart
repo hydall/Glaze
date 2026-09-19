@@ -399,6 +399,67 @@ void main() {
       expect(state.messageMutationPending, isNull);
     });
 
+    test('resetMutations drops a hung mutation so later ops are not parked '
+        'behind it', () async {
+      final state = ChatWebViewSyncState();
+      final hung = Completer<void>();
+      final calls = <String>[];
+
+      // The dead-page case: a mutation aimed at a page that no longer answers.
+      unawaited(
+        state.enqueueMessageMutation(() async {
+          calls.add('hung');
+          await hung.future;
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(state.messageMutationPending, isNotNull);
+
+      // The page is torn down and rebuilt: the queue must not outlive it.
+      state.resetMutations();
+      expect(state.messageMutationPending, isNull);
+
+      // The rebuilt page's first mutation runs immediately, not behind the
+      // hung one.
+      await state.enqueueMessageMutation(() async {
+        calls.add('rebuild');
+      });
+      expect(calls, ['hung', 'rebuild']);
+      expect(state.messageMutationPending, isNull);
+    });
+
+    test('resetMutations also clears pending streaming snapshots', () async {
+      final state = ChatWebViewSyncState();
+      final gate = Completer<void>();
+      final calls = <String>[];
+
+      unawaited(
+        state.enqueueLatestStreamingMutation('a1', () async {
+          calls.add('first');
+          await gate.future;
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      unawaited(
+        state.enqueueLatestStreamingMutation('a1', () async {
+          calls.add('later');
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      // The page died while a delta was still queued. Dropping the queue must
+      // drop the superseding snapshot too, or the rebuilt page replays a stale
+      // streamed chunk over the fresh `setMessages`.
+      state.resetMutations();
+      gate.complete();
+      await state.messageMutationPending;
+      await Future<void>.delayed(Duration.zero);
+
+      // The superseded snapshot never ran: the page it targeted is gone.
+      expect(calls, ['first']);
+    });
+
     test('streaming queue keeps only the latest waiting snapshot', () async {
       final state = ChatWebViewSyncState();
       final firstMutation = Completer<void>();

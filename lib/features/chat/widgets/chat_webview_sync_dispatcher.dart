@@ -29,6 +29,21 @@ class ChatWebViewSyncState {
   final Map<String, _LatestStreamingMutation> _latestStreamingMutations = {};
   final Set<String> _scheduledStreamingMutations = {};
 
+  /// Drops the mutation queue and every pending streaming snapshot.
+  ///
+  /// Called when the page behind the chat is torn down — a render-process
+  /// death, or a failed init that rebuilds the native view. Every mutation
+  /// still queued was aimed at a page that no longer answers, and a single
+  /// one of them hanging (a dead page accepts the call and never resolves it)
+  /// would otherwise park every later delete / regenerate behind it until the
+  /// app is restarted. Clearing the queue here lets the rebuilt page's full
+  /// `setMessages` take over without waiting on the corpse.
+  void resetMutations() {
+    messageMutationPending = null;
+    _latestStreamingMutations.clear();
+    _scheduledStreamingMutations.clear();
+  }
+
   Future<void> enqueueMessageMutation(Future<void> Function() mutation) {
     final previous = messageMutationPending;
     late final Future<void> operation;
