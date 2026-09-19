@@ -845,6 +845,11 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                     _guidanceMode && _guidanceController.text.trim().isNotEmpty
                     ? _guidanceController.text.trim()
                     : null;
+                // The instruction is spent: it now belongs to the message
+                // impersonation is about to write, and the chat stamps it on
+                // that message when it is sent. Leaving it in the field would
+                // send it a second time, as a guided generation.
+                _closeGuidanceSilently();
                 widget.onImpersonate?.call(guidance);
               }
             },
@@ -977,10 +982,117 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     }
   }
 
+  /// The guidance instruction, as the top half of the input pill: a small
+  /// caption naming which mode is armed, the instruction itself, and a hairline
+  /// separating it from the message field underneath.
+  Widget _buildGuidanceField(double scale, double letterSpacing) {
+    final accent = Colors.orange;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.06),
+        border: Border(
+          bottom: BorderSide(color: accent.withValues(alpha: 0.25)),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 8, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _guidanceImpersonates
+                        ? 'guided_impersonation'.tr()
+                        : 'guided_generation'.tr(),
+                    style: TextStyle(
+                      fontSize: 10 * scale,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                      color: accent.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ),
+                // Guidance was only dismissable from whichever button had
+                // opened it — a composer action that may be pinned anywhere,
+                // or the drawer.
+                GestureDetector(
+                  onTap: widget.isEditingMessage ? null : _toggleGuidance,
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 16,
+                      color: accent.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextField(
+            controller: _guidanceController,
+            readOnly: widget.isEditingMessage,
+            canRequestFocus: !widget.isEditingMessage,
+            enableInteractiveSelection: !widget.isEditingMessage,
+            showCursor: !widget.isEditingMessage,
+            maxLines: 3,
+            minLines: 1,
+            textCapitalization: TextCapitalization.sentences,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            style: TextStyle(
+              fontSize: 14 * scale,
+              color: accent,
+              letterSpacing: letterSpacing,
+            ),
+            decoration: InputDecoration(
+              hintText: _guidanceImpersonates
+                  ? 'impersonate_guidance_placeholder'.tr()
+                  : 'guidance_placeholder'.tr(),
+              hintStyle: TextStyle(
+                color: accent.withValues(alpha: 0.5),
+                fontSize: 14 * scale,
+                letterSpacing: letterSpacing,
+              ),
+              prefixIcon: Icon(
+                Icons.tips_and_updates_outlined,
+                color: accent.withValues(alpha: 0.7),
+                size: 20,
+              ),
+              prefixIconConstraints: const BoxConstraints(
+                minWidth: 42,
+                minHeight: 32,
+              ),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              contentPadding: const EdgeInsets.fromLTRB(0, 6, 18, 10),
+              filled: false,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _toggleGuidance() {
     setState(() {
       _guidanceMode = !_guidanceMode;
       if (!_guidanceMode) _guidanceController.clear();
+    });
+  }
+
+  /// Closes the guidance half without the toggle's semantics — used once the
+  /// instruction has been handed to a generation that owns it now.
+  void _closeGuidanceSilently() {
+    if (!_guidanceMode) return;
+    setState(() {
+      _guidanceMode = false;
+      _guidanceController.clear();
     });
   }
 
@@ -1230,103 +1342,6 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
               ),
               const SizedBox(height: 8),
             ],
-            if (_guidanceMode) ...[
-              Container(
-                constraints: const BoxConstraints(minHeight: 44),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.08),
-                  border: Border.all(
-                    color: Colors.orange.withValues(alpha: 0.3),
-                    width: preset.borderWidth.clamp(1.0, double.infinity),
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _guidanceImpersonates
-                                  ? 'guided_impersonation'.tr()
-                                  : 'guided_generation'.tr(),
-                              style: TextStyle(
-                                fontSize: 10 * scale,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.8,
-                                color: Colors.orange.withValues(alpha: 0.8),
-                              ),
-                            ),
-                          ),
-                          // Guidance was only dismissable from whichever
-                          // button had opened it — a composer action that may
-                          // be pinned anywhere, or the drawer.
-                          GestureDetector(
-                            onTap: widget.isEditingMessage
-                                ? null
-                                : _toggleGuidance,
-                            behavior: HitTestBehavior.opaque,
-                            child: Padding(
-                              padding: const EdgeInsets.all(6),
-                              child: Icon(
-                                Icons.close_rounded,
-                                size: 16,
-                                color: Colors.orange.withValues(alpha: 0.7),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    TextField(
-                      controller: _guidanceController,
-                      readOnly: widget.isEditingMessage,
-                      canRequestFocus: !widget.isEditingMessage,
-                      enableInteractiveSelection: !widget.isEditingMessage,
-                      showCursor: !widget.isEditingMessage,
-                      maxLines: 3,
-                      minLines: 1,
-                      textCapitalization: TextCapitalization.sentences,
-                      keyboardType: TextInputType.multiline,
-                      textInputAction: TextInputAction.newline,
-                      style: TextStyle(
-                        fontSize: 14 * scale,
-                        color: Colors.orange,
-                        letterSpacing: letterSpacing,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: _guidanceImpersonates
-                            ? 'impersonate_guidance_placeholder'.tr()
-                            : 'guidance_placeholder'.tr(),
-                        hintStyle: TextStyle(
-                          color: Colors.orange.withValues(alpha: 0.5),
-                          fontSize: 14 * scale,
-                          letterSpacing: letterSpacing,
-                        ),
-                        prefixIcon: Icon(
-                          Icons.tips_and_updates_outlined,
-                          color: Colors.orange.withValues(alpha: 0.7),
-                          size: 20,
-                        ),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        filled: false,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 6),
-            ],
             Material(
               color: Colors.transparent,
               elevation: 0,
@@ -1346,53 +1361,64 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                           width: preset.borderWidth.clamp(1.0, double.infinity),
                         )
                       : uiBorder,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 56),
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _effectiveFocusNode,
-                      contextMenuBuilder: _buildContextMenu,
-                      contentInsertionConfiguration:
-                          ContentInsertionConfiguration(
-                            onContentInserted: _handleInsertedContent,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // The instruction is the pill's top half, over a hairline
+                      // and the message field — one block, the way the Vue
+                      // composer had it, rather than a card floating above it.
+                      if (_guidanceMode)
+                        _buildGuidanceField(scale, letterSpacing),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 56),
+                        child: TextField(
+                          controller: _controller,
+                          focusNode: _effectiveFocusNode,
+                          contextMenuBuilder: _buildContextMenu,
+                          contentInsertionConfiguration:
+                              ContentInsertionConfiguration(
+                                onContentInserted: _handleInsertedContent,
+                              ),
+                          readOnly: widget.isEditingMessage || _isImpersonating,
+                          canRequestFocus: !widget.isEditingMessage,
+                          enableInteractiveSelection: !widget.isEditingMessage,
+                          showCursor: !widget.isEditingMessage,
+                          maxLines: 5,
+                          minLines: 1,
+                          textCapitalization: TextCapitalization.sentences,
+                          textInputAction: widget.virtualKeyboardSend
+                              ? TextInputAction.send
+                              : TextInputAction.newline,
+                          onSubmitted: widget.virtualKeyboardSend
+                              ? (_) => _handleSend()
+                              : null,
+                          style: TextStyle(
+                            fontSize: 16 * scale,
+                            color: textColor,
+                            letterSpacing: letterSpacing,
                           ),
-                      readOnly: widget.isEditingMessage || _isImpersonating,
-                      canRequestFocus: !widget.isEditingMessage,
-                      enableInteractiveSelection: !widget.isEditingMessage,
-                      showCursor: !widget.isEditingMessage,
-                      maxLines: 5,
-                      minLines: 1,
-                      textCapitalization: TextCapitalization.sentences,
-                      textInputAction: widget.virtualKeyboardSend
-                          ? TextInputAction.send
-                          : TextInputAction.newline,
-                      onSubmitted: widget.virtualKeyboardSend
-                          ? (_) => _handleSend()
-                          : null,
-                      style: TextStyle(
-                        fontSize: 16 * scale,
-                        color: textColor,
-                        letterSpacing: letterSpacing,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: _guidanceMode
-                            ? 'chat_guidance_message_hint'.tr()
-                            : 'chat_placeholder'.tr(),
-                        hintStyle: TextStyle(
-                          color: secondaryColor,
-                          fontSize: 16 * scale,
-                          letterSpacing: letterSpacing,
+                          decoration: InputDecoration(
+                            hintText: _guidanceMode
+                                ? 'chat_guidance_message_hint'.tr()
+                                : 'chat_placeholder'.tr(),
+                            hintStyle: TextStyle(
+                              color: secondaryColor,
+                              fontSize: 16 * scale,
+                              letterSpacing: letterSpacing,
+                            ),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 16,
+                            ),
+                            filled: false,
+                          ),
                         ),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 16,
-                        ),
-                        filled: false,
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ),

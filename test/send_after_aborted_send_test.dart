@@ -39,6 +39,7 @@ class _ParkedGenerationService extends ChatGenerationService {
     int? previousTokens,
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? guidanceText,
+    String guidanceType = 'GENERATION',
     String? regenTargetId,
     String? continueTargetId,
     StudioTurnConfigSnapshot? studioTurnConfig,

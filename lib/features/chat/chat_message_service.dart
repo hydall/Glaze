@@ -511,6 +511,11 @@ class ChatMessageService {
       // rather than slice that sibling at a stale offset (INV-CM7).
       continuationOffset: meta?['continuationOffset'] as int?,
       time: activeAgentSwipe?.time,
+      // The guided-swipe instruction is per-variation: each swipe shows the
+      // one it was generated with, and a variation generated without an
+      // instruction shows none.
+      guidanceText: _guidanceTextFromMeta(meta),
+      guidanceType: _guidanceTypeFromMeta(meta),
       triggeredLorebooks: _triggeredFromMeta(meta, 'triggeredLorebooks'),
       triggeredMemories: _triggeredFromMeta(meta, 'triggeredMemories'),
       studioOutputs: nextAgentSwipes.isNotEmpty
@@ -920,6 +925,8 @@ class ChatMessageService {
       tokens: active.tokens,
       // The surviving swipe owns its own boundary — or none (INV-CM7).
       continuationOffset: nextMeta['continuationOffset'] as int?,
+      guidanceText: _guidanceTextFromMeta(nextMeta),
+      guidanceType: _guidanceTypeFromMeta(nextMeta),
       time: active.time,
       studioOutputs: active.studioOutputs,
       isError: nextMeta['isError'] == true,
@@ -1027,6 +1034,20 @@ class ChatMessageService {
       time: message.time,
     );
     return swipes;
+  }
+
+  /// The guided-swipe instruction a variation was generated with, if any.
+  /// Only a guided swipe leaves one: a reply steered from the composer is
+  /// described by the user message that carries the instruction.
+  static String? _guidanceTextFromMeta(Map<String, dynamic>? meta) {
+    final text = meta?['guidanceText'];
+    if (text is! String || text.isEmpty) return null;
+    return meta?['guidanceType'] == 'SWIPE' ? text : null;
+  }
+
+  static String _guidanceTypeFromMeta(Map<String, dynamic>? meta) {
+    final type = meta?['guidanceType'];
+    return type is String && type.isNotEmpty ? type : 'GENERATION';
   }
 
   /// Parse the per-swipe triggered entries stored in [swipesMeta]. Each

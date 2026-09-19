@@ -39,6 +39,7 @@ class SavedMessageWriter {
     int? previousTokens,
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? guidanceText,
+    String guidanceType = 'GENERATION',
     Map<String, dynamic> memoryCoverage = const {},
     bool isAllReasoning = false,
     List<TriggeredEntry> triggeredLorebooks = const [],
@@ -89,7 +90,7 @@ class SavedMessageWriter {
     };
     if (guidanceText != null && guidanceText.isNotEmpty) {
       currentSwipeMeta['guidanceText'] = guidanceText;
-      currentSwipeMeta['guidanceType'] = 'GENERATION';
+      currentSwipeMeta['guidanceType'] = guidanceType;
     }
 
     List<Map<String, dynamic>> swipesMeta;
@@ -155,6 +156,13 @@ class SavedMessageWriter {
           content: text,
           reasoning: reasoning,
           isAllReasoning: isAllReasoning,
+          // A guided swipe's instruction belongs to the variation it produced:
+          // the message shows it while that variation is the visible one, and
+          // `ChatMessageService.setSwipe` restores it from the swipe's meta.
+          // A reply steered from the composer is described by the user message
+          // that carries it, so it leaves no block on this one.
+          guidanceText: guidanceType == 'SWIPE' ? guidanceText : null,
+          guidanceType: guidanceType,
           // A full regen is a fresh event: restamp the message so the chat
           // list (sorted on the last message's timestamp) surfaces the
           // session again. The message keeps its position in the chat — only

@@ -76,6 +76,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   int _sendPendingSeq = 0;
   int _sessionChangesInFlight = 0;
 
+  /// The instruction a guided impersonation ran with, waiting for the message
+  /// it produced to be sent. Glaze stamped the *user* message with it so the
+  /// bubble names what steered the text it carries; the send consumes it, and
+  /// an impersonation started without an instruction clears it.
+  String? _pendingImpersonationGuidance;
+
   /// Reflects the active session's generation state into
   /// [generatingSessionsProvider]. Called on every state transition; membership
   /// updates are idempotent so streaming chunks don't churn the registry.
@@ -357,11 +363,18 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<void> setGreeting(int messageIndex, int direction) =>
       _swipeCtrl.setGreeting(messageIndex, direction);
 
-  Future<void> switchSession(int sessionIndex) =>
-      _runSessionChange(() => _sessionCtrl.switchSession(sessionIndex));
+  Future<void> switchSession(int sessionIndex) {
+    // The message an impersonation wrote stays in the composer of the chat it
+    // was written for; another session's first message must not inherit its
+    // instruction.
+    _pendingImpersonationGuidance = null;
+    return _runSessionChange(() => _sessionCtrl.switchSession(sessionIndex));
+  }
 
-  Future<void> createNewSession() =>
-      _runSessionChange(_sessionCtrl.createNewSession);
+  Future<void> createNewSession() {
+    _pendingImpersonationGuidance = null;
+    return _runSessionChange(_sessionCtrl.createNewSession);
+  }
 
   Future<List<ChatSession>> getSessions() => _sessionCtrl.getSessions();
 
@@ -492,6 +505,22 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       final attachments = splitAttachments(
         imageDataUrls.take(maxMessageAttachments).toList(),
       );
+      // Guided generation puts its instruction on the user message, so the
+      // bubble shows what the reply was steered by. A guided impersonation
+      // leaves its instruction pending instead — it belongs to the message
+      // that impersonation wrote, which is this one.
+      final pendingImpersonation = _pendingImpersonationGuidance;
+      _pendingImpersonationGuidance = null;
+      final effectiveGuidance =
+          (guidanceText != null && guidanceText.isNotEmpty)
+          ? guidanceText
+          : pendingImpersonation;
+      final effectiveGuidanceType =
+          (guidanceText == null || guidanceText.isEmpty) &&
+              pendingImpersonation != null
+          ? 'IMPERSONATION'
+          : 'GENERATION';
+
       final userMsg = ChatMessage(
         id: generateId(),
         role: 'user',
@@ -502,6 +531,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         extraImagePaths: attachments.extraImagePaths,
         personaId: sendingPersona?.id,
         personaName: sendingPersona?.name,
+        guidanceText: effectiveGuidance,
+        guidanceType: effectiveGuidanceType,
       );
 
       // Only the assistant *immediately* before the new message is accepted —
@@ -802,14 +833,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         messages: current.messages,
         updatedAt: currentTimestampSeconds(),
       );
+      // Re-running the reply to a guided message re-uses that message's own
+      // instruction: it is the one its bubble shows, so a regenerate that
+      // dropped it would answer a prompt the chat no longer describes.
       await _runGeneration(
         promptSession,
         current,
         saveSession: current.session!,
-        guidanceText: guidanceText,
+        guidanceText: guidanceText ?? lastMsg.guidanceText,
       );
       return;
     }
+
+    // Guidance on a reply that already exists is a guided *swipe*: the new
+    // variation carries it, and the bubble shows it for as long as that
+    // variation is the one on screen.
+    final guidanceType = guidanceText != null && guidanceText.trim().isNotEmpty
+        ? 'SWIPE'
+        : 'GENERATION';
 
     final prevAssistant = lastMsg;
     final regenTargetId = prevAssistant.id;
@@ -844,6 +885,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       swipes: pendingSwipes,
       swipeId: pendingSwipes.length - 1,
       swipesMeta: pendingSwipesMeta,
+      // The pending variation owns the instruction from the moment it opens,
+      // so the block is up while the reply streams; a plain regenerate clears
+      // whatever the previous variation showed.
+      guidanceText: guidanceType == 'SWIPE' ? guidanceText : null,
+      guidanceType: guidanceType,
     );
     final clearedMessages = [...current.messages];
     clearedMessages[lastIdx] = clearedMsg;
@@ -874,6 +920,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       current,
       saveSession: current.session!,
       guidanceText: guidanceText,
+      guidanceType: guidanceType,
       regenTargetId: regenTargetId,
       previousSwipes: prevAssistant.swipes.isNotEmpty
           ? prevAssistant.swipes
@@ -905,6 +952,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       return;
     }
     final session = current.session!;
+    // Held for the message this run is about to write: the send stamps it on
+    // the user bubble as GUIDED IMPERSONATION. An unguided run clears it so a
+    // previous instruction cannot follow an unrelated message.
+    _pendingImpersonationGuidance =
+        (guidanceText != null && guidanceText.trim().isNotEmpty)
+        ? guidanceText.trim()
+        : null;
     // Impersonation never restores a chat message on abort — clear any stale
     // restoration target left by a prior regenerate so Stop only drops the
     // streamed input text.
@@ -1052,6 +1106,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     ChatState current, {
     ChatSession? saveSession,
     String? guidanceText,
+    String guidanceType = 'GENERATION',
     List<String>? previousSwipes,
     int previousSwipeId = 0,
     String? previousReasoning,
@@ -1082,6 +1137,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       session: session,
       saveSession: saveSession,
       guidanceText: guidanceText,
+      guidanceType: guidanceType,
       previousSwipes: previousSwipes,
       previousSwipeId: previousSwipeId,
       previousReasoning: previousReasoning,

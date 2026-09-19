@@ -30,13 +30,6 @@ String _bodyAfter(String source, String signature) {
   return _group(source, start).text;
 }
 
-/// The `[...]` list that follows [signature] — a collection-if's children.
-String _listAfter(String source, String signature) {
-  final start = source.indexOf(signature);
-  expect(start, greaterThan(-1), reason: 'missing $signature');
-  return _group(source, start, open: '[', close: ']').text;
-}
-
 void main() {
   final editor = File(
     'lib/features/presets/preset_editor_screen.dart',
@@ -138,9 +131,32 @@ void main() {
     test('guidance can be dismissed from the panel itself', () {
       // It was only dismissable from whichever button opened it — a composer
       // action that may be pinned anywhere, or the drawer.
-      final body = _listAfter(composer, 'if (_guidanceMode) ...[');
+      final body = _bodyAfter(composer, 'Widget _buildGuidanceField(');
       expect(body, contains('Icons.close_rounded'));
       expect(body, contains('_toggleGuidance'));
+    });
+
+    test("the instruction is the pill's top half, not a card above it", () {
+      // The Vue composer kept the instruction inside the input wrapper, over a
+      // rule and the message field. It was a separate bordered block here,
+      // which read as a second composer stacked on the first.
+      expect(composer, isNot(contains('if (_guidanceMode) ...[')));
+      expect(composer, contains('if (_guidanceMode)'));
+      // The pill is the surface whose border turns amber in guidance mode; the
+      // instruction goes in first, the message field after it.
+      final pill = composer.indexOf('border: _guidanceMode');
+      expect(pill, greaterThan(-1));
+      final guidance = composer.indexOf('_buildGuidanceField(', pill);
+      final messageField = composer.indexOf('controller: _controller,', pill);
+      expect(guidance, greaterThan(pill));
+      expect(messageField, greaterThan(guidance));
+    });
+
+    test('impersonating spends the instruction', () {
+      // It belongs to the message impersonation writes, which the chat stamps
+      // on send; leaving it in the field would send it again as a guided
+      // generation.
+      expect(composer, contains('_closeGuidanceSilently();'));
     });
   });
 

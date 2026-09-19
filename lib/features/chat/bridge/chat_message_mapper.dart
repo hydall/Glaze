@@ -248,9 +248,12 @@ class ChatMessageMapper {
       'isHidden': m.isHidden,
       if (isLast) 'isLast': true,
       'messageIndex': ?messageIndex,
-      if (m.guidanceText != null && m.guidanceText!.isNotEmpty)
+      if (m.guidanceText != null && m.guidanceText!.isNotEmpty) ...{
         'guidanceText': m.guidanceText,
-      if (m.guidanceType != 'GENERATION') 'guidanceType': m.guidanceType,
+        // Always sent alongside the text: the renderer falls back to SWIPE
+        // when the type is missing, which would mislabel a guided generation.
+        'guidanceType': m.guidanceType,
+      },
       if (m.greetingIndex != null) 'greetingIndex': m.greetingIndex,
       if (m.greetingIndex != null && ctx.greetingTotal > 1)
         'greetingTotal': ctx.greetingTotal,
