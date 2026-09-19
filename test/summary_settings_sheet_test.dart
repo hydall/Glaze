@@ -157,6 +157,16 @@ void main() {
     expect(find.byType(Switch), findsOneWidget);
     expect(find.text('summary_auto_interval_label'.tr()), findsOneWidget);
     expect(find.text('summary_prompt_label'.tr()), findsOneWidget);
+    // A prompt to start from, and the prompts you have saved yourself.
+    expect(find.text('summary_prompt_preset_label'.tr()), findsOneWidget);
+    expect(find.text('memory_prompt_presets_title'.tr()), findsOneWidget);
+    // Summarizing runs on the Memory slot, so the settings say where that
+    // slot is bound rather than leaving the reader to find it.
+    expect(
+      find.text('memory_books_generation_connection'.tr()),
+      findsOneWidget,
+    );
+    expect(find.text('summary_connection_hint'.tr()), findsOneWidget);
   });
 
   testWidgets('the switch in the settings is the injection master switch', (
