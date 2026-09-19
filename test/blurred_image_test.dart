@@ -64,11 +64,17 @@ Future<ByteData> _capture(WidgetTester tester) async {
 
 /// Pumps until the provider has decoded and the post-frame bake has landed.
 /// Image decoding is real async, so it only progresses inside [runAsync].
-Future<void> _settle(WidgetTester tester) async {
-  for (var i = 0; i < 8; i++) {
+Future<void> _settle(WidgetTester tester, {int? expectedBakeCount}) async {
+  for (var i = 0; i < 40; i++) {
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     await tester.pump();
+    if (expectedBakeCount != null &&
+        BakedBlurCache.bakeCount >= expectedBakeCount) {
+      return;
+    }
+    if (expectedBakeCount == null && i == 7) return;
   }
+  fail('Timed out waiting for the baked blur');
 }
 
 void main() {
@@ -99,7 +105,7 @@ void main() {
     await tester.pumpWidget(
       _boxed(BlurredImage(image: MemoryImage(png), sigma: sigma)),
     );
-    await _settle(tester);
+    await _settle(tester, expectedBakeCount: 1);
     final baked = await _capture(tester);
 
     expect(baked.lengthInBytes, reference.lengthInBytes);
@@ -130,7 +136,7 @@ void main() {
     await tester.pumpWidget(
       _boxed(BlurredImage(image: MemoryImage(png), sigma: 6)),
     );
-    await _settle(tester);
+    await _settle(tester, expectedBakeCount: 1);
     expect(BakedBlurCache.bakeCount, 1);
 
     for (var i = 0; i < 5; i++) {
@@ -152,11 +158,11 @@ void main() {
     await tester.pumpWidget(
       _boxed(BlurredImage(image: MemoryImage(png), sigma: 6)),
     );
-    await _settle(tester);
+    await _settle(tester, expectedBakeCount: 1);
     await tester.pumpWidget(
       _boxed(BlurredImage(image: MemoryImage(png), sigma: 9)),
     );
-    await _settle(tester);
+    await _settle(tester, expectedBakeCount: 2);
 
     expect(BakedBlurCache.bakeCount, 2);
     expect(BakedBlurCache.size, 2);
@@ -194,7 +200,7 @@ void main() {
     await tester.pumpWidget(
       _boxed(BlurredImage(image: MemoryImage(png), sigma: 6)),
     );
-    await _settle(tester);
+    await _settle(tester, expectedBakeCount: 1);
 
     expect(BakedBlurCache.bakeCount, 1);
   });
