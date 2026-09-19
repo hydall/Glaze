@@ -86,15 +86,17 @@ void runDbMigrationTests() {
   });
 
   group('Database migrations', () {
-    late AppDatabase db;
+    AppDatabase? database;
+
+    AppDatabase currentDatabase() => database ??= _testDb();
 
     setUp(() {
       SharedPreferences.setMockInitialValues({});
-      db = _testDb();
     });
 
     tearDown(() async {
-      await db.close();
+      await database?.close();
+      database = null;
     });
 
     test(
@@ -626,6 +628,7 @@ void runDbMigrationTests() {
     );
 
     test('current schema includes atomic character fact tables', () async {
+      final db = currentDatabase();
       final version = await db.customSelect('PRAGMA user_version').getSingle();
       expect(version.read<int>('user_version'), 135);
 
@@ -677,6 +680,7 @@ void runDbMigrationTests() {
     test(
       'current API config schema includes extra request parameters',
       () async {
+        final db = currentDatabase();
         final columns = await db
             .customSelect("PRAGMA table_info('api_configs')")
             .get();
@@ -1108,6 +1112,7 @@ void runDbMigrationTests() {
     test(
       'v84 transition schema has queryable columns and lineage constraints',
       () async {
+        final db = currentDatabase();
         final transitionColumns = await db
             .customSelect("PRAGMA table_info('applied_canon_transition_rows')")
             .get();
@@ -1178,6 +1183,7 @@ void runDbMigrationTests() {
     );
 
     test('v85 exposes durable rewrite CAS and apply columns', () async {
+      final db = currentDatabase();
       final jobs = await db
           .customSelect("PRAGMA table_info('rewrite_jobs')")
           .get();
@@ -1314,6 +1320,7 @@ void runDbMigrationTests() {
     );
 
     test('v86 adds lifecycle columns, unique request key, and status CHECKs', () async {
+      final db = currentDatabase();
       final jobs = await db
           .customSelect("PRAGMA table_info('rewrite_jobs')")
           .get();
@@ -1861,6 +1868,7 @@ void runDbMigrationTests() {
     );
 
     test('memory catalog table exists in current schema', () async {
+      final db = currentDatabase();
       final rows = await db
           .customSelect("PRAGMA table_info('memory_catalog_rows')")
           .get();
@@ -2081,6 +2089,7 @@ void runDbMigrationTests() {
     test(
       'post-restore purge removes reintroduced agentic micro-memory',
       () async {
+        final db = currentDatabase();
         await db.customStatement(
           '''INSERT INTO memory_book_rows
            (session_id, entries_json, pending_drafts_json, settings_json,
@@ -2131,6 +2140,7 @@ void runDbMigrationTests() {
     );
 
     test('memory graph tables exist in current schema (v35)', () async {
+      final db = currentDatabase();
       final entityCols = await db
           .customSelect("PRAGMA table_info('memory_entity_rows')")
           .get();
@@ -2180,6 +2190,7 @@ void runDbMigrationTests() {
     test(
       'v90/v91 reconciliation journal schema is immutable and genesis-safe',
       () async {
+        final db = currentDatabase();
         for (final table in [
           'reconciliation_successful_runs',
           'reconciliation_run_invalidations',
@@ -2228,6 +2239,7 @@ void runDbMigrationTests() {
     test(
       'v92 evolution schema has exclusive claims and immutable output',
       () async {
+        final db = currentDatabase();
         for (final table in [
           'card_evolution_claims',
           'card_evolution_proposal_runs',
@@ -2257,6 +2269,7 @@ void runDbMigrationTests() {
     );
 
     test('v116 collector journal has durable cadence identities', () async {
+      final db = currentDatabase();
       final columns = await db
           .customSelect("PRAGMA table_info('card_evolution_collector_runs')")
           .get();
@@ -2286,6 +2299,7 @@ void runDbMigrationTests() {
     });
 
     test('v117 observation retrieval metadata is durable', () async {
+      final db = currentDatabase();
       final columns = await db
           .customSelect("PRAGMA table_info('card_evolution_observations')")
           .get();
@@ -2340,6 +2354,7 @@ void runDbMigrationTests() {
     test(
       'v93 session lorebook evolution overlay has the session key',
       () async {
+        final db = currentDatabase();
         final columns = await db
             .customSelect(
               "PRAGMA table_info('session_lorebook_evolution_rows')",
@@ -2438,6 +2453,7 @@ void runDbMigrationTests() {
     test(
       'v95 retains the latest Card Rewriter debug result per writer stage',
       () async {
+        final db = currentDatabase();
         final columns = await db
             .customSelect("PRAGMA table_info('card_evolution_debug_runs')")
             .get();
