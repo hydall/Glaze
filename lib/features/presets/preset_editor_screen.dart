@@ -394,6 +394,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           key: ValueKey(expanded.id),
           block: expanded,
           charId: widget.charId,
+          presetId: widget.preset?.id,
           onSave: (updated) {
             setState(() => _blocks[_expandedBlockIndex!] = updated);
             _scheduleSave();
@@ -1287,12 +1288,18 @@ class _BlockEditorInline extends StatelessWidget {
 class _AuthorsNoteBlockEditor extends ConsumerWidget {
   final PresetBlock block;
   final String? charId;
+
+  /// The preset being edited, so the note sheet this links to edits the same
+  /// block rather than the one the open chat happens to resolve to. Null for
+  /// a preset that has not been saved yet.
+  final String? presetId;
   final ValueChanged<PresetBlock> onSave;
 
   const _AuthorsNoteBlockEditor({
     super.key,
     required this.block,
     required this.charId,
+    required this.presetId,
     required this.onSave,
   });
 
@@ -1354,7 +1361,8 @@ class _AuthorsNoteBlockEditor extends ConsumerWidget {
             content: content,
             hint:
                 "Author's note content is tied to a chat. Open a chat to edit it.",
-            onEdit: () => showAuthorsNoteSheet(context, charId),
+            onEdit: () =>
+                showAuthorsNoteSheet(context, charId, presetId: presetId),
           ),
           GenericEditor(
             item: block.toJson(),

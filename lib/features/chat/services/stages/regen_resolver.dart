@@ -92,6 +92,11 @@ class RegenResolver {
       swipesMeta: rollbackSwipesMeta,
       swipeDirection: original.swipeDirection,
       isTyping: false,
+      // The instruction on screen belongs to the variation on screen: a
+      // cancelled guided swipe must not leave its block above the reply it
+      // never replaced.
+      guidanceText: original.guidanceText,
+      guidanceType: original.guidanceType,
       // Rolling back restores the pre-regen variation verbatim — including its
       // error state. Clearing it here turned an errored variation into a
       // normal-looking bubble whose text is an error message.

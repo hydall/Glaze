@@ -1418,7 +1418,7 @@
   "chat_long_message_hint": "Write a long message here...",
   "chat_guidance_message_hint": "Message with guidance...",
   "authors_note_placeholder": "Enter author's note...",
-  "authors_note_role_hint": "Role, depth and insertion mode are set per preset, in the preset editor.",
+  "authors_note_role_hint": "Role, insertion and depth belong to the Author's Note block of the preset this chat uses — {preset}. Changing them here edits that preset; the note's text stays with the chat.",
   "tokenizer_history_limit_warning": "History is near its limit",
   "image_gen_generating": "Generating image...",
   "image_viewer_load_failed": "Couldn't load the image",
