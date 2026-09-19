@@ -339,6 +339,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     super.activate();
     _lifecycleActive = true;
     ++_lifecycleEpoch;
+    _reverifyBridgeOnReactivate();
   }
 
   @override
@@ -346,6 +347,37 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     _lifecycleActive = false;
     ++_lifecycleEpoch;
     super.deactivate();
+  }
+
+  /// The chat page is a keep-alive singleton. While this widget sat
+  /// deactivated (another route on top, or the app in the background) the OS
+  /// can kill the render process, and the death callback that would rebuild
+  /// the view is dropped while `_lifecycleActive` is false — so the chat comes
+  /// back to a dead page that still accepts calls but never answers them, and
+  /// delete / regenerate do nothing until the app is restarted.
+  ///
+  /// On re-activation, probe the page once (bounded) and rebuild the native
+  /// view if `window.bridge` is gone. A live page answers in one call, so this
+  /// is a no-op for every ordinary tab switch.
+  void _reverifyBridgeOnReactivate() {
+    final bridge = _bridge;
+    if (bridge == null || !_ready || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(_bridge, bridge) || !_ready) return;
+      unawaited(() async {
+        bool alive;
+        try {
+          alive = await probeWebViewJsBridge(
+            () => bridge.evalJsWithResult(_kJsBridgeReadyProbe),
+            timeout: _kBridgeOpTimeout,
+          );
+        } catch (_) {
+          alive = false;
+        }
+        if (!mounted || !identical(_bridge, bridge)) return;
+        if (!alive) _handlePageProcessGone();
+      }());
+    });
   }
 
   @override
@@ -574,6 +606,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     _ready = false;
     _initFuture = null;
     _resetStreamingPresentationState();
+    _syncState.resetMutations();
     _clearBridgeRegistry?.call();
     _bridge = null;
     if (!_recovery.requestRebuild()) {
@@ -617,6 +650,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       debugPrint('[ChatWebView] rebuilding the view after a failed $phase');
       _ready = false;
       _initFuture = null;
+      _resetStreamingPresentationState();
+      _syncState.resetMutations();
       _bridge = null;
       _clearBridgeRegistry?.call();
       setState(() => _rebuildGeneration++);
