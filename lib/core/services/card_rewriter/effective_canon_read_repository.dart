@@ -163,6 +163,13 @@ class EffectiveCanonReadRepository {
       checkpoint?.characterId ?? source.id,
     );
     final baseline = await baselineRepo.getBySessionId(sessionId);
+    // Without a checkpoint or a baseline nothing binds an earlier revision to
+    // this window, so the session follows the source card exactly as the live
+    // read does. A card edited outside canon leaves that state, and failing
+    // the turn over it would break regeneration on an ordinary preset. Both
+    // branches below either keep a non-empty lineage or throw, so an anchored
+    // read always has a revision snapshot to restore.
+    final anchored = checkpoint != null || baseline != null;
     if (checkpoint != null) {
       lineage = lineage
           .where(
@@ -185,18 +192,14 @@ class EffectiveCanonReadRepository {
         );
       }
       lineage = lineage.take(index + 1).toList();
-    } else if (lineage.length > 1) {
-      throw const EffectiveCanonAssemblyUnavailable(
-        'Historical card has no anchored baseline.',
-      );
     }
-    final historicalCharacter = lineage.isEmpty
-        ? source
-        : Character.fromJson(
+    final historicalCharacter = anchored
+        ? Character.fromJson(
             Map<String, dynamic>.from(
               jsonDecode(lineage.last.snapshotJson) as Map,
             ),
-          );
+          )
+        : source;
     final raw = await _rawTrackerStateReader.read(
       sessionId,
       historicalWindow: window,
