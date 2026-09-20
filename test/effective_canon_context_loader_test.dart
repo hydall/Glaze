@@ -309,6 +309,34 @@ void main() {
     expect((await revisions.getForCharacter('c')).last.revision, next.revision);
   });
 
+  test('regen follows the source card when nothing anchors it', () async {
+    await ChatRepo(db).put(
+      const ChatSession(
+        id: 's',
+        characterId: 'c',
+        sessionIndex: 0,
+        messages: [
+          ChatMessage(id: 'previous', role: 'assistant', content: 'Before'),
+          ChatMessage(id: 'target', role: 'assistant', content: 'Target'),
+        ],
+      ),
+    );
+    final first = _character('one');
+    await loader.load(sessionId: 's', sourceCharacter: first);
+    final edited = first.copyWith(description: 'two');
+    await loader.load(sessionId: 's', sourceCharacter: edited);
+    expect(await revisions.getForCharacter('c'), hasLength(2));
+
+    final context = await loader.loadReadOnly(
+      sessionId: 's',
+      sourceCharacter: edited,
+      excludeSnapshotMessageId: 'target',
+    );
+
+    expect(context.character.description, 'two');
+    expect(context.effectiveRevision.number, 2);
+  });
+
   test(
     'historical knowledge restores superseded facts without mutating live state',
     () async {
