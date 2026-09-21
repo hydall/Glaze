@@ -273,6 +273,7 @@ jobs:
           "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
           "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
           "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+          "--dart-define=DATACAT_CLIENT_ID=${{ vars.DATACAT_CLIENT_ID }}"
 
       - name: Rename APK
         run: mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${{ needs.metadata.outputs.file_slug }}.apk"
@@ -358,6 +359,7 @@ jobs:
           "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
           "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
           "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+          "--dart-define=DATACAT_CLIENT_ID=${{ vars.DATACAT_CLIENT_ID }}"
 
       - name: Zip Windows build
         # The Release directory has to become one file before it can be sent to
@@ -467,7 +469,8 @@ jobs:
             "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}" \
             "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}" \
             "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}" \
-            "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+            "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}" \
+            "--dart-define=DATACAT_CLIENT_ID=${{ vars.DATACAT_CLIENT_ID }}"
           echo "=== AFTER flutter build ios ==="
           find build/ios -type f -name "*.app" -o -name "*.ipa" 2>/dev/null | head -20 || true
           ls -laR build/ios/iphoneos 2>/dev/null | tail -30 || true
@@ -576,6 +579,7 @@ jobs:
           "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}"
           "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}"
           "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+          "--dart-define=DATACAT_CLIENT_ID=${{ vars.DATACAT_CLIENT_ID }}"
 
       - name: Rename Linux packages
         # The script skips a format whose tooling is missing instead of failing,

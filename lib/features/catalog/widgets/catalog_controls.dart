@@ -183,7 +183,25 @@ class CatalogControls extends ConsumerWidget {
           ),
         ),
         const Spacer(),
+        GlazeFilterIconButton(
+          count: _activeFilterCount(),
+          onTap: () => showModalBottomSheet<void>(
+            context: context,
+            isScrollControlled: true,
+            useRootNavigator: true,
+            useSafeArea: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => CatalogFilterSheet(
+              filters: state.filters,
+              provider: state.activeProvider,
+              timelineMode: state.chubTimelineActive,
+              onApply: (f) => notifier.setFilters(f),
+              onBlockedTagsChanged: () => notifier.search(reset: true),
+            ),
+          ),
+        ),
         if (supportsWindow(state.activeProvider)) ...[
+          const SizedBox(width: 8),
           GlazeActionChip(
             icon: _windowIcons[state.filters.window] ??
                 Icons.all_inclusive_rounded,
@@ -205,25 +223,7 @@ class CatalogControls extends ConsumerWidget {
               onSelect: (v) => notifier.setWindow(v as String),
             ),
           ),
-          const SizedBox(width: 8),
         ],
-        GlazeFilterIconButton(
-          count: _activeFilterCount(),
-          onTap: () => showModalBottomSheet<void>(
-            context: context,
-            isScrollControlled: true,
-            useRootNavigator: true,
-            useSafeArea: true,
-            backgroundColor: Colors.transparent,
-            builder: (_) => CatalogFilterSheet(
-              filters: state.filters,
-              provider: state.activeProvider,
-              timelineMode: state.chubTimelineActive,
-              onApply: (f) => notifier.setFilters(f),
-              onBlockedTagsChanged: () => notifier.search(reset: true),
-            ),
-          ),
-        ),
         const SizedBox(width: 8),
         GlazeSortIconChip(
           icon: _currentSortIcon(),
