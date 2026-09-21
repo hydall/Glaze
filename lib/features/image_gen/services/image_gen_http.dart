@@ -79,6 +79,35 @@ class ImageGenHttp {
     return await extract(json);
   }
 
+  /// Sends a JSON request and returns the raw response body. Used by
+  /// providers whose image comes back as binary (a ZIP attachment) rather
+  /// than JSON.
+  Future<Uint8List> postForBytes({
+    required String url,
+    required Map<String, dynamic> body,
+    String? apiKey,
+    Map<String, String>? extraHeaders,
+    CancelToken? cancelToken,
+  }) async {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (apiKey != null && apiKey.isNotEmpty)
+        'Authorization': 'Bearer $apiKey',
+      ...?extraHeaders,
+    };
+    try {
+      final response = await _dio.post<List<int>>(
+        url,
+        data: body,
+        options: Options(headers: headers, responseType: ResponseType.bytes),
+        cancelToken: cancelToken,
+      );
+      return Uint8List.fromList(response.data ?? const []);
+    } on DioException {
+      rethrow;
+    }
+  }
+
   /// Plain JSON GET (job polling, model listings).
   Future<Map<String, dynamic>> getJson({
     required String url,

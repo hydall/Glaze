@@ -43,6 +43,44 @@ void main() {
       expect(restored, settings);
     });
 
+    test('round-trips the NovelAI sub-settings', () {
+      const settings = ImageGenSettings(
+        apiType: ImageGenApiType.novelai,
+        novelai: NovelAIImageSettings(
+          apiKey: 'pst-key',
+          endpoint: 'https://image.novelai.net',
+          model: 'nai-diffusion-5-full',
+          sampler: 'k_dpmpp_2m',
+          noiseSchedule: 'exponential',
+          steps: 23,
+          scale: 6.5,
+          cfgRescale: 0.2,
+          width: 1024,
+          height: 1024,
+          seed: 42,
+          negativePrompt: 'lowres',
+          ucPreset: 'heavy',
+          qualityToggle: false,
+          varietyBoost: true,
+        ),
+      );
+
+      final restored = ImageGenSettingsCodec.fromJson(
+        ImageGenSettingsCodec.toJson(settings),
+      );
+
+      expect(restored.apiType, ImageGenApiType.novelai);
+      expect(restored.novelai, settings.novelai);
+    });
+
+    test('missing NovelAI sub-settings take their defaults', () {
+      final restored = ImageGenSettingsCodec.fromJson({
+        'apiType': 'novelai',
+      });
+
+      expect(restored.novelai, const NovelAIImageSettings());
+    });
+
     test('migrates the two legacy reference lists into one library', () {
       final restored = ImageGenSettingsCodec.fromJson({
         'apiType': 'routmy',

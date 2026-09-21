@@ -95,6 +95,17 @@ class ImageGenConnectionService {
           null,
           extraHeaders: _a1111AuthHeaders(settings.a1111.apiKey),
         );
+      case ImageGenApiType.novelai:
+        if (settings.novelai.apiKey.trim().isEmpty) {
+          throw StateError('NovelAI API key not configured');
+        }
+        // Tag suggestions is a cheap authenticated GET on the image host.
+        await _get(
+          '${_novelAiBase(settings)}/ai/generate-image/suggest-tags'
+          '?model=${Uri.encodeQueryComponent(settings.novelai.model)}'
+          '&prompt=a',
+          settings.novelai.apiKey,
+        );
     }
   }
 
@@ -186,6 +197,9 @@ class ImageGenConnectionService {
     return (endpoint.isEmpty ? ElectronHubConstants.defaultEndpoint : endpoint)
         .replaceFirst(RegExp(r'/+$'), '');
   }
+
+  static String _novelAiBase(ImageGenSettings settings) =>
+      NovelAIConstants.normalizeEndpoint(settings.novelai.endpoint);
 
   static String _a1111Base(ImageGenSettings settings) {
     final endpoint = settings.a1111.endpoint.trim();

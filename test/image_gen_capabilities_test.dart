@@ -110,6 +110,27 @@ void main() {
       );
     });
 
+    test('NovelAI accepts references only on V4.5', () {
+      expect(
+        providerMaxReferences(
+          const ImageGenSettings(
+            apiType: ImageGenApiType.novelai,
+            novelai: NovelAIImageSettings(model: 'nai-diffusion-4-5-full'),
+          ),
+        ),
+        greaterThan(0),
+      );
+      expect(
+        providerMaxReferences(
+          const ImageGenSettings(
+            apiType: ImageGenApiType.novelai,
+            novelai: NovelAIImageSettings(model: 'nai-diffusion-3'),
+          ),
+        ),
+        0,
+      );
+    });
+
     test('dall-e-3 on the OpenAI path accepts none', () {
       expect(
         providerMaxReferences(const ImageGenSettings(customModel: 'dall-e-3')),
