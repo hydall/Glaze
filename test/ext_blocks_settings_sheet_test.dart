@@ -161,6 +161,28 @@ void main() {
     expect(find.text('block_edit_name_label'), findsOneWidget);
   });
 
+  testWidgets('the add row offers import and create, and create opens the '
+      'editor', (tester) async {
+    final container = await pumpPanel(tester);
+
+    await tester.tap(find.text('extblocks_block_add'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('extblocks_block_import'), findsOneWidget);
+    expect(find.text('extblocks_block_create'), findsOneWidget);
+
+    await tester.tap(find.text('extblocks_block_create'));
+    await tester.pumpAndSettle();
+
+    // The blank block lands at the end of the preset, then opens in its editor.
+    final preset = container
+        .read(extensionPresetsProvider)
+        .firstWhere((p) => p.id == 'p1');
+    expect(preset.blocks.length, 2);
+    expect(find.byType(BlockEditDialog), findsOneWidget);
+    expect(find.text('block_edit_name_label'), findsOneWidget);
+  });
+
   testWidgets('the switcher sorts and keeps its actions in overflow menus', (
     tester,
   ) async {

@@ -1856,6 +1856,8 @@
   "extblocks_blocks_section": "Blocks",
   "extblocks_blocks_empty": "No blocks yet. Add one, or import a file from the original extension.",
   "extblocks_block_add": "Add block",
+  "extblocks_block_import": "Import",
+  "extblocks_block_create": "Create new",
   "extblocks_blocks_import": "Import blocks",
   "extblocks_block_export": "Export block",
   "extblocks_block_duplicate": "Duplicate",
