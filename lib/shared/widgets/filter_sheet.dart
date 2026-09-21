@@ -59,6 +59,23 @@ class FilterRangeSection extends FilterSection {
   });
 }
 
+/// A titled row with a single integer field.
+class FilterNumberSection extends FilterSection {
+  final String title;
+  final String label;
+  final int value;
+  final String? hint;
+  final ValueChanged<int> onChanged;
+
+  const FilterNumberSection({
+    required this.title,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    this.hint,
+  });
+}
+
 /// A titled, searchable, multi-select tag picker row.
 ///
 /// [tags] is the curated list rendered as a chip grid and filtered locally.
@@ -152,6 +169,10 @@ class FilterSheet extends StatelessWidget {
       FilterRangeSection() => [
         const SizedBox(height: 20),
         _FilterRange(section: section),
+      ],
+      FilterNumberSection() => [
+        const SizedBox(height: 20),
+        _FilterNumber(section: section),
       ],
       FilterTagsSection() => [
         const SizedBox(height: 20),
@@ -256,45 +277,74 @@ class _FilterRange extends StatelessWidget {
       ],
     );
   }
+}
 
-  Widget _numberField(String label, int value, ValueChanged<int> onChanged) {
+/// A section with a single labelled integer field, for one-dimensional numeric
+/// filters (e.g. Chub's minimum AI rating) that a min/max range doesn't fit.
+class _FilterNumber extends StatelessWidget {
+  final FilterNumberSection section;
+  const _FilterNumber({required this.section});
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.4),
-            fontSize: 11,
-            letterSpacing: 0.5,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Container(
-          height: 38,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-          ),
-          child: TextField(
-            controller: TextEditingController(text: '$value'),
-            keyboardType: TextInputType.number,
-            style: const TextStyle(fontSize: 14, color: Colors.white),
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              isDense: true,
+        _SectionLabel(section.title),
+        const SizedBox(height: 10),
+        _numberField(section.label, section.value, section.onChanged),
+        if (section.hint != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            section.hint!,
+            style: TextStyle(
+              fontSize: 11,
+              color: context.cs.onSurfaceVariant,
             ),
-            onSubmitted: (v) {
-              final p = int.tryParse(v);
-              if (p != null) onChanged(p);
-            },
           ),
-        ),
+        ],
       ],
     );
   }
+}
+
+Widget _numberField(String label, int value, ValueChanged<int> onChanged) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.4),
+          fontSize: 11,
+          letterSpacing: 0.5,
+        ),
+      ),
+      const SizedBox(height: 4),
+      Container(
+        height: 38,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+        child: TextField(
+          controller: TextEditingController(text: '$value'),
+          keyboardType: TextInputType.number,
+          style: const TextStyle(fontSize: 14, color: Colors.white),
+          decoration: const InputDecoration(
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            isDense: true,
+          ),
+          onSubmitted: (v) {
+            final p = int.tryParse(v);
+            if (p != null) onChanged(p);
+          },
+        ),
+      ),
+    ],
+  );
 }
 
 class _FilterTags extends StatefulWidget {

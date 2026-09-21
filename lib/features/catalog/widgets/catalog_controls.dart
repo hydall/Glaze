@@ -73,6 +73,21 @@ class CatalogControls extends ConsumerWidget {
     if (f.tagNames.isNotEmpty) count += f.tagNames.length;
     if (f.minTokens != 29) count++;
     if (f.maxTokens != 100000) count++;
+    // The Chub-only refinements share the same rule as NSFL: they only apply to
+    // chub, so they only count toward chub's badge.
+    if (state.activeProvider == CatalogProvider.chub) {
+      if (f.nsfwOnly) count++;
+      if (f.requireImages) count++;
+      if (f.requireLore) count++;
+      if (f.requireCustomPrompt) count++;
+      if (f.requireExampleDialogues) count++;
+      if (f.requireAlternateGreetings) count++;
+      if (f.recommendedVerified) count++;
+      if (f.excludeMine) count++;
+      if (f.inclusiveOr) count++;
+      if (f.minAiRating > 0) count++;
+      if (f.minTags > 0) count++;
+    }
     return count;
   }
 

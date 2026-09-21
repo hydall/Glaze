@@ -13,6 +13,7 @@ import '../../../core/state/lorebook_provider.dart';
 import '../../../core/state/shared_prefs_provider.dart';
 import '../../../core/utils/error_format.dart';
 import 'catalog_models.dart';
+import 'chub_account_provider.dart';
 import 'services/datacat_provider.dart';
 import 'services/janitor_provider.dart';
 import 'services/janitor_public_lorebook.dart';
@@ -131,6 +132,19 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         setProvider(enabled.first);
       }
     });
+    // A Chub account key unlocks account-scoped results (NSFL). Reload when it
+    // changes while Chub is the active source — this also covers the stored key
+    // arriving from prefs after the first anonymous search.
+    _ref.listen<ChubAccount>(chubAccountProvider, (previous, next) {
+      if (previous?.apiKey == next.apiKey && previous?.nsfl == next.nsfl) {
+        return;
+      }
+      if (!_savedStateApplied || state.activeProvider != CatalogProvider.chub) {
+        return;
+      }
+      resetChubTagCache();
+      unawaited(search(reset: true));
+    });
   }
 
   Future<void> _loadSavedState() async {
@@ -195,6 +209,19 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
           tagNames: (json['tagNames'] as List?)?.cast<String>() ?? [],
           minTokens: json['minTokens'] as int? ?? 29,
           maxTokens: json['maxTokens'] as int? ?? 100000,
+          nsfwOnly: json['nsfwOnly'] as bool? ?? false,
+          requireImages: json['requireImages'] as bool? ?? false,
+          requireLore: json['requireLore'] as bool? ?? false,
+          requireCustomPrompt: json['requireCustomPrompt'] as bool? ?? false,
+          requireExampleDialogues:
+              json['requireExampleDialogues'] as bool? ?? false,
+          requireAlternateGreetings:
+              json['requireAlternateGreetings'] as bool? ?? false,
+          recommendedVerified: json['recommendedVerified'] as bool? ?? false,
+          excludeMine: json['excludeMine'] as bool? ?? false,
+          inclusiveOr: json['inclusiveOr'] as bool? ?? false,
+          minAiRating: json['minAiRating'] as int? ?? 0,
+          minTags: json['minTags'] as int? ?? 0,
         );
       }
     } catch (_) {}
@@ -217,6 +244,17 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         'tagNames': state.filters.tagNames,
         'minTokens': state.filters.minTokens,
         'maxTokens': state.filters.maxTokens,
+        'nsfwOnly': state.filters.nsfwOnly,
+        'requireImages': state.filters.requireImages,
+        'requireLore': state.filters.requireLore,
+        'requireCustomPrompt': state.filters.requireCustomPrompt,
+        'requireExampleDialogues': state.filters.requireExampleDialogues,
+        'requireAlternateGreetings': state.filters.requireAlternateGreetings,
+        'recommendedVerified': state.filters.recommendedVerified,
+        'excludeMine': state.filters.excludeMine,
+        'inclusiveOr': state.filters.inclusiveOr,
+        'minAiRating': state.filters.minAiRating,
+        'minTags': state.filters.minTags,
       }),
     );
   }
@@ -348,6 +386,8 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
           page: state.page,
           limit: _pageSize,
           filters: state.filters,
+          apiKey: _ref.read(chubAccountProvider).apiKey,
+          accountNsfl: _ref.read(chubAccountProvider).nsfl,
         );
     }
   }

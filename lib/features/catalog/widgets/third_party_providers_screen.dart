@@ -7,9 +7,11 @@ import '../../../shared/widgets/menu_group.dart';
 import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../settings/app_settings_provider.dart';
+import '../chub_account_provider.dart';
 import '../janitor_account_provider.dart';
 import '../saucepan_account_provider.dart';
 import '../third_party_providers_provider.dart';
+import 'chub_login_sheet.dart';
 import 'janitor_login_sheet.dart';
 import 'janitor_source_settings.dart';
 import 'saucepan_login_sheet.dart';
@@ -127,9 +129,37 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
             onTap: () => openSaucepanAccountSheet(context, ref),
           ),
         ];
+      case ThirdPartyProvider.chub:
+        final account = ref.watch(chubAccountProvider);
+        return [
+          MenuItem(
+            icon: Icons.key_outlined,
+            label: 'chub_login_menu'.tr(),
+            subtitle: account.isLoggedIn
+                ? 'chub_login_menu_logged_in'.tr()
+                : 'chub_login_menu_logged_out'.tr(),
+            onTap: () => openChubAccountSheet(context, ref),
+          ),
+          // Account-level NSFL opt-in, mirroring chub.ai's own `no_nsfl`
+          // profile flag: the site only ever serves NSFL to a signed-in
+          // account, and this is the persistent "I want it" that the
+          // per-search toggle in the filter sheet then narrows.
+          MenuSwitchItem(
+            label: 'catalog_filter_nsfl'.tr(),
+            description: 'chub_nsfl_account_hint'.tr(),
+            value: account.nsfl,
+            onChanged: (v) {
+              if (v && !account.isLoggedIn) {
+                // NSFL is account-scoped on chub.ai — sign in first.
+                openChubAccountSheet(context, ref);
+                return;
+              }
+              ref.read(chubAccountProvider.notifier).setNsfl(v);
+            },
+          ),
+        ];
       case ThirdPartyProvider.janny:
       case ThirdPartyProvider.datacat:
-      case ThirdPartyProvider.chub:
         // No dedicated settings — the group is just an enable/disable toggle.
         return const [];
     }

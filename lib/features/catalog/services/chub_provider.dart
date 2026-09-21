@@ -5,10 +5,18 @@ import '../catalog_models.dart';
 const _apiBase = 'https://api.chub.ai';
 const _avatarBase = 'https://avatars.charhub.io/avatars/';
 
-const _chubHeaders = {
+/// Headers for a Chub API request. When [apiKey] is set the site's own
+/// account key rides along as both `CH-API-KEY` and `samwise` — the two headers
+/// chub.ai itself sends. Without a key the request stays anonymous, which is
+/// all browsing needs; the key only unlocks account-scoped results (NSFL).
+Map<String, String> chubHeaders({String? apiKey}) => {
   'Accept': 'application/json',
   'Origin': 'https://chub.ai',
   'Referer': 'https://chub.ai/',
+  if (apiKey != null && apiKey.isNotEmpty) ...{
+    'CH-API-KEY': apiKey,
+    'samwise': apiKey,
+  },
 };
 
 const _sortMap = <String, _SortEntry>{
@@ -24,7 +32,14 @@ List<CatalogTag> _cachedChubTags = [];
 bool _chubTagsFetched = false;
 List<CatalogTag> getCachedChubTags() => _cachedChubTags;
 
-Future<List<CatalogTag>> fetchChubTags() async {
+/// Drops the cached tag list so the next fetch runs — used when the account key
+/// changes and the tag universe may differ.
+void resetChubTagCache() {
+  _cachedChubTags = [];
+  _chubTagsFetched = false;
+}
+
+Future<List<CatalogTag>> fetchChubTags({String? apiKey}) async {
   if (_chubTagsFetched) return _cachedChubTags;
 
   try {
@@ -36,7 +51,10 @@ Future<List<CatalogTag>> fetchChubTags() async {
       for (var page = 1; page <= pagesPerSort; page++) {
         try {
           final params = 'search=&first=200&page=$page&sort=$sortOrder&nsfw=true&nsfl=true&include_forks=false&min_tokens=50';
-          final data = await catalogGet('$_apiBase/search?$params', _chubHeaders);
+          final data = await catalogGet(
+            '$_apiBase/search?$params',
+            chubHeaders(apiKey: apiKey),
+          );
           final nodes = ((data['nodes'] ?? data['data']?['nodes']) as List?)?.cast<Map<String, dynamic>>() ?? [];
           if (nodes.isEmpty) break;
           allChars.addAll(nodes);
@@ -74,13 +92,19 @@ Future<CatalogSearchResult> chubSearch({
   int page = 1,
   int limit = 24,
   CatalogFilters filters = const CatalogFilters(),
+  String? apiKey,
+  bool accountNsfl = false,
 }) async {
   final sortEntry = _sortMap[filters.sort] ?? _sortMap['popular']!;
   final nsfw = filters.nsfw;
+  // NSFL is account-scoped on chub.ai: the public API ignores the flag, and the
+  // site only ever sets it while signed in. The account toggle is therefore a
+  // second, persistent opt-in alongside the per-search filter toggle.
+  final nsfl = filters.nsfl || accountNsfl;
   final minTokens = filters.minTokens > 0 ? filters.minTokens : 50;
 
   final params = StringBuffer(
-    'first=$limit&page=$page&sort=${sortEntry.sort}&nsfw=$nsfw&nsfl=${filters.nsfl}&include_forks=true&min_tokens=$minTokens&venus=false',
+    'first=$limit&page=$page&sort=${sortEntry.sort}&nsfw=$nsfw&nsfl=$nsfl&include_forks=true&min_tokens=$minTokens&venus=false',
   );
   if (sortEntry.maxDaysAgo != null) params.write('&max_days_ago=${sortEntry.maxDaysAgo}');
   if (query.isNotEmpty) params.write('&search=${Uri.encodeComponent(query)}');
@@ -91,20 +115,42 @@ Future<CatalogSearchResult> chubSearch({
   if (includeTags.isNotEmpty) params.write('&topics=${includeTags.map(Uri.encodeComponent).join(',')}');
   if (excludeTags.isNotEmpty) params.write('&excludetopics=${excludeTags.map(Uri.encodeComponent).join(',')}');
 
-  final data = await catalogGet('$_apiBase/search?$params', _chubHeaders);
-  final nodes = ((data['nodes'] ?? data['data']?['nodes']) as List?)?.cast<Map<String, dynamic>>() ?? [];
+  // Chub-only content flags, mapped straight onto the site's own parameters.
+  if (filters.nsfwOnly) params.write('&nsfw_only=true');
+  if (filters.requireImages) params.write('&require_images=true');
+  if (filters.requireLore) params.write('&require_lore=true');
+  if (filters.requireCustomPrompt) params.write('&require_custom_prompt=true');
+  if (filters.requireExampleDialogues) params.write('&require_example_dialogues=true');
+  if (filters.requireAlternateGreetings) params.write('&require_alternate_greetings=true');
+  if (filters.recommendedVerified) params.write('&recommended_verified=true');
+  if (filters.excludeMine) params.write('&exclude_mine=true');
+  if (filters.inclusiveOr) params.write('&inclusive_or=true');
+  if (filters.minAiRating > 0) params.write('&min_ai_rating=${filters.minAiRating}');
+  if (filters.minTags > 0) params.write('&min_tags=${filters.minTags}');
+
+  final data = await catalogGet(
+    '$_apiBase/search?$params',
+    chubHeaders(apiKey: apiKey),
+  );
+  final container = data['data'] as Map<String, dynamic>?;
+  final nodes = ((data['nodes'] ?? container?['nodes']) as List?)?.cast<Map<String, dynamic>>() ?? [];
 
   return CatalogSearchResult(
     characters: nodes.map(_normalizeNode).toList(),
-    total: (data['total'] as int?) ?? nodes.length,
-    hasMore: (data['data']?['cursor'] ?? data['cursor']) != null,
+    // The site's own response nests the running total under `data.count`; it is
+    // capped at 100000 for very broad queries.
+    total: (container?['count'] as int?) ?? (data['total'] as int?) ?? nodes.length,
+    hasMore: (container?['cursor'] ?? data['cursor']) != null,
   );
 }
 
-Future<DownloadedCharacter> chubGetCharacter(String fullPath) async {
+Future<DownloadedCharacter> chubGetCharacter(
+  String fullPath, {
+  String? apiKey,
+}) async {
   final data = await catalogGet(
     '$_apiBase/api/characters/$fullPath?full=true',
-    _chubHeaders,
+    chubHeaders(apiKey: apiKey),
   );
   final node = (data['node'] ?? data) as Map<String, dynamic>;
   return DownloadedCharacter(
@@ -131,10 +177,10 @@ CatalogItem _normalizeNode(Map<String, dynamic> node) {
     description: (node['tagline'] ?? '') as String,
     tags: [isTopicNsfw ? 'NSFW' : 'SFW', ...cleanTopics],
     tokens: (node['nTokens'] ?? node['n_tokens'] ?? 0) as int,
-    chatCount: (node['nDownloads'] ?? 0) as int,
+    chatCount: ((node['nChats'] ?? node['n_chats']) ?? 0) as int,
     creator: creator,
     creatorId: creator,
-    nsfw: isNsfw,
+    nsfw: isNsfw || isTopicNsfw,
     source: 'chub',
     fullPath: fullPath,
   );
