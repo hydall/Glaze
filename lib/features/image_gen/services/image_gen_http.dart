@@ -169,10 +169,14 @@ class ImageGenHttp {
   Future<Response<Uint8List>> getRaw(
     String url, {
     CancelToken? cancelToken,
+    Map<String, String>? extraHeaders,
   }) async {
     return _dio.get<Uint8List>(
       url,
-      options: Options(responseType: ResponseType.bytes),
+      options: Options(
+        responseType: ResponseType.bytes,
+        headers: {...?extraHeaders},
+      ),
       cancelToken: cancelToken,
     );
   }

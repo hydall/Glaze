@@ -267,5 +267,9 @@ int providerMaxReferences(ImageGenSettings settings) {
       return NovelAIConstants.supportsReferences(settings.novelai.model)
           ? NovelAIConstants.maxReferences
           : 0;
+    case ImageGenApiType.comfyui:
+      // The workflow decides whether any image-loading node exists, so the
+      // reference library is not offered.
+      return 0;
   }
 }

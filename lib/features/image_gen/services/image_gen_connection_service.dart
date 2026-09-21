@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../../../core/llm/transport/endpoint_normalizer.dart';
 import '../image_gen_models.dart';
+import 'comfyui_image_provider.dart';
 
 /// Lightweight connectivity and model-discovery requests for the image-gen
 /// settings sheet. Generation itself remains in the provider-specific clients.
@@ -106,6 +107,13 @@ class ImageGenConnectionService {
           '&prompt=a',
           settings.novelai.apiKey,
         );
+      case ImageGenApiType.comfyui:
+        // /system_stats is the cheapest route that proves the server is up.
+        await _get(
+          '${_comfyUiBase(settings)}/system_stats',
+          null,
+          extraHeaders: _comfyUiAuthHeaders(settings.comfyui.apiKey),
+        );
     }
   }
 
@@ -186,6 +194,10 @@ class ImageGenConnectionService {
         .toList();
   }
 
+  /// Checkpoint / UNet / GGUF entries loaded by the local ComfyUI server.
+  Future<List<String>> fetchComfyUiModels(ImageGenSettings settings) =>
+      ComfyUiImageProvider().fetchModels(settings.comfyui);
+
   static String _openRouterBase(ImageGenSettings settings) {
     final endpoint = settings.openrouter.endpoint.trim();
     return (endpoint.isEmpty ? OpenRouterConstants.defaultEndpoint : endpoint)
@@ -208,6 +220,18 @@ class ImageGenConnectionService {
   }
 
   static Map<String, String> _a1111AuthHeaders(String apiKey) {
+    final key = apiKey.trim();
+    if (key.isEmpty) return const {};
+    return {'Authorization': 'Basic ${base64Encode(utf8.encode(key))}'};
+  }
+
+  static String _comfyUiBase(ImageGenSettings settings) {
+    final endpoint = settings.comfyui.endpoint.trim();
+    return (endpoint.isEmpty ? ComfyUiConstants.defaultEndpoint : endpoint)
+        .replaceFirst(RegExp(r'/+$'), '');
+  }
+
+  static Map<String, String> _comfyUiAuthHeaders(String apiKey) {
     final key = apiKey.trim();
     if (key.isEmpty) return const {};
     return {'Authorization': 'Basic ${base64Encode(utf8.encode(key))}'};

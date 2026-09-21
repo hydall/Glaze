@@ -79,4 +79,69 @@ void main() {
       );
     },
   );
+
+  test('checks a ComfyUI server through /system_stats', () async {
+    final server = await startServer((request) async {
+      expect(request.uri.path, '/system_stats');
+      request.response.headers.contentType = ContentType.json;
+      request.response.write('{}');
+      await request.response.close();
+    });
+    final service = ImageGenConnectionService();
+    addTearDown(service.dispose);
+
+    await service.checkConnection(
+      settings: ImageGenSettings(
+        apiType: ImageGenApiType.comfyui,
+        comfyui: ComfyUiImageSettings(
+          endpoint: 'http://${server.address.address}:${server.port}',
+        ),
+      ),
+      llmEndpoint: '',
+      llmApiKey: '',
+    );
+  });
+
+  test('lists ComfyUI loader entries from /object_info', () async {
+    final server = await startServer((request) async {
+      expect(request.uri.path, '/object_info');
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'CheckpointLoaderSimple': {
+            'input': {
+              'required': {
+                'ckpt_name': [
+                  ['a.safetensors', 'b.safetensors'],
+                ],
+              },
+            },
+          },
+          'UNETLoader': {
+            'input': {
+              'required': {
+                'unet_name': [
+                  ['u.safetensors'],
+                ],
+              },
+            },
+          },
+        }),
+      );
+      await request.response.close();
+    });
+    final service = ImageGenConnectionService();
+    addTearDown(service.dispose);
+
+    final models = await service.fetchComfyUiModels(
+      ImageGenSettings(
+        apiType: ImageGenApiType.comfyui,
+        comfyui: ComfyUiImageSettings(
+          endpoint: 'http://${server.address.address}:${server.port}',
+        ),
+      ),
+    );
+
+    expect(models, ['a.safetensors', 'b.safetensors', 'u.safetensors']);
+  });
 }
