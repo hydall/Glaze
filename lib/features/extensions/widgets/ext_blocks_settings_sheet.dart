@@ -21,6 +21,9 @@ import '../screens/preset_editor/sections/profiles_section.dart';
 import '../services/block_transfer_service.dart';
 import 'ext_blocks_permissions_sheet.dart';
 
+/// Which way the add-block sheet was answered.
+enum _AddBlockChoice { import, create }
+
 /// External Blocks control panel, opened from the magic drawer and from Tools.
 ///
 /// The whole feature hangs off the switch in the header: with it off there is
@@ -123,7 +126,7 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
                 ProfilesSection(preset: activePreset),
                 _BlocksGroup(
                   preset: activePreset,
-                  onImport: () => _importBlocks(context, ref, activePreset),
+                  onAdd: () => _addBlock(context, ref, activePreset),
                 ),
               ],
             ],
@@ -280,6 +283,58 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
     }
   }
 
+  /// The add row: importing a file and starting a blank block are two ways to
+  /// put a block into the preset, so they sit behind one entry point. The
+  /// choice comes back as the sheet's result rather than popping and opening
+  /// the editor inside the tap, which would race the sheet's exit animation.
+  Future<void> _addBlock(
+    BuildContext context,
+    WidgetRef ref,
+    ExtensionPreset preset,
+  ) async {
+    final choice = await GlazeBottomSheet.show<_AddBlockChoice>(
+      context,
+      title: 'extblocks_block_add'.tr(),
+      items: [
+        BottomSheetItem(
+          label: 'extblocks_block_import'.tr(),
+          icon: Icons.file_download_outlined,
+          onTap: () => Navigator.pop(context, _AddBlockChoice.import),
+        ),
+        BottomSheetItem(
+          label: 'extblocks_block_create'.tr(),
+          icon: Icons.add_circle_outline_rounded,
+          onTap: () => Navigator.pop(context, _AddBlockChoice.create),
+        ),
+      ],
+    );
+    if (choice == null || !context.mounted) return;
+    switch (choice) {
+      case _AddBlockChoice.import:
+        await _importBlocks(context, ref, preset);
+      case _AddBlockChoice.create:
+        await _createBlock(context, ref, preset);
+    }
+  }
+
+  /// A blank block added to the end of the preset, then opened straight in the
+  /// editor so its type and settings can be filled in.
+  Future<void> _createBlock(
+    BuildContext context,
+    WidgetRef ref,
+    ExtensionPreset preset,
+  ) async {
+    final block = BlockConfig(
+      id: generateId(),
+      name: 'new_block'.tr(),
+      enabled: true,
+      order: preset.blocks.length,
+    );
+    final updated = preset.copyWith(blocks: [...preset.blocks, block]);
+    await ref.read(extensionPresetsProvider.notifier).update(updated);
+    if (context.mounted) editBlockSheet(context, ref, updated, block);
+  }
+
   Future<void> _importBlocks(
     BuildContext context,
     WidgetRef ref,
@@ -318,10 +373,10 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
 /// The active preset's blocks. Tapping one opens its settings; the overflow
 /// menu holds the file and lifecycle actions.
 class _BlocksGroup extends ConsumerWidget {
-  const _BlocksGroup({required this.preset, required this.onImport});
+  const _BlocksGroup({required this.preset, required this.onAdd});
 
   final ExtensionPreset preset;
-  final VoidCallback onImport;
+  final VoidCallback onAdd;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -346,9 +401,9 @@ class _BlocksGroup extends ConsumerWidget {
               onMore: () => _showActions(context, ref, block),
             ),
         MenuItem(
-          icon: Icons.file_download_outlined,
-          label: 'extblocks_blocks_import'.tr(),
-          onTap: onImport,
+          icon: Icons.add_circle_outline_rounded,
+          label: 'extblocks_block_add'.tr(),
+          onTap: onAdd,
         ),
       ],
     );
