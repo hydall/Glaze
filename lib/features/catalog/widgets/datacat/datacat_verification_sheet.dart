@@ -33,7 +33,9 @@ Future<String?> ensureDatacatLease(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,
-    useSafeArea: true,
+    // No useSafeArea: SheetView pads itself for the status bar as it grows to
+    // fullscreen, so the route's own inset would be counted twice and leave
+    // the header stranded a status bar's height below the sheet's top edge.
     backgroundColor: Colors.transparent,
     builder: (_) => const DatacatVerificationSheet(),
   );
@@ -108,11 +110,15 @@ class _DatacatVerificationSheetState extends State<DatacatVerificationSheet> {
       showBack: true,
       onBack: () => Navigator.of(context).pop(),
       startExpanded: true,
-      body: _buildBody(),
+      // Built through a Builder so the body reads the header inset SheetView
+      // publishes as MediaQuery.padding.top. Passing `context` from here reads
+      // the padding *above* the sheet instead, which is zero, and the content
+      // was drawn under the title row.
+      body: Builder(builder: _buildBody),
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildBody(BuildContext context) {
     final error = _error;
     if (error != null) {
       return Padding(

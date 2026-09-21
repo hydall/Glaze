@@ -5,7 +5,14 @@ import 'datacat_errors.dart';
 import 'datacat_models.dart';
 
 /// The action a transfer lease is issued for. Currently the only one.
-const datacatTransferAction = 'character_transfer';
+///
+/// The vendored contract in `docs/external/` spells it `character_transfer`,
+/// but the live deployment rejects that with "Unsupported verification action.
+/// Use \"character-import\"." — the document is behind the server. The value the
+/// server names is the one that has actually been observed to work, so it wins;
+/// omitting the field instead would rely on the same stale document's claim
+/// that it is optional.
+const datacatTransferAction = 'character-import';
 
 /// How many distinct characters one lease covers when the server does not say.
 /// The live figure arrives as `maxUniqueCharacters` on the lease itself.

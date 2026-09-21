@@ -53,7 +53,9 @@ Future<bool> showDatacatLinkSheet(BuildContext context) async {
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,
-    useSafeArea: true,
+    // No useSafeArea: SheetView pads itself for the status bar as it grows to
+    // fullscreen, so the route's own inset would be counted twice and leave
+    // the header stranded a status bar's height below the sheet's top edge.
     backgroundColor: Colors.transparent,
     builder: (_) => const DatacatLinkSheet(),
   );
@@ -123,11 +125,15 @@ class _DatacatLinkSheetState extends ConsumerState<DatacatLinkSheet> {
       showBack: true,
       onBack: () => Navigator.of(context).pop(false),
       startExpanded: true,
-      body: _buildBody(),
+      // Built through a Builder so the body reads the header inset SheetView
+      // publishes as MediaQuery.padding.top. Passing `context` from here reads
+      // the padding *above* the sheet instead, which is zero, and the content
+      // was drawn under the title row.
+      body: Builder(builder: _buildBody),
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildBody(BuildContext context) {
     final topPad = MediaQuery.paddingOf(context).top;
     final error = _error;
     if (error != null) {
