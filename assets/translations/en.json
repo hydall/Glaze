@@ -1592,6 +1592,8 @@
   "catalog_sort_janny_tokens_asc": "Fewest Tokens",
   "catalog_sort_janny_relevant": "Relevance",
   "catalog_sort_datacat_fresh": "Freshest",
+  "catalog_sort_chub_timeline": "Timeline",
+  "catalog_chub_timeline_no_filters": "Chub Timeline doesn't support filters",
   "catalog_sort_chub_popular": "Popular",
   "catalog_sort_chub_trending_week": "Trending (Week)",
   "catalog_sort_chub_trending_24h": "Trending (24h)",

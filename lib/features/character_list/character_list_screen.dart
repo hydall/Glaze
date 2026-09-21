@@ -181,6 +181,10 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final inFolder = _tabIndex == 0 && _currentFolderId != null;
     final inPicks = inFolder && _currentFolderId == kPicksFolderId;
     final inSearch = _searchExpanded && !inPicks;
+    // Chub's Timeline feed ignores free-text search, so the loupe is locked out
+    // while it's selected on the Discover tab.
+    final timelineLocked =
+        _tabIndex == 1 && ref.read(catalogProvider).chubTimelineActive;
     final folderTitle = inFolder ? _folderName(_currentFolderId!) : null;
     return ShellHeaderConfig(
       title: inSearch
@@ -203,7 +207,9 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
                     size: 22,
                   ),
                   color: context.cs.primary,
-                  onPressed: _searchExpanded ? _closeSearch : _openSearch,
+                  onPressed: timelineLocked && !_searchExpanded
+                      ? null
+                      : (_searchExpanded ? _closeSearch : _openSearch),
                 ),
               ),
             ],
@@ -219,6 +225,8 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   }
 
   void _openSearch() {
+    // Timeline ignores the query, so don't open the field for it.
+    if (_tabIndex == 1 && ref.read(catalogProvider).chubTimelineActive) return;
     setState(() => _searchExpanded = true);
     refreshShellHeader();
     WidgetsBinding.instance.addPostFrameCallback(
@@ -244,6 +252,8 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
 
   void _onSearchChanged(String value) {
     if (_tabIndex == 1) {
+      // Timeline ignores the query — the field is locked out while it's active.
+      if (ref.read(catalogProvider).chubTimelineActive) return;
       // Discover: debounce the provider query (same 400ms as the Vue header).
       _catalogDebounce?.cancel();
       _catalogDebounce = Timer(const Duration(milliseconds: 400), () {
@@ -262,6 +272,8 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   void _applySearchForActiveTab() {
     final text = _searchCtrl.text;
     if (_tabIndex == 1) {
+      // Timeline ignores the query — leave its results untouched.
+      if (ref.read(catalogProvider).chubTimelineActive) return;
       _catalogDebounce?.cancel();
       final notifier = ref.read(catalogProvider.notifier);
       notifier.setQuery(text.trim());
@@ -421,6 +433,17 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
         setState(() => _switchTab(0));
       }
       refreshShellHeader();
+    });
+
+    // Selecting Chub's Timeline feed locks the query out. If it lands while the
+    // Discover search is open, close it; either way republish the header so the
+    // loupe disables in step.
+    ref.listen(catalogProvider.select((s) => s.chubTimelineActive), (_, active) {
+      if (active && _tabIndex == 1 && _searchExpanded) {
+        _closeSearch();
+      } else {
+        refreshShellHeader();
+      }
     });
 
     // With the catalog hidden the Discover tab can't be reached, so the body

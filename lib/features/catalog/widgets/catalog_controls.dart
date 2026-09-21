@@ -55,6 +55,7 @@ class CatalogControls extends ConsumerWidget {
           'first_published': 'catalog_sort_datacat_first_published'.tr(),
         },
         CatalogProvider.chub => {
+          'timeline': 'catalog_sort_chub_timeline'.tr(),
           'popular': 'catalog_sort_chub_popular'.tr(),
           'trending_week': 'catalog_sort_chub_trending_week'.tr(),
           'trending_24h': 'catalog_sort_chub_trending_24h'.tr(),
@@ -145,6 +146,7 @@ class CatalogControls extends ConsumerWidget {
     'first_published': Icons.event_available_rounded,
     'rating': Icons.thumb_up_rounded,
     'updated': Icons.update_rounded,
+    'timeline': Icons.timeline_rounded,
   };
 
   static IconData sortIconForKey(String key) =>
@@ -216,6 +218,7 @@ class CatalogControls extends ConsumerWidget {
             builder: (_) => CatalogFilterSheet(
               filters: state.filters,
               provider: state.activeProvider,
+              timelineMode: state.chubTimelineActive,
               onApply: (f) => notifier.setFilters(f),
               onBlockedTagsChanged: () => notifier.search(reset: true),
             ),

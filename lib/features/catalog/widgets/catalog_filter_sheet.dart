@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/filter_sheet.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../catalog_models.dart';
@@ -18,6 +19,12 @@ class CatalogFilterSheet extends ConsumerStatefulWidget {
   final CatalogProvider provider;
   final ValueChanged<CatalogFilters> onApply;
 
+  /// Chub's "Timeline" feed is served by its own endpoint that only consumes
+  /// `nsfw` and `nsfl`; every other catalog filter is ignored. When set, the
+  /// sheet hides those controls and shows a hint instead of leaving a wall of
+  /// switches that would silently do nothing.
+  final bool timelineMode;
+
   /// Called after the JanitorAI account block list is PATCHed (blocked tags or
   /// keywords changed), so the catalog list can be reloaded to reflect it.
   final VoidCallback? onBlockedTagsChanged;
@@ -27,6 +34,7 @@ class CatalogFilterSheet extends ConsumerStatefulWidget {
     required this.filters,
     required this.provider,
     required this.onApply,
+    this.timelineMode = false,
     this.onBlockedTagsChanged,
   });
 
@@ -91,7 +99,7 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
     _selectedTagIds = Set.from(widget.filters.tagIds);
     _selectedTagNames = Set.from(widget.filters.tagNames);
 
-    _loadTags();
+    if (!widget.timelineMode) _loadTags();
     if (_janitorBlockTagsEnabled) _loadBlockedTags();
   }
 
@@ -378,6 +386,7 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final timelineMode = widget.timelineMode;
     return FilterSheet(
       title: 'catalog_filters'.tr(),
       sections: [
@@ -393,47 +402,84 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
             onChanged: _onNsflToggle,
             isDanger: true,
           ),
-        // DataCat's Client API filters by text, tags, sort and paging only —
-        // there are no token bounds to send. Showing the slider anyway would
-        // be a control that silently does nothing.
-        if (CatalogControls.supportsTokenRange(widget.provider))
-          FilterRangeSection(
-            title: 'catalog_token_range'.tr(),
-            minLabel: 'catalog_min'.tr(),
-            maxLabel: 'catalog_max'.tr(),
-            min: _minTokens,
-            max: _maxTokens,
-            onMinChanged: (v) => setState(() => _minTokens = v),
-            onMaxChanged: (v) => setState(() => _maxTokens = v),
+        // Timeline's endpoint consumes only `nsfw`/`nsfl`; every other control
+        // would silently do nothing, so it is replaced by a hint.
+        if (timelineMode)
+          const FilterCustomSection(child: _TimelineFiltersHint())
+        else ...[
+          // DataCat's Client API filters by text, tags, sort and paging only —
+          // there are no token bounds to send. Showing the slider anyway would
+          // be a control that silently does nothing.
+          if (CatalogControls.supportsTokenRange(widget.provider))
+            FilterRangeSection(
+              title: 'catalog_token_range'.tr(),
+              minLabel: 'catalog_min'.tr(),
+              maxLabel: 'catalog_max'.tr(),
+              min: _minTokens,
+              max: _maxTokens,
+              onMinChanged: (v) => setState(() => _minTokens = v),
+              onMaxChanged: (v) => setState(() => _maxTokens = v),
+            ),
+          if (widget.provider == CatalogProvider.chub) ..._chubFilterSections(),
+          FilterTagsSection(
+            title: 'catalog_tags'.tr(),
+            searchHint: 'catalog_search_tags'.tr(),
+            tags: [for (final t in _allTags) FilterTag(id: t.id, name: t.name)],
+            selectedIds: _selectedTagIds,
+            selectedNames: _selectedTagNames,
+            onToggle: _toggleTag,
+            onClear: _clearTags,
+            // JanitorAI: `/hampter/tags` only covers the curated tags searched by
+            // id. Custom tags are free text (`custom_tags[]`), so they come from
+            // the same `/tags/suggest` autocomplete the block list uses, and the
+            // raw query can be searched verbatim.
+            fetchSuggestions: _isJanitor ? fetchJanitorTagSuggestions : null,
+            allowCustomTags: _isJanitor,
           ),
-        if (widget.provider == CatalogProvider.chub) ..._chubFilterSections(),
-        FilterTagsSection(
-          title: 'catalog_tags'.tr(),
-          searchHint: 'catalog_search_tags'.tr(),
-          tags: [for (final t in _allTags) FilterTag(id: t.id, name: t.name)],
-          selectedIds: _selectedTagIds,
-          selectedNames: _selectedTagNames,
-          onToggle: _toggleTag,
-          onClear: _clearTags,
-          // JanitorAI: `/hampter/tags` only covers the curated tags searched by
-          // id. Custom tags are free text (`custom_tags[]`), so they come from
-          // the same `/tags/suggest` autocomplete the block list uses, and the
-          // raw query can be searched verbatim.
-          fetchSuggestions: _isJanitor ? fetchJanitorTagSuggestions : null,
-          allowCustomTags: _isJanitor,
+          if (_blockList != null)
+            FilterCustomSection(
+              child: JanitorBlockedContentSection(
+                allTags: _allTags,
+                blockedTagIds: _blockedTagIds,
+                blockedKeywords: _blockedKeywords,
+                onToggleTag: _toggleBlockedTag,
+                onAddKeyword: _addBlockedKeyword,
+                onRemoveKeyword: _removeBlockedKeyword,
+                onClear: _clearBlockedContent,
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Explains why the filter sheet is nearly empty while Chub's Timeline feed is
+/// selected: the feed's endpoint only reads `nsfw`/`nsfl`.
+class _TimelineFiltersHint extends StatelessWidget {
+  const _TimelineFiltersHint();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          Icons.info_outline_rounded,
+          size: 16,
+          color: context.cs.onSurfaceVariant,
         ),
-        if (_blockList != null)
-          FilterCustomSection(
-            child: JanitorBlockedContentSection(
-              allTags: _allTags,
-              blockedTagIds: _blockedTagIds,
-              blockedKeywords: _blockedKeywords,
-              onToggleTag: _toggleBlockedTag,
-              onAddKeyword: _addBlockedKeyword,
-              onRemoveKeyword: _removeBlockedKeyword,
-              onClear: _clearBlockedContent,
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'catalog_chub_timeline_no_filters'.tr(),
+            style: TextStyle(
+              fontSize: 13,
+              color: context.cs.onSurfaceVariant,
+              height: 1.35,
             ),
           ),
+        ),
       ],
     );
   }
