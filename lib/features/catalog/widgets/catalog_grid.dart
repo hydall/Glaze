@@ -228,7 +228,12 @@ class CatalogGrid extends ConsumerWidget {
                 ),
               ),
             ),
-          if (state.activeProvider != CatalogProvider.janny && state.activeProvider != CatalogProvider.chub)
+          // DataCat's listings carry no total at all — only `hasMore` and a
+          // cursor — so a count row here would read "0 results" over a full
+          // grid. Janny and Chub opt out for their own reasons.
+          if (state.activeProvider != CatalogProvider.janny &&
+              state.activeProvider != CatalogProvider.chub &&
+              state.activeProvider != CatalogProvider.datacat)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),

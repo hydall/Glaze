@@ -114,7 +114,13 @@ Future<T> _leased<T>(
       leases.noteUsed(characterId);
       return result;
     } on DatacatApiException catch (e) {
-      if (!e.verificationRequired && !e.isForbidden) rethrow;
+      // A refused transfer answers 428 with `verificationRequired`. The 403 is
+      // for a lease the server has retired — but an unapproved or revoked
+      // client id reports *that* as a 403 too, and re-verifying could not fix
+      // it: it would put a challenge in front of the user for nothing.
+      final leaseRefused =
+          e.verificationRequired || (e.isForbidden && !e.isClientNotApproved);
+      if (!leaseRefused) rethrow;
       leases.invalidate();
     }
   }

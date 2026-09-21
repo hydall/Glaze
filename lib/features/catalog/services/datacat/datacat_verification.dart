@@ -1,18 +1,27 @@
 import 'dart:async';
 
 import 'datacat_client.dart';
+import 'datacat_discovery.dart';
 import 'datacat_errors.dart';
 import 'datacat_models.dart';
 
-/// The action a transfer lease is issued for. Currently the only one.
+/// The action a transfer lease is issued for, when the server does not say.
 ///
 /// The vendored contract in `docs/external/` spells it `character_transfer`,
-/// but the live deployment rejects that with "Unsupported verification action.
-/// Use \"character-import\"." — the document is behind the server. The value the
-/// server names is the one that has actually been observed to work, so it wins;
-/// omitting the field instead would rely on the same stale document's claim
-/// that it is optional.
+/// and the live deployment answers that with a 400: `INVALID_VERIFICATION_ACTION`,
+/// "Unsupported verification action. Use \"character-import\"." The document is
+/// behind the server, so this is only the floor — the value actually sent is
+/// whatever `/capabilities` advertises, which is the one thing that survived
+/// the rename.
 const datacatTransferAction = 'character-import';
+
+/// The action this deployment wants, falling back to [datacatTransferAction].
+Future<String> datacatVerificationAction() async {
+  final caps = await datacatCapabilities();
+  return caps.verificationActions.isEmpty
+      ? datacatTransferAction
+      : caps.verificationActions.first;
+}
 
 /// How many distinct characters one lease covers when the server does not say.
 /// The live figure arrives as `maxUniqueCharacters` on the lease itself.
@@ -89,12 +98,12 @@ class DatacatLeaseStore {
 /// page. Doing the Turnstile exchange directly would mean shipping the site key
 /// handling and the widget, and the contract says integrations should open the
 /// hosted URL instead.
-Future<DatacatDeviceFlow> startDatacatVerification({
-  String action = datacatTransferAction,
-}) async {
+Future<DatacatDeviceFlow> startDatacatVerification({String? action}) async {
   final data = await datacatPost(
     '/verifications',
-    body: await datacatDeviceBody({'action': action}),
+    body: await datacatDeviceBody({
+      'action': action ?? await datacatVerificationAction(),
+    }),
   );
   final flow = DatacatDeviceFlow.fromJson(data);
   if (flow.id.isEmpty || flow.uri.isEmpty) {
@@ -151,17 +160,13 @@ Future<String> awaitDatacatLease(
       if (token.isEmpty) continue;
       leases.store(
         token,
-        // The lease states an absolute expiry, not a duration. A clock that
-        // cannot parse it is not a reason to treat the lease as immortal, so
-        // it falls back to the shortest sensible life.
-        DateTime.tryParse(datacatString(data['expiresAt']))?.toLocal() ??
-            DateTime.now().add(const Duration(minutes: 5)),
+        await _leaseExpiry(data),
         maxUniqueCharacters: datacatInt(data['maxUniqueCharacters']),
       );
       return token;
     } on DatacatApiException catch (e) {
       // Not solved yet — keep waiting. Anything else is final.
-      if (e.isConflict) continue;
+      if (e.isPending) continue;
       rethrow;
     }
   }
@@ -170,4 +175,24 @@ Future<String> awaitDatacatLease(
     status: 410,
     message: 'The verification challenge expired',
   );
+}
+
+/// When the lease in [data] runs out.
+///
+/// The contract states an absolute `expiresAt`, and that is preferred. The
+/// success body has never actually been observed — the verification sweep could
+/// not solve the Turnstile — so a `expiresIn` duration is accepted too, and a
+/// body carrying neither falls back to the lifetime the deployment advertises
+/// (half an hour, not the five-minute stub this used to assume).
+Future<DateTime> _leaseExpiry(Map<String, dynamic> data) async {
+  final absolute = DateTime.tryParse(datacatString(data['expiresAt']));
+  if (absolute != null) return absolute.toLocal();
+
+  final seconds = datacatInt(data['expiresIn']);
+  if (seconds != null && seconds > 0) {
+    return DateTime.now().add(Duration(seconds: seconds));
+  }
+
+  final caps = await datacatCapabilities();
+  return DateTime.now().add(caps.leaseTtl);
 }

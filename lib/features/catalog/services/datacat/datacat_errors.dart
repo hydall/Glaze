@@ -28,8 +28,8 @@ class DatacatApiException implements Exception {
   /// flow and asking again.
   final bool verificationRequired;
 
-  /// The `action` the verification challenge must be started with (normally
-  /// `character_transfer`), when the server named one.
+  /// The `action` the verification challenge must be started with (currently
+  /// `character-import`), when the server named one.
   final String? verificationAction;
 
   /// Where this installation stands with DataCat, when the failure mentioned
@@ -62,9 +62,22 @@ class DatacatApiException implements Exception {
   /// or a character/creator that is not there (404).
   bool get isGone => status == 404 || status == 410;
 
-  /// Whether the flow is not in the state this call needs (409) — e.g. a token
-  /// exchange for a link the user has not approved yet.
-  bool get isConflict => status == 409;
+  /// Whether the flow is not in the state this call needs, so the answer is to
+  /// wait and ask again — a token exchange for a link the user has not approved
+  /// yet, or for a challenge they have not solved.
+  ///
+  /// The contract describes this as a 409. The live deployment answers an
+  /// unsolved challenge's token exchange with **428** `VERIFICATION_PENDING`
+  /// instead, which a 409-only check reads as fatal: the poll gives up on a
+  /// challenge the user is in the middle of solving. Both are accepted.
+  bool get isPending => status == 409 || status == 428;
+
+  /// Whether this integration's client id is not approved, or was revoked.
+  ///
+  /// Reported as a 403, the same status a refused transfer uses, so a caller
+  /// that answers 403 by verifying again would put a challenge in front of the
+  /// user that cannot possibly help.
+  bool get isClientNotApproved => code == 'CLIENT_API_CLIENT_NOT_APPROVED';
 
   bool get isRateLimited => status == 429;
 

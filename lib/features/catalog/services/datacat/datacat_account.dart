@@ -126,7 +126,9 @@ Future<DatacatAccountStatus> awaitDatacatLink(
         scopes: scopes ?? const [],
       );
     } on DatacatApiException catch (e) {
-      if (e.isConflict) continue;
+      // Not approved yet — keep waiting. The contract calls this a 409; the
+      // live server uses 428 for the sibling verification flow, so both count.
+      if (e.isPending) continue;
       rethrow;
     }
   }

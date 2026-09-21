@@ -23,8 +23,11 @@ List<Map<String, dynamic>> _maps(Object? v) => v is List
 /// Largest `offset` any listing endpoint accepts, from the parameter schema.
 const datacatMaxOffset = 200000;
 
-/// Bounds the `/tags` and creator endpoints declare for their page sizes.
-const datacatMaxTagLimit = 250;
+/// Bounds the `/tags` and creator endpoints enforce on their page sizes.
+/// The parameter schema says 250; the live deployment clamps to 240 and
+/// reports that back as `paging.limit`. Asking for the real ceiling keeps the
+/// request and the response describing the same page.
+const datacatMaxTagLimit = 240;
 const datacatMaxCreatorLimit = 50;
 
 /// Where a page sits in a result set.
@@ -158,6 +161,18 @@ class DatacatCapabilities {
   /// challenge on this deployment.
   final bool securityCheckEnabled;
 
+  /// The verification actions this deployment will start a challenge for.
+  ///
+  /// Worth reading rather than hard-coding: the contract documents the value as
+  /// `character_transfer`, the live server answers that with a 400 and names
+  /// `character-import` instead, and the only thing that stayed true through
+  /// the rename is that the server advertises the legal values here.
+  final List<String> verificationActions;
+
+  /// How long an issued lease lives. Only used as the fallback when a lease
+  /// arrives without a readable expiry of its own.
+  final Duration leaseTtl;
+
   const DatacatCapabilities({
     this.defaultPageSize = 24,
     this.maxPageSize = 24,
@@ -165,6 +180,8 @@ class DatacatCapabilities {
     this.tagBrowsing = true,
     this.social = true,
     this.securityCheckEnabled = true,
+    this.verificationActions = const [],
+    this.leaseTtl = const Duration(minutes: 30),
   });
 
   factory DatacatCapabilities.fromJson(Map<String, dynamic> json) {
@@ -174,6 +191,11 @@ class DatacatCapabilities {
     bool feature(String name) =>
         features[name] is bool ? features[name] as bool : true;
     final maxPageSize = _int(paging['maxPageSize']) ?? 24;
+    // The deployment lists the actions under both names; either will do.
+    final actions = securityCheck['actions'] is List
+        ? securityCheck['actions'] as List
+        : (_map(json['verification'])['actions'] as List? ?? const []);
+    final leaseSeconds = _int(securityCheck['leaseTtlSeconds']);
     return DatacatCapabilities(
       defaultPageSize: _int(paging['defaultPageSize']) ?? maxPageSize,
       maxPageSize: maxPageSize,
@@ -181,6 +203,13 @@ class DatacatCapabilities {
       tagBrowsing: feature('tagBrowsing'),
       social: feature('social'),
       securityCheckEnabled: securityCheck['enabled'] != false,
+      verificationActions: actions
+          .map(_str)
+          .where((a) => a.isNotEmpty)
+          .toList(),
+      leaseTtl: leaseSeconds == null || leaseSeconds <= 0
+          ? const Duration(minutes: 30)
+          : Duration(seconds: leaseSeconds),
     );
   }
 }
@@ -296,7 +325,13 @@ class DatacatAccountStatus {
     this.scopes = const [],
   });
 
-  bool get linked => accountState.isNotEmpty && accountState != 'unlinked';
+  /// The two states that mean this installation is bound to something.
+  ///
+  /// Named rather than defined as "anything but `unlinked`": a rate-limit body
+  /// from the live server reports `accountState: "anonymous"`, which the
+  /// open-ended test read as linked and would have kept a dead token on.
+  bool get linked =>
+      accountState == 'linked_anonymous' || accountState == 'logged_in';
   bool get loggedIn => accountState == 'logged_in';
 
   factory DatacatAccountStatus.fromJson(

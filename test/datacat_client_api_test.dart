@@ -9,6 +9,7 @@ import 'package:glaze_flutter/features/catalog/services/datacat/datacat_cards.da
 import 'package:glaze_flutter/features/catalog/services/datacat/datacat_client.dart';
 import 'package:glaze_flutter/features/catalog/services/datacat/datacat_discovery.dart';
 import 'package:glaze_flutter/features/catalog/services/datacat/datacat_errors.dart';
+import 'package:glaze_flutter/features/catalog/services/datacat/datacat_models.dart';
 import 'package:glaze_flutter/features/catalog/services/datacat/datacat_sort.dart';
 import 'package:glaze_flutter/features/catalog/services/datacat/datacat_verification.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -88,6 +89,16 @@ const _capabilities =
     '"features":{"listing":true,"tagBrowsing":true,"social":true},'
     '"paging":{"defaultPageSize":24,"maxPageSize":24},'
     '"securityCheck":{"enabled":true,"hosted":true}}';
+
+/// `/capabilities` as the live deployment answers it: the documented fields
+/// plus the advertised verification actions and lease lifetime.
+const _liveCapabilities =
+    '{"success":true,"apiVersion":"v1",'
+    '"features":{"listing":true,"tagBrowsing":true,"social":true},'
+    '"paging":{"defaultPageSize":24,"maxPageSize":24},'
+    '"securityCheck":{"enabled":true,"hosted":true,'
+    '"actions":["character-import"],"leaseTtlSeconds":1800,'
+    '"maxUniqueCharacters":20}}';
 
 String? _header(RequestOptions options, String name) =>
     options.headers[name]?.toString();
@@ -558,6 +569,151 @@ void main() {
           isA<DatacatApiException>().having((e) => e.status, 'status', 502),
         ),
       );
+    });
+  });
+
+  group('the live deployment is not the vendored contract', () {
+    test('the challenge is started with the action capabilities advertises',
+        () async {
+      // The contract says `character_transfer`; the server rejects that and
+      // names its own. Reading the list is what survives the next rename.
+      final adapter = _ScriptedAdapter((options, index) {
+        if (options.uri.path.endsWith('/capabilities')) {
+          return (
+            status: 200,
+            body: _liveCapabilities.replaceFirst(
+              '"character-import"',
+              '"renamed-again"',
+            ),
+          );
+        }
+        return (
+          status: 201,
+          body: _json({
+            'verificationId': 'v-1',
+            'deviceCode': 'secret',
+            'verificationUriComplete': 'https://datacat.run/client-verify?id=v-1',
+            'expiresIn': 300,
+            'interval': 3,
+          }),
+        );
+      });
+      setCatalogHttpAdapter(adapter);
+
+      await startDatacatVerification();
+
+      final started = adapter.requests.last;
+      expect(started.uri.path, endsWith('/verifications'));
+      expect(jsonDecode(started.data as String)['action'], 'renamed-again');
+    });
+
+    test('an unsolved challenge answers 428, and the poll keeps waiting',
+        () async {
+      // The contract documents 409. Live uses 428 VERIFICATION_PENDING, which a
+      // 409-only check reads as fatal and throws the user's solve away.
+      final adapter = _ScriptedAdapter((options, index) {
+        if (options.uri.path.endsWith('/capabilities')) {
+          return (status: 200, body: _liveCapabilities);
+        }
+        if (index == 0) {
+          return (
+            status: 428,
+            body: _json({
+              'success': false,
+              'error': 'VERIFICATION_PENDING',
+              'message': 'Waiting for the DataCat security check.',
+            }),
+          );
+        }
+        return (
+          status: 200,
+          body: _json({
+            'success': true,
+            'leaseToken': 'dcv1v_lease',
+            'expiresAt': DateTime.now()
+                .add(const Duration(minutes: 30))
+                .toUtc()
+                .toIso8601String(),
+            'maxUniqueCharacters': 20,
+          }),
+        );
+      });
+      setCatalogHttpAdapter(adapter);
+
+      final lease = await awaitDatacatLease(
+        const DatacatDeviceFlow(
+          id: 'v-1',
+          deviceCode: 'secret',
+          uri: 'https://datacat.run/client-verify?id=v-1',
+          interval: Duration(milliseconds: 5),
+        ),
+      );
+
+      expect(lease, 'dcv1v_lease');
+      expect(DatacatLeaseStore.instance.leaseFor('char-1'), 'dcv1v_lease');
+    });
+
+    test('a lease that states a duration rather than an instant still lives',
+        () async {
+      // The success body was never observed against live, so both spellings
+      // have to work — reading neither would leave the lease a 5-minute stub.
+      final adapter = _ScriptedAdapter((options, index) {
+        if (options.uri.path.endsWith('/capabilities')) {
+          return (status: 200, body: _liveCapabilities);
+        }
+        return (
+          status: 200,
+          body: _json({'leaseToken': 'dcv1v_lease', 'expiresIn': 1800}),
+        );
+      });
+      setCatalogHttpAdapter(adapter);
+
+      await awaitDatacatLease(
+        const DatacatDeviceFlow(
+          id: 'v-1',
+          deviceCode: 'secret',
+          uri: 'https://datacat.run/client-verify?id=v-1',
+          interval: Duration(milliseconds: 5),
+        ),
+      );
+
+      expect(DatacatLeaseStore.instance.leaseFor('char-1'), 'dcv1v_lease');
+    });
+
+    test('a revoked client id is not answered by verifying again', () async {
+      // Live reports an unapproved client id as a 403 — the same status a
+      // retired lease uses. Only one of the two is worth a challenge.
+      DatacatLeaseStore.instance.store(
+        'dcv1v_stale',
+        DateTime.now().add(const Duration(minutes: 30)),
+      );
+      final adapter = _serve(
+        (options, index) => (
+          status: 403,
+          body: _json({
+            'success': false,
+            'error': 'CLIENT_API_CLIENT_NOT_APPROVED',
+            'message': 'This client is not approved or has been revoked.',
+          }),
+        ),
+      );
+      setCatalogHttpAdapter(adapter);
+
+      var asked = false;
+      await expectLater(
+        datacatFetchCard(
+          'char-1',
+          obtainLease: () async {
+            asked = true;
+            return 'dcv1v_fresh';
+          },
+        ),
+        throwsA(
+          isA<DatacatApiException>()
+              .having((e) => e.isClientNotApproved, 'clientNotApproved', true),
+        ),
+      );
+      expect(asked, isFalse);
     });
   });
 }
