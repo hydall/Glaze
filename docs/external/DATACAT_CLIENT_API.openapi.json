@@ -1,0 +1,562 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DataCat Client API",
+    "version": "1.0.0-experimental",
+    "description": "Versioned API for character discovery, card transfers, creator browsing, account linking, verification, and community activity. Additive fields may be introduced during v1; clients should ignore fields they do not recognize."
+  },
+  "servers": [
+    { "url": "https://datacat.run/api/client/v1", "description": "Production" }
+  ],
+  "security": [{ "ClientId": [] }],
+  "tags": [
+    { "name": "Discovery" },
+    { "name": "Creators" },
+    { "name": "Characters and files" },
+    { "name": "Community" },
+    { "name": "Account linking" },
+    { "name": "Human verification" }
+  ],
+  "paths": {
+    "/capabilities": {
+      "get": {
+        "tags": ["Discovery"],
+        "summary": "Inspect enabled API capabilities and limits",
+        "description": "Use this at client startup to discover enabled features, paging limits, registration requirements, rate-limit tiers, and hosted verification settings without hard-coding deployment configuration.",
+        "security": [],
+        "responses": {
+          "200": { "description": "Current Client API capabilities", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CapabilitiesResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/characters": {
+      "get": {
+        "tags": ["Discovery"],
+        "summary": "Search and browse public characters",
+        "description": "Returns filtered pages of public character summaries for discovery grids, search results, tag-filtered catalogs, and selecting a character before loading its full profile.",
+        "parameters": [
+          { "$ref": "#/components/parameters/Search" },
+          { "name": "tagIds", "in": "query", "schema": { "type": "string" }, "description": "Comma-separated required integer tag IDs; at most 24." },
+          { "name": "blockedTagIds", "in": "query", "schema": { "type": "string" }, "description": "Comma-separated excluded integer tag IDs; at most 50." },
+          { "$ref": "#/components/parameters/CharacterSort" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": { "description": "Page of character summaries", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CharacterListResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/fresh": {
+      "get": {
+        "tags": ["Discovery"],
+        "summary": "Load daily and weekly Fresh-feed windows",
+        "description": "Returns independent last-24-hours and this-week character windows for new-release feeds that show immediate arrivals alongside a broader weekly stream.",
+        "parameters": [
+          { "$ref": "#/components/parameters/Limit" },
+          { "name": "offset24", "in": "query", "schema": { "type": "integer", "minimum": 0, "maximum": 200000, "default": 0 } },
+          { "name": "offsetWeek", "in": "query", "schema": { "type": "integer", "minimum": 0, "maximum": 200000, "default": 0 } },
+          { "$ref": "#/components/parameters/CharacterSort" }
+        ],
+        "responses": {
+          "200": { "description": "Fresh-feed windows", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FreshResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/tags": {
+      "get": {
+        "tags": ["Discovery"],
+        "summary": "Browse faceted tags",
+        "description": "Returns tag groups and counts calculated against current filters so clients can build tag pickers whose available choices stay relevant as a catalog is narrowed.",
+        "parameters": [
+          { "name": "activeTagIds", "in": "query", "schema": { "type": "string" }, "description": "Comma-separated active integer tag IDs." },
+          { "name": "blockedTagIds", "in": "query", "schema": { "type": "string" }, "description": "Comma-separated excluded integer tag IDs." },
+          { "$ref": "#/components/parameters/Search" },
+          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["count", "alpha"], "default": "count" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 20, "maximum": 250, "default": 120 } },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": { "description": "Faceted tag rows and groups", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TagListResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/creators/{creatorRef}/bootstrap": {
+      "get": {
+        "tags": ["Creators"],
+        "summary": "Load creator metadata and the first character page",
+        "description": "Returns a creator profile and its first filtered character page together, reducing the request waterfall when opening a creator screen.",
+        "parameters": [
+          { "$ref": "#/components/parameters/CreatorRef" },
+          { "$ref": "#/components/parameters/CreatorTagSlugs" },
+          { "$ref": "#/components/parameters/CreatorBlockedTagSlugs" },
+          { "$ref": "#/components/parameters/CreatorSort" },
+          { "$ref": "#/components/parameters/SortDirection" },
+          { "$ref": "#/components/parameters/CreatorLimit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": { "description": "Creator profile and character page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreatorBootstrapResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/creators/{creatorRef}/characters": {
+      "get": {
+        "tags": ["Creators"],
+        "summary": "Page through a creator's characters",
+        "description": "Returns filtered character pages without repeating profile metadata, supporting infinite scroll and subsequent sort or tag changes on an open creator screen.",
+        "parameters": [
+          { "$ref": "#/components/parameters/CreatorRef" },
+          { "$ref": "#/components/parameters/CreatorTagSlugs" },
+          { "$ref": "#/components/parameters/CreatorBlockedTagSlugs" },
+          { "$ref": "#/components/parameters/CreatorSort" },
+          { "$ref": "#/components/parameters/SortDirection" },
+          { "$ref": "#/components/parameters/CreatorLimit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": { "description": "Creator character page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreatorCharactersResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/characters/{characterId}": {
+      "get": {
+        "tags": ["Characters and files"],
+        "summary": "Load a full public character profile",
+        "description": "Returns full public metadata, description text, tags, custom tags, and creator notes for detail screens and suitability checks before protected file transfers.",
+        "parameters": [{ "$ref": "#/components/parameters/CharacterId" }, { "$ref": "#/components/parameters/SourceKind" }],
+        "responses": {
+          "200": { "description": "Character profile", "content": { "application/json": { "schema": { "type": "object", "required": ["success", "character"], "properties": { "success": { "const": true }, "character": { "$ref": "#/components/schemas/CharacterProfile" } } } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/characters/{characterId}/avatar-preview": {
+      "get": {
+        "tags": ["Characters and files"],
+        "summary": "Stream a public direct-upload preview image",
+        "description": "Streams a mirrored direct-upload image for thumbnails and profile previews without consuming a protected character-file transfer allowance.",
+        "security": [],
+        "parameters": [{ "$ref": "#/components/parameters/CharacterId" }, { "$ref": "#/components/parameters/SourceKind" }],
+        "responses": {
+          "200": { "description": "Mirrored image body", "content": { "image/avif": {}, "image/gif": {}, "image/jpeg": {}, "image/png": {}, "image/webp": {} } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/characters/{characterId}/card": {
+      "get": {
+        "tags": ["Characters and files"],
+        "summary": "Download Character Card V2 JSON",
+        "description": "Returns an importable Character Card V2 definition after authorization, verification, and creator-policy checks for use in compatible chat clients or portable backups.",
+        "security": [{ "ClientId": [], "VerificationLease": [] }, { "ClientId": [], "BearerAuth": [], "VerificationLease": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/CharacterId" }, { "$ref": "#/components/parameters/SourceKind" }],
+        "responses": {
+          "200": { "description": "Character Card V2 document", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CharacterCardV2" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/characters/{characterId}/avatar": {
+      "get": {
+        "tags": ["Characters and files"],
+        "summary": "Download a protected mirrored character image",
+        "description": "Streams the archived character image after authorization, verification, and creator-policy checks so integrations can save the visual asset alongside card JSON.",
+        "security": [{ "ClientId": [], "VerificationLease": [] }, { "ClientId": [], "BearerAuth": [], "VerificationLease": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/CharacterId" }, { "$ref": "#/components/parameters/SourceKind" }],
+        "responses": {
+          "200": { "description": "Mirrored image body", "content": { "image/avif": {}, "image/gif": {}, "image/jpeg": {}, "image/png": {}, "image/webp": {} } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/characters/{characterId}/community": {
+      "get": {
+        "tags": ["Community"],
+        "summary": "Read character kudos and comments",
+        "description": "Returns kudos totals and choices, paged comments, and viewer interaction state for presenting the DataCat community thread inside an integration.",
+        "parameters": [
+          { "$ref": "#/components/parameters/CharacterId" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 40 } },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": { "description": "Community thread", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommunityResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/characters/{characterId}/community/kudos": {
+      "post": {
+        "tags": ["Community"],
+        "summary": "Give kudos as a linked logged-in user",
+        "description": "Creates a kudos reaction using an advertised gift key, allowing an authenticated DataCat user to react without leaving the client.",
+        "security": [{ "ClientId": [], "BearerAuth": [], "InstallationId": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/CharacterId" }],
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "type": "object", "properties": { "giftKey": { "type": "string", "maxLength": 40, "default": "kudos" } } } } } },
+        "responses": {
+          "201": { "description": "Kudos created and refreshed community returned", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommunityWriteResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/characters/{characterId}/community/comments": {
+      "post": {
+        "tags": ["Community"],
+        "summary": "Post a comment as a linked logged-in user",
+        "description": "Creates a plain-text community comment and returns the refreshed thread so approved integrations can provide an in-client discussion flow.",
+        "security": [{ "ClientId": [], "BearerAuth": [], "InstallationId": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/CharacterId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["body"], "properties": { "body": { "type": "string", "minLength": 1, "maxLength": 4000 } } } } } },
+        "responses": {
+          "201": { "description": "Comment created and refreshed community returned", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CommunityWriteResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/account-links": {
+      "post": {
+        "tags": ["Account linking"],
+        "summary": "Start a device account-link flow",
+        "description": "Creates a short-lived browser authorization request so a desktop app, extension, or device can connect a DataCat account without collecting the user's site credentials.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountLinkCreateRequest" } } } },
+        "responses": {
+          "201": { "description": "Short-lived account-link request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountLinkCreateResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/account-links/approve": {
+      "post": {
+        "tags": ["Account linking"],
+        "summary": "Approve a user code from the hosted DataCat page",
+        "description": "Browser-owned route. Requires a same-site X-Session-Token rather than a Client API bearer token.",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["userCode"], "properties": { "userCode": { "type": "string" }, "requireAccount": { "type": "boolean", "default": false }, "forceAnonymous": { "type": "boolean", "default": false } } } } } },
+        "responses": {
+          "200": { "description": "Approval state", "content": { "application/json": { "schema": { "type": "object", "required": ["success", "approval"], "properties": { "success": { "const": true }, "approval": { "type": "object", "additionalProperties": true } } } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/account-links/{linkId}/token": {
+      "post": {
+        "tags": ["Account linking"],
+        "summary": "Exchange an approved link for a bearer token",
+        "description": "Poll this after browser approval to receive the installation-bound bearer token used for later account-aware and community requests.",
+        "parameters": [{ "$ref": "#/components/parameters/LinkId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["deviceCode", "installationId"], "properties": { "deviceCode": { "type": "string" }, "installationId": { "$ref": "#/components/schemas/InstallationId" } } } } } },
+        "responses": {
+          "200": { "description": "Installation-bound bearer token", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountTokenResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/account-links/{linkId}/browser-session": {
+      "post": {
+        "tags": ["Account linking"],
+        "summary": "Activate a same-origin DataCat browser session",
+        "description": "Reserved for an authorized first-party client on the DataCat origin.",
+        "parameters": [{ "$ref": "#/components/parameters/LinkId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["deviceCode", "installationId"], "properties": { "deviceCode": { "type": "string" }, "installationId": { "$ref": "#/components/schemas/InstallationId" } } } } } },
+        "responses": {
+          "200": { "description": "DataCat browser session", "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/account": {
+      "get": {
+        "tags": ["Account linking"],
+        "summary": "Read the account represented by a bearer token",
+        "description": "Returns the linked account and client metadata so an integration can show who is connected and which scopes and expiry apply.",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Linked account and client metadata", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "delete": {
+        "tags": ["Account linking"],
+        "summary": "Revoke the current linked token",
+        "description": "Invalidates the supplied bearer token server-side for a complete Disconnect DataCat action rather than only removing a local credential copy.",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "204": { "description": "Token revoked; no response body" },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/account/status": {
+      "get": {
+        "tags": ["Account linking"],
+        "summary": "Check linkage and account-aware rate tier",
+        "description": "Returns current account state, installation binding, and rate tier for lightweight connection checks and sign-in or limit messaging.",
+        "responses": {
+          "200": { "description": "Account-link status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountStatusResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/verifications": {
+      "post": {
+        "tags": ["Human verification"],
+        "summary": "Start hosted verification for protected transfers",
+        "description": "Creates a short-lived hosted human-verification challenge used to obtain the lease required before downloading protected card JSON or archived images.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VerificationCreateRequest" } } } },
+        "responses": {
+          "201": { "description": "Short-lived verification challenge", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VerificationCreateResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/verifications/{verificationId}": {
+      "get": {
+        "tags": ["Human verification"],
+        "summary": "Read public verification status",
+        "description": "Returns challenge state and hosted widget metadata for presenting or polling the DataCat verification page while a transfer challenge is pending.",
+        "security": [],
+        "parameters": [{ "$ref": "#/components/parameters/VerificationId" }],
+        "responses": {
+          "200": { "description": "Verification status and hosted widget metadata", "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/verifications/{verificationId}/complete": {
+      "post": {
+        "tags": ["Human verification"],
+        "summary": "Complete a hosted Turnstile challenge",
+        "description": "Validates the hosted Turnstile response and marks the challenge verified; third-party clients normally open the supplied hosted URL rather than call this route directly.",
+        "security": [],
+        "parameters": [{ "$ref": "#/components/parameters/VerificationId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["turnstileToken"], "properties": { "turnstileToken": { "type": "string" } } } } } },
+        "responses": {
+          "200": { "description": "Verified challenge", "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/verifications/{verificationId}/token": {
+      "post": {
+        "tags": ["Human verification"],
+        "summary": "Exchange a verified challenge for a transfer lease",
+        "description": "Returns the short-lived lease header value required by protected card and avatar endpoints after a human-verification challenge succeeds.",
+        "parameters": [{ "$ref": "#/components/parameters/VerificationId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["deviceCode", "installationId"], "properties": { "deviceCode": { "type": "string" }, "installationId": { "$ref": "#/components/schemas/InstallationId" } } } } } },
+        "responses": {
+          "200": { "description": "Short-lived transfer lease", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VerificationLeaseResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ClientId": { "type": "apiKey", "in": "header", "name": "X-Datacat-Client-Id", "description": "Public identifier assigned to an approved integration." },
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Developer token (dca1_) or linked-installation token (dcv1_)." },
+      "InstallationId": { "type": "apiKey", "in": "header", "name": "X-Datacat-Installation-Id" },
+      "VerificationLease": { "type": "apiKey", "in": "header", "name": "X-Datacat-Verification-Lease" }
+    },
+    "parameters": {
+      "CharacterId": { "name": "characterId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+      "CreatorRef": { "name": "creatorRef", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Creator UUID, or saucepan: followed by a creator UUID." },
+      "LinkId": { "name": "linkId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+      "VerificationId": { "name": "verificationId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+      "SourceKind": { "name": "sourceKind", "in": "query", "schema": { "type": "string", "enum": ["janitor", "janitor_core", "jannyai", "saucepan", "direct_upload"] } },
+      "Search": { "name": "search", "in": "query", "schema": { "type": "string", "maxLength": 120 } },
+      "Limit": { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "default": 24 }, "description": "Capped by capabilities.paging.maxPageSize." },
+      "CreatorLimit": { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 24 } },
+      "Offset": { "name": "offset", "in": "query", "schema": { "type": "integer", "minimum": 0, "maximum": 200000, "default": 0 } },
+      "CharacterSort": { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["fresh", "score", "chat_count", "messages_per_chat", "first_published"], "default": "fresh" } },
+      "CreatorSort": { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["creation_date", "chat_count", "message_count", "name"], "default": "creation_date" } },
+      "SortDirection": { "name": "sortDir", "in": "query", "schema": { "type": "string", "enum": ["asc", "desc"], "default": "desc" } },
+      "CreatorTagSlugs": { "name": "tagSlugs", "in": "query", "schema": { "type": "string" }, "description": "Comma-separated required tag slugs; at most 24." },
+      "CreatorBlockedTagSlugs": { "name": "blockedTagSlugs", "in": "query", "schema": { "type": "string" }, "description": "Comma-separated excluded tag slugs; at most 50." }
+    },
+    "responses": {
+      "Error": {
+        "description": "Client API error",
+        "headers": {
+          "Retry-After": { "schema": { "type": "integer" }, "description": "Seconds to wait after a 429 response." },
+          "X-RateLimit-Limit": { "schema": { "type": "integer" } },
+          "X-RateLimit-Remaining": { "schema": { "type": "integer" } },
+          "X-RateLimit-Reset": { "schema": { "type": "integer" } }
+        },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+      }
+    },
+    "schemas": {
+      "InstallationId": { "type": "string", "minLength": 16, "maxLength": 160, "pattern": "^[A-Za-z0-9._:-]+$" },
+      "Paging": {
+        "type": "object",
+        "required": ["limit", "offset", "hasMore", "nextOffset"],
+        "properties": {
+          "limit": { "type": "integer" },
+          "offset": { "type": "integer" },
+          "total": { "type": "integer" },
+          "totalCount": { "type": "integer" },
+          "hasMore": { "type": "boolean" },
+          "nextOffset": { "type": ["integer", "null"] }
+        }
+      },
+      "CharacterSummary": {
+        "type": "object",
+        "required": ["id", "name", "creator", "description", "tags", "image", "sourceKind", "nsfw", "stats"],
+        "properties": {
+          "id": { "type": ["string", "null"], "format": "uuid" },
+          "name": { "type": "string" },
+          "chatName": { "type": ["string", "null"] },
+          "creator": {
+            "type": "object",
+            "required": ["id", "ref", "sourceKind", "name"],
+            "properties": {
+              "id": { "type": ["string", "null"] },
+              "ref": { "type": ["string", "null"] },
+              "sourceKind": { "type": "string" },
+              "name": { "type": "string" }
+            }
+          },
+          "description": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "image": { "type": "object", "required": ["status", "url"], "properties": { "status": { "type": "string", "enum": ["ready", "pending"] }, "url": { "type": ["string", "null"], "format": "uri" } } },
+          "avatarUrl": { "type": ["string", "null"], "format": "uri" },
+          "clientPaths": { "type": ["object", "null"], "additionalProperties": { "type": ["string", "null"] } },
+          "sourceKind": { "type": "string" },
+          "nsfw": { "type": "boolean" },
+          "stats": { "type": "object", "required": ["chats", "messages", "messagesPerChat"], "properties": { "chats": { "type": "number" }, "messages": { "type": "number" }, "messagesPerChat": { "type": ["number", "null"] } } },
+          "totalTokens": { "type": ["number", "null"] },
+          "score": { "type": ["number", "null"] },
+          "publishedAt": { "type": ["string", "null"], "format": "date-time" },
+          "updatedAt": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "CharacterProfile": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CharacterSummary" },
+          { "type": "object", "required": ["customTags", "creatorNotes"], "properties": { "customTags": { "type": "array", "items": {} }, "creatorNotes": { "type": "string" } } }
+        ]
+      },
+      "CharacterListResponse": {
+        "type": "object",
+        "required": ["success", "characters", "paging", "filters"],
+        "properties": {
+          "success": { "const": true },
+          "characters": { "type": "array", "items": { "$ref": "#/components/schemas/CharacterSummary" } },
+          "paging": { "$ref": "#/components/schemas/Paging" },
+          "filters": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "FreshCharacterSummary": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CharacterSummary" },
+          { "type": "object", "properties": { "freshAt": { "type": ["string", "null"], "format": "date-time" }, "firstDiscoveredAt": { "type": ["string", "null"], "format": "date-time" }, "spottedBy": { "type": ["object", "null"], "properties": { "username": { "type": "string" } } } } }
+        ]
+      },
+      "FreshResponse": {
+        "type": "object",
+        "required": ["success", "sortBy", "windows"],
+        "properties": {
+          "success": { "const": true },
+          "sortBy": { "type": "string" },
+          "windows": {
+            "type": "object",
+            "additionalProperties": { "type": "object", "required": ["count", "characters", "paging"], "properties": { "count": { "type": "integer" }, "characters": { "type": "array", "items": { "$ref": "#/components/schemas/FreshCharacterSummary" } }, "paging": { "$ref": "#/components/schemas/Paging" } } }
+          }
+        }
+      },
+      "TagListResponse": {
+        "type": "object",
+        "required": ["success", "groups", "tags", "filters", "paging"],
+        "properties": {
+          "success": { "const": true },
+          "groups": { "type": "array", "items": { "type": "object", "required": ["id", "name", "slug", "displayOrder", "exclusive"], "properties": { "id": { "type": "integer" }, "name": { "type": "string" }, "slug": { "type": "string" }, "displayOrder": { "type": "integer" }, "exclusive": { "type": "boolean" } } } },
+          "tags": { "type": "array", "items": { "type": "object", "required": ["id", "name", "slug", "groupId", "count"], "properties": { "id": { "type": "integer" }, "name": { "type": "string" }, "slug": { "type": "string" }, "groupId": { "type": ["integer", "null"] }, "count": { "type": "integer" } } } },
+          "filters": { "type": "object", "additionalProperties": true },
+          "paging": { "$ref": "#/components/schemas/Paging" }
+        }
+      },
+      "CreatorProfile": {
+        "type": "object",
+        "required": ["id", "ref", "sourceKind", "name", "verified", "stats", "topTags"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "ref": { "type": "string" },
+          "sourceKind": { "type": "string", "enum": ["janitor", "saucepan"] },
+          "name": { "type": "string" },
+          "handle": { "type": ["string", "null"] },
+          "avatarUrl": { "type": ["string", "null"], "format": "uri" },
+          "about": { "type": "string" },
+          "verified": { "type": "boolean" },
+          "stats": { "type": "object", "additionalProperties": { "type": "number" } },
+          "topTags": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+          "createdAt": { "type": ["string", "null"], "format": "date-time" },
+          "updatedAt": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "CreatorBootstrapResponse": {
+        "type": "object",
+        "required": ["success", "creatorRef", "creator", "characters", "paging", "filters"],
+        "properties": {
+          "success": { "const": true },
+          "creatorRef": { "type": "object", "additionalProperties": true },
+          "creator": { "$ref": "#/components/schemas/CreatorProfile" },
+          "characters": { "type": "array", "items": { "$ref": "#/components/schemas/CharacterSummary" } },
+          "paging": { "$ref": "#/components/schemas/Paging" },
+          "filters": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "CreatorCharactersResponse": {
+        "type": "object",
+        "required": ["success", "creatorRef", "creator", "characters", "paging", "filters"],
+        "properties": {
+          "success": { "const": true },
+          "creatorRef": { "type": "object", "additionalProperties": true },
+          "creator": { "type": "null" },
+          "characters": { "type": "array", "items": { "$ref": "#/components/schemas/CharacterSummary" } },
+          "paging": { "$ref": "#/components/schemas/Paging" },
+          "filters": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "CharacterCardV2": {
+        "type": "object",
+        "required": ["spec", "spec_version", "data"],
+        "properties": {
+          "spec": { "const": "chara_card_v2" },
+          "spec_version": { "type": "string" },
+          "data": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": true
+      },
+      "Community": {
+        "type": "object",
+        "required": ["characterId", "kudos", "comments", "canInteract"],
+        "properties": {
+          "characterId": { "type": "string", "format": "uuid" },
+          "kudos": { "type": "object", "additionalProperties": true },
+          "comments": { "type": "object", "additionalProperties": true },
+          "canInteract": { "type": "boolean" }
+        }
+      },
+      "CommunityResponse": { "type": "object", "required": ["success", "community"], "properties": { "success": { "const": true }, "community": { "$ref": "#/components/schemas/Community" } } },
+      "CommunityWriteResponse": { "type": "object", "required": ["success", "community", "replyId"], "properties": { "success": { "const": true }, "community": { "$ref": "#/components/schemas/Community" }, "replyId": { "type": ["string", "null"] }, "credits": { "type": ["object", "null"], "additionalProperties": true } } },
+      "Account": { "type": ["object", "null"], "properties": { "uuid": { "type": ["string", "null"], "format": "uuid" }, "username": { "type": ["string", "null"] }, "displayName": { "type": ["string", "null"] }, "userType": { "type": ["string", "null"] } } },
+      "AccountLinkCreateRequest": { "type": "object", "required": ["installationId"], "properties": { "installationId": { "$ref": "#/components/schemas/InstallationId" }, "clientName": { "type": "string" }, "clientVersion": { "type": "string" } } },
+      "AccountLinkCreateResponse": { "type": "object", "required": ["success", "linkId", "deviceCode", "userCode", "authorizationUri", "authorizationUriComplete", "expiresIn", "interval"], "properties": { "success": { "const": true }, "linkId": { "type": "string", "format": "uuid" }, "deviceCode": { "type": "string" }, "userCode": { "type": "string" }, "authorizationUri": { "type": "string", "format": "uri" }, "authorizationUriComplete": { "type": "string", "format": "uri" }, "verificationUri": { "type": "string", "format": "uri", "deprecated": true }, "verificationUriComplete": { "type": "string", "format": "uri", "deprecated": true }, "expiresIn": { "type": "integer" }, "interval": { "type": "integer" } } },
+      "AccountTokenResponse": { "type": "object", "required": ["success", "accessToken", "tokenType", "scopes", "accountState", "account"], "properties": { "success": { "const": true }, "accessToken": { "type": "string" }, "tokenType": { "const": "Bearer" }, "scopes": { "type": "array", "items": { "type": "string" } }, "expiresAt": { "type": ["string", "null"], "format": "date-time" }, "accountState": { "type": "string", "enum": ["logged_in", "linked_anonymous"] }, "account": { "$ref": "#/components/schemas/Account" } } },
+      "AccountResponse": { "type": "object", "required": ["success", "accountState", "account", "client"], "properties": { "success": { "const": true }, "accountState": { "type": "string" }, "account": { "$ref": "#/components/schemas/Account" }, "client": { "type": "object", "additionalProperties": true } } },
+      "AccountStatusResponse": { "type": "object", "required": ["success", "accountState", "account", "installation", "rateLimit", "securityCheck"], "properties": { "success": { "const": true }, "accountState": { "type": "string", "enum": ["unlinked", "linked_anonymous", "logged_in"] }, "account": { "$ref": "#/components/schemas/Account" }, "installation": { "type": "object", "additionalProperties": true }, "rateLimit": { "type": "object", "additionalProperties": true }, "securityCheck": { "type": "object", "additionalProperties": true } } },
+      "VerificationCreateRequest": { "type": "object", "required": ["installationId"], "properties": { "installationId": { "$ref": "#/components/schemas/InstallationId" }, "clientName": { "type": "string" }, "clientVersion": { "type": "string" }, "action": { "const": "character_transfer" } } },
+      "VerificationCreateResponse": { "type": "object", "required": ["success", "verificationId", "deviceCode", "verificationUri", "verificationUriComplete", "expiresIn", "interval", "action"], "properties": { "success": { "const": true }, "verificationId": { "type": "string", "format": "uuid" }, "deviceCode": { "type": "string" }, "verificationUri": { "type": "string", "format": "uri" }, "verificationUriComplete": { "type": "string", "format": "uri" }, "expiresIn": { "type": "integer" }, "interval": { "type": "integer" }, "action": { "const": "character_transfer" } } },
+      "VerificationLeaseResponse": { "type": "object", "required": ["success", "leaseToken", "tokenType", "leaseHeader", "action", "expiresAt"], "properties": { "success": { "const": true }, "leaseToken": { "type": "string" }, "tokenType": { "const": "DataCat-Verification" }, "leaseHeader": { "const": "X-Datacat-Verification-Lease" }, "action": { "const": "character_transfer" }, "expiresAt": { "type": "string", "format": "date-time" }, "maxUniqueCharacters": { "type": "integer" } } },
+      "CapabilitiesResponse": { "type": "object", "required": ["success", "apiVersion", "clientRegistration", "features", "paging", "rateLimiting", "securityCheck", "verification"], "properties": { "success": { "const": true }, "apiVersion": { "const": "v1" }, "clientRegistration": { "type": "object", "additionalProperties": true }, "features": { "type": "object", "additionalProperties": { "type": "boolean" } }, "paging": { "type": "object", "additionalProperties": true }, "rateLimiting": { "type": "object", "additionalProperties": true }, "securityCheck": { "type": "object", "additionalProperties": true }, "verification": { "type": "object", "additionalProperties": true } } },
+      "ErrorResponse": { "type": "object", "required": ["success", "error", "message"], "properties": { "success": { "const": false }, "error": { "type": "string" }, "message": { "type": "string" }, "accountState": { "type": "string" }, "verificationRequired": { "type": "boolean" }, "securityCheckRequired": { "type": "boolean" }, "verificationReason": { "type": "string" }, "verification": { "type": "object", "additionalProperties": true }, "securityCheck": { "type": "object", "additionalProperties": true } } }
+    }
+  }
+}

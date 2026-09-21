@@ -14,7 +14,8 @@ import '../../../core/state/shared_prefs_provider.dart';
 import '../../../core/utils/error_format.dart';
 import 'catalog_models.dart';
 import 'chub_account_provider.dart';
-import 'services/datacat_provider.dart';
+import 'services/datacat/datacat_discovery.dart';
+import 'services/datacat/datacat_sort.dart';
 import 'services/janitor_provider.dart';
 import 'services/janitor_public_lorebook.dart';
 import 'services/janny_provider.dart';
@@ -34,7 +35,7 @@ String _filtersKeyFor(CatalogProvider p) => '${_filtersKey}_${p.name}';
 const providerSortDefaults = <CatalogProvider, String>{
   CatalogProvider.janitor: 'trending',
   CatalogProvider.janny: 'newest',
-  CatalogProvider.datacat: 'recent',
+  CatalogProvider.datacat: 'fresh',
   CatalogProvider.chub: 'popular',
 };
 
@@ -49,6 +50,10 @@ class CatalogState {
   final CatalogProvider activeProvider;
   final CatalogFilters filters;
 
+  /// Where the next page starts, for a provider that pages by cursor rather
+  /// than by page number. Reset with the results.
+  final int nextOffset;
+
   const CatalogState({
     this.results = const [],
     this.loading = false,
@@ -59,6 +64,7 @@ class CatalogState {
     this.total = 0,
     this.activeProvider = CatalogProvider.janitor,
     this.filters = const CatalogFilters(),
+    this.nextOffset = 0,
   });
 
   CatalogState copyWith({
@@ -71,6 +77,7 @@ class CatalogState {
     int? total,
     CatalogProvider? activeProvider,
     CatalogFilters? filters,
+    int? nextOffset,
   }) {
     return CatalogState(
       results: results ?? this.results,
@@ -82,6 +89,7 @@ class CatalogState {
       total: total ?? this.total,
       activeProvider: activeProvider ?? this.activeProvider,
       filters: filters ?? this.filters,
+      nextOffset: nextOffset ?? this.nextOffset,
     );
   }
 }
@@ -180,7 +188,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     _savedStateApplied = true;
     state = state.copyWith(
       activeProvider: provider,
-      filters: savedFilters.copyWith(sort: savedSort),
+      filters: _migrated(provider, savedFilters.copyWith(sort: savedSort)),
     );
     await search(reset: true);
   }
@@ -222,11 +230,23 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
           inclusiveOr: json['inclusiveOr'] as bool? ?? false,
           minAiRating: json['minAiRating'] as int? ?? 0,
           minTags: json['minTags'] as int? ?? 0,
+          window: json['window'] as String? ?? 'all',
         );
       }
     } catch (_) {}
     return const CatalogFilters();
   }
+
+  /// Rewrites a restored DataCat sort that predates the Client API.
+  ///
+  /// The old keys folded a sort field and a time window into one label
+  /// (`score_week`); the API takes them as two parameters. Translating on
+  /// restore rather than on every request means the migration happens once and
+  /// the persisted value is the new shape from then on.
+  CatalogFilters _migrated(CatalogProvider provider, CatalogFilters filters) =>
+      provider == CatalogProvider.datacat
+          ? DatacatSort.migrate(filters)
+          : filters;
 
   Future<void> _saveState() async {
     final prefs = await _ref.read(sharedPreferencesProvider.future);
@@ -255,6 +275,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         'inclusiveOr': state.filters.inclusiveOr,
         'minAiRating': state.filters.minAiRating,
         'minTags': state.filters.minTags,
+        'window': state.filters.window,
       }),
     );
   }
@@ -278,7 +299,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     final savedFilters = _loadFilters(prefs, provider);
     state = state.copyWith(
       activeProvider: provider,
-      filters: savedFilters.copyWith(sort: savedSort),
+      filters: _migrated(provider, savedFilters.copyWith(sort: savedSort)),
     );
     unawaited(_saveState());
     unawaited(search(reset: true));
@@ -286,6 +307,16 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
 
   void setSort(String sort) {
     state = state.copyWith(filters: state.filters.copyWith(sort: sort));
+    _saveState();
+    search(reset: true);
+  }
+
+  /// Changes the time window a listing is scoped to. Its own action rather
+  /// than part of [setFilters] because it reads as a sort choice to the user
+  /// and lives next to the sort chip, not in the filter sheet.
+  void setWindow(String window) {
+    if (window == state.filters.window) return;
+    state = state.copyWith(filters: state.filters.copyWith(window: window));
     _saveState();
     search(reset: true);
   }
@@ -310,7 +341,13 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     final epoch = ++_searchEpoch;
 
     if (reset) {
-      state = state.copyWith(page: 1, results: [], hasMore: true, error: null);
+      state = state.copyWith(
+        page: 1,
+        results: [],
+        hasMore: true,
+        error: null,
+        nextOffset: 0,
+      );
     }
 
     if (!state.hasMore) return;
@@ -339,6 +376,8 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
             (items.isNotEmpty &&
                 (state.results.length + items.length) < (result.total)),
         page: state.page + 1,
+        nextOffset:
+            result.nextOffset ?? state.nextOffset + items.length,
         loading: false,
       );
     } catch (e) {
@@ -364,19 +403,13 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
           filters: state.filters,
         );
       case CatalogProvider.datacat:
-        // No session probe first: every DataCat call now re-establishes the
-        // session itself when the server rejects the token, so the extra
-        // round-trip this used to make before each page bought nothing.
-        if (state.query.isNotEmpty) {
-          return datacatSearch(
-            query: state.query,
-            page: state.page,
-            limit: _pageSize,
-            filters: state.filters,
-          );
-        }
-        return datacatBrowse(
-          page: state.page,
+        // Browse and search are the same endpoint now — an empty query is
+        // simply an unfiltered listing — so there is no second code path to
+        // drift out of sync. Paged by the server's own cursor rather than by
+        // multiplying the page number, because DataCat filters after paging.
+        return datacatFetchCharacters(
+          query: state.query,
+          offset: state.nextOffset,
           limit: _pageSize,
           filters: state.filters,
         );
@@ -410,7 +443,18 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     final charData = downloaded.charData;
 
     String? avatarPath;
-    if (downloaded.avatarUrl != null) {
+    // A source whose image endpoint needs the same credentials as the card
+    // hands the bytes over with it — they cannot be re-fetched from a bare URL
+    // afterwards, so they are saved rather than re-downloaded.
+    final carriedBytes = downloaded.avatarBytes;
+    if (carriedBytes != null && carriedBytes.isNotEmpty) {
+      try {
+        avatarPath = await imageStorage.saveAvatar(
+          id,
+          Uint8List.fromList(carriedBytes),
+        );
+      } catch (_) {}
+    } else if (downloaded.avatarUrl != null) {
       try {
         final bytes = await _fetchImageBytes(downloaded.avatarUrl!);
         avatarPath = await imageStorage.saveAvatar(id, bytes);
@@ -492,7 +536,9 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   void resetFilters() {
     final defaultSort =
         providerSortDefaults[state.activeProvider] ?? 'trending';
-    state = state.copyWith(filters: CatalogFilters(sort: defaultSort));
+    state = state.copyWith(
+      filters: CatalogFilters(sort: defaultSort),
+    );
     _saveState();
     search(reset: true);
   }

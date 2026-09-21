@@ -18,6 +18,7 @@ import '../services/chub_provider.dart';
 // JanitorExtractor's, so the DataCat name is hidden to keep it unambiguous.
 import '../services/datacat_provider.dart' hide ExtractionResult;
 import '../services/janitor_extractor.dart';
+import '../services/datacat/datacat_cards.dart';
 import '../services/janitor_provider.dart';
 import '../services/janitor_public_lorebook.dart';
 import '../services/janitor_webview_proxy.dart';
@@ -25,6 +26,9 @@ import '../services/janny_provider.dart';
 import 'janitor_login_sheet.dart';
 import 'janitor_lorebook_capture_sheet.dart';
 import 'janitor_refused_sheet.dart';
+import 'datacat/datacat_community_section.dart';
+import 'datacat/datacat_creator_screen.dart';
+import 'datacat/datacat_verification_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
 
 /// Thrown when a JanitorAI card could be read from neither source because its
@@ -96,7 +100,7 @@ class _CatalogDetailLauncherState
         case CatalogProvider.janny:
           result = await jannyFetchCharacter(widget.item.id, widget.item.slug);
         case CatalogProvider.datacat:
-          result = await datacatGetCharacter(widget.item.id);
+          result = await _fetchDatacatCard();
         case CatalogProvider.chub:
           result = await chubGetCharacter(
             widget.item.fullPath ?? widget.item.id,
@@ -109,6 +113,22 @@ class _CatalogDetailLauncherState
     } catch (e) {
       if (mounted) setState(() => _error = formatError(e));
     }
+  }
+
+  /// The DataCat card, through the Client API's protected transfer.
+  ///
+  /// Needs a human-verification lease, which is why the preview asks for one
+  /// here rather than at import time: a card that cannot be transferred is a
+  /// card there is nothing to preview of, and finding that out after the user
+  /// has read the page and pressed Import is worse. One lease covers twenty
+  /// characters, so browsing a few in a row verifies once.
+  Future<DownloadedCharacter> _fetchDatacatCard() {
+    return datacatFetchCard(
+      widget.item.id,
+      sourceKind: widget.item.sourceKind,
+      obtainLease: () =>
+          ensureDatacatLease(context, characterId: widget.item.id),
+    );
   }
 
   /// The JanitorAI card, from whichever source "Load character cards with"
@@ -514,12 +534,36 @@ class _CatalogDetailLauncherState
           : null,
       // JanitorAI previews get a Lorebooks tab (public + closed lorebooks).
       janitorLorebookArgs: _lorebookArgs,
+      datacatCommunityArgs: _communityArgs,
+      onOpenCreator: _openCreator,
       onImport: _doImport,
       onBeforeImport: _confirmImportPossible,
       importing: _importing,
       importPhase: _importPhase,
     );
   }
+
+  /// The creator's own screen, for a source that has one.
+  ///
+  /// DataCat addresses creators by `ref`, not by the raw id — a Saucepan
+  /// creator's ref carries a `saucepan:` prefix — so a row without one has no
+  /// page to open and the author line stays plain text.
+  VoidCallback? get _openCreator {
+    if (widget.provider != CatalogProvider.datacat) return null;
+    final ref = widget.item.creatorRef;
+    if (ref == null || ref.isEmpty) return null;
+    return () => openDatacatCreatorScreen(
+      context,
+      creatorRef: ref,
+      creatorName: widget.item.creator,
+    );
+  }
+
+  /// Kudos and comments, for a source that exposes them.
+  DatacatCommunityArgs? get _communityArgs =>
+      widget.provider == CatalogProvider.datacat
+      ? DatacatCommunityArgs(characterId: widget.item.id)
+      : null;
 
   /// External URL of the character's page on its source site. Only Janitor
   /// exposes a stable per-character web URL today; other providers return null

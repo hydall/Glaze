@@ -360,6 +360,20 @@ lib/
 │   ├── personas/                     # Persona UI screens + provider
 │   ├── backup/                       # Backup UI screen + provider
 │   ├── catalog/                      # Character discovery: UI + provider + API services
+│   │   ├── services/datacat/         # DataCat Client API (v1): discovery, cards, creators, community, account
+│   │   │                             # Contract vendored at docs/external/DATACAT_CLIENT_API{.md,.openapi.json}
+│   │   │   ├── datacat_client.dart   # Base URL, client id, installation id, headers, request wrappers
+│   │   │   ├── datacat_errors.dart   # Structured API failures (code, message, verification instructions)
+│   │   │   ├── datacat_models.dart   # Paging, capabilities, creator profile, kudos, device flow
+│   │   │   ├── datacat_sort.dart     # Sort field + time window, and the pre-API sort-key migration
+│   │   │   ├── datacat_discovery.dart # /capabilities, /characters, /fresh, /tags
+│   │   │   ├── datacat_cards.dart    # Leased Character Card V2 + image transfers
+│   │   │   ├── datacat_verification.dart # Hosted human verification, transfer-lease store
+│   │   │   ├── datacat_creators.dart # Creator bootstrap + paged characters
+│   │   │   ├── datacat_community.dart # Kudos and comments (read anonymous, write as linked user)
+│   │   │   └── datacat_account.dart  # Device-link flow, account status, revoke
+│   │   ├── services/datacat_provider.dart # URL extraction only — the Client API has no indexing endpoint
+│   │   └── widgets/datacat/          # Verification sheet, account link sheet, creator screen, community section
 │   ├── character_list/               # Character list/detail/editor screens + widgets
 │   ├── character_gallery/            # Gallery screen + provider
 │   ├── regex/                        # Global regex list screen

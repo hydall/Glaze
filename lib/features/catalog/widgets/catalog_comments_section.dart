@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/utils/time_formatter.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
-import '../services/janitor_provider.dart';
+import '../catalog_models.dart';
 
 const _kSurface = Color(0x0DFFFFFF);
 const _kBorderLine = Color(0x14FFFFFF);
@@ -13,20 +13,20 @@ const _kText75 = Color(0xBFFFFFFF);
 const _kText50 = Color(0x80FFFFFF);
 const _kText35 = Color(0x59FFFFFF);
 
-/// Renders a JanitorAI character's comments as a plain [Column] of cards plus a
+/// Renders a catalog character's comments as a plain [Column] of cards plus a
 /// footer that reflects the current paging state. It owns no fetching: the host
 /// (`CharacterDetailScreen`) loads pages incrementally as its scroll view nears
 /// the bottom and passes the accumulated [comments] down. The footer shows a
 /// spinner while [loading], a retry affordance on [error], an end marker once
 /// [hasMore] is false, or an empty-state when nothing was found.
-class JanitorCommentsView extends StatelessWidget {
-  final List<JanitorReview> comments;
+class CatalogCommentsView extends StatelessWidget {
+  final List<CatalogComment> comments;
   final bool loading;
   final bool hasMore;
   final Object? error;
   final VoidCallback onRetry;
 
-  const JanitorCommentsView({
+  const CatalogCommentsView({
     super.key,
     required this.comments,
     required this.loading,
@@ -140,7 +140,7 @@ class _FooterError extends StatelessWidget {
 }
 
 class _CommentCard extends StatelessWidget {
-  final JanitorReview review;
+  final CatalogComment review;
   const _CommentCard({required this.review});
 
   @override

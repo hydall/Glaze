@@ -62,6 +62,8 @@ Map<String, dynamic> _query(RequestOptions options) =>
     as Map<String, dynamic>;
 
 void main() {
+  // Only URL extraction still runs on the anonymous session token; everything
+  // else moved to the Client API (see datacat_client_api_test.dart).
   group('DataCat re-establishes a session the server has forgotten', () {
     test('the card detail recovers instead of dead-ending on 403', () async {
       SharedPreferences.setMockInitialValues({'gz_dc_token': 'stale'});
@@ -89,22 +91,24 @@ void main() {
       expect(prefs.getString('gz_dc_token'), 'fresh');
     });
 
-    test('browsing recovers on its own, with no probe request first', () async {
+    test('the avatar lookup recovers too, with no probe request first', () async {
       SharedPreferences.setMockInitialValues({'gz_dc_token': 'stale'});
       final adapter = _ScriptedAdapter((options, index) {
         if (options.path.contains('/liberator/identify')) {
           return (status: 200, body: '{"sessionToken":"fresh"}');
         }
         return _header(options, 'X-Session-Token') == 'fresh'
-            ? (status: 200, body: '{"characters":[],"totalCount":0}')
+            ? (status: 200, body: _card)
             : (status: 401, body: 'unauthorized');
       });
       setCatalogHttpAdapter(adapter);
 
-      await datacatBrowse(filters: const CatalogFilters(sort: 'recent'));
+      await datacatGetCharacterAvatar('uuid-1');
 
+      // Three requests: the real one, the re-identify, the retry. The first is
+      // the call itself — nothing is spent asking whether the token is alive.
       expect(adapter.requests, hasLength(3));
-      expect(adapter.requests.first.uri.path, '/api/characters/recent-public');
+      expect(adapter.requests.first.uri.path, '/api/characters/uuid-1');
     });
 
     test('bot protection a fresh session cannot cure is asked once', () async {

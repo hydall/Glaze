@@ -92,6 +92,30 @@ Future<String> catalogGetText(
   return res.data ?? '';
 }
 
+/// Raw bytes, for endpoints that answer with an image rather than JSON.
+///
+/// DataCat's Client API serves archived character images from an endpoint that
+/// needs the same headers as every other call (client id, transfer lease), so
+/// the bytes cannot be fetched with a bare `Dio()` the way a public avatar URL
+/// can.
+Future<List<int>> catalogGetBytes(
+  String url,
+  Map<String, String> headers,
+) async {
+  final res = await _dio.get<List<int>>(
+    url,
+    options: Options(headers: headers, responseType: ResponseType.bytes),
+  );
+  if (res.statusCode != null && res.statusCode! >= 400) {
+    throw DioException.badResponse(
+      statusCode: res.statusCode!,
+      requestOptions: res.requestOptions,
+      response: res,
+    );
+  }
+  return res.data ?? const [];
+}
+
 Future<Map<String, dynamic>> catalogPost(
   String url,
   Map<String, dynamic> body,
@@ -107,6 +131,18 @@ Future<Map<String, dynamic>> catalogPost(
     _throwHttp(res);
   }
   return _parseJson(res.data ?? '');
+}
+
+/// A DELETE whose success is the status alone. Used by endpoints that answer
+/// `204 No Content`, where parsing a body would only ever fail.
+Future<void> catalogDelete(String url, Map<String, String> headers) async {
+  final res = await _dio.delete<String>(
+    url,
+    options: Options(headers: headers, responseType: ResponseType.plain),
+  );
+  if (res.statusCode != null && res.statusCode! >= 400) {
+    _throwHttp(res);
+  }
 }
 
 Map<String, dynamic> _parseJson(String text) {
