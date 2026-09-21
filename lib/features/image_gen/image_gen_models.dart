@@ -16,6 +16,7 @@ enum ImageGenApiType {
   openrouter,
   electronhub,
   a1111,
+  novelai,
 }
 
 extension ImageGenApiTypeLabel on ImageGenApiType {
@@ -30,6 +31,7 @@ extension ImageGenApiTypeLabel on ImageGenApiType {
     ImageGenApiType.openrouter => 'OpenRouter',
     ImageGenApiType.electronhub => 'Electron Hub',
     ImageGenApiType.a1111 => 'AUTOMATIC1111 / Forge',
+    ImageGenApiType.novelai => 'NovelAI',
   };
 }
 
@@ -154,6 +156,28 @@ abstract class A1111ImageSettings with _$A1111ImageSettings {
   }) = _A1111ImageSettings;
 }
 
+/// NovelAI Image Generation connection and sampling parameters.
+@freezed
+abstract class NovelAIImageSettings with _$NovelAIImageSettings {
+  const factory NovelAIImageSettings({
+    @Default('') String apiKey,
+    @Default('') String endpoint,
+    @Default('nai-diffusion-4-5-full') String model,
+    @Default('k_euler_ancestral') String sampler,
+    @Default('karras') String noiseSchedule,
+    @Default(28) int steps,
+    @Default(5.0) double scale,
+    @Default(0.0) double cfgRescale,
+    @Default(832) int width,
+    @Default(1216) int height,
+    @Default(-1) int seed,
+    @Default('') String negativePrompt,
+    @Default('light') String ucPreset,
+    @Default(true) bool qualityToggle,
+    @Default(false) bool varietyBoost,
+  }) = _NovelAIImageSettings;
+}
+
 @freezed
 abstract class ImageGenSettings with _$ImageGenSettings {
   const factory ImageGenSettings({
@@ -195,6 +219,7 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default(OpenRouterImageSettings()) OpenRouterImageSettings openrouter,
     @Default(ElectronHubImageSettings()) ElectronHubImageSettings electronhub,
     @Default(A1111ImageSettings()) A1111ImageSettings a1111,
+    @Default(NovelAIImageSettings()) NovelAIImageSettings novelai,
     // Reference handling — shared by every provider that accepts references.
     @Default(false) bool sendCharAvatar,
     @Default(false) bool sendUserAvatar,

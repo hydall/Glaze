@@ -1327,7 +1327,7 @@ feature-local adapters to `SyncService`.
 - `image_gen_http.dart` — HTTP client for image generation APIs
 - Provider adapters: `routmy_image_provider.dart`, `openai_image_provider.dart` (also serves Electron Hub),
   `gemini_image_provider.dart`, `naistera_image_provider.dart`, `openrouter_image_provider.dart`,
-  `a1111_image_provider.dart`
+  `a1111_image_provider.dart`, `novelai_image_provider.dart`
 - UI: `widgets/image_gen_sheet.dart`, `widgets/image_content_renderer.dart`
 
 ### Image variants
@@ -1348,7 +1348,9 @@ avatar, the entries whose aliases match the prompt (or that are set to
 `always`), then the recent generated images used as context — and clips the
 result to what the active model accepts (`providerMaxReferences`). Providers
 that cannot take references at all (AUTOMATIC1111, `dall-e-3`, Naistera
-`novelai` / `grok-pro`) report 0 and the reference UI is hidden.
+`novelai` / `grok-pro`) report 0 and the reference UI is hidden. The direct
+NovelAI provider takes references as Director Tools (Character Reference)
+images, which only the V4.5 family supports.
 
 Protocol and capability tables are ported from
 [sillyimages](https://github.com/0xl0cal/sillyimages).

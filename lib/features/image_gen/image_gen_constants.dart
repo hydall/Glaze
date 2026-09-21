@@ -276,6 +276,324 @@ class ElectronHubConstants {
   static const aspectRatios = OpenAIConstants.aspectRatios;
 }
 
+/// NovelAI Image Generation (`POST {image base}/ai/generate-image`).
+///
+/// The image endpoints moved off `api.novelai.net`; the current base is
+/// `https://image.novelai.net`, documented at
+/// https://image.novelai.net/docs/index.html (spec at `docs/doc.json`).
+/// Authentication is the NovelAI persistent token sent as `Authorization:
+/// Bearer`. The response is a ZIP attachment holding the generated image(s)
+/// (or JSON when `Accept: application/json` is sent). Every table below — model
+/// ids, samplers, quality tags, undesired-content presets — mirrors the live
+/// NovelAI web client, not a third-party wrapper.
+class NovelAIConstants {
+  static const String defaultEndpoint = 'https://image.novelai.net';
+
+  static const String defaultModel = 'nai-diffusion-4-5-full';
+
+  static const models = [
+    ('nai-diffusion-5-full', 'NovelAI Diffusion V5 Full'),
+    ('nai-diffusion-5-curated', 'NovelAI Diffusion V5 Curated'),
+    ('nai-diffusion-4-5-full', 'NovelAI Diffusion V4.5 Full'),
+    ('nai-diffusion-4-5-curated', 'NovelAI Diffusion V4.5 Curated'),
+    ('nai-diffusion-4-full', 'NovelAI Diffusion V4 Full'),
+    ('nai-diffusion-4-curated-preview', 'NovelAI Diffusion V4 Curated'),
+    ('nai-diffusion-3', 'NovelAI Diffusion Anime V3'),
+    ('nai-diffusion-furry-3', 'NovelAI Diffusion Furry V3'),
+  ];
+
+  static const samplers = [
+    ('k_euler', 'Euler'),
+    ('k_euler_ancestral', 'Euler Ancestral'),
+    ('k_dpm_2', 'DPM2'),
+    ('k_dpm_2_ancestral', 'DPM2 Ancestral'),
+    ('k_dpmpp_2m', 'DPM++ 2M'),
+    ('k_dpmpp_2s_ancestral', 'DPM++ 2S Ancestral'),
+    ('k_dpmpp_sde', 'DPM++ SDE'),
+    ('ddim', 'DDIM'),
+  ];
+
+  static const noiseSchedules = ['karras', 'exponential', 'polyexponential'];
+
+  /// (label, width, height)
+  static const resolutionPresets = [
+    ('Portrait · 832x1216', 832, 1216),
+    ('Landscape · 1216x832', 1216, 832),
+    ('Square · 1024x1024', 1024, 1024),
+    ('Large portrait · 1024x1536', 1024, 1536),
+    ('Large landscape · 1536x1024', 1536, 1024),
+  ];
+
+  /// (id, label, wire index). The wire `ucPreset` is 0-3; the preset text is
+  /// merged into `negative_prompt` by the client, matching the web UI. `none`
+  /// is a UI-only choice: it sends index 0 but no preset text.
+  static const ucPresets = [
+    ('heavy', 'Heavy', 0),
+    ('light', 'Light', 1),
+    ('furry_focus', 'Furry Focus', 2),
+    ('human_focus', 'Human Focus', 3),
+  ];
+
+  /// UI id for "no undesired-content preset".
+  static const ucPresetNone = 'none';
+
+  /// Quality-tag suffix appended to the positive prompt by `qualityToggle`.
+  /// These are the exact strings the live web app's model table carries.
+  static const _qualityTags = <String, String>{
+    'nai-diffusion-5-full': 'very aesthetic, masterpiece, no text',
+    'nai-diffusion-5-curated': 'very aesthetic, masterpiece, no text',
+    'nai-diffusion-4-5-full': 'very aesthetic, masterpiece, no text',
+    'nai-diffusion-4-5-curated':
+        'very aesthetic, masterpiece, no text, -0.8::feet::, rating:general',
+    'nai-diffusion-4-full': 'no text, best quality, very aesthetic, absurdres',
+    'nai-diffusion-4-curated-preview':
+        'rating:general, best quality, very aesthetic, absurdres',
+    'nai-diffusion-3': 'best quality, amazing quality, very aesthetic, absurdres',
+    'nai-diffusion-furry-3': '{best quality}, {amazing quality}',
+  };
+
+  /// Quality tags for the selected model; unknown ids get the V5 standard set.
+  static String qualityTagsFor(String? model) =>
+      _qualityTags[normalizeModel(model)] ??
+      'very aesthetic, masterpiece, no text';
+
+  /// Appends the quality tags as a suffix, comma-separated — the web UI's
+  /// "Add Quality Tags" behaviour.
+  static String applyQualityTags(String prompt, String? model) {
+    final suffix = qualityTagsFor(model);
+    final text = prompt.trim();
+    if (suffix.isEmpty) return text;
+    return text.isEmpty ? suffix : '$text, $suffix';
+  }
+
+  // Undesired-content preset text, per model — the exact strings the live web
+  // app's preset table carries (they match https://docs.novelai.net/image/
+  // undesiredcontent). The automatic `nsfw` guard is added by
+  // [resolveNegativePrompt], not baked in here.
+  static const Map<String, String> _ucV5 = {
+    'heavy':
+        'lowres, artistic error, film grain, scan artifacts, worst quality, '
+        'bad quality, jpeg artifacts, very displeasing, chromatic aberration, '
+        'dithering, halftone, screentone, multiple views, logo, too many '
+        'watermarks, negative space, blank page',
+    'light':
+        'lowres, bad hands, bad anatomy, artistic error, sepia, white haze, '
+        'worst quality, very displeasing, jpeg artifacts, 0::ai-generated::',
+    'furry_focus':
+        '{worst quality}, distracting watermark, unfinished, bad quality, '
+        '{widescreen}, upscale, {sequence}, {{grandfathered content}}, blurred '
+        'foreground, chromatic aberration, sketch, everyone, [sketch '
+        'background], simple, [flat colors], ych (character), outline, multiple '
+        'scenes, [[horror (theme)]], comic',
+    'human_focus':
+        'lowres, artistic error, film grain, scan artifacts, worst quality, '
+        'bad quality, jpeg artifacts, very displeasing, chromatic aberration, '
+        'dithering, halftone, screentone, multiple views, logo, too many '
+        'watermarks, negative space, blank page, @_@, mismatched pupils, '
+        'glowing eyes, bad anatomy',
+  };
+
+  static const Map<String, String> _ucV45Full = {
+    'heavy':
+        'lowres, artistic error, film grain, scan artifacts, worst quality, '
+        'bad quality, jpeg artifacts, very displeasing, chromatic aberration, '
+        'dithering, halftone, screentone, multiple views, logo, too many '
+        'watermarks, negative space, blank page',
+    'light':
+        'lowres, artistic error, scan artifacts, worst quality, bad quality, '
+        'jpeg artifacts, multiple views, very displeasing, too many watermarks, '
+        'negative space, blank page',
+    'furry_focus':
+        '{worst quality}, distracting watermark, unfinished, bad quality, '
+        '{widescreen}, upscale, {sequence}, {{grandfathered content}}, blurred '
+        'foreground, chromatic aberration, sketch, everyone, [sketch '
+        'background], simple, [flat colors], ych (character), outline, multiple '
+        'scenes, [[horror (theme)]], comic',
+    'human_focus':
+        'lowres, artistic error, film grain, scan artifacts, worst quality, '
+        'bad quality, jpeg artifacts, very displeasing, chromatic aberration, '
+        'dithering, halftone, screentone, multiple views, logo, too many '
+        'watermarks, negative space, blank page, @_@, mismatched pupils, '
+        'glowing eyes, bad anatomy',
+  };
+
+  static const Map<String, String> _ucV45Curated = {
+    'heavy':
+        'blurry, lowres, upscaled, artistic error, film grain, scan artifacts, '
+        'worst quality, bad quality, jpeg artifacts, very displeasing, '
+        'chromatic aberration, halftone, multiple views, logo, too many '
+        'watermarks, negative space, blank page',
+    'light':
+        'blurry, lowres, upscaled, artistic error, scan artifacts, jpeg '
+        'artifacts, logo, too many watermarks, negative space, blank page',
+    'human_focus':
+        'blurry, lowres, upscaled, artistic error, film grain, scan artifacts, '
+        'bad anatomy, bad hands, worst quality, bad quality, jpeg artifacts, '
+        'very displeasing, chromatic aberration, halftone, multiple views, '
+        'logo, too many watermarks, @_@, mismatched pupils, glowing eyes, '
+        'negative space, blank page',
+  };
+
+  static const Map<String, String> _ucV4Full = {
+    'heavy':
+        'blurry, lowres, error, film grain, scan artifacts, worst quality, '
+        'bad quality, jpeg artifacts, very displeasing, chromatic aberration, '
+        'multiple views, logo, too many watermarks, white blank page, blank page',
+    'light':
+        'blurry, lowres, error, worst quality, bad quality, jpeg artifacts, '
+        'very displeasing, white blank page, blank page',
+  };
+
+  static const Map<String, String> _ucV4Curated = {
+    'heavy':
+        'blurry, lowres, error, film grain, scan artifacts, worst quality, '
+        'bad quality, jpeg artifacts, very displeasing, chromatic aberration, '
+        'logo, dated, signature, multiple views, gigantic breasts, white blank '
+        'page, blank page',
+    'light':
+        'blurry, lowres, error, worst quality, bad quality, jpeg artifacts, '
+        'very displeasing, logo, dated, signature, white blank page, blank page',
+  };
+
+  static const Map<String, String> _ucV3 = {
+    'heavy':
+        'lowres, {bad}, error, fewer, extra, missing, worst quality, jpeg '
+        'artifacts, bad quality, watermark, unfinished, displeasing, chromatic '
+        'aberration, signature, extra digits, artistic error, username, scan, '
+        '[abstract]',
+    'light':
+        'lowres, jpeg artifacts, worst quality, watermark, blurry, very '
+        'displeasing',
+    'human_focus':
+        'lowres, {bad}, error, fewer, extra, missing, worst quality, jpeg '
+        'artifacts, bad quality, watermark, unfinished, displeasing, chromatic '
+        'aberration, signature, extra digits, artistic error, username, scan, '
+        '[abstract], bad anatomy, bad hands, @_@, mismatched pupils, '
+        'heart-shaped pupils, glowing eyes',
+  };
+
+  static const Map<String, String> _ucFurryV3 = {
+    'heavy':
+        '{{worst quality}}, [displeasing], {unusual pupils}, guide lines, '
+        '{{unfinished}}, {bad}, url, artist name, {{tall image}}, mosaic, '
+        '{sketch page}, comic panel, impact (font), [dated], {logo}, ych, '
+        '{what}, {where is your god now}, {distorted text}, repeated text, '
+        '{floating head}, {1994}, {widescreen}, absolutely everyone, sequence, '
+        '{compression artifacts}, hard translated, {cropped}, {commissioner '
+        'name}, unknown text, high contrast',
+    'light':
+        '{worst quality}, guide lines, unfinished, bad, url, tall image, '
+        'widescreen, compression artifacts, unknown text',
+  };
+
+  static const _ucPresetText = <String, Map<String, String>>{
+    'nai-diffusion-5-full': _ucV5,
+    'nai-diffusion-5-curated': _ucV5,
+    'nai-diffusion-4-5-full': _ucV45Full,
+    'nai-diffusion-4-5-curated': _ucV45Curated,
+    'nai-diffusion-4-full': _ucV4Full,
+    'nai-diffusion-4-curated-preview': _ucV4Curated,
+    'nai-diffusion-3': _ucV3,
+    'nai-diffusion-furry-3': _ucFurryV3,
+  };
+
+  /// Preset text for a model and UI preset id, or an empty string when the
+  /// model has no such preset (or `none` is selected).
+  static String ucPresetText(String? model, String? id) {
+    final key = (id ?? '').trim();
+    if (key.isEmpty || key == ucPresetNone) return '';
+    return _ucPresetText[normalizeModel(model)]?[key] ?? '';
+  }
+
+  /// The final negative prompt, following the web UI: the selected preset is
+  /// prepended to the user's own text, and non-curated models also get an
+  /// `nsfw, ` guard unless the user already wrote it.
+  static String resolveNegativePrompt({
+    required String? model,
+    required String presetId,
+    required String userNegative,
+  }) {
+    final preset = ucPresetText(model, presetId);
+    final user = userNegative.trim();
+    var result = preset;
+    if (user.isNotEmpty) {
+      result = preset.isEmpty ? user : '$preset, $user';
+    }
+    if (preset.isNotEmpty &&
+        !_skipsNsfwGuard(model) &&
+        !user.toLowerCase().contains('nsfw')) {
+      result = 'nsfw, $result';
+    }
+    return result;
+  }
+
+  /// Curated (and safe/custom) models never receive the automatic `nsfw` guard.
+  static bool _skipsNsfwGuard(String? model) =>
+      normalizeModel(model).toLowerCase().contains('curated');
+
+  /// Character Reference (Director Tools) images accepted per request. The
+  /// feature exists only on the V4.5 family.
+  static const int maxReferences = 4;
+
+  /// Maps a per-tag aspect ratio onto a preset resolution, or null when the
+  /// ratio has no equivalent — the configured resolution is then used.
+  static (int, int)? sizeForAspect(String? aspect) {
+    switch ((aspect ?? '').trim()) {
+      case '1:1':
+        return (1024, 1024);
+      case '3:4':
+      case '2:3':
+      case '9:16':
+      case '1:2':
+      case '10:24':
+        return (832, 1216);
+      case '4:3':
+      case '3:2':
+      case '16:9':
+      case '2:1':
+      case '24:10':
+        return (1216, 832);
+      default:
+        return null;
+    }
+  }
+
+  static String normalizeModel(String? model) {
+    final trimmed = (model ?? '').trim();
+    return trimmed.isEmpty ? defaultModel : trimmed;
+  }
+
+  static String normalizeEndpoint(String? endpoint) {
+    final trimmed = (endpoint ?? '').trim().replaceFirst(RegExp(r'/+$'), '');
+    return trimmed.isEmpty ? defaultEndpoint : trimmed;
+  }
+
+  /// V4 / V4.5 / V5 models take the structured `v4_prompt` instead of a plain
+  /// `prompt` field.
+  static bool isV4(String? model) {
+    final id = normalizeModel(model).toLowerCase();
+    return id.contains('nai-diffusion-4') || id.contains('nai-diffusion-5');
+  }
+
+  static bool isV5(String? model) =>
+      normalizeModel(model).toLowerCase().contains('nai-diffusion-5');
+
+  /// Director Tools character references are V4.5 only.
+  static bool supportsReferences(String? model) =>
+      normalizeModel(model).toLowerCase().contains('nai-diffusion-4-5');
+
+  /// Integer sent as `ucPreset`; unknown ids fall back to `light`.
+  static int ucPresetIndex(String? id) {
+    final key = (id ?? '').trim();
+    for (final (presetId, _, index) in ucPresets) {
+      if (presetId == key) return index;
+    }
+    // `none` and unknown ids send 0, the value the web UI uses when no preset
+    // is chosen. The actual text is driven by the merged negative prompt.
+    return 0;
+  }
+}
+
 /// AUTOMATIC1111 / Forge / reForge (`/sdapi/v1/txt2img`).
 class A1111Constants {
   static const String defaultEndpoint = 'http://127.0.0.1:7860';

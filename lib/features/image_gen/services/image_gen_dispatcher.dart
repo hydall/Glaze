@@ -10,6 +10,7 @@ import 'a1111_image_provider.dart';
 import 'gemini_image_provider.dart';
 import 'image_prompt_builder.dart';
 import 'naistera_image_provider.dart';
+import 'novelai_image_provider.dart';
 import 'openai_image_provider.dart';
 import 'openrouter_image_provider.dart';
 import 'routmy_image_provider.dart';
@@ -142,6 +143,14 @@ class ImageGenDispatcher {
           prompt: prompt,
           cancelToken: cancelToken,
         );
+      case ImageGenApiType.novelai:
+        return NovelAIImageProvider().generate(
+          settings: settings.novelai,
+          prompt: prompt,
+          references: references,
+          instructionAspectRatio: instructionAspectRatio,
+          cancelToken: cancelToken,
+        );
     }
   }
 
@@ -151,6 +160,7 @@ class ImageGenDispatcher {
       switch (settings.apiType) {
         ImageGenApiType.naistera => settings.naisteraModel,
         ImageGenApiType.routmy => settings.routmyModel,
+        ImageGenApiType.novelai => settings.novelai.model,
         _ => settings.customModel.isEmpty
             ? settings.apiType.name
             : settings.customModel,

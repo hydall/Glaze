@@ -24,6 +24,7 @@ import '../services/naistera_image_provider.dart';
 import 'a1111_fields.dart';
 import 'connection_fields.dart';
 import 'model_fields.dart';
+import 'novelai_fields.dart';
 import 'openrouter_fields.dart';
 import 'reference_library_section.dart';
 import 'rows.dart' as rows;
@@ -93,7 +94,9 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       before.electronhub.apiKey != after.electronhub.apiKey ||
       before.electronhub.endpoint != after.electronhub.endpoint ||
       before.a1111.endpoint != after.a1111.endpoint ||
-      before.a1111.apiKey != after.a1111.apiKey;
+      before.a1111.apiKey != after.a1111.apiKey ||
+      before.novelai.endpoint != after.novelai.endpoint ||
+      before.novelai.apiKey != after.novelai.apiKey;
 
   /// Probes the provider. Only ever runs from a tap on the status badge — the
   /// sheet never reaches out on its own.
@@ -390,6 +393,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return buildElectronHubConnectionFields(s, _update);
       case ImageGenApiType.a1111:
         return buildA1111ConnectionFields(s, _update);
+      case ImageGenApiType.novelai:
+        return buildNovelAiConnectionFields(s, _update);
       case ImageGenApiType.openai:
       case ImageGenApiType.gemini:
         return buildOpenaiConnectionFields(s, _update);
@@ -473,6 +478,14 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
           onUpdate: _update,
           showOptions: showOptions,
         );
+      case ImageGenApiType.novelai:
+        return buildNovelAiModelFields(
+          s,
+          isFetching: _isFetchingModels,
+          onFetchModels: _onFetchModels,
+          onUpdate: _update,
+          showOptions: showOptions,
+        );
     }
   }
 
@@ -505,6 +518,11 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return _connectionService.fetchElectronHubModels(_settings);
       case ImageGenApiType.a1111:
         return _connectionService.fetchA1111Models(_settings);
+      case ImageGenApiType.novelai:
+        // No model-listing endpoint — the shipped catalog is the catalog.
+        return Future.value(
+          NovelAIConstants.models.map((model) => model.$1).toList(),
+        );
       case ImageGenApiType.xai:
         return _connectionService.fetchXaiModels(_settings);
       case ImageGenApiType.naistera:
@@ -538,6 +556,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     ImageGenApiType.naistera => _settings.naisteraModel == model,
     ImageGenApiType.electronhub => _settings.electronhub.model == model,
     ImageGenApiType.a1111 => _settings.a1111.model == model,
+    ImageGenApiType.novelai => _settings.novelai.model == model,
     _ => _settings.customModel == model,
   };
 
@@ -563,6 +582,12 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         _update(_settings.copyWith(xai: _settings.xai.copyWith(model: model)));
       case ImageGenApiType.naistera:
         _update(_settings.copyWith(naisteraModel: model));
+      case ImageGenApiType.novelai:
+        _update(
+          _settings.copyWith(
+            novelai: _settings.novelai.copyWith(model: model),
+          ),
+        );
       default:
         _update(_settings.copyWith(customModel: model));
     }

@@ -220,8 +220,9 @@ class ImageGenService {
       // NovelAI parses the whole prompt as tags — the [STYLE: ...] wrapper
       // would reach the sampler verbatim.
       wrapStyle:
-          !(isNaistera &&
-              NaisteraConstants.isNovelAIModel(settings.naisteraModel)),
+          !(settings.apiType == ImageGenApiType.novelai ||
+              (isNaistera &&
+                  NaisteraConstants.isNovelAIModel(settings.naisteraModel))),
     );
     if (isNaistera && settings.sendRefDescriptions) {
       finalPrompt = appendPromptBlock(
