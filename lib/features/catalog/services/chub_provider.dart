@@ -95,6 +95,20 @@ Future<CatalogSearchResult> chubSearch({
   String? apiKey,
   bool accountNsfl = false,
 }) async {
+  // "Timeline" is chub.ai's account-scoped recommendation feed, served from a
+  // separate endpoint that pages by number and ignores the free-text query and
+  // tags. The account key personalizes it; `nsfw`/`nsfl` still narrow the
+  // result set. It is exposed as a Chub sort option, mirroring the site's own
+  // sort dropdown (`special_mode=timeline`).
+  if (filters.sort == 'timeline') {
+    return _chubTimeline(
+      page: page,
+      filters: filters,
+      apiKey: apiKey,
+      accountNsfl: accountNsfl,
+    );
+  }
+
   final sortEntry = _sortMap[filters.sort] ?? _sortMap['popular']!;
   final nsfw = filters.nsfw;
   // NSFL is account-scoped on chub.ai: the public API ignores the flag, and the
@@ -141,6 +155,39 @@ Future<CatalogSearchResult> chubSearch({
     // capped at 100000 for very broad queries.
     total: (container?['count'] as int?) ?? (data['total'] as int?) ?? nodes.length,
     hasMore: (container?['cursor'] ?? data['cursor']) != null,
+  );
+}
+
+/// One page of Chub's "Timeline" recommendation feed.
+///
+/// The endpoint is `/api/timeline/v1`, not `/search`: it takes only `page`
+/// (fixed page size, no cursor in the anonymous response), uses the account key
+/// to personalize, and returns the same node shape as search — so
+/// [_normalizeNode] maps it unchanged. A page that comes back empty ends the
+/// feed; that is the same stop condition chub.ai uses (`nodes == 0`).
+Future<CatalogSearchResult> _chubTimeline({
+  required int page,
+  required CatalogFilters filters,
+  String? apiKey,
+  bool accountNsfl = false,
+}) async {
+  final nsfw = filters.nsfw;
+  final nsfl = filters.nsfl || accountNsfl;
+
+  final data = await catalogGet(
+    '$_apiBase/api/timeline/v1?page=$page&count=false&nsfw=$nsfw&nsfl=$nsfl',
+    chubHeaders(apiKey: apiKey),
+  );
+  final container = data['data'] as Map<String, dynamic>?;
+  final nodes =
+      ((container?['nodes'] ?? data['nodes']) as List?)
+          ?.cast<Map<String, dynamic>>() ??
+      [];
+
+  return CatalogSearchResult(
+    characters: nodes.map(_normalizeNode).toList(),
+    total: nodes.length,
+    hasMore: nodes.isNotEmpty,
   );
 }
 

@@ -1603,6 +1603,8 @@
   "catalog_sort_janny_tokens_asc": "Меньше всего токенов",
   "catalog_sort_janny_relevant": "По релевантности",
   "catalog_sort_datacat_fresh": "Самые свежие",
+  "catalog_sort_chub_timeline": "Лента",
+  "catalog_chub_timeline_no_filters": "Chub Timeline не поддерживает фильтры",
   "catalog_sort_chub_popular": "Популярные",
   "catalog_sort_chub_trending_week": "В тренде (Неделя)",
   "catalog_sort_chub_trending_24h": "В тренде (24ч)",

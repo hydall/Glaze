@@ -54,6 +54,12 @@ class CatalogState {
   /// than by page number. Reset with the results.
   final int nextOffset;
 
+  /// True while Chub's "Timeline" recommendation feed is selected. The feed is
+  /// served from its own endpoint that only reads `nsfw`/`nsfl`, so the UI hides
+  /// the query and the other filters while this is set.
+  bool get chubTimelineActive =>
+      activeProvider == CatalogProvider.chub && filters.sort == 'timeline';
+
   const CatalogState({
     this.results = const [],
     this.loading = false,
@@ -306,7 +312,17 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   }
 
   void setSort(String sort) {
-    state = state.copyWith(filters: state.filters.copyWith(sort: sort));
+    var filters = state.filters.copyWith(sort: sort);
+    // Timeline is a fixed recommendation feed served by its own endpoint: its
+    // query and every filter but nsfw/nsfl never reach it, so switching to it
+    // drops those selections instead of leaving dead controls lit.
+    if (sort == 'timeline') {
+      filters = _stripForTimeline(filters);
+    }
+    state = state.copyWith(
+      filters: filters,
+      query: sort == 'timeline' ? '' : state.query,
+    );
     _saveState();
     search(reset: true);
   }
@@ -322,14 +338,42 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   }
 
   void setFilters(CatalogFilters filters) {
+    // Timeline ignores everything but nsfw/nsfl; don't let stale selections ride.
+    if (state.chubTimelineActive) {
+      filters = _stripForTimeline(filters);
+    }
     state = state.copyWith(filters: filters);
     _saveState();
     search(reset: true);
   }
 
   void setQuery(String query) {
+    // The Timeline feed ignores free-text search; keep its query pinned empty.
+    if (state.chubTimelineActive) return;
     state = state.copyWith(query: query);
   }
+
+  /// The Timeline endpoint reads only `nsfw` and `nsfl`; every other field in
+  /// [CatalogFilters] is silently dropped, so reset them instead of carrying
+  /// selections the filter sheet no longer exposes.
+  CatalogFilters _stripForTimeline(CatalogFilters filters) => filters.copyWith(
+    tagIds: const [],
+    tagNames: const [],
+    excludeTagNames: const [],
+    minTokens: 29,
+    maxTokens: 100000,
+    nsfwOnly: false,
+    requireImages: false,
+    requireLore: false,
+    requireCustomPrompt: false,
+    requireExampleDialogues: false,
+    requireAlternateGreetings: false,
+    recommendedVerified: false,
+    excludeMine: false,
+    inclusiveOr: false,
+    minAiRating: 0,
+    minTags: 0,
+  );
 
   Future<void> search({bool reset = false}) async {
     // Pagination must not stack on top of an in-flight page, but a reset search

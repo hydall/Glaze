@@ -175,6 +175,63 @@ void main() {
     });
   });
 
+  group('Chub timeline feed', () {
+    test('the timeline sort hits the timeline endpoint, not search', () async {
+      final adapter = _ScriptedAdapter(
+        (_) => (
+          status: 200,
+          body:
+              '{"data":{"nodes":[{"name":"Card","fullPath":"a/card",'
+              '"topics":["NSFW","Fantasy"],"tagline":"t","nTokens":100,'
+              '"nChats":5}],"count":20}}',
+        ),
+      );
+      setCatalogHttpAdapter(adapter);
+
+      final result = await chubSearch(
+        page: 3,
+        filters: const CatalogFilters(sort: 'timeline'),
+      );
+
+      final request = adapter.requests.single;
+      expect(request.uri.path, '/api/timeline/v1');
+      expect(request.uri.queryParameters['page'], '3');
+      expect(request.uri.queryParameters['count'], 'false');
+      expect(result.characters.single.name, 'Card');
+      expect(result.hasMore, isTrue);
+    });
+
+    test('the timeline carries the account key and the nsfw filter', () async {
+      final adapter = _ScriptedAdapter(
+        (_) => (status: 200, body: '{"data":{"nodes":[]}}'),
+      );
+      setCatalogHttpAdapter(adapter);
+
+      await chubSearch(
+        apiKey: 'secret-key',
+        filters: const CatalogFilters(sort: 'timeline', nsfw: true),
+      );
+
+      final q = adapter.requests.single.uri.queryParameters;
+      expect(q['nsfw'], 'true');
+      expect(_header(adapter.requests.single, 'CH-API-KEY'), 'secret-key');
+    });
+
+    test('an empty timeline page ends the feed', () async {
+      final adapter = _ScriptedAdapter(
+        (_) => (status: 200, body: '{"data":{"nodes":[]}}'),
+      );
+      setCatalogHttpAdapter(adapter);
+
+      final result = await chubSearch(
+        filters: const CatalogFilters(sort: 'timeline'),
+      );
+
+      expect(result.characters, isEmpty);
+      expect(result.hasMore, isFalse);
+    });
+  });
+
   group('Chub account storage', () {
     test('the key and display name persist, and logout clears them', () async {
       SharedPreferences.setMockInitialValues({});
