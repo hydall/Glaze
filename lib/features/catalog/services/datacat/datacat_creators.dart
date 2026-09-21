@@ -19,8 +19,16 @@ class DatacatCreatorPage {
 }
 
 /// Opens [creatorRef] — a UUID, or `saucepan:UUID` for a Saucepan creator.
+///
+/// [filters] is applied to the rows here, not sent. The creator endpoints do
+/// take tag filters — as slugs, unlike `/characters`, which wants numeric ids
+/// and ignores slugs — but adult content is not a tag on this API: a character
+/// carries a boolean `nsfw`, and `blockedTagSlugs=nsfw` was measured to change
+/// nothing. A reader who turned NSFW off would have been shown adult
+/// characters on a creator's page and nowhere else.
 Future<DatacatCreatorPage> datacatFetchCreator(
   String creatorRef, {
+  CatalogFilters filters = const CatalogFilters(),
   List<String> tagSlugs = const [],
   List<String> blockedTagSlugs = const [],
   String sort = 'creation_date',
@@ -41,7 +49,7 @@ Future<DatacatCreatorPage> datacatFetchCreator(
 
   return DatacatCreatorPage(
     profile: DatacatCreatorProfile.fromJson(datacatMap(data['creator'])),
-    characters: _characterPage(data),
+    characters: _characterPage(data, filters),
   );
 }
 
@@ -49,6 +57,7 @@ Future<DatacatCreatorPage> datacatFetchCreator(
 Future<CatalogSearchResult> datacatFetchCreatorCharacters(
   String creatorRef, {
   required int offset,
+  CatalogFilters filters = const CatalogFilters(),
   List<String> tagSlugs = const [],
   List<String> blockedTagSlugs = const [],
   String sort = 'creation_date',
@@ -66,16 +75,22 @@ Future<CatalogSearchResult> datacatFetchCreatorCharacters(
       'offset': offset.clamp(0, datacatMaxOffset),
     },
   );
-  return _characterPage(data);
+  return _characterPage(data, filters);
 }
 
-CatalogSearchResult _characterPage(Map<String, dynamic> data) {
+CatalogSearchResult _characterPage(
+  Map<String, dynamic> data,
+  CatalogFilters filters,
+) {
   final paging = DatacatPaging.fromJson(datacatMap(data['paging']));
   final rows = datacatMaps(data['characters']);
-  return CatalogSearchResult(
-    characters: rows.map(datacatItemFromSummary).toList(),
-    total: paging.total,
-    hasMore: paging.hasMore,
-    nextOffset: paging.nextOffset ?? paging.offset + rows.length,
+  return datacatApplyClientFilters(
+    CatalogSearchResult(
+      characters: rows.map(datacatItemFromSummary).toList(),
+      total: paging.total,
+      hasMore: paging.hasMore,
+      nextOffset: paging.nextOffset ?? paging.offset + rows.length,
+    ),
+    filters,
   );
 }

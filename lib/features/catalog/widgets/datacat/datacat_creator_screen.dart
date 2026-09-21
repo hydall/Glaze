@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/widgets/glass_surface.dart';
@@ -8,6 +9,7 @@ import '../../../../shared/widgets/glaze_error_block.dart';
 import '../../../../shared/widgets/glaze_scaffold.dart';
 import '../../../../shared/widgets/glaze_spinner.dart';
 import '../../catalog_models.dart';
+import '../../catalog_provider.dart';
 import '../../services/datacat/datacat_creators.dart';
 import '../../services/datacat/datacat_models.dart';
 import '../catalog_card_grid.dart';
@@ -37,7 +39,7 @@ Future<void> openDatacatCreatorScreen(
 /// scraped site endpoints exposed none. The first page arrives with the profile
 /// in one `bootstrap` call; every page after that comes from the paged endpoint
 /// at the server's own cursor.
-class DatacatCreatorScreen extends StatefulWidget {
+class DatacatCreatorScreen extends ConsumerStatefulWidget {
   final String creatorRef;
 
   /// Shown in the header until the profile lands, so the screen is never
@@ -51,10 +53,11 @@ class DatacatCreatorScreen extends StatefulWidget {
   });
 
   @override
-  State<DatacatCreatorScreen> createState() => _DatacatCreatorScreenState();
+  ConsumerState<DatacatCreatorScreen> createState() =>
+      _DatacatCreatorScreenState();
 }
 
-class _DatacatCreatorScreenState extends State<DatacatCreatorScreen> {
+class _DatacatCreatorScreenState extends ConsumerState<DatacatCreatorScreen> {
   final _scrollController = ScrollController();
 
   DatacatCreatorProfile? _profile;
@@ -77,6 +80,12 @@ class _DatacatCreatorScreenState extends State<DatacatCreatorScreen> {
     super.dispose();
   }
 
+  /// What the reader has the catalog set to. Read rather than watched: a
+  /// filter change while this screen is open must not silently reshuffle a
+  /// grid the user is scrolling — it applies to the next page, and to the
+  /// screen the next time it is opened.
+  CatalogFilters get _filters => ref.read(catalogProvider).filters;
+
   void _onScroll() {
     if (!_scrollController.hasClients || _loading || !_hasMore) return;
     final pos = _scrollController.position;
@@ -89,7 +98,10 @@ class _DatacatCreatorScreenState extends State<DatacatCreatorScreen> {
       _error = null;
     });
     try {
-      final page = await datacatFetchCreator(widget.creatorRef);
+      final page = await datacatFetchCreator(
+        widget.creatorRef,
+        filters: _filters,
+      );
       if (!mounted) return;
       setState(() {
         _profile = page.profile;
@@ -115,6 +127,7 @@ class _DatacatCreatorScreenState extends State<DatacatCreatorScreen> {
       final page = await datacatFetchCreatorCharacters(
         widget.creatorRef,
         offset: _nextOffset,
+        filters: _filters,
       );
       if (!mounted) return;
       setState(() {

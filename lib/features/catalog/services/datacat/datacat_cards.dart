@@ -84,20 +84,6 @@ Future<List<int>> datacatFetchAvatar(
   );
 }
 
-/// A mirrored image for a public direct-upload character.
-///
-/// Public, and spends no transfer allowance — so a preview can show the real
-/// picture before the user has verified anything. Only direct-upload content
-/// has one, which is why the source kind is required rather than optional here;
-/// every other character falls back to the summary's avatar URL.
-Future<List<int>> datacatFetchAvatarPreview(
-  String characterId, {
-  String sourceKind = 'direct_upload',
-}) => datacatGetBytes(
-  '/characters/$characterId/avatar-preview',
-  query: {'sourceKind': sourceKind},
-);
-
 /// Runs [request] under a valid lease, verifying once if it needs one.
 ///
 /// The stored lease is tried first even when the store thinks it is spent, and

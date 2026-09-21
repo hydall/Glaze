@@ -169,6 +169,13 @@ Future<CatalogSearchResult> _fetchFresh({
 }
 
 /// Drops rows the reader asked not to see, for a listing the server could not
+/// filter. Shared with the creator listings, which have the same problem.
+CatalogSearchResult datacatApplyClientFilters(
+  CatalogSearchResult result,
+  CatalogFilters filters,
+) => _applyFilters(result, filters);
+
+/// Drops rows the reader asked not to see, for a listing the server could not
 /// filter.
 ///
 /// Only ever removes: adult rows when NSFW is off, and rows missing a required

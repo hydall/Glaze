@@ -39,6 +39,10 @@ Future<DatacatCommunity> datacatFetchCommunity(
 }
 
 /// Maps one DataCat comment onto the shared catalog comment.
+///
+/// The author block was measured carrying `username` and `avatarUrl` only —
+/// `displayName` is in the contract but not in any response, so the fallback
+/// below is the path every comment actually takes, not an edge case.
 CatalogComment datacatComment(Map<String, dynamic> json) {
   final author = datacatMap(json['author']);
   final username = datacatString(author['username']);

@@ -66,6 +66,15 @@ class _DatacatCommunitySectionState
     super.dispose();
   }
 
+  /// Reads the next page.
+  ///
+  /// Paged by how many comments are already on screen, not by the server's
+  /// `nextOffset`. The contract calls that cursor authoritative, and for
+  /// listings it is — but the comment thread's is not: it was measured
+  /// reporting 3 on a single-comment thread, never null even when `hasMore` is
+  /// false, and the echoed `offset` does not match the one that was asked for.
+  /// `hasMore` is the part that behaves, so it alone decides whether to ask
+  /// again.
   Future<void> _loadMore() async {
     if (_loading || !_hasMore) return;
     setState(() {
@@ -82,8 +91,7 @@ class _DatacatCommunitySectionState
         _community = community;
         _comments.addAll(community.comments.map(datacatComment));
         _hasMore = community.paging.hasMore;
-        _nextOffset =
-            community.paging.nextOffset ?? _nextOffset + community.comments.length;
+        _nextOffset = _comments.length;
         _loading = false;
       });
     } catch (e) {
@@ -103,7 +111,7 @@ class _DatacatCommunitySectionState
         ..clear()
         ..addAll(community.comments.map(datacatComment));
       _hasMore = community.paging.hasMore;
-      _nextOffset = community.paging.nextOffset ?? _comments.length;
+      _nextOffset = _comments.length;
     });
   }
 

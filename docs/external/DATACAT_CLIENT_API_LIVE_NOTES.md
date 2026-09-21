@@ -514,3 +514,92 @@ Account linking (needs a real login) was not run.
 Note on the Turnstile step for future runs: it only cleared in a **headed**
 Chromium under `xvfb` with the browser's **real** User-Agent. Headless and a
 mismatched UA both failed (`600010`).
+---
+
+# Round 3 — the remaining gaps, measured
+
+Run date: 2026-09-21. Client ID only, installation id
+`glaze-live-check-0000002`, lease obtained through headed Chromium under
+`xvfb`.
+
+Reconfirmed: every bearer-authenticated request and every protected transfer
+needs `X-Datacat-Installation-Id`. Without it the server answers
+`INVALID_CLIENT_TOKEN` (bearer) or 428 `verificationReason: "missing"` (lease).
+
+## `avatar-preview` and direct-upload characters
+
+Across 768 summaries (`/fresh` and `/characters`, all five sorts, offsets
+0–216) the `sourceKind` values were `janitor_core` (716), `saucepan` (34),
+`jannyai` (13) and `direct_upload` (5). `clientPaths.avatarPreview` is non-null
+on exactly those 5.
+
+- On a direct-upload character the endpoint is **fully public**: 200
+  `image/webp` with no lease, no installation header and no Client ID.
+- `sourceKind` is optional, but **must match if sent** — a mismatched pair is a
+  404 either way round.
+- On any non-direct-upload character it is **404 `CHARACTER_NOT_FOUND`**, with
+  or without `sourceKind`.
+
+So a speculative preview call is a 404 for 99% of the catalogue. Summaries
+already carry a working `avatarUrl`, so the app does not call this at all.
+
+## Community, populated
+
+`kudos.gifts[]` keys on `key` — same as `options[]`, not `giftKey` — with the
+tally in `count`, so merging the two lists by `key` is right.
+
+A comment item carries `id`, `body`, `createdAt`, `mine`, and an author with
+`username` and `avatarUrl`. **`displayName` is absent**, contract
+notwithstanding.
+
+`comments.paging` is **not trustworthy**: `nextOffset` is never null even when
+`hasMore` is false, reported 3 on a one-comment thread, and the echoed `offset`
+does not match the request (a `limit=1` read jumped to the last page and
+returned no items). `comments.total` can also under-count — a thread the website
+shows with 3 replies reported `total: 1`. Only `hasMore` behaves.
+
+`canInteract` was never observed true: false for an unlinked viewer, and false
+for a `linked_anonymous` bearer.
+
+## Account linking
+
+The device flow completes end to end against an **anonymous** DataCat session,
+which links as `linked_anonymous`. The logged-in half stays untested.
+
+- Before approval the token exchange answers **428 `LINK_PENDING`** with
+  `Retry-After: 3` — the same family as the verification flow.
+- The token response **does** carry `scopes`, alongside `accessToken`,
+  `accountState` and an absolute `expiresAt`. `account` is null for an anonymous
+  link.
+- `GET /account/status` has no `scopes`; `GET /account` exposes them under
+  `client.scopes`. Both need the installation header or answer 401.
+- `DELETE /account` is a 204, and status returns to `unlinked` afterwards.
+- Community writes need a **logged-in** account: an anonymous bearer is rejected
+  with 401 `CLIENT_ACCOUNT_LOGIN_REQUIRED` before body validation, so the kudos
+  and comment body keys and the write-response shape are still unconfirmed.
+
+## Echoed is not honoured
+
+- **Creator tag filters are real, and are slugs.** `tagSlugs=male` narrowed 63
+  characters to 41; `blockedTagSlugs=smut` to 46 with no smut rows. Numeric
+  `tagIds` is ignored there — the mirror image of `/characters`.
+- **`blockedTagSlugs=nsfw` does nothing**, because adult content is a boolean on
+  the character, not a tag. Creator listings have to be filtered client-side.
+- **`/fresh` ignores every filter** — `blockedTagIds`, `tagIds` and `search` all
+  leave the rows unchanged, and there is no `filters` object on the response.
+  The client-side filtering on that feed is required.
+- **`sortDir`** is honoured by the creator endpoints and ignored by
+  `/characters`.
+
+## Small open ends
+
+- `GET /characters/{id}` needs no lease and wraps its body under `character`.
+- `/tags` pages past the first 240: `offset=240` works, `totalCount` ≈ 110 000.
+- `Retry-After` is integer seconds.
+- `/capabilities` answers with no Client ID at all.
+
+## Still untested
+
+Community writes and everything behind a real logged-in account, and a
+populated multi-page comment thread — no character with more than three replies
+was found.
