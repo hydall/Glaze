@@ -20,7 +20,7 @@ import '../services/cf_challenge_service.dart';
 import '../services/janitor_session.dart';
 import '../services/janitor_webview_proxy.dart';
 import '../services/chub_provider.dart';
-import '../services/datacat_provider.dart';
+import '../services/datacat/datacat_discovery.dart';
 import '../services/janitor_provider.dart';
 import 'catalog_card_grid.dart';
 import 'catalog_controls.dart';

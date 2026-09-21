@@ -43,13 +43,16 @@ class CatalogControls extends ConsumerWidget {
           'tokens_asc': 'catalog_sort_janny_tokens_asc'.tr(),
           'relevant': 'catalog_sort_janny_relevant'.tr(),
         },
+        // The five sort fields the Client API accepts. The time window used
+        // to be baked into these labels (`score_week`); it is its own chip
+        // now, so every field can be combined with every window instead of
+        // only the four pairings the old list happened to name.
         CatalogProvider.datacat => {
-          'recent': 'catalog_sort_datacat_recent'.tr(),
           'fresh': 'catalog_sort_datacat_fresh'.tr(),
-          'score_week': 'catalog_sort_datacat_score_week'.tr(),
-          'score_24h': 'catalog_sort_datacat_score_24h'.tr(),
-          'chat_count_week': 'catalog_sort_datacat_chat_count_week'.tr(),
-          'chat_count_24h': 'catalog_sort_datacat_chat_count_24h'.tr(),
+          'score': 'catalog_sort_datacat_score'.tr(),
+          'chat_count': 'catalog_sort_datacat_chat_count'.tr(),
+          'messages_per_chat': 'catalog_sort_datacat_messages_per_chat'.tr(),
+          'first_published': 'catalog_sort_datacat_first_published'.tr(),
         },
         CatalogProvider.chub => {
           'popular': 'catalog_sort_chub_popular'.tr(),
@@ -61,6 +64,28 @@ class CatalogControls extends ConsumerWidget {
         },
       };
 
+  /// Labels for the DataCat time-window chip.
+  static Map<String, String> get windowOptions => {
+    'all': 'catalog_window_all'.tr(),
+    'week': 'catalog_window_week'.tr(),
+    '24h': 'catalog_window_24h'.tr(),
+  };
+
+  static const Map<String, IconData> _windowIcons = {
+    'all': Icons.all_inclusive_rounded,
+    'week': Icons.date_range_rounded,
+    '24h': Icons.local_fire_department_rounded,
+  };
+
+  /// Whether this provider can express a time window. Only DataCat can: every
+  /// other source folds the window into its sort key.
+  static bool supportsWindow(CatalogProvider p) => p == CatalogProvider.datacat;
+
+  /// Whether this provider can filter by token count. DataCat's API takes no
+  /// token bounds, so the slider is hidden there rather than quietly ignored.
+  static bool supportsTokenRange(CatalogProvider p) =>
+      p != CatalogProvider.datacat;
+
   int _activeFilterCount() {
     final f = state.filters;
     int count = 0;
@@ -71,8 +96,12 @@ class CatalogControls extends ConsumerWidget {
     if (state.activeProvider == CatalogProvider.chub && f.nsfl) count++;
     if (f.tagIds.isNotEmpty) count += f.tagIds.length;
     if (f.tagNames.isNotEmpty) count += f.tagNames.length;
-    if (f.minTokens != 29) count++;
-    if (f.maxTokens != 100000) count++;
+    // Only counted where the filter exists — a leftover token range from
+    // another provider must not badge a provider that cannot apply it.
+    if (supportsTokenRange(state.activeProvider)) {
+      if (f.minTokens != 29) count++;
+      if (f.maxTokens != 100000) count++;
+    }
     // The Chub-only refinements share the same rule as NSFL: they only apply to
     // chub, so they only count toward chub's badge.
     if (state.activeProvider == CatalogProvider.chub) {
@@ -109,12 +138,11 @@ class CatalogControls extends ConsumerWidget {
     'tokens_desc': Icons.arrow_downward_rounded,
     'tokens_asc': Icons.arrow_upward_rounded,
     'relevant': Icons.auto_awesome_rounded,
-    'recent': Icons.schedule_rounded,
     'fresh': Icons.new_releases_rounded,
-    'score_week': Icons.star_rounded,
-    'score_24h': Icons.local_fire_department_rounded,
-    'chat_count_week': Icons.chat_bubble_rounded,
-    'chat_count_24h': Icons.whatshot_rounded,
+    'score': Icons.star_rounded,
+    'chat_count': Icons.chat_bubble_rounded,
+    'messages_per_chat': Icons.forum_rounded,
+    'first_published': Icons.event_available_rounded,
     'rating': Icons.thumb_up_rounded,
     'updated': Icons.update_rounded,
   };
@@ -153,6 +181,30 @@ class CatalogControls extends ConsumerWidget {
           ),
         ),
         const Spacer(),
+        if (supportsWindow(state.activeProvider)) ...[
+          GlazeActionChip(
+            icon: _windowIcons[state.filters.window] ??
+                Icons.all_inclusive_rounded,
+            label: windowOptions[state.filters.window],
+            tooltip: 'catalog_window_title'.tr(),
+            onTap: () => showGlazePickerSheet(
+              context,
+              title: 'catalog_window_title'.tr(),
+              items: windowOptions.entries
+                  .map(
+                    (e) => GlazePickerItem(
+                      label: e.value,
+                      isActive: e.key == state.filters.window,
+                      value: e.key,
+                      icon: _windowIcons[e.key],
+                    ),
+                  )
+                  .toList(),
+              onSelect: (v) => notifier.setWindow(v as String),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
         GlazeFilterIconButton(
           count: _activeFilterCount(),
           onTap: () => showModalBottomSheet<void>(

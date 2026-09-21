@@ -6,8 +6,9 @@ import '../catalog_models.dart';
 import '../chub_account_provider.dart';
 import '../janitor_account_provider.dart';
 import '../services/chub_provider.dart';
-import '../services/datacat_provider.dart';
+import '../services/datacat/datacat_discovery.dart';
 import '../services/janitor_provider.dart';
+import 'catalog_controls.dart';
 import 'janitor_blocked_content_section.dart';
 import 'chub_login_sheet.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -392,15 +393,19 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
             onChanged: _onNsflToggle,
             isDanger: true,
           ),
-        FilterRangeSection(
-          title: 'catalog_token_range'.tr(),
-          minLabel: 'catalog_min'.tr(),
-          maxLabel: 'catalog_max'.tr(),
-          min: _minTokens,
-          max: _maxTokens,
-          onMinChanged: (v) => setState(() => _minTokens = v),
-          onMaxChanged: (v) => setState(() => _maxTokens = v),
-        ),
+        // DataCat's Client API filters by text, tags, sort and paging only —
+        // there are no token bounds to send. Showing the slider anyway would
+        // be a control that silently does nothing.
+        if (CatalogControls.supportsTokenRange(widget.provider))
+          FilterRangeSection(
+            title: 'catalog_token_range'.tr(),
+            minLabel: 'catalog_min'.tr(),
+            maxLabel: 'catalog_max'.tr(),
+            min: _minTokens,
+            max: _maxTokens,
+            onMinChanged: (v) => setState(() => _minTokens = v),
+            onMaxChanged: (v) => setState(() => _maxTokens = v),
+          ),
         if (widget.provider == CatalogProvider.chub) ..._chubFilterSections(),
         FilterTagsSection(
           title: 'catalog_tags'.tr(),

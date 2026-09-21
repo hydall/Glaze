@@ -19,6 +19,16 @@ abstract class CatalogItem with _$CatalogItem {
     String? slug,
     String? source,
     String? fullPath,
+
+    /// How the character's creator is addressed on their own source. DataCat's
+    /// creator screens are opened by this, not by [creatorId] — a Saucepan
+    /// creator's ref carries a `saucepan:` prefix its raw id does not.
+    String? creatorRef,
+
+    /// Which library the row was scraped from (`janitor`, `saucepan`,
+    /// `direct_upload`…). Disambiguates a character id that is only unique
+    /// within one source.
+    String? sourceKind,
   }) = _CatalogItem;
 }
 
@@ -48,6 +58,11 @@ abstract class CatalogFilters with _$CatalogFilters {
     @Default(false) bool inclusiveOr,
     @Default(0) int minAiRating,
     @Default(0) int minTags,
+
+    /// Time window the listing is scoped to (`all`, `week`, `24h`). Only
+    /// DataCat expresses one; every other provider folds the window into its
+    /// sort key and leaves this at the default.
+    @Default('all') String window,
   }) = _CatalogFilters;
 }
 
@@ -84,14 +99,37 @@ class CatalogSearchResult {
   final int total;
   final bool? hasMore;
 
-  CatalogSearchResult({required this.characters, required this.total, this.hasMore});
+  /// Where the next page starts, when the server said so.
+  ///
+  /// A page number multiplied by a page size only lands on the next unseen row
+  /// while the server returns exactly what was asked for. DataCat filters after
+  /// paging and hands back the authoritative cursor, so a result that carries
+  /// one is paged by it instead.
+  final int? nextOffset;
+
+  CatalogSearchResult({
+    required this.characters,
+    required this.total,
+    this.hasMore,
+    this.nextOffset,
+  });
 }
 
 class DownloadedCharacter {
   final CharacterData charData;
   final String? avatarUrl;
 
-  DownloadedCharacter({required this.charData, this.avatarUrl});
+  /// The avatar itself, for a source whose image endpoint needs the same
+  /// credentials as the card and so cannot be re-fetched from a bare URL
+  /// later. When set, the import saves these bytes and never looks at
+  /// [avatarUrl].
+  final List<int>? avatarBytes;
+
+  DownloadedCharacter({
+    required this.charData,
+    this.avatarUrl,
+    this.avatarBytes,
+  });
 }
 
 class CharacterData {
@@ -125,5 +163,40 @@ class CharacterData {
     this.creator = '',
     this.creatorId = '',
     this.characterBook,
+  });
+}
+
+/// One user comment on a catalog character.
+///
+/// Shared by every source that exposes comments: JanitorAI's reviews endpoint
+/// and DataCat's community endpoint both normalize onto this, so one view
+/// renders both. Fields a source does not carry keep their defaults —
+/// [likeCount] drives JanitorAI's default `sortBy=likes` order and is simply 0
+/// for a source that does not rank comments.
+class CatalogComment {
+  final String id;
+  final String content;
+  final String authorName;
+  final String authorUserName;
+  final String? avatarUrl;
+  final int likeCount;
+  final int replyCount;
+  final bool isPinned;
+  final bool isVerified;
+  final bool hasPlus;
+  final DateTime? createdAt;
+
+  const CatalogComment({
+    required this.id,
+    required this.content,
+    required this.authorName,
+    this.authorUserName = '',
+    this.avatarUrl,
+    this.likeCount = 0,
+    this.replyCount = 0,
+    this.isPinned = false,
+    this.isVerified = false,
+    this.hasPlus = false,
+    this.createdAt,
   });
 }

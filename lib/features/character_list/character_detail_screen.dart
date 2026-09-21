@@ -20,7 +20,8 @@ import '../../shared/widgets/glaze_spinner.dart';
 import '../catalog/catalog_models.dart';
 import '../catalog/services/janitor_provider.dart';
 import '../catalog/services/janitor_public_lorebook.dart';
-import '../catalog/widgets/janitor_comments_section.dart';
+import '../catalog/widgets/catalog_comments_section.dart';
+import '../catalog/widgets/datacat/datacat_community_section.dart';
 import '../catalog/widgets/janitor_lorebooks_tab.dart';
 import '../../core/services/persona_character_converter.dart';
 import '../../core/utils/html_to_markdown.dart';
@@ -183,6 +184,17 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
   /// extraction + LLM build of the closed lorebook.
   final JanitorLorebookArgs? janitorLorebookArgs;
 
+  /// DataCat kudos and comments for this preview, when it is a DataCat
+  /// character. Its own section rather than the comment list above: it also
+  /// writes, so it owns its loading, its composer and the account state they
+  /// depend on.
+  final DatacatCommunityArgs? datacatCommunityArgs;
+
+  /// Opens the creator inside the app instead of in a browser. Set for a
+  /// source that has a creator screen of its own; when null the author line
+  /// falls back to [previewAuthorUrl] and the system browser.
+  final VoidCallback? onOpenCreator;
+
   /// Runs the import in the given [CatalogImportMode], chosen via the
   /// import-options bottom sheet when the previewed character has attached
   /// lorebooks (it starts immediately in [CatalogImportMode.character] when it
@@ -210,6 +222,8 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
     this.previewAuthorUrl,
     this.janitorReviewCharId,
     this.janitorLorebookArgs,
+    this.datacatCommunityArgs,
+    this.onOpenCreator,
     this.onImport,
     this.onBeforeImport,
     this.importing = false,
@@ -231,7 +245,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
   final ScrollController _scrollController = ScrollController();
 
   // ─── Comments paging state (JanitorAI previews only) ──────────────────────
-  final List<JanitorReview> _comments = [];
+  final List<CatalogComment> _comments = [];
   int _commentPage = 1;
   bool _commentsLoading = false;
   bool _commentsHasMore = true;
@@ -239,6 +253,12 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
 
   bool get _hasComments => widget.janitorReviewCharId != null;
   bool get _hasLorebooks => widget.janitorLorebookArgs != null;
+  bool get _hasDatacatCommunity => widget.datacatCommunityArgs != null;
+
+  /// Stand-in URL for an author line that navigates in-app. The hero only
+  /// checks that the target is non-empty before making the name tappable; the
+  /// value itself is never opened.
+  static const _inAppAuthorTarget = 'in-app';
 
   /// Whether the previewed character actually lists attached lorebooks (not just
   /// that it is a JanitorAI preview). Drives the import-options bottom sheet.
@@ -288,7 +308,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
       setState(() {
         _comments.addAll(batch);
         // A full page means there may be more; a short page is the end.
-        _commentsHasMore = batch.length >= kJanitorReviewsPageSize;
+        _commentsHasMore = batch.length >= kCatalogCommentsPageSize;
         _commentPage += 1;
         _commentsLoading = false;
       });
@@ -780,8 +800,15 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
             _HeroSection(
               character: char,
               previewAvatarUrl: widget.previewAvatarUrl,
-              authorUrl: widget.previewAuthorUrl,
-              onOpenAuthor: _openExternal,
+              // An in-app creator screen wins over the external link: the
+              // author line is the same affordance either way, it just lands
+              // somewhere better when the source has a page for it.
+              authorUrl: widget.onOpenCreator != null
+                  ? _inAppAuthorTarget
+                  : widget.previewAuthorUrl,
+              onOpenAuthor: widget.onOpenCreator != null
+                  ? (_) => widget.onOpenCreator!()
+                  : _openExternal,
               variationLabel: _variationLabelOf(char),
             ),
             Padding(
@@ -829,12 +856,19 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _InfoTab(character: char),
+            if (_hasDatacatCommunity) ...[
+              _TabSectionHeader(
+                icon: Icons.forum_outlined,
+                label: 'section_community'.tr(),
+              ),
+              DatacatCommunitySection(args: widget.datacatCommunityArgs!),
+            ],
             if (_hasComments) ...[
               _TabSectionHeader(
                 icon: Icons.forum_outlined,
                 label: 'section_comments'.tr(),
               ),
-              JanitorCommentsView(
+              CatalogCommentsView(
                 comments: _comments,
                 loading: _commentsLoading,
                 hasMore: _commentsHasMore,

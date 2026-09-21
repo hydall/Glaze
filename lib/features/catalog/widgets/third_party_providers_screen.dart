@@ -8,10 +8,12 @@ import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../settings/app_settings_provider.dart';
 import '../chub_account_provider.dart';
+import '../datacat_account_provider.dart';
 import '../janitor_account_provider.dart';
 import '../saucepan_account_provider.dart';
 import '../third_party_providers_provider.dart';
 import 'chub_login_sheet.dart';
+import 'datacat/datacat_account_sheet.dart';
 import 'janitor_login_sheet.dart';
 import 'janitor_source_settings.dart';
 import 'saucepan_login_sheet.dart';
@@ -130,12 +132,12 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
           ),
         ];
       case ThirdPartyProvider.chub:
-        final account = ref.watch(chubAccountProvider);
+        final chub = ref.watch(chubAccountProvider);
         return [
           MenuItem(
             icon: Icons.key_outlined,
             label: 'chub_login_menu'.tr(),
-            subtitle: account.isLoggedIn
+            subtitle: chub.isLoggedIn
                 ? 'chub_login_menu_logged_in'.tr()
                 : 'chub_login_menu_logged_out'.tr(),
             onTap: () => openChubAccountSheet(context, ref),
@@ -147,9 +149,9 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
           MenuSwitchItem(
             label: 'catalog_filter_nsfl'.tr(),
             description: 'chub_nsfl_account_hint'.tr(),
-            value: account.nsfl,
+            value: chub.nsfl,
             onChanged: (v) {
-              if (v && !account.isLoggedIn) {
+              if (v && !chub.isLoggedIn) {
                 // NSFL is account-scoped on chub.ai — sign in first.
                 openChubAccountSheet(context, ref);
                 return;
@@ -158,8 +160,26 @@ class ThirdPartyProvidersScreen extends ConsumerWidget {
             },
           ),
         ];
-      case ThirdPartyProvider.janny:
       case ThirdPartyProvider.datacat:
+        // Linking is only needed to post kudos and comments; browsing and
+        // importing work without it, so the row says what it unlocks rather
+        // than presenting itself as a prerequisite.
+        final datacat = ref.watch(datacatAccountProvider);
+        return [
+          MenuItem(
+            icon: Icons.person_outline_rounded,
+            label: 'datacat_account_menu'.tr(),
+            subtitle: datacat.linked
+                ? (datacat.displayName != null
+                      ? 'datacat_account_linked_as'.tr(
+                          namedArgs: {'name': datacat.displayName!},
+                        )
+                      : 'datacat_account_linked'.tr())
+                : 'datacat_account_not_linked'.tr(),
+            onTap: () => openDatacatAccountSheet(context, ref),
+          ),
+        ];
+      case ThirdPartyProvider.janny:
         // No dedicated settings — the group is just an enable/disable toggle.
         return const [];
     }
