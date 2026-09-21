@@ -3,11 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/widgets/filter_sheet.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../catalog_models.dart';
+import '../chub_account_provider.dart';
 import '../janitor_account_provider.dart';
 import '../services/chub_provider.dart';
 import '../services/datacat_provider.dart';
 import '../services/janitor_provider.dart';
 import 'janitor_blocked_content_section.dart';
+import 'chub_login_sheet.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 class CatalogFilterSheet extends ConsumerStatefulWidget {
@@ -37,6 +39,19 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
   late int _minTokens;
   late int _maxTokens;
 
+  // Chub-only content flags, mirrored 1:1 onto the API parameters.
+  late bool _nsfwOnly;
+  late bool _requireImages;
+  late bool _requireLore;
+  late bool _requireCustomPrompt;
+  late bool _requireExampleDialogues;
+  late bool _requireAlternateGreetings;
+  late bool _recommendedVerified;
+  late bool _excludeMine;
+  late bool _inclusiveOr;
+  late int _minAiRating;
+  late int _minTags;
+
   Set<int> _selectedTagIds = {};
   Set<String> _selectedTagNames = {};
 
@@ -61,6 +76,17 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
     _nsfl = widget.filters.nsfl;
     _minTokens = widget.filters.minTokens;
     _maxTokens = widget.filters.maxTokens;
+    _nsfwOnly = widget.filters.nsfwOnly;
+    _requireImages = widget.filters.requireImages;
+    _requireLore = widget.filters.requireLore;
+    _requireCustomPrompt = widget.filters.requireCustomPrompt;
+    _requireExampleDialogues = widget.filters.requireExampleDialogues;
+    _requireAlternateGreetings = widget.filters.requireAlternateGreetings;
+    _recommendedVerified = widget.filters.recommendedVerified;
+    _excludeMine = widget.filters.excludeMine;
+    _inclusiveOr = widget.filters.inclusiveOr;
+    _minAiRating = widget.filters.minAiRating;
+    _minTags = widget.filters.minTags;
     _selectedTagIds = Set.from(widget.filters.tagIds);
     _selectedTagNames = Set.from(widget.filters.tagNames);
 
@@ -71,7 +97,9 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
   Future<void> _loadTags() async {
     List<CatalogTag> tags = [];
     if (widget.provider == CatalogProvider.chub) {
-      tags = await fetchChubTags();
+      tags = await fetchChubTags(
+        apiKey: ref.read(chubAccountProvider).apiKey,
+      );
     } else if (widget.provider == CatalogProvider.datacat) {
       tags = await fetchDatacatTags();
     } else {
@@ -134,34 +162,34 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
 
   @override
   void dispose() {
-    // Only apply if changed
-    final changed = _nsfw != widget.filters.nsfw ||
-        _nsfl != widget.filters.nsfl ||
-        _minTokens != widget.filters.minTokens ||
-        _maxTokens != widget.filters.maxTokens ||
-        _selectedTagIds.length != widget.filters.tagIds.length ||
-        _selectedTagNames.length != widget.filters.tagNames.length ||
-        !_selectedTagIds.containsAll(widget.filters.tagIds) ||
-        !_selectedTagNames.containsAll(widget.filters.tagNames);
+    // Build the candidate up front and let freezed's deep equality decide
+    // whether anything actually changed — the sheet edits a lot of fields now,
+    // and hand-rolling the comparison is how a new one silently stops applying.
+    final newFilters = CatalogFilters(
+      sort: widget.filters.sort,
+      nsfw: _nsfw,
+      nsfl: _nsfl,
+      tagIds: _selectedTagIds.toList()..sort(),
+      tagNames: _selectedTagNames.toList()..sort(),
+      excludeTagNames: widget.filters.excludeTagNames,
+      minTokens: _minTokens,
+      maxTokens: _maxTokens,
+      nsfwOnly: _nsfwOnly,
+      requireImages: _requireImages,
+      requireLore: _requireLore,
+      requireCustomPrompt: _requireCustomPrompt,
+      requireExampleDialogues: _requireExampleDialogues,
+      requireAlternateGreetings: _requireAlternateGreetings,
+      recommendedVerified: _recommendedVerified,
+      excludeMine: _excludeMine,
+      inclusiveOr: _inclusiveOr,
+      minAiRating: _minAiRating,
+      minTags: _minTags,
+    );
 
-    if (changed) {
-      final newTagIds = _selectedTagIds.toList()..sort();
-      final newTagNames = _selectedTagNames.toList()..sort();
+    if (newFilters != widget.filters) {
       final apply = widget.onApply;
-
-      Future.microtask(() {
-        apply(
-          CatalogFilters(
-            sort: widget.filters.sort,
-            nsfw: _nsfw,
-            nsfl: _nsfl,
-            tagIds: newTagIds,
-            tagNames: newTagNames,
-            minTokens: _minTokens,
-            maxTokens: _maxTokens,
-          ),
-        );
-      });
+      Future.microtask(() => apply(newFilters));
     }
 
     _saveBlockedTagsIfChanged();
@@ -211,37 +239,140 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
     });
   }
 
+  /// Chub's own search refinements, appended right after the token range. They
+  /// map 1:1 onto the parameters chub.ai's site sends, so their labels mirror
+  /// what the site calls them.
+  List<FilterSection> _chubFilterSections() {
+    return [
+      FilterToggleSection(
+        label: 'catalog_filter_nsfw_only'.tr(),
+        value: _nsfwOnly,
+        onChanged: (v) => setState(() => _nsfwOnly = v),
+      ),
+      FilterToggleSection(
+        label: 'catalog_filter_require_images'.tr(),
+        value: _requireImages,
+        onChanged: (v) => setState(() => _requireImages = v),
+      ),
+      FilterToggleSection(
+        label: 'catalog_filter_require_lore'.tr(),
+        value: _requireLore,
+        onChanged: (v) => setState(() => _requireLore = v),
+      ),
+      FilterToggleSection(
+        label: 'catalog_filter_require_custom_prompt'.tr(),
+        value: _requireCustomPrompt,
+        onChanged: (v) => setState(() => _requireCustomPrompt = v),
+      ),
+      FilterToggleSection(
+        label: 'catalog_filter_require_example_dialogues'.tr(),
+        value: _requireExampleDialogues,
+        onChanged: (v) => setState(() => _requireExampleDialogues = v),
+      ),
+      FilterToggleSection(
+        label: 'catalog_filter_require_alternate_greetings'.tr(),
+        value: _requireAlternateGreetings,
+        onChanged: (v) => setState(() => _requireAlternateGreetings = v),
+      ),
+      FilterToggleSection(
+        label: 'catalog_filter_recommended_verified'.tr(),
+        value: _recommendedVerified,
+        onChanged: (v) => setState(() => _recommendedVerified = v),
+      ),
+      FilterToggleSection(
+        label: 'catalog_filter_exclude_mine'.tr(),
+        value: _excludeMine,
+        onChanged: (v) => setState(() => _excludeMine = v),
+      ),
+      FilterToggleSection(
+        label: 'catalog_filter_inclusive_or'.tr(),
+        value: _inclusiveOr,
+        onChanged: (v) => setState(() => _inclusiveOr = v),
+      ),
+      FilterNumberSection(
+        title: 'catalog_filter_min_ai_rating'.tr(),
+        label: 'catalog_min'.tr(),
+        value: _minAiRating,
+        onChanged: (v) => setState(() => _minAiRating = v),
+      ),
+      FilterNumberSection(
+        title: 'catalog_filter_min_tags'.tr(),
+        label: 'catalog_min'.tr(),
+        value: _minTags,
+        onChanged: (v) => setState(() => _minTags = v),
+      ),
+    ];
+  }
+
   void _onNsflToggle(bool value) {
-    if (value) {
-      // Trying to enable — show warning
-      GlazeBottomSheet.show<void>(
-        context,
-        title: 'catalog_nsfl_warning_title'.tr(),
-        bigInfo: BottomSheetBigInfo(
-          icon: Icons.warning_amber_rounded,
-          description: 'catalog_nsfl_warning_desc'.tr(),
-        ),
-        items: [
-          BottomSheetItem(
-            label: 'catalog_nsfl_btn'.tr(),
-            isDestructive: true,
-            centered: true,
-            onTap: () {
-              setState(() => _nsfl = true);
-              Navigator.of(context, rootNavigator: true).pop();
-            },
-          ),
-          BottomSheetItem(
-            label: 'catalog_nsfl_btn_cancel'.tr(),
-            centered: true,
-            onTap: () => Navigator.of(context, rootNavigator: true).pop(),
-          ),
-        ],
-      );
-    } else {
+    if (!value) {
       // Disabling
       setState(() => _nsfl = false);
+      return;
     }
+    // chub.ai only serves NSFL to a signed-in account (and the public API
+    // silently ignores the flag). Don't flip the switch — send them to log in,
+    // then offer the warning again once there is an account behind it.
+    if (!ref.read(chubAccountProvider).isLoggedIn) {
+      _promptChubLoginForNsfl();
+      return;
+    }
+    _confirmNsfl();
+  }
+
+  /// The site-side explanation shown when NSFL is switched on without an
+  /// account, with a button into the Chub login sheet.
+  void _promptChubLoginForNsfl() {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'catalog_filter_nsfl'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.lock_outline_rounded,
+        description: 'chub_nsfl_login_desc'.tr(),
+      ),
+      items: [
+        BottomSheetItem(
+          label: 'chub_nsfl_login_btn'.tr(),
+          centered: true,
+          onTap: () async {
+            Navigator.of(context, rootNavigator: true).pop();
+            await showChubLoginSheet(context);
+            if (!mounted) return;
+            // Signed in via the WebView — carry the toggle through to the
+            // warning instead of making them tap NSFL again.
+            if (ref.read(chubAccountProvider).isLoggedIn) _confirmNsfl();
+          },
+        ),
+      ],
+    );
+  }
+
+  /// The destructive-content warning that gates actually turning NSFL on.
+  void _confirmNsfl() {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'catalog_nsfl_warning_title'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.warning_amber_rounded,
+        description: 'catalog_nsfl_warning_desc'.tr(),
+      ),
+      items: [
+        BottomSheetItem(
+          label: 'catalog_nsfl_btn'.tr(),
+          isDestructive: true,
+          centered: true,
+          onTap: () {
+            setState(() => _nsfl = true);
+            Navigator.of(context, rootNavigator: true).pop();
+          },
+        ),
+        BottomSheetItem(
+          label: 'catalog_nsfl_btn_cancel'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(),
+        ),
+      ],
+    );
   }
 
   @override
@@ -270,6 +401,7 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
           onMinChanged: (v) => setState(() => _minTokens = v),
           onMaxChanged: (v) => setState(() => _maxTokens = v),
         ),
+        if (widget.provider == CatalogProvider.chub) ..._chubFilterSections(),
         FilterTagsSection(
           title: 'catalog_tags'.tr(),
           searchHint: 'catalog_search_tags'.tr(),

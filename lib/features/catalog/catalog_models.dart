@@ -33,6 +33,21 @@ abstract class CatalogFilters with _$CatalogFilters {
     @Default([]) List<String> excludeTagNames,
     @Default(29) int minTokens,
     @Default(100000) int maxTokens,
+
+    // Chub-only search flags, mapped 1:1 onto the site's own `/search`
+    // parameters. Other providers ignore them. `nsfl` is deliberately not here —
+    // it is account-scoped and driven by [ChubAccount].
+    @Default(false) bool nsfwOnly,
+    @Default(false) bool requireImages,
+    @Default(false) bool requireLore,
+    @Default(false) bool requireCustomPrompt,
+    @Default(false) bool requireExampleDialogues,
+    @Default(false) bool requireAlternateGreetings,
+    @Default(false) bool recommendedVerified,
+    @Default(false) bool excludeMine,
+    @Default(false) bool inclusiveOr,
+    @Default(0) int minAiRating,
+    @Default(0) int minTags,
   }) = _CatalogFilters;
 }
 

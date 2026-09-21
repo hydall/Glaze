@@ -11,6 +11,7 @@ import '../../character_list/character_detail_screen.dart';
 import '../../settings/app_settings_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
+import '../chub_account_provider.dart';
 import '../janitor_account_provider.dart';
 import '../services/chub_provider.dart';
 // `ExtractionResult` here is DataCat's own; the one this file uses is
@@ -99,6 +100,7 @@ class _CatalogDetailLauncherState
         case CatalogProvider.chub:
           result = await chubGetCharacter(
             widget.item.fullPath ?? widget.item.id,
+            apiKey: ref.read(chubAccountProvider).apiKey,
           );
       }
       if (mounted) setState(() => _downloaded = result);
