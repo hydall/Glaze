@@ -693,6 +693,10 @@ class MenuRangeItem extends StatefulWidget {
   final int divisions;
   final bool editableValue;
   final int decimalPlaces;
+
+  /// Unit shown after the value — `%` on a percentage slider. Display only:
+  /// the stored value stays a plain number.
+  final String? unit;
   final bool? included;
   final ValueChanged<bool>? onIncludedChanged;
   final ValueChanged<double> onChanged;
@@ -709,6 +713,7 @@ class MenuRangeItem extends StatefulWidget {
     this.divisions = 200,
     this.editableValue = false,
     this.decimalPlaces = 2,
+    this.unit,
     this.included,
     this.onIncludedChanged,
   }) : assert(
@@ -873,7 +878,7 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
   Widget _buildValueControl(BuildContext context) {
     if (widget.editableValue) {
       return SizedBox(
-        width: 72,
+        width: widget.unit == null ? 72 : 88,
         height: 36,
         child: TextField(
           controller: _controller,
@@ -899,6 +904,11 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
           decoration: InputDecoration(
             filled: true,
             fillColor: context.inputFill,
+            suffixText: widget.unit,
+            suffixStyle: TextStyle(
+              color: context.cs.onSurfaceVariant,
+              fontSize: 13,
+            ),
             contentPadding: const EdgeInsets.symmetric(horizontal: 8),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
@@ -920,7 +930,7 @@ class _MenuRangeItemState extends State<MenuRangeItem> {
       );
     }
     return Text(
-      _display,
+      widget.unit == null ? _display : '$_display${widget.unit}',
       style: TextStyle(
         color: context.cs.onSurfaceVariant,
         fontSize: 14,

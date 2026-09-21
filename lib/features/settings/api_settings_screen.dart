@@ -228,7 +228,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadActivePreset();
-      _scrollToFocusSection();
     });
   }
 
@@ -266,6 +265,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   void _reveal() {
     if (_revealed || !mounted) return;
     setState(() => _revealed = true);
+    // The deep-linked section only exists once the content is built, so the
+    // scroll is kicked off here rather than in `initState` — where the spinner
+    // was still on screen and the key had no context to measure.
+    _scrollToFocusSection();
   }
 
   @override
@@ -820,6 +823,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     return Builder(
       builder: (context) => ListView(
         controller: _llmScrollController,
+        // A deep link lands on the Context group, which sits below the fold.
+        // A lazy list never builds it, and `Scrollable.ensureVisible` cannot
+        // scroll to an element that does not exist, so while a focus is
+        // pending the viewport builds far enough down to reach it.
+        cacheExtent: widget.focusSection == ApiSettingsSection.context
+            ? 3000
+            : null,
         padding: EdgeInsets.only(
           top: MediaQuery.paddingOf(context).top + 12,
           bottom: MediaQuery.paddingOf(context).bottom + 16,
@@ -968,19 +978,20 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       key: _contextGroupKey,
       compact: true,
       header: 'section_context'.tr(),
+      helpTerm: 'history-trim',
       items: [
-        // No description here: the two modes are explained where the choice is
-        // actually made, in the picker's hints. Repeating it under the closed
-        // dropdown pushed the fields it belongs with off the screen.
         MenuSelectorItem(
           label: 'label_history_trim_mode'.tr(),
+          helpTerm: 'history-trim',
           currentValue: _historyTrimModeLabel(_historyTrimMode),
+          description: 'desc_history_trim_mode'.tr(),
           onTap: _openHistoryTrimModeSelector,
         ),
         // Only stepped spends them; under sliding they would be two dead rows.
         if (_historyTrimMode == HistoryTrimMode.stepped) ...[
           MenuRangeItem(
             label: 'label_history_trim_threshold'.tr(),
+            helpTerm: 'history-trim',
             description: 'desc_history_trim_threshold'.tr(),
             value: _historyTrimTriggerPercent.toDouble(),
             min: 10,
@@ -988,6 +999,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             divisions: 90,
             decimalPlaces: 0,
             editableValue: true,
+            unit: '%',
             onChanged: (v) {
               setState(() => _historyTrimTriggerPercent = v.round());
               _scheduleSave();
@@ -995,6 +1007,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           ),
           MenuRangeItem(
             label: 'label_history_trim_step'.tr(),
+            helpTerm: 'step-size',
             description: 'desc_history_trim_step'.tr(),
             value: _historyTrimStepPercent.toDouble(),
             min: 5,
@@ -1002,6 +1015,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             divisions: 90,
             decimalPlaces: 0,
             editableValue: true,
+            unit: '%',
             onChanged: (v) {
               setState(() => _historyTrimStepPercent = v.round());
               _scheduleSave();

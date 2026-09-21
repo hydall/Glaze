@@ -16,6 +16,7 @@ const Color _userAccent = Color(0xFFB57BE0);
 const Color _assistantAccent = Color(0xFF4CAF7D);
 const Color _otherAccent = Color(0xFF9AA0A6);
 const Color _depthAccent = Color(0xFFE0A030);
+const Color _cacheAccent = Color(0xFF3FA7C4);
 
 /// One message of a request, in the shape the inspector renders.
 ///
@@ -35,6 +36,7 @@ class InspectorMessage {
     this.isLorebook = false,
     this.isHistory = false,
     this.isDepth = false,
+    this.isCacheAnchor = false,
   });
 
   final String role;
@@ -52,6 +54,48 @@ class InspectorMessage {
   final bool isLorebook;
   final bool isHistory;
   final bool isDepth;
+
+  /// The oldest message the prompt still carries — where the history starts.
+  /// Under the stepped trim mode this start is the anchor the provider's prompt
+  /// cache holds onto. Marked from the outside (see [markCacheAnchor]) because
+  /// neither side of the inspector knows it at construction time.
+  final bool isCacheAnchor;
+
+  /// The same message, flagged as the history start. Used by [markCacheAnchor].
+  InspectorMessage withCacheAnchor() => InspectorMessage(
+    role: role,
+    content: content,
+    blockName: blockName,
+    depth: depth,
+    imagePaths: imagePaths,
+    mergedCount: mergedCount,
+    isLorebook: isLorebook,
+    isHistory: isHistory,
+    isDepth: isDepth,
+    isCacheAnchor: true,
+  );
+
+  /// Flags the first history message in [messages] as the cache anchor.
+  ///
+  /// A built prompt knows the exact message; a captured request knows only role
+  /// and content, so there the first user/assistant turn stands in for the
+  /// history start — post-processing has already folded the static system and
+  /// lorebook blocks ahead of it.
+  static List<InspectorMessage> markCacheAnchor(
+    List<InspectorMessage> messages,
+  ) {
+    var at = messages.indexWhere((m) => m.isHistory);
+    if (at < 0) {
+      at = messages.indexWhere(
+        (m) => m.role == 'user' || m.role == 'assistant',
+      );
+    }
+    if (at < 0) return messages;
+    return [
+      for (var i = 0; i < messages.length; i++)
+        if (i == at) messages[i].withCacheAnchor() else messages[i],
+    ];
+  }
 
   /// A system message that is neither history nor lorebook — the instruction
   /// blocks the `System` filter is about.
@@ -177,6 +221,16 @@ class _InspectorMessageCardState extends State<InspectorMessageCard> {
     return Row(
       children: [
         InspectorRoleChip(role: message.role),
+        if (message.isCacheAnchor) ...[
+          const SizedBox(width: 4),
+          Tooltip(
+            message: 'prompt_cache_anchor_hint'.tr(),
+            child: _Badge(
+              label: 'prompt_cache_anchor'.tr(),
+              color: _cacheAccent,
+            ),
+          ),
+        ],
         if (message.mergedCount > 1) ...[
           const SizedBox(width: 4),
           _MergedBadge(count: message.mergedCount),

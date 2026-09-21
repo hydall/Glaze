@@ -288,6 +288,16 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
         const <ChatMessage>[];
     final hiddenCount = messages.where((m) => m.isHidden).length;
 
+    // The anchor carries only an id; the tile shows where it sits in the chat
+    // as the reader sees it, so hidden and typing rows are not counted.
+    final visibleMessages = messages
+        .where((m) => !m.isHidden && !m.isTyping)
+        .toList();
+    final anchorId = bd.historyAnchorId;
+    final anchorIndex = anchorId == null
+        ? -1
+        : visibleMessages.indexWhere((m) => m.id == anchorId);
+
     return Builder(
       builder: (context) => ListView(
         shrinkWrap: true,
@@ -317,6 +327,13 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
                 context,
                 focusSection: ApiSettingsSection.context,
               ),
+            ),
+          ],
+          if (anchorIndex >= 0) ...[
+            const SizedBox(height: 12),
+            CacheAnchorTile(
+              messageNumber: anchorIndex + 1,
+              preview: visibleMessages[anchorIndex].content,
             ),
           ],
           if (hiddenCount > 0) ...[
