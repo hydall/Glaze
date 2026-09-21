@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/llm/history_trim.dart';
 import '../../../../core/llm/raw_response_text.dart';
 import '../../../../core/llm/tokenizer.dart';
 import '../../../../core/llm/transport/llm_protocol.dart';
@@ -92,6 +93,13 @@ class _RequestDetailViewState extends ConsumerState<RequestDetailView> {
       for (final message in capture.messages)
         InspectorMessage.fromCapture(message),
     ];
+    // A capture keeps no anchor id, so the first user/assistant turn stands in
+    // for the start of the history. Only worth marking under the stepped mode,
+    // where that start is held still for the cache.
+    final trimMode = ref.watch(activeApiConfigProvider)?.historyTrimMode;
+    final shownMessages = trimMode == HistoryTrimMode.stepped
+        ? InspectorMessage.markCacheAnchor(messages)
+        : messages;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -145,7 +153,7 @@ class _RequestDetailViewState extends ConsumerState<RequestDetailView> {
                   contextSize: _contextSize(),
                   paramsTitle: _protocolLabel(capture),
                   params: _params(capture),
-                  messages: messages,
+                  messages: shownMessages,
                   // A record, not a rendering: the capture shows what went out
                   // verbatim rather than markdown-formatting it.
                   renderMarkdown: false,

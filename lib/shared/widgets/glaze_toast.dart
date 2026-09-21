@@ -30,6 +30,7 @@ class GlazeToast {
     int duration = 2500,
     ToastPosition position = ToastPosition.bottom,
     bool isError = false,
+    bool isWarning = false,
     bool showCopyButton = false,
   }) {
     final overlay = _resolveOverlay(context);
@@ -40,6 +41,7 @@ class GlazeToast {
         duration: duration,
         position: position,
         isError: isError,
+        isWarning: isWarning,
         showCopyButton: showCopyButton,
       );
     }
@@ -51,6 +53,7 @@ class GlazeToast {
     int duration = 2500,
     ToastPosition position = ToastPosition.bottom,
     bool isError = false,
+    bool isWarning = false,
     bool showCopyButton = false,
   }) {
     _current?.dismiss();
@@ -64,6 +67,7 @@ class GlazeToast {
         text: text,
         position: position,
         isError: isError,
+        isWarning: isWarning,
         showCopyButton: showCopyButton,
         visibleDuration: Duration(milliseconds: duration),
         onDismissRequest: () => toast.dismiss(),
@@ -90,6 +94,7 @@ class GlazeToast {
     int duration = 2500,
     ToastPosition position = ToastPosition.bottom,
     bool isError = false,
+    bool isWarning = false,
   }) {
     final overlay = _resolveOverlay(null);
     if (overlay != null) {
@@ -99,8 +104,39 @@ class GlazeToast {
         duration: duration,
         position: position,
         isError: isError,
+        isWarning: isWarning,
       );
     }
+  }
+
+  /// Amber toast for a non-fatal notice the user should still see — a stepped
+  /// history trim, say. Distinct from [isError]: nothing failed.
+  static void warning(
+    BuildContext context,
+    String text, {
+    int duration = 3500,
+    ToastPosition position = ToastPosition.bottom,
+  }) {
+    show(
+      context,
+      text,
+      duration: duration,
+      position: position,
+      isWarning: true,
+    );
+  }
+
+  static void warningWithoutContext(
+    String text, {
+    int duration = 3500,
+    ToastPosition position = ToastPosition.bottom,
+  }) {
+    showWithoutContext(
+      text,
+      duration: duration,
+      position: position,
+      isWarning: true,
+    );
   }
 
   static void error(BuildContext context, String prefix, Object err) {
@@ -190,6 +226,7 @@ class _ToastAnimator extends StatefulWidget {
   final String text;
   final ToastPosition position;
   final bool isError;
+  final bool isWarning;
   final bool showCopyButton;
 
   /// How long the chip stays up once it is actually on screen.
@@ -206,6 +243,7 @@ class _ToastAnimator extends StatefulWidget {
     required this.text,
     required this.position,
     this.isError = false,
+    this.isWarning = false,
     this.showCopyButton = false,
     required this.visibleDuration,
     required this.onDismissRequest,
@@ -314,6 +352,7 @@ class _ToastAnimatorState extends State<_ToastAnimator>
                       text: widget.text,
                       onTap: widget.onDismissRequest,
                       isError: widget.isError,
+                      isWarning: widget.isWarning,
                       showCopyButton: widget.showCopyButton,
                     ),
                   ),
@@ -333,12 +372,14 @@ class _ToastChip extends ConsumerStatefulWidget {
   final String text;
   final VoidCallback onTap;
   final bool isError;
+  final bool isWarning;
   final bool showCopyButton;
 
   const _ToastChip({
     required this.text,
     required this.onTap,
     this.isError = false,
+    this.isWarning = false,
     this.showCopyButton = false,
   });
 
@@ -390,9 +431,17 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
     // Battery saver drops the backdrop blur, so its fill stays a touch more
     // opaque — without the blur behind it, chat text would otherwise read
     // straight through the chip.
-    final bgColor = opaque
-        ? (widget.isError ? const Color(0xE65C1A1A) : const Color(0xE61E1E1E))
-        : (widget.isError ? const Color(0xC25C1A1A) : const Color(0xC21E1E1E));
+    final Color bgColor;
+    if (widget.isError) {
+      bgColor = opaque ? const Color(0xE65C1A1A) : const Color(0xC25C1A1A);
+    } else if (widget.isWarning) {
+      // Amber reads as a notice, not a failure; the dark text keeps it legible
+      // where white on yellow would not.
+      bgColor = opaque ? const Color(0xE6F5B301) : const Color(0xC2F5B301);
+    } else {
+      bgColor = opaque ? const Color(0xE61E1E1E) : const Color(0xC21E1E1E);
+    }
+    final textColor = widget.isWarning ? const Color(0xFF2A1E00) : Colors.white;
     return Container(
       constraints: BoxConstraints(
         maxWidth: MediaQuery.of(context).size.width - 48,
@@ -418,10 +467,10 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
             child: Text(
               widget.text,
               textAlign: TextAlign.left,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
-                color: Colors.white,
+                color: textColor,
                 height: 1.3,
                 decoration: TextDecoration.none,
               ),
@@ -437,15 +486,17 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0x33FFFFFF),
+                  color: widget.isWarning
+                      ? const Color(0x332A1E00)
+                      : const Color(0x33FFFFFF),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   _copied ? 'Copied' : 'Copy',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: Colors.white,
+                    color: textColor,
                     decoration: TextDecoration.none,
                   ),
                 ),

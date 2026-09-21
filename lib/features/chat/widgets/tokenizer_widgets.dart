@@ -418,6 +418,10 @@ class TokenizerLayout extends StatelessWidget {
 /// it, hoisted per `docs/UI_KIT.md` § Colours.
 const Color _cutoffAccent = Color(0xFFE0A030);
 
+/// Teal accent for the cache anchor, so it reads as its own status rather than
+/// another amber warning. Hoisted per `docs/UI_KIT.md` § Colours.
+const Color _cacheAccent = Color(0xFF3FA7C4);
+
 /// How much of the history did not make it into the prompt.
 ///
 /// Not a failure — it is what a long chat in a finite window looks like. The
@@ -460,6 +464,80 @@ class CutoffWarning extends StatelessWidget {
               tooltip: 'context_open_api_settings'.tr(),
               onPressed: onOpenSettings,
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Where the history the prompt still carries begins.
+///
+/// Under the stepped trim mode that start is the cache anchor: the prompt keeps
+/// it byte-identical across turns, which is what lets the provider's prompt
+/// cache hit. Shown next to the cutoff notice, since the two are the same
+/// boundary seen from opposite sides — what was dropped, and where the kept
+/// history starts.
+class CacheAnchorTile extends StatelessWidget {
+  /// 1-based position of the anchor in the visible chat.
+  final int messageNumber;
+
+  /// First characters of the anchor message, so it can be recognised in the
+  /// chat without opening anything.
+  final String preview;
+
+  const CacheAnchorTile({
+    super.key,
+    required this.messageNumber,
+    required this.preview,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmed = preview.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final text = trimmed.length <= 80
+        ? trimmed
+        : '${trimmed.substring(0, 80)}…';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: _cacheAccent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _cacheAccent.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.anchor, size: 18, color: _cacheAccent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'context_cache_anchor'.tr(
+                    namedArgs: {'index': '$messageNumber'},
+                  ),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _cacheAccent,
+                  ),
+                ),
+                if (text.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    text,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );

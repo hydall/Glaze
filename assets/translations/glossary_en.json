@@ -65,6 +65,18 @@
                     "desc": "A local Glaze setting — it is not sent to the provider. It caps how many [[token]]s the whole prompt may use. Glaze trims the chat, dropping the oldest messages, so the assembled prompt fits within this size before it is sent. Set it to match your model's [[context|context window]]; raising it above the model's real limit does not give the model more memory. When trimming chat history, Glaze takes the Context Size, subtracts [[max-tokens|Max Output Tokens]] from it (a provider requirement), and fits as many whole history messages as it can into the number that remains."
                 },
                 {
+                    "id": "history-trim",
+                    "name": "History Trimming",
+                    "alt": "In blocks, Continuous, History trim mode",
+                    "desc": "How Glaze cuts the chat history once it no longer fits the [[context|context window]]. **Continuous** drops exactly what does not fit on every turn — always the most history, but the prompt starts at a different message each turn, so a provider's prompt cache rarely hits. **In blocks** holds the start of the history still and drops a whole block only when the window gets too full. Between jumps the request begins with the same bytes, so a provider's prompt cache can hit: one big miss instead of one per turn. The mode lives on the connection because it trades tokens for cache behaviour. See [[step-size]] and the trim group in the connection's Context section."
+                },
+                {
+                    "id": "step-size",
+                    "name": "Step Size",
+                    "alt": "History freed per step",
+                    "desc": "An **In blocks** setting: how much of the history budget one jump frees when the held window gets too full. A step of 30% leaves the window 70% full, so the next turns have 30% of headroom to grow into — and the prompt keeps the same start for as many turns as it takes to spend it. Bigger steps mean rarer jumps and longer runs where the prompt cache holds, at the cost of showing less history. Works together with the trim trigger (how full the window may get before a jump)."
+                },
+                {
                     "id": "max-tokens",
                     "name": "Max Output Tokens",
                     "alt": "Max Tokens, Response Limit",

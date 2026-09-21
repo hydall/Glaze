@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/game_time.dart';
 import '../../../core/llm/generation_phase.dart';
 import '../../../core/llm/history_assembler.dart';
+import '../../../core/llm/history_trim.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
@@ -36,6 +37,7 @@ import '../../../core/llm/tokenizer.dart';
 import '../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../../core/state/studio_regex_provider.dart';
+import '../../../shared/widgets/glaze_toast.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/pipeline_settings.dart';
@@ -232,7 +234,12 @@ class StreamGenerationService {
       // id is the whole mechanism: next turn reuses the same anchor, so the
       // request keeps the same prefix and the provider's cache hits instead of
       // being invalidated by a cut that moved one message along.
-      _persistHistoryAnchor(session, promptResult.breakdown.historyAnchorId);
+      _persistHistoryAnchor(
+        session: session,
+        breakdown: promptResult.breakdown,
+        history: inputs.history,
+        historyTrimMode: apiConfig.historyTrimMode,
+      );
 
       _ref.read(lastVectorLoreTokensProvider(_charId).notifier).state =
           promptResult.breakdown.vectorLoreTokens;
@@ -1134,24 +1141,34 @@ class StreamGenerationService {
     return override.isNotEmpty ? override : apiConfig.model;
   }
 
-  /// Stores the history anchor a stepped trim settled on, when it moved.
+  /// Stores the history anchor a stepped trim settled on, when it moved, and
+  /// raises the amber "trimmed" toast for the block the move dropped.
   ///
   /// Fire-and-forget and change-guarded: it must never delay a generation, and
   /// the anchor holds still for many turns, so the common case writes nothing.
   /// Failure is survivable — the next turn simply re-anchors.
-  void _persistHistoryAnchor(ChatSession session, String? anchorId) {
+  void _persistHistoryAnchor({
+    required ChatSession session,
+    required TokenBreakdown breakdown,
+    required List<ChatMessage> history,
+    required String historyTrimMode,
+  }) {
     final current = session.sessionVars[ChatSessionX.historyAnchorVarKey];
-    final next = (anchorId == null || anchorId.isEmpty) ? null : anchorId;
-    if (current == next) return;
+    final next = breakdown.historyAnchorId;
+    final normalizedCurrent = (current == null || current.isEmpty)
+        ? null
+        : current;
+    final normalizedNext = (next == null || next.isEmpty) ? null : next;
+    if (normalizedCurrent == normalizedNext) return;
     unawaited(
       _ref
           .read(chatRepoProvider)
           .updateSessionVarsJson(session.id, (vars) {
             final updated = Map<String, dynamic>.from(vars);
-            if (next == null) {
+            if (normalizedNext == null) {
               updated.remove(ChatSessionX.historyAnchorVarKey);
             } else {
-              updated[ChatSessionX.historyAnchorVarKey] = next;
+              updated[ChatSessionX.historyAnchorVarKey] = normalizedNext;
             }
             return updated;
           })
@@ -1159,6 +1176,46 @@ class StreamGenerationService {
             debugPrint('[history-anchor] persist failed: $e');
             return <String, dynamic>{};
           }),
+    );
+
+    // Only the stepped mode holds an anchor, so only a stepped trim is worth a
+    // notice. `historyAnchorId` is already null under sliding.
+    if (historyTrimMode == HistoryTrimMode.stepped && normalizedNext != null) {
+      _toastHistoryTrim(history, normalizedCurrent, normalizedNext);
+    }
+  }
+
+  /// Reports one stepped trim in an amber toast: how many messages it dropped
+  /// and what they were worth in tokens.
+  ///
+  /// A missing previous anchor (the first stepped trim after switching modes)
+  /// counts from the start of the history. A stored anchor the open chat no
+  /// longer has (the message was deleted) reports nothing rather than a number
+  /// read off the wrong list.
+  void _toastHistoryTrim(
+    List<ChatMessage> history,
+    String? currentId,
+    String newId,
+  ) {
+    final newIndex = history.indexWhere((m) => m.id == newId);
+    if (newIndex < 0) return;
+    final oldIndex = currentId == null
+        ? 0
+        : history.indexWhere((m) => m.id == currentId);
+    if (currentId != null && oldIndex < 0) return;
+    final from = oldIndex < 0 ? 0 : oldIndex;
+    final dropped = newIndex - from;
+    if (dropped <= 0) return;
+
+    var droppedTokens = 0;
+    for (var i = from; i < newIndex; i++) {
+      droppedTokens += estimateTokens(history[i].content);
+    }
+    GlazeToast.warningWithoutContext(
+      'history_trim_toast'.plural(
+        dropped,
+        namedArgs: {'tokens': '$droppedTokens'},
+      ),
     );
   }
 }

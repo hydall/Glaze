@@ -7,6 +7,7 @@ import 'dart:convert';
 
 import '../../../core/llm/converters/prompt_post_processing.dart';
 import '../../../core/llm/history_assembler.dart';
+import '../../../core/llm/history_trim.dart';
 import '../../../core/llm/prompt_builder.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/prompt_worker.dart';
@@ -154,6 +155,12 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
             for (final row in _previewMessages)
               InspectorMessage.fromPreview(row),
           ];
+          // In blocks mode the start of the history is the anchor the cache
+          // holds onto, so the inspector marks it. Under continuous trimming
+          // that start moves every turn and there is nothing to hold.
+          if (_apiConfig?.historyTrimMode == HistoryTrimMode.stepped) {
+            _messages = InspectorMessage.markCacheAnchor(_messages);
+          }
           _requestBody = _buildRequestBody();
           _loading = false;
         });
