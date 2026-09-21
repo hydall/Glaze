@@ -161,7 +161,12 @@ Future<String> awaitDatacatLease(
       leases.store(
         token,
         await _leaseExpiry(data),
-        maxUniqueCharacters: datacatInt(data['maxUniqueCharacters']),
+        // `remainingUniqueCharacters` is what is left to spend, which is what
+        // the budget counts. It equals the maximum on a fresh lease and is
+        // smaller on one re-exchanged after use.
+        maxUniqueCharacters:
+            datacatInt(data['remainingUniqueCharacters']) ??
+            datacatInt(data['maxUniqueCharacters']),
       );
       return token;
     } on DatacatApiException catch (e) {

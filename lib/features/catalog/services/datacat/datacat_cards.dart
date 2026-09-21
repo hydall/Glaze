@@ -7,8 +7,11 @@ import 'datacat_verification.dart';
 
 /// Protected transfers: the Character Card V2 JSON and the archived image.
 ///
-/// Both need a transfer lease, and both enforce the creator's download policy
-/// server-side. What used to be a pile of source-dependent field guessing —
+/// Both need a transfer lease **and** the installation id the lease was issued
+/// to. The contract mentions only the lease header, but a request carrying the
+/// lease alone is refused exactly like one carrying nothing —
+/// `verificationReason: "missing"` — so the lease is silently ignored without
+/// it. Both enforce the creator's download policy server-side. What used to be a pile of source-dependent field guessing —
 /// which column holds the definition for a JanitorAI row, which one holds it
 /// for a Saucepan row, where the greetings hid, which of eight fields was the
 /// avatar — is gone: the API answers with a standard card, so the reader below
@@ -37,7 +40,7 @@ Future<DownloadedCharacter> datacatFetchCard(
     request: (lease) => datacatGet(
       '/characters/$characterId/card',
       query: {'sourceKind': sourceKind},
-      auth: DatacatAuth(lease: lease),
+      auth: DatacatAuth(lease: lease, withInstallationId: true),
     ),
   );
 
@@ -76,7 +79,7 @@ Future<List<int>> datacatFetchAvatar(
     request: (lease) => datacatGetBytes(
       '/characters/$characterId/avatar',
       query: {'sourceKind': sourceKind},
-      auth: DatacatAuth(lease: lease),
+      auth: DatacatAuth(lease: lease, withInstallationId: true),
     ),
   );
 }

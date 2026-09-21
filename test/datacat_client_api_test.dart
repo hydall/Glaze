@@ -393,9 +393,14 @@ void main() {
       );
 
       expect(card.charData.name, 'Yixuan');
+      final transfer = adapter.requests.last;
+      expect(_header(transfer, 'X-Datacat-Verification-Lease'), 'lease-1');
+      // The installation id rides along, undocumented but mandatory: a
+      // transfer carrying the lease alone is refused exactly like one carrying
+      // no lease at all, so dropping this header silently breaks every import.
       expect(
-        _header(adapter.requests.last, 'X-Datacat-Verification-Lease'),
-        'lease-1',
+        _header(transfer, 'X-Datacat-Installation-Id'),
+        'install-1234567890',
       );
     });
 
