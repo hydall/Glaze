@@ -89,6 +89,15 @@ void main() {
       );
     });
 
+    test('ComfyUI accepts none', () {
+      expect(
+        providerMaxReferences(
+          const ImageGenSettings(apiType: ImageGenApiType.comfyui),
+        ),
+        0,
+      );
+    });
+
     test('Naistera models without reference support accept none', () {
       expect(
         providerMaxReferences(

@@ -7,6 +7,7 @@ import '../../../core/llm/transport/llm_request_capture.dart';
 import '../image_gen_capabilities.dart';
 import '../image_gen_models.dart';
 import 'a1111_image_provider.dart';
+import 'comfyui_image_provider.dart';
 import 'gemini_image_provider.dart';
 import 'image_prompt_builder.dart';
 import 'naistera_image_provider.dart';
@@ -151,6 +152,12 @@ class ImageGenDispatcher {
           instructionAspectRatio: instructionAspectRatio,
           cancelToken: cancelToken,
         );
+      case ImageGenApiType.comfyui:
+        return ComfyUiImageProvider().generate(
+          settings: settings.comfyui,
+          prompt: prompt,
+          cancelToken: cancelToken,
+        );
     }
   }
 
@@ -161,6 +168,9 @@ class ImageGenDispatcher {
         ImageGenApiType.naistera => settings.naisteraModel,
         ImageGenApiType.routmy => settings.routmyModel,
         ImageGenApiType.novelai => settings.novelai.model,
+        ImageGenApiType.comfyui => settings.comfyui.model.isEmpty
+            ? settings.apiType.name
+            : settings.comfyui.model,
         _ => settings.customModel.isEmpty
             ? settings.apiType.name
             : settings.customModel,

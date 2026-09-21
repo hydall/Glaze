@@ -22,6 +22,8 @@ import '../image_gen_provider.dart';
 import '../services/image_gen_connection_service.dart';
 import '../services/naistera_image_provider.dart';
 import 'a1111_fields.dart';
+import 'comfyui_fields.dart';
+import 'comfyui_workflow_sheet.dart';
 import 'connection_fields.dart';
 import 'model_fields.dart';
 import 'novelai_fields.dart';
@@ -96,7 +98,9 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       before.a1111.endpoint != after.a1111.endpoint ||
       before.a1111.apiKey != after.a1111.apiKey ||
       before.novelai.endpoint != after.novelai.endpoint ||
-      before.novelai.apiKey != after.novelai.apiKey;
+      before.novelai.apiKey != after.novelai.apiKey ||
+      before.comfyui.endpoint != after.comfyui.endpoint ||
+      before.comfyui.apiKey != after.comfyui.apiKey;
 
   /// Probes the provider. Only ever runs from a tap on the status badge — the
   /// sheet never reaches out on its own.
@@ -395,6 +399,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return buildA1111ConnectionFields(s, _update);
       case ImageGenApiType.novelai:
         return buildNovelAiConnectionFields(s, _update);
+      case ImageGenApiType.comfyui:
+        return buildComfyUiConnectionFields(s, _update);
       case ImageGenApiType.openai:
       case ImageGenApiType.gemini:
         return buildOpenaiConnectionFields(s, _update);
@@ -408,6 +414,23 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       useRootNavigator: true,
       backgroundColor: Colors.transparent,
       builder: (_) => StyleLibrarySheet(settings: _settings, onUpdate: _update),
+    );
+  }
+
+  void _openComfyUiWorkflow() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ComfyUiWorkflowSheet(
+        workflow: _settings.comfyui.workflow,
+        onSave: (workflow) => _update(
+          _settings.copyWith(
+            comfyui: _settings.comfyui.copyWith(workflow: workflow),
+          ),
+        ),
+      ),
     );
   }
 
@@ -486,6 +509,15 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
           onUpdate: _update,
           showOptions: showOptions,
         );
+      case ImageGenApiType.comfyui:
+        return buildComfyUiModelFields(
+          s,
+          isFetching: _isFetchingModels,
+          onFetchModels: _onFetchModels,
+          onEditWorkflow: _openComfyUiWorkflow,
+          onUpdate: _update,
+          showOptions: showOptions,
+        );
     }
   }
 
@@ -523,6 +555,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return Future.value(
           NovelAIConstants.models.map((model) => model.$1).toList(),
         );
+      case ImageGenApiType.comfyui:
+        return _connectionService.fetchComfyUiModels(_settings);
       case ImageGenApiType.xai:
         return _connectionService.fetchXaiModels(_settings);
       case ImageGenApiType.naistera:
@@ -557,6 +591,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     ImageGenApiType.electronhub => _settings.electronhub.model == model,
     ImageGenApiType.a1111 => _settings.a1111.model == model,
     ImageGenApiType.novelai => _settings.novelai.model == model,
+    ImageGenApiType.comfyui => _settings.comfyui.model == model,
     _ => _settings.customModel == model,
   };
 
@@ -577,6 +612,10 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       case ImageGenApiType.a1111:
         _update(
           _settings.copyWith(a1111: _settings.a1111.copyWith(model: model)),
+        );
+      case ImageGenApiType.comfyui:
+        _update(
+          _settings.copyWith(comfyui: _settings.comfyui.copyWith(model: model)),
         );
       case ImageGenApiType.xai:
         _update(_settings.copyWith(xai: _settings.xai.copyWith(model: model)));

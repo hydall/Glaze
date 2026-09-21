@@ -23,6 +23,15 @@ void main() {
           cfgScale: 5.5,
           enableHr: true,
         ),
+        comfyui: ComfyUiImageSettings(
+          endpoint: 'http://localhost:8188',
+          workflow: '{"3":{"class_type":"KSampler"}}',
+          model: 'anythingXL.safetensors',
+          sampler: 'euler',
+          steps: 28,
+          cfgScale: 6.5,
+          denoise: 0.8,
+        ),
         styles: [ImageStyle(id: 's1', name: 'Anime', value: 'anime')],
         activeStyleId: 's1',
         references: [
@@ -138,9 +147,7 @@ void main() {
 
     test('settings saved before the toggle existed stay sequential', () {
       expect(
-        ImageGenSettingsCodec.fromJson({
-          'enabled': true,
-        }).concurrentGeneration,
+        ImageGenSettingsCodec.fromJson({'enabled': true}).concurrentGeneration,
         isFalse,
       );
     });

@@ -17,6 +17,7 @@ enum ImageGenApiType {
   electronhub,
   a1111,
   novelai,
+  comfyui,
 }
 
 extension ImageGenApiTypeLabel on ImageGenApiType {
@@ -32,6 +33,7 @@ extension ImageGenApiTypeLabel on ImageGenApiType {
     ImageGenApiType.electronhub => 'Electron Hub',
     ImageGenApiType.a1111 => 'AUTOMATIC1111 / Forge',
     ImageGenApiType.novelai => 'NovelAI',
+    ImageGenApiType.comfyui => 'ComfyUI',
   };
 }
 
@@ -178,6 +180,33 @@ abstract class NovelAIImageSettings with _$NovelAIImageSettings {
   }) = _NovelAIImageSettings;
 }
 
+/// ComfyUI connection, workflow and sampler parameters.
+///
+/// [workflow] is the raw API-format workflow with `%placeholder%` tokens; an
+/// empty value means [ComfyUiConstants.defaultWorkflow]. References are not
+/// supported — the workflow decides what extra nodes (and images) it loads.
+@freezed
+abstract class ComfyUiImageSettings with _$ComfyUiImageSettings {
+  const factory ComfyUiImageSettings({
+    @Default('') String endpoint,
+    @Default('') String apiKey,
+    @Default('') String workflow,
+    @Default('') String model,
+    @Default('') String vae,
+    @Default('DDIM') String sampler,
+    @Default('normal') String scheduler,
+    @Default(20) int steps,
+    @Default(7.0) double cfgScale,
+    @Default(-1) int seed,
+    @Default(1.0) double denoise,
+    @Default(1) int clipSkip,
+    @Default(512) int width,
+    @Default(512) int height,
+    @Default('') String promptPrefix,
+    @Default('') String negativePrompt,
+  }) = _ComfyUiImageSettings;
+}
+
 @freezed
 abstract class ImageGenSettings with _$ImageGenSettings {
   const factory ImageGenSettings({
@@ -220,6 +249,7 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default(ElectronHubImageSettings()) ElectronHubImageSettings electronhub,
     @Default(A1111ImageSettings()) A1111ImageSettings a1111,
     @Default(NovelAIImageSettings()) NovelAIImageSettings novelai,
+    @Default(ComfyUiImageSettings()) ComfyUiImageSettings comfyui,
     // Reference handling — shared by every provider that accepts references.
     @Default(false) bool sendCharAvatar,
     @Default(false) bool sendUserAvatar,
