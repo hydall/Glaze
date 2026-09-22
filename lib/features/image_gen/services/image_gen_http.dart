@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../core/utils/error_format.dart';
+
 class ImageGenHttp {
   final Dio _dio;
 
@@ -103,8 +105,10 @@ class ImageGenHttp {
         cancelToken: cancelToken,
       );
       return Uint8List.fromList(response.data ?? const []);
-    } on DioException {
-      rethrow;
+    } on DioException catch (error) {
+      // The success payload is binary, so the error body is bytes too; decode
+      // it before `formatError` sees it, or the provider's reason is lost.
+      throw await decodeByteError(error);
     }
   }
 

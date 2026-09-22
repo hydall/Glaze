@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/features/image_gen/image_gen_models.dart';
 import 'package:glaze_flutter/features/image_gen/services/novelai_image_provider.dart';
@@ -11,6 +12,7 @@ import 'package:glaze_flutter/features/image_gen/services/novelai_image_provider
 Future<(HttpServer, List<HttpRequest>, List<String>)> _byteServer(
   List<int> bytes, {
   String contentType = 'application/zip',
+  int status = 200,
 }) async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   final requests = <HttpRequest>[];
@@ -18,6 +20,7 @@ Future<(HttpServer, List<HttpRequest>, List<String>)> _byteServer(
   server.listen((request) async {
     requests.add(request);
     bodies.add(await utf8.decoder.bind(request).join());
+    request.response.statusCode = status;
     request.response.headers.contentType = ContentType.parse(contentType);
     request.response.add(bytes);
     await request.response.close();
@@ -280,6 +283,39 @@ void main() {
       );
 
       expect(image, png);
+    });
+
+    test('keeps the provider message on a rejected request', () async {
+      // The success payload is a ZIP, so the request asks for bytes; a JSON
+      // error body must still be decoded or `formatError` cannot show it.
+      final (server, _, _) = await _byteServer(
+        utf8.encode(
+          jsonEncode({
+            'statusCode': 400,
+            'message': 'model must be a valid enum value',
+          }),
+        ),
+        contentType: 'application/json',
+        status: 400,
+      );
+      addTearDown(() => server.close(force: true));
+
+      try {
+        await NovelAIImageProvider().generate(
+          settings: NovelAIImageSettings(
+            apiKey: 'tok',
+            endpoint: _endpoint(server),
+          ),
+          prompt: 'a cat',
+        );
+        fail('expected a DioException');
+      } on DioException catch (error) {
+        expect(error.response?.data, isA<Map<String, dynamic>>());
+        expect(
+          (error.response!.data as Map<String, dynamic>)['message'],
+          'model must be a valid enum value',
+        );
+      }
     });
   });
 

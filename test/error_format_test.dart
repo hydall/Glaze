@@ -144,6 +144,63 @@ void main() {
     expect(formatError(error), 'HTTP 599\nupstream exploded');
   });
 
+  group('a body that arrived as bytes is decoded before it is shown', () {
+    /// The shape NovelAI's image provider produces: because the success payload
+    /// is a ZIP it requests `ResponseType.bytes`, so a JSON error body arrives
+    /// as `List<int>`.
+    Future<DioException> byteError(int status, List<int> body) {
+      final options = RequestOptions(path: '/ai/generate-image');
+      return decodeByteError(
+        DioException.badResponse(
+          statusCode: status,
+          requestOptions: options,
+          response: Response<List<int>>(
+            requestOptions: options,
+            statusCode: status,
+            data: body,
+          ),
+        ),
+      );
+    }
+
+    test('the provider message survives the byte body', () async {
+      final message = formatError(
+        await byteError(
+          400,
+          utf8.encode(
+            '{"statusCode":400,"message":"model must be a valid enum value"}',
+          ),
+        ),
+      );
+
+      expectStatusLine(message, 400);
+      expect(message.split('\n').last, 'model must be a valid enum value');
+    });
+
+    test('a bare prose byte body is shown', () async {
+      final message = formatError(
+        await byteError(400, utf8.encode('Model is not available')),
+      );
+
+      expectStatusLine(message, 400);
+      expect(message.split('\n').last, 'Model is not available');
+    });
+
+    test('binary bytes are left alone', () async {
+      final original = DioException.badResponse(
+        statusCode: 400,
+        requestOptions: RequestOptions(path: '/ai/generate-image'),
+        response: Response<List<int>>(
+          requestOptions: RequestOptions(path: '/ai/generate-image'),
+          statusCode: 400,
+          data: const [0x89, 0x50, 0x4E, 0x47, 0xFF],
+        ),
+      );
+
+      expect(await decodeByteError(original), same(original));
+    });
+  });
+
   group('a body that arrived as text is decoded before it is shown', () {
     /// The shape the catalog client produces: `ResponseType.plain`, so the
     /// server's JSON reaches `formatError` as a String.

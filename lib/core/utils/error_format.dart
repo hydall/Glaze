@@ -75,6 +75,52 @@ Future<DioException> decodeStreamingError(DioException err) async {
   );
 }
 
+/// Decodes an error body left as raw bytes by `ResponseType.bytes`.
+///
+/// Providers whose success payload is binary ask for the response as bytes —
+/// NovelAI answers with a ZIP, ComfyUI with an image — so a provider that
+/// rejects the request with a 4xx/5xx JSON body delivers that body as
+/// `List<int>` too. `_extractApiMessage` reads strings and maps, not byte
+/// lists, so without this the reason is dropped and the reader only sees
+/// "HTTP 400 - Bad Request" with no provider description.
+Future<DioException> decodeByteError(DioException err) async {
+  final response = err.response;
+  final body = response?.data;
+  if (response == null || body is! List<int>) return err;
+
+  late final String text;
+  try {
+    text = utf8.decode(body).trim();
+  } on Object {
+    return err;
+  }
+  if (text.isEmpty) return err;
+
+  dynamic data = text;
+  try {
+    data = jsonDecode(text);
+  } on FormatException {
+    // Plain-text error bodies still reach `_proseMessage`.
+  }
+  return DioException(
+    requestOptions: err.requestOptions,
+    response: Response<dynamic>(
+      data: data,
+      headers: response.headers,
+      requestOptions: response.requestOptions,
+      statusCode: response.statusCode,
+      statusMessage: response.statusMessage,
+      isRedirect: response.isRedirect,
+      redirects: response.redirects,
+      extra: response.extra,
+    ),
+    type: err.type,
+    error: err.error,
+    stackTrace: err.stackTrace,
+    message: err.message,
+  );
+}
+
 /// Builds "HTTP <code> - <description>" and appends the provider message on a
 /// second line when the body carries one.
 String _formatHttpError(Response<dynamic> response) {
