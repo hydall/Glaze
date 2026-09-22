@@ -44,7 +44,7 @@ void main() {
         .add(ExtensionPreset(id: 'p1', name: 'Preset', blocks: blocks));
     await container
         .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(enabled: true, activePresetId: 'p1'));
+        .update(const ExtensionsSettings(activePresetId: 'p1'));
     // Settle the notifier's own initial load before any row is inserted, so a
     // later refresh() can't be overwritten by it.
     await container.read(infoBlocksProvider(_sessionId).notifier).refresh();

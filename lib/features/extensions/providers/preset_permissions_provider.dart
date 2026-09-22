@@ -8,7 +8,6 @@ import '../providers/extensions_settings_provider.dart';
 ///
 /// Falls back to a fully default-deny (no capabilities) [PresetPermissions]
 /// when:
-///   - extensions are disabled in [ExtensionsSettings],
 ///   - the active preset id is null/empty,
 ///   - the preset cannot be found,
 ///   - or the preset has no permissions field yet (older saves).
@@ -17,9 +16,6 @@ import '../providers/extensions_settings_provider.dart';
 /// for an unknown preset. The user has to opt in explicitly.
 final activePresetPermissionsProvider = Provider<PresetPermissions>((ref) {
   final settings = ref.watch(extensionsSettingsProvider);
-  if (!settings.enabled) {
-    return const PresetPermissions();
-  }
   final activeId = settings.activePresetId;
   if (activeId == null || activeId.isEmpty) {
     return const PresetPermissions();

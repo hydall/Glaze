@@ -30,8 +30,7 @@ class ExtBlocksPanelBuilder {
 
   static bool extensionsActive(Ref ref) {
     final settings = ref.read(extensionsSettingsProvider);
-    return settings.enabled &&
-        settings.activePresetId != null &&
+    return settings.activePresetId != null &&
         settings.activePresetId!.isNotEmpty;
   }
 
@@ -84,7 +83,6 @@ class ExtBlocksPanelBuilder {
     int agentSwipeId = -1,
   }) {
     final settings = ref.read(extensionsSettingsProvider);
-    if (!settings.enabled) return [];
     final presetId = settings.activePresetId;
     if (presetId == null || presetId.isEmpty) return [];
 

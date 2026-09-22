@@ -20,7 +20,6 @@ import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat/widgets/chat_stats_sheet.dart';
 import '../chat/widgets/magic_drawer_widgets.dart' show MagicCardBadge;
-import '../extensions/providers/extensions_settings_provider.dart';
 import '../extensions/widgets/ext_blocks_settings_sheet.dart';
 import '../image_gen/widgets/image_gen_sheet.dart';
 import '../personas/persona_list_provider.dart';
@@ -188,19 +187,10 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
 
   ToolsTileSize _sizeFor(ToolsTileDef def) => _sizes[def.id] ?? def.defaultSize;
 
-  bool _featureVisible(ToolsTileDef def, bool extBlocksEnabled) =>
-      !def.featureGated || extBlocksEnabled;
+  List<ToolsTileDef> _visibleTiles() =>
+      _itemIds.map(_defFor).whereType<ToolsTileDef>().toList();
 
-  List<ToolsTileDef> _visibleTiles(bool extBlocksEnabled) => _itemIds
-      .map(_defFor)
-      .whereType<ToolsTileDef>()
-      .where((def) => _featureVisible(def, extBlocksEnabled))
-      .toList();
-
-  bool _canAdd(bool extBlocksEnabled) => _allTiles.any(
-    (tile) =>
-        !_itemIds.contains(tile.id) && _featureVisible(tile, extBlocksEnabled),
-  );
+  bool _canAdd() => _allTiles.any((tile) => !_itemIds.contains(tile.id));
 
   Future<void> _removeTile(String id) async {
     setState(() {
@@ -229,10 +219,9 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     await _saveLayout();
   }
 
-  Future<void> _showAddSheet(bool extBlocksEnabled) async {
+  Future<void> _showAddSheet() async {
     final hidden = _allTiles
         .where((tile) => !_itemIds.contains(tile.id))
-        .where((tile) => _featureVisible(tile, extBlocksEnabled))
         .toList();
     if (hidden.isEmpty) return;
 
@@ -354,9 +343,6 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     final presetName =
         ref.watch(_activePresetProvider)?.name ?? 'label_default'.tr();
     final presetImage = ref.watch(_activePresetImageProvider);
-    final extBlocksEnabled = ref.watch(
-      extensionsSettingsProvider.select((s) => s.enabled),
-    );
     final topPad = widget.inSidebar
         ? 0.0
         : MediaQuery.of(context).padding.top + 66.0;
@@ -369,7 +355,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
       });
     }
 
-    final tiles = _visibleTiles(extBlocksEnabled);
+    final tiles = _visibleTiles();
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -386,7 +372,6 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
             : _buildRows(
                 context,
                 tiles,
-                extBlocksEnabled,
                 personaInfo,
                 resolvedAvatar,
                 presetName,
@@ -401,7 +386,6 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
   List<Widget> _buildRows(
     BuildContext context,
     List<ToolsTileDef> tiles,
-    bool extBlocksEnabled,
     PersonaInfo? personaInfo,
     String? resolvedAvatar,
     String presetName,
@@ -450,9 +434,9 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     }
     flushSmallRow();
 
-    if (_editing && _canAdd(extBlocksEnabled)) {
+    if (_editing && _canAdd()) {
       if (rows.isNotEmpty) rows.add(const SizedBox(height: 10));
-      rows.add(_AddTile(onTap: () => _showAddSheet(extBlocksEnabled)));
+      rows.add(_AddTile(onTap: _showAddSheet));
     }
 
     return rows;

@@ -220,16 +220,12 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   List<MagicDrawerCardItem> _displayItems(
     ExtensionsSettings extSettings,
     List<ExtensionPreset> extPresets,
-    bool studioFeatureEnabled,
     Set<String> pinnedIds,
   ) {
     final list = _itemIds
         .where((id) => !pinnedIds.contains(id))
         .map((id) => _allItems.where((item) => item.id == id).firstOrNull)
         .whereType<MagicDrawerItemDef>()
-        .where(
-          (def) => _featureVisible(def.id, extSettings, studioFeatureEnabled),
-        )
         .map(
           (def) => MagicDrawerCardItem(
             def: def,
@@ -240,26 +236,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     return list;
   }
 
-  /// Feature-gated cards are hidden from the Tools tab and the "Add Tool"
-  /// list unless their Experimental Features master switch is on.
-  /// Ungated items are always visible.
-  bool _featureVisible(
-    String id,
-    ExtensionsSettings extSettings,
-    bool studioFeatureEnabled,
-  ) {
-    return switch (id) {
-      'ext-blocks' => extSettings.enabled,
-      _ => true,
-    };
-  }
-
-  bool _canAddMore(ExtensionsSettings extSettings, bool studioFeatureEnabled) =>
-      _allItems.any(
-        (item) =>
-            !_itemIds.contains(item.id) &&
-            _featureVisible(item.id, extSettings, studioFeatureEnabled),
-      );
+  bool _canAddMore() =>
+      _allItems.any((item) => !_itemIds.contains(item.id));
 
   String? _statusFor(
     String id,
@@ -302,9 +280,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
             ? '${_stats.session!.authorsNote!.content.length} chars'
             : 'placeholder_empty'.tr(),
       'ext-blocks' =>
-        !extSettings.enabled
-            ? 'off'.tr()
-            : extSettings.activePresetId == null
+        extSettings.activePresetId == null
             ? 'No preset'
             : extPresets
                       .where((p) => p.id == extSettings.activePresetId)
@@ -341,13 +317,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   Future<void> _showAddItemSheet() async {
-    final extSettings = ref.read(extensionsSettingsProvider);
-    final studioFeatureEnabled = ref.read(studioFeatureEnabledProvider);
     final available = _allItems
         .where((item) => !_itemIds.contains(item.id))
-        .where(
-          (item) => _featureVisible(item.id, extSettings, studioFeatureEnabled),
-        )
         .toList();
     if (available.isEmpty) return;
 
@@ -431,8 +402,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
         _scheduleRefresh();
         return;
       }
-      if (prev.enabled != next.enabled ||
-          prev.activePresetId != next.activePresetId) {
+      if (prev.activePresetId != next.activePresetId) {
         _scheduleRefresh();
       }
     });
@@ -453,19 +423,13 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
     final extSettings = ref.watch(extensionsSettingsProvider);
     final extPresets = ref.watch(extensionPresetsProvider);
-    final studioFeatureEnabled = ref.watch(studioFeatureEnabledProvider);
     final pinnedIds = {
       for (final pin
           in ref.watch(composerPinsProvider).value ?? const <ComposerPin>[])
         if (pin.kind == ComposerPinKind.tool) pin.refId,
     };
-    final items = _displayItems(
-      extSettings,
-      extPresets,
-      studioFeatureEnabled,
-      pinnedIds,
-    );
-    final canAdd = _canAddMore(extSettings, studioFeatureEnabled);
+    final items = _displayItems(extSettings, extPresets, pinnedIds);
+    final canAdd = _canAddMore();
 
     final scrollable = RawScrollbar(
       controller: _scrollController,

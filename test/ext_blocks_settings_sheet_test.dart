@@ -41,7 +41,7 @@ void main() {
         );
     await container
         .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(enabled: true, activePresetId: 'p1'));
+        .update(const ExtensionsSettings(activePresetId: 'p1'));
 
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -61,11 +61,8 @@ void main() {
     expect(find.text('Настроить контекст блока'), findsNothing);
   });
 
-  /// Two presets, the first active and holding one block, with External Blocks on.
-  Future<ProviderContainer> pumpPanel(
-    WidgetTester tester, {
-    bool enabled = true,
-  }) async {
+  /// Two presets, the first active and holding one block.
+  Future<ProviderContainer> pumpPanel(WidgetTester tester) async {
     tester.view.physicalSize = const Size(800, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -92,7 +89,7 @@ void main() {
         .add(const ExtensionPreset(id: 'p2', name: 'Other preset', blocks: []));
     await container
         .read(extensionsSettingsProvider.notifier)
-        .update(ExtensionsSettings(enabled: enabled, activePresetId: 'p1'));
+        .update(const ExtensionsSettings(activePresetId: 'p1'));
 
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -106,21 +103,14 @@ void main() {
     return container;
   }
 
-  testWidgets('the master switch lives in the header and gates the body', (
+  testWidgets('the sheet has no master switch and always shows the preset', (
     tester,
   ) async {
-    final container = await pumpPanel(tester, enabled: false);
+    await pumpPanel(tester);
 
-    // Off: one line of explanation, and nothing to configure under it.
-    expect(find.byType(GlazeSwitch), findsOneWidget);
-    expect(find.text('extblocks_disabled_hint'), findsOneWidget);
-    expect(find.byType(PresetPill), findsNothing);
-    expect(find.text('Ledger'), findsNothing);
-
-    await tester.tap(find.byType(GlazeSwitch));
-    await tester.pumpAndSettle();
-
-    expect(container.read(extensionsSettingsProvider).enabled, isTrue);
+    // External Blocks is no longer gated behind an experimental switch, so
+    // the body is always the preset's controls — never a disabled hint.
+    expect(find.byType(GlazeSwitch), findsNothing);
     expect(find.text('extblocks_disabled_hint'), findsNothing);
     expect(find.byType(PresetPill), findsOneWidget);
     expect(find.text('Ledger'), findsOneWidget);

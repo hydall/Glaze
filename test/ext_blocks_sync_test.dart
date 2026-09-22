@@ -579,10 +579,8 @@ ExtensionPreset makeExtPresetWithBlock(String id) => ExtensionPreset(
   ],
 );
 
-ExtensionsSettings makeSettings({
-  bool enabled = true,
-  String? activePresetId,
-}) => ExtensionsSettings(enabled: enabled, activePresetId: activePresetId);
+ExtensionsSettings makeSettings({String? activePresetId}) =>
+    ExtensionsSettings(activePresetId: activePresetId);
 
 InfoBlock makeInfoBlock(
   String id,
@@ -835,7 +833,7 @@ void main() {
   // ── Test 4: ExtensionsSettings push/pull round-trip ──────────────────
   test('ExtensionsSettings push/pull round-trip preserves data', () async {
     final deviceA = SyncWorld();
-    final settings = makeSettings(enabled: true, activePresetId: 'ep1');
+    final settings = makeSettings(activePresetId: 'ep1');
     await deviceA.extensionsSettings.put(settings);
 
     await deviceA.engine.pushEntities(onProgress: (_) {});
@@ -852,7 +850,6 @@ void main() {
     await deviceB.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
 
     final pulledSettings = await deviceB.extensionsSettings.get();
-    expect(pulledSettings.enabled, isTrue);
     expect(pulledSettings.activePresetId, equals('ep1'));
   });
 
@@ -1020,7 +1017,7 @@ void main() {
 
       await world.extensionPresets.put(makeExtPreset('ep1', name: 'My Preset'));
       await world.extensionsSettings.put(
-        makeSettings(enabled: true, activePresetId: 'ep1'),
+        makeSettings(activePresetId: 'ep1'),
       );
       await world.infoBlocks.insert(makeInfoBlock('ib1', 'session1'));
 

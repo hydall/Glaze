@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/utils/id_generator.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../../shared/widgets/glaze_switch.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/list_controls.dart';
 import '../../../shared/widgets/menu_group.dart';
@@ -26,11 +25,10 @@ enum _AddBlockChoice { import, create }
 
 /// External Blocks control panel, opened from the magic drawer and from Tools.
 ///
-/// The whole feature hangs off the switch in the header: with it off there is
-/// nothing to configure, so the body is a single line explaining that rather
-/// than a set of controls that do nothing. With it on the panel is the preset
-/// pill, the preset's API card and its blocks — tapping a block opens that
-/// block's settings, and managing the presets themselves lives behind the pill.
+/// The panel is the preset pill, the preset's API card and its blocks — tapping
+/// a block opens that block's settings, and managing the presets themselves
+/// lives behind the pill. There is no master on/off switch: the feature is
+/// always available, and which preset runs is the only choice to make.
 class ExtBlocksSettingsSheet extends ConsumerWidget {
   const ExtBlocksSettingsSheet({super.key});
 
@@ -45,30 +43,15 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
         : null;
 
     return SheetView(
-      // The master switch rides in the header rather than as the first row:
-      // it governs everything under it, so it should not look like a sibling
-      // of the settings it turns on.
-      titleWidget: Row(
-        children: [
-          Expanded(
-            child: Text(
-              'extblocks_sheet_title'.tr(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
-              ),
-            ),
-          ),
-          GlazeSwitch(
-            value: settings.enabled,
-            onChanged: (value) => ref
-                .read(extensionsSettingsProvider.notifier)
-                .update(settings.copyWith(enabled: value)),
-          ),
-        ],
+      titleWidget: Text(
+        'extblocks_sheet_title'.tr(),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          color: context.cs.onSurface,
+        ),
       ),
       // The header inset SheetView reports lives inside its own subtree,
       // so the padding must be read from a context below it — the outer
@@ -82,53 +65,48 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
             MediaQuery.paddingOf(context).bottom + 24,
           ),
           children: [
-            if (!settings.enabled)
-              _Hint(text: 'extblocks_disabled_hint'.tr())
-            else ...[
-              // The dropdown heads the list: it says which preset everything
-              // below belongs to. Permissions sit at the other end of the same
-              // row — they are the preset's, not a setting among the blocks.
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Row(
-                  // spaceBetween rather than a Spacer: a Flexible next to a
-                  // Spacer would split the free space with the pill and leave
-                  // the chip short of the cards' right edge.
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Flexible(
-                      child: PresetPill(
-                        label:
-                            activePreset?.name ?? 'extblocks_preset_none'.tr(),
-                        onTap: () => _showPresetSwitcher(context, ref),
-                      ),
+            // The dropdown heads the list: it says which preset everything
+            // below belongs to. Permissions sit at the other end of the same
+            // row — they are the preset's, not a setting among the blocks.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Row(
+                // spaceBetween rather than a Spacer: a Flexible next to a
+                // Spacer would split the free space with the pill and leave
+                // the chip short of the cards' right edge.
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: PresetPill(
+                      label: activePreset?.name ?? 'extblocks_preset_none'.tr(),
+                      onTap: () => _showPresetSwitcher(context, ref),
                     ),
-                    if (activePreset != null) ...[
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: GlazeActionChip(
-                          icon: Icons.verified_user_outlined,
-                          label: 'extblocks_permissions'.tr(),
-                          tooltip: 'extblocks_permissions'.tr(),
-                          onTap: () => ExtBlocksPermissionsSheet.show(
-                            context,
-                            activePreset.id,
-                          ),
+                  ),
+                  if (activePreset != null) ...[
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: GlazeActionChip(
+                        icon: Icons.verified_user_outlined,
+                        label: 'extblocks_permissions'.tr(),
+                        tooltip: 'extblocks_permissions'.tr(),
+                        onTap: () => ExtBlocksPermissionsSheet.show(
+                          context,
+                          activePreset.id,
                         ),
                       ),
-                    ],
+                    ),
                   ],
-                ),
+                ],
               ),
-              if (activePreset == null)
-                _Hint(text: 'extblocks_no_preset_hint'.tr())
-              else ...[
-                ProfilesSection(preset: activePreset),
-                _BlocksGroup(
-                  preset: activePreset,
-                  onAdd: () => _addBlock(context, ref, activePreset),
-                ),
-              ],
+            ),
+            if (activePreset == null)
+              _Hint(text: 'extblocks_no_preset_hint'.tr())
+            else ...[
+              ProfilesSection(preset: activePreset),
+              _BlocksGroup(
+                preset: activePreset,
+                onAdd: () => _addBlock(context, ref, activePreset),
+              ),
             ],
           ],
         ),

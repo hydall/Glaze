@@ -74,7 +74,7 @@ void main() {
 
     await container
         .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(enabled: false, activePresetId: 'p1'));
+        .update(const ExtensionsSettings(activePresetId: 'p1'));
 
     await container
         .read(_extBlocksStageProvider)

@@ -223,7 +223,6 @@ class MagicDrawerStatsService {
           (cached?.macroTokens['lorebooks'] ?? 0)),
       imageGenEnabled: imageGenEnabled,
       summaryContent: summaryContent,
-      extBlocksEnabled: extSettings.enabled,
       extBlocksActivePresetName: extActivePresetName,
     );
   }
