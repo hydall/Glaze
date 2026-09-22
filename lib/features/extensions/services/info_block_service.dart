@@ -272,9 +272,9 @@ class InfoBlockService {
   }
 
   /// Loads up to [BlockConfig.previousBlocksCount] of this block's own prior
-  /// outputs (same [BlockConfig.name], same session, from OTHER messages),
+  /// outputs (same [BlockConfig.id], same session, from OTHER messages),
   /// ordered oldest → newest for prompt insertion. Returns empty when the
-  /// feature is disabled (`previousBlocksCount <= 0`) or the block has no name.
+  /// feature is disabled (`previousBlocksCount <= 0`) or the block has no id.
   Future<List<InfoBlock>> _loadPreviousBlocks({
     required String sessionId,
     required String currentMessageId,
@@ -283,7 +283,7 @@ class InfoBlockService {
     required BlockConfig blockConfig,
   }) async {
     final count = blockConfig.previousBlocksCount;
-    if (count <= 0 || blockConfig.name.trim().isEmpty) {
+    if (count <= 0 || blockConfig.id.isEmpty) {
       return const [];
     }
 
@@ -310,7 +310,7 @@ class InfoBlockService {
         blocks
             .where(
               (b) =>
-                  b.blockName == blockConfig.name &&
+                  b.blockId == blockConfig.id &&
                   b.content.trim().isNotEmpty &&
                   messageOrder.containsKey(b.messageId) &&
                   b.swipeId == swipeByMessageId[b.messageId] &&
