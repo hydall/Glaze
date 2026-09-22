@@ -101,9 +101,9 @@ class ComfyUiImageProvider {
     ComfyUiImageSettings settings, {
     required String prompt,
   }) {
-    final raw = settings.workflow.trim().isEmpty
+    final raw = settings.activeWorkflowJson.isEmpty
         ? ComfyUiConstants.defaultWorkflow
-        : settings.workflow;
+        : settings.activeWorkflowJson;
     final seed = settings.seed >= 0 ? settings.seed : _randomSeed();
 
     final values = <String, Object>{

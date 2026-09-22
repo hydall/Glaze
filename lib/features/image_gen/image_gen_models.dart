@@ -193,17 +193,31 @@ abstract class NovelAIImageSettings with _$NovelAIImageSettings {
   }) = _NovelAIImageSettings;
 }
 
-/// ComfyUI connection, workflow and sampler parameters.
+/// One named ComfyUI API-format workflow.
 ///
-/// [workflow] is the raw API-format workflow with `%placeholder%` tokens; an
-/// empty value means [ComfyUiConstants.defaultWorkflow]. References are not
+/// [json] is the graph exactly as ComfyUI's "Export Workflow (API)" writes it,
+/// with the `%placeholder%` tokens left for the provider to substitute.
+@freezed
+abstract class ComfyUiWorkflow with _$ComfyUiWorkflow {
+  const factory ComfyUiWorkflow({
+    required String id,
+    required String name,
+    @Default('') String json,
+  }) = _ComfyUiWorkflow;
+}
+
+/// ComfyUI connection, sampler parameters and the workflow library.
+///
+/// An empty [activeWorkflowId] (or one that no longer matches an entry) means
+/// the shipped [ComfyUiConstants.defaultWorkflow] is used. References are not
 /// supported — the workflow decides what extra nodes (and images) it loads.
 @freezed
 abstract class ComfyUiImageSettings with _$ComfyUiImageSettings {
   const factory ComfyUiImageSettings({
     @Default('') String endpoint,
     @Default('') String apiKey,
-    @Default('') String workflow,
+    @Default([]) List<ComfyUiWorkflow> workflows,
+    @Default('') String activeWorkflowId,
     @Default('') String model,
     @Default('') String vae,
     @Default('DDIM') String sampler,
@@ -218,6 +232,21 @@ abstract class ComfyUiImageSettings with _$ComfyUiImageSettings {
     @Default('') String promptPrefix,
     @Default('') String negativePrompt,
   }) = _ComfyUiImageSettings;
+
+  const ComfyUiImageSettings._();
+
+  /// Selected workflow, or null when the shipped default graph is active.
+  ComfyUiWorkflow? get activeWorkflow {
+    if (activeWorkflowId.isEmpty) return null;
+    for (final workflow in workflows) {
+      if (workflow.id == activeWorkflowId) return workflow;
+    }
+    return null;
+  }
+
+  /// Prompt-substitution source: the active workflow's JSON, or an empty string
+  /// so the provider falls back to [ComfyUiConstants.defaultWorkflow].
+  String get activeWorkflowJson => activeWorkflow?.json.trim() ?? '';
 }
 
 @freezed

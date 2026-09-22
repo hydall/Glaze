@@ -42,22 +42,21 @@ List<Widget> buildComfyUiModelFields(
   ImageGenSettings s, {
   required bool isFetching,
   required VoidCallback onFetchModels,
-  required VoidCallback onEditWorkflow,
+  required VoidCallback onManageWorkflows,
   required ValueChanged<ImageGenSettings> onUpdate,
   required ShowOptionsCallback showOptions,
 }) {
   final config = s.comfyui;
   void update(ComfyUiImageSettings next) => onUpdate(s.copyWith(comfyui: next));
-  final hasCustomWorkflow = config.workflow.trim().isNotEmpty;
+  final activeWorkflow = config.activeWorkflow;
 
   return [
     MenuSelectorItem(
       label: 'imggen_comfyui_workflow'.tr(),
       description: 'imggen_comfyui_workflow_desc'.tr(),
-      currentValue: hasCustomWorkflow
-          ? 'imggen_comfyui_workflow_custom'.tr()
-          : 'imggen_comfyui_workflow_default'.tr(),
-      onTap: onEditWorkflow,
+      currentValue:
+          activeWorkflow?.name ?? 'imggen_comfyui_workflow_default'.tr(),
+      onTap: onManageWorkflows,
     ),
     rows.ImageGenTextFieldItem(
       label: 'Checkpoint',

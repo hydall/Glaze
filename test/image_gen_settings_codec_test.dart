@@ -25,7 +25,14 @@ void main() {
         ),
         comfyui: ComfyUiImageSettings(
           endpoint: 'http://localhost:8188',
-          workflow: '{"3":{"class_type":"KSampler"}}',
+          workflows: [
+            ComfyUiWorkflow(
+              id: 'w1',
+              name: 'Anime',
+              json: '{"3":{"class_type":"KSampler"}}',
+            ),
+          ],
+          activeWorkflowId: 'w1',
           model: 'anythingXL.safetensors',
           sampler: 'euler',
           steps: 28,
@@ -50,6 +57,22 @@ void main() {
       );
 
       expect(restored, settings);
+    });
+
+    test('migrates a legacy single ComfyUI workflow into the library', () {
+      final restored = ImageGenSettingsCodec.fromJson({
+        'comfyui': {
+          'endpoint': 'http://localhost:8188',
+          'workflow': '{"3":{"class_type":"KSampler"}}',
+        },
+      });
+
+      final comfyui = restored.comfyui;
+      expect(comfyui.workflows, hasLength(1));
+      expect(comfyui.workflows.single.json, contains('KSampler'));
+      expect(comfyui.activeWorkflowId, comfyui.workflows.single.id);
+      expect(comfyui.activeWorkflow, isNotNull);
+      expect(comfyui.activeWorkflowJson, contains('KSampler'));
     });
 
     test('round-trips the NovelAI sub-settings', () {
