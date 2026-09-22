@@ -21,7 +21,8 @@ import 'block_image_renderer.dart';
 /// interactive block's iframe. Each of those is now a step every generated
 /// block goes through, skipped when the block gives it nothing to do:
 ///
-/// 1. the content is generated, or taken from [BlockConfig.staticContent];
+/// 1. the content is generated, or taken from [BlockConfig.staticContent]
+///    when [BlockConfig.source] says the block carries its own;
 /// 2. any image tag in it is drawn, by the same pipeline a chat message uses;
 /// 3. the result is shown as [BlockConfig.render] asks — a card, or a
 ///    sandboxed panel.
@@ -51,16 +52,16 @@ class GeneratedBlockHandler implements BlockHandler {
     if (context.cancelToken.isCancelled) return _stopped(context);
 
     final blockConfig = context.blockConfig;
-    final prompt = blockConfig.prompt.trim();
-    final static = blockConfig.staticContent.trim();
 
     String content;
-    if (prompt.isEmpty) {
-      // Nothing to ask and nothing to show. Finishing empty rather than
-      // erroring keeps an unconfigured block out of the reader's way.
-      if (static.isEmpty) return _finishEmpty(context);
-      content = static;
+    if (blockConfig.source == BlockSource.carried) {
+      final carried = blockConfig.staticContent.trim();
+      // Nothing to show. Finishing empty rather than erroring keeps an
+      // unconfigured block out of the reader's way.
+      if (carried.isEmpty) return _finishEmpty(context);
+      content = carried;
     } else {
+      if (blockConfig.prompt.trim().isEmpty) return _finishEmpty(context);
       final generated = await ref
           .read(infoBlockServiceProvider)
           .generateSingleBlockContent(

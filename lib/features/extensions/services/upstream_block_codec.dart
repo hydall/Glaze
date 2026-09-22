@@ -139,6 +139,13 @@ BlockConfig decodeUpstreamBlock(Map<String, dynamic> json, {int order = 0}) {
     template: upstreamString(json['template']),
     prompt: upstreamString(json['prompt']),
     script: upstreamString(json['script']),
+    // The original has no source field: its script editor writes code and its
+    // generated editor writes a prompt, so which of the two the block carries
+    // is the answer.
+    source: inferBlockSource(
+      prompt: upstreamString(json['prompt']),
+      carried: upstreamString(json['script']),
+    ),
     scriptType: upstreamEnum(
       json['script_type'],
       _scriptTypes,

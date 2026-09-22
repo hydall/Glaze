@@ -76,7 +76,32 @@ const String legacyImageAgentPrompt =
 /// Applied inside [BlockConfig.fromJson], so every reader — the preset
 /// repository, cloud sync, and the import of a single block — gets the same
 /// result without having to know the old shape.
-Map<String, dynamic> migrateLegacyBlockJson(Map<String, dynamic> json) {
+Map<String, dynamic> migrateLegacyBlockJson(Map<String, dynamic> json) =>
+    _withExplicitSource(_withUnifiedType(json));
+
+/// The source a block has when it predates the stored [BlockSource].
+///
+/// Reproduces what the runtime used to infer: a block with nothing to ask the
+/// model and something of its own to show was showing its own content.
+BlockSource inferBlockSource({required String prompt, required String carried}) =>
+    prompt.trim().isEmpty && carried.trim().isNotEmpty
+    ? BlockSource.carried
+    : BlockSource.model;
+
+Map<String, dynamic> _withExplicitSource(Map<String, dynamic> json) {
+  if (json['source'] is String) return json;
+  final prompt = json['prompt'];
+  final carried = [json['staticContent'], json['script']]
+      .whereType<String>()
+      .firstWhere((value) => value.trim().isNotEmpty, orElse: () => '');
+  final source = inferBlockSource(
+    prompt: prompt is String ? prompt : '',
+    carried: carried,
+  );
+  return {...json, 'source': source == BlockSource.carried ? 'carried' : 'model'};
+}
+
+Map<String, dynamic> _withUnifiedType(Map<String, dynamic> json) {
   final rawType = json['type'];
   if (rawType is! String) return json;
   final unified = _legacyBlockTypes[rawType];
@@ -156,9 +181,11 @@ abstract class BlockConfig with _$BlockConfig {
     /// past this as the panel resizes itself.
     @Default(120) int panelMinHeight,
 
-    /// Content the block carries itself, used instead of a generation when
-    /// [prompt] is empty. For a [BlockType.generated] block this is its markup
-    /// or text; [script] is the equivalent for [BlockType.script].
+    /// Where the block's content comes from: the model, or the block itself.
+    @Default(BlockSource.model) BlockSource source,
+
+    /// Content a generated block carries itself, used when [source] is
+    /// [BlockSource.carried]. [script] is the equivalent for a script block.
     @Default('') String staticContent,
     // Context control (Phase 9)
     /// Number of recent messages to include as context for this block,
@@ -178,8 +205,8 @@ abstract class BlockConfig with _$BlockConfig {
     /// so a new run can continue/update the prior state instead of starting
     /// from scratch. 0 = disabled (default).
     @Default(0) int previousBlocksCount,
-    /// Script blocks: the code the block carries itself, run when [prompt] is
-    /// empty instead of asking the model to write one.
+    /// Script blocks: the code the block carries itself, run when [source] is
+    /// [BlockSource.carried] instead of asking the model to write one.
     @Default('') String script,
     // Template (upstream parity)
     /// XML-like skeleton that defines the block's shape. Sent to the LLM as

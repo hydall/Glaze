@@ -73,6 +73,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late bool _triggerOnChar;
   late bool _triggerOnSwipe;
   late bool _generationPause;
+  late bool _generationAfterCommands;
   late bool _keywordIsRegex;
   late bool _hideDisplay;
   late bool _background;
@@ -127,11 +128,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _streamToPanel = b.streamToPanel;
     _manualOnly = b.manualOnly;
     _contextPolicy = b.contextPolicy;
-    // An empty prompt next to content the block carries is what "written here"
-    // means at runtime, so the switch reads the same thing the handler does.
-    _useStaticSource =
-        b.prompt.trim().isEmpty &&
-        (b.staticContent.trim().isNotEmpty || b.script.trim().isNotEmpty);
+    _useStaticSource = b.source == BlockSource.carried;
 
     _periodController = TextEditingController(text: b.period.toString());
     _keywordController = TextEditingController(text: b.keyword);
@@ -143,6 +140,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _triggerOnChar = b.triggerOnChar;
     _triggerOnSwipe = b.triggerOnSwipe;
     _generationPause = b.generationPause;
+    _generationAfterCommands = b.generationAfterCommands;
     _keywordIsRegex = b.keywordIsRegex;
     _hideDisplay = b.hideDisplay;
     _background = b.background;
@@ -169,37 +167,47 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     Navigator.pop(context);
   }
 
+  /// Writes back what the editor showed, and nothing else.
+  ///
+  /// Every field stays on the block whatever the type is. It used to blank the
+  /// ones the current type had no use for, which meant switching a block to
+  /// another type — or even flipping its content source — destroyed the prompt,
+  /// the template, the markup, the connection and the context settings, with no
+  /// way back. Upstream keeps them too and drops what does not apply only when
+  /// it writes the block out, which [encodeUpstreamBlock] already does.
   BlockConfig _buildSavedBlock() {
-    final isGenerated = _type == BlockType.generated;
-    final isScript = _type == BlockType.script;
     return widget.block.copyWith(
       name: _nameController.text.trim(),
       type: _type,
       trigger: _resolvedTrigger,
-      template: isGenerated && _usesLlm ? _templateController.text : '',
-      prompt: _usesLlm ? _promptController.text : '',
-      staticContent: isGenerated ? _staticContentController.text : '',
-      script: isScript ? _scriptController.text : '',
-      render: isGenerated ? _render : BlockRender.card,
+      source: _producesContent
+          ? (_useStaticSource ? BlockSource.carried : BlockSource.model)
+          : widget.block.source,
+      template: _templateController.text,
+      prompt: _promptController.text,
+      staticContent: _staticContentController.text,
+      script: _scriptController.text,
+      render: _render,
       panelMinHeight:
           int.tryParse(_panelMinHeightController.text.trim()) ??
           widget.block.panelMinHeight,
-      inject: isGenerated ? _inject : false,
-      injectLastN: isGenerated ? _injectLastN : 0,
-      injectPrefix: isGenerated ? _injectPrefixController.text : '',
+      inject: _inject,
+      injectLastN: _injectLastN,
+      injectPrefix: _injectPrefixController.text,
       dependsOnPrevious: _dependsOnPrevious,
-      apiConfigId: _usesLlm ? _apiConfigId : '',
-      model: _usesLlm ? _model : '',
-      contextMessageCount: _usesLlm ? _contextMessageCount : 0,
-      previousBlocksCount: _usesLlm ? _previousBlocksCount : 0,
-      contextSystemPrompt: _usesLlm ? _contextSystemPromptController.text : '',
+      apiConfigId: _apiConfigId,
+      model: _model,
+      contextMessageCount: _contextMessageCount,
+      previousBlocksCount: _previousBlocksCount,
+      contextSystemPrompt: _contextSystemPromptController.text,
       contextPolicy: _contextPolicy,
-      streamToPanel: _usesLlm ? _streamToPanel : false,
+      streamToPanel: _streamToPanel,
       manualOnly: _manualOnly,
       triggerOnUser: _triggerOnUser,
       triggerOnChar: _triggerOnChar,
       triggerOnSwipe: _triggerOnSwipe,
       generationPause: _generationPause,
+      generationAfterCommands: _generationAfterCommands,
       // Never zero: the interval check divides by it.
       period:
           int.tryParse(_periodController.text.trim()) ?? widget.block.period,
@@ -336,6 +344,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               onChar: _triggerOnChar,
               onSwipe: _triggerOnSwipe,
               generationPause: _generationPause,
+              generationAfterCommands: _generationAfterCommands,
               periodController: _periodController,
               keywordController: _keywordController,
               keywordIsRegex: _keywordIsRegex,
@@ -344,6 +353,8 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               onSwipeChanged: (v) => setState(() => _triggerOnSwipe = v),
               onGenerationPauseChanged: (v) =>
                   setState(() => _generationPause = v),
+              onGenerationAfterCommandsChanged: (v) =>
+                  setState(() => _generationAfterCommands = v),
               onKeywordIsRegexChanged: (v) =>
                   setState(() => _keywordIsRegex = v),
             ),
