@@ -36,4 +36,23 @@ void main() {
       expect(book.entries.single.probability, 100);
     });
   });
+
+  test('preserves embedded book recursion controls', () {
+    final book = convertCharacterBook({
+      'scan_depth': 3,
+      'recursive_scanning': false,
+      'entries': [
+        {
+          'selective': true,
+          'selectiveLogic': 0,
+          'extensions': {'excludeRecursion': true},
+        },
+      ],
+    }, 'character');
+
+    expect(book.settings?.scanDepth, 3);
+    expect(book.settings?.recursiveScan, isFalse);
+    expect(book.entries.single.selectiveLogic, 0);
+    expect(book.entries.single.preventRecursion, isTrue);
+  });
 }

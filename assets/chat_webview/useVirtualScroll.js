@@ -1030,6 +1030,7 @@ class UseVirtualScroll {
                 if (!this.mounted) return;
                 const wasPinned = this._pinnedToBottom;
                 let changed = false;
+                let editedRowChanged = false;
                 for (const entry of entries) {
                     const idx = parseInt(entry.target.dataset.index);
                     const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
@@ -1038,6 +1039,9 @@ class UseVirtualScroll {
                     if (previous == null || Math.abs(previous - height) > 1) {
                         this.cache.setHeight(idx, height);
                         changed = true;
+                        if (entry.target.classList.contains('editing')) {
+                            editedRowChanged = true;
+                        }
                     }
                 }
                 if (!changed) return;
@@ -1048,7 +1052,10 @@ class UseVirtualScroll {
                 // no scroll event to follow, which is the second way a chat
                 // went blank on its own.
                 this._recoverIfViewportIsBlank();
-                if (wasPinned) {
+                // Growing an editor is user-controlled layout, not streamed or
+                // late-loading content. Let the browser reveal the caret without
+                // also dragging the whole conversation back to the bottom.
+                if (wasPinned && !editedRowChanged) {
                     requestAnimationFrame(() => {
                         if (this.mounted && this._pinnedToBottom) this.smartScroll();
                     });

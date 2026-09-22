@@ -8,6 +8,7 @@ import '../../models/character.dart';
 import '../../models/gallery_entry.dart';
 import '../../llm/character_tokens.dart';
 import '../../utils/time_helpers.dart';
+import '../../utils/platform_paths.dart';
 import '../../application/sync_repo_interfaces.dart';
 import 'character_deletion_repo.dart';
 
@@ -520,7 +521,7 @@ class CharacterRepo implements SyncCharacterStore {
             // group-wide operations (e.g. hide) can match it by id.
             variantGroupId: Value(id),
             name: Value(name),
-            avatarPath: Value(avatarPath),
+            avatarPath: Value(_storedAvatarPath(avatarPath)),
             description: Value(description),
             personality: Value(personality),
             scenario: Value(scenario),
@@ -602,7 +603,7 @@ class CharacterRepo implements SyncCharacterStore {
   CharactersCompanion _toCompanion(Character m) => CharactersCompanion(
     charId: Value(m.id),
     name: Value(m.name),
-    avatarPath: Value(m.avatarPath),
+    avatarPath: Value(_storedAvatarPath(m.avatarPath)),
     description: Value(m.description),
     personality: Value(m.personality),
     scenario: Value(m.scenario),
@@ -630,6 +631,11 @@ class CharacterRepo implements SyncCharacterStore {
     variantOrder: Value(m.variantOrder),
     hidden: Value(m.hidden),
   );
+
+  String? _storedAvatarPath(String? path) {
+    if (path == null) return null;
+    return relativeGlazeFilePath(path);
+  }
 
   String? _encodeCharacterExtensions(Character m) {
     final extensions = Map<String, dynamic>.from(m.extensions);
