@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/settings/api_list_provider.dart';
@@ -147,7 +148,7 @@ class VectorRebuildController extends Notifier<VectorRebuildState> {
       if (result.cancelled) {
         state = state.copyWith(
           status: VectorRebuildStatus.cancelled,
-          message: 'Vector rebuild cancelled.',
+          message: 'vector_error_rebuild_cancelled'.tr(),
         );
         return;
       }
@@ -162,7 +163,7 @@ class VectorRebuildController extends Notifier<VectorRebuildState> {
     } catch (e) {
       state = state.copyWith(
         status: VectorRebuildStatus.error,
-        message: 'Vector rebuild failed: $e',
+        message: 'vector_error_rebuild_failed'.tr(namedArgs: {'error': '$e'}),
       );
     }
   }

@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -14,13 +15,13 @@ class GlazeErrorBlock extends StatelessWidget {
   /// [GlazeErrorBlock.fromError] so the text matches the chat's wording.
   final String message;
 
-  /// Header label. Defaults to `ERROR`, same as the chat window.
-  final String label;
+  /// Header label. When null, the localized generic `ERROR` label is used.
+  final String? label;
 
   const GlazeErrorBlock({
     super.key,
     required this.message,
-    this.label = 'ERROR',
+    this.label,
   });
 
   /// Formats [error] with the shared [formatError] — the same helper the chat
@@ -28,7 +29,7 @@ class GlazeErrorBlock extends StatelessWidget {
   GlazeErrorBlock.fromError(
     Object error, {
     super.key,
-    this.label = 'ERROR',
+    this.label,
   }) : message = formatError(error);
 
   static const _accent = Color(0xFFFF3B30);
@@ -54,7 +55,7 @@ class GlazeErrorBlock extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    label,
+                    label ?? 'error_source_generic'.tr(),
                     style: const TextStyle(
                       color: _accent,
                       fontSize: 10,

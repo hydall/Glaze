@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/models/preset.dart';
@@ -17,7 +18,11 @@ Future<void> exportPreset(BuildContext context, Preset preset) async {
     }
   } catch (e) {
     if (context.mounted) {
-      GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+      GlazeErrorDialog.show(
+        context,
+        e,
+        prefix: 'error_export_failed_prefix'.tr(),
+      );
     }
   }
 }

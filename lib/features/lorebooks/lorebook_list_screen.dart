@@ -263,7 +263,11 @@ class LorebookListScreen extends ConsumerWidget {
 
     if (importedCount <= 0 || firstImported == null) {
       if (lastError != null) {
-        GlazeErrorDialog.show(context, lastError, prefix: 'Import failed: ');
+        GlazeErrorDialog.show(
+          context,
+          lastError,
+          prefix: 'error_import_failed_prefix'.tr(),
+        );
       }
       return;
     }
@@ -339,7 +343,11 @@ class LorebookListScreen extends ConsumerWidget {
       if (path.isEmpty) return; // user cancelled the save dialog
     } catch (e) {
       if (context.mounted) {
-        GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_export_failed_prefix'.tr(),
+        );
       }
     }
   }

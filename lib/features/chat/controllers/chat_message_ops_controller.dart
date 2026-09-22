@@ -1,6 +1,7 @@
 // Named public constructor arguments intentionally initialize private fields.
 // ignore_for_file: prefer_initializing_formals
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -201,7 +202,7 @@ class ChatMessageOpsController {
         _invalidateHistory();
       }
       GlazeToast.showWithoutContext(
-        'Failed to delete message: $e',
+        'error_delete_message_failed'.tr(namedArgs: {'error': '$e'}),
         isError: true,
         duration: 5000,
       );

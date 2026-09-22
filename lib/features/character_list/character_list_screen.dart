@@ -1337,7 +1337,11 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
       }
     } catch (e) {
       if (!context.mounted) return;
-      GlazeErrorDialog.show(context, e, prefix: 'Import failed: ');
+      GlazeErrorDialog.show(
+        context,
+        e,
+        prefix: 'error_import_failed_prefix'.tr(),
+      );
     }
   }
 

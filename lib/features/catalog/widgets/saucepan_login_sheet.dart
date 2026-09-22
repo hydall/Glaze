@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -98,7 +99,7 @@ class _SaucepanLoginFormState extends ConsumerState<_SaucepanLoginForm> {
     final handle = _handle.text.trim();
     final password = _password.text;
     if (handle.isEmpty || password.isEmpty) {
-      setState(() => _error = 'Enter your handle and password.');
+      setState(() => _error = 'error_handle_password_required'.tr());
       return;
     }
     _run(() =>
@@ -108,7 +109,7 @@ class _SaucepanLoginFormState extends ConsumerState<_SaucepanLoginForm> {
   void _saveToken() {
     final token = _token.text.trim();
     if (token.isEmpty) {
-      setState(() => _error = 'Paste a bearer token.');
+      setState(() => _error = 'error_token_required'.tr());
       return;
     }
     _run(() => ref.read(saucepanAccountProvider.notifier).setToken(token));
