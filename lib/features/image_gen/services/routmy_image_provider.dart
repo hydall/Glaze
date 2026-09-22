@@ -22,23 +22,13 @@ class RoutmyImageProvider {
     List<String>? referenceImages,
     CancelToken? cancelToken,
   }) async {
-    final isChatModel = RoutMyConstants.chatImageModels.contains(model);
-    final isSeedreamModel = model == 'bytedance/seedream-5.0-pro';
     final hasRefs = referenceImages != null && referenceImages.isNotEmpty;
 
-    if (isChatModel) {
-      return _generateChat(
-        apiKey: apiKey,
-        model: model,
-        prompt: prompt,
-        aspectRatio: aspectRatio,
-        imageSize: imageSize,
-        quality: quality,
-        referenceImages: referenceImages,
-        cancelToken: cancelToken,
-      );
-    }
-    if (hasRefs && !isSeedreamModel) {
+    // References are documented only on `/v1/images/edits`, which the catalog
+    // advertises only for the edit-capable models. The provider still checks
+    // so a reference set that slipped past the UI gate is dropped rather than
+    // sent to `/v1/images/generations`, which has no image input.
+    if (hasRefs && RoutMyConstants.supportsReferences(model)) {
       return _editImages(
         apiKey: apiKey,
         model: model,
@@ -57,7 +47,6 @@ class RoutmyImageProvider {
       aspectRatio: aspectRatio,
       imageSize: imageSize,
       quality: quality,
-      referenceImages: isSeedreamModel ? referenceImages : null,
       cancelToken: cancelToken,
     );
   }
@@ -69,7 +58,6 @@ class RoutmyImageProvider {
     required String aspectRatio,
     required String imageSize,
     required String quality,
-    List<String>? referenceImages,
     CancelToken? cancelToken,
   }) async {
     final url = '$baseUrl/v1/images/generations';
@@ -91,14 +79,6 @@ class RoutmyImageProvider {
       },
       if (!isSeedreamModel) 'quality': ?normalizedQuality,
     };
-
-    final validRefs = referenceImages
-        ?.where((ref) => ref.isNotEmpty)
-        .map(_asDataUrl)
-        .toList();
-    if (validRefs != null && validRefs.isNotEmpty) {
-      body['image'] = validRefs.length == 1 ? validRefs.first : validRefs;
-    }
 
     final json = await _http.post(
       url: url,
@@ -192,28 +172,6 @@ class RoutmyImageProvider {
     return base64Decode(s);
   }
 
-  /// Reference images arrive as bare base64 (from ImageGenService._fileToBase64)
-  /// or already as data/https URLs. rout.my expects a full data URL (or https)
-  /// in `image_url`, so wrap bare base64 and sniff the MIME from its signature.
-  /// Without this, every avatar/context reference was silently dropped.
-  String _asDataUrl(String s) {
-    if (s.isEmpty) return s;
-    if (s.startsWith('data:') ||
-        s.startsWith('http://') ||
-        s.startsWith('https://')) {
-      return s;
-    }
-    return 'data:${_sniffMime(s)};base64,$s';
-  }
-
-  String _sniffMime(String b64) {
-    if (b64.startsWith('/9j/')) return 'image/jpeg';
-    if (b64.startsWith('iVBORw0KGgo')) return 'image/png';
-    if (b64.startsWith('UklGR')) return 'image/webp';
-    if (b64.startsWith('R0lGOD')) return 'image/gif';
-    return 'image/png';
-  }
-
   Future<Uint8List> _extractImageBytes(
     Map<String, dynamic> json, {
     CancelToken? cancelToken,
@@ -282,84 +240,6 @@ class RoutmyImageProvider {
       throw Exception('Invalid base64 image data URI');
     }
     return normalized.substring(comma + 1);
-  }
-
-  Future<Uint8List> _generateChat({
-    required String apiKey,
-    required String model,
-    required String prompt,
-    required String aspectRatio,
-    required String imageSize,
-    required String quality,
-    List<String>? referenceImages,
-    CancelToken? cancelToken,
-  }) async {
-    final url = '$baseUrl/v1/chat/completions';
-
-    final content = <Map<String, dynamic>>[];
-
-    if (referenceImages != null) {
-      for (final ref in referenceImages) {
-        if (ref.isEmpty) continue;
-        final dataUrl = _asDataUrl(ref);
-        content.add({
-          'type': 'image_url',
-          'image_url': {'url': dataUrl},
-        });
-      }
-    }
-    content.add({'type': 'text', 'text': prompt});
-
-    final body = <String, dynamic>{
-      'model': model,
-      'messages': [
-        {'role': 'user', 'content': content},
-      ],
-      'modalities': ['image', 'text'],
-      'image_config': {
-        'aspect_ratio': aspectRatio,
-        'image_size': imageSize,
-        if (quality.isNotEmpty) 'quality': quality,
-      },
-    };
-
-    final response = await _http.post(
-      url: url,
-      apiKey: apiKey,
-      body: body,
-      cancelToken: cancelToken,
-    );
-
-    final choices = response['choices'] as List?;
-    if (choices == null || choices.isEmpty) {
-      throw Exception('No response from rout.my');
-    }
-    final message = choices.first['message'] as Map<String, dynamic>?;
-    if (message == null) throw Exception('No message in rout.my response');
-
-    final images = message['images'] as List?;
-    if (images != null && images.isNotEmpty) {
-      final imgUrl = images.first['image_url']?['url'] as String?;
-      if (imgUrl != null) {
-        return _downloadImage(imgUrl, cancelToken: cancelToken);
-      }
-    }
-
-    final msgContent = message['content'];
-    if (msgContent is List) {
-      for (final part in msgContent) {
-        if (part is Map<String, dynamic> &&
-            part['type'] == 'image_url' &&
-            part['image_url']?['url'] != null) {
-          return _downloadImage(
-            part['image_url']['url'] as String,
-            cancelToken: cancelToken,
-          );
-        }
-      }
-    }
-
-    throw Exception('No image in rout.my response');
   }
 
   Future<Uint8List> _downloadImage(

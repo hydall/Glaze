@@ -101,70 +101,74 @@ String _descriptionsModeLabel(CharacterDescriptionsMode mode) => switch (mode) {
     'imggen_char_descriptions_prompt'.tr(),
 };
 
-/// Model-field rows for the rout.my image-gen API. The Russian variant
-/// shares the same shape and only differs in the settings field it
-/// writes to, controlled by [isRu].
+/// Model-field rows for the rout.my image-gen API. The model list comes from
+/// the catalog loaded via the refresh button (`GET /v1/models`) and falls back
+/// to the shipped shortlist until then.
 List<Widget> buildRoutmyModelFields(
   ImageGenSettings s, {
-  required bool isRu,
+  required bool isFetching,
+  required VoidCallback onFetchModels,
   required ValueChanged<ImageGenSettings> onUpdate,
   required ShowOptionsCallback showOptions,
 }) {
-  final model = isRu ? s.ruRoutmyModel : s.routmyModel;
-  final aspect = isRu ? s.ruRoutmyAspectRatio : s.routmyAspectRatio;
-  final size = isRu ? s.ruRoutmyImageSize : s.routmyImageSize;
-  final quality = isRu ? s.ruRoutmyQuality : s.routmyQuality;
-  final constantsModels = isRu
-      ? RuRoutMyConstants.models
-      : RoutMyConstants.models;
-  final aspectRatios = isRu
-      ? RuRoutMyConstants.aspectRatios
-      : RoutMyConstants.aspectRatios;
-  final imageSizes = isRu
-      ? RuRoutMyConstants.imageSizes
-      : RoutMyConstants.imageSizes;
-  final availableImageSizes = model == 'bytedance/seedream-5.0-pro'
+  const seedreamModel = 'bytedance/seedream-5.0-pro';
+  final model = s.routmyModel;
+  final aspect = s.routmyAspectRatio;
+  final size = s.routmyImageSize;
+  final quality = s.routmyQuality;
+  final catalog = s.routmyModels.map((m) => m.id).toList();
+  final items = catalog.isEmpty
+      ? RoutMyConstants.models.map((e) => e.$1).toList()
+      : catalog;
+  final availableImageSizes = model == seedreamModel
       ? RoutMyConstants.seedreamImageSizes
-      : imageSizes;
+      : RoutMyConstants.imageSizes;
 
   return [
-    MenuSelectorItem(
-      label: 'Model',
-      currentValue: constantsModels
-          .firstWhere((e) => e.$1 == model, orElse: () => (model, model))
-          .$2,
-      onTap: () => showOptions<String>(
-        title: 'Model',
-        items: constantsModels.map((e) => e.$1).toList(),
-        labelBuilder: (v) => constantsModels.firstWhere((e) => e.$1 == v).$2,
-        isSelected: (v) => model == v,
-        onSelected: (v) {
-          final seedreamSize =
-              v == 'bytedance/seedream-5.0-pro' &&
-                  !RoutMyConstants.seedreamImageSizes.contains(size)
-              ? '2K'
-              : size;
-          isRu
-              ? onUpdate(
-                  s.copyWith(ruRoutmyModel: v, ruRoutmyImageSize: seedreamSize),
-                )
-              : onUpdate(
+    // MenuSelectorItem has no trailing slot, so the refresh button sits
+    // beside it in a row of its own.
+    Row(
+      children: [
+        Expanded(
+          child: MenuSelectorItem(
+            label: 'Model',
+            currentValue: s.routmyModelLabel(model),
+            onTap: () => showOptions<String>(
+              title: 'Model',
+              items: items,
+              labelBuilder: s.routmyModelLabel,
+              isSelected: (v) => model == v,
+              onSelected: (v) {
+                final seedreamSize =
+                    v == seedreamModel &&
+                        !RoutMyConstants.seedreamImageSizes.contains(size)
+                    ? '2K'
+                    : size;
+                onUpdate(
                   s.copyWith(routmyModel: v, routmyImageSize: seedreamSize),
                 );
-        },
-      ),
+              },
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 16),
+          child: rows.ImageGenFetchButton(
+            isFetching: isFetching,
+            onPressed: onFetchModels,
+          ),
+        ),
+      ],
     ),
     MenuSelectorItem(
       label: 'Aspect Ratio',
       currentValue: aspect,
       onTap: () => showOptions<String>(
         title: 'Aspect Ratio',
-        items: aspectRatios,
+        items: RoutMyConstants.aspectRatios,
         labelBuilder: (v) => v,
         isSelected: (v) => aspect == v,
-        onSelected: (v) => isRu
-            ? onUpdate(s.copyWith(ruRoutmyAspectRatio: v))
-            : onUpdate(s.copyWith(routmyAspectRatio: v)),
+        onSelected: (v) => onUpdate(s.copyWith(routmyAspectRatio: v)),
       ),
     ),
     MenuSelectorItem(
@@ -175,12 +179,10 @@ List<Widget> buildRoutmyModelFields(
         items: availableImageSizes,
         labelBuilder: (v) => v,
         isSelected: (v) => size == v,
-        onSelected: (v) => isRu
-            ? onUpdate(s.copyWith(ruRoutmyImageSize: v))
-            : onUpdate(s.copyWith(routmyImageSize: v)),
+        onSelected: (v) => onUpdate(s.copyWith(routmyImageSize: v)),
       ),
     ),
-    if (model != 'bytedance/seedream-5.0-pro')
+    if (model != seedreamModel)
       MenuSelectorItem(
         label: 'Quality',
         currentValue: quality == 'hd' ? 'HD' : 'Standard',
@@ -189,9 +191,7 @@ List<Widget> buildRoutmyModelFields(
           items: ['standard', 'hd'],
           labelBuilder: (v) => v == 'hd' ? 'HD' : 'Standard',
           isSelected: (v) => quality == v,
-          onSelected: (v) => isRu
-              ? onUpdate(s.copyWith(ruRoutmyQuality: v))
-              : onUpdate(s.copyWith(routmyQuality: v)),
+          onSelected: (v) => onUpdate(s.copyWith(routmyQuality: v)),
         ),
       ),
   ];

@@ -257,8 +257,11 @@ int providerMaxReferences(ImageGenSettings settings) {
           ? maxGenerationReferenceImages
           : 0;
     case ImageGenApiType.routmy:
-    case ImageGenApiType.ruRoutmy:
-      return routmyMaxInjectedReferenceImages;
+      // References are documented only on `/v1/images/edits`, and the catalog
+      // advertises that endpoint only for the models that take them.
+      return settings.routmySupportsReferences
+          ? routmyMaxInjectedReferenceImages
+          : 0;
     case ImageGenApiType.a1111:
       // txt2img only.
       return 0;

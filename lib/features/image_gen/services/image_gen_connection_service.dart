@@ -61,17 +61,11 @@ class ImageGenConnectionService {
         if (settings.routmyApiKey.trim().isEmpty) {
           throw StateError('rout.my API key not configured');
         }
-        await _get(
-          '${RoutMyConstants.baseUrl}/v1/models',
+        // `/v1/models` is a public catalog and answers 200 for any key, so a
+        // real probe has to hit an authenticated route.
+        await _checkRoutmyChat(
+          settings.routmyMirror.baseUrl,
           settings.routmyApiKey,
-        );
-      case ImageGenApiType.ruRoutmy:
-        if (settings.ruRoutmyApiKey.trim().isEmpty) {
-          throw StateError('RU-rout.my API key not configured');
-        }
-        await _get(
-          '${RuRoutMyConstants.baseUrl}/v1/models',
-          settings.ruRoutmyApiKey,
         );
       case ImageGenApiType.openrouter:
         if (settings.openrouter.apiKey.trim().isEmpty) {
@@ -131,6 +125,44 @@ class ImageGenConnectionService {
         .map((model) => model['id']?.toString() ?? '')
         .where((id) => id.isNotEmpty && id.toLowerCase().contains('image'))
         .toList();
+  }
+
+  /// Image models exposed by rout.my (`GET /v1/models`). Each entry keeps the
+  /// `/images/edits` capability the catalog advertises, which decides whether
+  /// references can be routed for that model. Entries without an `endpoints`
+  /// field fall back to keyword matching.
+  Future<List<RoutmyModelInfo>> fetchRoutmyModels(
+    ImageGenSettings settings,
+  ) async {
+    final data = await _get(
+      '${settings.routmyMirror.baseUrl}/v1/models',
+      settings.routmyApiKey,
+    );
+    final models = data is Map ? data['data'] : null;
+    if (models is! List) return const [];
+    final result = <RoutmyModelInfo>[];
+    for (final raw in models.whereType<Map<Object?, Object?>>()) {
+      final id = raw['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      final endpoints = raw['endpoints'];
+      final endpointList = endpoints is List
+          ? endpoints.map((endpoint) => endpoint.toString()).toList()
+          : const <String>[];
+      final isImage = endpointList.isEmpty
+          ? _looksLikeImageModel(id)
+          : endpointList.any((endpoint) => endpoint.contains('/images/'));
+      if (!isImage) continue;
+      result.add(
+        RoutmyModelInfo(
+          id: id,
+          name: raw['name']?.toString() ?? '',
+          supportsEdits: endpointList.any(
+            (endpoint) => endpoint.contains('/images/edits'),
+          ),
+        ),
+      );
+    }
+    return result;
   }
 
   /// Image models exposed by OpenRouter (`output_modalities=image`).
@@ -331,6 +363,48 @@ class ImageGenConnectionService {
       throw StateError('HTTP $status');
     }
     return response.data;
+  }
+
+  /// Minimal authenticated request that proves the rout.my key is accepted.
+  /// `GET /v1/models` cannot be used: it is a public catalog that answers 200
+  /// for any key, so it would report a bad key as connected. A 403 still means
+  /// the key is valid (the probe model is just unavailable on the plan).
+  Future<void> _checkRoutmyChat(String baseUrl, String apiKey) async {
+    final response = await _dio.post<dynamic>(
+      '$baseUrl/v1/chat/completions',
+      data: {
+        'model': 'openai/gpt-5.4-mini',
+        'messages': [
+          {'role': 'user', 'content': 'ping'},
+        ],
+        'max_tokens': 1,
+        'stream': false,
+      },
+      options: Options(
+        headers: {'Authorization': 'Bearer $apiKey'},
+        validateStatus: (_) => true,
+      ),
+    );
+    final status = response.statusCode ?? 0;
+    if (status >= 200 && status < 300 || status == 403) return;
+    if (status == 401) {
+      throw StateError('Invalid rout.my API key (HTTP 401)');
+    }
+    throw StateError('HTTP $status${_errorMessage(response.data)}');
+  }
+
+  /// `error.message` from a rout.my error body, prefixed for a status line.
+  static String _errorMessage(dynamic data) {
+    if (data is Map) {
+      final error = data['error'];
+      if (error is Map) {
+        final message = error['message'];
+        if (message is String && message.trim().isNotEmpty) {
+          return ': ${message.trim()}';
+        }
+      }
+    }
+    return '';
   }
 
   /// Both probes reuse the chat transports' normalization, so an endpoint

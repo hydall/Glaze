@@ -1021,6 +1021,7 @@
   "imggen_api_type": "API Type",
   "imggen_endpoint": "Endpoint URL",
   "imggen_api_key": "API Key",
+  "imggen_mirror": "Mirror",
   "imggen_model": "Model",
   "imggen_model_placeholder": "dall-e-3",
   "imggen_size": "Image Size",
