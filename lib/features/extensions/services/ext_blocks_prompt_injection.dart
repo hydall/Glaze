@@ -24,7 +24,6 @@ class ExtBlocksPromptInjection {
 
   ExtensionPreset? _resolveActivePreset() {
     final settings = _ref.read(extensionsSettingsProvider);
-    if (!settings.enabled) return null;
     final presetId = settings.activePresetId;
     if (presetId == null || presetId.isEmpty) return null;
     return _ref

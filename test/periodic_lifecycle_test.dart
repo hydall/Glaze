@@ -92,7 +92,7 @@ void main() {
 
     await container
         .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(enabled: true, activePresetId: 'p1'));
+        .update(const ExtensionsSettings(activePresetId: 'p1'));
     final preset = ExtensionPreset(
       id: 'p1',
       name: 'Tick',
@@ -132,46 +132,6 @@ void main() {
         reason: 'resumed lifecycle rebuilds timers from the current preset');
   });
 
-  test('scheduler does not rebuild timers while not resumed', () async {
-    final container = ProviderContainer(
-      overrides: [
-        appDbProvider.overrideWith((ref) => db),
-        extensionPostGenServiceProvider.overrideWith((ref) => _FakePostGen(ref)),
-      ],
-    );
-    addTearDown(container.dispose);
-
-    // Settings disabled: no timers should ever be created, even on
-    // a synthetic resumed → paused → resumed cycle.
-    await container
-        .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(enabled: false, activePresetId: 'p2'));
-    final preset = ExtensionPreset(
-      id: 'p2',
-      name: 'Tick',
-      blocks: [
-        BlockConfig(
-          id: 'b1',
-          name: 'Tick',
-          type: BlockType.script,
-          enabled: true,
-          trigger: BlockTrigger.periodic,
-          prompt: '// js',
-          periodicIntervalSeconds: 1,
-        ),
-      ],
-    );
-    await container.read(extensionPresetsProvider.notifier).add(preset);
-
-    final scheduler = container.read(periodicTriggerSchedulerProvider);
-    expect(scheduler.activeTimerCount, 0);
-    scheduler.debugLifecycleState(AppLifecycleState.paused);
-    expect(scheduler.activeTimerCount, 0);
-    scheduler.debugLifecycleState(AppLifecycleState.resumed);
-    expect(scheduler.activeTimerCount, 0,
-        reason: 'settings.enabled=false still blocks the timer set');
-  });
-
   test('scheduler survives a paused → detached → resumed cycle', () async {
     final container = ProviderContainer(
       overrides: [
@@ -183,7 +143,7 @@ void main() {
 
     await container
         .read(extensionsSettingsProvider.notifier)
-        .update(const ExtensionsSettings(enabled: true, activePresetId: 'p3'));
+        .update(const ExtensionsSettings(activePresetId: 'p3'));
     final preset = ExtensionPreset(
       id: 'p3',
       name: 'Tick',

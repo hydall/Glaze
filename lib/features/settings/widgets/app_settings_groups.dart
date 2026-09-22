@@ -1,7 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../../core/platform/system_settings.dart';
@@ -164,16 +163,6 @@ class _AdvancedGroup extends ConsumerWidget {
       header: 'settings_group_advanced'.tr(),
       headerIcon: Icons.science_outlined,
       items: [
-        MenuItem(
-          icon: Icons.science_outlined,
-          label: 'experimental_features_title'.tr(),
-          trailing: const Icon(
-            Icons.chevron_right,
-            size: 20,
-            color: Color(0xFF99A2AD),
-          ),
-          onTap: () => context.push('/extensions'),
-        ),
         highlightIf(
           'reset_settings',
           highlightId,

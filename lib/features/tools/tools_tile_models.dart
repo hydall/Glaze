@@ -55,10 +55,6 @@ class ToolsTileDef {
   /// avatar-gradient placeholder when there is no avatar image.
   final bool isAvatar;
 
-  /// Feature-gated tiles are hidden unless their experimental master switch is
-  /// on — same gating as chat Quick Access (External Blocks).
-  final bool featureGated;
-
   const ToolsTileDef({
     required this.id,
     required this.titleKey,
@@ -68,7 +64,6 @@ class ToolsTileDef {
     required this.defaultSize,
     this.hero = false,
     this.isAvatar = false,
-    this.featureGated = false,
   }) : assert(
          svgPath != null || icon != null,
          'Provide an SVG path or an icon',
@@ -156,7 +151,6 @@ List<ToolsTileDef> buildToolsTileCatalog() => [
     subtitleKey: 'tools_ext_blocks_subtitle',
     icon: Icons.extension_outlined,
     defaultSize: ToolsTileSize.small,
-    featureGated: true,
   ),
 ];
 

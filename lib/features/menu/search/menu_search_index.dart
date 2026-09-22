@@ -245,18 +245,6 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
         groupKey: 'settings_group_general',
       ),
     // ── Advanced ────────────────────────────────────────────────────────────
-    MenuSearchEntry(
-      title: 'experimental_features_title'.tr(),
-      breadcrumb: [...settings, 'settings_group_advanced'.tr()],
-      icon: Icons.science_outlined,
-      keywords: const [
-        'extensions',
-        'experimental',
-        'расширения',
-        'эксперименты',
-      ],
-      open: (context) => context.push('/extensions'),
-    ),
     row(
       'reset_settings',
       'settings_reset_title',

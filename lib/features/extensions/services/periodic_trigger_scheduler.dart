@@ -15,8 +15,7 @@ import 'extension_post_gen_service.dart';
 ///
 /// The scheduler watches:
 ///   * `extensionPresetsProvider` — to discover new/updated/changed blocks.
-///   * `extensionsSettingsProvider` — to pause/resume with the master
-///     extensions toggle and the active preset selection.
+///   * `extensionsSettingsProvider` — to follow the active preset selection.
 ///
 /// For each enabled block with `trigger == BlockTrigger.periodic` the
 /// scheduler starts a per-block [Timer.periodic]. The tick handler
@@ -106,7 +105,7 @@ class PeriodicTriggerScheduler with WidgetsBindingObserver {
     if (_lifecycle != AppLifecycleState.resumed) return;
     final settings = _ref.read(extensionsSettingsProvider);
     final activeId = settings.activePresetId;
-    if (!settings.enabled || activeId == null || activeId.isEmpty) {
+    if (activeId == null || activeId.isEmpty) {
       _cancelAll();
       return;
     }

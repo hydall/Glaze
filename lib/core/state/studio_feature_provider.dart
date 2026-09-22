@@ -6,19 +6,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'db_provider.dart';
 
-/// Global master switch for the **Studio** experimental feature.
+/// Global mode flag for **Studio**, set by preset selection rather than by a
+/// settings switch: `true` while an agentic preset is the active one, `false`
+/// while a plain chat preset is.
 ///
-/// Studio is otherwise a per-session setting ([StudioConfig.enabled]). This
-/// provider is the app-wide gate exposed from Settings → Experimental Features:
-///
-/// * When `false` (the default), Studio never runs in chat — the generation
-///   pipeline treats every session's Studio config as disabled — and the Studio
-///   card is hidden from the magic drawer (Quick Access / Tools).
-/// * When `true`, Studio behaves as before, honouring each session's own
-///   [StudioConfig.enabled] flag.
-///
-/// External Blocks has an equivalent master flag inside `ExtensionsSettings.enabled`;
-/// this provider covers Studio, which had no global on/off before.
+/// It is the "which kind is in effect" discriminator the pipeline reads before
+/// it resolves a Studio turn, and the preset list uses it to keep the agentic
+/// and plain presets mutually exclusive. Picking an agentic preset turns it on
+/// ([StudioFeatureEnabledNotifier.enable]); picking a plain one turns it off.
 final studioFeatureEnabledProvider =
     StateNotifierProvider<StudioFeatureEnabledNotifier, bool>(
       (ref) => StudioFeatureEnabledNotifier(ref),
