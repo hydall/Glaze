@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/chat_message.dart' show maxMessageAttachments;
 import '../../../core/platform/clipboard_images.dart';
 import '../../../core/platform/haptics.dart';
+import '../../../core/utils/text_insert.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
@@ -21,6 +22,7 @@ import '../chat_provider.dart'
     show ImpersonationState, chatProvider, impersonationStateProvider;
 import '../composer_empty_action_provider.dart';
 import '../composer_pins_provider.dart';
+import '../hidden_composer_actions_provider.dart';
 import '../quick_replies_provider.dart';
 import '../services/drawer_item_launcher.dart';
 import '../state/chat_drawer_editing_provider.dart';
@@ -231,7 +233,19 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
         unawaited(_openFullscreenEditor());
       case ComposerAction.guidance:
         _toggleGuidance();
+      case ComposerAction.asterisk:
+      case ComposerAction.quote:
+        final token = action.insertToken;
+        if (token != null) _insertSurround(token);
     }
+  }
+
+  /// Wraps the caret / selection in a pair of [token] and brings the keyboard
+  /// back, so the drawer's insert cards type where the user was already
+  /// looking rather than leaving a caret they have to go find.
+  void _insertSurround(String token) {
+    insertSurroundingText(_controller, token);
+    _effectiveFocusNode.requestFocus();
   }
 
   void _onTextChanged() {
@@ -647,6 +661,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
       hintText: _guidanceMode
           ? 'chat_long_message_hint'.tr()
           : 'chat_placeholder'.tr(),
+      showFormatBar: true,
       onChanged: (value) {
         if (!mounted) return;
         _controller.text = value;
@@ -978,6 +993,20 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
           icon: action.icon,
           onTap: _toggleGuidance,
           color: _guidanceMode ? Colors.orange : null,
+        );
+      case ComposerAction.asterisk:
+      case ComposerAction.quote:
+        final token = action.insertToken;
+        // A hidden action loses its pinned button too: hiding is "put this
+        // away", and a copy left under the composer would not be away.
+        if (token == null ||
+            (ref.watch(hiddenComposerActionsProvider).value ?? const <String>{})
+                .contains(action.id)) {
+          return null;
+        }
+        return _ResolvedPin(
+          icon: action.icon,
+          onTap: () => _insertSurround(token),
         );
     }
   }

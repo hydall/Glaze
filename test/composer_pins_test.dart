@@ -252,6 +252,26 @@ void main() {
     });
   });
 
+  group('insert actions', () {
+    test('are absent from the shipped row but stay demotable', () {
+      expect(
+        kDefaultComposerPins.where((p) => p.asAction?.isInsert ?? false),
+        isEmpty,
+      );
+      expect(ComposerAction.demotable.where((a) => a.isInsert), [
+        ComposerAction.asterisk,
+        ComposerAction.quote,
+      ]);
+    });
+
+    test('carry their delimiter and only they can be hidden', () {
+      expect(ComposerAction.asterisk.insertToken, '*');
+      expect(ComposerAction.quote.insertToken, '"');
+      expect(ComposerAction.attach.insertToken, isNull);
+      expect(ComposerAction.attach.isInsert, isFalse);
+    });
+  });
+
   group('ComposerActionBridge', () {
     test('runs through the registered handler and stops after unregister', () {
       final bridge = ComposerActionBridge();

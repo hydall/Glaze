@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +10,7 @@ import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../chat_provider.dart';
 import '../composer_pins_provider.dart';
+import '../hidden_composer_actions_provider.dart';
 import '../quick_reply_icons.dart';
 import '../quick_replies_provider.dart';
 import 'drawer_panel_scaffold.dart';
@@ -82,6 +85,12 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     await ref.read(quickRepliesProvider.notifier).remove(id);
   }
 
+  /// Puts a built-in insert action away. Reversible from the "+" sheet.
+  void _hideAction(ComposerAction action) {
+    Haptics.mediumImpact();
+    unawaited(ref.read(hiddenComposerActionsProvider.notifier).hide(action));
+  }
+
   /// Reorders by reply id, not by grid position: the grid hides replies that
   /// are pinned to the composer row, so a drop's display index is not an index
   /// into the stored list.
@@ -95,6 +104,31 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     if (from < 0 || to < 0 || from == to) return;
     await ref.read(quickRepliesProvider.notifier).reorder(from, to);
     if (mounted) setState(() => _hoverIndex = null);
+  }
+
+  /// The "+" sheet: create a quick reply, or bring back a hidden insert action.
+  ///
+  /// One entry point instead of a bare create form, because a hidden button has
+  /// nowhere else to be restored from — it is gone from the grid by design.
+  Future<void> _showAddSheet() async {
+    final hiddenIds =
+        ref.read(hiddenComposerActionsProvider).value ?? const <String>{};
+    final hiddenActions = [
+      for (final action in ComposerAction.values)
+        if (action.isInsert && hiddenIds.contains(action.id)) action,
+    ];
+    final result = await GlazeBottomSheet.show<_AddSheetResult>(
+      context,
+      title: 'action_add'.tr(),
+      child: _ActionsAddSheet(hiddenActions: hiddenActions),
+    );
+    if (!mounted || result == null) return;
+    final restore = result.restore;
+    if (restore != null) {
+      await ref.read(hiddenComposerActionsProvider.notifier).show(restore);
+    } else {
+      await _showEditSheet();
+    }
   }
 
   Future<void> _showEditSheet({QuickReply? existing}) async {
@@ -145,6 +179,8 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     final repliesAsync = ref.watch(quickRepliesProvider);
     final allReplies = repliesAsync.value ?? const <QuickReply>[];
     final pins = ref.watch(composerPinsProvider).value ?? const <ComposerPin>[];
+    final hiddenIds =
+        ref.watch(hiddenComposerActionsProvider).value ?? const <String>{};
 
     // Anything pinned to the composer's row is dropped from the grid: the two
     // must never offer the same button twice. The stored order is untouched, so
@@ -152,10 +188,15 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
     //
     // Attach / fullscreen / guidance lead the grid as a fixed block. They are
     // composer behaviour rather than user content, so they have a home rather
-    // than a position: nothing to reorder, nothing to delete.
+    // than a position: nothing to reorder, nothing to delete. The two insert
+    // buttons sit in the same block but may be hidden — they have no feature
+    // behind them to lose, so edit mode offers them a hide badge, and the "+"
+    // sheet below is where a hidden one comes back.
     final actions = [
       for (final action in ComposerAction.demotable)
-        if (!pins.contains(ComposerPin.action(action))) action,
+        if (!pins.contains(ComposerPin.action(action)) &&
+            !hiddenIds.contains(action.id))
+          action,
     ];
     final replies = [
       for (final reply in allReplies)
@@ -205,6 +246,9 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                             onTap: () => _handleActionTap(action),
                             onDelete: () {},
                             deletable: false,
+                            onHide: action.isInsert
+                                ? () => _hideAction(action)
+                                : null,
                           );
                           // Draggable but not a drop target: this block has a
                           // fixed home order, so the only move it accepts is
@@ -328,7 +372,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                   // is how a new user learns this tab is theirs to fill.
                   SizedBox(
                     width: itemWidth,
-                    child: AddMagicCard(onTap: () => _showEditSheet()),
+                    child: AddMagicCard(onTap: () => _showAddSheet()),
                   ),
                 ],
               ),
@@ -610,6 +654,103 @@ class _IconSwatch extends StatelessWidget {
             size: 20,
             color: active ? Colors.white : context.cs.onSurface,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the Actions tab's "+" sheet returns: a request to create a reply, or
+/// the hidden insert action the user picked to bring back.
+class _AddSheetResult {
+  final ComposerAction? restore;
+
+  const _AddSheetResult.createReply() : restore = null;
+
+  const _AddSheetResult.restore(this.restore);
+}
+
+/// The "+" sheet body: the create-reply row, then the hidden insert actions.
+class _ActionsAddSheet extends StatelessWidget {
+  final List<ComposerAction> hiddenActions;
+
+  const _ActionsAddSheet({required this.hiddenActions});
+
+  void _pop(BuildContext context, _AddSheetResult result) {
+    Navigator.of(context, rootNavigator: true).pop(result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _AddSheetRow(
+            icon: Icons.add,
+            label: 'action_create_new'.tr(),
+            onTap: () => _pop(context, const _AddSheetResult.createReply()),
+          ),
+          if (hiddenActions.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+              child: Text(
+                'composer_action_hidden'.tr().toUpperCase(),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.8),
+                ),
+              ),
+            ),
+            for (final action in hiddenActions)
+              _AddSheetRow(
+                icon: action.icon,
+                label: action.label,
+                onTap: () => _pop(context, _AddSheetResult.restore(action)),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AddSheetRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _AddSheetRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: context.cs.onSurface.withValues(alpha: 0.85),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(fontSize: 15, color: context.cs.onSurface),
+              ),
+            ),
+          ],
         ),
       ),
     );
