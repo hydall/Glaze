@@ -165,7 +165,11 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
       }
     } catch (e) {
       if (mounted) {
-        GlazeErrorDialog.show(context, e, prefix: 'Avatar import failed: ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_avatar_import_failed_prefix'.tr(),
+        );
       }
     }
   }
@@ -308,7 +312,11 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
       }
     } catch (e) {
       if (mounted) {
-        GlazeErrorDialog.show(context, e, prefix: 'Save failed: ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_save_failed_prefix'.tr(),
+        );
       }
     }
   }

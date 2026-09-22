@@ -1064,11 +1064,11 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         ref.invalidate(studioPresetListProvider);
         GlazeToast.show(ctx, 'Created "${result.preset.name}"');
       } else {
-        GlazeToast.show(ctx, 'Failed to create agentic preset');
+        GlazeToast.show(ctx, 'error_create_agentic_preset_failed'.tr());
       }
     } catch (_) {
       if (ctx.mounted) {
-        GlazeToast.show(ctx, 'Failed to create agentic preset');
+        GlazeToast.show(ctx, 'error_create_agentic_preset_failed'.tr());
       }
     }
   }
@@ -1144,9 +1144,13 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
     if (imported.isEmpty) {
       if (lastError != null) {
-        GlazeErrorDialog.show(ctx, lastError, prefix: 'Import failed: ');
+        GlazeErrorDialog.show(
+          ctx,
+          lastError,
+          prefix: 'error_import_failed_prefix'.tr(),
+        );
       } else if (unreadable > 0) {
-        GlazeToast.show(ctx, 'Cannot read file');
+        GlazeToast.show(ctx, 'error_cannot_read_file'.tr());
       }
       return;
     }

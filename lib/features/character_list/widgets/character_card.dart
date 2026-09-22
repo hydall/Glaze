@@ -643,7 +643,11 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
       }
     } catch (e) {
       if (context.mounted) {
-        GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_export_failed_prefix'.tr(),
+        );
       }
     }
   }

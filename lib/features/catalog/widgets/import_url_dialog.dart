@@ -385,7 +385,7 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
   Future<void> _openJanitorCard(String url) async {
     final id = _janitorCharacterId(url);
     if (id == null) {
-      setState(() => _error = 'Could not find a character id in that link.');
+      setState(() => _error = 'error_character_id_not_found'.tr());
       return;
     }
     final item = CatalogItem(id: id, name: '', slug: _janitorSlug(url, id));

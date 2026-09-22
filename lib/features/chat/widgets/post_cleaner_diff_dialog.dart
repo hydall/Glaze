@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -76,7 +77,7 @@ class _PostCleanerDiffDialogState extends ConsumerState<PostCleanerDiffDialog> {
         if (!mounted) return;
         setState(() {
           _loading = false;
-          _error = 'Session not found';
+          _error = 'error_session_not_found'.tr();
         });
         return;
       }
@@ -87,7 +88,7 @@ class _PostCleanerDiffDialogState extends ConsumerState<PostCleanerDiffDialog> {
         if (!mounted) return;
         setState(() {
           _loading = false;
-          _error = 'Message not found';
+          _error = 'error_message_not_found'.tr();
         });
         return;
       }

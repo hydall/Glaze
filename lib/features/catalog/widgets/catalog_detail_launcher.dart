@@ -449,7 +449,11 @@ class _CatalogDetailLauncherState
         }
         return;
       }
-      GlazeErrorDialog.show(context, e, prefix: 'Import failed: ');
+      GlazeErrorDialog.show(
+        context,
+        e,
+        prefix: 'error_import_failed_prefix'.tr(),
+      );
     }
   }
 

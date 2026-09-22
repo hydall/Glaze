@@ -605,7 +605,11 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
       GlazeToast.show(context, 'Theme exported to $path');
     } catch (e) {
       if (!mounted) return;
-      GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+      GlazeErrorDialog.show(
+        context,
+        e,
+        prefix: 'error_export_failed_prefix'.tr(),
+      );
     }
   }
 
@@ -669,7 +673,11 @@ class _ThemePresetScreenState extends ConsumerState<ThemePresetScreen> {
       }
     } catch (e) {
       if (mounted) {
-        GlazeErrorDialog.show(context, e, prefix: 'Failed to import: ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_import_failed_prefix'.tr(),
+        );
       }
     }
   }

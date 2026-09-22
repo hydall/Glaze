@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -629,7 +630,11 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   void _notifyWebViewFailure(Object message) {
     if (!mounted || _bridgeFailureNotified) return;
     _bridgeFailureNotified = true;
-    GlazeErrorDialog.show(context, message, prefix: 'Chat view failed to load');
+    GlazeErrorDialog.show(
+      context,
+      message,
+      prefix: 'error_chat_view_load_failed'.tr(),
+    );
   }
 
   void _handleWebViewFailure(

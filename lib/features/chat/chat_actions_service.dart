@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -116,9 +117,21 @@ class ChatActionsService {
     } on StateError catch (e) {
       if (context.mounted) GlazeToast.show(context, e.message);
     } on Exception catch (e) {
-      if (context.mounted) GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+      if (context.mounted) {
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_export_failed_prefix'.tr(),
+        );
+      }
     } catch (e) {
-      if (context.mounted) GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+      if (context.mounted) {
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_export_failed_prefix'.tr(),
+        );
+      }
     }
   }
 

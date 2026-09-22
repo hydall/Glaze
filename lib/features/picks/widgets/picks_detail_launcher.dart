@@ -159,7 +159,11 @@ class _PicksDetailLauncherState extends ConsumerState<PicksDetailLauncher> {
     } catch (e) {
       if (mounted) {
         setState(() => _importing = false);
-        GlazeErrorDialog.show(context, e, prefix: 'Import failed: ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_import_failed_prefix'.tr(),
+        );
       }
     }
   }

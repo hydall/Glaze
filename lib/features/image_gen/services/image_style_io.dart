@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:easy_localization/easy_localization.dart';
+
 import '../image_gen_models.dart';
 
 /// JSON export / import for the style library.
@@ -31,7 +33,11 @@ class ImageStyleIo {
     try {
       payload = jsonDecode(raw);
     } on FormatException catch (e) {
-      throw FormatException('File is not valid JSON: ${e.message}');
+      throw FormatException(
+        'imggen_styles_err_invalid_json'.tr(
+          namedArgs: {'message': e.message},
+        ),
+      );
     }
 
     final List<Object?> entries;
@@ -42,16 +48,20 @@ class ImageStyleIo {
       if (map['styles'] is List) {
         final declaredKind = map['kind'];
         if (declaredKind != null && declaredKind != kind) {
-          throw FormatException('Unsupported file kind: $declaredKind');
+          throw FormatException(
+            'imggen_styles_err_unsupported_kind'.tr(
+              namedArgs: {'kind': '$declaredKind'},
+            ),
+          );
         }
         entries = map['styles'] as List;
       } else if (map.containsKey('value') || map.containsKey('name')) {
         entries = [map];
       } else {
-        throw const FormatException('No "styles" array in the file');
+        throw FormatException('imggen_styles_err_no_styles_array'.tr());
       }
     } else {
-      throw const FormatException('Unsupported style file');
+      throw FormatException('imggen_styles_err_unsupported_file'.tr());
     }
 
     final styles = <ImageStyle>[];
@@ -69,7 +79,9 @@ class ImageStyleIo {
         ),
       );
     }
-    if (styles.isEmpty) throw const FormatException('No styles in the file');
+    if (styles.isEmpty) {
+      throw FormatException('imggen_styles_err_no_styles'.tr());
+    }
     return styles;
   }
 

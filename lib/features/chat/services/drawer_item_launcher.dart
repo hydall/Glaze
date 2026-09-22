@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -183,7 +184,7 @@ class DrawerItemLauncher {
             GlazeErrorDialog.show(
               context,
               error,
-              prefix: 'Failed to switch chat session',
+              prefix: 'error_switch_chat_session_failed'.tr(),
             );
           }
         }
@@ -233,7 +234,11 @@ class DrawerItemLauncher {
       );
     } catch (e) {
       if (context.mounted) {
-        GlazeErrorDialog.show(context, e, prefix: 'Import failed: ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: 'error_import_failed_prefix'.tr(),
+        );
       }
     }
   }

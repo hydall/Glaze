@@ -108,7 +108,7 @@ class _EmbeddingSettingsScreenState
       if (_rebuildRawChat) VectorRebuildSource.rawChat,
     };
     if (sources.isEmpty) {
-      GlazeToast.show(context, 'Select at least one vector source.');
+      GlazeToast.show(context, 'vector_error_select_source'.tr());
       return;
     }
     final controller = ref.read(vectorRebuildControllerProvider.notifier);
@@ -150,7 +150,11 @@ class _EmbeddingSettingsScreenState
       case ApiTestSuccess(:final message):
         GlazeToast.show(context, message);
       case ApiTestFailure(:final error):
-        GlazeErrorDialog.show(context, error, prefix: 'Failed: ');
+        GlazeErrorDialog.show(
+          context,
+          error,
+          prefix: 'settings_err_failed'.tr(),
+        );
     }
     if (mounted) setState(() => _isTesting = false);
   }

@@ -251,7 +251,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         GlazeErrorDialog.show(
           context,
           e,
-          prefix: 'Failed to open chat session',
+          prefix: 'error_open_chat_session_failed'.tr(),
         );
       }
     } catch (e) {
@@ -259,7 +259,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         GlazeErrorDialog.show(
           context,
           e,
-          prefix: 'Failed to open chat session',
+          prefix: 'error_open_chat_session_failed'.tr(),
         );
       }
     } finally {
