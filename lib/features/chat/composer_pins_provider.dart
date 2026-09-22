@@ -22,7 +22,14 @@ enum ComposerAction {
   fullscreen('fullscreen', Icons.fullscreen, 'composer_action_fullscreen'),
 
   /// Toggles the guidance field (the steering note sent alongside the reply).
-  guidance('guidance', Icons.north_east, 'composer_action_guidance');
+  guidance('guidance', Icons.north_east, 'composer_action_guidance'),
+
+  /// Wraps the caret / selection in a pair of asterisks — the markdown
+  /// emphasis marker — with the caret left between them.
+  asterisk('asterisk', Icons.star_border, 'composer_action_asterisk'),
+
+  /// Same, for a pair of double quotes.
+  quote('quote', Icons.format_quote, 'composer_action_quote');
 
   final String id;
   final IconData icon;
@@ -37,7 +44,25 @@ enum ComposerAction {
   /// home in the Actions tab and can move both ways.
   bool get isPermanent => this == ComposerAction.drawer;
 
+  /// The delimiter an insert action wraps the selection with, or null for an
+  /// action that does something rather than type.
+  String? get insertToken => switch (this) {
+    ComposerAction.asterisk => '*',
+    ComposerAction.quote => '"',
+    _ => null,
+  };
+
+  /// True for the two pair-insert buttons.
+  ///
+  /// They are the only actions that may be hidden: everything else is a way
+  /// into a feature, while these only type, and a user who never writes
+  /// markdown has nothing to lose by putting them away.
+  bool get isInsert => insertToken != null;
+
   /// Actions that appear as cards in the drawer's Actions tab while unpinned.
+  ///
+  /// Includes the insert buttons — they live in the tab only until the user
+  /// drags them up onto the composer row.
   static Iterable<ComposerAction> get demotable =>
       values.where((a) => !a.isPermanent);
 
@@ -132,8 +157,13 @@ class ComposerPin {
 
 /// The row as shipped: the four composer actions, in the order the buttons had
 /// before the row became configurable.
+///
+/// The insert buttons are left out. They are a typing shortcut rather than a
+/// way into a feature, and they already have a home in the Actions tab; a user
+/// who wants one under the composer drags it there like any other card.
 final List<ComposerPin> kDefaultComposerPins = [
-  for (final action in ComposerAction.values) ComposerPin.action(action),
+  for (final action in ComposerAction.values)
+    if (!action.isInsert) ComposerPin.action(action),
 ];
 
 /// Which buttons sit under the composer, in display order.

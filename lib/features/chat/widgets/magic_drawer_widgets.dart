@@ -18,6 +18,12 @@ class MagicCard extends StatefulWidget {
   /// drawn, because removing one would take the feature away for good.
   final bool deletable;
 
+  /// Draws a hide badge instead of the delete one. Set on cards that back a
+  /// built-in action the user may put away but not remove — the badge is the
+  /// reversible counterpart to [deletable]'s permanent one, and [onHide] is
+  /// what it runs.
+  final VoidCallback? onHide;
+
   const MagicCard({
     super.key,
     required this.item,
@@ -27,6 +33,7 @@ class MagicCard extends StatefulWidget {
     required this.onDelete,
     this.onLongPress,
     this.deletable = true,
+    this.onHide,
   });
 
   @override
@@ -128,7 +135,18 @@ class _MagicCardState extends State<MagicCard> {
                       ),
                     ],
                   ),
-                  if (editing && widget.deletable)
+                  if (editing && widget.onHide != null)
+                    Positioned(
+                      top: -8,
+                      right: -8,
+                      child: MagicCardBadge(
+                        icon: Icons.visibility_off,
+                        color: Colors.blueGrey,
+                        tooltip: 'composer_action_hide'.tr(),
+                        onTap: widget.onHide!,
+                      ),
+                    )
+                  else if (editing && widget.deletable)
                     Positioned(
                       top: -8,
                       right: -8,
