@@ -16,6 +16,7 @@ import '../../../core/utils/error_format.dart';
 import '../../image_gen/services/image_tag_markup.dart';
 import '../../settings/api_list_provider.dart';
 import '../models/block_config.dart';
+import '../models/extension_preset.dart';
 import '../models/info_block.dart';
 import '../models/extension_context_policy.dart';
 import 'blocks/block_llm_runner.dart';
@@ -39,6 +40,29 @@ final infoBlockServiceProvider = Provider<InfoBlockService>(
 String _withoutImagePaths(String content) =>
     ImageTagMarkup.reduceBlocksToInstructions(content);
 
+/// Picks the connection a block runs on, in the order the editor implies:
+/// the block's own, the preset's, then whatever the LLM tab is on.
+///
+/// Either level may be left on "Use selected LLM connection" — an empty id,
+/// which the editor literally labels that way — so an empty id means "follow
+/// the selection", never "misconfigured". An id that no longer resolves (the
+/// preset was deleted) also falls through, so a stale reference degrades to
+/// the selected connection instead of an error card.
+@visibleForTesting
+ApiConfig? resolveBlockApiConfig({
+  required String blockApiConfigId,
+  required String presetApiConfigId,
+  required List<ApiConfig> allConfigs,
+  required ApiConfig? activeFallback,
+}) {
+  for (final id in [blockApiConfigId, presetApiConfigId]) {
+    if (id.isEmpty) continue;
+    final match = allConfigs.where((c) => c.id == id).firstOrNull;
+    if (match != null) return match;
+  }
+  return activeFallback;
+}
+
 class InfoBlockService {
   InfoBlockService(this._ref, {BlockLlmRunner? llmRunner})
     : _llmRunner = llmRunner ?? const BlockLlmRunner();
@@ -61,6 +85,7 @@ class InfoBlockService {
     ExtensionContextPolicy contextPolicy = const ExtensionContextPolicy(),
     MainModelContextSnapshot? mainModelContextSnapshot,
     Persona? personaModel,
+    ExtensionPreset? preset,
     int swipeId = 0,
     CancelToken? cancelToken,
     void Function(String partial)? onStreamUpdate,
@@ -155,9 +180,18 @@ class InfoBlockService {
       );
     }
 
-    // Resolve API config.
-    final apiConfigId = blockConfig.apiConfigId;
-    if (apiConfigId.isEmpty) {
+    // Resolve the connection: the block's own, then the preset's, then the
+    // connection the LLM tab is on. Either level may be left on "Use selected
+    // LLM connection" (an empty id), which is the documented default — the
+    // editor labels the empty row exactly that way — so an empty id must mean
+    // "follow the selection", never "misconfigured".
+    final apiConfigs = await _ref.read(apiListProvider.future);
+    final apiConfig = _resolveApiConfig(
+      blockConfig: blockConfig,
+      preset: preset,
+      apiConfigs: apiConfigs,
+    );
+    if (apiConfig == null) {
       debugPrint(
         '[InfoBlockService] No API config for block "${blockConfig.name}"',
       );
@@ -167,20 +201,15 @@ class InfoBlockService {
       );
     }
 
-    final apiConfigs = await _ref.read(apiListProvider.future);
-    final apiConfig = apiConfigs.where((c) => c.id == apiConfigId).firstOrNull;
-    if (apiConfig == null) {
-      debugPrint('[InfoBlockService] API config not found: $apiConfigId');
-      return (content: null, error: 'API config not found: $apiConfigId');
-    }
-
     if (cancelToken?.isCancelled == true) return (content: null, error: null);
 
+    final callId = 'extblock:${blockConfig.id}:$messageId#$swipeId';
     String? rawResponse;
     try {
       rawResponse = await _callLLM(
         apiConfig: apiConfig,
         blockConfig: blockConfig,
+        model: blockConfig.model.isNotEmpty ? blockConfig.model : preset?.apiModel,
         requestMessages: assembly.messages,
         charName: character?.name,
         userName: personaModel?.name ?? persona ?? 'User',
@@ -188,14 +217,19 @@ class InfoBlockService {
         onStreamUpdate: onStreamUpdate,
         // Diagnostic identity only — never serialized into the provider body.
         // Without it an ext block request lands in the capture log unlabeled,
-        // unlike every other stage (chat, cleaner, ledger, summary).
+        // unlike every other stage (chat, cleaner, ledger, summary). The
+        // `callId` / `pipelineRunId` pair is what the outcome row joins on:
+        // without them the model's reply is captured but never shown.
         captureContext: LlmCaptureContext(
           stage: 'extblock.${blockConfig.type.name}',
           sessionId: sessionId,
           messageId: messageId,
+          pipelineRunId: 'extblock:$sessionId:$messageId#$swipeId',
+          callId: callId,
+          logicalCallId: callId,
           agentId: blockConfig.id,
-          logicalCallId: 'extblock:${blockConfig.id}:$messageId#$swipeId',
           relatedArtifactId: messageId,
+          attempt: 1,
         ),
       );
     } catch (e) {
@@ -495,9 +529,21 @@ class InfoBlockService {
   // LLM call
   // ─────────────────────────────────────────────────────────────────────────
 
+  ApiConfig? _resolveApiConfig({
+    required BlockConfig blockConfig,
+    required ExtensionPreset? preset,
+    required List<ApiConfig> apiConfigs,
+  }) => resolveBlockApiConfig(
+    blockApiConfigId: blockConfig.apiConfigId,
+    presetApiConfigId: preset?.apiConfigId ?? '',
+    allConfigs: apiConfigs,
+    activeFallback: _ref.read(activeApiConfigProvider),
+  );
+
   Future<String?> _callLLM({
     required ApiConfig apiConfig,
     required BlockConfig blockConfig,
+    required String? model,
     required List<Map<String, dynamic>> requestMessages,
     required String? charName,
     required String userName,
@@ -508,7 +554,7 @@ class InfoBlockService {
     return _llmRunner.run(
       apiConfig: apiConfig,
       messages: requestMessages,
-      model: blockConfig.model.isNotEmpty ? blockConfig.model : null,
+      model: model,
       // A block only streams when it streams into the panel; otherwise the
       // whole answer is wanted in one piece.
       stream: onStreamUpdate != null,

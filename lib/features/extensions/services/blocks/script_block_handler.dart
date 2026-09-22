@@ -83,6 +83,7 @@ class ScriptBlockHandler implements BlockHandler {
       contextPolicy: blockConfig.contextPolicy,
       mainModelContextSnapshot: context.mainModelContextSnapshot,
       personaModel: context.persona,
+      preset: context.preset,
       swipeId: context.swipeId,
       cancelToken: context.cancelToken,
       onStreamUpdate: makeStreamHandler(
