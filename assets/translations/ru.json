@@ -1028,6 +1028,7 @@
   "imggen_api_type": "Тип API",
   "imggen_endpoint": "URL эндпоинта",
   "imggen_api_key": "API ключ",
+  "imggen_mirror": "Зеркало",
   "imggen_model": "Модель",
   "imggen_model_placeholder": "dall-e-3",
   "imggen_size": "Размер картинки",

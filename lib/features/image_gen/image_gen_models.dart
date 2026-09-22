@@ -12,7 +12,6 @@ enum ImageGenApiType {
   gemini,
   naistera,
   routmy,
-  ruRoutmy,
   openrouter,
   electronhub,
   a1111,
@@ -28,7 +27,6 @@ extension ImageGenApiTypeLabel on ImageGenApiType {
     ImageGenApiType.gemini => 'Gemini',
     ImageGenApiType.naistera => 'Naistera',
     ImageGenApiType.routmy => 'rout.my',
-    ImageGenApiType.ruRoutmy => 'RU-rout.my',
     ImageGenApiType.openrouter => 'OpenRouter',
     ImageGenApiType.electronhub => 'Electron Hub',
     ImageGenApiType.a1111 => 'AUTOMATIC1111 / Forge',
@@ -65,6 +63,21 @@ abstract class NaisteraModelInfo with _$NaisteraModelInfo {
     @Default('') String name,
     @Default(true) bool references,
   }) = _NaisteraModelInfo;
+}
+
+/// One image model of the rout.my catalog as served by `GET /v1/models`.
+///
+/// [supportsEdits] mirrors the catalog's `endpoints` field: when the model
+/// advertises `v1/images/edits`, reference images are routed there and the
+/// reference UI is shown; generation-only models get their references gated
+/// off. The catalog is fetched in the settings sheet and persisted.
+@freezed
+abstract class RoutmyModelInfo with _$RoutmyModelInfo {
+  const factory RoutmyModelInfo({
+    required String id,
+    @Default('') String name,
+    @Default(false) bool supportsEdits,
+  }) = _RoutmyModelInfo;
 }
 
 /// xAI Imagine connection and per-model parameters.
@@ -239,11 +252,14 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default('1:1') String routmyAspectRatio,
     @Default('1K') String routmyImageSize,
     @Default('standard') String routmyQuality,
-    @Default('') String ruRoutmyApiKey,
-    @Default('google/gemini-3.1-flash-image-preview') String ruRoutmyModel,
-    @Default('1:1') String ruRoutmyAspectRatio,
-    @Default('1K') String ruRoutmyImageSize,
-    @Default('standard') String ruRoutmyQuality,
+
+    /// Which rout.my host to call — the global one by default, the RU mirror
+    /// as an option. Both serve the same catalog.
+    @Default(RoutMyMirror.global) RoutMyMirror routmyMirror,
+
+    /// Catalog last loaded from `GET /v1/models`. Empty until the user hits
+    /// refresh — [RoutMyConstants.models] is the fallback shortlist.
+    @Default([]) List<RoutmyModelInfo> routmyModels,
     @Default(XaiImageSettings()) XaiImageSettings xai,
     @Default(OpenRouterImageSettings()) OpenRouterImageSettings openrouter,
     @Default(ElectronHubImageSettings()) ElectronHubImageSettings electronhub,
@@ -297,6 +313,27 @@ abstract class ImageGenSettings with _$ImageGenSettings {
       if (model.$1 == id) return model.$2;
     }
     return id;
+  }
+
+  /// Reference support of the selected rout.my model: the fetched catalog when
+  /// it knows the model (its `endpoints` decide), the shipped classification
+  /// otherwise.
+  bool get routmySupportsReferences {
+    for (final model in routmyModels) {
+      if (model.id == routmyModel) return model.supportsEdits;
+    }
+    return RoutMyConstants.supportsReferences(routmyModel);
+  }
+
+  /// Human-readable label of a rout.my model id — the catalog name when it is
+  /// known, then the shipped shortlist, then the raw id.
+  String routmyModelLabel(String id) {
+    for (final model in routmyModels) {
+      if (model.id == id) {
+        return model.name.trim().isEmpty ? model.id : model.name;
+      }
+    }
+    return RoutMyConstants.labelFor(id);
   }
 
   /// Active style, or null when "no style" is selected.

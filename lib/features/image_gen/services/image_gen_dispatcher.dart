@@ -125,17 +125,6 @@ class ImageGenDispatcher {
           references,
           instructionAspectRatio,
           instructionImageSize,
-          isRu: false,
-          cancelToken: cancelToken,
-        );
-      case ImageGenApiType.ruRoutmy:
-        return _routmy(
-          settings,
-          prompt,
-          references,
-          instructionAspectRatio,
-          instructionImageSize,
-          isRu: true,
           cancelToken: cancelToken,
         );
       case ImageGenApiType.a1111:
@@ -344,28 +333,27 @@ class ImageGenDispatcher {
     List<Map<String, String>> references,
     String? instructionAspectRatio,
     String? instructionImageSize, {
-    required bool isRu,
     CancelToken? cancelToken,
   }) {
     final images = _imagesOf(references);
     return RoutmyImageProvider(
-      baseUrl: isRu ? RuRoutMyConstants.baseUrl : RoutMyConstants.baseUrl,
+      baseUrl: settings.routmyMirror.baseUrl,
     ).generate(
-      apiKey: isRu ? settings.ruRoutmyApiKey : settings.routmyApiKey,
-      model: isRu ? settings.ruRoutmyModel : settings.routmyModel,
+      apiKey: settings.routmyApiKey,
+      model: settings.routmyModel,
       // rout.my sends references without captions — name them in the prompt.
       prompt: imagePromptWithReferenceLabels(prompt, references),
       aspectRatio: _validOverride(
         instructionAspectRatio,
         RoutMyConstants.aspectRatios,
-        isRu ? settings.ruRoutmyAspectRatio : settings.routmyAspectRatio,
+        settings.routmyAspectRatio,
       ),
       imageSize: _validOverride(
         instructionImageSize,
         RoutMyConstants.imageSizes,
-        isRu ? settings.ruRoutmyImageSize : settings.routmyImageSize,
+        settings.routmyImageSize,
       ),
-      quality: isRu ? settings.ruRoutmyQuality : settings.routmyQuality,
+      quality: settings.routmyQuality,
       referenceImages: images,
       cancelToken: cancelToken,
     );

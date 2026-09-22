@@ -90,7 +90,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       before.xai.apiKey != after.xai.apiKey ||
       before.xai.endpoint != after.xai.endpoint ||
       before.routmyApiKey != after.routmyApiKey ||
-      before.ruRoutmyApiKey != after.ruRoutmyApiKey ||
+      before.routmyMirror != after.routmyMirror ||
       before.openrouter.apiKey != after.openrouter.apiKey ||
       before.openrouter.endpoint != after.openrouter.endpoint ||
       before.electronhub.apiKey != after.electronhub.apiKey ||
@@ -387,9 +387,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       case ImageGenApiType.naistera:
         return buildNaisteraConnectionFields(s, _update);
       case ImageGenApiType.routmy:
-        return buildRoutmyConnectionFields(s, isRu: false, onUpdate: _update);
-      case ImageGenApiType.ruRoutmy:
-        return buildRoutmyConnectionFields(s, isRu: true, onUpdate: _update);
+        return buildRoutmyConnectionFields(s, context, _update);
       case ImageGenApiType.xai:
         return buildXaiConnectionFields(s, _update);
       case ImageGenApiType.openrouter:
@@ -457,14 +455,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       case ImageGenApiType.routmy:
         return buildRoutmyModelFields(
           s,
-          isRu: false,
-          onUpdate: _update,
-          showOptions: showOptions,
-        );
-      case ImageGenApiType.ruRoutmy:
-        return buildRoutmyModelFields(
-          s,
-          isRu: true,
+          isFetching: _isFetchingModels,
+          onFetchModels: _onFetchModels,
           onUpdate: _update,
           showOptions: showOptions,
         );
@@ -562,10 +554,10 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return _connectionService.fetchXaiModels(_settings);
       case ImageGenApiType.naistera:
         return _fetchNaisteraModels();
+      case ImageGenApiType.routmy:
+        return _fetchRoutmyModels();
       case ImageGenApiType.openai:
       case ImageGenApiType.gemini:
-      case ImageGenApiType.routmy:
-      case ImageGenApiType.ruRoutmy:
         return _connectionService.fetchOpenAiModels(
           settings: _settings,
           llmEndpoint: apiConfig?.endpoint ?? '',
@@ -585,10 +577,20 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     return catalog.map((model) => model.id).toList();
   }
 
+  /// Loads the rout.my catalog and stores it with the `/images/edits`
+  /// capability each entry advertises, so the reference gate follows the API.
+  Future<List<String>> _fetchRoutmyModels() async {
+    final catalog = await _connectionService.fetchRoutmyModels(_settings);
+    if (catalog.isEmpty) return const [];
+    _update(_settings.copyWith(routmyModels: catalog));
+    return catalog.map((model) => model.id).toList();
+  }
+
   bool _isSelectedModel(String model) => switch (_settings.apiType) {
     ImageGenApiType.openrouter => _settings.openrouter.model == model,
     ImageGenApiType.xai => _settings.xai.model == model,
     ImageGenApiType.naistera => _settings.naisteraModel == model,
+    ImageGenApiType.routmy => _settings.routmyModel == model,
     ImageGenApiType.electronhub => _settings.electronhub.model == model,
     ImageGenApiType.a1111 => _settings.a1111.model == model,
     ImageGenApiType.novelai => _settings.novelai.model == model,
@@ -622,6 +624,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         _update(_settings.copyWith(xai: _settings.xai.copyWith(model: model)));
       case ImageGenApiType.naistera:
         _update(_settings.copyWith(naisteraModel: model));
+      case ImageGenApiType.routmy:
+        _update(_settings.copyWith(routmyModel: model));
       case ImageGenApiType.novelai:
         _update(
           _settings.copyWith(

@@ -146,6 +146,43 @@ void main() {
         0,
       );
     });
+
+    test('rout.my gates references by model', () {
+      // Generation-only models do not advertise `/images/edits`.
+      expect(
+        providerMaxReferences(
+          const ImageGenSettings(
+            apiType: ImageGenApiType.routmy,
+            routmyModel: 'google/gemini-3.1-flash-image-preview',
+          ),
+        ),
+        0,
+      );
+      expect(
+        providerMaxReferences(
+          const ImageGenSettings(
+            apiType: ImageGenApiType.routmy,
+            routmyModel: 'openai/gpt-image-2',
+          ),
+        ),
+        greaterThan(0),
+      );
+    });
+
+    test('rout.my follows the fetched catalog over the fallback', () {
+      const settings = ImageGenSettings(
+        apiType: ImageGenApiType.routmy,
+        routmyModel: 'google/gemini-3.1-flash-image-preview',
+        routmyModels: [
+          RoutmyModelInfo(
+            id: 'google/gemini-3.1-flash-image-preview',
+            supportsEdits: true,
+          ),
+        ],
+      );
+
+      expect(providerMaxReferences(settings), greaterThan(0));
+    });
   });
 
   group('reference matching', () {

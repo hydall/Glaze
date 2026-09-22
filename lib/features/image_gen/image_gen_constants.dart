@@ -21,9 +21,34 @@ const defaultReferenceInstruction =
     'hair color and style, skin tone, body type, clothing, and all distinctive '
     'features. Do not deviate from the reference appearances.]';
 
+/// Which rout.my host the single rout.my provider talks to. Both mirrors serve
+/// the same API and catalog; the RU host is offered as an option, with the
+/// global host as the default. There is no automatic selection.
+enum RoutMyMirror {
+  global,
+  ru;
+
+  String get label => switch (this) {
+    RoutMyMirror.global => 'rout.my',
+    RoutMyMirror.ru => 'RU-rout.my',
+  };
+
+  String get baseUrl => switch (this) {
+    RoutMyMirror.global => RoutMyConstants.baseUrl,
+    RoutMyMirror.ru => RoutMyConstants.ruBaseUrl,
+  };
+}
+
 class RoutMyConstants {
   static const String baseUrl = 'https://api.rout.my';
 
+  /// RU mirror of the same API. Both hosts serve the same catalog and accept
+  /// the same keys; the mirror is selected manually in settings.
+  static const String ruBaseUrl = 'https://ru-api.rout.my';
+
+  /// Shipped shortlist, used until `GET /v1/models` has been loaded. The live
+  /// catalog ([ImageGenSettings.routmyModels]) is the source of truth; this is
+  /// only a fallback for the labels and for a fresh install.
   static const models = [
     ('google/gemini-3.1-flash-image-preview', 'Gemini 3.1 Flash Image'),
     ('google/gemini-3.1-flash-lite-image', 'Gemini 3.1 Flash Lite Image'),
@@ -31,20 +56,31 @@ class RoutMyConstants {
     ('google/gemini-omni-flash-preview', 'Gemini Omni Flash'),
     ('openai/gpt-image-1.5', 'GPT Image 1.5'),
     ('openai/gpt-image-2', 'GPT Image 2'),
+    ('openai/gpt-image-2.5-flare', 'GPT Image 2.5 Flare'),
+    ('openai/gpt-image-2.5-sunburst', 'GPT Image 2.5 Sunburst'),
     ('meta/muse-spark-1.1', 'Muse Spark 1.1'),
     ('bytedance/seedream-5.0-pro', 'Seedream 5.0 Pro'),
   ];
 
-  // Models that generate images via /v1/chat/completions with modalities:[image,text].
-  // openai/gpt-image-* are NOT here — rout.my rejects them on chat completions
-  // ("not a language model"). They go through /v1/images/edits (with refs) or
-  // /v1/images/generations (without refs).
-  static const chatImageModels = {
-    'google/gemini-3.1-flash-image-preview',
-    'google/gemini-3.1-flash-lite-image',
-    'google/gemini-3-pro-image',
-    'google/gemini-omni-flash-preview',
-  };
+  /// Human-readable label for a model id — the shipped shortlist name when it
+  /// is known, otherwise the raw id.
+  static String labelFor(String id) {
+    for (final (modelId, label) in models) {
+      if (modelId == id) return label;
+    }
+    return id;
+  }
+
+  /// Reference images are documented only on `/v1/images/edits`, and the live
+  /// catalog advertises that endpoint only for the `openai/gpt-image-*`
+  /// family. Every other rout.my image model is generation-only, so its
+  /// references are gated off (see [providerMaxReferences]).
+  static bool supportsReferences(String? model) =>
+      (model ?? '').toLowerCase().contains('gpt-image');
+
+  /// Models that take references through `/v1/images/edits` instead of the
+  /// plain `/v1/images/generations` route.
+  static bool isEditModel(String? model) => supportsReferences(model);
 
   static const aspectRatios = [
     '1:1',
@@ -61,14 +97,6 @@ class RoutMyConstants {
 
   static const imageSizes = ['1K', '2K', '4K'];
   static const seedreamImageSizes = ['1K', '2K'];
-}
-
-class RuRoutMyConstants {
-  static const String baseUrl = 'https://ru-api.rout.my';
-
-  static const models = RoutMyConstants.models;
-  static const aspectRatios = RoutMyConstants.aspectRatios;
-  static const imageSizes = RoutMyConstants.imageSizes;
 }
 
 class NaisteraConstants {

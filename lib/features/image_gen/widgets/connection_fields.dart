@@ -52,23 +52,33 @@ List<Widget> buildNaisteraConnectionFields(
   ];
 }
 
-/// Connection-field rows for the rout.my image-gen API. The Russian
-/// variant (ruRoutmy) shares the same shape and only differs in the
-/// settings field it writes to, controlled by [isRu].
+/// Connection-field rows for the rout.my image-gen API. Under the API key sits
+/// the mirror picker: the global host is the default, the RU mirror is an
+/// option. Both serve the same catalog and accept the same keys.
 List<Widget> buildRoutmyConnectionFields(
-  ImageGenSettings s, {
-  required bool isRu,
-  required ValueChanged<ImageGenSettings> onUpdate,
-}) {
+  ImageGenSettings s,
+  BuildContext context,
+  ValueChanged<ImageGenSettings> onUpdate,
+) {
   return [
     rows.ImageGenTextFieldItem(
-      label: isRu ? 'RU-rout.my API Key' : 'rout.my API Key',
-      value: isRu ? s.ruRoutmyApiKey : s.routmyApiKey,
+      label: 'rout.my API Key',
+      value: s.routmyApiKey,
       obscure: true,
       hint: 'sk-...',
-      onChanged: (v) => isRu
-          ? onUpdate(s.copyWith(ruRoutmyApiKey: v))
-          : onUpdate(s.copyWith(routmyApiKey: v)),
+      onChanged: (v) => onUpdate(s.copyWith(routmyApiKey: v)),
+    ),
+    MenuSelectorItem(
+      label: 'imggen_mirror'.tr(),
+      currentValue: s.routmyMirror.label,
+      onTap: () => rows.showImageGenOptions<RoutMyMirror>(
+        context,
+        title: 'imggen_mirror'.tr(),
+        items: RoutMyMirror.values,
+        labelBuilder: (mirror) => mirror.label,
+        isSelected: (mirror) => s.routmyMirror == mirror,
+        onSelected: (mirror) => onUpdate(s.copyWith(routmyMirror: mirror)),
+      ),
     ),
   ];
 }

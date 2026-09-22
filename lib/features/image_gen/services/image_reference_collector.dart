@@ -113,8 +113,7 @@ class ImageReferenceCollector {
   /// The preprocessing the active provider/model needs. Only reached when the
   /// provider takes references at all ([providerMaxReferences] gates it).
   static _ReferenceTransform _transformFor(ImageGenSettings settings) {
-    if (settings.apiType == ImageGenApiType.routmy ||
-        settings.apiType == ImageGenApiType.ruRoutmy) {
+    if (settings.apiType == ImageGenApiType.routmy) {
       return _ReferenceTransform.downscaleJpeg;
     }
     if (settings.apiType == ImageGenApiType.novelai &&

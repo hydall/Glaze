@@ -162,5 +162,32 @@ void main() {
         ImageGenApiType.electronhub,
       );
     });
+
+    test('folds the retired RU provider into rout.my with the RU mirror', () {
+      final restored = ImageGenSettingsCodec.fromJson({
+        'apiType': 'ruRoutmy',
+        'ruRoutmyApiKey': 'ru-key',
+        'ruRoutmyModel': 'openai/gpt-image-2',
+      });
+
+      expect(restored.apiType, ImageGenApiType.routmy);
+      expect(restored.routmyMirror, RoutMyMirror.ru);
+      expect(restored.routmyApiKey, 'ru-key');
+      expect(restored.routmyModel, 'openai/gpt-image-2');
+    });
+
+    test('round-trips the rout.my mirror and catalog', () {
+      const settings = ImageGenSettings(
+        apiType: ImageGenApiType.routmy,
+        routmyMirror: RoutMyMirror.ru,
+        routmyModels: [RoutmyModelInfo(id: 'openai/gpt-image-2')],
+      );
+      final restored = ImageGenSettingsCodec.fromJson(
+        ImageGenSettingsCodec.toJson(settings),
+      );
+
+      expect(restored.routmyMirror, RoutMyMirror.ru);
+      expect(restored.routmyModels.single.id, 'openai/gpt-image-2');
+    });
   });
 }
