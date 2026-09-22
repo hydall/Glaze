@@ -535,6 +535,16 @@ class NovelAIConstants {
   /// feature exists only on the V4.5 family.
   static const int maxReferences = 4;
 
+  /// The canvas a Director Tools reference has to be padded onto, chosen by the
+  /// source orientation. The API accepts only these three sizes with the image
+  /// fitted and black-padded (`image.RequestParameters.director_reference_images`
+  /// in the image OpenAPI spec); any other size is rejected with a 400.
+  static (int, int) referenceCanvas(int width, int height) {
+    if (width > height) return (1536, 1024);
+    if (height > width) return (1024, 1536);
+    return (1472, 1472);
+  }
+
   /// Maps a per-tag aspect ratio onto a preset resolution, or null when the
   /// ratio has no equivalent — the configured resolution is then used.
   static (int, int)? sizeForAspect(String? aspect) {
