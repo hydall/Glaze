@@ -2,7 +2,6 @@ import '../../models/block_config.dart';
 import '../../models/info_block.dart';
 import 'block_context.dart';
 import 'block_handler.dart';
-import 'infoblock_handler.dart' show BlockErrorMarker;
 
 /// Stands in for block types the editor can already describe but the runtime
 /// cannot yet execute — rewrite and accumulation blocks imported from the

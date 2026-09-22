@@ -1768,7 +1768,9 @@ class Bridge {
       } else if (block.status === 'pending') {
         btnGroup.appendChild(makeButton('ext-block-regen', ICON.play, 'Запустить'));
       } else {
-        const canRegenImage = block.type === 'imageGen' && block.content && (
+        // Type-agnostic on purpose: a block can be redrawn because its
+        // content holds an image, not because it was made by an image block.
+        const canRegenImage = block.content && (
           /\[IMG:RESULT:/.test(block.content) ||
           /\[IMG:GEN:/.test(block.content) ||
           /data-iig-instruction/i.test(block.content)

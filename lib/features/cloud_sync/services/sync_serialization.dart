@@ -115,16 +115,21 @@ class SyncSerialization {
     };
   }
 
-  /// Normalizes an InfoBlock for cloud storage:
-  /// - imageGen blocks: replaces [IMG:RESULT:/path|json] with [IMG:GEN:json]
-  ///   so images can be regenerated on pull without storing device-local paths.
-  /// - All other block types: stored as-is.
+  /// Normalizes an InfoBlock for cloud storage: a finished image is replaced
+  /// by the instruction that produced it, so the block can be regenerated on
+  /// pull and no device-local path ever leaves the device. A block holding no
+  /// image is stored as-is.
+  ///
+  /// The test is the content, not the block's type. It used to be
+  /// `blockType == 'imageGen'`, which was safe only while images could come
+  /// from nothing else; now that any generated block can draw one, that check
+  /// would upload the file paths of every block the old image type did not
+  /// cover.
   static Map<String, dynamic> normalizeInfoBlockForSync(InfoBlock block) {
     final json = block.toJson();
-    if (block.blockType != 'imageGen') return json;
-    final normalized = Map<String, dynamic>.from(json);
-    normalized['content'] = normalizeImageGenContent(block.content);
-    return normalized;
+    final normalized = normalizeImageGenContent(block.content);
+    if (normalized == block.content) return json;
+    return Map<String, dynamic>.from(json)..['content'] = normalized;
   }
 
   /// Replaces [IMG:RESULT:/abs/path|json] → [IMG:GEN:json]

@@ -32,3 +32,21 @@ enum BlockRunOrder {
   @JsonValue('after')
   after,
 }
+
+/// How a block's finished content reaches the reader.
+///
+/// This is what used to be the difference between the `infoblock` and
+/// `interactive` block types. Nothing about *producing* the content changed
+/// between them — only where it was put — so it is a property of the result,
+/// not a kind of block.
+enum BlockRender {
+  /// Sanitized HTML (or plain text) in the message's ext-blocks panel.
+  @JsonValue('card')
+  card,
+
+  /// A sandboxed `allow-scripts` iframe under the message, hosted by
+  /// `PanelHostService`. The HTML stays executable there, so this is the one
+  /// place a block's own JavaScript runs without going through the bridge.
+  @JsonValue('panel')
+  panel,
+}

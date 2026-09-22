@@ -1,4 +1,4 @@
-/// Parses LLM output into executable JavaScript for [BlockType.jsRunner].
+/// Parses LLM output into executable JavaScript for a [BlockType.script] block.
 class JsScriptExtractor {
   JsScriptExtractor._();
 

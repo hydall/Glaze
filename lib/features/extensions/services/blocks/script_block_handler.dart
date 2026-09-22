@@ -7,8 +7,6 @@ import '../info_block_service.dart';
 import '../js_script_extractor.dart';
 import 'block_context.dart';
 import 'block_handler.dart';
-import 'image_gen_block_handler.dart';
-import 'infoblock_handler.dart';
 
 typedef JsScriptExecutor =
     Future<InfoBlock?> Function({
@@ -17,8 +15,10 @@ typedef JsScriptExecutor =
       String Function(String result)? panelContentBuilder,
     });
 
-class JsRunnerBlockHandler implements BlockHandler {
-  const JsRunnerBlockHandler({
+/// Runs a [BlockType.script] block: JavaScript, written by the model from the
+/// block's prompt or carried on the block itself, executed in the sandbox.
+class ScriptBlockHandler implements BlockHandler {
+  const ScriptBlockHandler({
     required this.repo,
     required this.infoBlockService,
     required this.markBlockError,
@@ -55,7 +55,7 @@ class JsRunnerBlockHandler implements BlockHandler {
 
     if (prompt.isEmpty) {
       debugPrint(
-        '[ExtPostGen] jsRunner "${blockConfig.name}" - prompt is empty',
+        '[ExtPostGen] script "${blockConfig.name}" - prompt is empty',
       );
       await repo.updateStatus(context.placeholderId, BlockRunStatus.done);
       refreshPanelForMessage(
@@ -68,7 +68,7 @@ class JsRunnerBlockHandler implements BlockHandler {
       return placeholder.copyWith(status: BlockRunStatus.done);
     }
 
-    debugPrint('[ExtPostGen] _runJsRunner START: name="${blockConfig.name}"');
+    debugPrint('[ExtPostGen] script block START: name="${blockConfig.name}"');
 
     final generated = await infoBlockService.generateSingleBlockContent(
       sessionId: context.sessionId,

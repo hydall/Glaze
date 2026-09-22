@@ -100,7 +100,7 @@ void main() {
         BlockConfig(
           id: 'b1',
           name: 'Tick',
-          type: BlockType.jsRunner,
+          type: BlockType.script,
           enabled: true,
           trigger: BlockTrigger.periodic,
           prompt: '// js',
@@ -153,7 +153,7 @@ void main() {
         BlockConfig(
           id: 'b1',
           name: 'Tick',
-          type: BlockType.jsRunner,
+          type: BlockType.script,
           enabled: true,
           trigger: BlockTrigger.periodic,
           prompt: '// js',
@@ -191,7 +191,7 @@ void main() {
         BlockConfig(
           id: 'b1',
           name: 'Tick',
-          type: BlockType.jsRunner,
+          type: BlockType.script,
           enabled: true,
           trigger: BlockTrigger.periodic,
           prompt: '// js',

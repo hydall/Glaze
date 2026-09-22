@@ -110,7 +110,7 @@ class BlockTriggersGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isScript = type == BlockType.jsRunner;
+    final isScript = type == BlockType.script;
 
     return MenuGroup(
       header: 'block_sec_triggers'.tr(),
@@ -297,7 +297,7 @@ class BlockOrderGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isRewrite = type == BlockType.rewrite;
-    final isScript = type == BlockType.jsRunner;
+    final isScript = type == BlockType.script;
 
     final items = <Widget>[
       if (isRewrite) ...[

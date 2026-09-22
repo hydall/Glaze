@@ -83,7 +83,7 @@ void main() {
     test('keeps identity and maps the type tag', () {
       expect(block.id, '21ff7fb6-aec7-418d-8bad-41a6e7ba1766');
       expect(block.name, 'image_lite');
-      expect(block.type, BlockType.infoblock);
+      expect(block.type, BlockType.generated);
     });
 
     test('inverts disabled into enabled', () {
@@ -274,7 +274,7 @@ void main() {
     test('falls back to the original defaults when keys are missing', () {
       final block = decodeUpstreamBlock({'name': 'bare'});
 
-      expect(block.type, BlockType.infoblock);
+      expect(block.type, BlockType.generated);
       expect(block.enabled, isTrue);
       expect(block.period, 2);
       expect(block.injectionDepth, 4);

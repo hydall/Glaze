@@ -22,9 +22,9 @@ class PeriodicJsBlockRunner {
     bool Function()? isAuthorized,
   }) async {
     if (!(isAuthorized?.call() ?? true)) return null;
-    if (block.type != BlockType.jsRunner) {
+    if (block.type != BlockType.script) {
       throw ArgumentError(
-        'runJsBlock only supports BlockType.jsRunner (got ${block.type.name})',
+        'runJsBlock only supports script blocks (got ${block.type.name})',
       );
     }
     final script = block.prompt.isNotEmpty ? block.prompt : block.script;

@@ -567,7 +567,7 @@ ExtensionPreset makeExtPresetWithBlock(String id) => ExtensionPreset(
     BlockConfig(
       id: 'block1',
       name: 'Infoblock',
-      type: BlockType.infoblock,
+      type: BlockType.generated,
       trigger: BlockTrigger.afterUser,
       prompt: 'Describe the scene',
       contextMessageCount: -1,

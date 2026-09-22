@@ -97,28 +97,28 @@ void main() {
           BlockConfig(
             id: 'a-user',
             name: 'A user',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterUser,
           ),
           BlockConfig(
             id: 'b-asst',
             name: 'B asst',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterAssistant,
           ),
           BlockConfig(
             id: 'c-per',
             name: 'C periodic',
-            type: BlockType.jsRunner,
+            type: BlockType.script,
             enabled: true,
             trigger: BlockTrigger.periodic,
           ),
           BlockConfig(
             id: 'd-user',
             name: 'D user',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterUser,
           ),
@@ -139,7 +139,7 @@ void main() {
           BlockConfig(
             id: 'disabled',
             name: 'Disabled',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: false,
             trigger: BlockTrigger.afterUser,
             order: 0,
@@ -147,7 +147,7 @@ void main() {
           BlockConfig(
             id: 'second',
             name: 'Second',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterUser,
             order: 5,
@@ -155,7 +155,7 @@ void main() {
           BlockConfig(
             id: 'first',
             name: 'First',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterUser,
             order: 2,
@@ -220,7 +220,7 @@ void main() {
           BlockConfig(
             id: 'a',
             name: 'A',
-            type: BlockType.infoblock,
+            type: BlockType.generated,
             enabled: true,
             trigger: BlockTrigger.afterUser,
           ),

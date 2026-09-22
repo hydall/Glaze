@@ -66,7 +66,7 @@ void main() {
       final block = const BlockConfig(
         id: 'b1',
         name: 'Test',
-        type: BlockType.infoblock,
+        type: BlockType.generated,
       );
       await tester.pumpWidget(
         UncontrolledProviderScope(

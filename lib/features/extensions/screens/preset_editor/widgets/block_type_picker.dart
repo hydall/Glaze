@@ -7,20 +7,26 @@ import '../sections/upstream_block_sections.dart';
 
 /// Human-readable name of a block type.
 String blockTypeLabel(BlockType type) => switch (type) {
-  BlockType.infoblock => 'block_type_infoblock'.tr(),
-  BlockType.imageGen => 'block_type_image'.tr(),
-  BlockType.jsRunner => 'block_type_js'.tr(),
-  BlockType.interactive => 'block_type_interactive'.tr(),
+  BlockType.generated => 'block_type_generated'.tr(),
+  BlockType.script => 'block_type_script'.tr(),
   BlockType.rewrite => 'block_type_rewrite'.tr(),
   BlockType.accumulation => 'block_type_accumulation'.tr(),
 };
 
+/// What a block type does, in one line, under its name in the picker.
+String blockTypeDescription(BlockType type) => switch (type) {
+  BlockType.generated => 'block_type_generated_desc'.tr(),
+  BlockType.script => 'block_type_script_desc'.tr(),
+  BlockType.rewrite => 'block_type_rewrite_desc'.tr(),
+  BlockType.accumulation => 'block_type_accumulation_desc'.tr(),
+};
+
 /// Type row for the block editor.
 ///
-/// This used to be a segmented control, which fitted four types across the
-/// width and no more. With the original extension's rewrite and accumulation
-/// types there are six, so the choice moved into a picker sheet, where each
-/// option also has room for a name rather than an icon.
+/// There are four types again, and they differ in what the block *does* rather
+/// than in what is done with its result: a generated block that draws a picture
+/// or opens a panel is the same type as one that writes a card, so those
+/// choices live further down the editor instead of here.
 class BlockTypePicker extends StatelessWidget {
   const BlockTypePicker({
     required this.selected,
@@ -36,7 +42,9 @@ class BlockTypePicker extends StatelessWidget {
     return MenuSelectorItem(
       label: 'block_type_label'.tr(),
       currentValue: blockTypeLabel(selected),
-      description: selected.isRunnable ? null : 'extblocks_not_executed'.tr(),
+      description: selected.isRunnable
+          ? blockTypeDescription(selected)
+          : 'extblocks_not_executed'.tr(),
       onTap: () => pickBlockOption<BlockType>(
         context: context,
         title: 'block_type_label'.tr(),

@@ -51,7 +51,7 @@ void main() {
       block: BlockConfig(
         id: 'periodic-1',
         name: 'Periodic',
-        type: BlockType.jsRunner,
+        type: BlockType.script,
         prompt: 'return "result";',
       ),
       contextMessages: const <ChatMessage>[],

@@ -9,11 +9,24 @@ import 'extension_context_policy.dart';
 part 'block_config.freezed.dart';
 part 'block_config.g.dart';
 
+/// What a block *is*, which after the type unification means only how its
+/// content is produced.
+///
+/// What used to be four separate kinds — infoblock, image, JS runner and
+/// interactive panel — differed in what happened to the result, not in how it
+/// was made: every one of them called the same generation and then handled the
+/// text differently. Those differences are fields now ([BlockConfig.render],
+/// the image tags in the content itself), so the enum matches the original
+/// extension's one-for-one and a preset survives a round trip through it.
 enum BlockType {
-  infoblock,
-  imageGen,
-  jsRunner,
-  interactive,
+  /// Content from the model, or [BlockConfig.staticContent] when the block
+  /// carries its own. Displayed as [BlockConfig.render] asks, and any image
+  /// tag in it is drawn by the same pipeline that draws a chat message's.
+  generated,
+
+  /// JavaScript, either written by the model from [BlockConfig.prompt] or
+  /// stored on the block in [BlockConfig.script], executed in the sandbox.
+  script,
 
   /// Rewrites the character's own reply instead of adding a panel.
   rewrite,
@@ -31,12 +44,79 @@ enum BlockType {
 /// stamping an error card onto every message.
 extension BlockTypeRunnable on BlockType {
   bool get isRunnable => switch (this) {
-    BlockType.infoblock ||
-    BlockType.imageGen ||
-    BlockType.jsRunner ||
-    BlockType.interactive => true,
+    BlockType.generated || BlockType.script => true,
     BlockType.rewrite || BlockType.accumulation => false,
   };
+}
+
+/// The block types this app used to have, and what each one is now.
+///
+/// `imageGen` and `interactive` were generated blocks that differed only in
+/// what was done with the reply, so both come back as [BlockType.generated];
+/// `interactive` also carries [BlockRender.panel], which is the part of it
+/// that was real.
+const Map<String, String> _legacyBlockTypes = {
+  'infoblock': 'generated',
+  'imageGen': 'generated',
+  'interactive': 'generated',
+  'jsRunner': 'script',
+};
+
+/// What an image block asked its agent for when it had no prompt of its own.
+///
+/// The old runtime hard-coded this for the image type. With that type gone the
+/// instruction has nowhere to live but the block's own prompt, so migration
+/// writes it there rather than letting those blocks come back empty.
+const String legacyImageAgentPrompt =
+    'Write the roleplay response, then append the visual HTML card with '
+    '[IMG:GEN] / data-iig-instruction as instructed.';
+
+/// Rewrites a block stored under the old six-type model onto the new four.
+///
+/// Applied inside [BlockConfig.fromJson], so every reader — the preset
+/// repository, cloud sync, and the import of a single block — gets the same
+/// result without having to know the old shape.
+Map<String, dynamic> migrateLegacyBlockJson(Map<String, dynamic> json) {
+  final rawType = json['type'];
+  if (rawType is! String) return json;
+  final unified = _legacyBlockTypes[rawType];
+  if (unified == null) return json;
+
+  final next = {...json, 'type': unified};
+
+  switch (rawType) {
+    case 'interactive':
+      // Its HTML shared the `script` field with the JS runner's code. Now that
+      // those are different types, the panel's markup gets a field of its own.
+      final markup = json['script'];
+      final existing = json['staticContent'];
+      if (markup is String &&
+          markup.trim().isNotEmpty &&
+          (existing is! String || existing.isEmpty)) {
+        next['staticContent'] = markup;
+        next['script'] = '';
+      }
+      next['render'] ??= 'panel';
+
+    case 'imageGen':
+      final prompt = json['prompt'];
+      if (prompt is! String || prompt.trim().isEmpty) {
+        final legacy = json['imagePromptInstruction'];
+        next['prompt'] = legacy is String && legacy.trim().isNotEmpty
+            ? legacy
+            : legacyImageAgentPrompt;
+      }
+  }
+
+  // An image or JS block never had its reply read out of a template — the
+  // editor wrote an empty one and the runtime skipped extraction outright.
+  // Any template left on such a block is a leftover from before that rule, and
+  // honouring it now would start parsing a reply that was never tagged.
+  if (rawType == 'imageGen' || rawType == 'jsRunner') {
+    next['template'] = '';
+  }
+
+  return next;
 }
 
 enum BlockTrigger { afterUser, afterAssistant, periodic }
@@ -46,7 +126,7 @@ abstract class BlockConfig with _$BlockConfig {
   const factory BlockConfig({
     required String id,
     required String name,
-    @Default(BlockType.infoblock) BlockType type,
+    @Default(BlockType.generated) BlockType type,
     @Default(true) bool enabled,
     @Default(BlockTrigger.afterAssistant) BlockTrigger trigger,
     @Default('') String prompt,
@@ -65,11 +145,21 @@ abstract class BlockConfig with _$BlockConfig {
     @Default('') String model,
 
     /// When true, LLM output is pushed to the ext-blocks panel incrementally
-    /// during generation (infoblock + image agent steps).
+    /// during generation.
     @Default(false) bool streamToPanel,
-    // Image-specific
-    @Default('') String imagePromptInstruction,
-    @Default(true) bool imageGenEnabled,
+
+    /// Where the finished content is shown. A card in the panel, or a
+    /// sandboxed iframe under the message.
+    @Default(BlockRender.card) BlockRender render,
+
+    /// Initial height, in pixels, of a [BlockRender.panel] iframe. It grows
+    /// past this as the panel resizes itself.
+    @Default(120) int panelMinHeight,
+
+    /// Content the block carries itself, used instead of a generation when
+    /// [prompt] is empty. For a [BlockType.generated] block this is its markup
+    /// or text; [script] is the equivalent for [BlockType.script].
+    @Default('') String staticContent,
     // Context control (Phase 9)
     /// Number of recent messages to include as context for this block,
     /// counted backward from the message the block is attached to (inclusive).
@@ -88,8 +178,8 @@ abstract class BlockConfig with _$BlockConfig {
     /// so a new run can continue/update the prior state instead of starting
     /// from scratch. 0 = disabled (default).
     @Default(0) int previousBlocksCount,
-    // JS Runner (Phase 10)
-    /// Legacy static script (used only when [prompt] is empty). Prefer LLM prompt.
+    /// Script blocks: the code the block carries itself, run when [prompt] is
+    /// empty instead of asking the model to write one.
     @Default('') String script,
     // Template (upstream parity)
     /// XML-like skeleton that defines the block's shape. Sent to the LLM as
@@ -184,5 +274,5 @@ abstract class BlockConfig with _$BlockConfig {
   }) = _BlockConfig;
 
   factory BlockConfig.fromJson(Map<String, dynamic> json) =>
-      _$BlockConfigFromJson(json);
+      _$BlockConfigFromJson(migrateLegacyBlockJson(json));
 }

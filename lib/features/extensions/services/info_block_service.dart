@@ -78,11 +78,11 @@ class InfoBlockService {
       blockConfig: blockConfig,
     );
 
-    // Image / JS blocks run an LLM agent first; no XML template extract.
-    final isRawAgent =
-        blockConfig.type == BlockType.imageGen ||
-        blockConfig.type == BlockType.jsRunner;
-    final resolvedTemplate = isRawAgent ? '' : _resolveTemplate(blockConfig);
+    // The template is the only thing that decides whether the reply is read
+    // out of tags. A block that carries none — an image agent, a JS agent, a
+    // block whose prompt already fixes the shape — has its whole reply stored,
+    // which is what the image and JS types used to get from a type check.
+    final resolvedTemplate = _resolveTemplate(blockConfig);
     final systemContent = _buildSystemMessage(
       blockConfig: blockConfig,
       template: resolvedTemplate,
@@ -209,21 +209,8 @@ class InfoBlockService {
       return (content: null, error: 'LLM returned empty response');
     }
 
-    if (isRawAgent) {
-      final raw = rawResponse.trim();
-      if (raw.isEmpty) {
-        return (
-          content: null,
-          error: blockConfig.type == BlockType.imageGen
-              ? 'Image agent returned empty response'
-              : 'JS agent returned empty response',
-        );
-      }
-      return (content: raw, error: null);
-    }
-
     final content = resolveBlockContent(
-      rawResponse: rawResponse,
+      rawResponse: _withoutCodeFence(rawResponse),
       blockConfig: blockConfig,
       resolvedTemplate: resolvedTemplate,
     );
@@ -342,42 +329,50 @@ class InfoBlockService {
     Character? character,
     String? persona,
   }) {
-    if (blockConfig.type == BlockType.imageGen) {
-      final prompt = blockConfig.prompt.trim();
-      if (prompt.isNotEmpty) {
-        return expand(
-          prompt,
-          _macroContext(character: character, persona: persona),
-        );
-      }
-      return 'Write the roleplay response, then append the visual HTML card with '
-          '[IMG:GEN] / data-iig-instruction as instructed.';
+    final instructions = expand(
+      blockConfig.prompt.trim(),
+      _macroContext(character: character, persona: persona),
+    );
+
+    // No template means the block's prompt is the whole instruction. An image
+    // agent's prompt is written that way — it fixes its own output shape — and
+    // prefixing it with a format rule it did not ask for is how a carefully
+    // built card prompt gets talked out of its own layout.
+    if (template.isEmpty) {
+      return instructions.isNotEmpty
+          ? instructions
+          : 'Write the block content directly. Do not wrap the answer in XML '
+                'tags unless asked.';
     }
 
-    final buffer = StringBuffer();
+    final buffer = StringBuffer()
+      ..writeln('Output format — fill in the content between these tags:')
+      ..writeln(template)
+      ..writeln();
 
-    if (template.isNotEmpty) {
-      buffer.writeln('Output format — fill in the content between these tags:');
-      buffer.writeln(template);
-      buffer.writeln();
-    } else {
-      buffer.writeln(
-        'Write the block content directly. Do not wrap the answer in XML tags unless asked.',
-      );
-      buffer.writeln();
-    }
-
-    if (blockConfig.prompt.isNotEmpty) {
-      buffer.writeln('Instructions:');
-      buffer.writeln(
-        expand(
-          blockConfig.prompt,
-          _macroContext(character: character, persona: persona),
-        ),
-      );
-      buffer.writeln();
+    if (instructions.isNotEmpty) {
+      buffer
+        ..writeln('Instructions:')
+        ..writeln(instructions)
+        ..writeln();
     }
     return buffer.toString().trimRight();
+  }
+
+  /// Unwraps a reply that is nothing but one fenced code block.
+  ///
+  /// Models fence HTML and JSON cards unprompted. The original extension
+  /// strips the fence from every generated block for the same reason, and the
+  /// interactive type did it here before the types merged; doing it once, for
+  /// all of them, is what makes that a property of the reply rather than of
+  /// the block's kind.
+  static String _withoutCodeFence(String raw) {
+    final trimmed = raw.trim();
+    if (!trimmed.startsWith('```') || !trimmed.endsWith('```')) return trimmed;
+    if (trimmed.length < 6) return trimmed;
+    final firstNewline = trimmed.indexOf('\n');
+    if (firstNewline < 0) return trimmed;
+    return trimmed.substring(firstNewline + 1, trimmed.length - 3).trim();
   }
 
   /// Builds the user message: the conversation context, character, persona,

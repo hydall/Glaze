@@ -128,7 +128,7 @@ void main() {
       BlockConfig(
         id: 'periodic',
         name: 'Periodic',
-        type: BlockType.jsRunner,
+        type: BlockType.script,
         trigger: BlockTrigger.periodic,
         order: 2,
       ),

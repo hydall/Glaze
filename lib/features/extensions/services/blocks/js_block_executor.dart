@@ -13,7 +13,7 @@ import '../../models/info_block.dart';
 import '../../providers/info_blocks_provider.dart';
 import '../block_context_builder.dart';
 import 'block_context.dart';
-import 'infoblock_handler.dart';
+import 'block_handler.dart';
 
 class JsBlockExecutor {
   const JsBlockExecutor({
@@ -37,7 +37,7 @@ class JsBlockExecutor {
     final bridge = ref.read(chatBridgeRegistryProvider(context.charId));
     if (bridge == null) {
       debugPrint(
-        '[ExtPostGen] jsRunner "${blockConfig.name}" - Chat WebView bridge unavailable',
+        '[ExtPostGen] script block "${blockConfig.name}" - Chat WebView bridge unavailable',
       );
       return markBlockError(
         context: context,
@@ -127,7 +127,7 @@ class JsBlockExecutor {
         );
         return stopped;
       }
-      debugPrint('[ExtPostGen] jsRunner "${blockConfig.name}" failed: $e');
+      debugPrint('[ExtPostGen] script block "${blockConfig.name}" failed: $e');
       return markBlockError(context: context, errorMessage: formatError(e));
     }
   }
