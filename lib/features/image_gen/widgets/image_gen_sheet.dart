@@ -416,19 +416,16 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     );
   }
 
-  void _openComfyUiWorkflow() {
+  void _openComfyUiWorkflows() {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useRootNavigator: true,
       backgroundColor: Colors.transparent,
       builder: (_) => ComfyUiWorkflowSheet(
-        workflow: _settings.comfyui.workflow,
-        onSave: (workflow) => _update(
-          _settings.copyWith(
-            comfyui: _settings.comfyui.copyWith(workflow: workflow),
-          ),
-        ),
+        settings: _settings.comfyui,
+        onUpdate: (comfyui) =>
+            _update(_settings.copyWith(comfyui: comfyui)),
       ),
     );
   }
@@ -507,7 +504,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
           s,
           isFetching: _isFetchingModels,
           onFetchModels: _onFetchModels,
-          onEditWorkflow: _openComfyUiWorkflow,
+          onManageWorkflows: _openComfyUiWorkflows,
           onUpdate: _update,
           showOptions: showOptions,
         );
