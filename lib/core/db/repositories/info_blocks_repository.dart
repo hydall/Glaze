@@ -92,7 +92,7 @@ class InfoBlocksRepository extends DatabaseAccessor<AppDatabase>
 
   Future<List<InfoBlock>> getRecentBlocks(
     String sessionId,
-    String blockName,
+    String blockId,
     int count,
   ) async {
     final rows =
@@ -100,7 +100,7 @@ class InfoBlocksRepository extends DatabaseAccessor<AppDatabase>
               ..where(
                 (tbl) =>
                     tbl.sessionId.equals(sessionId) &
-                    tbl.blockName.equals(blockName),
+                    tbl.blockId.equals(blockId),
               )
               ..orderBy([
                 (t) => OrderingTerm.desc(t.createdAt),

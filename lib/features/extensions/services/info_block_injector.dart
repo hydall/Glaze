@@ -71,7 +71,7 @@ class InfoBlockInjector {
           swipeId: msg.swipeId,
         );
         final blockResults =
-            blocks.where((b) => b.blockName == blockConfig.name).toList();
+            blocks.where((b) => b.blockId == blockConfig.id).toList();
         if (blockResults.isEmpty) continue;
 
         final injected = blockResults

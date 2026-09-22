@@ -95,6 +95,64 @@ void main() {
       expect(result[5].content, isNot(contains('ledger-2')));
     });
 
+    test('matches a block by id, not by its name', () async {
+      const sessionId = 'sess1';
+      final messages = [
+        ChatMessage(id: 'a1', role: 'assistant', content: 'reply'),
+      ];
+
+      // Two stored rows share the block name but belong to different blocks.
+      final repo = _FakeInfoBlockReader({
+        'a1': [
+          InfoBlock(
+            id: 'mine',
+            sessionId: sessionId,
+            messageId: 'a1',
+            blockId: 'cfg1',
+            blockType: 'llm',
+            blockName: 'loomledger',
+            content: 'my-content',
+            createdAt: 1,
+          ),
+          InfoBlock(
+            id: 'other',
+            sessionId: sessionId,
+            messageId: 'a1',
+            blockId: 'cfg2',
+            blockType: 'llm',
+            blockName: 'loomledger',
+            content: 'other-content',
+            createdAt: 2,
+          ),
+        ],
+      });
+
+      const preset = ExtensionPreset(
+        id: 'p1',
+        name: 'test',
+        createdAt: 0,
+        blocks: [
+          BlockConfig(
+            id: 'cfg1',
+            name: 'loomledger',
+            enabled: true,
+            inject: true,
+            injectLastN: 1,
+            template: '<loomledger>{{content}}</loomledger>',
+          ),
+        ],
+      );
+
+      final result = await InfoBlockInjector(repo).injectBlocks(
+        messages: messages,
+        sessionId: sessionId,
+        preset: preset,
+      );
+
+      expect(result[0].content, contains('my-content'));
+      expect(result[0].content, isNot(contains('other-content')));
+    });
+
     test(
       'injectLastN limits how many assistant messages receive blocks',
       () async {

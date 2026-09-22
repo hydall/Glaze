@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../../core/utils/id_generator.dart';
 import '../../../../../shared/theme/app_colors.dart';
 import '../../../../../shared/widgets/menu_group.dart';
 import '../../../models/block_config.dart';
@@ -88,9 +89,8 @@ class BlocksSection extends ConsumerWidget {
     WidgetRef ref,
     ExtensionPreset preset,
   ) async {
-    final id = 'block_${DateTime.now().millisecondsSinceEpoch}';
     final block = BlockConfig(
-      id: id,
+      id: generateId(),
       name: 'new_block'.tr(),
       type: BlockType.generated,
       enabled: true,
