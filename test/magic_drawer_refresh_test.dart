@@ -49,38 +49,27 @@ void main() {
       expect(launcher, isNot(contains('_refreshStats')));
     });
 
-    test('rejects token results calculated from an older stats snapshot', () {
+    test('does not compile prompts while refreshing sidebar metadata', () {
       final source = File(
         'lib/features/chat/widgets/magic_drawer.dart',
       ).readAsStringSync();
 
-      expect(source, contains('final request = _statsRequest;'));
-      expect(
-        source,
-        contains('if (!mounted || request != _statsRequest) return;'),
-      );
+      expect(source, isNot(contains('computeTokenStats(')));
+      expect(source, isNot(contains('TokenBreakdownCache.invalidate()')));
+      expect(source, isNot(contains('_scheduleTokenStats')));
     });
 
-    test('does not schedule token work after the drawer unmounts', () {
+    test('does not refresh metadata after the drawer unmounts', () {
       final source = File(
         'lib/features/chat/widgets/magic_drawer.dart',
       ).readAsStringSync();
 
-      final schedulerStart = source.indexOf('void _scheduleTokenStats()');
-      final schedulerEnd = source.indexOf(
-        'Future<void> _loadTokenStats()',
-        schedulerStart,
-      );
       final refreshStart = source.indexOf('Future<void> _refreshStats()');
       final refreshEnd = source.indexOf(
         'void _scheduleRefresh()',
         refreshStart,
       );
 
-      expect(
-        source.substring(schedulerStart, schedulerEnd),
-        contains('if (!mounted) return;'),
-      );
       expect(
         source.substring(refreshStart, refreshEnd),
         contains('if (!mounted) return;'),

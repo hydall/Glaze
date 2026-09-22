@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/haptics.dart';
 import '../../../core/state/lorebook_provider.dart';
-import '../../../features/settings/app_settings_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/studio_feature_provider.dart';
@@ -23,7 +22,6 @@ import '../services/magic_drawer_layout_service.dart';
 import '../services/magic_drawer_stats_service.dart';
 import 'magic_drawer_widgets.dart';
 import '../state/magic_drawer_stats_cache.dart';
-import '../state/token_breakdown_cache.dart';
 import '../../extensions/models/extension_preset.dart';
 import '../../extensions/models/extensions_settings.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
@@ -80,7 +78,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   final List<String> _itemIds = [];
   final Set<String> _deletedIds = {};
   bool _loading = true;
-  bool _loadingTokens = false;
   int? _draggingIndex;
   int? _hoverIndex;
   MagicDrawerStats _stats = const MagicDrawerStats();
@@ -137,10 +134,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     if (mounted) {
       setState(() => _loading = false);
     }
-    // Defer token stats calculation until after UI render completes
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _scheduleTokenStats();
-    });
   }
 
   Future<void> _loadLayout() async {
@@ -199,40 +192,10 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     }
   }
 
-  void _scheduleTokenStats() {
-    if (!mounted) return;
-    _debounceTimer?.cancel();
-    final delay = ref.read(appSettingsProvider).value?.batterySaver == true
-        ? const Duration(milliseconds: 700)
-        : const Duration(milliseconds: 300);
-    _debounceTimer = Timer(delay, _loadTokenStats);
-  }
-
-  Future<void> _loadTokenStats() async {
-    if (!mounted) return;
-    setState(() => _loadingTokens = true);
-    final request = _statsRequest;
-    MagicDrawerStats updated;
-    try {
-      updated = await _statsService.computeTokenStats(widget.charId, _stats);
-    } catch (e) {
-      debugPrint('[MagicDrawer] _loadTokenStats error: $e');
-      return;
-    }
-    if (!mounted || request != _statsRequest) return;
-    ref.read(magicDrawerStatsCacheProvider(_statsCacheKey()).notifier).state =
-        updated;
-    setState(() {
-      _stats = updated;
-      _loadingTokens = false;
-    });
-  }
-
   /// Lightweight refresh: only stats, no layout re-read from disk.
   /// Called by the debounce timer when messages change.
   Future<void> _refreshStats() async {
     if (!mounted) return;
-    TokenBreakdownCache.invalidate();
     try {
       await _loadStats();
     } catch (e) {
@@ -240,7 +203,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     }
     if (!mounted) return;
     setState(() {});
-    _scheduleTokenStats();
   }
 
   void _scheduleRefresh() {
@@ -308,10 +270,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       'inspector' =>
         _stats.promptTokens > 0 && _stats.contextSize > 0
             ? '${_stats.promptTokens}/${_stats.contextSize} tokens'
-            : _loadingTokens && _stats.approximateHistoryTokens > 0
+            : _stats.approximateHistoryTokens > 0 && _stats.contextSize > 0
             ? '~${_stats.approximateHistoryTokens}/${_stats.contextSize} tokens'
-            : _loadingTokens
-            ? 'Calculating...'
             : null,
       'memory' =>
         _stats.summaryChars > 0
@@ -435,7 +395,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
         );
         setState(() {
           _stats = cached ?? const MagicDrawerStats();
-          _loadingTokens = false;
         });
         unawaited(_refreshStats());
       } else if (prevSession?.messages.length != nextSession?.messages.length ||
@@ -496,7 +455,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     final extPresets = ref.watch(extensionPresetsProvider);
     final studioFeatureEnabled = ref.watch(studioFeatureEnabledProvider);
     final pinnedIds = {
-      for (final pin in ref.watch(composerPinsProvider).value ?? const <ComposerPin>[])
+      for (final pin
+          in ref.watch(composerPinsProvider).value ?? const <ComposerPin>[])
         if (pin.kind == ComposerPinKind.tool) pin.refId,
     };
     final items = _displayItems(

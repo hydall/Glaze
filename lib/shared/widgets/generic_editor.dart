@@ -584,7 +584,7 @@ class _GenericEditorState extends State<GenericEditor> {
                 color: context.cs.surfaceContainerHighest,
                 child: avatarPath != null && avatarPath.isNotEmpty
                     ? Image.file(
-                        File(resolveGlazeFilePath(avatarPath)!),
+                        File(resolveGlazeThumbnailPath(avatarPath)!),
                         fit: BoxFit.cover,
                       )
                     : Container(

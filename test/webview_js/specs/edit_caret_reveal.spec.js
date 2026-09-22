@@ -151,3 +151,37 @@ test('entering edit mode leaves the chat where it was', async ({ page }) => {
   // carried the chat hundreds of pixels.
   expect(moved).toBeLessThan(60);
 });
+
+test('growing a bottom-pinned editor does not re-pin the chat', async ({ page }) => {
+  await page.goto('/assets/chat_webview/index.html');
+  await page.waitForFunction(() => !!window.bridge);
+  await page.evaluate(() => {
+    const msgs = Array.from({ length: 16 }, (_, i) => ({
+      id: `m${i}`, role: 'assistant', text: `message ${i}\n`.repeat(6),
+      timestamp: 1767225600000, isUser: false, isAssistant: true,
+      isSystem: false, isError: false, isHidden: false, isTyping: false,
+      isGenerating: false, isPostGenRunning: false,
+    }));
+    window.bridge.setMessages(JSON.stringify(msgs));
+  });
+  await page.waitForTimeout(400);
+  await page.evaluate(() => window.bridge.startEdit('m15'));
+  await page.waitForTimeout(300);
+
+  const before = await page.evaluate(() => {
+    const c = document.getElementById('chat-container');
+    c.scrollTop = c.scrollHeight;
+    return c.scrollTop;
+  });
+  await page.waitForTimeout(100);
+  await page.evaluate(() => {
+    const ta = document.querySelector('[data-message-id="m15"] .edit-textarea');
+    ta.style.height = `${ta.getBoundingClientRect().height + 300}px`;
+  });
+  await page.waitForTimeout(250);
+
+  const after = await page.evaluate(() =>
+    document.getElementById('chat-container').scrollTop,
+  );
+  expect(Math.abs(after - before)).toBeLessThan(3);
+});

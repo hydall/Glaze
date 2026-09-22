@@ -1,3 +1,5 @@
+import 'dart:isolate';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -106,9 +108,9 @@ final lorebookCoverageProvider = FutureProvider.autoDispose
         }
       }
 
-      // Off the current frame: the keyword scan is synchronous and can walk a
-      // few thousand entries.
-      return Future(
+      // The keyword scan can walk thousands of entries. A Future callback still
+      // runs on the UI isolate, so use a worker isolate to keep input responsive.
+      return Isolate.run(
         () => computeLorebookCoverage(
           history: session.messages,
           char: character,
