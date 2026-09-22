@@ -119,7 +119,7 @@ void main() {
 
     expect(find.text('block_edit_title'), findsOneWidget);
     expect(find.text('block_edit_name_label'), findsOneWidget);
-    expect(find.text('block_type_infoblock'), findsOneWidget);
+    expect(find.text('block_type_generated'), findsOneWidget);
     expect(find.text('block_sec_context'), findsOneWidget);
     expect(find.text('block_ctx_use_main'), findsOneWidget);
     // Off by default, so the per-source toggles have a card of their own.

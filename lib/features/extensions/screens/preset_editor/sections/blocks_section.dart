@@ -92,7 +92,7 @@ class BlocksSection extends ConsumerWidget {
     final block = BlockConfig(
       id: id,
       name: 'new_block'.tr(),
-      type: BlockType.infoblock,
+      type: BlockType.generated,
       enabled: true,
     );
     final updated = preset.copyWith(blocks: [...preset.blocks, block]);
@@ -196,10 +196,8 @@ class _BlockTile extends ConsumerWidget {
 
 String blockSubtitle(BlockConfig block) {
   final type = switch (block.type) {
-    BlockType.infoblock => 'block_type_infoblock'.tr(),
-    BlockType.imageGen => 'block_type_image'.tr(),
-    BlockType.jsRunner => 'block_type_js'.tr(),
-    BlockType.interactive => 'block_type_interactive'.tr(),
+    BlockType.generated => 'block_type_generated'.tr(),
+    BlockType.script => 'block_type_script'.tr(),
     BlockType.rewrite => 'block_type_rewrite'.tr(),
     BlockType.accumulation => 'block_type_accumulation'.tr(),
   };

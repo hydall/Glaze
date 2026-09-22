@@ -1,14 +1,14 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../../core/db/repositories/info_blocks_repository.dart';
+import '../../models/block_config.dart';
+import '../../models/block_modes.dart';
 import '../../models/block_run_status.dart';
 import '../../models/info_block.dart';
 import '../info_block_service.dart';
 import '../js_script_extractor.dart';
 import 'block_context.dart';
 import 'block_handler.dart';
-import 'image_gen_block_handler.dart';
-import 'infoblock_handler.dart';
 
 typedef JsScriptExecutor =
     Future<InfoBlock?> Function({
@@ -17,8 +17,10 @@ typedef JsScriptExecutor =
       String Function(String result)? panelContentBuilder,
     });
 
-class JsRunnerBlockHandler implements BlockHandler {
-  const JsRunnerBlockHandler({
+/// Runs a [BlockType.script] block: JavaScript, written by the model from the
+/// block's prompt or carried on the block itself, executed in the sandbox.
+class ScriptBlockHandler implements BlockHandler {
+  const ScriptBlockHandler({
     required this.repo,
     required this.infoBlockService,
     required this.markBlockError,
@@ -45,18 +47,8 @@ class JsRunnerBlockHandler implements BlockHandler {
       return placeholder.copyWith(status: BlockRunStatus.stopped);
     }
 
-    final prompt = blockConfig.prompt.trim();
-    final staticScript = blockConfig.script.trim();
-
-    // Legacy: hand-written script without LLM prompt.
-    if (prompt.isEmpty && staticScript.isNotEmpty) {
-      return executeJsScript(context: context, script: staticScript);
-    }
-
-    if (prompt.isEmpty) {
-      debugPrint(
-        '[ExtPostGen] jsRunner "${blockConfig.name}" - prompt is empty',
-      );
+    Future<InfoBlock> finishEmpty(String why) async {
+      debugPrint('[ExtPostGen] script "${blockConfig.name}" - $why');
       await repo.updateStatus(context.placeholderId, BlockRunStatus.done);
       refreshPanelForMessage(
         context.charId,
@@ -68,7 +60,17 @@ class JsRunnerBlockHandler implements BlockHandler {
       return placeholder.copyWith(status: BlockRunStatus.done);
     }
 
-    debugPrint('[ExtPostGen] _runJsRunner START: name="${blockConfig.name}"');
+    // Code written on the block runs as it is; the model is never asked.
+    if (blockConfig.source == BlockSource.carried) {
+      final carried = blockConfig.script.trim();
+      if (carried.isEmpty) return finishEmpty('no script');
+      return executeJsScript(context: context, script: carried);
+    }
+
+    final prompt = blockConfig.prompt.trim();
+    if (prompt.isEmpty) return finishEmpty('prompt is empty');
+
+    debugPrint('[ExtPostGen] script block START: name="${blockConfig.name}"');
 
     final generated = await infoBlockService.generateSingleBlockContent(
       sessionId: context.sessionId,

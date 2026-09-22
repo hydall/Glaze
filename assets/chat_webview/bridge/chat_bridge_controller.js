@@ -1941,7 +1941,9 @@ export class Bridge {
       } else if (block.status === 'pending') {
         btnGroup.appendChild(makeButton('ext-block-regen', ICON.play, 'Запустить'));
       } else {
-        const canRegenImage = block.type === 'imageGen' && block.content && (
+        // Type-agnostic on purpose: a block can be redrawn because its
+        // content holds an image, not because it was made by an image block.
+        const canRegenImage = block.content && (
           /\[IMG:RESULT:/.test(block.content) ||
           /\[IMG:GEN:/.test(block.content) ||
           /data-iig-instruction/i.test(block.content)
@@ -2110,6 +2112,23 @@ export class Bridge {
     return raw;
   }
 
+  /* The card a failed `[IMG:ERROR:…]` renders as.
+   *
+   * These only reach a block now that its content goes through the same image
+   * pipeline a message does: a picture that fails leaves a retryable card in
+   * place of its tag instead of taking the whole block down with it. The
+   * block's own "regenerate image" control redraws every failed picture at
+   * once, so the card states what went wrong rather than carrying a button of
+   * its own. */
+  _extBlockImageErrorMarkup(payload) {
+    let message = 'Unknown error';
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed && parsed.error) message = parsed.error;
+    } catch (_) { /* keep the default */ }
+    return `<div class="ext-block-image-error"><span class="ext-block-image-error-icon">⚠</span><span class="ext-block-image-error-msg">${this._escapeHtml(message)}</span></div>`;
+  }
+
   _fillExtBlockBody(body, block) {
     if (block.status === 'error') {
       this._renderExtBlockError(body, block);
@@ -2128,41 +2147,38 @@ export class Bridge {
     const content = this._extBlockLegacyImageTokens(block.content);
     const imgResultRegex = /\[IMG:RESULT:([^\]]+)\]/;
     const imgGenRegex = /\[IMG:GEN(?::([\s\S]*?))?\]/;
+    const imgErrorRegex = /\[IMG:ERROR:([\s\S]*?)\]/;
     const hasImgResult = imgResultRegex.test(content);
     const hasImgGen = imgGenRegex.test(content);
+    const hasImgError = imgErrorRegex.test(content);
     const hasHtmlMarkup = /<[a-z][\s\S]*>/i.test(content);
 
-    if (hasImgGen) {
-      // A pending image block renders the same shimmer placeholder the inline
-      // message image uses; the block header already carries the clock + stop.
-      const html = content
-        .replace(/<p class="ext-block-image-pending">[\s\S]*?<\/p>/g, '')
-        .replace(imgGenRegex, (match, instruction) =>
-          this._extBlockImageGenMarkup(instruction || ''));
-      const htmlEl = document.createElement('div');
-      htmlEl.className = 'ext-block-content';
-      htmlEl.innerHTML = sanitizeExtBlockHtml(html);
-      body.appendChild(htmlEl);
-    } else if (hasImgResult && hasHtmlMarkup) {
-      let html = content.replace(
-        /\[IMG:RESULT:([^\]]+)\]/g,
-        (match, payload) => this._renderExtBlockImageHtml(payload),
-      );
-      const htmlEl = document.createElement('div');
-      htmlEl.className = 'ext-block-content';
-      htmlEl.innerHTML = sanitizeExtBlockHtml(html);
-      body.appendChild(htmlEl);
-    } else if (hasImgResult) {
+    // One bare picture and nothing else keeps its unwrapped form.
+    if (hasImgResult && !hasImgGen && !hasImgError && !hasHtmlMarkup) {
       const imgMatch = content.match(imgResultRegex);
       const wrapper = document.createElement('span');
       wrapper.innerHTML = sanitizeExtBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
       body.appendChild(wrapper.firstElementChild);
-    } else {
-      const html = document.createElement('div');
-      html.className = 'ext-block-content';
-      html.innerHTML = sanitizeExtBlockHtml(content);
-      body.appendChild(html);
+      return;
     }
+
+    // Every image token is rewritten in one pass rather than one kind per
+    // branch: a block's content goes through the same pipeline a message's
+    // does, so it can hold a finished picture, one still generating and one
+    // that failed, all at the same time.
+    const html = content
+      .replace(/<p class="ext-block-image-pending">[\s\S]*?<\/p>/g, '')
+      .replace(/\[IMG:ERROR:([\s\S]*?)\]/g, (match, payload) =>
+        this._extBlockImageErrorMarkup(payload))
+      .replace(/\[IMG:GEN(?::([\s\S]*?))?\]/g, (match, instruction) =>
+        this._extBlockImageGenMarkup(instruction || ''))
+      .replace(/\[IMG:RESULT:([^\]]+)\]/g, (match, payload) =>
+        this._renderExtBlockImageHtml(payload));
+
+    const htmlEl = document.createElement('div');
+    htmlEl.className = 'ext-block-content';
+    htmlEl.innerHTML = sanitizeExtBlockHtml(html);
+    body.appendChild(htmlEl);
   }
 
   /**

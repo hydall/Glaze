@@ -17,14 +17,11 @@ import 'info_block_service.dart';
 import 'blocks/block_processor.dart';
 import 'blocks/block_context.dart';
 import 'blocks/block_handler.dart';
+import 'blocks/block_image_renderer.dart';
 import 'blocks/block_panel_updater.dart';
-import 'blocks/image_gen_block_handler.dart';
-import 'blocks/image_only_rerunner.dart';
-import 'blocks/image_pixel_renderer.dart';
-import 'blocks/interactive_block_handler.dart';
+import 'blocks/generated_block_handler.dart';
 import 'blocks/js_block_executor.dart';
-import 'blocks/js_runner_block_handler.dart';
-import 'blocks/infoblock_handler.dart';
+import 'blocks/script_block_handler.dart';
 import 'blocks/block_status_tracker.dart';
 import 'blocks/periodic_js_block_runner.dart';
 import 'blocks/single_block_runner.dart';
@@ -392,7 +389,12 @@ class ExtensionPostGenService {
     );
   }
 
-  /// Re-runs only the Image Gen step for an existing image ext block (keeps agent HTML).
+  /// Redraws the pictures of a block that already has content, without asking
+  /// the model for a new description.
+  ///
+  /// The block's type has nothing to do with it: what makes this possible is
+  /// image tags in the stored content, so any generated block that produced a
+  /// picture can be redrawn the same way.
   Future<void> rerunImageOnly({
     required String blockId,
     required String messageId,
@@ -406,28 +408,51 @@ class ExtensionPostGenService {
     final preset = _resolveActivePreset();
     if (preset == null) return;
 
-    final cancelToken = _startBlockRun();
+    final blockConfig = preset.blocks.where((b) => b.id == blockId).firstOrNull;
+    if (blockConfig == null) return;
 
+    final rows = await _repo.getByMessageId(
+      sessionId,
+      messageId,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+    );
+    final existing = rows.where((b) => b.blockId == blockId).firstOrNull;
+    if (existing == null || existing.content.isEmpty) return;
+
+    final cancelToken = _startBlockRun();
     try {
-      await ImageOnlyRerunner(
+      await BlockImageRenderer(
         ref: _ref,
         repo: _repo,
-        refreshPanelForMessage: _refreshPanelForMessage,
-        renderImagePixels: _renderImagePixels,
+        publishStreamingBlockContent: _publishStreamingBlockContent,
       ).rerun(
-        blockId: blockId,
-        messageId: messageId,
-        swipeId: swipeId,
-        agentSwipeId: agentSwipeId,
-        sessionId: sessionId,
-        charId: charId,
-        character: character,
-        persona: persona,
-        blocks: preset.blocks,
-        cancelToken: cancelToken,
+        context: BlockContext(
+          charId: charId,
+          sessionId: sessionId,
+          messageId: messageId,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+          messages: const [],
+          blockConfig: blockConfig,
+          preset: preset,
+          character: character,
+          persona: persona,
+          previousOutput: null,
+          cancelToken: cancelToken,
+          placeholderId: existing.id,
+          placeholder: existing,
+        ),
       );
     } finally {
       _finishBlockRun(cancelToken);
+      _refreshPanelForMessage(
+        charId,
+        sessionId,
+        messageId,
+        swipeId,
+        agentSwipeId,
+      );
     }
   }
 
@@ -519,25 +544,17 @@ class ExtensionPostGenService {
 
   BlockHandler _handlerFor(BlockType type) {
     switch (type) {
-      case BlockType.infoblock:
-        return InfoblockHandler(
+      case BlockType.generated:
+        return GeneratedBlockHandler(
           ref: _ref,
           repo: _repo,
           markBlockError: _markContextBlockError,
           refreshPanelForMessage: _refreshPanelForMessage,
           makeStreamHandler: _makeStreamHandler,
-        );
-      case BlockType.imageGen:
-        return ImageGenBlockHandler(
-          ref: _ref,
-          repo: _repo,
-          markBlockError: _markContextBlockError,
-          makeStreamHandler: _makeStreamHandler,
           publishStreamingBlockContent: _publishStreamingBlockContent,
-          renderImagePixels: _renderContextImagePixels,
         );
-      case BlockType.jsRunner:
-        return JsRunnerBlockHandler(
+      case BlockType.script:
+        return ScriptBlockHandler(
           repo: _repo,
           infoBlockService: _ref.read(infoBlockServiceProvider),
           markBlockError: _markContextBlockError,
@@ -560,75 +577,7 @@ class ExtensionPostGenService {
               'Accumulation blocks can be edited and exported, but are not '
               'executed yet.',
         );
-      case BlockType.interactive:
-        return InteractiveBlockHandler(
-          ref: _ref,
-          repo: _repo,
-          markBlockError: _markContextBlockError,
-          refreshPanelForMessage: _refreshPanelForMessage,
-          publishStreamingBlockContent: _publishStreamingBlockContent,
-        );
     }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Image gen
-  // ─────────────────────────────────────────────────────────────────────────
-
-  Future<InfoBlock?> _renderContextImagePixels({
-    required BlockContext context,
-    required String sourceContent,
-  }) {
-    return _renderImagePixels(
-      charId: context.charId,
-      sessionId: context.sessionId,
-      messageId: context.messageId,
-      swipeId: context.swipeId,
-      agentSwipeId: context.agentSwipeId,
-      blockConfig: context.blockConfig,
-      character: context.character,
-      persona: context.persona,
-      sourceContent: sourceContent,
-      placeholderId: context.placeholderId,
-      placeholder: context.placeholder,
-      cancelToken: context.cancelToken,
-    );
-  }
-
-  Future<InfoBlock?> _renderImagePixels({
-    required String charId,
-    required String sessionId,
-    required String messageId,
-    required int swipeId,
-    required int agentSwipeId,
-    required BlockConfig blockConfig,
-    required Character character,
-    required Persona? persona,
-    required String sourceContent,
-    required String placeholderId,
-    required InfoBlock placeholder,
-    required CancelToken cancelToken,
-  }) {
-    return ImagePixelRenderer(
-      ref: _ref,
-      repo: _repo,
-      markBlockError: _markContextBlockError,
-      refreshPanelForMessage: _refreshPanelForMessage,
-      publishStreamingBlockContent: _publishStreamingBlockContent,
-    ).render(
-      charId: charId,
-      sessionId: sessionId,
-      messageId: messageId,
-      swipeId: swipeId,
-      agentSwipeId: agentSwipeId,
-      blockConfig: blockConfig,
-      character: character,
-      persona: persona,
-      sourceContent: sourceContent,
-      placeholderId: placeholderId,
-      placeholder: placeholder,
-      cancelToken: cancelToken,
-    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────

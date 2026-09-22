@@ -645,6 +645,29 @@
   100% { background-position: -100% 0; }
 }
 
+/* A picture that failed inside a block. The shared image pipeline leaves a
+ * card in place of the tag instead of failing the whole block, so this sits
+ * alongside the block's other content; the header's "regenerate image" control
+ * is what redraws it. */
+.ext-block-image-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 123, 123, 0.10);
+  color: rgba(255, 123, 123, 0.95);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ext-block-image-error-icon {
+  flex: none;
+}
+.ext-block-image-error-msg {
+  word-break: break-word;
+}
+
 .ext-block-image {
   display: block;
   max-width: 100%;

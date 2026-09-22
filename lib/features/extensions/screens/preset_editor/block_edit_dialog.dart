@@ -16,6 +16,13 @@ import '../../widgets/extension_context_policy_editor.dart';
 import 'widgets/block_type_picker.dart';
 import 'sections/upstream_block_sections.dart';
 
+/// Editor for one block.
+///
+/// The editor used to branch six ways on the block's type, because the type
+/// decided everything: whether there was a prompt, whether the result could be
+/// injected, what the labels said. It branches on two questions now — where
+/// the content comes from, and where it goes — and both are settings the
+/// reader can change without turning the block into a different kind of thing.
 class BlockEditDialog extends ConsumerStatefulWidget {
   const BlockEditDialog({required this.block, required this.onSave, super.key});
 
@@ -32,19 +39,23 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late TextEditingController _promptController;
   late TextEditingController _contextSystemPromptController;
   late TextEditingController _injectPrefixController;
-  late TextEditingController _staticHtmlController;
-  late TextEditingController _minHeightController;
+  late TextEditingController _staticContentController;
+  late TextEditingController _scriptController;
+  late TextEditingController _panelMinHeightController;
   late TextEditingController _injectLastNController;
   late TextEditingController _contextMessageCountController;
   late TextEditingController _previousBlocksCountController;
   late BlockType _type;
+  late BlockRender _render;
   late bool _inject;
   late int _injectLastN;
   late bool _dependsOnPrevious;
   late int _contextMessageCount;
   late int _previousBlocksCount;
   late bool _streamToPanel;
-  late bool _useStaticHtml;
+
+  /// Content written on the block instead of asked of the model.
+  late bool _useStaticSource;
   late bool _manualOnly;
   late ExtensionContextPolicy _contextPolicy;
 
@@ -62,6 +73,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late bool _triggerOnChar;
   late bool _triggerOnSwipe;
   late bool _generationPause;
+  late bool _generationAfterCommands;
   late bool _keywordIsRegex;
   late bool _hideDisplay;
   late bool _background;
@@ -85,21 +97,18 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     final b = widget.block;
     _nameController = TextEditingController(text: b.name);
     _templateController = TextEditingController(text: b.template);
-    final promptText =
-        b.type == BlockType.imageGen &&
-            b.prompt.isEmpty &&
-            b.imagePromptInstruction.isNotEmpty
-        ? b.imagePromptInstruction
-        : b.prompt;
-    _promptController = TextEditingController(text: promptText);
+    _promptController = TextEditingController(text: b.prompt);
     _apiConfigId = b.apiConfigId;
     _model = b.model;
     _contextSystemPromptController = TextEditingController(
       text: b.contextSystemPrompt,
     );
     _injectPrefixController = TextEditingController(text: b.injectPrefix);
-    _staticHtmlController = TextEditingController(text: b.script);
-    _minHeightController = TextEditingController(text: '120');
+    _staticContentController = TextEditingController(text: b.staticContent);
+    _scriptController = TextEditingController(text: b.script);
+    _panelMinHeightController = TextEditingController(
+      text: b.panelMinHeight.toString(),
+    );
     _injectLastNController = TextEditingController(
       text: b.injectLastN.toString(),
     );
@@ -110,6 +119,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       text: b.previousBlocksCount.toString(),
     );
     _type = b.type;
+    _render = b.render;
     _inject = b.inject;
     _injectLastN = b.injectLastN;
     _dependsOnPrevious = b.dependsOnPrevious;
@@ -118,8 +128,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _streamToPanel = b.streamToPanel;
     _manualOnly = b.manualOnly;
     _contextPolicy = b.contextPolicy;
-    _useStaticHtml =
-        b.type == BlockType.interactive && b.script.trim().isNotEmpty;
+    _useStaticSource = b.source == BlockSource.carried;
 
     _periodController = TextEditingController(text: b.period.toString());
     _keywordController = TextEditingController(text: b.keyword);
@@ -131,6 +140,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _triggerOnChar = b.triggerOnChar;
     _triggerOnSwipe = b.triggerOnSwipe;
     _generationPause = b.generationPause;
+    _generationAfterCommands = b.generationAfterCommands;
     _keywordIsRegex = b.keywordIsRegex;
     _hideDisplay = b.hideDisplay;
     _background = b.background;
@@ -157,40 +167,47 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     Navigator.pop(context);
   }
 
+  /// Writes back what the editor showed, and nothing else.
+  ///
+  /// Every field stays on the block whatever the type is. It used to blank the
+  /// ones the current type had no use for, which meant switching a block to
+  /// another type — or even flipping its content source — destroyed the prompt,
+  /// the template, the markup, the connection and the context settings, with no
+  /// way back. Upstream keeps them too and drops what does not apply only when
+  /// it writes the block out, which [encodeUpstreamBlock] already does.
   BlockConfig _buildSavedBlock() {
-    final isImage = _type == BlockType.imageGen;
-    final isJs = _type == BlockType.jsRunner;
-    final isInfoblock = _type == BlockType.infoblock;
-    final isInteractive = _type == BlockType.interactive;
-    final usesLlm =
-        isInfoblock || isImage || isJs || (isInteractive && !_useStaticHtml);
     return widget.block.copyWith(
       name: _nameController.text.trim(),
       type: _type,
       trigger: _resolvedTrigger,
-      template: isInfoblock ? _templateController.text : '',
-      prompt: usesLlm ? _promptController.text : '',
-      inject: isInfoblock ? _inject : false,
-      injectLastN: isInfoblock ? _injectLastN : 0,
-      injectPrefix: isInfoblock ? _injectPrefixController.text : '',
+      source: _producesContent
+          ? (_useStaticSource ? BlockSource.carried : BlockSource.model)
+          : widget.block.source,
+      template: _templateController.text,
+      prompt: _promptController.text,
+      staticContent: _staticContentController.text,
+      script: _scriptController.text,
+      render: _render,
+      panelMinHeight:
+          int.tryParse(_panelMinHeightController.text.trim()) ??
+          widget.block.panelMinHeight,
+      inject: _inject,
+      injectLastN: _injectLastN,
+      injectPrefix: _injectPrefixController.text,
       dependsOnPrevious: _dependsOnPrevious,
-      apiConfigId: usesLlm ? _apiConfigId : '',
-      model: usesLlm ? _model : '',
-      imagePromptInstruction: '',
-      imageGenEnabled: true,
-      contextMessageCount: usesLlm ? _contextMessageCount : 0,
-      previousBlocksCount: usesLlm ? _previousBlocksCount : 0,
-      contextSystemPrompt: usesLlm ? _contextSystemPromptController.text : '',
+      apiConfigId: _apiConfigId,
+      model: _model,
+      contextMessageCount: _contextMessageCount,
+      previousBlocksCount: _previousBlocksCount,
+      contextSystemPrompt: _contextSystemPromptController.text,
       contextPolicy: _contextPolicy,
-      streamToPanel: usesLlm ? _streamToPanel : false,
+      streamToPanel: _streamToPanel,
       manualOnly: _manualOnly,
-      script: isInteractive
-          ? (_useStaticHtml ? _staticHtmlController.text : '')
-          : (isJs ? widget.block.script : ''),
       triggerOnUser: _triggerOnUser,
       triggerOnChar: _triggerOnChar,
       triggerOnSwipe: _triggerOnSwipe,
       generationPause: _generationPause,
+      generationAfterCommands: _generationAfterCommands,
       // Never zero: the interval check divides by it.
       period:
           int.tryParse(_periodController.text.trim()) ?? widget.block.period,
@@ -216,11 +233,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   void _onTypeChanged(BlockType type) {
     setState(() {
       _type = type;
-      if (type == BlockType.imageGen) {
-        _dependsOnPrevious = true;
-        _inject = false;
-      }
-      if (type == BlockType.jsRunner && _contextMessageCount == 0) {
+      if (type == BlockType.script && _contextMessageCount == 0) {
         _contextMessageCount = 10;
         _contextMessageCountController.text = '10';
       }
@@ -266,8 +279,9 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _promptController.dispose();
     _contextSystemPromptController.dispose();
     _injectPrefixController.dispose();
-    _staticHtmlController.dispose();
-    _minHeightController.dispose();
+    _staticContentController.dispose();
+    _scriptController.dispose();
+    _panelMinHeightController.dispose();
     _injectLastNController.dispose();
     _contextMessageCountController.dispose();
     _previousBlocksCountController.dispose();
@@ -316,7 +330,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
                   value: _manualOnly,
                   onChanged: (v) => setState(() => _manualOnly = v),
                 ),
-                if (_type == BlockType.jsRunner)
+                if (_type == BlockType.script)
                   MenuSwitchItem(
                     label: 'block_trig_periodic'.tr(),
                     value: _periodicTimer,
@@ -330,6 +344,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               onChar: _triggerOnChar,
               onSwipe: _triggerOnSwipe,
               generationPause: _generationPause,
+              generationAfterCommands: _generationAfterCommands,
               periodController: _periodController,
               keywordController: _keywordController,
               keywordIsRegex: _keywordIsRegex,
@@ -338,6 +353,8 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               onSwipeChanged: (v) => setState(() => _triggerOnSwipe = v),
               onGenerationPauseChanged: (v) =>
                   setState(() => _generationPause = v),
+              onGenerationAfterCommandsChanged: (v) =>
+                  setState(() => _generationAfterCommands = v),
               onKeywordIsRegexChanged: (v) =>
                   setState(() => _keywordIsRegex = v),
             ),
@@ -373,17 +390,12 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
               onRewriteModeChanged: (v) => setState(() => _rewriteMode = v),
               onScriptTypeChanged: (v) => setState(() => _scriptType = v),
             ),
+            ..._sourceItems(),
             ..._outputItems(),
-            ..._promptItems(),
-            if (_type == BlockType.interactive) _interactiveGroup(),
             ..._contextItems(),
             if (_usesLlm)
               ApiSlotGroup(
-                header: switch (_type) {
-                  BlockType.imageGen ||
-                  BlockType.jsRunner => 'block_api_agent_label'.tr(),
-                  _ => 'block_api_section_label'.tr(),
-                },
+                header: 'block_api_section_label'.tr(),
                 apiConfigId: _apiConfigId,
                 onApiConfigChanged: (id) => setState(() {
                   _apiConfigId = id;
@@ -398,12 +410,11 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
                   ),
                 ],
               ),
-            if (_type == BlockType.imageGen)
-              const _HelpText('block_image_gen_help'),
-            if (_type == BlockType.jsRunner)
-              const _HelpText('block_js_runner_help'),
-            if (_type == BlockType.interactive)
-              const _HelpText('block_interactive_help'),
+            if (_type == BlockType.generated)
+              const _HelpText('block_generated_help'),
+            if (_type == BlockType.generated && _render == BlockRender.panel)
+              const _HelpText('block_render_panel_help'),
+            if (_type == BlockType.script) const _HelpText('block_script_help'),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Align(
@@ -421,33 +432,115 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     );
   }
 
-  /// What the block does with its result: whether it follows the block before
-  /// it, whether it is injected into the prompt, and whether it streams.
+  /// Where the block's content comes from: the model, or written here.
+  ///
+  /// This is one question for every runnable block now. It used to be asked
+  /// only of interactive panels, which is why a JS block's stored script and a
+  /// static card were not editable at all.
+  List<Widget> _sourceItems() {
+    if (!_producesContent) return const [];
+    final isScript = _type == BlockType.script;
+    return [
+      MenuGroup(
+        header: 'block_sec_source'.tr(),
+        items: [
+          MenuSelectorItem(
+            label: 'block_source_label'.tr(),
+            currentValue: _useStaticSource
+                ? 'block_source_static'.tr()
+                : 'block_source_llm'.tr(),
+            onTap: _pickSource,
+          ),
+          if (_useStaticSource)
+            MenuFieldItem(
+              label: isScript
+                  ? 'block_script_label'.tr()
+                  : 'block_static_content_label'.tr(),
+              helper: isScript
+                  ? 'block_script_helper'.tr()
+                  : 'block_static_content_helper'.tr(),
+              controller: isScript
+                  ? _scriptController
+                  : _staticContentController,
+              maxLines: 18,
+            )
+          else ...[
+            MenuFieldItem(
+              label: isScript
+                  ? 'block_prompt_label_js'.tr()
+                  : 'block_prompt_label_default'.tr(),
+              placeholder: isScript
+                  ? 'block_prompt_hint_js'.tr()
+                  : 'block_prompt_hint_default'.tr(),
+              helper: isScript
+                  ? 'block_prompt_helper_js'.tr()
+                  : 'block_prompt_helper_default'.tr(),
+              controller: _promptController,
+              maxLines: isScript ? 12 : 6,
+            ),
+            if (!isScript)
+              MenuFieldItem(
+                label: 'block_template_label'.tr(),
+                placeholder: 'block_template_hint'.tr(),
+                helper: 'block_template_helper'.tr(),
+                controller: _templateController,
+                maxLines: 5,
+              ),
+          ],
+        ],
+      ),
+    ];
+  }
+
+  Future<void> _pickSource() async {
+    await GlazeBottomSheet.show<void>(
+      context,
+      title: 'block_source_label'.tr(),
+      items: [
+        for (final static in const [false, true])
+          BottomSheetItem(
+            label: static
+                ? 'block_source_static'.tr()
+                : 'block_source_llm'.tr(),
+            icon: _useStaticSource == static
+                ? Icons.radio_button_checked
+                : Icons.radio_button_off,
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              setState(() => _useStaticSource = static);
+            },
+          ),
+      ],
+    );
+  }
+
+  /// What happens to the block's result: where it is shown, whether it goes
+  /// back into the prompt, whether it streams.
   List<Widget> _outputItems() {
-    final dependsLabelled =
-        _type == BlockType.infoblock ||
-        _type == BlockType.imageGen ||
-        _type == BlockType.jsRunner;
     final items = <Widget>[
-      if (dependsLabelled)
+      if (_type == BlockType.generated) ...[
+        MenuSelectorItem(
+          label: 'block_render_label'.tr(),
+          currentValue: _renderLabel(_render),
+          description: 'block_render_desc'.tr(),
+          onTap: _pickRender,
+        ),
+        if (_render == BlockRender.panel)
+          MenuFieldItem(
+            label: 'block_min_height_label'.tr(),
+            helper: 'block_min_height_helper'.tr(),
+            controller: _panelMinHeightController,
+            keyboardType: TextInputType.number,
+          ),
+      ],
+      if (_producesContent)
         MenuSwitchItem(
           label: 'block_depends_on_prev'.tr(),
-          description: switch (_type) {
-            BlockType.imageGen => 'block_depends_sub_image'.tr(),
-            BlockType.jsRunner => 'block_depends_sub_js'.tr(),
-            _ => 'block_depends_sub_default'.tr(),
-          },
+          description: 'block_depends_sub_default'.tr(),
           value: _dependsOnPrevious,
           onChanged: (v) => setState(() => _dependsOnPrevious = v),
         ),
-      if (_type == BlockType.interactive && !_useStaticHtml)
-        MenuSwitchItem(
-          label: 'block_interactive_depends'.tr(),
-          description: 'block_interactive_depends_sub'.tr(),
-          value: _dependsOnPrevious,
-          onChanged: (v) => setState(() => _dependsOnPrevious = v),
-        ),
-      if (_type == BlockType.infoblock) ...[
+      if (_type == BlockType.generated) ...[
         MenuSwitchItem(
           label: 'block_inject_title'.tr(),
           description: 'block_inject_desc'.tr(),
@@ -472,15 +565,8 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       ],
       if (_usesLlm)
         MenuSwitchItem(
-          label: _type == BlockType.interactive
-              ? 'block_interactive_stream_title'.tr()
-              : 'block_stream_title'.tr(),
-          description: switch (_type) {
-            BlockType.imageGen => 'block_stream_sub_image'.tr(),
-            BlockType.jsRunner => 'block_stream_sub_js'.tr(),
-            BlockType.interactive => 'block_interactive_stream_sub'.tr(),
-            _ => 'block_stream_sub_default'.tr(),
-          },
+          label: 'block_stream_title'.tr(),
+          description: 'block_stream_sub_default'.tr(),
           value: _streamToPanel,
           onChanged: (v) => setState(() => _streamToPanel = v),
         ),
@@ -489,101 +575,25 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     return [MenuGroup(header: 'block_sec_output'.tr(), items: items)];
   }
 
-  /// The instruction the block is generated from, and the layout its result is
-  /// wrapped in. An interactive block keeps its own, in [_interactiveGroup].
-  List<Widget> _promptItems() {
-    if (!_usesStandardLlmFields) return const [];
-    return [
-      MenuGroup(
-        header: switch (_type) {
-          BlockType.imageGen => 'block_prompt_image_agent'.tr(),
-          BlockType.jsRunner => 'block_prompt_js_agent'.tr(),
-          _ => 'block_prompt_and_format'.tr(),
-        },
-        items: [
-          MenuFieldItem(
-            label: switch (_type) {
-              BlockType.imageGen => 'block_prompt_label_image'.tr(),
-              BlockType.jsRunner => 'block_prompt_label_js'.tr(),
-              _ => 'block_prompt_label_default'.tr(),
-            },
-            placeholder: switch (_type) {
-              BlockType.imageGen => 'block_prompt_hint_image'.tr(),
-              BlockType.jsRunner => 'block_prompt_hint_js'.tr(),
-              _ => 'block_prompt_hint_default'.tr(),
-            },
-            helper: switch (_type) {
-              BlockType.imageGen => 'block_prompt_helper_image'.tr(),
-              BlockType.jsRunner => 'block_prompt_helper_js'.tr(),
-              _ => 'block_prompt_helper_default'.tr(),
-            },
-            controller: _promptController,
-            maxLines: _type == BlockType.infoblock ? 4 : 12,
-          ),
-          if (_type == BlockType.infoblock)
-            MenuFieldItem(
-              label: 'block_template_label'.tr(),
-              placeholder: 'block_template_hint'.tr(),
-              helper: 'block_template_helper'.tr(),
-              controller: _templateController,
-              maxLines: 5,
-            ),
-        ],
-      ),
-    ];
-  }
+  String _renderLabel(BlockRender render) => switch (render) {
+    BlockRender.card => 'block_render_card'.tr(),
+    BlockRender.panel => 'block_render_panel'.tr(),
+  };
 
-  /// Where an interactive block's HTML comes from: written by hand, or asked
-  /// of the model.
-  Widget _interactiveGroup() {
-    return MenuGroup(
-      header: 'block_html_source_label'.tr(),
-      items: [
-        MenuSelectorItem(
-          label: 'block_html_source_label'.tr(),
-          currentValue: _useStaticHtml
-              ? 'block_html_static'.tr()
-              : 'block_html_llm'.tr(),
-          onTap: _pickHtmlSource,
-        ),
-        if (_useStaticHtml)
-          MenuFieldItem(
-            label: 'block_static_html_label'.tr(),
-            helper: 'block_static_html_helper'.tr(),
-            controller: _staticHtmlController,
-            maxLines: 18,
-          )
-        else
-          MenuFieldItem(
-            label: 'block_llm_html_label'.tr(),
-            helper: 'block_llm_html_helper'.tr(),
-            controller: _promptController,
-            maxLines: 12,
-          ),
-        MenuFieldItem(
-          label: 'block_min_height_label'.tr(),
-          helper: 'block_min_height_helper'.tr(),
-          controller: _minHeightController,
-          keyboardType: TextInputType.number,
-        ),
-      ],
-    );
-  }
-
-  Future<void> _pickHtmlSource() async {
+  Future<void> _pickRender() async {
     await GlazeBottomSheet.show<void>(
       context,
-      title: 'block_html_source_label'.tr(),
+      title: 'block_render_label'.tr(),
       items: [
-        for (final static in const [false, true])
+        for (final option in BlockRender.values)
           BottomSheetItem(
-            label: static ? 'block_html_static'.tr() : 'block_html_llm'.tr(),
-            icon: _useStaticHtml == static
+            label: _renderLabel(option),
+            icon: _render == option
                 ? Icons.radio_button_checked
                 : Icons.radio_button_off,
             onTap: () {
               Navigator.of(context, rootNavigator: true).pop();
-              setState(() => _useStaticHtml = static);
+              setState(() => _render = option);
             },
           ),
       ],
@@ -604,9 +614,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
           policy.mainSwitch(),
           MenuFieldItem(
             label: 'block_context_count_label'.tr(),
-            helper: _usesStandardLlmFields
-                ? 'block_context_count_helper_full'.tr()
-                : 'block_context_count_helper'.tr(),
+            helper: 'block_context_count_helper_full'.tr(),
             controller: _contextMessageCountController,
             keyboardType: const TextInputType.numberWithOptions(signed: true),
             onChanged: (v) =>
@@ -619,15 +627,14 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
             controller: _contextSystemPromptController,
             maxLines: 5,
           ),
-          if (_usesStandardLlmFields)
-            MenuFieldItem(
-              label: 'block_previous_blocks_label'.tr(),
-              helper: 'block_previous_blocks_helper'.tr(),
-              controller: _previousBlocksCountController,
-              keyboardType: TextInputType.number,
-              onChanged: (v) => _previousBlocksCount =
-                  int.tryParse(v) ?? _previousBlocksCount,
-            ),
+          MenuFieldItem(
+            label: 'block_previous_blocks_label'.tr(),
+            helper: 'block_previous_blocks_helper'.tr(),
+            controller: _previousBlocksCountController,
+            keyboardType: TextInputType.number,
+            onChanged: (v) =>
+                _previousBlocksCount = int.tryParse(v) ?? _previousBlocksCount,
+          ),
         ],
       ),
       ?policy.detailsGroup(),
@@ -637,7 +644,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   /// The single-valued trigger our pipeline selects on, derived from the
   /// switches the editor actually shows.
   BlockTrigger get _resolvedTrigger {
-    if (_periodicTimer && _type == BlockType.jsRunner) {
+    if (_periodicTimer && _type == BlockType.script) {
       return BlockTrigger.periodic;
     }
     return _triggerOnUser && !_triggerOnChar
@@ -645,14 +652,12 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
         : BlockTrigger.afterAssistant;
   }
 
-  bool get _usesStandardLlmFields =>
-      _type == BlockType.infoblock ||
-      _type == BlockType.imageGen ||
-      _type == BlockType.jsRunner;
+  /// Whether this type produces something for the reader at all. Rewrite and
+  /// accumulation blocks are editable but have no runtime yet.
+  bool get _producesContent =>
+      _type == BlockType.generated || _type == BlockType.script;
 
-  bool get _usesLlm =>
-      _usesStandardLlmFields ||
-      (_type == BlockType.interactive && !_useStaticHtml);
+  bool get _usesLlm => _producesContent && !_useStaticSource;
 }
 
 /// A muted paragraph under a type's settings, explaining what that type does.

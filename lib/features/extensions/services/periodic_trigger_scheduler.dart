@@ -121,7 +121,7 @@ class PeriodicTriggerScheduler with WidgetsBindingObserver {
       for (final b in preset.blocks.where(
         (b) =>
             b.enabled &&
-            b.type == BlockType.jsRunner &&
+            b.type == BlockType.script &&
             b.trigger == BlockTrigger.periodic,
       ))
         b.id: b,

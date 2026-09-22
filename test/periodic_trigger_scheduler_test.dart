@@ -97,7 +97,7 @@ void main() {
         BlockConfig(
           id: 'b1',
           name: 'Tick',
-          type: BlockType.jsRunner,
+          type: BlockType.script,
           enabled: true,
           trigger: BlockTrigger.periodic,
           prompt: '// js',
@@ -106,7 +106,7 @@ void main() {
         BlockConfig(
           id: 'b2',
           name: 'After assistant',
-          type: BlockType.jsRunner,
+          type: BlockType.script,
           enabled: true,
           trigger: BlockTrigger.afterAssistant,
           prompt: '// not run on tick',
@@ -114,7 +114,7 @@ void main() {
         BlockConfig(
           id: 'b3',
           name: 'Infoblock',
-          type: BlockType.infoblock,
+          type: BlockType.generated,
           enabled: true,
           trigger: BlockTrigger.periodic,
           prompt: '// infoblock, not jsRunner — ignored',
@@ -158,7 +158,7 @@ void main() {
         BlockConfig(
           id: 'b1',
           name: 'Tick',
-          type: BlockType.jsRunner,
+          type: BlockType.script,
           enabled: true,
           trigger: BlockTrigger.periodic,
           prompt: '// js',
@@ -185,7 +185,7 @@ void main() {
     final block = BlockConfig(
       id: 'b1',
       name: 'Tick',
-      type: BlockType.jsRunner,
+      type: BlockType.script,
       enabled: true,
       trigger: BlockTrigger.periodic,
       prompt: '// js',

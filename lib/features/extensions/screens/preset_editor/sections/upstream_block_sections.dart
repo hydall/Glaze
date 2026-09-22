@@ -83,6 +83,7 @@ class BlockTriggersGroup extends StatelessWidget {
     required this.onChar,
     required this.onSwipe,
     required this.generationPause,
+    required this.generationAfterCommands,
     required this.periodController,
     required this.keywordController,
     required this.keywordIsRegex,
@@ -90,6 +91,7 @@ class BlockTriggersGroup extends StatelessWidget {
     required this.onCharChanged,
     required this.onSwipeChanged,
     required this.onGenerationPauseChanged,
+    required this.onGenerationAfterCommandsChanged,
     required this.onKeywordIsRegexChanged,
     super.key,
   });
@@ -99,6 +101,7 @@ class BlockTriggersGroup extends StatelessWidget {
   final bool onChar;
   final bool onSwipe;
   final bool generationPause;
+  final bool generationAfterCommands;
   final TextEditingController periodController;
   final TextEditingController keywordController;
   final bool keywordIsRegex;
@@ -106,14 +109,19 @@ class BlockTriggersGroup extends StatelessWidget {
   final ValueChanged<bool> onCharChanged;
   final ValueChanged<bool> onSwipeChanged;
   final ValueChanged<bool> onGenerationPauseChanged;
+  final ValueChanged<bool> onGenerationAfterCommandsChanged;
   final ValueChanged<bool> onKeywordIsRegexChanged;
 
   @override
   Widget build(BuildContext context) {
-    final isScript = type == BlockType.jsRunner;
+    final isScript = type == BlockType.script;
 
     return MenuGroup(
       header: 'block_sec_triggers'.tr(),
+      // Only the two message switches reach our pipeline; the rest are stored
+      // and exported faithfully but nothing acts on them yet. Saying so beats
+      // a row of switches the reader cannot tell apart from the working ones.
+      description: 'block_sec_triggers_partial'.tr(),
       items: [
         MenuSwitchItem(
           label: 'block_trig_user'.tr(),
@@ -137,6 +145,15 @@ class BlockTriggersGroup extends StatelessWidget {
           value: generationPause,
           onChanged: onGenerationPauseChanged,
         ),
+        // The original's "Generation Start" for script blocks. It was carried
+        // through import and export but had no control of its own here.
+        if (isScript)
+          MenuSwitchItem(
+            label: 'block_trig_after_commands'.tr(),
+            description: 'block_trig_after_commands_desc'.tr(),
+            value: generationAfterCommands,
+            onChanged: onGenerationAfterCommandsChanged,
+          ),
         MenuFieldItem(
           label: 'block_period_label'.tr(),
           description: 'block_period_desc'.tr(),
@@ -182,6 +199,7 @@ class BlockStateGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     return MenuGroup(
       header: 'block_sec_state'.tr(),
+      description: 'extblocks_carried_only'.tr(),
       items: [
         MenuSwitchItem(
           label: 'block_hide_display'.tr(),
@@ -227,6 +245,7 @@ class BlockInjectionGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     return MenuGroup(
       header: 'block_sec_injection'.tr(),
+      description: 'extblocks_carried_only'.tr(),
       items: [
         MenuSelectorItem(
           label: 'block_injection_role'.tr(),
@@ -297,7 +316,7 @@ class BlockOrderGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isRewrite = type == BlockType.rewrite;
-    final isScript = type == BlockType.jsRunner;
+    final isScript = type == BlockType.script;
 
     final items = <Widget>[
       if (isRewrite) ...[
@@ -354,6 +373,10 @@ class BlockOrderGroup extends StatelessWidget {
       ],
     ];
 
-    return MenuGroup(header: 'block_sec_order'.tr(), items: items);
+    return MenuGroup(
+      header: 'block_sec_order'.tr(),
+      description: 'extblocks_carried_only'.tr(),
+      items: items,
+    );
   }
 }

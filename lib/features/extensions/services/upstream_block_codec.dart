@@ -15,18 +15,21 @@ import '../models/connection_profiles.dart';
 import 'upstream_context_codec.dart';
 import 'upstream_json.dart';
 
+/// The two type sets line up one-for-one now that images and interactive
+/// panels are settings of a generated block rather than types of their own, so
+/// nothing is approximated in either direction.
 const Map<String, BlockType> _typeFromUpstream = {
-  'generated': BlockType.infoblock,
+  'generated': BlockType.generated,
   'rewrite': BlockType.rewrite,
   'accumulation': BlockType.accumulation,
-  'script': BlockType.jsRunner,
+  'script': BlockType.script,
 };
 
 const Map<BlockType, String> _typeToUpstream = {
-  BlockType.infoblock: 'generated',
+  BlockType.generated: 'generated',
   BlockType.rewrite: 'rewrite',
   BlockType.accumulation: 'accumulation',
-  BlockType.jsRunner: 'script',
+  BlockType.script: 'script',
 };
 
 const Map<Object, InjectionRole> _injectionRoles = {
@@ -102,7 +105,7 @@ BlockConfig decodeUpstreamBlock(Map<String, dynamic> json, {int order = 0}) {
         json['block_type'],
         fallback: 'generated',
       )] ??
-      BlockType.infoblock;
+      BlockType.generated;
 
   final onUser = upstreamBool(json['user_message']);
   final onChar = upstreamBool(json['char_message']);
@@ -136,6 +139,13 @@ BlockConfig decodeUpstreamBlock(Map<String, dynamic> json, {int order = 0}) {
     template: upstreamString(json['template']),
     prompt: upstreamString(json['prompt']),
     script: upstreamString(json['script']),
+    // The original has no source field: its script editor writes code and its
+    // generated editor writes a prompt, so which of the two the block carries
+    // is the answer.
+    source: inferBlockSource(
+      prompt: upstreamString(json['prompt']),
+      carried: upstreamString(json['script']),
+    ),
     scriptType: upstreamEnum(
       json['script_type'],
       _scriptTypes,
@@ -183,8 +193,10 @@ BlockConfig decodeUpstreamBlock(Map<String, dynamic> json, {int order = 0}) {
 
 /// Writes [block] back out in the original's format.
 ///
-/// Types with no counterpart there — images and interactive panels — are
-/// written as generated blocks, which is the closest the format can express.
+/// Settings the original has no field for — how the result is rendered, its
+/// panel height, the static content a generated block may carry — are left out
+/// rather than approximated, exactly as the original leaves out the keys that
+/// do not apply to a block's type.
 Map<String, dynamic> encodeUpstreamBlock(BlockConfig block) {
   final type = _typeToUpstream[block.type] ?? 'generated';
 
