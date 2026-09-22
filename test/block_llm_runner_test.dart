@@ -4,8 +4,17 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_call_event.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/features/extensions/services/blocks/block_llm_runner.dart';
+
+class _CollectingCallEventSink implements LlmCallEventSink {
+  final events = <LlmCallEvent>[];
+
+  @override
+  Future<void> recordCallEvent(LlmCallEvent event) async => events.add(event);
+}
 
 typedef _StreamHandler =
     Future<void> Function({
@@ -223,6 +232,83 @@ void main() {
         ),
         throwsA(isA<StateError>()),
       );
+    });
+  });
+
+  group('BlockLlmRunner capture outcome', () {
+    const context = LlmCaptureContext(
+      stage: 'extblock.generated',
+      sessionId: 's1',
+      messageId: 'm1',
+      pipelineRunId: 'extblock:s1:m1#0',
+      callId: 'extblock:b1:m1#0',
+      attempt: 1,
+    );
+
+    tearDown(() => LlmCallEventCapture.sink = null);
+
+    test('records the model reply against the request callId', () async {
+      final sink = _CollectingCallEventSink();
+      LlmCallEventCapture.sink = sink;
+      final transport = _FakeTransport(({
+        required request,
+        required cancelToken,
+        required onUpdate,
+        required onComplete,
+        required onError,
+      }) async {
+        onComplete!('the reply', null, rawResponseJson: null);
+      });
+
+      await BlockLlmRunner(transportPicker: (_) => transport).run(
+        apiConfig: _config,
+        messages: _messages,
+        stream: false,
+        captureContext: context,
+      );
+
+      expect(sink.events, hasLength(1));
+      expect(sink.events.single.context.callId, context.callId);
+      expect(sink.events.single.responseText, 'the reply');
+      expect(sink.events.single.kind, 'transport_succeeded');
+    });
+
+    test('records a failed call once, with the error', () async {
+      final sink = _CollectingCallEventSink();
+      LlmCallEventCapture.sink = sink;
+      final transport = _FakeTransport(({
+        required request,
+        required cancelToken,
+        required onUpdate,
+        required onComplete,
+        required onError,
+      }) async {
+        // A real transport reports the failure once the caller has begun
+        // awaiting the stream, not synchronously inside `stream`.
+        await Future<void>.delayed(Duration.zero);
+        onError!(DioException(
+          requestOptions: RequestOptions(path: '/chat/completions'),
+          type: DioExceptionType.badResponse,
+          response: Response(
+            requestOptions: RequestOptions(path: '/chat/completions'),
+            statusCode: 500,
+          ),
+        ));
+      });
+
+      await expectLater(
+        BlockLlmRunner(transportPicker: (_) => transport).run(
+          apiConfig: _config,
+          messages: _messages,
+          stream: false,
+          captureContext: context,
+        ),
+        throwsA(isA<DioException>()),
+      );
+
+      expect(sink.events, hasLength(1));
+      expect(sink.events.single.kind, 'transport_failed');
+      expect(sink.events.single.status, 'http_5xx');
     });
   });
 }

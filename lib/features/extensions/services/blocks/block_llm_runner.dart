@@ -4,8 +4,10 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../../core/llm/idle_timeout_guard.dart';
+import '../../../../core/llm/transport/call_attempt_outcome.dart';
 import '../../../../core/llm/transport/chat_transport.dart';
 import '../../../../core/llm/transport/chat_transport_request.dart';
+import '../../../../core/llm/transport/llm_call_event.dart';
 import '../../../../core/llm/transport/llm_capture_context.dart';
 import '../../../../core/llm/transport/transport_factory.dart';
 import '../../../../core/models/api_config.dart';
@@ -58,6 +60,31 @@ class BlockLlmRunner {
         ? apiConfig.firstChunkTimeoutMs
         : fallbackTimeoutMs;
 
+    // One outcome per call, recorded on the same `callId` the request capture
+    // carries. Without it a block's request shows up in the inspector with no
+    // reply beside it, unlike every other stage. `onComplete` and `onError`
+    // are not exclusive on every transport, so the first write wins.
+    final startedAtMs = DateTime.now().millisecondsSinceEpoch;
+    var outcomeRecorded = false;
+    void recordOutcome({String? responseText, Object? error}) {
+      if (captureContext == null || outcomeRecorded) return;
+      outcomeRecorded = true;
+      unawaited(
+        LlmCallEventCapture.record(
+          LlmCallEvent.transport(
+            context: captureContext,
+            attempt: describeCallAttempt(
+              attempt: 1,
+              startedAtMs: startedAtMs,
+              elapsedMs: DateTime.now().millisecondsSinceEpoch - startedAtMs,
+              error: error,
+            ),
+            responseText: responseText,
+          ),
+        ),
+      );
+    }
+
     // The timeout cancels a token of its own, never the caller's: a cancelled
     // caller token means the reader pressed stop, and that is a different
     // outcome for the block than a provider that never answered.
@@ -107,10 +134,12 @@ class BlockLlmRunner {
         },
         onComplete: (text, reasoning, {rawResponseJson}) {
           idleGuard.dispose();
+          recordOutcome(responseText: text);
           if (!completer.isCompleted) completer.complete(text);
         },
         onError: (error) {
           idleGuard.dispose();
+          recordOutcome(error: error);
           if (!completer.isCompleted) completer.completeError(error);
         },
       );
@@ -123,11 +152,16 @@ class BlockLlmRunner {
       }
       return await completer.future;
     } catch (e) {
-      if (timedOut) throw _timeout(idleTimeoutMs);
+      if (timedOut) {
+        recordOutcome(error: _timeout(idleTimeoutMs));
+        throw _timeout(idleTimeoutMs);
+      }
       if (cancelToken?.isCancelled == true ||
           (e is DioException && CancelToken.isCancel(e))) {
+        recordOutcome(error: e);
         return null;
       }
+      recordOutcome(error: e);
       debugPrint('[BlockLlmRunner] LLM call failed: $e');
       rethrow;
     } finally {
