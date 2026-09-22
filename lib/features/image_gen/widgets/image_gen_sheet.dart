@@ -266,27 +266,28 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 ),
               ],
             ),
-            if (s.apiType == ImageGenApiType.naistera &&
-                !s.naisteraSupportsReferences)
+            if (providerMaxReferences(s) == 0)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.05),
-                  border: Border.all(color: Colors.red.withValues(alpha: 0.2)),
+                  color: context.cs.surfaceContainerHighest.withValues(
+                    alpha: 0.5,
+                  ),
+                  border: Border.all(color: context.cs.outlineVariant),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Center(
                   child: Text(
                     'imggen_no_refs_hint'.tr(),
                     style: TextStyle(
-                      color: Colors.red,
+                      color: context.cs.onSurfaceVariant,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
-              ),
-            if (providerMaxReferences(s) > 0)
+              )
+            else ...[
               ...buildReferenceSections(
                 context: context,
                 settings: s,
@@ -294,7 +295,6 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 onUpdate: _update,
                 pickImage: _pickReferenceImage,
               ),
-            if (providerMaxReferences(s) > 0)
               MenuGroup(
                 header: 'Image Context',
                 items: [
@@ -322,6 +322,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                     ),
                 ],
               ),
+            ],
             MenuGroup(
               header: 'imggen_tag_hint_title'.tr(),
               description: 'imggen_tag_hint_desc'.tr(),
