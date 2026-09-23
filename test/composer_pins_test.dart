@@ -270,6 +270,14 @@ void main() {
       expect(ComposerAction.attach.insertToken, isNull);
       expect(ComposerAction.attach.isInsert, isFalse);
     });
+
+    test('the asterisk button wears the fullscreen editor token', () {
+      // Same mark as the format bar, not a star icon that names the wrong
+      // character; the quote button keeps its icon.
+      expect(ComposerAction.asterisk.glyph, '**');
+      expect(ComposerAction.quote.glyph, isNull);
+      expect(ComposerAction.attach.glyph, isNull);
+    });
   });
 
   group('ComposerActionBridge', () {

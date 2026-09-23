@@ -583,6 +583,31 @@ void main() {
       expect(find.byType(TextField), findsNWidgets(2));
     });
 
+    testWidgets('a pinned insert action wears its text token', (tester) async {
+      SharedPreferences.setMockInitialValues({
+        ComposerPinsNotifier.storageKey: ['action:asterisk'],
+      });
+      await tester.pumpWidget(buildChatInputBar());
+      await tester.pumpAndSettle();
+
+      // The fullscreen editor's `**` mark, not the star icon it used to wear.
+      expect(find.text('**'), findsOneWidget);
+      expect(find.byIcon(Icons.star_border), findsNothing);
+    });
+
+    testWidgets('the empty composer wears the insert token when assigned one', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({
+        ComposerEmptyActionNotifier.storageKey: 'action:asterisk',
+      });
+      await tester.pumpWidget(buildChatInputBar());
+      await tester.pumpAndSettle();
+
+      expect(find.text('**'), findsOneWidget);
+      expect(find.byIcon(Icons.account_circle_rounded), findsNothing);
+    });
+
     testWidgets('a stored action this build cannot resolve impersonates', (
       tester,
     ) async {

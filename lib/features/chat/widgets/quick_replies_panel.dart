@@ -13,6 +13,7 @@ import '../composer_pins_provider.dart';
 import '../hidden_composer_actions_provider.dart';
 import '../quick_reply_icons.dart';
 import '../quick_replies_provider.dart';
+import 'action_glyph.dart';
 import 'drawer_panel_scaffold.dart';
 import 'magic_drawer_models.dart';
 import 'magic_drawer_widgets.dart';
@@ -238,6 +239,7 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                                 id: action.id,
                                 label: action.label,
                                 icon: action.icon,
+                                glyph: action.glyph,
                                 category: MagicDrawerCategory.session,
                               ),
                             ),
@@ -709,6 +711,7 @@ class _ActionsAddSheet extends StatelessWidget {
             for (final action in hiddenActions)
               _AddSheetRow(
                 icon: action.icon,
+                glyph: action.glyph,
                 label: action.label,
                 onTap: () => _pop(context, _AddSheetResult.restore(action)),
               ),
@@ -721,6 +724,7 @@ class _ActionsAddSheet extends StatelessWidget {
 
 class _AddSheetRow extends StatelessWidget {
   final IconData icon;
+  final String? glyph;
   final String label;
   final VoidCallback onTap;
 
@@ -728,6 +732,7 @@ class _AddSheetRow extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.glyph,
   });
 
   @override
@@ -738,8 +743,9 @@ class _AddSheetRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         child: Row(
           children: [
-            Icon(
-              icon,
+            ActionGlyph(
+              icon: icon,
+              glyph: glyph,
               size: 20,
               color: context.cs.onSurface.withValues(alpha: 0.85),
             ),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/hover_glow.dart';
+import 'action_glyph.dart';
 import 'magic_drawer_models.dart';
 
 class MagicCard extends StatefulWidget {
@@ -93,8 +94,9 @@ class _MagicCardState extends State<MagicCard> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Icon(
-                        item.def.icon,
+                      ActionGlyph(
+                        icon: item.def.icon,
+                        glyph: item.def.glyph,
                         size: 20,
                         color: Colors.white.withValues(alpha: 0.85),
                       ),

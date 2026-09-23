@@ -14,6 +14,11 @@ class MagicDrawerItemDef {
   final String id;
   final String label;
   final IconData icon;
+
+  /// A short text token to draw in place of [icon] — the `**` on the insert
+  /// action, which types characters rather than opening a feature. Null on
+  /// every ordinary card.
+  final String? glyph;
   final MagicDrawerCategory category;
 
   const MagicDrawerItemDef({
@@ -21,6 +26,7 @@ class MagicDrawerItemDef {
     required this.label,
     required this.icon,
     required this.category,
+    this.glyph,
   });
 }
 
